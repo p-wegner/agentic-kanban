@@ -1,4 +1,5 @@
 import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
+import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import type { Database } from "../db/index.js";
 import { getAllPreferences } from "../repositories/preferences.repository.js";
@@ -12,6 +13,7 @@ import {
   selectProviderFromStrategy,
   resolveStrategyProviderSelection,
 } from "./strategy-objective.service.js";
+import { providerProfilePrefKey, readSettingsProviderSelection } from "@agentic-kanban/shared/lib/strategy-policy";
 import { resolveStartPolicy, startModePrefKey, type StartPolicy } from "./start-policy.service.js";
 import { HARNESS_IDS, harnessSettingKey } from "./harness-settings.js";
 
@@ -66,15 +68,9 @@ export interface ProjectRuntimeConfigInput {
 }
 
 function readSettingsSelection(prefMap: Map<string, string>): { provider: ProviderName; profileName: string | null } {
-  const provider = narrowProviderName(prefMap.get("provider"));
-  const key = provider === "claude"
-    ? "claude_profile"
-    : provider === "codex"
-      ? "codex_profile"
-      : provider === "copilot"
-        ? "copilot_profile"
-        : "pi_profile";
-  return { provider, profileName: prefMap.get(key)?.trim() || null };
+  // Selection core shared with the MCP start_workspace tool (#984): the global
+  // `provider` pref + that provider's own `<provider>_profile` key.
+  return readSettingsProviderSelection(prefMap);
 }
 
 function resolveProviderSource(input: ProjectRuntimeConfigInput): RuntimeProviderConfig["source"] {
@@ -94,14 +90,7 @@ function applyWorkspaceSelection(
   prefMap.set("provider", provider);
   const profileName = workspaceSelection.profileName?.trim();
   if (!profileName) return;
-  const key = provider === "claude"
-    ? "claude_profile"
-    : provider === "codex"
-      ? "codex_profile"
-      : provider === "copilot"
-        ? "copilot_profile"
-        : "pi_profile";
-  prefMap.set(key, profileName);
+  prefMap.set(providerProfilePrefKey(provider), profileName);
 }
 
 export function resolveProjectRuntimeConfig(input: ProjectRuntimeConfigInput): ProjectRuntimeConfig {
@@ -140,9 +129,9 @@ export function resolveProjectRuntimeConfig(input: ProjectRuntimeConfigInput): P
     },
     monitor: {
       autoMerge,
-      autoMergeInReview: input.prefMap.get("auto_merge_in_review") === "true",
+      autoMergeInReview: getBool(input.prefMap, "auto_merge_in_review"),
       autoMergeDisabled,
-      maintenanceWindowEnabled: input.prefMap.get("monitor_maintenance_window_enabled") === "true",
+      maintenanceWindowEnabled: getBool(input.prefMap, "monitor_maintenance_window_enabled"),
       maintenanceWindowEnd: input.prefMap.get("monitor_maintenance_window_end") || null,
     },
     systemInstructions: input.prefMap.get(PREF_BUILDER_GUARDRAILS) ?? DEFAULT_BUILDER_GUARDRAILS,

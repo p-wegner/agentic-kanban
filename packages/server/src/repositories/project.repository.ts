@@ -1,9 +1,9 @@
-import { projects, projectStatuses, issues, preferences, scheduledRuns, scheduledRunHistory, agentSkills, repos, flakyTests, qualityMetrics, projectScriptShortcuts, boardHealthEvents, workflowTemplates, workspaces } from "@agentic-kanban/shared/schema";
-import { eq, sql, and, isNull, gte } from "drizzle-orm";
+import { projects, projectStatuses, issues, workspaces } from "@agentic-kanban/shared/schema";
+import { deleteProjectCascade as deleteProjectCascadeShared } from "@agentic-kanban/shared/lib/cascade-delete";
+import { eq, sql, and, isNull, gte, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
-import { deleteIssueCascade } from "./issue-service.repository.js";
 import { initializeProjectStatuses } from "./issue.repository.js";
 
 export async function getProjectById(
@@ -12,6 +12,28 @@ export async function getProjectById(
 ) {
   const rows = await database.select().from(projects).where(eq(projects.id, projectId)).limit(1);
   return rows[0] ?? null;
+}
+
+/**
+ * Canonical repoPath accessor (#957). Was duplicated verbatim in
+ * agent-skill/drive-service/issue-ai per-consumer mirror files — this is now the
+ * only copy; services import it from here.
+ */
+export async function getProjectRepoPath(
+  projectId: string,
+  database: Database = db,
+): Promise<string | null> {
+  const project = await getProjectById(projectId, database);
+  return project?.repoPath ?? null;
+}
+
+/** Batch project lookup by ids (#957 — was merge-queue.repository's private mirror). */
+export async function getProjectsByIds(
+  projectIds: string[],
+  database: Database = db,
+) {
+  if (projectIds.length === 0) return [];
+  return database.select().from(projects).where(inArray(projects.id, projectIds));
 }
 
 export async function getProjectByRepoPath(
@@ -91,30 +113,17 @@ export async function insertProject(
   return { id, name: values.name, repoPath: values.repoPath, defaultBranch: values.defaultBranch };
 }
 
+/**
+ * Cascade-delete a project and everything referencing it. Thin caller — the walk
+ * itself (table list, ordering, single-transaction atomicity, per-project
+ * preference cleanup) lives in shared/lib/cascade-delete.ts, the single home for
+ * all cascade knowledge (#949).
+ */
 export async function deleteProjectCascade(
   projectId: string,
   database: Database = db,
 ): Promise<void> {
-  const projectIssues = await database.select({ id: issues.id }).from(issues).where(eq(issues.projectId, projectId));
-  if (projectIssues.length > 0) {
-    for (const issue of projectIssues) {
-      await deleteIssueCascade(issue.id, database);
-    }
-  }
-
-  await database.delete(scheduledRunHistory).where(eq(scheduledRunHistory.projectId, projectId));
-  await database.delete(scheduledRuns).where(eq(scheduledRuns.projectId, projectId));
-  await database.delete(projectScriptShortcuts).where(eq(projectScriptShortcuts.projectId, projectId));
-  await database.delete(workflowTemplates).where(eq(workflowTemplates.projectId, projectId));
-  await database.update(projects).set({ defaultSkillId: null }).where(eq(projects.id, projectId));
-  await database.delete(agentSkills).where(eq(agentSkills.projectId, projectId));
-  await database.delete(flakyTests).where(eq(flakyTests.projectId, projectId));
-  await database.delete(qualityMetrics).where(eq(qualityMetrics.projectId, projectId));
-  await database.delete(boardHealthEvents).where(eq(boardHealthEvents.projectId, projectId));
-  await database.delete(repos).where(eq(repos.projectId, projectId));
-  await database.delete(projectStatuses).where(eq(projectStatuses.projectId, projectId));
-  await database.delete(preferences).where(and(eq(preferences.key, "activeProjectId"), eq(preferences.value, projectId)));
-  await database.delete(projects).where(eq(projects.id, projectId));
+  await deleteProjectCascadeShared(projectId, database);
 }
 
 export async function getProjectStats(

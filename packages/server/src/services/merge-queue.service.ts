@@ -1,12 +1,13 @@
+import { tryAcquireRepoLock } from "@agentic-kanban/shared/lib/repo-lock";
 import type { Database } from "../db/index.js";
 import * as gitService from "./git.service.js";
 import {
   getMergeQueueWorkspaceRows,
   getMergeQueueIssueRows,
-  getMergeQueueProjectRows,
   getWorkspaceStatus,
   getWorkspaceMergeState,
 } from "../repositories/merge-queue.repository.js";
+import { getProjectsByIds } from "../repositories/project.repository.js";
 import { createWorkspaceMergeService } from "./workspace-merge.service.js";
 import type { BoardEvents } from "./board-events.js";
 import type { SessionManager } from "./session.manager.js";
@@ -225,7 +226,7 @@ export function createMergeQueueService(deps: {
     const issueRows = await getMergeQueueIssueRows(issueIds, database);
 
     const projectIds = [...new Set(issueRows.map((i) => i.projectId))];
-    const projectRows = await getMergeQueueProjectRows(projectIds, database);
+    const projectRows = await getProjectsByIds(projectIds, database);
 
     const issueMap = new Map(issueRows.map((i) => [i.id, i]));
     const projectMap = new Map(projectRows.map((p) => [p.id, p]));
@@ -465,7 +466,19 @@ export function createMergeQueueService(deps: {
       }
 
       // Rebase onto base first (if we have a working dir)
+      let rebaseOutcome: "continue" | "break" | undefined;
       if (ws.workingDir && !ws.isDirect) {
+        // The rebase touches shared refs/objects in ws.repoPath (the main checkout) via
+        // autoRenumberMigrations's direct reads there and rebaseOntoBase's fetch/rebase —
+        // acquire the on-disk repo lock (#993) so this can't race a concurrent merge,
+        // a Conductor-loop agent's own git, or human git in the same repo.
+        let repoLock = tryAcquireRepoLock(ws.repoPath, `merge-queue:${ws.id}`);
+        while (!repoLock) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          repoLock = tryAcquireRepoLock(ws.repoPath, `merge-queue:${ws.id}`);
+        }
+        const repoLockHeartbeat = setInterval(() => repoLock!.heartbeat(), 15_000);
+
         try {
           const renumber = await gitService.autoRenumberMigrations(ws.workingDir, ws.repoPath, ws.baseBranch);
           if (renumber.renumbered) {
@@ -485,73 +498,83 @@ export function createMergeQueueService(deps: {
               issueTitle: ws.issueTitle,
               reason: `migration renumber failed: ${error}`,
             };
-            continue;
-          }
-          failed.push(ws.id);
-          yield {
-            type: "error",
-            workspaceId: ws.id,
-            issueNumber: ws.issueNumber,
-            issueTitle: ws.issueTitle,
-            error,
-          };
-          break;
-        }
-
-        yield {
-          type: "rebasing",
-          workspaceId: ws.id,
-          issueNumber: ws.issueNumber,
-          issueTitle: ws.issueTitle,
-          position,
-          total,
-        };
-        try {
-          const rebaseResult = await gitService.rebaseOntoBase(ws.workingDir, ws.baseBranch, ws.branch);
-          if (!rebaseResult.success) {
-            if (opts.skipOnConflict) {
-              await gitService.abortRebase(ws.workingDir).catch(() => {
-                // Best effort: skip-on-conflict should leave the queue free to continue.
-              });
-              skipped.push(ws.id);
-              yield {
-                type: "skipped",
-                workspaceId: ws.id,
-                issueNumber: ws.issueNumber,
-                issueTitle: ws.issueTitle,
-                reason: `rebase conflict: ${rebaseResult.conflictingFiles?.join(", ") ?? rebaseResult.error ?? "unknown"}`,
-              };
-              continue;
-            }
+            rebaseOutcome = "continue";
+          } else {
             failed.push(ws.id);
             yield {
-              type: "conflict",
+              type: "error",
               workspaceId: ws.id,
               issueNumber: ws.issueNumber,
               issueTitle: ws.issueTitle,
-              conflictingFiles: rebaseResult.conflictingFiles ?? [],
-              error: rebaseResult.error ?? "Rebase failed",
+              error,
             };
-            break; // Stop queue — resumable after manual fix
+            rebaseOutcome = "break";
           }
-          yield {
-            type: "rebase_ok",
-            workspaceId: ws.id,
-            issueNumber: ws.issueNumber,
-            issueTitle: ws.issueTitle,
-          };
-        } catch (err) {
-          failed.push(ws.id);
-          yield {
-            type: "error",
-            workspaceId: ws.id,
-            issueNumber: ws.issueNumber,
-            issueTitle: ws.issueTitle,
-            error: err instanceof Error ? err.message : String(err),
-          };
-          break;
         }
+
+        if (!rebaseOutcome) {
+          yield {
+            type: "rebasing",
+            workspaceId: ws.id,
+            issueNumber: ws.issueNumber,
+            issueTitle: ws.issueTitle,
+            position,
+            total,
+          };
+          try {
+            const rebaseResult = await gitService.rebaseOntoBase(ws.workingDir, ws.baseBranch, ws.branch);
+            if (!rebaseResult.success) {
+              if (opts.skipOnConflict) {
+                await gitService.abortRebase(ws.workingDir).catch(() => {
+                  // Best effort: skip-on-conflict should leave the queue free to continue.
+                });
+                skipped.push(ws.id);
+                yield {
+                  type: "skipped",
+                  workspaceId: ws.id,
+                  issueNumber: ws.issueNumber,
+                  issueTitle: ws.issueTitle,
+                  reason: `rebase conflict: ${rebaseResult.conflictingFiles?.join(", ") ?? rebaseResult.error ?? "unknown"}`,
+                };
+                rebaseOutcome = "continue";
+              } else {
+                failed.push(ws.id);
+                yield {
+                  type: "conflict",
+                  workspaceId: ws.id,
+                  issueNumber: ws.issueNumber,
+                  issueTitle: ws.issueTitle,
+                  conflictingFiles: rebaseResult.conflictingFiles ?? [],
+                  error: rebaseResult.error ?? "Rebase failed",
+                };
+                rebaseOutcome = "break"; // Stop queue — resumable after manual fix
+              }
+            } else {
+              yield {
+                type: "rebase_ok",
+                workspaceId: ws.id,
+                issueNumber: ws.issueNumber,
+                issueTitle: ws.issueTitle,
+              };
+            }
+          } catch (err) {
+            failed.push(ws.id);
+            yield {
+              type: "error",
+              workspaceId: ws.id,
+              issueNumber: ws.issueNumber,
+              issueTitle: ws.issueTitle,
+              error: err instanceof Error ? err.message : String(err),
+            };
+            rebaseOutcome = "break";
+          }
+        }
+
+        clearInterval(repoLockHeartbeat);
+        repoLock.release();
       }
+      if (rebaseOutcome === "continue") continue;
+      if (rebaseOutcome === "break") break;
 
       // Merge
       yield {

@@ -16,9 +16,11 @@
     "./lib/cascade-delete": { "development": "./src/lib/cascade-delete.ts", "types": "./dist/lib/cascade-delete.d.ts", "import": "./dist/lib/cascade-delete.js", "default": "./src/lib/cascade-delete.ts" },
     "./lib/fk-actions": { "development": "./src/lib/fk-actions.ts", "types": "./dist/lib/fk-actions.d.ts", "import": "./dist/lib/fk-actions.js", "default": "./src/lib/fk-actions.ts" },
     "./lib/fk-actions-repair": { "development": "./src/lib/fk-actions-repair.ts", "types": "./dist/lib/fk-actions-repair.d.ts", "import": "./dist/lib/fk-actions-repair.js", "default": "./src/lib/fk-actions-repair.ts" },
+    "./lib/fk-assert": { "development": "./src/lib/fk-assert.ts", "types": "./dist/lib/fk-assert.d.ts", "import": "./dist/lib/fk-assert.js", "default": "./src/lib/fk-assert.ts" },
     "./lib/git-service": { "development": "./src/lib/git-service.ts", "types": "./dist/lib/git-service.d.ts", "import": "./dist/lib/git-service.js", "default": "./src/lib/git-service.ts" },
     "./lib/git-service.js": { "development": "./src/lib/git-service.ts", "types": "./dist/lib/git-service.d.ts", "import": "./dist/lib/git-service.js", "default": "./src/lib/git-service.ts" },
     "./lib/git-exec": { "development": "./src/lib/git-exec.ts", "types": "./dist/lib/git-exec.d.ts", "import": "./dist/lib/git-exec.js", "default": "./src/lib/git-exec.ts" },
+    "./lib/repo-lock": { "development": "./src/lib/repo-lock.ts", "types": "./dist/lib/repo-lock.d.ts", "import": "./dist/lib/repo-lock.js", "default": "./src/lib/repo-lock.ts" },
     "./lib/dependency-graph": { "development": "./src/lib/dependency-graph.ts", "types": "./dist/lib/dependency-graph.d.ts", "import": "./dist/lib/dependency-graph.js", "default": "./src/lib/dependency-graph.ts" },
     "./lib/dependency-graph.js": { "development": "./src/lib/dependency-graph.ts", "types": "./dist/lib/dependency-graph.d.ts", "import": "./dist/lib/dependency-graph.js", "default": "./src/lib/dependency-graph.ts" },
     "./lib/coupling-overlap": { "development": "./src/lib/coupling-overlap.ts", "types": "./dist/lib/coupling-overlap.d.ts", "import": "./dist/lib/coupling-overlap.js", "default": "./src/lib/coupling-overlap.ts" },
@@ -32,6 +34,7 @@
     "./lib/auto-merge-pref": { "development": "./src/lib/auto-merge-pref.ts", "types": "./dist/lib/auto-merge-pref.d.ts", "import": "./dist/lib/auto-merge-pref.js", "default": "./src/lib/auto-merge-pref.ts" },
     "./lib/auto-review-pref": { "development": "./src/lib/auto-review-pref.ts", "types": "./dist/lib/auto-review-pref.d.ts", "import": "./dist/lib/auto-review-pref.js", "default": "./src/lib/auto-review-pref.ts" },
     "./lib/settings-registry": { "development": "./src/lib/settings-registry.ts", "types": "./dist/lib/settings-registry.d.ts", "import": "./dist/lib/settings-registry.js", "default": "./src/lib/settings-registry.ts" },
+    "./lib/dynamic-preference-keys": { "development": "./src/lib/dynamic-preference-keys.ts", "types": "./dist/lib/dynamic-preference-keys.d.ts", "import": "./dist/lib/dynamic-preference-keys.js", "default": "./src/lib/dynamic-preference-keys.ts" },
     "./lib/workspace-activity-state": { "development": "./src/lib/workspace-activity-state.ts", "types": "./dist/lib/workspace-activity-state.d.ts", "import": "./dist/lib/workspace-activity-state.js", "default": "./src/lib/workspace-activity-state.ts" },
     "./lib/workspace-activity-state.js": { "development": "./src/lib/workspace-activity-state.ts", "types": "./dist/lib/workspace-activity-state.d.ts", "import": "./dist/lib/workspace-activity-state.js", "default": "./src/lib/workspace-activity-state.ts" },
     "./lib/setup-script": { "development": "./src/lib/setup-script.ts", "types": "./dist/lib/setup-script.d.ts", "import": "./dist/lib/setup-script.js", "default": "./src/lib/setup-script.ts" },
@@ -39,9 +42,12 @@
     "./lib/cron-utils": { "development": "./src/lib/cron-utils.ts", "types": "./dist/lib/cron-utils.d.ts", "import": "./dist/lib/cron-utils.js", "default": "./src/lib/cron-utils.ts" },
     "./lib/worktree-symlink-bootstrap": { "development": "./src/lib/worktree-symlink-bootstrap.ts", "types": "./dist/lib/worktree-symlink-bootstrap.d.ts", "import": "./dist/lib/worktree-symlink-bootstrap.js", "default": "./src/lib/worktree-symlink-bootstrap.ts" },
     "./lib/workflow-engine": { "development": "./src/lib/workflow-engine.ts", "types": "./dist/lib/workflow-engine.d.ts", "import": "./dist/lib/workflow-engine.js", "default": "./src/lib/workflow-engine.ts" },
+    "./lib/strategy-policy": { "development": "./src/lib/strategy-policy.ts", "types": "./dist/lib/strategy-policy.d.ts", "import": "./dist/lib/strategy-policy.js", "default": "./src/lib/strategy-policy.ts" },
+    "./lib/issue-status-orchestration": { "development": "./src/lib/issue-status-orchestration.ts", "types": "./dist/lib/issue-status-orchestration.d.ts", "import": "./dist/lib/issue-status-orchestration.js", "default": "./src/lib/issue-status-orchestration.ts" },
     "./lib/smoke-check": { "development": "./src/lib/smoke-check.ts", "types": "./dist/lib/smoke-check.d.ts", "import": "./dist/lib/smoke-check.js", "default": "./src/lib/smoke-check.ts" },
     "./lib/drive-retro": { "development": "./src/lib/drive-retro.ts", "types": "./dist/lib/drive-retro.d.ts", "import": "./dist/lib/drive-retro.js", "default": "./src/lib/drive-retro.ts" },
-    "./lib/failure-keywords": { "development": "./src/lib/failure-keywords.ts", "types": "./dist/lib/failure-keywords.d.ts", "import": "./dist/lib/failure-keywords.js", "default": "./src/lib/failure-keywords.ts" }
+    "./lib/failure-keywords": { "development": "./src/lib/failure-keywords.ts", "types": "./dist/lib/failure-keywords.d.ts", "import": "./dist/lib/failure-keywords.js", "default": "./src/lib/failure-keywords.ts" },
+    "./lib/sanitize-utf8": { "development": "./src/lib/sanitize-utf8.ts", "types": "./dist/lib/sanitize-utf8.d.ts", "import": "./dist/lib/sanitize-utf8.js", "default": "./src/lib/sanitize-utf8.ts" }
   },
   "scripts": {
     "prepare": "pnpm build",
@@ -50,7 +56,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "drizzle-orm": "0.45.2"
+    "drizzle-orm": "0.45.2",
+    "zod": "3.25.76"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",

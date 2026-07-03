@@ -2,10 +2,10 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, delimiter, join } from "node:path";
 import type { Database } from "../db/index.js";
-import { setPreference } from "../repositories/preferences.repository.js";
 import { getAllPreferences } from "../repositories/agent-profile-health.repository.js";
+import { getRuntimeStateByPrefix, setRuntimeState } from "../repositories/runtime-state.repository.js";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
-import { buildAgentLaunchConfig, type ProviderName } from "./agent-provider.js";
+import { buildAgentLaunchConfig, getProfilePrefKey, narrowProviderName, type ProviderName } from "./agent-provider.js";
 import { resolvePiExecutable, splitArgs } from "./agent-provider/helpers.js";
 import { parseCodexLicenseRing, codexHomeHasAuth, resolveCodexHomeForProfile } from "./codex-license-ring.js";
 import { parseClaudeSubscriptionRing, claudeConfigDirHasAuth, resolveClaudeConfigDirForProfile } from "./claude-subscription-ring.js";
@@ -80,23 +80,12 @@ function failurePreferenceKey(provider: ProviderName, profileName?: string | nul
 function applyProfileSelection(prefMap: Map<string, string>, provider: ProviderName, profileName: string): Map<string, string> {
   const next = new Map(prefMap);
   next.set("provider", provider);
-  if (provider === "claude") {
-    next.set("claude_profile", profileName === DEFAULT_PROFILE ? "" : profileName);
-  } else if (provider === "codex") {
-    next.set("codex_profile", profileName === DEFAULT_PROFILE ? "" : profileName);
-  } else if (provider === "pi") {
-    next.set("pi_profile", profileName === DEFAULT_PROFILE ? "" : profileName);
-  } else {
-    next.set("copilot_profile", profileName === DEFAULT_PROFILE ? "" : profileName);
-  }
+  next.set(getProfilePrefKey(provider), profileName === DEFAULT_PROFILE ? "" : profileName);
   return next;
 }
 
 function selectedProfileName(prefMap: Map<string, string>, provider: ProviderName): string {
-  if (provider === "codex") return prefMap.get("codex_profile") || DEFAULT_PROFILE;
-  if (provider === "pi") return prefMap.get("pi_profile") || DEFAULT_PROFILE;
-  if (provider === "copilot") return prefMap.get("copilot_profile") || DEFAULT_PROFILE;
-  return prefMap.get("claude_profile") || DEFAULT_PROFILE;
+  return prefMap.get(getProfilePrefKey(provider)) || DEFAULT_PROFILE;
 }
 
 function profileConfigPath(provider: ProviderName, profileName: string): string | null {
@@ -376,14 +365,11 @@ export async function listAgentProfileHealth(
 ): Promise<AgentProfileHealthRow[]> {
   const prefRows = await getAllPreferences(database);
   const prefMap = new Map(prefRows.map((row) => [row.key, row.value]));
+  // Launch-failure payloads are RUNTIME STATE (in `runtime_state`, #975), not config.
   const failureRows = new Map(
-    prefRows
-      .filter((row) => row.key.startsWith(FAILURE_PREFIX))
-      .map((row) => [row.key, row.value]),
+    (await getRuntimeStateByPrefix(FAILURE_PREFIX, database)).map((row) => [row.key, row.value]),
   );
-  const selectedProvider = (prefMap.get("provider") === "codex" || prefMap.get("provider") === "copilot" || prefMap.get("provider") === "pi")
-    ? prefMap.get("provider") as ProviderName
-    : "claude";
+  const selectedProvider = narrowProviderName(prefMap.get("provider"));
 
   const candidates: Array<{ provider: ProviderName; profileName: string }> = [
     { provider: "claude", profileName: DEFAULT_PROFILE },
@@ -479,5 +465,5 @@ export async function recordAgentProfileLaunchFailure(
     sessionId: input.sessionId,
     workspaceId: input.workspaceId,
   };
-  await setPreference(failurePreferenceKey(input.provider, profileName), JSON.stringify(payload), database);
+  await setRuntimeState(failurePreferenceKey(input.provider, profileName), JSON.stringify(payload), database);
 }

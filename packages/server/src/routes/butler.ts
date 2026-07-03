@@ -6,6 +6,7 @@ import { streamSSE } from "hono/streaming";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { getPreference, setPreference } from "../repositories/preferences.repository.js";
+import { deleteRuntimeState, getRuntimeState, setRuntimeState } from "../repositories/runtime-state.repository.js";
 import { getProjectById } from "../repositories/project.repository.js";
 import {
   getButlerPrompt,
@@ -57,25 +58,27 @@ function resolveButlerId(c: { req: { query: (k: string) => string | undefined } 
   return c.req.query("butler")?.trim() || "default";
 }
 
-function butlerSessionPrefKey(projectId: string, butlerId: string): string {
+// Butler session id + history are RUNTIME STATE (kept out of the `preferences`
+// config table, #975) — persisted in `runtime_state` via the runtime-state repo.
+function butlerSessionStateKey(projectId: string, butlerId: string): string {
   return `butler_session_${projectId}${butlerSuffix(butlerId)}`;
 }
 
 /** Rolling list of butler session IDs for this project+butler (JSON array, capped at 50). */
-function butlerSessionHistoryPrefKey(projectId: string, butlerId: string): string {
+function butlerSessionHistoryStateKey(projectId: string, butlerId: string): string {
   return `butler_session_history_${projectId}${butlerSuffix(butlerId)}`;
 }
 
-/** Append a sessionId to the per-project+butler session history preference. */
+/** Append a sessionId to the per-project+butler session history (runtime state). */
 async function appendToSessionHistory(projectId: string, butlerId: string, sessionId: string, database: Database): Promise<void> {
   try {
-    const key = butlerSessionHistoryPrefKey(projectId, butlerId);
-    const raw = await getPreference(key, database);
+    const key = butlerSessionHistoryStateKey(projectId, butlerId);
+    const raw = await getRuntimeState(key, database);
     const ids: string[] = raw ? (JSON.parse(raw) as string[]) : [];
     if (!ids.includes(sessionId)) {
       ids.unshift(sessionId); // most-recent first
       if (ids.length > 50) ids.length = 50;
-      await setPreference(key, JSON.stringify(ids), database);
+      await setRuntimeState(key, JSON.stringify(ids), database);
     }
   } catch (err) {
     console.warn(`[butler] failed to append session history: project=${projectId} butler=${butlerId}`, err);
@@ -337,7 +340,7 @@ export function createButlerRoute(
     const sdkBackend = butlerSdkBackend(backend.provider);
     // Model is a property of the (global) butler definition, not a per-project pref.
     const model = normalizeModelForBackend(def?.model, sdkBackend) || undefined;
-    const resumeSessionId = (await getPreference(butlerSessionPrefKey(projectId, butlerId), database)) || undefined;
+    const resumeSessionId = (await getRuntimeState(butlerSessionStateKey(projectId, butlerId), database)) || undefined;
     const systemPromptAppend = await resolveButlerPrompt(projectId, project.name, project.repoPath);
     const wasActive = getButlerSession(projectId, butlerId).active;
     // When the resolved profile is "mock", use the in-process mock backend instead
@@ -371,7 +374,7 @@ export function createButlerRoute(
     if (!wasActive) {
       subscribeButler(projectId, (e) => {
         if (e.type === "session") {
-          void setPreference(butlerSessionPrefKey(projectId, butlerId), e.sessionId, database);
+          void setRuntimeState(butlerSessionStateKey(projectId, butlerId), e.sessionId, database);
           void appendToSessionHistory(projectId, butlerId, e.sessionId, database);
         }
       }, butlerId);
@@ -412,7 +415,7 @@ export function createButlerRoute(
     const projectId = c.req.param("id");
     const butlerId = resolveButlerId(c);
     const state = getButlerSession(projectId, butlerId);
-    const persisted = (await getPreference(butlerSessionPrefKey(projectId, butlerId), database)) || null;
+    const persisted = (await getRuntimeState(butlerSessionStateKey(projectId, butlerId), database)) || null;
     const def = await getButlerDefinition(database, butlerId);
     const backend = await resolveButlerBackend(projectId, def?.provider);
     const effectiveBackend = state.active ? state.backend : butlerSdkBackend(backend.provider);
@@ -502,7 +505,7 @@ export function createButlerRoute(
     await setPreference(butlerProfilePrefKey(projectId), profile, database);
     // Fresh session: stop, forget resume id (different endpoint can't resume), restart.
     stopButlerSession(projectId, butlerId);
-    await setPreference(butlerSessionPrefKey(projectId, butlerId), "", database);
+    await deleteRuntimeState(butlerSessionStateKey(projectId, butlerId), database);
     const session = await startSession(projectId, butlerId);
     if (!session) return c.json({ error: "Project not found" }, 404);
     return c.json({ ok: true, profile, active: true });
@@ -645,7 +648,7 @@ export function createButlerRoute(
     const project = await resolveProject(projectId);
     if (!project) return c.json({ error: "Project not found" }, 404);
 
-    const raw = await getPreference(butlerSessionHistoryPrefKey(projectId, butlerId), database);
+    const raw = await getRuntimeState(butlerSessionHistoryStateKey(projectId, butlerId), database);
     const allowedIds = new Set<string>(raw ? (JSON.parse(raw) as string[]) : []);
     if (allowedIds.size === 0) return c.json({ sessions: [] });
 
@@ -662,7 +665,7 @@ export function createButlerRoute(
     if (!project) return c.json({ error: "Project not found" }, 404);
 
     // Security: only allow sessions that are tracked for this project
-    const raw = await getPreference(butlerSessionHistoryPrefKey(projectId, butlerId), database);
+    const raw = await getRuntimeState(butlerSessionHistoryStateKey(projectId, butlerId), database);
     const allowedIds = new Set<string>(raw ? (JSON.parse(raw) as string[]) : []);
     if (!allowedIds.has(sessionId)) return c.json({ error: "Session not found" }, 404);
 
@@ -678,7 +681,7 @@ export function createButlerRoute(
     const projectId = c.req.param("id");
     const butlerId = resolveButlerId(c);
     stopButlerSession(projectId, butlerId);
-    await setPreference(butlerSessionPrefKey(projectId, butlerId), "", database);
+    await deleteRuntimeState(butlerSessionStateKey(projectId, butlerId), database);
     return c.json({ ok: true });
   });
 

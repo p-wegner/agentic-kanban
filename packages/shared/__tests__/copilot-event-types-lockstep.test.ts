@@ -41,7 +41,13 @@ const CONST_NAMES = [
   "COPILOT_TOOL_RESULT_TYPES",
 ] as const;
 
-/** The two parsers that consume Copilot events; both must import, never redefine, the sets. */
+/**
+ * Files scanned against re-forking the sets. Since #951 the offline
+ * session-summary parser no longer classifies Copilot events itself — it
+ * consumes `parseCopilotEvent` — so only copilot.ts is REQUIRED to import the
+ * sets, but session-summary is still scanned so a private copy can't creep back.
+ */
+const IMPORTERS = ["lib/agent-stream/copilot.ts"];
 const CONSUMERS = ["lib/agent-stream/copilot.ts", "lib/session-summary.ts"];
 
 describe("Copilot event-type sets stay in lockstep (#892)", () => {
@@ -68,13 +74,20 @@ describe("Copilot event-type sets stay in lockstep (#892)", () => {
   });
 
   it("the consumer source files import the sets, never redefine them", () => {
+    for (const importer of IMPORTERS) {
+      expect(
+        readSrc(importer).includes("copilot-event-types"),
+        `${importer} must import the Copilot event-type sets from agent-stream/copilot-event-types`,
+      ).toBe(true);
+    }
+    // Session-summary must consume the canonical Copilot parser, not re-parse (#951).
+    expect(
+      readSrc("lib/session-summary.ts").includes("parseCopilotEvent"),
+      "lib/session-summary.ts must consume parseCopilotEvent from agent-stream/copilot",
+    ).toBe(true);
+
     for (const consumer of CONSUMERS) {
       const src = readSrc(consumer);
-      expect(
-        src.includes("copilot-event-types"),
-        `${consumer} must import the Copilot event-type sets from agent-stream/copilot-event-types`,
-      ).toBe(true);
-
       for (const name of CONST_NAMES) {
         // A re-fork would look like `const COPILOT_*_TYPES = new Set(...`.
         const reDefinition = new RegExp(`(const|let|var)\\s+${name}\\s*=\\s*new Set`);

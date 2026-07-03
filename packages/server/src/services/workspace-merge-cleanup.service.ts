@@ -1,4 +1,5 @@
 import { applyOpenSpecDeltas, OPENSPEC_CHANGES_DIR, OPENSPEC_SPECS_DIR } from "@agentic-kanban/shared/lib/openspec";
+import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import type { Database } from "../db/index.js";
 import { persistWorkspaceCleanupWarning, getWorkspaceById } from "../repositories/workspace-merge-cleanup.repository.js";
 import type { SessionManager } from "./session.manager.js";
@@ -242,7 +243,7 @@ async function maybeAutoStartFollowups(
   deps: { database: Database; getSessionManager?: () => SessionManager; boardEvents?: BoardEvents },
 ): Promise<void> {
   try {
-    if (args.prefMap.get(PREF_AUTO_START_FOLLOWUP) === "true" && args.projectId && deps.getSessionManager) {
+    if (getBool(args.prefMap, PREF_AUTO_START_FOLLOWUP) && args.projectId && deps.getSessionManager) {
       await autoStartFollowups(args.issueId, args.projectId, deps.database, deps.getSessionManager, args.prefMap, { boardEvents: deps.boardEvents });
     }
   } catch (err) {

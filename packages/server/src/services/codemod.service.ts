@@ -3,7 +3,7 @@ import { join, relative, extname, resolve, sep } from "node:path";
 import { existsSync } from "node:fs";
 import { Project } from "ts-morph";
 import { invokeClaudePrompt } from "./claude-cli.service.js";
-import { getProjectRepoPath } from "../repositories/agent-skill.repository.js";
+import { getProjectRepoPath } from "../repositories/project.repository.js";
 import type { Database } from "../db/index.js";
 import { ValidationError } from "../errors/index.js";
 

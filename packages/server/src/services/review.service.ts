@@ -1,4 +1,5 @@
 import type { Database } from "../db/index.js";
+import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import {
   getProjectScopedReviewSkill,
   getGlobalReviewSkill,
@@ -10,8 +11,8 @@ import {
   getIssueProjectAndId,
   getAllPreferenceRows,
   getProjectDefaultBranch,
-  setWorkspaceStatus,
 } from "../repositories/review.repository.js";
+import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import type { ProviderName } from "./agent-provider.js";
 import { narrowProviderName, getProfilePrefKey } from "./agent-provider.js";
 import type { BoardEvents } from "./board-events.js";
@@ -39,7 +40,7 @@ Issue ID: {{issueId}}
 Workspace ID: {{workspaceId}}`;
 
 export function buildReviewArgs(prefMap: Map<string, string>, provider: ProviderName): string | undefined {
-  const skipPerms = prefMap.get("skip_permissions") !== "false" && provider === "claude";
+  const skipPerms = getBool(prefMap, "skip_permissions") && provider === "claude";
   const baseArgs = prefMap.get("agent_args") || "";
   if (skipPerms) {
     return baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions";
@@ -393,7 +394,7 @@ export async function startManualReview(
     const effectiveProfileName = getEffectiveProfile(prefMap, provider, claudeProfile);
     const manualProfileSelection = runtime?.provider.profileSelection ?? (effectiveProfileName ? { provider, name: effectiveProfileName } : undefined);
     const reviewArgs = runtime?.provider.agentArgs ?? buildReviewArgs(prefMap, provider);
-    const autoFix = prefMap.get("review_auto_fix") !== "false";
+    const autoFix = getBool(prefMap, "review_auto_fix");
 
     const projectRows = await getProjectDefaultBranch(projectId, database);
     const defaultBranch = projectRows.length > 0 ? projectRows[0].defaultBranch : null;
@@ -430,7 +431,7 @@ export async function startManualReview(
     const reviewArgsWithModel = reviewModel && provider === "claude" ? `${reviewArgs ?? ""} --model ${reviewModel}`.trim() : reviewArgs;
 
     const now = new Date().toISOString();
-    await setWorkspaceStatus(workspaceId, "reviewing", now, database);
+    await setWorkspaceStatus(database, workspaceId, "reviewing", { now });
     boardEvents.broadcast(projectId, "issue_updated");
 
     let sessionId: string;
@@ -445,9 +446,11 @@ export async function startManualReview(
         model: runtimeModel,
       });
     } catch (sessionErr) {
-      // Revert the workspace status so retries are possible — don't leave it stuck at "reviewing"
+      // Revert the workspace status so retries are possible — don't leave it stuck at "reviewing".
+      // Goes through the terminal-invariant authority: if a concurrent merge landed
+      // closed+mergedAt in the meantime, this revive is a logged no-op (#985).
       const revertedAt = new Date().toISOString();
-      await setWorkspaceStatus(workspaceId, "idle", revertedAt, database);
+      await setWorkspaceStatus(database, workspaceId, "idle", { now: revertedAt });
       boardEvents.broadcast(projectId, "issue_updated");
       throw sessionErr;
     }

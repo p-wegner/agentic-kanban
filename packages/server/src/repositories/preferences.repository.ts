@@ -1,11 +1,19 @@
 import { preferences } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
-import type { Database } from "../db/index.js";
+import type { Database, TransactionClient } from "../db/index.js";
+
+/**
+ * Every accessor also takes a drizzle transaction handle, so multi-pref writes
+ * that must be atomic (e.g. auth-rotation's profile write + Bullseye retargets,
+ * #986) can pass the `tx` from `withTransaction` instead of duplicating the
+ * upsert logic.
+ */
+export type PreferenceDb = Database | TransactionClient;
 
 export async function getPreference(
   key: string,
-  database: Database = db,
+  database: PreferenceDb = db,
 ): Promise<string | null> {
   const rows = await database
     .select()
@@ -18,7 +26,7 @@ export async function getPreference(
 export async function setPreference(
   key: string,
   value: string,
-  database: Database = db,
+  database: PreferenceDb = db,
 ): Promise<void> {
   const now = new Date().toISOString();
   await database

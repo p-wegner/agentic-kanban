@@ -14,6 +14,18 @@
         ]
       },
       {
+        "matcher": "Bash|PowerShell|shell|shell_command|exec_command|command_execution",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/vital-file-guard.js\"",
+            "commandWindows": "node .claude/hooks/vital-file-guard.js",
+            "timeout": 10,
+            "statusMessage": "Checking vital-file safety"
+          }
+        ]
+      },
+      {
         "matcher": "Write|Edit|MultiEdit|NotebookEdit|apply_patch|apply_patch_freeform|functions.apply_patch",
         "hooks": [
           {

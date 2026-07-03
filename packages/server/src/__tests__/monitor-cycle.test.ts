@@ -13,6 +13,11 @@ vi.mock("../services/butler-event-feed.js", () => ({
 
 vi.mock("@agentic-kanban/shared/lib/workflow-engine", () => ({
   syncCurrentNodeToStatus: vi.fn(),
+  transitionIssueStatus: vi.fn(async () => {}),
+}));
+
+vi.mock("../repositories/workspace-status.repository.js", () => ({
+  setWorkspaceStatus: vi.fn(async () => true),
 }));
 
 import { db } from "../db/index.js";

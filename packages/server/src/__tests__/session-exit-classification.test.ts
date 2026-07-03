@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   classifySessionExit,
+  roleFromTriggerType,
+  resolveSessionRoleFlags,
   type SessionExitInputs,
   type SessionExitAction,
 } from "../startup/session-exit-classification.js";
@@ -147,5 +149,60 @@ describe("classifySessionExit", () => {
     ])("resolves to %s for the highest matching rung", (expected, given) => {
       expect(classifySessionExit(given).action).toBe(expected);
     });
+  });
+});
+
+describe("roleFromTriggerType (#950 — persisted triggerType is the source of truth)", () => {
+  it.each<[string | null | undefined, ReturnType<typeof roleFromTriggerType>]>([
+    ["review", "review"],
+    ["fix-and-merge", "fix-and-merge"],
+    ["fix-conflicts", "fix-and-merge"], // resolve-conflicts sessions share the fix-and-merge handler
+    ["learning", "learning"],
+    ["agent", null],
+    ["chat", null],
+    ["initial", null],
+    ["plan-implement", null],
+    ["verify", null],
+    ["reconcile", null],
+    ["skill:code-review", null],
+    [null, null],
+    [undefined, null],
+  ])("maps triggerType %j to role %j", (triggerType, expected) => {
+    expect(roleFromTriggerType(triggerType)).toBe(expected);
+  });
+});
+
+describe("resolveSessionRoleFlags (#950 — sets are a cache, DB wins on a miss)", () => {
+  const emptySets = () => ({
+    reviewSessionIds: new Set<string>(),
+    fixAndMergeSessionIds: new Set<string>(),
+    learningSessionIds: new Set<string>(),
+  });
+
+  it("flags a review session absent from the sets via its persisted triggerType (restart case)", () => {
+    expect(resolveSessionRoleFlags("s1", "review", emptySets()))
+      .toEqual({ isReview: true, isFixAndMerge: false, isLearning: false });
+  });
+
+  it("flags a fix-and-merge session absent from the sets via its persisted triggerType", () => {
+    expect(resolveSessionRoleFlags("s1", "fix-and-merge", emptySets()))
+      .toEqual({ isReview: false, isFixAndMerge: true, isLearning: false });
+  });
+
+  it("flags a learning session absent from the sets via its persisted triggerType", () => {
+    expect(resolveSessionRoleFlags("s1", "learning", emptySets()))
+      .toEqual({ isReview: false, isFixAndMerge: false, isLearning: true });
+  });
+
+  it("still honours the in-memory set when triggerType is missing (legacy/fast path)", () => {
+    const sets = emptySets();
+    sets.reviewSessionIds.add("s1");
+    expect(resolveSessionRoleFlags("s1", null, sets))
+      .toEqual({ isReview: true, isFixAndMerge: false, isLearning: false });
+  });
+
+  it("yields all-false (builder) when neither sets nor triggerType mark a role", () => {
+    expect(resolveSessionRoleFlags("s1", "agent", emptySets()))
+      .toEqual({ isReview: false, isFixAndMerge: false, isLearning: false });
   });
 });

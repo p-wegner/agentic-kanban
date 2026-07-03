@@ -1,5 +1,10 @@
 import type { ParseContext, ParsedStreamEvent } from "./types.js";
-import { COPILOT_RESULT_TYPES, COPILOT_SESSION_START_TYPES } from "./copilot-event-types.js";
+import {
+  COPILOT_RESULT_TYPES,
+  COPILOT_SESSION_START_TYPES,
+  COPILOT_TOOL_RESULT_TYPES,
+  COPILOT_TOOL_USE_TYPES,
+} from "./copilot-event-types.js";
 import {
   contentToText,
   getString,
@@ -15,6 +20,8 @@ import {
   stringifyValue,
   toolNameFor,
 } from "./shared.js";
+import { recordUnknownFieldDrift } from "./unknown-fields.js";
+import { copilotResultPayloadSchema, hasCopilotSuccessSignalFields } from "./copilot-schema.js";
 
 const COPILOT_IGNORED_TYPES = new Set([
   "assistant.message_start",
@@ -30,17 +37,49 @@ const COPILOT_IGNORED_TYPES = new Set([
   "session.tools_updated",
 ]);
 
+// Catch-all raw fallback events (#968): the fallback keeps UI continuity for
+// unmatched-but-valid JSON, but it must NOT count as "recognized" in the drift
+// detector — before #968 it made literally any JSON parse as defined, so a
+// Copilot CLI wire-format change produced ZERO unknown-event counts. Marked via
+// a WeakSet (not a ParsedStreamEvent field) so the wire contract is unchanged.
+const unmatchedFallbackEvents = new WeakSet<ParsedStreamEvent>();
+
+/** True when the event is only the copilot catch-all raw fallback for an unmatched type (#968). */
+export function isCopilotUnmatchedFallback(event: ParsedStreamEvent): boolean {
+  return unmatchedFallbackEvents.has(event);
+}
+
+/**
+ * Tool-shaped type gate (#968): the tool branches used to fire on bare
+ * `type.includes("tool")`, so foreign shapes (e.g. `subagent_toolkit.updated`)
+ * silently misparsed as tool activity. All known copilot tool type names either
+ * live in the shared sets or start with `tool` — require that.
+ */
+function isCopilotToolishType(type: string): boolean {
+  return COPILOT_TOOL_USE_TYPES.has(type) || COPILOT_TOOL_RESULT_TYPES.has(type) || type.startsWith("tool");
+}
+
 function normalizedType(obj: Record<string, unknown>): string {
   return String((obj.type as string) || (obj.event as string) || (obj.name as string) || "").toLowerCase().replace(/-/g, "_");
 }
 
+/**
+ * Extract assistant text from Copilot's varied message shapes (CLI nested, REST
+ * flat, legacy). Single definition (#951) — the offline session-summary parser
+ * consumes this via `parseCopilotEvent`, and the server-side fork in
+ * agent-provider/helpers.ts was deleted; its field coverage (top-level
+ * `text`/`message` on `assistant.message`, bare `content[]` arrays with no
+ * recognizable type/role) is unioned in here.
+ */
 function extractCopilotAssistantText(obj: Record<string, unknown>): string {
   const type = normalizedType(obj);
   const role = String((obj.role as string) || "").toLowerCase();
   const data = objectValue(obj.data);
   const message = objectValue(obj.message);
-  if (type === "assistant.message" && Object.keys(data).length > 0) {
-    return contentToText(data.content) || getString(data, ["content", "text", "message"]);
+  if (type === "assistant.message") {
+    return contentToText(data.content)
+      || getString(data, ["content", "text", "message"])
+      || getString(obj, ["text", "message"]);
   }
   if (type === "assistant" || type === "assistant_message" || role === "assistant") {
     return contentToText(obj.content) || getString(obj, ["text", "message", "delta"]) || contentToText(message.content) || getString(message, ["text", "content", "message"]);
@@ -48,6 +87,7 @@ function extractCopilotAssistantText(obj: Record<string, unknown>): string {
   if (type === "message" && role === "assistant") {
     return contentToText(obj.content) || getString(obj, ["text", "message"]);
   }
+<<<<<<< HEAD
   // General fallback (restored #961): Copilot also emits assistant text on flat
   // shapes that carry no assistant-typed envelope — e.g. an `assistant.message`
   // with top-level `text` (no `data` wrapper) or a generic event whose payload
@@ -58,6 +98,14 @@ function extractCopilotAssistantText(obj: Record<string, unknown>): string {
   const direct = stringValue(payload.text ?? payload.message ?? payload.response);
   if (direct) return direct;
   return contentToText(payload.content);
+=======
+  // Legacy flexible shapes: a bare top-level content[] with no recognizable
+  // type/role. Never applied to user/system/session/tool events.
+  if (!role && !type.includes("user") && !type.includes("system") && !type.includes("session") && !type.includes("tool")) {
+    return contentToText(obj.content);
+  }
+  return "";
+>>>>>>> master
 }
 
 function formatShutdownResult(shutdownType: string, linesAdded: number, linesRemoved: number, filesModified: string[]): string {
@@ -110,9 +158,17 @@ export function parseCopilotEvent(obj: Record<string, unknown>, rawLine: string,
       ? (codeChanges.filesModified as unknown[]).filter((f): f is string => typeof f === "string")
       : [];
     const shutdownType = stringValue(data.shutdownType) ?? "";
+    // #994: success used to be inferred purely from the ABSENCE of "error"/
+    // "abrupt" — a renamed or missing shutdownType field silently read as
+    // success. Require the field to actually be PRESENT (a genuine positive
+    // signal that the CLI reported a shutdown reason) before trusting it;
+    // record the drift when it's missing instead of defaulting to success.
+    if (!shutdownType) {
+      recordUnknownFieldDrift("copilot", "session.shutdown", "shutdownType field missing or empty");
+    }
     pushDisplay(result, {
       kind: "result",
-      success: shutdownType !== "error" && shutdownType !== "abrupt",
+      success: Boolean(shutdownType) && shutdownType !== "error" && shutdownType !== "abrupt",
       durationMs: numberValue(data.totalApiDurationMs),
       result: formatShutdownResult(shutdownType, Number(codeChanges.linesAdded ?? 0), Number(codeChanges.linesRemoved ?? 0), filesModified),
       totalCostUsd: 0,
@@ -185,12 +241,15 @@ export function parseCopilotEvent(obj: Record<string, unknown>, rawLine: string,
     result.toolActivity = { name, input: inputParsed, toolUseId: id };
     registerToolName(context, id, name);
     pushDisplay(result, { kind: "tool_use", id: id ?? "", name, input: stringifyValue(inputValue), inputParsed });
-  } else if (toolName) {
+  } else if (toolName && isCopilotToolishType(type)) {
     const id = stringValue(payload.id ?? payload.tool_use_id ?? payload.toolUseId ?? payload.toolCallId ?? item.id);
-    const input = objectValue(payload.input ?? payload.arguments ?? item.input);
+    const input = parseInput(payload.input ?? payload.arguments ?? item.input);
     result.toolActivity = { name: toolName, input, toolUseId: id };
     registerToolName(context, id, toolName);
-    if (type.includes("start") || type.includes("call") || type.includes("use")) {
+    // A completion event that happens to carry the tool name (e.g. tool_call.completed)
+    // must not be counted as a second invocation — it is handled as a tool result below.
+    const isResultish = type.includes("complete") || type.includes("end") || type.includes("result");
+    if ((type.includes("start") || type.includes("call") || type.includes("use")) && !isResultish) {
       pushDisplay(result, { kind: "tool_use", id: id ?? "", name: toolName, input: stringifyValue(payload.input ?? payload.arguments ?? item.input), inputParsed: input });
     }
   } else if (type.includes("command") || item.type === "command_execution") {
@@ -201,7 +260,7 @@ export function parseCopilotEvent(obj: Record<string, unknown>, rawLine: string,
     }
   }
 
-  if (type.includes("tool") && (type.includes("complete") || type.includes("completed") || type.includes("end") || type.includes("result"))) {
+  if (COPILOT_TOOL_RESULT_TYPES.has(type) || (isCopilotToolishType(type) && (type.includes("complete") || type.includes("end") || type.includes("result")))) {
     const id = stringValue(payload.id ?? payload.tool_use_id ?? payload.toolUseId ?? payload.toolCallId ?? obj.id ?? item.id);
     if (id) {
       const resultRecord = objectValue(payload.result);
@@ -230,6 +289,20 @@ export function parseCopilotEvent(obj: Record<string, unknown>, rawLine: string,
 
   if (COPILOT_RESULT_TYPES.has(type)) {
     const status = String((payload.status as string) || (payload.subtype as string) || "").toLowerCase();
+    // #994: the event TYPE (e.g. "completed"/"turn.completed") is itself the
+    // positive signal that a turn finished; exitCode/is_error/status only
+    // downgrade that to failure when present. But if NONE of the fields this
+    // computation reads are present at all under ANY known spelling, a CLI
+    // rename could be silently hiding a failure signal behind success's
+    // default — report that ambiguity as field drift instead of only ever
+    // logging it as a quiet success.
+    if (!hasCopilotSuccessSignalFields(payload)) {
+      const parsed = copilotResultPayloadSchema.safeParse(payload);
+      const detail = parsed.success
+        ? "no exitCode/is_error/isError/error/status/subtype field present to confirm success"
+        : parsed.error.issues.map((issue) => `${issue.path.join(".") || "<root>"}: ${issue.message}`).join("; ");
+      recordUnknownFieldDrift("copilot", type || "<no-type>", detail);
+    }
     const stats = {
       durationMs: numberValue(payload.duration_ms ?? payload.durationMs ?? usage.sessionDurationMs ?? usage.duration_ms ?? usage.durationMs),
       totalCostUsd: numberValue(payload.total_cost_usd ?? payload.cost_usd ?? payload.costUsd),
@@ -254,10 +327,16 @@ export function parseCopilotEvent(obj: Record<string, unknown>, rawLine: string,
     });
   }
 
-  if (!hasFields(result) && !COPILOT_IGNORED_TYPES.has(type)) {
+  if (!hasFields(result)) {
+    if (COPILOT_IGNORED_TYPES.has(type)) {
+      // Known-but-deliberately-ignored chatter (deltas, turn boundaries):
+      // recognized-but-empty, so healthy noise never counts as drift (#968).
+      return result;
+    }
     const rawText = getString(obj, ["message", "text", "content", "status"]);
     pushDisplay(result, { kind: "raw", text: rawText || rawLine });
+    unmatchedFallbackEvents.add(result);
   }
 
-  return hasFields(result) ? result : undefined;
+  return result;
 }

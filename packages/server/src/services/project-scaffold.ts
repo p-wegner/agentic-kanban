@@ -347,13 +347,39 @@ export interface HookScaffoldOptions {
   includeWorktreeGuard?: boolean;
 }
 
-// Module directory — used to locate the canonical hook sources in .claude/hooks/.
-// Works in both dev (src/services/) and bundled (dist/) modes by walking up to find .claude/.
+// Module directory — used to locate the hook sources shipped with the package.
+// Bundled (dist/server.js): _moduleDir = dist/, hooks live in dist/scaffold/hooks/
+// (copied there by scripts/copy-assets.mjs and shipped via package.json "files").
+// Dev (src/services/): the packaged dir doesn't exist; fall back to src/scaffold/
+// (the canonical tested copies of ALL scaffold hooks — #990) and then the repo-root
+// .claude/hooks/ walk-up (the dev checkout's live hooks).
 const _moduleDir = dirname(fileURLToPath(import.meta.url));
 
 function resolveHookSource(filename: string): string | null {
-  // Walk up from the module dir (src/services, dist/, etc.) to the git repo root.
-  // The .claude/hooks dir lives at the git repo root — check up to 6 levels up.
+  // 1. Packaged copy — the robust path for npm/npx installs (dist/scaffold/hooks/,
+  //    shipped in the tarball). Before this existed, npx installs shipped NO hook
+  //    sources and every scaffold hook (vital-file-guard, cross-worktree guard,
+  //    smart-hooks runner, verify-gate runner) silently vanished from published
+  //    installs (#952). Two relative candidates because the bundles sit at
+  //    different depths: dist/server.js|mcp.js (_moduleDir = dist/) and
+  //    dist/cli/index.js (_moduleDir = dist/cli/).
+  // 2. Dev: the canonical tested sources next to this module (src/services/ →
+  //    src/scaffold/) — all scaffold hooks live there (#990); the repo-root
+  //    .claude/hooks/ copies are the checkout's live deployments of the same
+  //    sources, kept byte-identical by the identity tests.
+  const packagedCandidates = [
+    join(_moduleDir, "scaffold", "hooks", filename),
+    join(_moduleDir, "..", "scaffold", "hooks", filename),
+    join(_moduleDir, "..", "scaffold", filename),
+  ];
+  for (const candidate of packagedCandidates) {
+    try {
+      return readFileSync(candidate, "utf8");
+    } catch { /* try next */ }
+  }
+
+  // 3. Dev fallback: walk up from the module dir to the git repo root, where the
+  //    dev checkout's live .claude/hooks dir holds the remaining hook sources.
   let dir = _moduleDir;
   for (let i = 0; i < 6; i++) {
     const candidate = join(dir, ".claude", "hooks", filename);
@@ -364,6 +390,15 @@ function resolveHookSource(filename: string): string | null {
     if (parent === dir) break; // reached filesystem root
     dir = parent;
   }
+
+  // Loud failure: the packaged copy should always exist in a published install and
+  // one of the dev paths always exists in a checkout — reaching here is a bug
+  // (broken build/pack), never a normal condition. Never skip silently.
+  console.warn(
+    `[scaffold] Hook source not found: ${filename}. Looked in the packaged dist/scaffold/hooks/, ` +
+      `src/scaffold/, and repo .claude/hooks/. The scaffolded project will be missing this quality ` +
+      `gate — this indicates a broken build or npm pack (see #952).`,
+  );
   return null;
 }
 
@@ -638,10 +673,10 @@ const VERIFY_GATE_CONFIG_STUB =
  * - Creates the hooks dir if absent.
  * Non-fatal on any error.
  *
- * The runner source is resolved via resolveHookSource (same walk-up pattern
- * used by ensureHookScaffold) so this works in both dev (src/) and production
- * (dist/ bundles) without relying on import.meta.url-relative paths that
- * tsc does not copy to dist/.
+ * The runner source is resolved via resolveHookSource: packaged copy first
+ * (dist/scaffold/hooks/, shipped in the npm tarball — the path npx installs
+ * use), then the canonical tested copy in src/scaffold/, then the dev-checkout
+ * .claude/hooks/ walk-up. Missing source logs a loud warning (#952).
  */
 export function ensureVerifyGateRunner(repoPath: string): void {
   try {
