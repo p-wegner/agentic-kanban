@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { setSettings as savePreferences } from "../lib/settingsStore.js";
-import { showToast } from "../components/Toast.js";
+import { showToast } from "../lib/toast.js";
 import { buildMigrationConfig } from "../lib/strategy-targets.js";
 import type { MonitorTunables } from "../components/SettingsPanel.shared.js";
 import type { MonitorAction } from "../components/MonitorPopover.js";

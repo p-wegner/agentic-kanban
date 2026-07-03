@@ -7,6 +7,9 @@ import { getProfilePrefKey } from "./agent-provider.js";
 import { fetchLiveQuotaUsage } from "./quota-usage.service.js";
 import type { QuotaUsageResult } from "./quota-usage.service.js";
 import { resolveEffectiveModel } from "./effective-config.service.js";
+import { PROVIDER_POLICY_MODES, PROVIDER_POLICY_PROVIDERS, selectPolicyByPriority } from "@agentic-kanban/shared/lib/strategy-policy";
+import { isBoardStrategyPreferenceKey } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
+import type { ProviderPolicyMode, ProviderProfilePolicy } from "@agentic-kanban/shared/lib/strategy-policy";
 
 export type StrategySegmentKind = "work-type" | "provider" | "area" | "custom";
 
@@ -19,47 +22,11 @@ export interface StrategyBullseyeSegment {
   keywords?: string;
 }
 
-/**
- * Rate-limit policy for a single provider profile.
- *
- * - "fill": use aggressively — keep busy at all times (e.g. time-windowed plans with cheap resets)
- * - "throttle": use for main work but preserve headroom (e.g. 5h/week plans shared with other projects)
- * - "fallback-only": only use when no better option exists, or on explicit user action (e.g. token-based gateways)
- *
- * `headroomPct` (0–100) is only meaningful for "throttle": the fraction of the window's capacity
- * the orchestrator should leave unused. E.g. 20 means "don't start new work if projected usage
- * would exceed 80% of the window".
- */
-export type ProviderPolicyMode = "fill" | "throttle" | "fallback-only";
-
-export interface ProviderProfilePolicy {
-  /** Unique key: "{provider}:{profileName}" — e.g. "claude:work", "codex:default" */
-  id: string;
-  provider: "claude" | "codex" | "copilot" | "pi";
-  profileName: string;
-  /** Human-readable label, e.g. "Claude (andrena gateway)" */
-  label: string;
-  mode: ProviderPolicyMode;
-  /** 0–100. Only applies when mode="throttle". Leave this % of the rate-limit window unused. */
-  headroomPct: number;
-  /** Informational note shown in the UI and emitted into objective.md */
-  notes: string;
-  /**
-   * Optional ID of the corresponding quota provider from the tampermonkey-direct
-   * `/api/usage` response. When set and live quota data is available, the orchestrator
-   * checks real usage against headroomPct (throttle) or max-out (fill) before
-   * selecting this policy. Leave blank to skip usage-based gating for this policy.
-   */
-  quotaProviderId?: string;
-  /**
-   * Optional model id this policy launches with (e.g. "sonnet" for claude, "gpt-5.5" for codex).
-   * Lets a project pin a model WITHOUT the global `default_model` preference, which applies to
-   * every provider and every project (the #696 cross-provider footgun). When set, it is threaded
-   * into new-workspace creation as the `requestedModel` for this policy's provider; an explicit
-   * per-workspace model still wins, and a model that doesn't belong to the provider is dropped.
-   */
-  model?: string;
-}
+// Policy shape + priority-order selection live in the shared package so the
+// client's Strategy Targets round-trip codec and this service can never diverge
+// again (the client copy silently dropped `model` on save — #983). Docs for the
+// modes / headroomPct semantics live on the shared definitions.
+export type { ProviderPolicyMode, ProviderProfilePolicy } from "@agentic-kanban/shared/lib/strategy-policy";
 
 export interface StrategyBullseyeConfig {
   version?: number;
@@ -126,7 +93,7 @@ function segmentWeight(segment: StrategyBullseyeSegment): number {
   return clampInt(segment.weight, 3, 1, 5);
 }
 
-const VALID_MODES: ProviderPolicyMode[] = ["fill", "throttle", "fallback-only"];
+const VALID_MODES: readonly ProviderPolicyMode[] = PROVIDER_POLICY_MODES;
 
 /** Untrusted shape of a single provider policy entry before validation. */
 interface RawProviderPolicy {
@@ -153,7 +120,7 @@ function parseProviderPolicies(raw: unknown): ProviderProfilePolicy[] {
     .filter(isRawProviderPolicy)
     .map((p) => ({
       id: p.id,
-      provider: (["claude", "codex", "copilot", "pi"].includes(p.provider) ? p.provider : "claude") as "claude" | "codex" | "copilot" | "pi",
+      provider: ((PROVIDER_POLICY_PROVIDERS as readonly string[]).includes(p.provider) ? p.provider : "claude") as "claude" | "codex" | "copilot" | "pi",
       profileName: typeof p.profileName === "string" ? p.profileName : "",
       label: typeof p.label === "string" ? p.label : p.id,
       mode: (typeof p.mode === "string" && VALID_MODES.includes(p.mode as ProviderPolicyMode) ? p.mode : "throttle") as ProviderPolicyMode,
@@ -425,7 +392,8 @@ export function resolveMonitorTunables(
 }
 
 export function isBoardStrategyKey(key: string): boolean {
-  return /^board_strategy_[0-9a-f-]+$/.test(normalizeText(key));
+  // Delegates to the shared pure predicate (also enforced by MCP set_preference, #989).
+  return isBoardStrategyPreferenceKey(key);
 }
 
 export function projectIdFromBoardStrategyKey(key: string): string | null {
@@ -496,24 +464,15 @@ export function selectProviderFromStrategy(
 
   const quota = options.quota ?? null;
 
-  const fill = policies.filter((p) => p.mode === "fill" && !isPolicyBlockedByQuota(p, quota));
-  if (fill.length > 0) {
-    return { provider: fill[0].provider, profileName: fill[0].profileName, policy: fill[0] };
-  }
-
-  const throttle = policies.filter((p) => p.mode === "throttle" && !isPolicyBlockedByQuota(p, quota));
-  if (throttle.length > 0) {
-    return { provider: throttle[0].provider, profileName: throttle[0].profileName, policy: throttle[0] };
-  }
-
-  if (options.allowFallback) {
-    const fallback = policies.filter((p) => p.mode === "fallback-only");
-    if (fallback.length > 0) {
-      return { provider: fallback[0].provider, profileName: fallback[0].profileName, policy: fallback[0] };
-    }
-  }
-
-  return null;
+  // Priority order (fill → throttle → fallback-only) is the shared
+  // selectPolicyByPriority — the same logic the client's Settings preview uses —
+  // with live-quota gating layered on via the isBlocked hook.
+  const chosen = selectPolicyByPriority(policies, {
+    allowFallback: options.allowFallback ?? false,
+    isBlocked: (p) => isPolicyBlockedByQuota(p, quota),
+  });
+  if (!chosen) return null;
+  return { provider: chosen.provider, profileName: chosen.profileName, policy: chosen };
 }
 
 /**

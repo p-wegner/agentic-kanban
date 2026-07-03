@@ -1,5 +1,6 @@
 import { resolveMonitorTunables, type MonitorTunables } from "./strategy-objective.service.js";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
+import { START_MODE_VALUES } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 
 /**
  * Start Mode — the single per-project decision for HOW new tickets get auto-started.
@@ -22,7 +23,7 @@ import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
  *                  the SOLE driver (via the ungated POST path). The in-process monitor stands
  *                  down so the two never double-start. Independent scheduled crons still fire.
  */
-export type StartMode = "manual" | "monitor" | "conductor";
+export type StartMode = (typeof START_MODE_VALUES)[number];
 
 export interface StartPolicy {
   mode: StartMode;
@@ -44,7 +45,9 @@ export function startModePrefKey(projectId: string): string {
   return `start_mode_${projectId}`;
 }
 
-const VALID_MODES: ReadonlySet<string> = new Set<StartMode>(["manual", "monitor", "conductor"]);
+// Derived from the shared START_MODE_VALUES list so preference writers (settings
+// route, MCP set_preference) validate against exactly what this resolver accepts.
+const VALID_MODES: ReadonlySet<string> = new Set<StartMode>(START_MODE_VALUES);
 
 /**
  * Resolve the effective Start Mode + capabilities for a project. Mirrors

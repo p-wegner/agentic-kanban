@@ -20,6 +20,8 @@ import {
   stringifyValue,
   toolNameFor,
 } from "./shared.js";
+import { recordUnknownFieldDrift } from "./unknown-fields.js";
+import { copilotResultPayloadSchema, hasCopilotSuccessSignalFields } from "./copilot-schema.js";
 
 const COPILOT_IGNORED_TYPES = new Set([
   "assistant.message_start",
@@ -143,9 +145,17 @@ export function parseCopilotEvent(obj: Record<string, unknown>, rawLine: string,
       ? (codeChanges.filesModified as unknown[]).filter((f): f is string => typeof f === "string")
       : [];
     const shutdownType = stringValue(data.shutdownType) ?? "";
+    // #994: success used to be inferred purely from the ABSENCE of "error"/
+    // "abrupt" — a renamed or missing shutdownType field silently read as
+    // success. Require the field to actually be PRESENT (a genuine positive
+    // signal that the CLI reported a shutdown reason) before trusting it;
+    // record the drift when it's missing instead of defaulting to success.
+    if (!shutdownType) {
+      recordUnknownFieldDrift("copilot", "session.shutdown", "shutdownType field missing or empty");
+    }
     pushDisplay(result, {
       kind: "result",
-      success: shutdownType !== "error" && shutdownType !== "abrupt",
+      success: Boolean(shutdownType) && shutdownType !== "error" && shutdownType !== "abrupt",
       durationMs: numberValue(data.totalApiDurationMs),
       result: formatShutdownResult(shutdownType, Number(codeChanges.linesAdded ?? 0), Number(codeChanges.linesRemoved ?? 0), filesModified),
       totalCostUsd: 0,
@@ -266,6 +276,20 @@ export function parseCopilotEvent(obj: Record<string, unknown>, rawLine: string,
 
   if (COPILOT_RESULT_TYPES.has(type)) {
     const status = String((payload.status as string) || (payload.subtype as string) || "").toLowerCase();
+    // #994: the event TYPE (e.g. "completed"/"turn.completed") is itself the
+    // positive signal that a turn finished; exitCode/is_error/status only
+    // downgrade that to failure when present. But if NONE of the fields this
+    // computation reads are present at all under ANY known spelling, a CLI
+    // rename could be silently hiding a failure signal behind success's
+    // default — report that ambiguity as field drift instead of only ever
+    // logging it as a quiet success.
+    if (!hasCopilotSuccessSignalFields(payload)) {
+      const parsed = copilotResultPayloadSchema.safeParse(payload);
+      const detail = parsed.success
+        ? "no exitCode/is_error/isError/error/status/subtype field present to confirm success"
+        : parsed.error.issues.map((issue) => `${issue.path.join(".") || "<root>"}: ${issue.message}`).join("; ");
+      recordUnknownFieldDrift("copilot", type || "<no-type>", detail);
+    }
     const stats = {
       durationMs: numberValue(payload.duration_ms ?? payload.durationMs ?? usage.sessionDurationMs ?? usage.duration_ms ?? usage.durationMs),
       totalCostUsd: numberValue(payload.total_cost_usd ?? payload.cost_usd ?? payload.costUsd),

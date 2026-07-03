@@ -124,7 +124,7 @@ describe("MCP Server Tools", () => {
     try { rmSync(tmpDir, { recursive: true }); } catch { /* ignore */ }
   });
 
-  it("the MCP_TOOL_DEFINITIONS catalog and the runtime tools/list stay in exact name-parity", async () => {
+  it("the MCP_TOOL_DEFINITIONS catalog and the runtime tools/list stay in exact name- and description-parity", async () => {
     // Regression: mark_ready_for_merge was advertised in MCP_TOOL_DEFINITIONS (and the
     // review prompt told reviewers to call it) but was never wired into TOOL_REGISTRARS,
     // so every worktree review stranded its issue in "In Review" — the approval signal
@@ -137,11 +137,12 @@ describe("MCP Server Tools", () => {
     //   - registered ⊆ advertised  → no runtime tool can ship without a UI catalog
     //     entry + category (so the tool browser never silently omits a real tool).
     //
-    // We deliberately do NOT assert description EQUALITY: by design the catalog holds a
-    // terse one-line UI label while each registrar holds a richer agent-facing
-    // description (e.g. add_dependency lists every dependency type). Equality would be
-    // both false today and a regression in agent UX. We only guard that every runtime
-    // description is non-empty.
+    // We ALSO assert DESCRIPTION equality (#977). The old "catalog holds a terse UI
+    // label, registrar holds the rich agent-facing text" split was a drift generator:
+    // 74 of 91 descriptions had silently diverged, so the Settings tool browser lied
+    // about what a tool does. The RUNTIME registration (server.tool(...) in
+    // packages/mcp-server/src/tools/*) is the single source of truth — edit the
+    // description there and copy it verbatim into MCP_TOOL_DEFINITIONS.
     const resp = await sendAndReceive(proc, makeRequest("tools/list"));
     const tools = resp.result.tools as { name: string; description?: string }[];
     const registered = new Set<string>(tools.map((t) => t.name));
@@ -160,6 +161,16 @@ describe("MCP Server Tools", () => {
 
     const blankDescriptions = tools.filter((t) => !t.description || t.description.trim().length === 0).map((t) => t.name);
     expect(blankDescriptions, `tools shipped with an empty description: ${blankDescriptions.join(", ")}`).toEqual([]);
+
+    const catalogDescriptions = new Map(MCP_TOOL_DEFINITIONS.map((d) => [d.name, d.description]));
+    const descriptionDrift = tools
+      .filter((t) => catalogDescriptions.has(t.name) && catalogDescriptions.get(t.name) !== t.description)
+      .map((t) => `${t.name}:\n  runtime: ${JSON.stringify(t.description)}\n  catalog: ${JSON.stringify(catalogDescriptions.get(t.name))}`);
+    expect(
+      descriptionDrift,
+      `catalog descriptions drifted from the runtime registration (runtime is the source of truth — ` +
+        `copy the server.tool(...) description into MCP_TOOL_DEFINITIONS):\n${descriptionDrift.join("\n")}`,
+    ).toEqual([]);
   });
 
   it("get_context returns project info", async () => {

@@ -20,7 +20,6 @@ import { createRequire } from "node:module";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const MAX_LINES = 1000;
-const COHESION_MIN_LINES = 600;
 // The cohesion signal counts a module's top-level function-like DECLARATIONS —
 // exported AND internal (arch-review #889). Exports alone undercount: a low-cohesion
 // god-module can hide many independent responsibilities behind a handful of exports
@@ -30,6 +29,13 @@ const COHESION_MIN_LINES = 600;
 // deliberately TOP-LEVEL only — nested callbacks/handlers belong to their enclosing
 // function and are not separate responsibilities — and ignores `const` data tables and
 // type/interface exports (cohesive data/contracts, not behaviors).
+//
+// The signal fires on the COUNT ALONE, with no line-count floor (#977). It used to
+// require 600+ lines, which left a blind spot: a 450-line file declaring 31 top-level
+// functions is a low-cohesion god-module by this gate's own definition, yet sat
+// invisible below the floor (and could grow unchecked until it crossed 600 already
+// deep in breach). Files that were resident in that blind spot when the floor was
+// removed are grandfathered in COHESION_BASELINE like every other legacy offender.
 const COHESION_MAX_FN_DECLS = 20;
 
 // Ratchet baseline (arch-review #889). These large modules already exceeded the
@@ -52,6 +58,19 @@ const COHESION_BASELINE = {
   "packages/server/src/services/insights.service.ts": 23,
   // agent-questions.service.ts decomposed into ./agent-questions/* sub-modules (#912);
   // the facade barrel re-exports only, so its baseline entry is removed.
+  // #977: the 600-line cohesion floor was removed (the count fires alone now). These
+  // files sat in the old blind spot — under 600 lines but over 20 top-level function
+  // declarations — and are grandfathered at their current count. Shrink-only, same as
+  // every entry above.
+  "packages/server/src/repositories/workflow-fork.repository.ts": 33,
+  "packages/server/src/repositories/issue-ai.repository.ts": 31,
+  "packages/server/src/repositories/issue-service.repository.ts": 30,
+  "packages/server/src/services/git-info.service.ts": 28,
+  "packages/server/src/repositories/workspace-crud.repository.ts": 27,
+  "packages/server/src/scripts/mock-agent.ts": 23,
+  "packages/server/src/repositories/workspace.repository.ts": 22,
+  "packages/server/src/repositories/session-lifecycle.repository.ts": 21,
+  "packages/shared/src/lib/openspec.ts": 21,
 };
 
 // typescript is the precise way to count behavioral exports. If it isn't
@@ -153,15 +172,13 @@ for (const file of files) {
   const text = readFileSync(file, "utf8");
   const lines = lineCount(text);
   if (lines > MAX_LINES) lineOffenders.push(`${rel}  (${lines} lines)`);
-  if (lines >= COHESION_MIN_LINES) {
-    const fnDecls = countInternalFunctions(file, text);
-    const allowed = Math.max(COHESION_MAX_FN_DECLS, COHESION_BASELINE[rel] ?? 0);
-    if (fnDecls > allowed) {
-      const baselineNote = COHESION_BASELINE[rel]
-        ? ` — grandfathered at ${COHESION_BASELINE[rel]}, GREW past its baseline`
-        : "";
-      cohesionOffenders.push(`${rel}  (${lines} lines, ${fnDecls} functions/classes${baselineNote})`);
-    }
+  const fnDecls = countInternalFunctions(file, text);
+  const allowed = Math.max(COHESION_MAX_FN_DECLS, COHESION_BASELINE[rel] ?? 0);
+  if (fnDecls > allowed) {
+    const baselineNote = COHESION_BASELINE[rel]
+      ? ` — grandfathered at ${COHESION_BASELINE[rel]}, GREW past its baseline`
+      : "";
+    cohesionOffenders.push(`${rel}  (${lines} lines, ${fnDecls} functions/classes${baselineNote})`);
   }
 }
 
@@ -178,7 +195,7 @@ if (lineOffenders.length > 0) {
 if (cohesionOffenders.length > 0) {
   failed = true;
   console.error(
-    `\n[god-module gate] ${cohesionOffenders.length} large module(s) declare more than ` +
+    `\n[god-module gate] ${cohesionOffenders.length} module(s) declare more than ` +
       `${COHESION_MAX_FN_DECLS} top-level functions/classes (exported + internal) — a low-cohesion ` +
       `god-module smell (#889).\n` +
       `Split by responsibility into cohesive sub-modules re-exported through a facade barrel:\n  ` +

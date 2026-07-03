@@ -47,12 +47,10 @@ const BASELINE: Record<string, number> = {
   "mcp-server/src/tools/contract-coupled-issues.ts::issues-statusId": 1,
   "mcp-server/src/tools/stop-workspace.ts::workspaces-status": 1,
   "mcp-server/src/tools/update-issue.ts::issues-opaque-set": 1,
-  "server/src/repositories/bisect.repository.ts::workspaces-status": 1,
   "server/src/repositories/issue-service.repository.ts::issues-opaque-set": 2,
   "server/src/repositories/issue-service.repository.ts::issues-statusId": 1,
   "server/src/repositories/issue-service.repository.ts::workspaces-status": 1,
   "server/src/repositories/project-registration.repository.ts::issues-statusId": 1,
-  "server/src/repositories/review.repository.ts::workspaces-status": 1,
   "server/src/repositories/session-lifecycle.repository.ts::workspaces-status": 3,
   "server/src/repositories/workflow-fork.repository.ts::workspaces-status": 3,
   "server/src/repositories/workspace-crud.repository.ts::workspaces-opaque-set": 4,
@@ -60,7 +58,6 @@ const BASELINE: Record<string, number> = {
   "server/src/repositories/workspace-scorecard.repository.ts::workspaces-opaque-set": 1,
   "server/src/repositories/workspace-session.repository.ts::workspaces-status": 2,
   "server/src/repositories/workspace-summary.repository.ts::workspaces-opaque-set": 2,
-  "server/src/startup/done-unmerged-invariant-scanner.ts::workspaces-status": 1,
 };
 
 function listTsFiles(dir: string): string[] {

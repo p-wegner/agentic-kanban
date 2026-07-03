@@ -15,8 +15,8 @@ import {
   getSessionsForWorkspace,
   insertBisectSession,
   setSessionTerminal,
-  setWorkspaceStatus,
 } from "../repositories/bisect.repository.js";
+import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 
 export type BisectScope = "related" | "full";
 
@@ -267,7 +267,7 @@ export function createBisectService(deps: {
     }
     await emit(sessionId, { type: "exit", sessionId, exitCode });
     await setSessionTerminal(sessionId, "completed", now, String(exitCode), database);
-    await setWorkspaceStatus(workspaceId, "idle", now, database);
+    await setWorkspaceStatus(database, workspaceId, "idle", { now });
   }
 
   async function stopSession(workspaceId: string, sessionId: string) {
@@ -275,7 +275,7 @@ export function createBisectService(deps: {
     await emitLine(sessionId, "Auto-bisect stopped.");
     await emit(sessionId, { type: "exit", sessionId, exitCode: 130 });
     await setSessionTerminal(sessionId, "stopped", now, "130", database);
-    await setWorkspaceStatus(workspaceId, "idle", now, database);
+    await setWorkspaceStatus(database, workspaceId, "idle", { now });
   }
 
   async function runBisect(workspaceId: string, sessionId: string, scope: BisectScope) {
@@ -434,7 +434,7 @@ export function createBisectService(deps: {
     const sessionId = randomUUID();
     const now = new Date().toISOString();
     await insertBisectSession({ id: sessionId, workspaceId, startedAt: now }, database);
-    await setWorkspaceStatus(workspaceId, "active", now, database);
+    await setWorkspaceStatus(database, workspaceId, "active", { now });
 
     if (row.projectId) boardEvents?.broadcast(row.projectId, "session_launched");
     void runBisect(workspaceId, sessionId, scope);

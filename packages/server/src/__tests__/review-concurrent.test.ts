@@ -252,6 +252,35 @@ describe("startManualReview — concurrent trigger hardening (AK-520)", () => {
     const retryResult = await startManualReview(db, () => retryManager as never, mockBoardEvents as never, reviewSessionIds, workspaceId, false);
     expect(retryResult.sessionId).toBe("session-retry");
   });
+
+  it("launch-failure revert cannot flip a concurrently merged (closed+mergedAt) workspace back to idle (#985)", async () => {
+    const { workspaceId } = await seedWorkspace(db);
+    const reviewSessionIds = new Set<string>();
+    const { eq } = await import("drizzle-orm");
+    const mergedAt = new Date().toISOString();
+
+    // Session manager fails to launch — but before it throws, a concurrent merge
+    // lands the workspace as closed+mergedAt (terminal). The revert-to-idle in the
+    // catch path must go through the terminal-invariant authority and no-op.
+    const racingManager = makeSessionManager(async () => {
+      await db.update(workspaces)
+        .set({ status: "closed", mergedAt })
+        .where(eq(workspaces.id, workspaceId));
+      throw new Error("launch failed after merge landed");
+    });
+
+    await expect(
+      startManualReview(db, () => racingManager as never, mockBoardEvents as never, reviewSessionIds, workspaceId, false),
+    ).rejects.toThrow("launch failed");
+
+    const rows = await db
+      .select({ status: workspaces.status, mergedAt: workspaces.mergedAt })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1);
+    expect(rows[0].status).toBe("closed");
+    expect(rows[0].mergedAt).toBe(mergedAt);
+  });
 });
 
 /** Seed a non-direct (worktree) workspace with a workingDir so prepareForReview is called. */
