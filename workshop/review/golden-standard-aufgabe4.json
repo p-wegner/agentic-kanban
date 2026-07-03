@@ -1,0 +1,34 @@
+{
+  "aufgabe": 4,
+  "branch": "aufgabe4",
+  "diff_base": "master",
+  "challenge": "Adversarial Finding",
+  "description": "Frontend adds 'Export with AI Summary' feature. The backend endpoint it calls does not exist. Some findings require adversarial thinking or Playwright to discover.",
+  "playwright_required": ["F4"],
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "high",
+      "description": "The endpoint POST /api/projects/:id/export-enriched called from ExportEnrichedModal is not implemented anywhere in the backend. The route is registered in neither packages/server/src/routes/index.ts nor any project-scoped route file. Every call returns 404 and the feature is completely non-functional.",
+      "location": "packages/client/src/components/ExportEnrichedModal.tsx:25"
+    },
+    {
+      "id": "F2",
+      "severity": "medium",
+      "description": "showToast(\"Export started – AI summaries are being generated\", \"success\") is called on line 22, before the awaited apiPost on line 24. The success toast fires unconditionally regardless of whether the request succeeds or fails. Users receive misleading positive feedback even when the export endpoint returns an error.",
+      "location": "packages/client/src/components/ExportEnrichedModal.tsx:22"
+    },
+    {
+      "id": "F3",
+      "severity": "medium",
+      "description": "The catch block in handleExport only calls console.error and never calls setLoading(false). After any failed request the loading state remains true permanently for the lifetime of the modal instance.",
+      "location": "packages/client/src/components/ExportEnrichedModal.tsx:31"
+    },
+    {
+      "id": "F4",
+      "severity": "high",
+      "description": "After clicking Export the modal becomes permanently unclosable. The Cancel button is disabled={loading} (line 88) and the backdrop onClick guard checks !loading (line 39). Combined with F3 (loading never resets after failure) and F1 (endpoint always 404s), both escape paths are blocked after the first click. The user must reload the page. This outcome is only observable at runtime — a static reviewer must connect three separate facts (missing endpoint → always throws, missing setLoading(false) → loading stays true, disabled Cancel + blocked backdrop → no escape) to predict it.",
+      "location": "packages/client/src/components/ExportEnrichedModal.tsx:39"
+    }
+  ]
+}
