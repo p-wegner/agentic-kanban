@@ -1,13 +1,16 @@
 import { drizzle } from "drizzle-orm/libsql";
 import { createClient } from "@libsql/client";
 import * as schema from "@agentic-kanban/shared/schema";
-import { getDbUrl, ensureDataDir } from "./data-dir.js";
+import { getDbUrl, ensureDataDir, DB_LOCATION } from "./data-dir.js";
 // Single pragma implementation shared with script clients (db-repair etc., #987) —
 // a bare createClient without these runs with foreign_keys=OFF for the connection.
 import { applyPragmas } from "./pragmas.js";
 
 ensureDataDir();
 const DB_URL = getDbUrl();
+// Log the resolved absolute DB path at startup so a split-brain (server and MCP
+// opening different databases) is visible instead of silent (#962).
+console.log(`[db] opening ${DB_LOCATION.path ?? DB_URL} (source: ${DB_LOCATION.source})`);
 
 // Read connection — used for board/API queries. With WAL, readers proceed against the
 // last checkpoint while the write connection commits, so board reads no longer queue
