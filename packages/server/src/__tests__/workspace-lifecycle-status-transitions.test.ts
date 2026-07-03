@@ -83,6 +83,15 @@ import { createTestDb } from "./helpers/test-db.js";
 import { createWorkflowEngine } from "../startup/exit-workflow.js";
 import { createWorkspaceSessionService } from "../services/workspace-session.service.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
+import { activeMerges } from "../services/workspace-internals.js";
+
+// Test isolation: the per-repoPath merge lock (activeMerges) is a module-level Map
+// (see workspace-merge-service.test.ts ~line 22). Clearing it before each test
+// prevents a lock left by one test's merge from leaking into the next and failing
+// with "A merge is already in progress for this repository".
+beforeEach(() => {
+  activeMerges.clear();
+});
 
 // ─── shared helpers ──────────────────────────────────────────────────────────
 
