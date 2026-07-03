@@ -11,8 +11,8 @@ import {
   getIssueProjectAndId,
   getAllPreferenceRows,
   getProjectDefaultBranch,
-  setWorkspaceStatus,
 } from "../repositories/review.repository.js";
+import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import type { ProviderName } from "./agent-provider.js";
 import { narrowProviderName, getProfilePrefKey } from "./agent-provider.js";
 import type { BoardEvents } from "./board-events.js";
@@ -431,7 +431,7 @@ export async function startManualReview(
     const reviewArgsWithModel = reviewModel && provider === "claude" ? `${reviewArgs ?? ""} --model ${reviewModel}`.trim() : reviewArgs;
 
     const now = new Date().toISOString();
-    await setWorkspaceStatus(workspaceId, "reviewing", now, database);
+    await setWorkspaceStatus(database, workspaceId, "reviewing", { now });
     boardEvents.broadcast(projectId, "issue_updated");
 
     let sessionId: string;
@@ -446,9 +446,11 @@ export async function startManualReview(
         model: runtimeModel,
       });
     } catch (sessionErr) {
-      // Revert the workspace status so retries are possible — don't leave it stuck at "reviewing"
+      // Revert the workspace status so retries are possible — don't leave it stuck at "reviewing".
+      // Goes through the terminal-invariant authority: if a concurrent merge landed
+      // closed+mergedAt in the meantime, this revive is a logged no-op (#985).
       const revertedAt = new Date().toISOString();
-      await setWorkspaceStatus(workspaceId, "idle", revertedAt, database);
+      await setWorkspaceStatus(database, workspaceId, "idle", { now: revertedAt });
       boardEvents.broadcast(projectId, "issue_updated");
       throw sessionErr;
     }

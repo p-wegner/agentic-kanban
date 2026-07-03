@@ -351,7 +351,7 @@ export interface HookScaffoldOptions {
 // Bundled (dist/server.js): _moduleDir = dist/, hooks live in dist/scaffold/hooks/
 // (copied there by scripts/copy-assets.mjs and shipped via package.json "files").
 // Dev (src/services/): the packaged dir doesn't exist; fall back to src/scaffold/
-// (the canonical tested copy of the verify-gate runner) and then the repo-root
+// (the canonical tested copies of ALL scaffold hooks — #990) and then the repo-root
 // .claude/hooks/ walk-up (the dev checkout's live hooks).
 const _moduleDir = dirname(fileURLToPath(import.meta.url));
 
@@ -363,8 +363,10 @@ function resolveHookSource(filename: string): string | null {
   //    installs (#952). Two relative candidates because the bundles sit at
   //    different depths: dist/server.js|mcp.js (_moduleDir = dist/) and
   //    dist/cli/index.js (_moduleDir = dist/cli/).
-  // 2. Dev: the canonical tested source next to this module (src/services/ →
-  //    src/scaffold/) — currently only verify-gate-runner.js lives there.
+  // 2. Dev: the canonical tested sources next to this module (src/services/ →
+  //    src/scaffold/) — all scaffold hooks live there (#990); the repo-root
+  //    .claude/hooks/ copies are the checkout's live deployments of the same
+  //    sources, kept byte-identical by the identity tests.
   const packagedCandidates = [
     join(_moduleDir, "scaffold", "hooks", filename),
     join(_moduleDir, "..", "scaffold", "hooks", filename),

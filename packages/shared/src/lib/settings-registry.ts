@@ -95,7 +95,9 @@ export const SETTINGS_REGISTRY = {
   backlog_empty_strategy: { type: "string", default: "skip" },
   backlog_empty_skill: { type: "string", default: "architecture-improvement" },
   backlog_empty_cooldown_min: { type: "number", default: "120" },
-  backlog_empty_last_run: { type: "string", default: "" },
+  // NOTE: `backlog_empty_last_run` is deliberately NOT here — it is a rate-limit
+  // TIMESTAMP (runtime state), not config. It lives in the `runtime_state` table so
+  // this registry stays the closed CONFIG set (#975).
   backlog_stale_days: { type: "number", default: "14" },
   inprogress_stale_days: { type: "number", default: "3" },
   stale_column_threshold_days: { type: "number", default: "" },

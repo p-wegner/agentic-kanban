@@ -7,8 +7,30 @@ export type AgentSkillFile = {
   prompt: string;
 };
 
+/**
+ * A skill name is safe iff it can be used verbatim as a single filesystem
+ * directory segment with no path-traversal or escape potential. This is the
+ * single source of truth shared by the create-time guard (MCP
+ * `create_agent_skill`) and every materialization/copy guard below — they must
+ * never diverge (see ticket #931).
+ *
+ * Rejects: empty/whitespace-only, `/` or `\` separators, the `.` and `..`
+ * directory aliases, embedded NUL, and Windows drive-relative names like `C:`.
+ */
+export function isSafeSkillName(name: unknown): name is string {
+  if (typeof name !== "string") return false;
+  if (name.trim().length === 0) return false;
+  if (/[/\\]/.test(name)) return false;
+  if (name === "." || name === "..") return false;
+  if (name.includes("\0")) return false;
+  // Windows drive-relative reference (e.g. "C:", "C:foo") resolves against the
+  // drive's current dir, escaping the skills directory.
+  if (/^[a-zA-Z]:/.test(name)) return false;
+  return true;
+}
+
 export async function writeAgentSkillFile(targetPath: string, skill: AgentSkillFile) {
-  if (/[/\\]/.test(skill.name) || skill.name === ".." || skill.name === ".") {
+  if (!isSafeSkillName(skill.name)) {
     throw new Error(`Invalid skill name for filesystem use: "${skill.name}"`);
   }
   const skillsDir = join(targetPath, ".claude", "skills");
@@ -132,7 +154,7 @@ export async function scanLocalSkills(repoPath: string): Promise<DiskSkillEntry[
   const skills: DiskSkillEntry[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
-    if (/[/\\]/.test(entry.name) || entry.name === ".." || entry.name === ".") continue;
+    if (!isSafeSkillName(entry.name)) continue;
     try {
       const content = await readFile(join(skillsDir, entry.name, "SKILL.md"), "utf-8");
       skills.push(parseDiskSkillMarkdown(content, entry.name));
@@ -149,7 +171,7 @@ export async function scanLocalSkills(repoPath: string): Promise<DiskSkillEntry[
  */
 export async function copySkillToWorktree(repoPath: string, skillName: string, worktreePath: string): Promise<boolean> {
   // Reject names that could escape the skills directory via path traversal
-  if (/[/\\]/.test(skillName) || skillName === ".." || skillName === "." || skillName.includes("\0")) {
+  if (!isSafeSkillName(skillName)) {
     return false;
   }
   const src = localSkillFilePath(repoPath, skillName);

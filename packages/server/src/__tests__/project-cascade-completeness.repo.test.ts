@@ -423,9 +423,15 @@ describe("deleteProjectCascade — completeness vs the schema FK graph", () => {
       { key: "activeProjectId", value: c.projectId, updatedAt: now },
       { key: `start_mode_${c.projectId}`, value: "monitor", updatedAt: now },
       { key: `board_strategy_${c.projectId}`, value: "{}", updatedAt: now },
-      { key: `butler_session_${c.projectId}`, value: "abc", updatedAt: now },
       { key: `start_mode_${c.otherProjectId}`, value: "manual", updatedAt: now },
       { key: "claude_profile", value: "anth", updatedAt: now },
+    ]);
+    // Per-project runtime state (butler session) moved to runtime_state (#975); the
+    // cascade must clean it there too.
+    await db.insert(schema.runtimeState).values([
+      { key: `butler_session_${c.projectId}`, value: "abc", updatedAt: now },
+      { key: `butler_session_history_${c.projectId}`, value: "[]", updatedAt: now },
+      { key: `butler_session_${c.otherProjectId}`, value: "keep", updatedAt: now },
     ]);
 
     await deleteProjectCascade(c.projectId, db);
@@ -433,6 +439,9 @@ describe("deleteProjectCascade — completeness vs the schema FK graph", () => {
     const remaining = (await db.select().from(schema.preferences)).map((p) => p.key).sort();
     expect(remaining).toEqual([`start_mode_${c.otherProjectId}`, "claude_profile"].sort());
     expect(await db.select().from(schema.preferences).where(like(schema.preferences.key, `%_${c.projectId}`))).toHaveLength(0);
+    // The deleted project's runtime state is gone; the sibling's survives.
+    const remainingState = (await db.select().from(schema.runtimeState)).map((r) => r.key).sort();
+    expect(remainingState).toEqual([`butler_session_${c.otherProjectId}`]);
   });
 
   it("is ATOMIC: a failure mid-cascade rolls back the entire walk", async () => {
