@@ -8,6 +8,7 @@ export { sessions, sessionsRelations } from "./sessions.js";
 export { sessionMessages, sessionMessagesRelations } from "./session-messages.js";
 export { repos } from "./repos.js";
 export { preferences } from "./preferences.js";
+export { runtimeState } from "./runtime-state.js";
 export { diffComments, diffCommentsRelations } from "./diff-comments.js";
 export { issueDependencies, issueDependenciesRelations, DEPENDENCY_TYPES, DEPENDENCY_TYPE_LABELS, SYMMETRIC_DEPENDENCY_TYPES } from "./issue-dependencies.js";
 export type { DependencyType } from "./issue-dependencies.js";

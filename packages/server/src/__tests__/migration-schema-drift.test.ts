@@ -115,6 +115,26 @@ describe("migration journal structural gate", () => {
     ).toEqual([]);
   });
 
+  it("journal `when` timestamps are strictly increasing in array order (#954)", () => {
+    // Our runner applies migrations in ARRAY order, but drizzle's own migrator
+    // sorts by `when` — a non-monotonic value silently reorders migrations if
+    // that migrator ever runs. Keep `when` strictly increasing so array order
+    // and when-order can never disagree.
+    const entries = readJournal();
+    const violations: string[] = [];
+    for (let i = 1; i < entries.length; i++) {
+      if (entries[i].when <= entries[i - 1].when) {
+        violations.push(
+          `${entries[i].tag} (when=${entries[i].when}) <= predecessor ${entries[i - 1].tag} (when=${entries[i - 1].when})`,
+        );
+      }
+    }
+    expect(
+      violations,
+      `Journal 'when' values must be strictly increasing in array order:\n${violations.join("\n")}`,
+    ).toEqual([]);
+  });
+
   it("journal tags and indices are unique", () => {
     const entries = readJournal();
     const tagCounts = new Map<string, number>();

@@ -12,10 +12,8 @@ import {
   getProjectByIdRaw,
   getProjectStatusesByProject,
   remapIssueStatus,
-  moveIssuesToProject,
-  moveAgentSkillsToProject,
-  moveReposToProject,
-  moveScheduledRunsToProject,
+  reassignProjectChildren,
+  insertProjectStatus,
   deleteProjectStatusesByProject,
   deleteProjectRow,
   getActiveProjectPreference,
@@ -102,24 +100,47 @@ export async function deduplicateProjects(): Promise<void> {
       );
 
       await db.transaction(async (tx) => {
-        // Remap issue statusIds to the surviving project's statuses (matched by name)
+        // Remap issue statusIds to the surviving project's statuses (matched by name).
+        // This MUST run while the dup's issues still carry the dup's projectId, before the
+        // generic reassignment below moves them — remapIssueStatus filters by dup projectId.
         const dupStatuses = await getProjectStatusesByProject(dup.id, tx);
         const keepStatuses = await getProjectStatusesByProject(keep.id, tx);
         for (const dupStatus of dupStatuses) {
-          const match = keepStatuses.find((s) => s.name === dupStatus.name);
-          if (match && match.id !== dupStatus.id) {
+          let match = keepStatuses.find((s) => s.name === dupStatus.name);
+          // Name-MISMATCH case: the survivor has no identically-named status. Without
+          // handling this, the dup's status row gets deleted while a moved issue still
+          // points at it → dangling issues.status_id. Create the missing status on the
+          // survivor and remap onto it so nothing is left dangling (#929).
+          if (!match) {
+            const newStatusId = randomUUID();
+            await insertProjectStatus(
+              {
+                id: newStatusId,
+                projectId: keep.id,
+                name: dupStatus.name,
+                sortOrder: dupStatus.sortOrder,
+                isDefault: false, // never override the survivor's existing default
+                createdAt: dupStatus.createdAt,
+              },
+              tx,
+            );
+            match = { ...dupStatus, id: newStatusId, projectId: keep.id, isDefault: false };
+            keepStatuses.push(match);
+          }
+          if (match.id !== dupStatus.id) {
             await remapIssueStatus(dup.id, dupStatus.id, match.id, tx);
           }
         }
 
-        // Move issues to the surviving project
-        await moveIssuesToProject(dup.id, keep.id, tx);
-        // Move project-scoped skills to the surviving project
-        await moveAgentSkillsToProject(dup.id, keep.id, tx);
-        // Move repos to the surviving project
-        await moveReposToProject(dup.id, keep.id, tx);
-        // Move scheduled runs to the surviving project
-        await moveScheduledRunsToProject(dup.id, keep.id, tx);
+        // Reassign EVERY project-child table (derived from the schema FK graph) to the
+        // survivor — issues, agent_skills, repos, scheduled_runs AND the previously-lost
+        // milestones / drives / drive_obstacles (cascade children) and workflow_templates /
+        // quality_metrics / board_health_events / flaky_tests / project_script_shortcuts /
+        // scheduled_run_history (non-cascade children). project_statuses is excluded: the
+        // dup's statuses were remapped-by-name above and are deleted next (moving them would
+        // duplicate status columns on the survivor).
+        await reassignProjectChildren(dup.id, keep.id, tx, new Set(["project_statuses"]));
+
         // Remove duplicate's statuses
         await deleteProjectStatusesByProject(dup.id, tx);
         // Remove duplicate project

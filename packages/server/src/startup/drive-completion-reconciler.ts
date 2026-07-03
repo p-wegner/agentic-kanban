@@ -5,7 +5,7 @@ import {
   issues,
   projectStatuses,
 } from "@agentic-kanban/shared/schema";
-import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { LEGACY_TERMINAL_STATUS_NAMES, isTerminalStatusView } from "@agentic-kanban/shared/lib/status-view";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
@@ -128,13 +128,7 @@ export async function reconcileDriveCompletion(
           );
           continue;
         }
-        await database
-          .update(issues)
-          .set({ statusId: inProgress.id, updatedAt: now })
-          .where(eq(issues.id, meta.id));
-        await syncCurrentNodeToStatus(database, meta.id).catch((err) =>
-          console.warn("[drive-completion] syncCurrentNodeToStatus failed (non-fatal):", err),
-        );
+        await transitionIssueStatus(database, meta.id, inProgress.id, { now });
         console.log(
           `[drive-completion] drive ${drive.driveId}: refused to leave meta ${meta.id} in '${meta.statusName}' — ${openChildren.length}/${children.length} children still open; pulled back to In Progress`,
         );
@@ -153,13 +147,7 @@ export async function reconcileDriveCompletion(
         );
         continue;
       }
-      await database
-        .update(issues)
-        .set({ statusId: done.id, updatedAt: now })
-        .where(eq(issues.id, meta.id));
-      await syncCurrentNodeToStatus(database, meta.id).catch((err) =>
-        console.warn("[drive-completion] syncCurrentNodeToStatus failed (non-fatal):", err),
-      );
+      await transitionIssueStatus(database, meta.id, done.id, { now });
       console.log(
         `[drive-completion] drive ${drive.driveId}: all ${children.length} children done — drove meta ${meta.id} to Done`,
       );

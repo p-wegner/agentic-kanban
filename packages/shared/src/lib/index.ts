@@ -11,6 +11,7 @@ export * from "./branch.js";
 export * from "./butler-ticket-prompt.js";
 export * from "./outbound-webhook.js";
 export * from "./settings-registry.js";
+export * from "./sanitize-utf8.js";
 // Type-only: smoke-check.ts imports node:child_process (runSmokeCheck), which crashes
 // the browser bundle if pulled into the client via this barrel. The sole runtime consumer
 // (server exit-workflow) imports runSmokeCheck from the deep path; only the SmokeCheck type

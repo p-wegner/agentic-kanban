@@ -8,6 +8,12 @@ import {
 } from "@agentic-kanban/shared/schema";
 import { desc, eq, ne, inArray, and, gte, isNotNull } from "drizzle-orm";
 import { deleteWorkspaceCascade as deleteWorkspaceCascadeShared } from "@agentic-kanban/shared/lib/cascade-delete";
+import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { findOpenUnmergedWorkspace as findOpenUnmergedWorkspaceShared } from "@agentic-kanban/shared/lib/issue-status-orchestration";
+import { setWorkspaceStatus, type WorkspaceStatus } from "./workspace-status.repository.js";
+import { getProjectById } from "./project.repository.js";
+
+type WorkflowDbLike = Parameters<typeof transitionIssueStatus>[0];
 
 type Project = typeof projects.$inferSelect;
 import { db } from "../db/index.js";
@@ -157,14 +163,10 @@ export async function getWorkspacesForIssues(issueIds: string[], database: Datab
 export async function updateWorkspaceStatus(
   workspaceId: string,
   status: string,
-  extra: Partial<Omit<Workspace, "id" | "status">> = {},
+  extra: Partial<Omit<Workspace, "id" | "status" | "updatedAt">> = {},
   database: Database = db,
 ): Promise<void> {
-  const now = new Date().toISOString();
-  await database
-    .update(workspaces)
-    .set({ status, updatedAt: now, ...extra })
-    .where(eq(workspaces.id, workspaceId));
+  await setWorkspaceStatus(database, workspaceId, status as WorkspaceStatus, { set: extra });
 }
 
 export async function resolveProjectFull(
@@ -185,14 +187,9 @@ export async function resolveProjectFull(
     .limit(1);
   if (issueRows.length === 0) throw new Error("Issue not found");
 
-  const projectRows = await database
-    .select()
-    .from(projects)
-    .where(eq(projects.id, issueRows[0].projectId))
-    .limit(1);
-  if (projectRows.length === 0) throw new Error("Project not found");
+  const project = await getProjectById(issueRows[0].projectId, database);
+  if (!project) throw new Error("Project not found");
 
-  const project = projectRows[0];
   return { project, repoPath: project.repoPath, defaultBranch: project.defaultBranch };
 }
 
@@ -214,14 +211,10 @@ export async function resolveProjectRepo(
     .limit(1);
   if (issueRows.length === 0) throw new Error("Issue not found");
 
-  const projectRows = await database
-    .select({ repoPath: projects.repoPath, defaultBranch: projects.defaultBranch })
-    .from(projects)
-    .where(eq(projects.id, issueRows[0].projectId))
-    .limit(1);
-  if (projectRows.length === 0) throw new Error("Project not found");
+  const project = await getProjectById(issueRows[0].projectId, database);
+  if (!project) throw new Error("Project not found");
 
-  return { repoPath: projectRows[0].repoPath, defaultBranch: projectRows[0].defaultBranch };
+  return { repoPath: project.repoPath, defaultBranch: project.defaultBranch };
 }
 
 export async function resolveProjectId(
@@ -263,7 +256,7 @@ export async function moveIssueToDone(
     const doneStatus = statuses.find(s => s.name === "Done")
       ?? (fallbackToAiReviewed ? statuses.find(s => s.name === "AI Reviewed") : undefined);
     if (doneStatus) {
-      await database.update(issues).set({ statusId: doneStatus.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, issueId));
+      await transitionIssueStatus(database, issueId, doneStatus.id, { now });
     }
   } catch (err) {
     console.warn("[workspaces] Failed to move issue to Done:", err);
@@ -284,7 +277,7 @@ export async function moveIssueToInProgress(
     const statuses = await database.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
     const inProgress = statuses.find(s => s.name === "In Progress");
     if (inProgress) {
-      await database.update(issues).set({ statusId: inProgress.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, issueId));
+      await transitionIssueStatus(database, issueId, inProgress.id, { now });
     }
   } catch (err) {
     console.warn("[workspaces] Failed to move issue to In Progress:", err);
@@ -306,7 +299,9 @@ export async function moveIssueToInProgressStrict(
   if (!inProgress) {
     throw new Error(`Project ${projectId} has no In Progress status`);
   }
-  await database.update(issues).set({ statusId: inProgress.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, issueId));
+  // A TransactionClient is structurally a WorkflowDb for the select/update calls
+  // transitionIssueStatus makes; the node sync participates in the caller's tx.
+  await transitionIssueStatus(database as WorkflowDbLike, issueId, inProgress.id, { now });
 }
 
 /** Cascade delete a workspace and every table that directly FK-references it. */
@@ -315,24 +310,17 @@ export async function moveIssueToInProgressStrict(
  * issue (or null). Open = status != "closed" (a merged workspace is closed);
  * direct workspaces (isDirect=true) commit straight to the default branch — no
  * branch to strand — so they are excluded. Moving an issue to a terminal status
- * while such a workspace exists strands the branch (silent merge loss). The
- * server-side mirror of mcp-server db-utils.checkOpenUnmergedWorkspace, so the
- * status-write transports (MCP move/update, server PATCH, CLI move) share one guard.
+ * while such a workspace exists strands the branch (silent merge loss). The guard
+ * QUERY now lives in the shared `issue-status-orchestration` seam so the
+ * status-write transports (MCP move/update, server PATCH, CLI move) share ONE
+ * implementation (arch-review #974); this thin wrapper keeps the existing
+ * `(issueId, database)` call signature for server callers.
  */
 export async function findOpenUnmergedWorkspace(
   issueId: string,
   database: Database = db,
 ): Promise<{ id: string; branch: string } | null> {
-  const rows = await database
-    .select({ id: workspaces.id, branch: workspaces.branch })
-    .from(workspaces)
-    .where(and(
-      eq(workspaces.issueId, issueId),
-      ne(workspaces.status, "closed"),
-      eq(workspaces.isDirect, false),
-    ))
-    .limit(1);
-  return rows[0] ?? null;
+  return findOpenUnmergedWorkspaceShared(database, issueId);
 }
 
 export async function deleteWorkspaceCascade(

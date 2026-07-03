@@ -61,7 +61,8 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
 }));
 
 import { createButlerRoute } from "../routes/butler.js";
-import { getPreference, setPreference } from "../repositories/preferences.repository.js";
+import { setPreference } from "../repositories/preferences.repository.js";
+import { getRuntimeState, setRuntimeState } from "../repositories/runtime-state.repository.js";
 import { ensureButlerSession, sendButlerTurn, stopButlerSession, isInvalidThinkingSignatureError, getButlerSession } from "../services/butler-sdk.service.js";
 import { MOCK_AGENT_COMMAND } from "../services/agent-settings.service.js";
 import { createTestApp as _createTestApp } from "./helpers/test-app.js";
@@ -233,7 +234,7 @@ describe("Butler provider selection", () => {
     const { app, db } = createTestApp();
     const projectId = await createProject(db);
     sessionsToStop.push(projectId);
-    await setPreference(butlerSessionPrefKey(projectId), "persisted-session-123", db);
+    await setRuntimeState(butlerSessionPrefKey(projectId), "persisted-session-123", db);
 
     const coldState = await app.request(`/api/projects/${projectId}/butler`);
     expect(coldState.status).toBe(200);
@@ -300,7 +301,7 @@ describe("Butler provider selection", () => {
     // The old resume id was forgotten (the restarted session does NOT resume) and the pref
     // now tracks the freshly-started session's id.
     expect(sdkMock.calls[1].options).not.toHaveProperty("resume");
-    expect(await getPreference(butlerSessionPrefKey(projectId), db)).toBe(sdkMock.calls[1].sessionId);
+    expect(await getRuntimeState(butlerSessionPrefKey(projectId), db)).toBe(sdkMock.calls[1].sessionId);
     expect(sdkMock.calls[1].options.model).toBe("opus");
 
     const afterProfile = await app.request(`/api/projects/${projectId}/butler`);

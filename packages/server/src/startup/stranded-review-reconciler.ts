@@ -1,4 +1,5 @@
 import { issues, preferences, projectStatuses, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { and, eq } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
@@ -64,7 +65,7 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
 
   const prefRows = await database.select({ key: preferences.key, value: preferences.value }).from(preferences);
   const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
-  const autoReview = prefMap.get("auto_review") !== "false";
+  const autoReview = isAutoReviewEnabled(prefMap.get(AUTO_REVIEW_PREF_KEY));
 
   const candidates = await database
     .select({

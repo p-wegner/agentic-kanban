@@ -3,21 +3,22 @@ import { z } from "zod";
 import { db, schema } from "../db.js";
 import { eq, and, isNull } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
+import { isSafeSkillName } from "@agentic-kanban/shared/lib/agent-skill-files";
 
 export function registerCreateAgentSkill(server: McpServer) {
   server.tool(
     "create_agent_skill",
     "Create a new agent skill with a name, description, and prompt template",
     {
-      name: z.string().describe("Unique skill name (e.g. 'dependency-analyzer')"),
+      name: z.string().min(1).describe("Unique skill name (e.g. 'dependency-analyzer')"),
       description: z.string().describe("Short description of what the skill does"),
       prompt: z.string().describe("The full prompt template that gets injected into the agent's context"),
       model: z.string().optional().describe("Optional model override (e.g. 'haiku', 'sonnet', 'opus')"),
       projectId: z.string().optional().describe("Optional project ID to scope this skill to a specific project. Omit for global."),
     },
     async ({ name, description, prompt, model, projectId }) => {
-      if (/[/\\]|\.\./.test(name)) {
-        return { content: [{ type: "text" as const, text: "Error: Skill name cannot contain '/', '\\', or '..'" }] };
+      if (!isSafeSkillName(name)) {
+        return { content: [{ type: "text" as const, text: "Error: Skill name must be a single safe path segment (no '/', '\\', '..', '.', empty, NUL, or drive-relative names like 'C:')" }] };
       }
 
       const scopeProjectId = projectId || null;

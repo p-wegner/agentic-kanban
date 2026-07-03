@@ -139,8 +139,9 @@ if (!hasArgs) {
       console.log("  Press Ctrl+C to stop\n");
 
       // Open browser
-      const cmd = process.platform === "win32" ? "cmd" : "open";
-      const args = process.platform === "win32" ? ["/c", "start", `http://${host}:${port}`] : [`http://${host}:${port}`];
+      const url = `http://${host}:${port}`;
+      const cmd = process.platform === "win32" ? "cmd" : process.platform === "darwin" ? "open" : "xdg-open";
+      const args = process.platform === "win32" ? ["/c", "start", url] : [url];
       execFile(cmd, args, (err) => {
         if (err) console.warn("  Could not open browser:", err.message);
       });

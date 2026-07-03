@@ -1,9 +1,12 @@
 name: arch-gate
 
-# Makes the god-module architecture gate (arch-review #875, #888) actually BLOCK
-# merges instead of only living in `test:mine`. Runs on every PR into master and
-# on direct pushes to master. Enable branch protection on `master` requiring this
-# check so a breaching file (a 1000+ line god-module) cannot land — which is
+# Makes the architecture gates actually BLOCK merges instead of only living in
+# manual local commands. `pnpm check:arch` is the composite gate of record (#982):
+#   - scripts/check-god-modules.mjs — god-module ceiling/cohesion (arch-review #875, #888)
+#   - pnpm lint:arch — dependency-cruiser layering rules (was only in the manual
+#     `pnpm check` and sat red on master for 5 days unnoticed; fixed in #981)
+# Runs on every PR into master and on direct pushes to master. Enable branch
+# protection on `master` requiring this check so a breach cannot land — which is
 # exactly the failure #888 documented (a 1042-line file merged past a red gate).
 
 on:
@@ -22,8 +25,9 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-      # The gate needs `typescript` for a precise behavioral-export count; it falls
-      # back to a regex heuristic if absent. A full install keeps the count precise.
+      # The god-module gate needs `typescript` for a precise behavioral-export count
+      # (regex fallback if absent), and lint:arch needs the `dependency-cruiser`
+      # devDep — the full frozen install covers both.
       - run: pnpm install --frozen-lockfile
-      - name: god-module gate
+      - name: arch gates (god-module + depcruise layering)
         run: pnpm check:arch

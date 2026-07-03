@@ -4,7 +4,7 @@ import { createTestDb, type TestDb } from "./test-db.js";
 import type { ToolDeps } from "../../tools/deps.js";
 import * as schema from "@agentic-kanban/shared/schema";
 
-type ToolHandler = (args: Record<string, unknown>) => Promise<{ content: { type: string; text: string }[] }>;
+type ToolHandler = (args: Record<string, unknown>) => Promise<{ content: { type: string; text: string }[]; isError?: boolean }>;
 
 /**
  * A minimal stand-in for McpServer.tool() that captures the handler a registrar

@@ -1,4 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { z } from "zod";
 import { eq, inArray, desc } from "drizzle-orm";
 import { extractMeaningfulOutput, isTerminalStatusIdView } from "@agentic-kanban/shared";
@@ -54,7 +55,7 @@ export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodD
         const preferenceMap = new Map(preferenceRows.map((pref) => [pref.key, pref.value]));
         const classificationOptions = {
           autoMergeEnabled: isAutoMergeEnabled(preferenceMap),
-          autoMergeInReview: preferenceMap.get("auto_merge_in_review") === "true",
+          autoMergeInReview: getBool(preferenceMap, "auto_merge_in_review"),
         };
 
         // 2. Get statuses to identify terminal ones

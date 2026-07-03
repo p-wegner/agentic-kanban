@@ -23,7 +23,9 @@ past it (the gate was decorative). The **merge-blocking gate of record is now
 `typescript` devDep, falling back to a regex heuristic for the cohesion count) that exits
 non-zero on any breach. It is wired into `pnpm check:arch` (and thus `pnpm check` / `check:full`)
 and into CI (`.github/workflows/arch-gate.yml`, runs on PRs to master). Keep its thresholds in
-sync with `max-file-size.test.ts` (that test stays as the in-IDE signal).
+sync with `max-file-size.test.ts` (that test stays as the in-IDE signal). Since #982,
+`pnpm check:arch` is a composite that ALSO runs `pnpm lint:arch` (the dependency-cruiser
+layering rules), so those are merge-blocking via the same CI workflow.
 
 **Cohesion signal counts INTERNAL functions, not just exports (#889).** The cohesion check used
 to count only EXPORTED functions/classes, so a god-module hid behind a few exports —

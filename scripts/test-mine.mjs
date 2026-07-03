@@ -27,7 +27,10 @@
 //     - cli-butler.test.ts spawn-based CLI integration; same root causes
 //     - git.service.test.ts real git on temp dirs; Windows file-locking / timing
 //   mcp-server:
-//     - mcp-tools.test.ts  spawn-based MCP integration; stale migration list FIXED (reads journal dynamically)
+//     - mcp-tools.test.ts  spawn-based MCP integration; stale migration list FIXED (reads journal dynamically).
+//       Its catalog↔runtime parity gate has a fast NON-SPAWNING twin that DOES run here:
+//       mcp-catalog-parity.test.ts (#982) — so parity breaks surface in this loop, not
+//       only in the full `pnpm test`.
 //
 // Pass-through: any extra args are forwarded to vitest run in BOTH packages, so you can
 // still narrow the run, e.g.:
