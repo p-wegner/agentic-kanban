@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import * as gitService from "../git-service.js";
 import { notifyBoard } from "../notify.js";
 import { requireEntity } from "../db-utils.js";
+import { setWorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 
 export function registerCloseWorkspace(server: McpServer) {
   server.tool(
@@ -40,10 +41,7 @@ export function registerCloseWorkspace(server: McpServer) {
         }
       }
 
-      const now = new Date().toISOString();
-      await db.update(schema.workspaces)
-        .set({ status: "closed", workingDir: null, updatedAt: now })
-        .where(eq(schema.workspaces.id, workspaceId));
+      await setWorkspaceStatus(db, workspaceId, "closed", { set: { workingDir: null } });
 
       if (projectId) notifyBoard(projectId, "mcp_close_workspace");
 

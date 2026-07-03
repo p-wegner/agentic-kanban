@@ -1,5 +1,6 @@
 import { issues, sessions, sessionMessages, workspaces } from "@agentic-kanban/shared/schema";
 import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
+import { setWorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -36,11 +37,15 @@ export async function applyPlanImplementWorkspaceUpdate(
   },
   database: Database = db,
 ): Promise<void> {
-  await database.update(workspaces).set({
-    status: "active", pendingPlanPath: null,
-    claudeProfile: values.claudeProfile, agentCommand: values.agentCommand,
-    provider: values.provider, updatedAt: values.now,
-  }).where(eq(workspaces.id, workspaceId));
+  await setWorkspaceStatus(database, workspaceId, "active", {
+    now: values.now,
+    set: {
+      pendingPlanPath: null,
+      claudeProfile: values.claudeProfile,
+      agentCommand: values.agentCommand,
+      provider: values.provider,
+    },
+  });
 }
 
 export async function applyPlanRejectWorkspaceUpdate(
@@ -53,11 +58,16 @@ export async function applyPlanRejectWorkspaceUpdate(
   },
   database: Database = db,
 ): Promise<void> {
-  await database.update(workspaces).set({
-    status: "active", pendingPlanPath: null, planMode: true,
-    claudeProfile: values.claudeProfile, agentCommand: values.agentCommand,
-    provider: values.provider, updatedAt: values.now,
-  }).where(eq(workspaces.id, workspaceId));
+  await setWorkspaceStatus(database, workspaceId, "active", {
+    now: values.now,
+    set: {
+      pendingPlanPath: null,
+      planMode: true,
+      claudeProfile: values.claudeProfile,
+      agentCommand: values.agentCommand,
+      provider: values.provider,
+    },
+  });
 }
 
 export async function insertPlanGateAuditMessage(
