@@ -1,26 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { MilestoneResponse } from "@agentic-kanban/shared";
 import { PRIORITY_META } from "../lib/chartColors.js";
+import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 
 interface BoardFilterMenuProps {
   statuses: { id: string; name: string }[];
-  statusFilterId: string | null;
-  onStatusFilterChange: (id: string | null) => void;
-  issueTypeFilter: string | null;
-  onIssueTypeFilterChange: (type: string | null) => void;
-  priorityFilter: string | null;
-  onPriorityFilterChange: (priority: string | null) => void;
   milestones: MilestoneResponse[];
-  milestoneFilterId: string | null;
-  onMilestoneFilterChange: (id: string | null) => void;
-  showBlocked: boolean;
-  onToggleBlocked: () => void;
-  showStaleOnly: boolean;
-  onToggleStaleOnly: () => void;
   tags: { id: string; name: string; color?: string | null }[];
-  activeTagIds: Set<string>;
-  onTagFilterToggle: (tagId: string) => void;
-  onClearTagFilter: () => void;
 }
 
 /**
@@ -29,27 +15,30 @@ interface BoardFilterMenuProps {
  * across BoardStats, SavedBoardViews, and BoardToolbar (the tag legend ate its
  * own full row). Collapsing them here keeps the header to one row and makes the
  * active-filter count obvious at a glance.
+ *
+ * Filter slice (#958): all filter state/actions come straight from the board
+ * filter store; only the option data (statuses, milestones, tags) is passed in.
  */
 export function BoardFilterMenu({
   statuses,
-  statusFilterId,
-  onStatusFilterChange,
-  issueTypeFilter,
-  onIssueTypeFilterChange,
-  priorityFilter,
-  onPriorityFilterChange,
   milestones,
-  milestoneFilterId,
-  onMilestoneFilterChange,
-  showBlocked,
-  onToggleBlocked,
-  showStaleOnly,
-  onToggleStaleOnly,
   tags,
-  activeTagIds,
-  onTagFilterToggle,
-  onClearTagFilter,
 }: BoardFilterMenuProps) {
+  const statusFilterId = useBoardFilterStore((s) => s.statusFilterId);
+  const onStatusFilterChange = useBoardFilterStore((s) => s.setStatusFilterId);
+  const issueTypeFilter = useBoardFilterStore((s) => s.issueTypeFilter);
+  const onIssueTypeFilterChange = useBoardFilterStore((s) => s.setIssueTypeFilter);
+  const priorityFilter = useBoardFilterStore((s) => s.priorityFilter);
+  const onPriorityFilterChange = useBoardFilterStore((s) => s.setPriorityFilter);
+  const milestoneFilterId = useBoardFilterStore((s) => s.milestoneFilterId);
+  const onMilestoneFilterChange = useBoardFilterStore((s) => s.setMilestoneFilterId);
+  const showBlocked = useBoardFilterStore((s) => s.showBlocked);
+  const onToggleBlocked = useBoardFilterStore((s) => s.toggleShowBlocked);
+  const showStaleOnly = useBoardFilterStore((s) => s.showStaleOnly);
+  const onToggleStaleOnly = useBoardFilterStore((s) => s.toggleShowStaleOnly);
+  const activeTagIds = useBoardFilterStore((s) => s.activeTagIds);
+  const onTagFilterToggle = useBoardFilterStore((s) => s.toggleTagFilter);
+  const onClearTagFilter = useBoardFilterStore((s) => s.clearTagFilter);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 

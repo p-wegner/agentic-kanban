@@ -1,4 +1,5 @@
 import type { projects, workspaces } from "@agentic-kanban/shared/schema";
+import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { isFailedLaunchSession } from "@agentic-kanban/shared/lib/workspace-activity-state.js";
 import {
   getLatestSessionForWorkspace,
@@ -33,6 +34,8 @@ import {
   resolveRelaunchAgentSelection,
   requireBaseBranch,
   activeMerges,
+  acquireRepoMergeLock,
+  tryRecoverStaleMergeLock,
   describeMergeLock,
   resolveMergeState,
   type GitService,
@@ -47,6 +50,7 @@ import {
 import { executeWorkspaceMerge } from "./workspace-merge-execution.service.js";
 import { runWorkspacePostMergeCleanup } from "./workspace-merge-cleanup.service.js";
 import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
+import { runPreMergeGate } from "./pre-merge-gate.service.js";
 
 export function createWorkspaceMergeService(deps: {
   database: Database;
@@ -61,6 +65,19 @@ export function createWorkspaceMergeService(deps: {
   const gitService = deps.gitService ?? realGitService;
   const createBackup = deps.createBackup ?? realCreateBackup;
   const killProcesses = deps.processKiller ?? killProcessesInDir;
+
+  /**
+   * Options threaded from the merge entry points down into {@link doMerge}.
+   *
+   * `skipPreMergeGate` lets a caller that has ALREADY run the verify/smoke pre-merge gate against
+   * the same worktree state in the same cycle suppress the otherwise-mandatory re-run inside
+   * `doMerge` (#943). It is set ONLY by the in-process monitor's merge action
+   * (monitor-workspace-actions.ts): the monitor either runs the gate itself just before merging
+   * un-ready In-Review work, or merges work the review-exit handler already gated (readyForMerge),
+   * so re-gating in `doMerge` would double an expensive build/boot per merge. It defaults to false,
+   * so the manual/operator `/merge` route and the merge-queue/orchestrator path keep gating.
+   */
+  type MergeOptions = { skipPreMergeGate?: boolean };
 
   function warningMessage(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
@@ -160,7 +177,7 @@ export function createWorkspaceMergeService(deps: {
     await updateWorkspaceStatus(workspace.id, "idle", {}, database);
   }
 
-  async function mergeWorkspace(id: string) {
+  async function mergeWorkspace(id: string, opts: MergeOptions = {}) {
     let workspace = await getWorkspaceById(id, database);
     if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
     await recoverFailedFixAndMergeSessionIfNeeded(workspace);
@@ -170,19 +187,22 @@ export function createWorkspaceMergeService(deps: {
 
     const { project, repoPath, defaultBranch } = await resolveProjectFull(id, database);
 
+    // Manual-merge semantics are refuse/reuse (intentional, unlike autoMerge's
+    // queueing): an in-flight merge for the same workspace is reused; for a
+    // different workspace we return "already in progress" instead of queueing.
     const existingLock = activeMerges.get(repoPath);
     if (existingLock) {
       const diagnostic = describeMergeLock(existingLock);
-      if (diagnostic.isStale) {
-        console.warn(
-          `[workspace-merge] recovering stale merge lock: repoPath=${repoPath} ` +
-            `activeWorkspaceId=${diagnostic.activeWorkspaceId} ageMs=${diagnostic.ageMs}`,
-        );
-        activeMerges.delete(repoPath);
-      } else {
+      // Stale-lock recovery goes through tryRecoverStaleMergeLock (#970): it
+      // refuses when a fresh .git/index.lock suggests the holder's git process
+      // is still alive, in which case we fall through to refuse/reuse below.
+      const recovered = diagnostic.isStale && tryRecoverStaleMergeLock(repoPath, existingLock);
+      if (!recovered) {
         if (existingLock.workspaceId === id) {
           console.log(`[workspace-merge] reusing in-flight merge result for workspace ${id} on repo ${repoPath}`);
-          return await existingLock.promise;
+          // resultPromise settles as soon as the merge response is ready; the
+          // lock itself may stay held longer for post-merge cleanup (#970).
+          return await (existingLock.resultPromise ?? existingLock.promise);
         }
         throw new WorkspaceError(
           `A merge is already in progress for this repository ` +
@@ -194,37 +214,24 @@ export function createWorkspaceMergeService(deps: {
       }
     }
 
-    const rawMergePromise = doMerge(id, workspace, project, repoPath, defaultBranch);
-    const mergePromise = rawMergePromise.catch((err) => {
-      // A TypeError (e.g. "gitService.X is not a function") means shared/dist is stale —
-      // a deploy/build issue, NOT a merge conflict. Return a distinct 503 so the board
-      // monitor can rebuild rather than attempting a wasted fix-and-merge.
-      if (err instanceof TypeError && !(err instanceof WorkspaceError)) {
-        throw new WorkspaceError(
-          `Merge helper unavailable — the server build may be stale. Rebuild shared/dist and restart. (${err.message})`,
-          "CONFLICT",
-          { mergeReason: "server_build_stale", originalMessage: err.message },
-        );
-      }
-      throw err;
-    });
-    const lock = {
-      promise: mergePromise,
-      workspaceId: id,
-      repoPath,
-      startedAt: new Date().toISOString(),
-      startedAtMs: Date.now(),
-    };
-    activeMerges.set(repoPath, lock);
-    // Always clear the lock - both on success and on rejection - so a crashed
-    // merge never strands the repo behind a stale in-memory lock.
-    mergePromise.finally(() => {
-      if (activeMerges.get(repoPath) === lock) {
-        activeMerges.delete(repoPath);
-      }
-    }).catch(() => { /* swallow: caller awaits mergePromise below */ });
-
-    return await mergePromise;
+    // Install the lock and run the merge via the shared primitive (#944) so the
+    // entry can never be overwritten by a concurrent acquirer.
+    return await acquireRepoMergeLock(repoPath, id, (extendHold) =>
+      // #943: thread `opts` (e.g. skipPreMergeGate from the monitor auto-merge path) through.
+      doMerge(id, workspace, project, repoPath, defaultBranch, extendHold, opts).catch((err) => {
+        // A TypeError (e.g. "gitService.X is not a function") means shared/dist is stale —
+        // a deploy/build issue, NOT a merge conflict. Return a distinct 503 so the board
+        // monitor can rebuild rather than attempting a wasted fix-and-merge.
+        if (err instanceof TypeError && !(err instanceof WorkspaceError)) {
+          throw new WorkspaceError(
+            `Merge helper unavailable — the server build may be stale. Rebuild shared/dist and restart. (${err.message})`,
+            "CONFLICT",
+            { mergeReason: "server_build_stale", originalMessage: err.message },
+          );
+        }
+        throw err;
+      }),
+    );
   }
 
   async function doMerge(
@@ -233,10 +240,12 @@ export function createWorkspaceMergeService(deps: {
     project: typeof projects.$inferSelect | null,
     repoPath: string,
     defaultBranch: string | null,
+    extendHold: (p: Promise<unknown>) => void = () => {},
+    opts: MergeOptions = {},
   ) {
     const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
     const prefMap = await loadMergePreferences(database);
-    const autoMergeInReview = prefMap.get("auto_merge_in_review") === "true";
+    const autoMergeInReview = getBool(prefMap, "auto_merge_in_review");
     const resolution = await resolveMergeState(workspace, repoPath, baseBranch, { gitService, autoMergeInReview });
     const preflight = await handleWorkspaceMergeResolution({
       id,
@@ -255,6 +264,40 @@ export function createWorkspaceMergeService(deps: {
     });
     if (preflight.kind === "completed") return preflight.result;
     await runWorkspacePreMergeValidation({ workspace, repoPath, baseBranch, gitService });
+
+    // #930: gate the MANUAL/operator merge path (and, since the orchestrator/merge-queue route
+    // through here too, those) with the SAME verify_script + boot/render smoke gate the in-process
+    // monitor (monitor-cycle.ts) and review-exit handler run. Without this a hand-merge could land
+    // build/test/boot-UNVERIFIED code on a project that explicitly configured a gate — exactly the
+    // failure the gate exists to prevent. Unlike the monitor we do NOT skip on readyForMerge: a
+    // manual merge is an explicit operator action, so we always re-verify before landing. On failure
+    // we WITHHOLD the merge (throw, surfaced to the operator) rather than silently land it.
+    //
+    // #943: the in-process monitor auto-merge paths (monitor-cycle.ts) already run this exact gate
+    // against the same worktree state in the same cycle (for un-ready In-Review work), and merge
+    // readyForMerge work that the review-exit handler already gated — so re-running here doubles an
+    // expensive build/boot per monitor merge. Those callers pass `skipPreMergeGate` to suppress the
+    // redundant re-run; the manual/operator route and the merge-queue/orchestrator leave it false
+    // and stay gated.
+    if (project && !opts.skipPreMergeGate) {
+      const gate = await runPreMergeGate({ id, workingDir: workspace.workingDir }, project.id, database);
+      if (!gate.passed) {
+        await recordMergeAttempt(
+          workspace,
+          "conflict",
+          `Merge withheld: pre-merge gate failed (${gate.stage}). ${gate.message}`,
+          { mergeReason: "pre_merge_gate_failed", gateStage: gate.stage, gateMessage: gate.message, targetBranch: baseBranch },
+        );
+        throw new WorkspaceError(
+          `Pre-merge gate failed (${gate.stage}) — merge withheld. ${gate.message}`,
+          "CONFLICT",
+          { mergeReason: "pre_merge_gate_failed", gateStage: gate.stage },
+        );
+      }
+      if (!gate.skipped) {
+        console.log(`[workspace-merge] pre-merge gate passed for workspace ${id} (${gate.stage}); proceeding with merge`);
+      }
+    }
 
     const targetBranch = baseBranch;
     const { response, postMergeContext } = await executeWorkspaceMerge({
@@ -284,9 +327,28 @@ export function createWorkspaceMergeService(deps: {
       isDirect: workspace.isDirect,
       pendingWorkingTreeSyncSha: postMergeContext.pendingWorkingTreeSyncSha,
     };
-    setImmediate(() => {
-      void runWorkspacePostMergeCleanup(postMergeArgs, { database, gitService, killProcesses, getSessionManager, boardEvents });
-    });
+    // Post-merge cleanup — including the deferred `git reset --hard` sync of the
+    // MAIN checkout's working tree — must run INSIDE the repo merge lock (#970):
+    // otherwise a second merge acquires the lock while the sync is still pending,
+    // its dirty-main guard sees the stale tree, and it blocks (the recurring
+    // "auto-merge blocked by dirty main" incident class).
+    //
+    // Two earlier constraints are preserved:
+    // - setImmediate defers the cleanup past the current call stack so the Hono
+    //   response write (JSON body flush) happens first (#563 keep-alive drop).
+    // - The reset --hard runs after the HTTP response is already flushed, so a
+    //   tsx hot-reload can no longer drop the in-flight connection (#686).
+    // extendHold keeps the lock held until the cleanup settles, while the HTTP
+    // caller still receives `response` immediately.
+    extendHold(new Promise<void>((resolve) => {
+      setImmediate(() => {
+        runWorkspacePostMergeCleanup(postMergeArgs, { database, gitService, killProcesses, getSessionManager, boardEvents })
+          .catch((err) => {
+            console.warn("[workspace-merge] post-merge cleanup failed (non-fatal):", err instanceof Error ? err.message : String(err));
+          })
+          .finally(resolve);
+      });
+    }));
 
     return response;
   }
@@ -736,11 +798,11 @@ export function createWorkspaceMergeService(deps: {
    */
   const activeRequests = new Map<string, Promise<Awaited<ReturnType<typeof mergeWorkspace>>>>();
 
-  function mergeWorkspaceDeduped(id: string): Promise<Awaited<ReturnType<typeof mergeWorkspace>>> {
+  function mergeWorkspaceDeduped(id: string, opts: MergeOptions = {}): Promise<Awaited<ReturnType<typeof mergeWorkspace>>> {
     const existing = activeRequests.get(id);
     if (existing) return existing;
 
-    const promise = mergeWorkspace(id);
+    const promise = mergeWorkspace(id, opts);
     const tracked = promise.finally(() => {
       if (activeRequests.get(id) === tracked) {
         activeRequests.delete(id);

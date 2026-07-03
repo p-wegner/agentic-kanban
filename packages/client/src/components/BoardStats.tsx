@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import type { StatusWithIssues } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { computeBoardStats } from "../lib/boardStats.js";
+import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 
 interface BoardStatsProps {
   activeColumns: StatusWithIssues[];
   archiveColumns: StatusWithIssues[];
-  searchQuery: string;
   projectId?: string;
 }
 
@@ -32,10 +32,10 @@ function getConfig(name: string) {
 export function BoardStats({
   activeColumns,
   archiveColumns,
-  searchQuery,
   projectId,
 }: BoardStatsProps) {
-  const isFiltered = !!searchQuery;
+  // Filter slice (#958): subscribe to the store instead of a threaded prop.
+  const isFiltered = useBoardFilterStore((s) => !!s.searchQuery);
   const {
     allColumns,
     totalActive,

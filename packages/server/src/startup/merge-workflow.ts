@@ -1,6 +1,7 @@
-import { issueTags, issues, preferences, projects, sessions, tags, workspaces } from "@agentic-kanban/shared/schema";
+import { issueTags, preferences, projects, sessions, tags, workspaces } from "@agentic-kanban/shared/schema";
+import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { runDoneUnmergedScannerNow } from "./done-unmerged-invariant-scanner.js";
-import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { eq } from "drizzle-orm";
 import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { db } from "../db/index.js";
@@ -8,13 +9,15 @@ import { MOCK_AGENT_COMMAND, isMockProfile, toExecutorProvider } from "../servic
 import { createBoardEvents } from "../services/board-events.js";
 import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
 import * as gitService from "../services/git.service.js";
-import { activeMerges, type ActiveMergeLock } from "../services/workspace-internals.js";
+import { acquireRepoMergeLock } from "../services/workspace-internals.js";
+import { cleanupMergedWorktreeAndBranch, runMergeCore } from "../services/merge-executor.service.js";
 import { createBackup } from "../db/backup.js";
 import { killProcessesInDir } from "../services/process-cleanup.js";
 import { runScript } from "../services/script-runner.js";
 import { createSessionManager } from "../services/session.manager.js";
 import { getEffectiveProfile, parseProviderPref } from "./review-helpers.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
+import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { buildLearningStepPrompt } from "../services/merge-helpers.service.js";
 
 export type MergeWorkspace = Pick<typeof workspaces.$inferSelect, "id" | "isDirect" | "branch" | "workingDir" | "baseBranch" | "issueId">;
@@ -106,7 +109,7 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
     try {
       const prefRowsLearning = await db.select().from(preferences);
       const prefMapLearning = new Map(prefRowsLearning.map((r) => [r.key, r.value]));
-      if (prefMapLearning.get("learning_step_before_merge") === "true" && workspace.workingDir) {
+      if (getBool(prefMapLearning, "learning_step_before_merge") && workspace.workingDir) {
         try {
           const learningPrompt = buildLearningStepPrompt(true);
           const learningProfile = prefMapLearning.get("claude_profile") || undefined;
@@ -148,14 +151,15 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
         {
           const { repoPath, teardownScript, defaultBranch } = projectRows[0];
 
-          const mergePromise = (async () => {
-            const pendingMerge = activeMerges.get(repoPath);
-            if (pendingMerge) {
-              console.log(`[workflow] auto-merge for workspace ${workspace.id} is queued behind existing merge on ${repoPath}`);
-              await pendingMerge.promise.catch(() => {});
-            }
-
-            return (async () => {
+          // #944: acquire the shared per-repo merge lock via the serializing
+          // primitive. It re-checks the map in a loop after every wait, so two
+          // concurrent autoMerge calls queued behind the same merge run strictly
+          // one-after-the-other (the old code awaited once and then proceeded,
+          // letting both run concurrent git merges and overwrite the lock entry).
+          await acquireRepoMergeLock(
+            repoPath,
+            workspace.id,
+            async () => {
               if (workspace.workingDir) {
                 try { await killProcessesInDir(workspace.workingDir); } catch {}
                 if (teardownScript) {
@@ -163,43 +167,33 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
                 }
               }
               await tagIfNeedsVisualVerification(repoPath, workspace.branch, workspace.baseBranch, issueId, now, projectId);
-              // Mandatory pre-merge backup. Non-fatal: must not block a legit auto-merge.
-              try {
-                await createBackup("pre-merge");
-              } catch (err) {
-                console.warn("[backup] pre-merge backup failed (non-fatal):", err instanceof Error ? err.message : String(err));
-              }
-              // Guard: refuse merge if main checkout has uncommitted tracked changes.
-              const uncommittedInMain = await gitService.getUncommittedTrackedChanges(repoPath);
-              if (uncommittedInMain.length > 0) {
-                const preview = uncommittedInMain.slice(0, 5).join(", ");
-                const suffix = uncommittedInMain.length > 5 ? ` (and ${uncommittedInMain.length - 5} more)` : "";
-                console.error(`[workflow] auto-merge blocked: main checkout has ${uncommittedInMain.length} uncommitted tracked change(s): ${preview}${suffix}`);
-                boardEvents.broadcast(projectId, "workflow_error");
-                emitButlerSystemEvent({ projectId, kind: "merge_failed", workspaceId: workspace.id, text: `Auto-merge blocked for workspace ${workspace.id} (branch ${workspace.branch}): main checkout has ${uncommittedInMain.length} uncommitted tracked change(s).` });
-                throw new Error(`Main checkout has ${uncommittedInMain.length} uncommitted tracked change(s) — cannot merge workspace ${workspace.id}. Commit or stash those changes first.`);
-              }
 
               const targetBranch = workspace.baseBranch || defaultBranch || "main";
-              // #763: auto-resolve pure-append hot-file conflicts by concatenation so a
-              // wave of tickets that all append to one shared smoke test / log lands
-              // without fix-and-merge thrash. Non-append conflicts still throw.
-              const mergeOutput = await gitService.mergeBranch(repoPath, workspace.branch, targetBranch, {
-                autoResolveAppendConflicts: true,
+              // The git-touching pipeline (dirty-main guard → pre-merge backup →
+              // merge with append-conflict auto-resolution (#763) → post-merge
+              // ancestry verification) lives in the shared merge executor core (#945)
+              // — the same core the manual/monitor doMerge path runs.
+              const { mergeOutput, mergeCommitSha } = await runMergeCore({
+                repoPath,
+                branch: workspace.branch,
+                targetBranch,
+                gitService,
+                createBackup,
+                deferWorkingTreeSync: false,
+                onDirtyMain: (uncommittedInMain) => {
+                  const preview = uncommittedInMain.slice(0, 5).join(", ");
+                  const suffix = uncommittedInMain.length > 5 ? ` (and ${uncommittedInMain.length - 5} more)` : "";
+                  console.error(`[workflow] auto-merge blocked: main checkout has ${uncommittedInMain.length} uncommitted tracked change(s): ${preview}${suffix}`);
+                  boardEvents.broadcast(projectId, "workflow_error");
+                  emitButlerSystemEvent({ projectId, kind: "merge_failed", workspaceId: workspace.id, text: `Auto-merge blocked for workspace ${workspace.id} (branch ${workspace.branch}): main checkout has ${uncommittedInMain.length} uncommitted tracked change(s).` });
+                  return new Error(`Main checkout has ${uncommittedInMain.length} uncommitted tracked change(s) — cannot merge workspace ${workspace.id}. Commit or stash those changes first.`);
+                },
+                makeAncestryError: (branch, target) =>
+                  new Error(
+                    `Post-merge invariant violated: branch '${branch}' is still not an ancestor of '${target}' after merge — refusing to move issue to Done (workspace ${workspace.id})`,
+                  ),
               });
 
-              // Post-merge invariant: verify the branch tip is now reachable from target.
-              // If not, the git merge did not actually land the work (e.g. plumbing anomaly
-              // or interrupted ref update) — refuse to set Done so the scanner can catch it.
-              const postMergeAncestry = await gitService.checkBranchTipIsAncestor(repoPath, workspace.branch, targetBranch);
-              if (!postMergeAncestry.isAncestor) {
-                throw new Error(
-                  `Post-merge invariant violated: branch '${workspace.branch}' is still not an ancestor of '${targetBranch}' after merge — refusing to move issue to Done (workspace ${workspace.id})`,
-                );
-              }
-
-              let mergeCommitSha = "";
-              try { mergeCommitSha = await gitService.revParse(repoPath, "HEAD"); } catch { /* tolerate */ }
               await recordMergeAttempt(
                 workspace,
                 "merged",
@@ -207,10 +201,12 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
                 { targetBranch, commitSha: mergeCommitSha || null, mergedAt: now, mergeOutput },
                 now,
               );
-              if (workspace.workingDir) {
-                try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch {}
-              }
-              try { await gitService.deleteBranch(repoPath, workspace.branch); } catch {}
+              await cleanupMergedWorktreeAndBranch({
+                repoPath,
+                workingDir: workspace.workingDir,
+                branch: workspace.branch,
+                gitService,
+              });
 
               const verifyAgent = prefMapLearning.get("after_merge_verify_agent") || "none";
               const issueTagged = await db.select({ tagId: issueTags.tagId }).from(issueTags).where(eq(issueTags.issueId, issueId)).limit(100).then((rows) => rows.some((r) => r.tagId !== null));
@@ -249,35 +245,21 @@ Server: http://localhost:${serverPort}`;
                   console.warn("[workflow] dedicated verification session failed (non-fatal):", err);
                 }
               }
-            })();
-          })();
-
-          let trackedMergeLock: ActiveMergeLock;
-          const trackedMerge = mergePromise.finally(() => {
-            if (activeMerges.get(repoPath) === trackedMergeLock) {
-              activeMerges.delete(repoPath);
-            }
-          });
-          trackedMergeLock = {
-            promise: trackedMerge,
-            workspaceId: workspace.id,
-            repoPath,
-            startedAt: new Date().toISOString(),
-            startedAtMs: Date.now(),
-          };
-          activeMerges.set(repoPath, trackedMergeLock);
-          await trackedMerge;
+            },
+            () =>
+              console.log(
+                `[workflow] auto-merge for workspace ${workspace.id} is queued behind existing merge on ${repoPath}`,
+              ),
+          );
         }
       }
 
-      await db.update(workspaces).set({ status: "closed", workingDir: null, readyForMerge: false, updatedAt: now }).where(eq(workspaces.id, workspace.id));
+      await setWorkspaceStatus(db, workspace.id, "closed", { now, set: { workingDir: null, readyForMerge: false } });
       if (doneStatusId) {
-        await db.update(issues).set({ statusId: doneStatusId, updatedAt: now }).where(eq(issues.id, issueId));
-        // Advance the workflow node to the `end` node matching Done status, so
-        // blocked_by/depends_on dependents can resolve via the node type check (#537).
-        await syncCurrentNodeToStatus(db, issueId).catch((err) =>
-          console.warn("[workflow] syncCurrentNodeToStatus after merge failed (non-fatal):", err),
-        );
+        // transitionIssueStatus also advances the workflow node to the `end` node
+        // matching Done status, so blocked_by/depends_on dependents can resolve
+        // via the node type check (#537).
+        await transitionIssueStatus(db, issueId, doneStatusId, { now });
       }
       boardEvents.broadcast(projectId, "workspace_merged");
       console.log(`[workflow] auto-merged workspace ${workspace.id}`);

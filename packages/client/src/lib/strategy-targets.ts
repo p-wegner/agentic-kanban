@@ -1,9 +1,22 @@
 import { ACCENT, BRAND } from "./chartColors";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
+import {
+  normalizeProviderPolicy,
+  selectPolicyByPriority,
+} from "@agentic-kanban/shared/lib/strategy-policy";
+import type {
+  ProviderPolicyMode,
+  ProviderProfilePolicy,
+} from "@agentic-kanban/shared/lib/strategy-policy";
+
+// The policy shape + round-trip codec are shared with the server
+// (strategy-objective.service.ts) — ONE definition, so a Strategy Targets save
+// can never again drop fields the server wrote (the `model` outage, #983).
+export { normalizeProviderPolicy };
+export type { ProviderPolicyMode, ProviderProfilePolicy };
 
 export type SegmentKind = "work-type" | "provider" | "area" | "custom";
 export type Provider = "" | "claude" | "codex" | "copilot" | "pi";
-export type ProviderPolicyMode = "fill" | "throttle" | "fallback-only";
 
 export interface StrategySegment {
   id: string;
@@ -14,18 +27,6 @@ export interface StrategySegment {
   color: string;
   keywords: string;
   provider: Provider;
-}
-
-export interface ProviderProfilePolicy {
-  id: string;
-  provider: "claude" | "codex" | "copilot" | "pi";
-  profileName: string;
-  label: string;
-  mode: ProviderPolicyMode;
-  headroomPct: number;
-  notes: string;
-  /** Optional quota provider ID from the tampermonkey-direct /api/usage response. When set, live usage gates this policy. */
-  quotaProviderId: string;
 }
 
 export interface StrategyConfig {
@@ -117,23 +118,6 @@ export function normalizeSegment(segment: Partial<StrategySegment>, index: numbe
   };
 }
 
-export function normalizeProviderPolicy(p: Partial<ProviderProfilePolicy>, index: number): ProviderProfilePolicy {
-  const provider = (["claude", "codex", "copilot", "pi"].includes(p.provider ?? "") ? p.provider : "claude") as "claude" | "codex" | "copilot" | "pi";
-  const profileName = typeof p.profileName === "string" ? p.profileName : "";
-  const id = p.id || `policy-${provider}-${profileName || index}`;
-  const validModes: ProviderPolicyMode[] = ["fill", "throttle", "fallback-only"];
-  return {
-    id,
-    provider,
-    profileName,
-    label: typeof p.label === "string" && p.label.trim() ? p.label : `${provider}${profileName ? `:${profileName}` : ""}`,
-    mode: (validModes.includes(p.mode as ProviderPolicyMode) ? p.mode : "throttle") as ProviderPolicyMode,
-    headroomPct: clampPolicy(Number(p.headroomPct ?? 20), 20, 0, 100),
-    notes: typeof p.notes === "string" ? p.notes : "",
-    quotaProviderId: typeof p.quotaProviderId === "string" ? p.quotaProviderId : "",
-  };
-}
-
 export function normalizeConfig(raw: unknown): StrategyConfig {
   const parsed = raw && typeof raw === "object" ? raw as Partial<StrategyConfig> : {};
   const segments = Array.isArray(parsed.segments)
@@ -216,19 +200,17 @@ export const PROVIDER_DEFAULT_POLICY_ID = "provider-default";
 export type ConcreteProvider = "claude" | "codex" | "copilot" | "pi";
 
 /**
- * Read the effective provider+profile a config's provider policies would select,
- * mirroring the server's `selectProviderFromStrategy` priority order
- * (fill → throttle → fallback-only). Returns null when no policies are configured
- * (the caller falls back to the global Settings provider). Kept in lockstep with
- * `selectProviderFromStrategy` in strategy-objective.service.ts so the Settings
- * picker shows exactly what a workspace launch would use.
+ * Read the effective provider+profile a config's provider policies would select.
+ * Delegates to the shared `selectPolicyByPriority` (fill → throttle →
+ * fallback-only) — the SAME function the server's `selectProviderFromStrategy`
+ * uses (the server additionally layers live-quota gating on top, which this
+ * static preview cannot see). Returns null when no policies are configured
+ * (the caller falls back to the global Settings provider).
  */
 export function selectProviderFromPolicies(
   policies: ProviderProfilePolicy[],
 ): { provider: ConcreteProvider; profileName: string } | null {
-  if (policies.length === 0) return null;
-  const byMode = (mode: ProviderPolicyMode) => policies.find((p) => p.mode === mode);
-  const chosen = byMode("fill") ?? byMode("throttle") ?? byMode("fallback-only");
+  const chosen = selectPolicyByPriority(policies);
   if (!chosen) return null;
   return { provider: chosen.provider, profileName: chosen.profileName };
 }

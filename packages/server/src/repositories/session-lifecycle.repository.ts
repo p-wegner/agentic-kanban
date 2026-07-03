@@ -1,8 +1,11 @@
 import { sessions, sessionMessages, workspaces, issues, preferences, agentSkills } from "@agentic-kanban/shared/schema";
+import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
+import { setWorkspaceStatus, type WorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
+import { getSessionStatsRaw, getSessionStatus as getSessionStatusCanonical } from "./session.repository.js";
 
 export async function getWorkspaceById(
   workspaceId: string,
@@ -87,9 +90,7 @@ export async function getSessionStats(
   sessionId: string,
   database: Database = db,
 ): Promise<string | null | undefined> {
-  const rows = await database.select({ stats: sessions.stats }).from(sessions).where(eq(sessions.id, sessionId)).limit(1);
-  if (rows.length === 0) return undefined;
-  return rows[0].stats;
+  return getSessionStatsRaw(sessionId, database);
 }
 
 export async function insertSession(
@@ -108,7 +109,7 @@ export async function insertSession(
   },
   database: Database = db,
 ): Promise<void> {
-  await database.insert(sessions).values(values);
+  await database.insert(sessions).values({ ...values, stats: sanitizeUtf8(values.stats) });
 }
 
 export async function updateSessionPid(
@@ -141,7 +142,7 @@ export async function updateSessionStoppedWithStats(
   database: Database = db,
 ): Promise<void> {
   await database.update(sessions)
-    .set({ status: "stopped", endedAt, exitCode, stats })
+    .set({ status: "stopped", endedAt, exitCode, stats: sanitizeUtf8(stats) })
     .where(eq(sessions.id, sessionId));
 }
 
@@ -151,16 +152,17 @@ export async function updateWorkspaceStatus(
   updatedAt: string,
   database: Database = db,
 ): Promise<void> {
-  await database.update(workspaces)
-    .set({ status, updatedAt })
-    .where(eq(workspaces.id, workspaceId));
+  await setWorkspaceStatus(database, workspaceId, status as WorkspaceStatus, { now: updatedAt });
 }
 
 export async function insertSessionMessage(
   values: { sessionId: string; type: string; data: string | null; exitCode: string | null },
   database: Database = db,
 ): Promise<void> {
-  await database.insert(sessionMessages).values(values);
+  await database.insert(sessionMessages).values({
+    ...values,
+    data: values.data == null ? null : sanitizeUtf8(values.data),
+  });
 }
 
 export async function updateSessionCompleted(
@@ -189,7 +191,7 @@ export async function updateWorkspaceStatusOnly(
   updatedAt: string,
   database: Database = db,
 ): Promise<void> {
-  await database.update(workspaces).set({ status, updatedAt }).where(eq(workspaces.id, workspaceId));
+  await setWorkspaceStatus(database, workspaceId, status as WorkspaceStatus, { now: updatedAt });
 }
 
 export async function updateWorkspacePendingPlan(
@@ -199,19 +201,18 @@ export async function updateWorkspacePendingPlan(
   updatedAt: string,
   database: Database = db,
 ): Promise<void> {
-  await database.update(workspaces).set({ pendingPlanPath, status, updatedAt }).where(eq(workspaces.id, workspaceId));
+  await setWorkspaceStatus(database, workspaceId, status as WorkspaceStatus, {
+    now: updatedAt,
+    set: { pendingPlanPath },
+  });
 }
 
 export async function getSessionStatus(
   sessionId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({ status: sessions.status })
-    .from(sessions)
-    .where(eq(sessions.id, sessionId))
-    .limit(1);
-  return rows[0] ?? null;
+  const status = await getSessionStatusCanonical(sessionId, database);
+  return status === null ? null : { status };
 }
 
 export async function getSessionWorkspaceId(

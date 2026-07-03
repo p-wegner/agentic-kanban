@@ -36,7 +36,7 @@ import {
   getButlerSessionMessages,
   resolveTranscriptDir,
 } from "../services/butler-transcripts.service.js";
-import { setPreference } from "../repositories/preferences.repository.js";
+import { setRuntimeState } from "../repositories/runtime-state.repository.js";
 import { createTestApp as _createTestApp } from "./helpers/test-app.js";
 import { createMockSessionManager } from "./helpers/mocks.js";
 import type { TestDb } from "./helpers/test-db.js";
@@ -119,8 +119,8 @@ describe("butler.history.access — cross-project transcript allowlist", () => {
     const projectB = await createProject(db, "Project B", repoPath);
 
     // A tracks OWN_SID; B tracks FOREIGN_SID. The ids are disjoint across projects.
-    await setPreference(`butler_session_history_${projectA}`, JSON.stringify([OWN_SID]), db);
-    await setPreference(`butler_session_history_${projectB}`, JSON.stringify([FOREIGN_SID]), db);
+    await setRuntimeState(`butler_session_history_${projectA}`, JSON.stringify([OWN_SID]), db);
+    await setRuntimeState(`butler_session_history_${projectB}`, JSON.stringify([FOREIGN_SID]), db);
 
     // Sanity: the foreign transcript IS physically readable from A's repoPath, so
     // the deny below is enforced by the allowlist, not by a missing/empty file.
@@ -153,7 +153,7 @@ describe("butler.history.access — cross-project transcript allowlist", () => {
     const projectA = await createProject(db, "Project A list", repoPath);
 
     // A tracks only OWN_SID, even though FOREIGN_SID's file sits in the same dir.
-    await setPreference(`butler_session_history_${projectA}`, JSON.stringify([OWN_SID]), db);
+    await setRuntimeState(`butler_session_history_${projectA}`, JSON.stringify([OWN_SID]), db);
 
     const res = await app.request(`/api/projects/${projectA}/butler/sessions?limit=20`);
     expect(res.status).toBe(200);

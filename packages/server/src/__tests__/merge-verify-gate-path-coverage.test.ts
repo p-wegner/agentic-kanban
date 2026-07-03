@@ -4,19 +4,15 @@
 // verify_script exits non-zero (and must PASS the land when it exits 0). Test 1 pins that GATE
 // DECISION directly.
 //
-// FINDING (confirmed by reading the call sites): `runPreMergeGate` is wired ONLY into the in-process
-// monitor's auto-merge paths (monitor-cycle.ts:247 / :323) and the review-exit handler
-// (exit-workflow.ts:536). The MANUAL/operator merge body — POST /api/workspaces/:id/merge →
-// mergeWorkspace() → runWorkspacePreMergeValidation() — does NOT call runPreMergeGate. So a hand-merge
-// (or the merge_queue orchestrator, which also goes through mergeWorkspace) can land build/test/boot-
-// UNVERIFIED code even on a project that configured a verify gate. This is now filed as product
-// ticket #930.
-//
-// SELF-FLIPPING MARKERS: the two manual-path tests below use `it.fails(...)`. Their bodies assert the
-// DESIRED (post-#930-fix) behaviour — the gate runs and (on verify failure) the land is withheld.
-// While the bug exists those assertions fail, so `it.fails` reports them as PASSING (suite green).
-// When #930 is fixed and the manual path gates, the bodies pass → `it.fails` FAILS, forcing whoever
-// lands the fix to flip these to `it(...)`. They are NOT change-detectors pinning the bug as correct.
+// HISTORY (#930): `runPreMergeGate` was originally wired ONLY into the in-process monitor's auto-merge
+// paths (monitor-cycle.ts:247 / :323) and the review-exit handler (exit-workflow.ts:536). The
+// MANUAL/operator merge body — POST /api/workspaces/:id/merge → mergeWorkspace() → doMerge() — did NOT
+// call runPreMergeGate, so a hand-merge (or the merge_queue orchestrator, which also goes through
+// mergeWorkspace) could land build/test/boot-UNVERIFIED code on a project that configured a verify
+// gate. #930 CLOSED that gap: `doMerge` now runs the shared gate before landing (after OpenSpec/migration
+// prevalidation, before executeWorkspaceMerge) and WITHHOLDS the merge on failure. The two manual-path
+// tests below — which assert that gated behaviour — were `it.fails(...)` known-gap markers; now that the
+// path gates, they are flipped to `it(...)`.
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
@@ -139,10 +135,10 @@ describe("review-merge.gate.verify-smoke — gate decision + which merge path ru
     expect(passed.skipped).toBe(false);
   });
 
-  // `it.fails`: body asserts the DESIRED post-#930 behaviour (gate runs, land withheld on verify
-  // failure). TODAY the manual path bypasses the gate, so the body FAILS → `it.fails` PASSES. When
-  // #930 wires the gate into mergeWorkspace, the body PASSES → `it.fails` FAILS → flip this to `it`.
-  it.fails("manual /merge SHOULD withhold the land when verify_script fails (open gap #930)", async () => {
+  // #930 FIXED: the manual /merge path now runs the shared verify/smoke gate in `doMerge` before
+  // landing, so a non-zero verify_script WITHHOLDS the land (thrown CONFLICT). This was an `it.fails`
+  // known-gap marker; flipped to `it` now that the gate is wired into the operator merge body.
+  it("manual /merge withholds the land when verify_script fails (#930)", async () => {
     const { projectId, workspaceId } = await seedApprovedWorkspace(db);
     await setPreference(verifyScriptPrefKey(projectId), ".\\verify.sh", db);
     runSetupScript.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "tests failed" });
@@ -169,10 +165,10 @@ describe("review-merge.gate.verify-smoke — gate decision + which merge path ru
     expect(merged).toBe(false);
   });
 
-  // `it.fails`: TODAY the manual path lands without ever consulting the gate, so `toHaveBeenCalled`
-  // FAILS → `it.fails` PASSES. Post-#930 the manual path runs the gate (which passes here, exit 0) and
-  // still lands → body PASSES → `it.fails` FAILS → flip to `it`.
-  it.fails("manual /merge SHOULD run the verify gate before landing even when it would PASS (open gap #930)", async () => {
+  // #930 FIXED: the manual path now runs the gate even when it would PASS (exit 0) — the gate is
+  // consulted before every operator merge (it does NOT skip on readyForMerge), and since it passes
+  // here the branch lands. Flipped from `it.fails` to `it`.
+  it("manual /merge runs the verify gate before landing even when it would PASS (#930)", async () => {
     const { projectId, issueId, workspaceId } = await seedApprovedWorkspace(db);
     await setPreference(verifyScriptPrefKey(projectId), ".\\verify.sh", db);
     runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "" });
@@ -190,5 +186,49 @@ describe("review-merge.gate.verify-smoke — gate decision + which merge path ru
     expect(runSetupScript).toHaveBeenCalled();
     expect(result.merged).toBe(true);
     expect(await issueStatusName(db, issueId)).toBe("Done");
+  });
+
+  // #943: the in-process monitor's auto-merge paths already run the gate against the same worktree
+  // state in the same cycle (or rely on the review-exit gate for readyForMerge work). They pass
+  // `skipPreMergeGate` so `doMerge` does NOT re-run it — otherwise an expensive build/boot doubles
+  // per monitor merge. The skip is per-call, so the manual route (no flag) keeps gating.
+  it("skipPreMergeGate suppresses the doMerge gate re-run, so the verify_script is NOT spawned again (#943)", async () => {
+    const { projectId, issueId, workspaceId } = await seedApprovedWorkspace(db);
+    await setPreference(verifyScriptPrefKey(projectId), ".\\verify.sh", db);
+    runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "" });
+
+    const git = makeGit();
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+    const result = await svc.mergeWorkspace(workspaceId, { skipPreMergeGate: true });
+
+    // The gate did NOT run a second build, but the merge still landed.
+    expect(runSetupScript).not.toHaveBeenCalled();
+    expect(result.merged).toBe(true);
+    expect(await issueStatusName(db, issueId)).toBe("Done");
+  });
+
+  // The monitor reaches doMerge via mergeWorkspaceDeduped — verify the skip flag threads through it too.
+  it("mergeWorkspaceDeduped threads skipPreMergeGate through to doMerge (#943)", async () => {
+    const { projectId, workspaceId } = await seedApprovedWorkspace(db);
+    await setPreference(verifyScriptPrefKey(projectId), ".\\verify.sh", db);
+    // Even a FAILING verify must not be consulted when the gate is skipped — it never runs.
+    runSetupScript.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "would have failed" });
+
+    const git = makeGit();
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+    const result = await svc.mergeWorkspaceDeduped(workspaceId, { skipPreMergeGate: true });
+
+    expect(runSetupScript).not.toHaveBeenCalled();
+    expect(result.merged).toBe(true);
   });
 });

@@ -4,7 +4,7 @@ import type { BoardEvents } from "./board-events.js";
 import { WorkspaceError, type GitService } from "./workspace-internals.js";
 import type { RecordMergeAttempt } from "./workspace-merge-prevalidation.service.js";
 import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
-import { extractPendingWorkingTreeSync } from "@agentic-kanban/shared/lib/git-service";
+import { runMergeCore } from "./merge-executor.service.js";
 import { stampWorkspaceMergedAt } from "../repositories/workspace-merge-execution.repository.js";
 
 export type WorkspaceMergeExecutionResult = {
@@ -48,18 +48,39 @@ export async function executeWorkspaceMerge(args: {
     }
   }
 
-  await createPreMergeBackup(args.createBackup);
-  const preMergeHead = await revParseSafe(repoPath, "HEAD", gitService);
-  // Capture the feature branch tip BEFORE the merge — post-merge cleanup deletes
-  // the branch ref, but this commit stays reachable from the default branch, so
-  // the merged-commits panel can resolve baseCommitSha..mergedHeadSha afterwards.
-  const mergedHeadSha = await revParseSafe(repoPath, workspace.branch, gitService);
-  const mergeResult = await mergeBranchOrThrow(args);
-  // mergeBranch with deferWorkingTreeSync skips git reset --hard during the request.
-  // Extract the pending SHA so post-merge cleanup can apply it after the response is sent.
-  const pendingWorkingTreeSyncSha = extractPendingWorkingTreeSync(mergeResult);
-  const mergeCommitSha = await revParseSafe(repoPath, "HEAD", gitService);
-  await verifyPostMergeAncestry(repoPath, workspace.branch, targetBranch, gitService);
+  // The git-touching pipeline (backup → SHA capture → merge with append-conflict
+  // auto-resolution → post-merge ancestry verification) lives in the shared merge
+  // executor core (#945) — the same core the autoMerge path runs. The dirty-main
+  // guard already ran in resolveMergeState, so it is not repeated here.
+  const core = await runMergeCore({
+    repoPath,
+    branch: workspace.branch,
+    targetBranch,
+    gitService,
+    createBackup: args.createBackup,
+    deferWorkingTreeSync: true,
+    onMergeError: async (err) => {
+      await args.recordMergeAttempt(
+        workspace,
+        "conflict",
+        `Merge failed while merging ${workspace.branch} into ${targetBranch}: ${err instanceof Error ? err.message : String(err)}`,
+        { step: "git-merge", targetBranch },
+      );
+      return new WorkspaceError(
+        `Merge failed (git-merge step): ${err instanceof Error ? err.message : String(err)}`,
+        "CONFLICT",
+        { mergeReason: "conflict", step: "git-merge", branch: workspace.branch, targetBranch },
+      );
+    },
+    makeAncestryError: (branch, target) =>
+      new WorkspaceError(
+        `Post-merge invariant violated: branch '${branch}' is still not an ancestor of '${target}' after merge — refusing to move issue to Done`,
+        "CONFLICT",
+        { mergeReason: "post_merge_ancestry_check_failed", branch, targetBranch: target },
+      ),
+  });
+  const { preMergeHead, mergedHeadSha, mergeCommitSha, pendingWorkingTreeSyncSha } = core;
+  const mergeResult = core.mergeOutput;
 
   const now = new Date().toISOString();
   await stampMergedAtEarly(id, now, mergedHeadSha || null, database);
@@ -99,70 +120,6 @@ export async function executeWorkspaceMerge(args: {
       pendingWorkingTreeSyncSha,
     },
   };
-}
-
-async function createPreMergeBackup(createBackup: (reason: string) => Promise<unknown>): Promise<void> {
-  try {
-    await createBackup("pre-merge");
-  } catch (err) {
-    console.warn("[backup] pre-merge backup failed (non-fatal):", err instanceof Error ? err.message : String(err));
-  }
-}
-
-async function revParseSafe(repoPath: string, ref: string, gitService: GitService): Promise<string> {
-  try {
-    return await gitService.revParse(repoPath, ref);
-  } catch {
-    return "";
-  }
-}
-
-async function mergeBranchOrThrow(args: {
-  workspace: typeof workspaces.$inferSelect;
-  repoPath: string;
-  targetBranch: string;
-  gitService: GitService;
-  recordMergeAttempt: RecordMergeAttempt;
-}): Promise<string> {
-  const { workspace, repoPath, targetBranch, gitService } = args;
-  try {
-    return await gitService.mergeBranch(repoPath, workspace.branch, targetBranch, {
-      deferWorkingTreeSync: true,
-      // #763: auto-resolve pure-append hot-file conflicts (a wave of tickets all
-      // appending to one shared smoke test / log) by concatenating both tails, instead
-      // of 409ing and forcing the cluster through fix-and-merge thrash. Non-append
-      // conflicts still throw and route to fix-and-merge as before.
-      autoResolveAppendConflicts: true,
-    });
-  } catch (err) {
-    await args.recordMergeAttempt(
-      workspace,
-      "conflict",
-      `Merge failed while merging ${workspace.branch} into ${targetBranch}: ${err instanceof Error ? err.message : String(err)}`,
-      { step: "git-merge", targetBranch },
-    );
-    throw new WorkspaceError(
-      `Merge failed (git-merge step): ${err instanceof Error ? err.message : String(err)}`,
-      "CONFLICT",
-      { mergeReason: "conflict", step: "git-merge", branch: workspace.branch, targetBranch },
-    );
-  }
-}
-
-async function verifyPostMergeAncestry(
-  repoPath: string,
-  branch: string,
-  targetBranch: string,
-  gitService: GitService,
-): Promise<void> {
-  const postMergeAncestry = await gitService.checkBranchTipIsAncestor(repoPath, branch, targetBranch);
-  if (!postMergeAncestry.isAncestor) {
-    throw new WorkspaceError(
-      `Post-merge invariant violated: branch '${branch}' is still not an ancestor of '${targetBranch}' after merge — refusing to move issue to Done`,
-      "CONFLICT",
-      { mergeReason: "post_merge_ancestry_check_failed", branch, targetBranch },
-    );
-  }
 }
 
 async function stampMergedAtEarly(id: string, now: string, mergedHeadSha: string | null, database: Database): Promise<void> {

@@ -25,15 +25,58 @@ export function getMigrationsFolder(): string {
   return candidates[candidates.length - 1];
 }
 
+interface JournalEntry {
+  idx: number;
+  tag: string;
+  when: number;
+  breakpoints: boolean;
+}
+
+/**
+ * Idempotency-shim cutoff (#954).
+ *
+ * Historically the runner swallowed "duplicate column name" / "already exists"
+ * errors on EVERY migration, because DBs that predate reliable
+ * `__drizzle_migrations` tracking may be part-applied and re-running their DDL
+ * is the only way forward. That tolerance is only legitimate for those legacy
+ * migrations: 0000–0096 (the newest migration at the time #954 landed).
+ * Migrations with a journal idx ABOVE this cutoff were created after tracking
+ * was reliable, so a "duplicate column"/"already exists" error there is a REAL
+ * failure and must abort.
+ */
+export const LEGACY_IDEMPOTENCY_CUTOFF_IDX = 96;
+
+/** First ~140 chars of a statement, flattened, for log lines. */
+function stmtSnippet(stmt: string): string {
+  const flat = stmt.replace(/\s+/g, " ").trim();
+  return flat.length > 140 ? `${flat.slice(0, 140)}…` : flat;
+}
+
 /**
  * Apply migrations manually using the raw libsql client.
  *
  * Works around a libsql@0.4.7 + Node.js 26 bug where CREATE TABLE IF NOT EXISTS
  * returns SQLITE_OK (0), which libsql misinterprets as an error, causing
  * drizzle-orm's migrate() to abort partway through.
+ *
+ * Guarantees (#954):
+ * - Each migration file runs inside ONE write transaction (statements + the
+ *   `__drizzle_migrations` bookkeeping row commit together). A failing
+ *   statement rolls the whole file back and aborts the run — later migrations
+ *   are never attempted on top of a half-applied one.
+ * - A journal entry whose .sql file is missing is a HARD error (a published
+ *   bundle ships journal + .sql together via scripts/copy-assets.mjs, so a
+ *   missing file means the install is broken — silently skipping it would
+ *   leave the schema behind the journal with no visible symptom).
+ * - The "duplicate column name"/"already exists" tolerance is scoped to legacy
+ *   migrations (idx <= LEGACY_IDEMPOTENCY_CUTOFF_IDX) that are NOT recorded as
+ *   applied, and it logs a loud warning whenever it fires.
+ *
+ * @param options.folder Override the migrations folder (tests inject a synthetic
+ *   journal + .sql files; production callers omit it).
  */
-export async function applyMigrations(client: Client): Promise<void> {
-  const folder = getMigrationsFolder();
+export async function applyMigrations(client: Client, options?: { folder?: string }): Promise<void> {
+  const folder = options?.folder ?? getMigrationsFolder();
   const journalPath = resolve(folder, "meta/_journal.json");
   if (!existsSync(journalPath)) {
     throw new Error(`Migration journal not found at ${journalPath}`);
@@ -46,8 +89,8 @@ export async function applyMigrations(client: Client): Promise<void> {
       `Run 'git merge --abort' in the main checkout to recover, then restart the server.`,
     );
   }
-  const journal = JSON.parse(journalRaw) as { entries: Array<{ tag: string; when: number; breakpoints: boolean }> };
-  const entries: Array<{ tag: string; when: number; breakpoints: boolean }> = journal.entries;
+  const journal = JSON.parse(journalRaw) as { entries: JournalEntry[] };
+  const entries: JournalEntry[] = journal.entries;
 
   // Create drizzle's migration tracking table
   await client.execute(`
@@ -65,44 +108,77 @@ export async function applyMigrations(client: Client): Promise<void> {
     appliedTags = new Set(result.rows.map((r) => String((r as { hash?: string }).hash)));
   } catch { /* table doesn't exist yet */ }
 
-  for (let i = 0; i < entries.length; i++) {
-    if (appliedTags.has(entries[i].tag)) continue;
+  for (const entry of entries) {
+    if (appliedTags.has(entry.tag)) continue;
 
-    const sqlFile = resolve(folder, `${entries[i].tag}.sql`);
-    if (!existsSync(sqlFile)) continue;
+    const sqlFile = resolve(folder, `${entry.tag}.sql`);
+    if (!existsSync(sqlFile)) {
+      throw new Error(
+        `[migrate] Journal entry "${entry.tag}" has no SQL file at ${sqlFile}. ` +
+        `The migrations bundle is incomplete (journal and .sql files must ship together). ` +
+        `Refusing to continue — skipping would silently leave the schema behind the journal.`,
+      );
+    }
 
     const sql = readFileSync(sqlFile, "utf8");
 
     // Split on statement breakpoints
-    const statements = entries[i].breakpoints
+    const statements = entry.breakpoints
       ? sql.split("--> statement-breakpoint").map(s => s.trim()).filter(Boolean)
       : [sql.trim()];
 
-    for (const stmt of statements) {
-      try {
-        await client.execute(stmt);
-      } catch (err: unknown) {
-        const e = err as { code?: unknown; message?: { includes?: (s: string) => boolean } } | null | undefined;
-        // Ignore spurious SQLITE_OK "not an error" from libsql
-        if (e?.code === "SQLITE_OK" || (e?.message?.includes?.("not an error"))) {
-          continue;
-        }
-        // Ignore "duplicate column name" / "table already exists" — migration already applied
-        if (e?.message?.includes?.("duplicate column name") || e?.message?.includes?.("already exists")) {
-          continue;
-        }
-        throw err;
-      }
-    }
-
-    // Record migration as applied (use tag as hash to match drizzle-kit format)
+    // One transaction per migration file: DDL/data statements and the tracking
+    // row commit atomically, or the whole file rolls back.
+    const tx = await client.transaction("write");
+    let failingStmt = "";
     try {
-      await client.execute({
+      for (const stmt of statements) {
+        failingStmt = stmt;
+        try {
+          await tx.execute(stmt);
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          const code = (err as { code?: unknown } | null | undefined)?.code;
+          // Ignore spurious SQLITE_OK "not an error" from libsql (client bug,
+          // not a migration-state issue — always tolerated).
+          if (code === "SQLITE_OK" || message.includes("not an error")) {
+            continue;
+          }
+          // Legacy idempotency shim: pre-tracking DBs may be part-applied, so
+          // re-running their DDL hits "duplicate column"/"already exists".
+          // Only tolerated below the cutoff, and never silently.
+          if (
+            entry.idx <= LEGACY_IDEMPOTENCY_CUTOFF_IDX &&
+            (message.includes("duplicate column name") || message.includes("already exists"))
+          ) {
+            console.warn(
+              `[migrate] idempotency shim fired for legacy migration ${entry.tag}: tolerating "${message}" ` +
+              `(statement: ${stmtSnippet(stmt)}) — pre-#954 DBs may be part-applied; a real failure here would be masked`,
+            );
+            continue;
+          }
+          throw err;
+        }
+      }
+
+      // Record migration as applied (use tag as hash to match drizzle-kit format)
+      await tx.execute({
         sql: "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)",
-        args: [entries[i].tag, entries[i].when],
+        args: [entry.tag, entry.when],
       });
-    } catch {
-      // May already exist (drizzle-kit may have inserted it)
+      await tx.commit();
+    } catch (err: unknown) {
+      try {
+        await tx.rollback();
+      } catch { /* transaction already closed */ }
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(
+        `[migrate] Migration ${entry.tag} FAILED and was rolled back. ` +
+        `Failing statement: ${stmtSnippet(failingStmt)}. Aborting — later migrations were NOT attempted.`,
+      );
+      throw new Error(`Migration ${entry.tag} failed: ${message}`, { cause: err });
+    } finally {
+      tx.close();
     }
   }
 }

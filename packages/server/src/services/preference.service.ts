@@ -1,4 +1,5 @@
 import { readdirSync, statSync } from "node:fs";
+import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { db } from "../db/index.js";
@@ -56,6 +57,22 @@ export interface ProviderDivergenceRejection {
   settingsProvider: string | null;
   settingsProfile: string | null;
 }
+
+/**
+ * Provider/profile keys that participate in Bullseye divergence. A write that does
+ * not touch any of these can never CREATE divergence, so the guard skips it (an
+ * unrelated toggle save must never be blocked by a pre-existing, untouched drift).
+ * Exported so other write paths (the CLI's `preferences set`, #973) can route
+ * exactly these keys through the guarded `updateSettings` instead of the raw
+ * repository `setPreference`.
+ */
+export const PROVIDER_DIVERGENCE_KEYS: ReadonlySet<string> = new Set([
+  "provider",
+  "claude_profile",
+  "codex_profile",
+  "copilot_profile",
+  "pi_profile",
+]);
 
 function isConductorEnabledPreference(value: string | null | undefined): boolean {
   if (!value) return false;
@@ -128,13 +145,6 @@ export function createPreferenceService({ database }: { database: Database }) {
     return { applied, dropped, divergence: null };
   }
 
-  /**
-   * Provider/profile keys that participate in Bullseye divergence. A write that does
-   * not touch any of these can never CREATE divergence, so the guard skips it (an
-   * unrelated toggle save must never be blocked by a pre-existing, untouched drift).
-   */
-  const PROVIDER_DIVERGENCE_KEYS = new Set(["provider", "claude_profile", "codex_profile", "copilot_profile", "pi_profile"]);
-
   async function checkProviderDivergenceGuard(
     entries: Array<{ key: string; value: string }>,
   ): Promise<ProviderDivergenceRejection | null> {
@@ -165,7 +175,7 @@ export function createPreferenceService({ database }: { database: Database }) {
     if (strategyEntries.length === 0) return;
     // Default ON: a Bullseye save regenerates the git-tracked objective.md, and an
     // uncommitted main checkout blocks the auto-merge queue. Opt out via the setting.
-    const autoCommit = (await getPreference("auto_commit_strategy_objective", database)) !== "false";
+    const autoCommit = parseBoolSetting("auto_commit_strategy_objective", await getPreference("auto_commit_strategy_objective", database));
     for (const entry of strategyEntries) {
       const projectId = projectIdFromBoardStrategyKey(entry.key);
       if (!projectId) continue;

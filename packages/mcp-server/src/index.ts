@@ -195,6 +195,22 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   wait_workspace: registerWaitWorkspace,
 };
 
+// Parse the `disabled_mcp_tools` preference into a normalized lookup set.
+//
+// This is the ONLY authority knob on the (unauthenticated, single-user) MCP surface, so
+// the parse must be forgiving of how a human writes the pref. We:
+//   - trim() every entry, so `"delete_issue, delete_workspace"` (the natural way to write
+//     a comma list) disables BOTH, not just the first.
+//   - lowercase every entry, applying a CASE-INSENSITIVE policy: tool names registered in
+//     TOOL_REGISTRARS are all lowercase snake_case, so `"Delete_Issue"` must match
+//     `delete_issue`. Callers MUST compare lowercased tool names against this set
+//     (see main() — `name` keys are already lowercase).
+// Dropping the trim/lowercase here is a silent security gap: a tool the user believes is
+// disabled stays callable.
+function normalizeDisabledEntry(entry: string): string {
+  return entry.trim().toLowerCase();
+}
+
 async function getDisabledTools(): Promise<Set<string>> {
   try {
     const rows = await db.select({ value: schema.preferences.value })
@@ -202,7 +218,7 @@ async function getDisabledTools(): Promise<Set<string>> {
       .where(eq(schema.preferences.key, "disabled_mcp_tools"))
       .limit(1);
     if (rows.length > 0 && rows[0].value) {
-      return new Set(rows[0].value.split(",").filter(Boolean));
+      return new Set(rows[0].value.split(",").map(normalizeDisabledEntry).filter(Boolean));
     }
   } catch {}
   return new Set();

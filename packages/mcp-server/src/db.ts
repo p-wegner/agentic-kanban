@@ -1,59 +1,75 @@
-import { resolve, join } from "node:path";
-import { homedir } from "node:os";
+import { resolve } from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
 import { drizzle } from "drizzle-orm/libsql";
 import { createClient } from "@libsql/client";
 import * as schema from "@agentic-kanban/shared/schema";
+import { assertForeignKeysEnabled } from "@agentic-kanban/shared/lib/fk-assert";
+import { resolveDbLocation } from "@agentic-kanban/shared/lib/db-path";
 
-// Resolve DB path: prefer env var, then monorepo dev DB, then ~/.agentic-kanban/.
-// NOTE: the monorepo dev DB (../../server/kanban.db) must take precedence over the
-// ~/.agentic-kanban fallback. Otherwise, when both exist, an MCP server spawned during
-// monorepo development reads the stale published DB instead of the dev DB the main
-// server uses — causing tools to report the wrong board (see butler #45 investigation).
-// `import.meta.dirname` only resolves to a real dev path inside the monorepo, so this is
-// a no-op for published installs (devPath won't exist → falls through to publishedPath).
-function resolveDbPath(): string {
-  if (process.env.DB_URL) return process.env.DB_URL;
-  const dataDir = process.env.AGENTIC_KANBAN_DIR || join(homedir(), ".agentic-kanban");
-  const publishedPath = resolve(dataDir, "kanban.db");
-  // Monorepo dev: ../../server/kanban.db relative to this file — prefer it when present.
-  const devPath = resolve(import.meta.dirname, "../../server/kanban.db");
-  if (existsSync(devPath)) return devPath;
-  // Published default: ~/.agentic-kanban/kanban.db
-  if (existsSync(publishedPath)) return publishedPath;
-  // Fallback: create ~/.agentic-kanban/ and use it
-  if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
-  return publishedPath;
-}
+// Resolve the DB via the SHARED resolver so the MCP server and the HTTP server
+// (packages/server/src/db/data-dir.ts) agree on ONE precedence (#962). The MCP
+// server used to let a present monorepo dev DB outrank AGENTIC_KANBAN_DIR — so
+// with the env var set the two processes silently opened different databases.
+// Now an explicit env override (DB_URL / AGENTIC_KANBAN_DIR) ALWAYS wins; the
+// monorepo dev DB (../../server/kanban.db, relative to this file) is only the
+// in-checkout probe used when no env override is set. `import.meta.dirname`
+// resolves to a real dev path only inside the monorepo, so the candidate simply
+// doesn't exist for published installs.
+const location = resolveDbLocation({
+  localDbCandidates: [resolve(import.meta.dirname, "../../server/kanban.db")],
+});
+const url = location.url;
 
-const dbPath = resolveDbPath();
-const url = dbPath.startsWith("file:") ? dbPath : `file:${dbPath}`;
+// Log the resolved absolute DB path at startup so a split-brain is visible.
+// MCP speaks JSON-RPC over stdout, so diagnostics MUST go to stderr.
+console.error(`[mcp-db] opening ${location.path ?? url} (source: ${location.source})`);
 
-async function applyPragmas(c: ReturnType<typeof createClient>) {
+// Ensure the target directory exists (the home-dir fallback may not yet).
+if (location.dir && !existsSync(location.dir)) mkdirSync(location.dir, { recursive: true });
+
+const PRAGMAS: ReadonlyArray<readonly [pragma: string, rationale: string]> = [
   // foreign_keys=ON: SQLite/libsql enforce FK constraints per connection.
-  await c.execute("PRAGMA foreign_keys=ON");
+  ["PRAGMA foreign_keys=ON", "FK enforcement (per connection)"],
   // journal_mode=WAL: multiple readers never block a writer; writer doesn't block readers.
-  await c.execute("PRAGMA journal_mode=WAL");
+  ["PRAGMA journal_mode=WAL", "WAL journal mode"],
   // busy_timeout: wait up to 10s for a locked DB before throwing SQLITE_BUSY.
-  await c.execute("PRAGMA busy_timeout=10000");
+  ["PRAGMA busy_timeout=10000", "busy timeout"],
   // synchronous=NORMAL: crash-safe with WAL; removes an fsync per commit.
-  await c.execute("PRAGMA synchronous=NORMAL");
+  ["PRAGMA synchronous=NORMAL", "synchronous=NORMAL"],
   // temp_store=MEMORY: keep transient B-trees in RAM.
-  await c.execute("PRAGMA temp_store=MEMORY");
+  ["PRAGMA temp_store=MEMORY", "temp_store=MEMORY"],
   // cache_size=-65536: 64MB page cache.
-  await c.execute("PRAGMA cache_size=-65536");
+  ["PRAGMA cache_size=-65536", "page cache size"],
   // mmap_size=256MB: memory-map reads to cut syscall overhead.
-  await c.execute("PRAGMA mmap_size=268435456");
+  ["PRAGMA mmap_size=268435456", "mmap size"],
+];
+
+// Apply each pragma individually and LOG which one failed instead of swallowing
+// the whole batch (#955 — the empty catch here hid a failed foreign_keys=ON, which
+// leaves every shared-cascade ON DELETE clause silently inert). Non-FK pragmas are
+// perf/contention tuning and legitimately non-fatal (e.g. journal_mode=WAL fails on
+// a read-only DB), so a failure is logged but does not abort.
+async function applyPragmas(c: ReturnType<typeof createClient>) {
+  for (const [pragma, rationale] of PRAGMAS) {
+    try {
+      await c.execute(pragma);
+    } catch (err) {
+      console.error(
+        `[mcp-db] ${pragma} failed (${rationale}): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 }
 
 // Apply the same pragma discipline as the server DB entrypoint so MCP tools
 // cannot bypass FK enforcement and tolerate normal server write contention.
 const client = createClient({ url });
-try {
-  await applyPragmas(client);
-} catch {
-  // Non-fatal: pragmas may fail on read-only or in-memory DBs.
-}
+await applyPragmas(client);
+// Mirror the server's #894 startup guard (assertForeignKeysEnabled in startup-tasks):
+// read PRAGMA foreign_keys back and refuse to start if it is OFF — MCP's delete_issue
+// runs the shared cascade on this connection, so inert FKs must be a loud failure,
+// not a silent one. Same severity as the server: throw (kills MCP startup).
+await assertForeignKeysEnabled(client, "MCP");
 
 export const db = drizzle({ client, schema });
 export const rawClient = client;

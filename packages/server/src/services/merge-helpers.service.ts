@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,7 +9,7 @@ import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { PREF_LEARNING_STEP_BEFORE_MERGE } from "../constants/preference-keys.js";
-import { getSessionStatus } from "../repositories/merge-helpers.repository.js";
+import { getSessionStatus } from "../repositories/session.repository.js";
 
 const execFileAsync = promisify(execFile);
 const moduleDir = dirname(fileURLToPath(import.meta.url));
@@ -115,7 +116,7 @@ export async function runLearningStep(
   database: Database,
   getSessionManager: () => SessionManager,
 ): Promise<void> {
-  if (prefMap.get(PREF_LEARNING_STEP_BEFORE_MERGE) !== "true") return;
+  if (!getBool(prefMap, PREF_LEARNING_STEP_BEFORE_MERGE)) return;
 
   try {
     const learningPrompt = buildLearningStepPrompt(true);

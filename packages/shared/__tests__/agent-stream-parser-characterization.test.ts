@@ -430,7 +430,7 @@ describe("codex parser characterization", () => {
               "command": "ls -la",
             },
             "kind": "tool_use",
-            "name": "shell_command",
+            "name": "shell",
           },
         ],
         "toolActivity": {
@@ -454,7 +454,7 @@ describe("codex parser characterization", () => {
             "isError": false,
             "kind": "tool_result",
             "output": "file.txt",
-            "toolName": "shell_command",
+            "toolName": "shell",
             "toolUseId": "c1",
           },
         ],

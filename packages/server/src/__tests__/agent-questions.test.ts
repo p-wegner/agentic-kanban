@@ -13,7 +13,8 @@ import {
   type AgentQuestionRecommendation,
 } from "../services/agent-questions.service.js";
 import { createTestDb } from "./helpers/test-db.js";
-import { getPreference, setPreference } from "../repositories/preferences.repository.js";
+import { setPreference } from "../repositories/preferences.repository.js";
+import { getRuntimeState } from "../repositories/runtime-state.repository.js";
 import {
   projects,
   projectStatuses,
@@ -212,7 +213,7 @@ describe("markDismissed / isAnswered", () => {
     expect(await isAnswered("tu-1", db)).toBe(false);
     await markDismissed("tu-1", "2026-05-28T11:45:00.000Z", db);
     expect(await isAnswered("tu-1", db)).toBe(true);
-    const raw = await getPreference("agent_question_answered_tu-1", db);
+    const raw = await getRuntimeState("agent_question_answered_tu-1", db);
     expect(JSON.parse(raw!)).toEqual({ dismissed: true, dismissedAt: "2026-05-28T11:45:00.000Z" });
   });
 
@@ -220,7 +221,7 @@ describe("markDismissed / isAnswered", () => {
     const { db } = createTestDb();
     await markAnswered("tu-2", db);
     expect(await isAnswered("tu-2", db)).toBe(true);
-    expect(await getPreference("agent_question_answered_tu-2", db)).toBe("1");
+    expect(await getRuntimeState("agent_question_answered_tu-2", db)).toBe("1");
   });
 });
 

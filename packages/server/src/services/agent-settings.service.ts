@@ -1,4 +1,5 @@
 import { resolve, dirname } from "node:path";
+import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { preferences } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
@@ -90,13 +91,13 @@ export function resolveAgentSettings(
 
   // `--dangerously-skip-permissions` is Claude-specific. Codex and Copilot get
   // provider-native permission handling in their providers and reject Claude flags.
-  const skipPerms = prefMap.get(PREF_SKIP_PERMISSIONS) !== "false" && provider === "claude";
+  const skipPerms = getBool(prefMap, PREF_SKIP_PERMISSIONS) && provider === "claude";
   const baseArgs = prefMap.get(PREF_AGENT_ARGS) || "";
   const agentArgs = skipPerms
     ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
     : (baseArgs || undefined);
 
-  const resumeWithNewModel = prefMap.get(PREF_RESUME_WITH_NEW_MODEL) === "true";
+  const resumeWithNewModel = getBool(prefMap, PREF_RESUME_WITH_NEW_MODEL);
 
   const permPref = prefMap.get(PREF_PERMISSION_PROMPT_TOOL);
   const permissionPromptTool = permPref === "true"

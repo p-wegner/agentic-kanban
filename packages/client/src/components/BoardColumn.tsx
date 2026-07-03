@@ -17,6 +17,7 @@ import {
   type SortMode,
 } from "../lib/boardColumnSort.js";
 import type { CardDensity } from "../hooks/useBoardPreferences.js";
+import { useBoardCursorStore } from "../stores/boardCursorStore.js";
 import "./BoardColumn.css";
 
 export type SwimlaneDimension = "none" | "priority" | "tag";
@@ -38,14 +39,9 @@ interface BoardColumnProps {
   onDuplicate?: (issue: IssueWithStatus) => void;
   onMoveToNext?: (issue: IssueWithStatus, nextStatusId: string) => void;
   onDeleteIssue?: (issueId: string) => void;
-  searchQuery?: string;
   sessionActivity?: Record<string, string>;
   liveStats?: Record<string, LiveSessionStats>;
   sessionTodos?: Record<string, TodoItem[]>;
-  pendingIssueIds?: Set<string>;
-  pendingWorkspaceIssueIds?: Set<string>;
-  selectedIssueIds?: Set<string>;
-  keyboardCursorIssueId?: string | null;
   allProjectTags?: ProjectTag[];
   quickUpdate?: QuickUpdateCallbacks;
   children?: React.ReactNode;
@@ -97,14 +93,9 @@ export function BoardColumn({
   onDuplicate,
   onMoveToNext,
   onDeleteIssue,
-  searchQuery,
   sessionActivity,
   liveStats,
   sessionTodos,
-  pendingIssueIds,
-  pendingWorkspaceIssueIds,
-  selectedIssueIds,
-  keyboardCursorIssueId,
   allProjectTags,
   quickUpdate,
   children,
@@ -128,6 +119,9 @@ export function BoardColumn({
   agingWarmDays = 3,
   agingHotDays = 7,
 }: BoardColumnProps) {
+  // Cursor slice (#958): subscribed here only for the virtualizer
+  // scroll-follow effect; the per-card highlight lives in BoardColumnCard.
+  const keyboardCursorIssueId = useBoardCursorStore((s) => s.keyboardCursorIssueId);
   const [dragOver, setDragOver] = useState(false);
   const dragCounterRef = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -274,14 +268,9 @@ export function BoardColumn({
       quickUpdate={quickUpdate}
       statusOptions={statusOptions}
       onDeleteIssue={onDeleteIssue}
-      searchQuery={searchQuery}
       sessionActivity={sessionActivity}
       liveStats={liveStats}
       sessionTodos={sessionTodos}
-      pendingIssueIds={pendingIssueIds}
-      pendingWorkspaceIssueIds={pendingWorkspaceIssueIds}
-      selectedIssueIds={selectedIssueIds}
-      keyboardCursorIssueId={keyboardCursorIssueId}
       cardDensity={cardDensity}
       showAgingHeatmap={showAgingHeatmap}
       agingWarmDays={agingWarmDays}

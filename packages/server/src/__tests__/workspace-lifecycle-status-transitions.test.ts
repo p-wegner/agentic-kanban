@@ -15,11 +15,8 @@ vi.mock("../services/git.service.js", () => ({
   prepareForReview: vi.fn(async () => ({ success: true, diffRef: "master", conflictingFiles: [], uncommittedChanges: [] })),
 }));
 vi.mock("../services/butler-event-feed.js", () => ({ emitButlerSystemEvent: vi.fn() }));
-vi.mock("../services/agent-settings.service.js", () => ({
-  isMockProfile: vi.fn(() => false),
-  toExecutorProvider: vi.fn((p: string) => p),
-  MOCK_AGENT_COMMAND: "mock",
-  loadAgentSettings: vi.fn(async () => ({
+vi.mock("../services/agent-settings.service.js", () => {
+  const stubAgentSettings = () => ({
     agentCommand: undefined,
     agentArgs: undefined,
     claudeProfile: undefined,
@@ -27,8 +24,15 @@ vi.mock("../services/agent-settings.service.js", () => ({
     provider: "claude",
     resumeWithNewModel: false,
     permissionPromptTool: undefined,
-  })),
-}));
+  });
+  return {
+    isMockProfile: vi.fn(() => false),
+    toExecutorProvider: vi.fn((p: string) => p),
+    MOCK_AGENT_COMMAND: "mock",
+    loadAgentSettings: vi.fn(async () => stubAgentSettings()),
+    resolveAgentSettings: vi.fn(() => stubAgentSettings()),
+  };
+});
 vi.mock("../startup/review-helpers.js", () => ({
   applyWorkspaceProfileToPrefs: vi.fn((m: Map<string, string>) => m),
   buildReviewArgs: vi.fn(() => undefined),
@@ -79,6 +83,15 @@ import { createTestDb } from "./helpers/test-db.js";
 import { createWorkflowEngine } from "../startup/exit-workflow.js";
 import { createWorkspaceSessionService } from "../services/workspace-session.service.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
+import { activeMerges } from "../services/workspace-internals.js";
+
+// Test isolation: the per-repoPath merge lock (activeMerges) is a module-level Map
+// (see workspace-merge-service.test.ts ~line 22). Clearing it before each test
+// prevents a lock left by one test's merge from leaking into the next and failing
+// with "A merge is already in progress for this repository".
+beforeEach(() => {
+  activeMerges.clear();
+});
 
 // ─── shared helpers ──────────────────────────────────────────────────────────
 

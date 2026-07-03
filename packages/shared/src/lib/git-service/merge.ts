@@ -37,6 +37,64 @@ async function scanTreeForConflictMarkers(repoPath: string, treeSha: string, pat
     .filter((f) => !f.endsWith(".md"));
 }
 
+/**
+ * Thrown when advancing the target branch ref fails its compare-and-swap check:
+ * an external commit landed on the target branch between reading its tip (the
+ * merge computation's base) and `git update-ref`. Advancing anyway would orphan
+ * that external commit — the historical "silent merge loss" class (#980). The
+ * merge computation itself is sound; retrying against the new tip is safe.
+ */
+export class RefAdvanceRaceError extends Error {
+  /** Recomputing the merge against the branch's new tip is safe. */
+  readonly retryable = true;
+
+  constructor(
+    readonly targetBranch: string,
+    /** The target tip the merge was computed against. */
+    readonly expectedSha: string,
+    /** The tip actually found on the branch at update-ref time (null if unreadable). */
+    readonly actualSha: string | null,
+  ) {
+    super(
+      `Merge aborted: refs/heads/${targetBranch} moved during the merge ` +
+        `(expected ${expectedSha.slice(0, 12)}, found ${actualSha ? actualSha.slice(0, 12) : "unknown"}). ` +
+        `An external commit landed on ${targetBranch} after the merge was computed; ` +
+        `advancing the ref anyway would silently orphan it. Retry the merge against the new tip.`,
+    );
+    this.name = "RefAdvanceRaceError";
+  }
+}
+
+/**
+ * Advance `refs/heads/<targetBranch>` to `newSha` with git's compare-and-swap:
+ * `git update-ref <ref> <new> <expected-old>` atomically refuses when the ref no
+ * longer points at `expectedOldSha`. On CAS failure throws {@link RefAdvanceRaceError};
+ * any other update-ref failure propagates as a normal error.
+ */
+async function advanceRefWithCas(
+  repoPath: string,
+  targetBranch: string,
+  newSha: string,
+  expectedOldSha: string,
+): Promise<void> {
+  const ref = `refs/heads/${targetBranch}`;
+  const { stderr, code, error } = await gitExec(
+    ["update-ref", ref, newSha, expectedOldSha],
+    { cwd: repoPath },
+  );
+  if (code === 0 && !error) return;
+
+  // Distinguish the CAS race (ref moved) from other update-ref failures (locks, perms).
+  const { stdout: actualOut } = await gitExec(["rev-parse", "--verify", ref], { cwd: repoPath });
+  const actualSha = actualOut.trim() || null;
+  if (actualSha !== expectedOldSha) {
+    throw new RefAdvanceRaceError(targetBranch, expectedOldSha, actualSha);
+  }
+  throw new Error(
+    `git update-ref ${ref} failed: ${stderr.trim() || error?.message || `exit code ${code}`}`,
+  );
+}
+
 /** Hash a string into the object DB as a blob and return its SHA. */
 async function hashObjectFromStdin(repoPath: string, content: string): Promise<string> {
   const stdout = await gitExecOrThrow(["hash-object", "-w", "--stdin"], { cwd: repoPath, input: content });
@@ -67,7 +125,7 @@ async function tryResolveAppendOnlyMerge(
    * Seeding from the target tree instead would silently drop them (silent merge loss).
    */
   mergedTreeSha: string,
-): Promise<{ commitSha: string; resolvedFiles: string[] } | null> {
+): Promise<{ commitSha: string; targetSha: string; resolvedFiles: string[] } | null> {
   if (conflictingFiles.length === 0) return null;
 
   const targetSha = (await execGit(["rev-parse", targetBranch], repoPath)).trim();
@@ -112,7 +170,7 @@ async function tryResolveAppendOnlyMerge(
       ["commit-tree", mergedTree, "-p", targetSha, "-p", featureSha, "-m", `Merge branch '${featureBranch}' (append-only auto-resolve)`],
       repoPath,
     )).trim();
-    return { commitSha, resolvedFiles: resolutions.map((r) => r.path) };
+    return { commitSha, targetSha, resolvedFiles: resolutions.map((r) => r.path) };
   } catch {
     return null;
   } finally {
@@ -286,7 +344,10 @@ export async function mergeBranch(
       treeSha,
     );
     if (resolved) {
-      await execGit(["update-ref", `refs/heads/${targetBranch}`, resolved.commitSha], repoPath);
+      // CAS against the tip the resolved merge commit was actually parented on
+      // (re-read inside tryResolveAppendOnlyMerge) — an external commit landing
+      // after that read must fail loudly, never be orphaned (#980).
+      await advanceRefWithCas(repoPath, targetBranch, resolved.commitSha, resolved.targetSha);
       const needsSync = options?.syncWorkingTree || targetIsCheckedOut;
       if (needsSync && !options?.deferWorkingTreeSync) {
         await syncWorkingTreeHard(repoPath, resolved.commitSha);
@@ -331,8 +392,11 @@ export async function mergeBranch(
     repoPath,
   )).trim();
 
-  // Atomically advance the target branch ref.
-  await execGit(["update-ref", `refs/heads/${targetBranch}`, newCommitSha], repoPath);
+  // Atomically advance the target branch ref, compare-and-swap against the tip the
+  // merge was computed from (#980). If an external commit landed on the target branch
+  // between the rev-parse above and now, git refuses the update and we fail loudly
+  // (RefAdvanceRaceError) instead of silently orphaning that commit.
+  await advanceRefWithCas(repoPath, targetBranch, newCommitSha, targetSha);
 
   // Sync the working tree to the new merge commit when the target branch is
   // checked out here (otherwise repoPath silently desyncs), or when a caller
@@ -539,4 +603,4 @@ export async function isMergeInProgress(repoPath: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
+}

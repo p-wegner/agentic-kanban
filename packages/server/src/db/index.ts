@@ -1,27 +1,16 @@
 import { drizzle } from "drizzle-orm/libsql";
 import { createClient } from "@libsql/client";
 import * as schema from "@agentic-kanban/shared/schema";
-import { getDbUrl, ensureDataDir } from "./data-dir.js";
+import { getDbUrl, ensureDataDir, DB_LOCATION } from "./data-dir.js";
+// Single pragma implementation shared with script clients (db-repair etc., #987) —
+// a bare createClient without these runs with foreign_keys=OFF for the connection.
+import { applyPragmas } from "./pragmas.js";
 
 ensureDataDir();
 const DB_URL = getDbUrl();
-
-async function applyPragmas(c: ReturnType<typeof createClient>) {
-  // foreign_keys=ON: SQLite/libsql enforce FK constraints per connection.
-  await c.execute("PRAGMA foreign_keys=ON");
-  // journal_mode=WAL: multiple readers never block a writer; writer doesn't block readers.
-  await c.execute("PRAGMA journal_mode=WAL");
-  // busy_timeout: wait up to 10s for a locked DB before throwing SQLITE_BUSY.
-  await c.execute("PRAGMA busy_timeout=10000");
-  // synchronous=NORMAL: crash-safe with WAL; removes an fsync per commit.
-  await c.execute("PRAGMA synchronous=NORMAL");
-  // temp_store=MEMORY: keep transient B-trees in RAM.
-  await c.execute("PRAGMA temp_store=MEMORY");
-  // cache_size=-65536: 64MB page cache.
-  await c.execute("PRAGMA cache_size=-65536");
-  // mmap_size=256MB: memory-map reads to cut syscall overhead.
-  await c.execute("PRAGMA mmap_size=268435456");
-}
+// Log the resolved absolute DB path at startup so a split-brain (server and MCP
+// opening different databases) is visible instead of silent (#962).
+console.log(`[db] opening ${DB_LOCATION.path ?? DB_URL} (source: ${DB_LOCATION.source})`);
 
 // Read connection — used for board/API queries. With WAL, readers proceed against the
 // last checkpoint while the write connection commits, so board reads no longer queue
