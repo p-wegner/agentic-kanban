@@ -113,6 +113,8 @@ export function createAutoMergeOrchestrator(deps: {
         issueCurrentNodeId: issues.currentNodeId,
         issueCurrentNodeType: workflowNodes.nodeType,
         readyForMerge: workspaces.readyForMerge,
+        parentWorkspaceId: workspaces.parentWorkspaceId,
+        forkStatus: workspaces.forkStatus,
       })
       .from(workspaces)
       .innerJoin(issues, eq(workspaces.issueId, issues.id))
@@ -129,6 +131,10 @@ export function createAutoMergeOrchestrator(deps: {
       ));
 
     return rows
+      // #998: a fork child (parentWorkspaceId set, or forkStatus stamped) is an ephemeral
+      // sub-branch consolidated by its JOIN — it must never be auto-merged directly; only
+      // the join consolidates its commits into the parent.
+      .filter((row) => !row.parentWorkspaceId && !row.forkStatus)
       // Per-project opt-out (e.g. the dev board merges deliberately, not via this queue).
       .filter((row) => !autoMergeDisabledProjectIds.has(row.projectId))
       // Terminal-status (Done/Cancelled) workspaces are normally excluded — a user may

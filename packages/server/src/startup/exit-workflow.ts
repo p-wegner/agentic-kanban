@@ -888,6 +888,14 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
       console.log(`[workflow] workspace ${workspaceId} is on a non-terminal workflow node  skipping legacy auto-review (#997)`);
       return;
     }
+    // #998: a fork child (parentWorkspaceId set, or forkStatus stamped) is an ephemeral
+    // sub-branch consolidated by its JOIN — it must never be auto-reviewed or get
+    // readyForMerge on its own. Without this guard, a child that already joined can be
+    // picked up here on its own session exit and flipped back to idle/reviewing.
+    if (workspace.parentWorkspaceId || workspace.forkStatus) {
+      console.log(`[workflow] workspace ${workspaceId} is a fork child (parentWorkspaceId=${workspace.parentWorkspaceId ?? "n/a"}, forkStatus=${workspace.forkStatus ?? "n/a"})  skipping legacy auto-review (#998)`);
+      return;
+    }
     const autoReview = !skipAutoReview && (workspace.requiresReview || isAutoReviewEnabled(prefMap.get(AUTO_REVIEW_PREF_KEY)));
     if (!autoReview) return;
     await launchAutoReview(ctx);
