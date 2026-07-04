@@ -287,7 +287,6 @@ export function createWorkflowForkService(deps: {
         buildTransitionBlock(entry, transitions, childWorkspaceId);
 
     const cfg = await resolveAgentConfig(entry);
-    console.log(`[fork] child "${entry.name}" (${childWorkspaceId}) launching on provider=${toExecutorProvider(cfg.provider)}${cfg.model ? ` model=${cfg.model}` : ""}.`);
 
     await insertLaunchedChildWorkspace({
       id: childWorkspaceId,
@@ -324,6 +323,7 @@ export function createWorkflowForkService(deps: {
 
     if (getSessionManager) {
       try {
+        console.log(`[fork] child "${entry.name}" (${childWorkspaceId}) launching on provider=${toExecutorProvider(cfg.provider)}${cfg.model ? ` model=${cfg.model}` : ""}.`);
         await getSessionManager().startSession({
           workspaceId: childWorkspaceId,
           prompt,
