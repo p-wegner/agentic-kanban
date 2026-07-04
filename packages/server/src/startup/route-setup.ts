@@ -11,6 +11,7 @@ import { createSessionsRoute } from "../routes/sessions.js";
 import type { createBoardEvents } from "../services/board-events.js";
 import { ReviewError, startManualReview } from "../services/review.service.js";
 import { createSessionManager } from "../services/session.manager.js";
+import type { createWorkflowForkService } from "../services/workflow-fork.service.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -21,9 +22,11 @@ export interface RouteSetupDeps {
   fixAndMergeSessionIds: Set<string>;
   db: Database;
   upgradeWebSocket: UpgradeWebSocket;
+  /** Shared with the session-exit workflow — see `RouteOptions.forkService`. */
+  forkService?: ReturnType<typeof createWorkflowForkService>;
 }
 
-export function setupRoutes(app: Hono, { sessionManager, boardEvents, reviewSessionIds, fixAndMergeSessionIds, db, upgradeWebSocket }: RouteSetupDeps) {
+export function setupRoutes(app: Hono, { sessionManager, boardEvents, reviewSessionIds, fixAndMergeSessionIds, db, upgradeWebSocket, forkService }: RouteSetupDeps) {
   app.post("/api/workspaces/:id/review", async (c) => {
     const workspaceId = c.req.param("id");
     try {
@@ -57,7 +60,7 @@ export function setupRoutes(app: Hono, { sessionManager, boardEvents, reviewSess
 
   app.get("/ws/sessions/:sessionId", sessionManager.wsRoute());
   app.get("/ws/board/:projectId", createBoardWsRoute(upgradeWebSocket, boardEvents));
-  app.route("/api", createRoutes(db, () => sessionManager, { boardEvents, fixAndMergeSessionIds }));
+  app.route("/api", createRoutes(db, () => sessionManager, { boardEvents, fixAndMergeSessionIds, forkService }));
   app.route("/api/sessions", createSessionsRoute(db));
 
   const clientDir = resolve(__dirname, "../client");
