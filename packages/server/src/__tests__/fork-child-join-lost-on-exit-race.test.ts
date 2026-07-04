@@ -184,4 +184,37 @@ describe("#1000: fork child join lost on session-exit classifier race", () => {
     expect(after.status).toBe("blocked");
     expect(after.forkStatus).toBe("running");
   });
+
+  it("#1003: does not reopen a fork child already joined/closed when its own session exits afterward", async () => {
+    // Simulate the state immediately AFTER a successful join: the child's own
+    // CLI process is still shutting down (its session row is still "running"),
+    // but the join already flipped it to forkStatus="joined"/status="closed".
+    const { childId, joinNodeId } = await seedForkChildAlreadyOnJoinNode(db);
+    const closedAt = "2026-07-04T20:58:13.640Z";
+    await db.update(workspaces)
+      .set({ forkStatus: "joined", status: "closed", closedAt })
+      .where(eq(workspaces.id, childId));
+
+    const sessionManager = makeSessionManager();
+    const { runWorkflowOnExit } = createWorkflowEngine({
+      sessionManager: sessionManager as never,
+      boardEvents: makeBoardEvents() as never,
+      autoMerge: vi.fn(async () => {}),
+      database: db as never,
+    });
+
+    const [{ id: sessionId }] = await db.select({ id: sessions.id }).from(sessions).where(eq(sessions.workspaceId, childId));
+    // A plain, non-rate-limited exit — the exact case that previously slipped past
+    // the "closed && mergedAt" guard because a fork child is closed without ever
+    // being merged.
+    await db.update(sessions).set({ stats: null }).where(eq(sessions.id, sessionId));
+    await runWorkflowOnExit(childId, sessionId, 0);
+
+    const [after] = await db.select().from(workspaces).where(eq(workspaces.id, childId));
+    expect(after.status).toBe("closed");
+    expect(after.closedAt).toBe(closedAt);
+    expect(after.forkStatus).toBe("joined");
+    expect(after.currentNodeId).toBe(joinNodeId);
+    expect(sessionManager.startSession).not.toHaveBeenCalled();
+  });
 });
