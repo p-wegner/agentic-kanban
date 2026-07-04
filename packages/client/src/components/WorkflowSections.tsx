@@ -241,6 +241,30 @@ export function WorkflowFollowUpSection({
             When analyzing dependencies, backlog tickets whose AI-predicted touched files overlap at or above this fraction (0–1) are surfaced as advisory <code>coupled_with</code> suggestions. Advisory only — accepting one creates the coupling edge.
           </p>
         </div>
+        <div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-600 dark:text-gray-400">Workflow fork concurrency (per fork / per project)</label>
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={settings.workflow_fork_max_per_workspace ?? "2"}
+              onChange={(e) => set("workflow_fork_max_per_workspace")(e.target.value)}
+              className="w-16 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={settings.workflow_fork_max_per_project ?? "4"}
+              onChange={(e) => set("workflow_fork_max_per_project")(e.target.value)}
+              className="w-16 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
+          </div>
+          <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500 leading-snug">
+            How many parallel-fork children run concurrently: per fork (default 2) and across the whole project (default 4). Excess children queue and drain as slots free up. A fork node's "Max parallel children" in the workflow builder overrides the per-fork value.
+          </p>
+        </div>
         <Toggle
           checked={settings.auto_rebase_on_continue === "true"}
           onChange={setBool("auto_rebase_on_continue")}

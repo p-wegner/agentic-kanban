@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getNodeAgentOverride } from "../src/lib/workflow-engine/node-config.js";
+import { getNodeAgentOverride, getForkMaxParallel } from "../src/lib/workflow-engine/node-config.js";
 
 describe("getNodeAgentOverride", () => {
   it("returns null for missing/empty/invalid config", () => {
@@ -30,5 +30,22 @@ describe("getNodeAgentOverride", () => {
   it("trims and drops empty strings", () => {
     const config = JSON.stringify({ agent: { provider: "claude", profile: "  ", model: " m1 " } });
     expect(getNodeAgentOverride(config)).toEqual({ provider: "claude", model: "m1" });
+  });
+});
+
+describe("getForkMaxParallel", () => {
+  it("returns null for missing/invalid values", () => {
+    expect(getForkMaxParallel(null)).toBeNull();
+    expect(getForkMaxParallel("not json")).toBeNull();
+    expect(getForkMaxParallel(JSON.stringify({ forkMode: "shared" }))).toBeNull();
+    expect(getForkMaxParallel(JSON.stringify({ maxParallel: 0 }))).toBeNull();
+    expect(getForkMaxParallel(JSON.stringify({ maxParallel: -3 }))).toBeNull();
+    expect(getForkMaxParallel(JSON.stringify({ maxParallel: "abc" }))).toBeNull();
+  });
+
+  it("parses and floors positive numbers", () => {
+    expect(getForkMaxParallel(JSON.stringify({ maxParallel: 3 }))).toBe(3);
+    expect(getForkMaxParallel(JSON.stringify({ maxParallel: 2.9 }))).toBe(2);
+    expect(getForkMaxParallel(JSON.stringify({ maxParallel: "4" }))).toBe(4);
   });
 });
