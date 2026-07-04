@@ -171,10 +171,15 @@ describe("workflow fork/join orchestration", () => {
     const r = await proposeTransition(db as any, { workspaceId: parentId, toNodeName: "Split Reviews" });
     expect(r.ok).toBe(true);
 
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
     await svc.onWorkspaceEnteredNode(parentId);
 
     // Two reviewers spawned, each on its node-pinned harness.
     expect(startSession).toHaveBeenCalledTimes(2);
+    // Per-child launch logs name the resolved provider for each harness override.
+    expect(logSpy.mock.calls.some((c) => String(c[0]).includes("claude-code"))).toBe(true);
+    expect(logSpy.mock.calls.some((c) => String(c[0]).includes("codex"))).toBe(true);
     const providersByPrompt = new Map<string, string>(
       startSession.mock.calls.map((c: any[]) => [c[0].prompt as string, c[0].provider as string]),
     );
@@ -196,6 +201,9 @@ describe("workflow fork/join orchestration", () => {
     }
     expect(startSession).toHaveBeenCalledTimes(1);
     expect(startSession.mock.calls[0][0].provider).toBe("claude-code");
+    // Join launch logs the resolved (board-default) provider too.
+    expect(logSpy.mock.calls.some((c) => String(c[0]).includes("[fork] join") && String(c[0]).includes("claude-code"))).toBe(true);
+    logSpy.mockRestore();
   });
 
   it("multi-harness-plan-review: two fork/join pairs in one template, each consolidated separately", async () => {
