@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSyncPnpm } from "./pnpm-exec.mjs";
 
 const DRIZZLE_CRITICAL_FILES = [
   "alias.js",
@@ -71,11 +71,9 @@ export function repairDrizzleIfNeeded(rootDir) {
   }
 
   console.warn("[dev] Running pnpm install to re-hardlink drizzle-orm...");
-  const result = spawnSync("pnpm", ["install", "--frozen-lockfile"], {
+  const result = spawnSyncPnpm(["install", "--frozen-lockfile"], {
     cwd: rootDir,
     stdio: "inherit",
-    shell: false,
-    windowsHide: true,
   });
 
   if (result.status === 0) {
