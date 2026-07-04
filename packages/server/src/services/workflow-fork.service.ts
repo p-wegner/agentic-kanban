@@ -287,6 +287,7 @@ export function createWorkflowForkService(deps: {
         buildTransitionBlock(entry, transitions, childWorkspaceId);
 
     const cfg = await resolveAgentConfig(entry);
+    console.log(`[fork] child "${entry.name}" (${childWorkspaceId}) launching on provider=${cfg.provider}${cfg.model ? ` model=${cfg.model}` : ""}.`);
 
     await insertLaunchedChildWorkspace({
       id: childWorkspaceId,
@@ -590,6 +591,7 @@ export function createWorkflowForkService(deps: {
         `${consolidateLine}\n\n` +
         buildTransitionBlock(joinNode, joinTransitions, parent.id);
       const cfg = await resolveAgentConfig(joinNode);
+      console.log(`[fork] join "${joinNode.name}" (${parent.id}) launching on provider=${cfg.provider}${cfg.model ? ` model=${cfg.model}` : ""}.`);
       const skillName = await injectNodeSkill(joinNode, parent.workingDir ?? project.repoPath, project.repoPath);
       await getSessionManager()
         .startSession({
