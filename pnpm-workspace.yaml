@@ -1,2 +1,14 @@
 packages:
   - "packages/*"
+
+# Always fetch the win32-x64 native binaries (rollup/esbuild/swc) in addition to
+# the host platform's, so a lockfile produced on one OS installs cleanly on
+# another. Replaces the old hard devDependency on @rollup/rollup-win32-x64-msvc,
+# which made `pnpm install` fail outright on macOS/Linux (unsupported platform).
+supportedArchitectures:
+  os:
+    - current
+    - win32
+  cpu:
+    - current
+    - x64

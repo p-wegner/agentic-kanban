@@ -123,7 +123,7 @@ Prompt templates in the `agent_skills` table, written to `.claude/skills/<name>/
 
 ## Clean-clone / first-start blockers (Windows)
 Full symptom→cause→fix in `docs/install.md` (“Clean-clone / first-start gotchas”). The `dev-server` skill Step 0 handles bootstrap automatically (no DB → `pnpm db:setup`; 0 projects → register). Key facts for triage:
-- **`spawn pnpm ENOENT`** — needs `pnpm.exe` on PATH, not just `pnpm.ps1`. Fix: `scoop install pnpm`.
+- **`spawn pnpm ENOENT`** — fixed: launcher/preflight scripts re-invoke pnpm via `npm_execpath` (`scripts/pnpm-exec.mjs`), so any pnpm install method works. If it still fires, pnpm is missing from PATH entirely.
 - **Client shared resolution** — fixed; `vite.config.ts` uses `development` condition → `src/`. Fallback: `pnpm --filter @agentic-kanban/shared build`.
 - **Backend hangs (proxy up, nothing on 13001)** — `tsx watch` + Node 23.x on Windows; use Node LTS 20/22.
 - **DB location** — `packages/server/kanban.db`; absent → falls back to `~/.agentic-kanban/kanban.db` (board looks empty).

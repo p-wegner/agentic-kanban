@@ -53,3 +53,6 @@ code-metrics-out/
 # Build output (per-stack; generated, not source — keeps a fresh worktree's main clean for auto-merge)
 build/
 .next/
+
+# npm lockfile — this repo is pnpm-managed (pnpm-lock.yaml is the lockfile of record)
+package-lock.json

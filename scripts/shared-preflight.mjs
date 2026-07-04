@@ -1,6 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { spawnSyncPnpm } from "./pnpm-exec.mjs";
 
 /**
  * Checks whether packages/shared appears wiped or incomplete by looking for
@@ -108,11 +109,9 @@ function _defaultRunGitRestore(rootDir) {
 }
 
 function _defaultRunPnpmInstallForce(rootDir) {
-  const result = spawnSync("pnpm", ["install", "--force"], {
+  const result = spawnSyncPnpm(["install", "--force"], {
     cwd: rootDir,
     stdio: "inherit",
-    shell: false,
-    windowsHide: true,
   });
   if (result.status !== 0) {
     console.error(
