@@ -44,6 +44,13 @@ interface RouteOptions {
   boardEvents?: BoardEvents;
   fixAndMergeSessionIds?: Set<string>;
   serverPort?: number;
+  /**
+   * Share one fork/join orchestrator instance with the session-exit workflow
+   * (#1000: the exit workflow needs `reconcileJoinedForkChild` to recover a fork
+   * child whose join notify was lost/raced) instead of each creating its own.
+   * Falls back to creating a fresh instance (e.g. in tests) when omitted.
+   */
+  forkService?: ReturnType<typeof createWorkflowForkService>;
 }
 
 export function createRoutes(database: Database, getSessionManager: () => SessionManager, options?: RouteOptions) {
@@ -51,7 +58,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
 
   // Parallel fork/join orchestrator (#82) — shared by the internal advance hook
   // and the REST manual-transition route.
-  const forkService = createWorkflowForkService({
+  const forkService = options?.forkService ?? createWorkflowForkService({
     database,
     getSessionManager,
     boardEvents: options?.boardEvents,
