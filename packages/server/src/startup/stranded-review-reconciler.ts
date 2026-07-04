@@ -77,6 +77,8 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
       projectId: issues.projectId,
       currentNodeId: workspaces.currentNodeId,
       currentNodeType: workflowNodes.nodeType,
+      parentWorkspaceId: workspaces.parentWorkspaceId,
+      forkStatus: workspaces.forkStatus,
     })
     .from(workspaces)
     .innerJoin(issues, eq(workspaces.issueId, issues.id))
@@ -92,6 +94,10 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
   let recovered = 0;
   for (const c of candidates) {
     if (!c.workingDir || !c.baseBranch) continue;
+    // #998: a fork child (parentWorkspaceId set, or forkStatus stamped) is an ephemeral
+    // sub-branch consolidated by its JOIN — never eligible for the stranded-review
+    // reconciler, which would otherwise re-launch a review on it or mark it readyForMerge.
+    if (c.parentWorkspaceId || c.forkStatus) continue;
     // #997: a workspace parked on a non-terminal workflow-template node is owned
     // by the graph — its own node-driven stages decide review/fix, not this
     // legacy reconciler. Skip it so a mid-workflow branch never gets silently
