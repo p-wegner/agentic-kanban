@@ -73,7 +73,7 @@ Example:
 
   program
     .command("cleanup")
-    .description("Show stale worktrees for closed workspaces.\n\nLists git worktrees belonging to closed/merged workspaces. These worktrees are no longer needed and can be removed manually with 'git worktree remove --force <path>'.\n\nThis command does NOT auto-remove worktrees -- it only reports them.")
+    .description("Show stale worktrees for closed workspaces.\n\nLists git worktrees belonging to closed/merged workspaces. These worktrees are no longer needed and can be removed manually with 'git worktree remove --force <path>'.\n\nThis command does NOT auto-remove worktrees -- it only reports them. Use --dry-run to preview the same listing with explicit \"would be removed\" wording and a summary count.")
     .option("--dry-run", "List what would be removed without making any changes")
     .addHelpText("after", `
 Example:
@@ -104,7 +104,7 @@ Example:
         if (options.dryRun) {
           console.log(`Dry run: would remove ${withWorktrees.length} worktree(s):`);
           for (const ws of withWorktrees) {
-            console.log(`  ${ws.branch} -> ${ws.workingDir}`);
+            console.log(`  ${ws.branch} -> ${ws.workingDir} (session ${ws.id})`);
           }
           console.log(`\nDry run: ${withWorktrees.length} worktree(s) would be removed. No changes made.`);
           process.exit(0);

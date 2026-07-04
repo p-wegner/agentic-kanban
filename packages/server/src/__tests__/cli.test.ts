@@ -341,6 +341,7 @@ describe("CLI cleanup", () => {
     expect(result.stdout).toContain("would be removed");
     expect(result.stdout).toContain("1 worktree(s)");
     expect(result.stdout).toContain("feature/test");
+    expect(result.stdout).toContain(workspaceId);
     expect(result.stdout).not.toContain("git worktree remove --force");
 
     const verifyClient = createClient({ url: `file:${ctx.dbPath}` });
