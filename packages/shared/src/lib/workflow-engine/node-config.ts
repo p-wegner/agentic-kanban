@@ -60,6 +60,46 @@ export function getForkMode(config: string | null): ForkMode {
   }
 }
 
+/** Agent harnesses a workflow node may pin its launches to. */
+export const NODE_AGENT_PROVIDERS = ["claude", "codex", "copilot", "pi"] as const;
+export type NodeAgentProvider = (typeof NODE_AGENT_PROVIDERS)[number];
+
+/**
+ * Per-node agent override, stored under the `agent` key of a node's JSON config.
+ * When the SERVER launches a session for this node (fork children, the join
+ * consolidator, spec phase nodes), these values override the board's global
+ * provider/profile/model selection — enabling e.g. a Claude reviewer and a
+ * Codex reviewer to run in parallel off one fork, with a third harness at the
+ * join. Absent/empty fields fall back to the global settings.
+ */
+export interface NodeAgentOverride {
+  provider?: NodeAgentProvider;
+  profile?: string;
+  model?: string;
+}
+
+/** Parse the `agent` override out of a node's JSON config; null when absent/invalid. */
+export function getNodeAgentOverride(config: string | null): NodeAgentOverride | null {
+  if (!config) return null;
+  try {
+    const parsed = JSON.parse(config) as { agent?: Record<string, unknown> };
+    const raw = parsed.agent;
+    if (!raw || typeof raw !== "object") return null;
+    const override: NodeAgentOverride = {};
+    if (
+      typeof raw.provider === "string" &&
+      (NODE_AGENT_PROVIDERS as readonly string[]).includes(raw.provider)
+    ) {
+      override.provider = raw.provider as NodeAgentProvider;
+    }
+    if (typeof raw.profile === "string" && raw.profile.trim()) override.profile = raw.profile.trim();
+    if (typeof raw.model === "string" && raw.model.trim()) override.model = raw.model.trim();
+    return Object.keys(override).length > 0 ? override : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Derive the default board status name from a workflow node's structural type.
  * Nodes with an explicit `statusName` always take precedence over this default;
@@ -86,4 +126,4 @@ export function deriveStatusName(nodeType: string): string {
  */
 export function isTerminalNodeType(nodeType: string | null | undefined): boolean {
   return nodeType === "end";
-}
+}

@@ -153,6 +153,51 @@ describe("workflow fork/join orchestration", () => {
     expect(startSession).toHaveBeenCalledTimes(2);
   });
 
+  it("multi-harness-review: fork children launch on their node's agent override, join uses the board default", async () => {
+    const { projectId, statusIds } = await seedProject(db);
+    const templateId = (await resolveTemplateForIssueByKey(db, projectId, "multi-harness-review"))!;
+    const issueId = randomUUID();
+    const now = new Date().toISOString();
+    await db.insert(schema.issues).values({
+      id: issueId, issueNumber: 3, title: "Multi-harness demo", issueType: "task", priority: "medium",
+      sortOrder: 0, statusId: statusIds["Todo"], projectId, workflowTemplateId: templateId, createdAt: now, updatedAt: now,
+    });
+    const parentId = randomUUID();
+    await db.insert(schema.workspaces).values({
+      id: parentId, issueId, branch: "feature/mh", workingDir: "/fake/feature/mh", baseBranch: "main",
+      status: "active", createdAt: now, updatedAt: now,
+    });
+    await initWorkspaceWorkflow(db as any, { workspaceId: parentId, issueId });
+    const r = await proposeTransition(db as any, { workspaceId: parentId, toNodeName: "Split Reviews" });
+    expect(r.ok).toBe(true);
+
+    await svc.onWorkspaceEnteredNode(parentId);
+
+    // Two reviewers spawned, each on its node-pinned harness.
+    expect(startSession).toHaveBeenCalledTimes(2);
+    const providersByPrompt = new Map<string, string>(
+      startSession.mock.calls.map((c: any[]) => [c[0].prompt as string, c[0].provider as string]),
+    );
+    const providerFor = (marker: string) =>
+      [...providersByPrompt.entries()].find(([prompt]) => prompt.includes(marker))?.[1];
+    expect(providerFor("Claude Review")).toBe("claude-code");
+    expect(providerFor("Codex Review")).toBe("codex");
+
+    // The child workspace rows record the overridden provider.
+    const children = await db.select().from(schema.workspaces).where(eq(schema.workspaces.parentWorkspaceId, parentId));
+    expect(children.map((c) => c.provider).sort()).toEqual(["claude", "codex"]);
+
+    // Reviewers join → the consolidator launches on the board default (no node override).
+    startSession.mockClear();
+    for (const child of children) {
+      const t = await proposeTransition(db as any, { workspaceId: child.id, toNodeName: "Consolidate & Fix" });
+      expect(t.ok).toBe(true);
+      await svc.onWorkspaceEnteredNode(child.id);
+    }
+    expect(startSession).toHaveBeenCalledTimes(1);
+    expect(startSession.mock.calls[0][0].provider).toBe("claude-code");
+  });
+
   it("launches the attached spec phase skill when entering a spec-driven phase", async () => {
     const { projectId, statusIds } = await seedProject(db);
     const repoPath = await mkdtemp(join(tmpdir(), "ak-spec-repo-"));

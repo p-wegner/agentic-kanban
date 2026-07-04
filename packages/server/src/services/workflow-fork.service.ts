@@ -50,8 +50,10 @@ import {
   findJoinNode,
   getJoinStrategy,
   getForkMode,
+  getNodeAgentOverride,
   type WorkflowNodeRow,
 } from "@agentic-kanban/shared/lib/workflow-engine";
+import { getProfilePrefKey } from "./agent-provider.js";
 import { writeAgentSkillFile, readLocalSkillPrompt, copySkillToWorktree } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { resolveEffectiveModel } from "./effective-config.service.js";
@@ -80,11 +82,24 @@ export function createWorkflowForkService(deps: {
   const { database, getSessionManager, boardEvents } = deps;
   const gitService = deps.gitService ?? realGitService;
 
-  async function resolveAgentConfig() {
+  /**
+   * Resolve the agent settings for a launch, honoring the node's `agent` config
+   * override (provider/profile/model) when present — same overlay pattern as
+   * review's applyWorkspaceProfileToPrefs: the override is written into a copy
+   * of the pref map so the single resolution path (resolveAgentSettings +
+   * resolveEffectiveModel) stays authoritative.
+   */
+  async function resolveAgentConfig(node?: WorkflowNodeRow | null) {
     const prefRows = await selectAllPreferences(database);
     const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
+    const override = node ? getNodeAgentOverride(node.config) : null;
+    if (override?.provider) prefMap.set("provider", override.provider);
+    if (override?.profile) {
+      const provider = override.provider ?? prefMap.get("provider");
+      prefMap.set(getProfilePrefKey(provider), override.profile);
+    }
     const s = resolveAgentSettings(prefMap);
-    const model = resolveEffectiveModel({ prefMap, provider: s.provider }).model;
+    const model = override?.model ?? resolveEffectiveModel({ prefMap, provider: s.provider }).model;
     return { ...s, model };
   }
 
@@ -191,7 +206,7 @@ export function createWorkflowForkService(deps: {
       `${ws.description ?? ""}\n\n` +
       buildTransitionBlock(node, transitions, workspaceId);
 
-    const cfg = await resolveAgentConfig();
+    const cfg = await resolveAgentConfig(node);
     await getSessionManager().startSession({
       workspaceId,
       prompt,
@@ -246,7 +261,7 @@ export function createWorkflowForkService(deps: {
         `${issue.description ?? ""}\n\n` +
         buildTransitionBlock(entry, transitions, childWorkspaceId);
 
-    const cfg = await resolveAgentConfig();
+    const cfg = await resolveAgentConfig(entry);
 
     await insertLaunchedChildWorkspace({
       id: childWorkspaceId,
@@ -545,7 +560,7 @@ export function createWorkflowForkService(deps: {
         (artifactsPath ? `Read \`WORKFLOW_FORK_ARTIFACTS.md\` in this worktree for each branch's diff and summary.\n` : `${artifacts}\n`) +
         `${consolidateLine}\n\n` +
         buildTransitionBlock(joinNode, joinTransitions, parent.id);
-      const cfg = await resolveAgentConfig();
+      const cfg = await resolveAgentConfig(joinNode);
       const skillName = await injectNodeSkill(joinNode, parent.workingDir ?? project.repoPath, project.repoPath);
       await getSessionManager()
         .startSession({
