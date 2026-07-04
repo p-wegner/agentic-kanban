@@ -92,6 +92,19 @@ describe("workflow fork/join orchestration", () => {
     expect(names.sort()).toEqual(["Correctness Review", "Security Review"]);
   });
 
+  it("#1001: every fork-child prompt explicitly forbids mark_ready_for_merge and points to propose_transition/the join", async () => {
+    const { parentId } = await setupForkAtSplit();
+    await svc.onWorkspaceEnteredNode(parentId);
+
+    expect(startSession).toHaveBeenCalledTimes(2);
+    for (const call of startSession.mock.calls) {
+      const prompt = call[0].prompt as string;
+      expect(prompt).toContain("FORK CHILD");
+      expect(prompt).toContain("Never call `mark_ready_for_merge`");
+      expect(prompt).toContain("advance to the join stage");
+    }
+  });
+
   it("consolidates into the parent join node once all children join", async () => {
     const { parentId, statusIds, issueId } = await setupForkAtSplit();
     await svc.onWorkspaceEnteredNode(parentId);
