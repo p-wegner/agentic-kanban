@@ -74,13 +74,17 @@ Example:
   program
     .command("cleanup")
     .description("Show stale worktrees for closed workspaces.\n\nLists git worktrees belonging to closed/merged workspaces. These worktrees are no longer needed and can be removed manually with 'git worktree remove --force <path>'.\n\nThis command does NOT auto-remove worktrees -- it only reports them.")
+    .option("--dry-run", "List what would be removed without making any changes")
     .addHelpText("after", `
 Example:
   $ agentic-kanban cleanup
   # Then manually remove with:
   $ git worktree remove --force <path>
+
+  $ agentic-kanban cleanup --dry-run
+  # Lists what would be removed; makes no changes
 `)
-    .action(async () => {
+    .action(async (options: { dryRun?: boolean }) => {
       try {
         await runMigrations();
 
@@ -89,7 +93,20 @@ Example:
         const withWorktrees = closedWorkspaces.filter((ws) => ws.workingDir);
 
         if (withWorktrees.length === 0) {
-          console.log("No stale worktrees found.");
+          console.log(
+            options.dryRun
+              ? "Dry run: 0 worktree(s) would be removed. No changes made."
+              : "No stale worktrees found.",
+          );
+          process.exit(0);
+        }
+
+        if (options.dryRun) {
+          console.log(`Dry run: would remove ${withWorktrees.length} worktree(s):`);
+          for (const ws of withWorktrees) {
+            console.log(`  ${ws.branch} -> ${ws.workingDir}`);
+          }
+          console.log(`\nDry run: ${withWorktrees.length} worktree(s) would be removed. No changes made.`);
           process.exit(0);
         }
 
