@@ -60,6 +60,24 @@ export function getForkMode(config: string | null): ForkMode {
   }
 }
 
+/**
+ * Parse the per-fork `maxParallel` cap (max concurrently running children for
+ * THIS fork node) out of a fork node's JSON config. Returns null when unset or
+ * invalid — the caller falls back to the global workflow_fork_max_per_workspace
+ * setting. Clamped to >= 1.
+ */
+export function getForkMaxParallel(config: string | null): number | null {
+  if (!config) return null;
+  try {
+    const parsed = JSON.parse(config) as { maxParallel?: unknown };
+    const n = Number(parsed.maxParallel);
+    if (!Number.isFinite(n) || n < 1) return null;
+    return Math.floor(n);
+  } catch {
+    return null;
+  }
+}
+
 /** Agent harnesses a workflow node may pin its launches to. */
 export const NODE_AGENT_PROVIDERS = ["claude", "codex", "copilot", "pi"] as const;
 export type NodeAgentProvider = (typeof NODE_AGENT_PROVIDERS)[number];

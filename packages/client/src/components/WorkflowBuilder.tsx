@@ -553,6 +553,19 @@ export function WorkflowBuilder({
                   <span className="block text-[10px] text-gray-400 mt-0.5">Shared runs stages one at a time on the same branch (each commits before the next starts) — independent agents can't safely share a git index concurrently.</span>
                 </label>
               )}
+              {selectedNode.data.nodeType === "parallel-fork" && (
+                <label className="block text-xs">Max parallel children
+                  <input
+                    type="number"
+                    min={1}
+                    value={readForkMaxParallel(selectedNode.data.config)}
+                    onChange={(e) => patchNode(selectedNode.id, { config: writeForkMaxParallel(selectedNode.data.config, e.target.value) })}
+                    placeholder="global default"
+                    className="w-full mt-0.5 border rounded px-2 py-1 dark:bg-gray-800 dark:border-gray-600"
+                  />
+                  <span className="block text-[10px] text-gray-400 mt-0.5">How many of this fork's branches run at once (rest queue). Empty = the global Workflow setting (default 2).</span>
+                </label>
+              )}
               {selectedNode.data.nodeType === "parallel-join" && (
                 <label className="block text-xs">Join strategy
                   <select value={readJoinStrategy(selectedNode.data.config)} onChange={(e) => patchNode(selectedNode.id, { config: writeJoinStrategy(selectedNode.data.config, e.target.value) })} className="w-full mt-0.5 border rounded px-2 py-1 dark:bg-gray-800 dark:border-gray-600">
@@ -672,6 +685,23 @@ function writeGuidance(config: string | null, value: string): string | null {
 }
 
 const AGENT_PROVIDERS = ["claude", "codex", "copilot", "pi"] as const;
+
+/** Read the fork's maxParallel from its JSON config ("" = use the global default). */
+function readForkMaxParallel(config: string | null): string {
+  if (!config) return "";
+  try {
+    const value = (JSON.parse(config) as { maxParallel?: unknown }).maxParallel;
+    return typeof value === "number" && value >= 1 ? String(value) : "";
+  } catch { return ""; }
+}
+/** Write the fork's maxParallel into its JSON config, preserving other keys. */
+function writeForkMaxParallel(config: string | null, raw: string): string | null {
+  let obj: Record<string, unknown> = {};
+  if (config) { try { obj = JSON.parse(config) as Record<string, unknown>; } catch { obj = {}; } }
+  const n = Math.floor(Number(raw));
+  if (Number.isFinite(n) && n >= 1) obj.maxParallel = n; else delete obj.maxParallel;
+  return Object.keys(obj).length ? JSON.stringify(obj) : null;
+}
 
 /** Read one field of the node's `agent` override from its JSON config (defaults to ""). */
 function readAgentField(config: string | null, field: "provider" | "profile" | "model"): string {

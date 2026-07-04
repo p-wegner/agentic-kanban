@@ -67,6 +67,8 @@ export const SETTINGS_REGISTRY = {
   dependency_auto_chain: { type: "bool", default: "false" },
   coupling_overlap_threshold: { type: "number", default: "0.5" },
   coupling_contract_min_size: { type: "number", default: "2" },
+  workflow_fork_max_per_workspace: { type: "number", default: "2" },
+  workflow_fork_max_per_project: { type: "number", default: "4" },
   dynamic_column_scaling: { type: "bool", default: "false" },
   card_density: { type: "string", default: "" },
   persistent_agent: { type: "bool", default: "false" },

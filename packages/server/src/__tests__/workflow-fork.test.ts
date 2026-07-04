@@ -198,6 +198,83 @@ describe("workflow fork/join orchestration", () => {
     expect(startSession.mock.calls[0][0].provider).toBe("claude-code");
   });
 
+  it("multi-harness-plan-review: two fork/join pairs in one template, each consolidated separately", async () => {
+    const { projectId, statusIds } = await seedProject(db);
+    const templateId = (await resolveTemplateForIssueByKey(db, projectId, "multi-harness-plan-review"))!;
+    const issueId = randomUUID();
+    const now = new Date().toISOString();
+    await db.insert(schema.issues).values({
+      id: issueId, issueNumber: 4, title: "Plan+Review demo", issueType: "task", priority: "medium",
+      sortOrder: 0, statusId: statusIds["Todo"], projectId, workflowTemplateId: templateId, createdAt: now, updatedAt: now,
+    });
+    const parentId = randomUUID();
+    await db.insert(schema.workspaces).values({
+      id: parentId, issueId, branch: "feature/pr", workingDir: "/fake/feature/pr", baseBranch: "main",
+      status: "active", createdAt: now, updatedAt: now,
+    });
+    await initWorkspaceWorkflow(db as any, { workspaceId: parentId, issueId });
+
+    // Prepare -> Split Planning (fork 1)
+    expect((await proposeTransition(db as any, { workspaceId: parentId, toNodeName: "Split Planning" })).ok).toBe(true);
+    await svc.onWorkspaceEnteredNode(parentId);
+
+    let children = await db.select().from(schema.workspaces).where(eq(schema.workspaces.parentWorkspaceId, parentId));
+    expect(children.length).toBe(2);
+    // Planner children join -> parent must land on the PLANNING join, not the review join.
+    for (const child of children) {
+      expect((await proposeTransition(db as any, { workspaceId: child.id, toNodeName: "Consolidate Plan & Implement" })).ok).toBe(true);
+      await svc.onWorkspaceEnteredNode(child.id);
+    }
+    let parent = (await db.select().from(schema.workspaces).where(eq(schema.workspaces.id, parentId)))[0];
+    let node = (await db.select().from(schema.workflowNodes).where(eq(schema.workflowNodes.id, parent.currentNodeId!)))[0];
+    expect(node.name).toBe("Consolidate Plan & Implement");
+    // First consolidation captured exactly the 2 planner children's diffs.
+    expect(gitMock.getDiff.mock.calls.length + gitMock.getDiffFromRepo.mock.calls.length).toBe(2);
+
+    // Join agent "implements", then advances into the second fork.
+    expect((await proposeTransition(db as any, { workspaceId: parentId, toNodeName: "Split Reviews" })).ok).toBe(true);
+    await svc.onWorkspaceEnteredNode(parentId);
+
+    children = await db.select().from(schema.workspaces).where(eq(schema.workspaces.parentWorkspaceId, parentId));
+    expect(children.length).toBe(4);
+    const reviewers = children.filter((c) => c.forkStatus === "running");
+    expect(reviewers.length).toBe(2);
+    for (const child of reviewers) {
+      expect((await proposeTransition(db as any, { workspaceId: child.id, toNodeName: "Consolidate & Fix" })).ok).toBe(true);
+      await svc.onWorkspaceEnteredNode(child.id);
+    }
+    parent = (await db.select().from(schema.workspaces).where(eq(schema.workspaces.id, parentId)))[0];
+    node = (await db.select().from(schema.workflowNodes).where(eq(schema.workflowNodes.id, parent.currentNodeId!)))[0];
+    expect(node.name).toBe("Consolidate & Fix");
+    // Second consolidation only captured the 2 REVIEW children (2 + 2 = 4 diffs total, not 2 + 4).
+    expect(gitMock.getDiff.mock.calls.length + gitMock.getDiffFromRepo.mock.calls.length).toBe(4);
+  });
+
+  it("caps concurrency via the fork node's maxParallel config (rest queue)", async () => {
+    const { parentId } = await setupForkAtSplit();
+    // Pin the "Split Reviews" fork node to 1 parallel child.
+    const forkNodes = await db.select().from(schema.workflowNodes).where(eq(schema.workflowNodes.name, "Split Reviews"));
+    for (const n of forkNodes) {
+      const cfg = { ...(n.config ? JSON.parse(n.config) : {}), maxParallel: 1 };
+      await db.update(schema.workflowNodes).set({ config: JSON.stringify(cfg) }).where(eq(schema.workflowNodes.id, n.id));
+    }
+    await svc.onWorkspaceEnteredNode(parentId);
+
+    const children = await db.select().from(schema.workspaces).where(eq(schema.workspaces.parentWorkspaceId, parentId));
+    expect(children.map((c) => c.forkStatus).sort()).toEqual(["queued", "running"]);
+    expect(startSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("caps concurrency via the workflow_fork_max_per_workspace setting", async () => {
+    const { parentId } = await setupForkAtSplit();
+    await db.insert(schema.preferences).values({ key: "workflow_fork_max_per_workspace", value: "1" });
+    await svc.onWorkspaceEnteredNode(parentId);
+
+    const children = await db.select().from(schema.workspaces).where(eq(schema.workspaces.parentWorkspaceId, parentId));
+    expect(children.map((c) => c.forkStatus).sort()).toEqual(["queued", "running"]);
+    expect(startSession).toHaveBeenCalledTimes(1);
+  });
+
   it("launches the attached spec phase skill when entering a spec-driven phase", async () => {
     const { projectId, statusIds } = await seedProject(db);
     const repoPath = await mkdtemp(join(tmpdir(), "ak-spec-repo-"));
