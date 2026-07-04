@@ -93,8 +93,50 @@ function isDbResetCommand(command) {
   return /pnpm\s+db:reset/i.test(command) || /db:reset/i.test(command);
 }
 
+// SQL write verbs an agent could issue directly against the db, bypassing the
+// board's own MCP/API/service layer entirely (e.g. a bare `sqlite3 kanban.db
+// "UPDATE workspaces SET ready_for_merge=1..."` or a Node one-liner opening
+// better-sqlite3/libsql and running the same statement in-process). This is
+// distinct from DESTRUCTIVE_VERB (file-level erasure/overwrite) — any agent
+// session mutating board state via raw SQL instead of the sanctioned MCP/API
+// tools is itself the hazard (see #1001: a fork-child reviewer wrote
+// ready_for_merge=1 straight into kanban.db when the MCP tool was unreachable).
+const SQL_WRITE_VERB = [
+  /\bUPDATE\b[^\n]*\bSET\b/i,
+  /\bINSERT\s+INTO\b/i,
+  /\bDELETE\s+FROM\b/i,
+  /\bDROP\s+TABLE\b/i,
+  /\bALTER\s+TABLE\b/i,
+];
+
+// Tools/APIs that open the db for direct, in-process mutation rather than going
+// through the server/MCP/API layer.
+const DIRECT_DB_DRIVER = [
+  /\bsqlite3\b/i,
+  /\bbetter-sqlite3\b/i,
+  /\brequire\(["']better-sqlite3["']\)/i,
+  /\bdrizzle-orm\/libsql\b/i,
+  /\bcreateClient\s*\(/i, // @libsql/client
+];
+
+function hasSqlWriteVerb(command) {
+  return SQL_WRITE_VERB.some((re) => re.test(command));
+}
+
+function usesDirectDbDriver(command) {
+  return DIRECT_DB_DRIVER.some((re) => re.test(command));
+}
+
+function isDirectSqlWrite(command) {
+  // Both signals required: a command that merely references sqlite3/better-sqlite3
+  // without any write verb (e.g. a read-only query) is not the hazard this guards
+  // against; a command with a write verb but no db reference is unrelated SQL.
+  return referencesDb(command) && hasSqlWriteVerb(command) && usesDirectDbDriver(command);
+}
+
 function isDangerous(command) {
   if (isDbResetCommand(command)) return true;
+  if (isDirectSqlWrite(command)) return true;
   if (referencesDb(command) && hasDestructiveVerb(command)) {
     // A `>` redirect that only targets a log file (not the db) is a false positive
     // unless the db is also referenced — but we already require referencesDb, so a
@@ -498,6 +540,34 @@ async function main() {
   }
 
   if (!isDangerous(command)) process.exit(0);
+
+  // Direct SQL writes bypass the board's MCP/API/service layer entirely (the
+  // hazard is the write path, not data loss), so unlike file-erasure this is
+  // NOT bypassable via ALLOW_DB_DESTROY — that override exists for authorized
+  // resets, not for routing around "use MCP/API" (see #1001).
+  if (isDirectSqlWrite(command)) {
+    console.error("[safety] ⛔ Direct SQL write to kanban.db blocked.");
+    console.error("");
+    console.error("Command:");
+    console.error(`  ${command.substring(0, 160)}${command.length > 160 ? "..." : ""}`);
+
+    console.log(
+      JSON.stringify({
+        decision: "block",
+        reason:
+          "⛔ This command writes to kanban.db directly via a SQL driver (sqlite3/better-sqlite3/libsql), " +
+          "bypassing the board's MCP tools, REST API, and service layer.\n\n" +
+          "Agent sessions must NEVER mutate kanban.db with raw SQL — even for a single field, even as a " +
+          "fallback when an MCP tool seems unavailable or unreachable. Use the sanctioned MCP tool or REST " +
+          "endpoint for the state you're trying to change (e.g. `propose_transition` to advance a workflow " +
+          "stage, `mark_ready_for_merge` for a non-fork-child workspace review). If neither exists yet, stop " +
+          "and report the gap — do not improvise a direct database write.\n\n" +
+          "This block has no env-var bypass. If you believe a raw SQL write is genuinely required, ask the " +
+          "user first.",
+      })
+    );
+    process.exit(1);
+  }
 
   // Always create a backup first, regardless of what happens next.
   const backupDir = backupDatabase();
