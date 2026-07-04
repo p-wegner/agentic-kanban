@@ -1,4 +1,4 @@
-import { isSpecPlanningStageName, transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { isSpecPlanningStageName, isTerminalNodeType, transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { runSmokeCheck } from "@agentic-kanban/shared/lib/smoke-check";
@@ -219,6 +219,25 @@ async function isSpecPlanningNode(database: Database, currentNodeId: string | nu
     .where(eq(workflowNodes.id, currentNodeId))
     .limit(1);
   return isSpecPlanningStageName(rows[0]?.name);
+}
+
+/**
+ * #997 Guard: a workspace parked on a workflow-template node (currentNodeId set)
+ * that is NOT a terminal ("end") node is still owned by the graph — its own
+ * node-driven stages decide review/fix, not the legacy triggerType:"review"
+ * pipeline. Without this, a Prepare-stage builder exit (e.g. a planning-docs-only
+ * commit) launches legacy auto-review, which can arm readyForMerge on a branch
+ * the workflow never intended to merge yet.
+ */
+async function isWorkspaceOnNonTerminalWorkflowNode(database: Database, currentNodeId: string | null): Promise<boolean> {
+  if (!currentNodeId) return false;
+  const rows = await database
+    .select({ nodeType: workflowNodes.nodeType })
+    .from(workflowNodes)
+    .where(eq(workflowNodes.id, currentNodeId))
+    .limit(1);
+  if (rows.length === 0) return false;
+  return !isTerminalNodeType(rows[0].nodeType);
 }
 
 export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, database }: WorkflowDeps) {
@@ -724,6 +743,14 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     const { workspace, projectId, issueId, sessionId, now, prefMap, statuses, findStatus, autoMergeEnabled, defaultBranch, autoMergeDisabledProjectIds } = ctx;
     const workspaceId = workspace.id;
     reviewSessionIds.delete(sessionId);
+    // #997 defensive guard: a stray/legacy review session exiting while the
+    // workspace sits on a non-terminal workflow node must not arm readyForMerge —
+    // the graph owns merge eligibility for workflow-managed workspaces.
+    if (await isWorkspaceOnNonTerminalWorkflowNode(db, workspace.currentNodeId)) {
+      console.log(`[workflow] review session ${sessionId} exited but workspace ${workspaceId} is on a non-terminal workflow node  withholding readyForMerge (#997)`);
+      boardEvents.broadcast(projectId, "issue_updated");
+      return;
+    }
     const currentIssueRows = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId)).limit(1);
     const currentStatus = currentIssueRows.length > 0 ? statuses.find((s) => s.id === currentIssueRows[0].statusId) : null;
     const autoFix = getBool(prefMap, "review_auto_fix");
@@ -821,6 +848,10 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     }
     boardEvents.broadcast(projectId, "issue_updated");
     if (getBool(prefMap, "learning_step_after_agent") && workspace.workingDir) await launchLearningStep(db, sessionManager, learningSessionIds, workspace, prefMap, "after agent");
+    if (await isWorkspaceOnNonTerminalWorkflowNode(db, workspace.currentNodeId)) {
+      console.log(`[workflow] workspace ${workspaceId} is on a non-terminal workflow node  skipping legacy auto-review (#997)`);
+      return;
+    }
     const autoReview = !skipAutoReview && (workspace.requiresReview || isAutoReviewEnabled(prefMap.get(AUTO_REVIEW_PREF_KEY)));
     if (!autoReview) return;
     await launchAutoReview(ctx);
