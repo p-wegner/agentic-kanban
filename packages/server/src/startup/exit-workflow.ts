@@ -422,8 +422,14 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
       // If the workspace was already merged (e.g. via HTTP merge endpoint while a
       // fix-and-merge session was still running), do not reset the status back to
       // "idle" — that would overwrite "closed" and strand the issue in "In Review".
-      if (workspace.status === "closed" && workspace.mergedAt) {
-        console.log(`[workflow] session ${sessionId} exited but workspace ${workspaceId} is already merged (mergedAt=${workspace.mergedAt}) — skipping exit workflow`);
+      // #1003: a fork child is closed by its JOIN (forkStatus "joined"/"cancelled"), never
+      // individually merged — so it is "closed" with mergedAt null. Without this second
+      // condition, the child's own CLI process exiting after the join already closed it
+      // raced setWorkspaceStatus(..., "idle") past the terminal guard (which only protects
+      // closed+mergedAt), leaving status="idle" with closedAt still stamped from the join.
+      const forkTerminalStatuses = new Set(["joined", "cancelled", "failed"]);
+      if (workspace.status === "closed" && (workspace.mergedAt || (workspace.forkStatus && forkTerminalStatuses.has(workspace.forkStatus)))) {
+        console.log(`[workflow] session ${sessionId} exited but workspace ${workspaceId} is already closed (mergedAt=${workspace.mergedAt}, forkStatus=${workspace.forkStatus}) — skipping exit workflow`);
         boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity: "" });
         boardEvents.broadcast(projectId, "session_completed");
         fixAndMergeSessionIds.delete(sessionId);
