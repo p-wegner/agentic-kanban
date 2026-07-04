@@ -277,13 +277,19 @@ export function createWorkflowForkService(deps: {
 
     const skillName = await injectNodeSkill(entry, worktreePath, project.repoPath);
     const transitions = await getOutgoingTransitions(database, entry.id);
+    const forkChildGuardrail =
+      "You are a FORK CHILD. Never call `mark_ready_for_merge` — that verdict belongs to join consolidation, not " +
+      "an individual fork branch/stage. When your work here is done, advance to the join stage via " +
+      "`propose_transition`; do not attempt to merge, mark ready, or write to kanban.db yourself.\n\n";
     const prompt = sharedWorktree
       ? `You are working on a SHARED worktree for issue #${issue.issueNumber ?? "?"} — "${issue.title}", on branch \`${parent.branch}\`.\n` +
         `This is the "${entry.name}" stage of a fork whose stages run ONE AT A TIME on this same branch/worktree. Earlier stages' work is already committed here. Do ONLY this stage's work, add NEW files or additive changes (avoid rewriting other stages' work), commit it on this branch, then advance to the join stage.\n\n` +
+        forkChildGuardrail +
         `${issue.description ?? ""}\n\n` +
         buildTransitionBlock(entry, transitions, childWorkspaceId)
       : `You are working on a PARALLEL BRANCH of issue #${issue.issueNumber ?? "?"} — "${issue.title}".\n` +
         `This is the "${entry.name}" branch of a fork; sibling branches run concurrently. Do ONLY this branch's work, commit it, then advance to the join stage so your work can be consolidated.\n\n` +
+        forkChildGuardrail +
         `${issue.description ?? ""}\n\n` +
         buildTransitionBlock(entry, transitions, childWorkspaceId);
 
