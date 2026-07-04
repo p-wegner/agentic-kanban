@@ -23,6 +23,7 @@ vi.mock("../startup/review-helpers.js", () => ({
   buildReviewPrompt: vi.fn(async () => ({ prompt: "review", model: undefined })),
   getEffectiveProfile: vi.fn(() => undefined),
   parseProviderPref: vi.fn(() => "claude"),
+  applyWorkspaceProfileToPrefs: vi.fn((m: Map<string, string>) => m),
 }));
 vi.mock("../startup/merge-strategy.js", () => ({
   isAutomaticMergeEnabled: vi.fn(() => false),
@@ -33,8 +34,8 @@ vi.mock("node:child_process", async (importOriginal) => {
   return {
     ...actual,
     execFile: vi.fn(
-      (_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout?: string) => void) =>
-        cb(null, "M PLANNING-CONTEXT.md\n"),
+      (_cmd: string, _args: string[], _opts: unknown, cb: (err: (Error & { code?: number }) | null, stdout?: string) => void) =>
+        cb(Object.assign(new Error("git diff --quiet exited 1"), { code: 1 }), "M PLANNING-CONTEXT.md\n"),
     ),
   };
 });
