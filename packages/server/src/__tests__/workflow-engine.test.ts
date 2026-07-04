@@ -466,6 +466,25 @@ describe("workflow-engine", () => {
     expect(node.name).toBe("Review");
   });
 
+  it("syncCurrentNodeToStatus initializes currentNodeId for a fresh issue with no current node (regression: #999 fix must not block createIssue init)", async () => {
+    // createIssue() relies on syncCurrentNodeToStatus to set currentNodeId the
+    // first time a workflow template is assigned to a brand-new issue, where
+    // currentNodeId is still null (no existing position to protect, so this is
+    // initialization, not a teleport across the graph).
+    const { syncCurrentNodeToStatus } = await import("@agentic-kanban/shared/lib/workflow-engine");
+    const { projectId, statusIds } = await seedProject(db);
+    const templateId = await resolveTemplateForIssue(db as any, { projectId, issueType: "bug" });
+    const issueId = await seedIssue(db, projectId, statusIds["In Progress"], "bug");
+    await db.update(schema.issues).set({ workflowTemplateId: templateId, currentNodeId: null }).where(eq(schema.issues.id, issueId));
+
+    await syncCurrentNodeToStatus(db as any, issueId);
+
+    const issue = (await db.select().from(schema.issues).where(eq(schema.issues.id, issueId)))[0];
+    expect(issue.currentNodeId).toBeTruthy();
+    const node = (await db.select().from(schema.workflowNodes).where(eq(schema.workflowNodes.id, issue.currentNodeId!)))[0];
+    expect(node.statusName).toBe("In Progress");
+  });
+
   it("syncCurrentNodeToStatus also updates non-closed workspaces (regression: board endpoint staleness)", async () => {
     // Regression test for #552: after PATCH /api/issues/:id changes statusId, the board
     // endpoint was returning the old workflow-column because workspaces.currentNodeId was

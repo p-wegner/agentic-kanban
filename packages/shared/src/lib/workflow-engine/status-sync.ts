@@ -59,6 +59,11 @@ async function findNearestMatchingNode(
  * otherwise walk outward from the current node and take the nearest matching
  * node; otherwise leave currentNodeId untouched and let transitions own
  * placement.
+ *
+ * If the issue has no current node yet (fresh issue with a workflow template
+ * assigned, e.g. right after creation), there is no existing position to
+ * protect — this is initialization, not a teleport — so fall back to the
+ * first template-order node matching the status.
  */
 export async function syncCurrentNodeToStatus(db: WorkflowDb, issueId: string): Promise<void> {
   const issueRows = await db
@@ -86,10 +91,15 @@ export async function syncCurrentNodeToStatus(db: WorkflowDb, issueId: string): 
   const current = nodes.find((n) => n.id === issue.currentNodeId);
   if (current && current.statusName === statusName) return;
 
-  const matchId = current
-    ? await findNearestMatchingNode(db, issue.workflowTemplateId, nodes, current.id, statusName)
-    : null;
-  const match = matchId ? nodes.find((n) => n.id === matchId) : undefined;
+  let match: (typeof nodes)[number] | undefined;
+  if (current) {
+    const matchId = await findNearestMatchingNode(db, issue.workflowTemplateId, nodes, current.id, statusName);
+    match = matchId ? nodes.find((n) => n.id === matchId) : undefined;
+  } else {
+    // No current node to anchor from (e.g. fresh issue) — this is
+    // initialization, not a teleport, so pick the first template-order node.
+    match = nodes.find((n) => n.statusName === statusName);
+  }
   if (match) {
     await db.update(schema.issues).set({ currentNodeId: match.id }).where(eq(schema.issues.id, issueId));
     // Also sync non-closed workspaces so the board's workflow-status override
