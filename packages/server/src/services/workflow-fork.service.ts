@@ -36,6 +36,7 @@ import {
   selectCancelOverdueChild,
   updateChildWorkspaceCancelled,
   selectWorkspaceNodeContext,
+  selectForkChildNodeContext,
 } from "../repositories/workflow-fork.repository.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
@@ -438,8 +439,16 @@ export function createWorkflowForkService(deps: {
     if (projRows.length === 0) return;
     const project = projRows[0];
 
+    // #1000: reconcile any "running" child that is actually already sitting on
+    // its join node (a lost/raced notify left forkStatus stale) BEFORE counting
+    // capacity — otherwise a stuck-but-really-joined child both occupies a
+    // concurrency slot forever and blocks the fork from ever consolidating.
     const running = await selectRunningForkChildren(parent.id, database);
-    let runningCount = running.length;
+    for (const r of running) {
+      await reconcileJoinedForkChild(r.id);
+    }
+    const stillRunning = await selectRunningForkChildren(parent.id, database);
+    let runningCount = stillRunning.length;
 
     const queued = await selectQueuedForkChildren(parent.id, database);
 
@@ -497,6 +506,33 @@ export function createWorkflowForkService(deps: {
     if (msgs.length === 0) return null;
     const tail = msgs.slice(-1)[0]?.data ?? "";
     return tail.length > 1500 ? tail.slice(-1500) : tail;
+  }
+
+  /**
+   * #1000 reconciler: a fork child that already sits ON its recorded
+   * `forkJoinNodeId` (its agent successfully called `propose_transition` before
+   * exiting) but whose `forkStatus` never flipped to "joined" — because the
+   * cross-process notify that normally triggers `handleChildJoined`
+   * (`notifyWorkflowAdvanced`, fire-and-forget, no delivery guarantee) was lost or
+   * lost the race against a concurrent session-exit status write (e.g. a
+   * rate-limit exit blocking the workspace). Treat "already placed on the join
+   * node" as the source of truth for "joined" — status (blocked/failed) never
+   * decides it — and drive the same join path `handleChildJoined` would have.
+   * Idempotent / safe to call from anywhere a fork child's session just exited:
+   * a no-op for a non-fork-child, a child not yet at its join, or one already in
+   * a terminal forkStatus (joined/cancelled).
+   */
+  async function reconcileJoinedForkChild(childWorkspaceId: string): Promise<void> {
+    const rows = await selectForkChildNodeContext(childWorkspaceId, database);
+    if (rows.length === 0) return;
+    const child = rows[0];
+    if (!child.parentWorkspaceId || !child.forkJoinNodeId || !child.currentNodeId) return;
+    if (child.currentNodeId !== child.forkJoinNodeId) return;
+    if (child.forkStatus === "joined" || child.forkStatus === "cancelled") return;
+    console.warn(
+      `[fork] reconciled stuck child ${childWorkspaceId}: already on join node ${child.forkJoinNodeId} but forkStatus was "${child.forkStatus}" — treating as joined`,
+    );
+    await handleChildJoined(childWorkspaceId);
   }
 
   /** Mark a child as joined; when all siblings are done, consolidate into the parent. */
@@ -736,6 +772,15 @@ export function createWorkflowForkService(deps: {
   async function cancelOverdueChild(childWorkspaceId: string): Promise<void> {
     const rows = await selectCancelOverdueChild(childWorkspaceId, database);
     if (rows.length === 0 || rows[0].forkStatus !== "running") return;
+    // #1000: before cancelling an "overdue" child, check whether it actually
+    // already completed its work and reached the join node — a lost/raced
+    // notify can leave forkStatus stuck at "running" for a child that is done.
+    // Wrongly cancelling that child discards a real, finished contribution.
+    if (rows[0].currentNodeId && rows[0].forkJoinNodeId && rows[0].currentNodeId === rows[0].forkJoinNodeId) {
+      console.warn(`[fork] child ${childWorkspaceId} hit the overdue timeout but is already on its join node — reconciling as joined instead of cancelling.`);
+      await reconcileJoinedForkChild(childWorkspaceId);
+      return;
+    }
     const now = new Date().toISOString();
     if (getSessionManager) {
       const running = await selectRunningSessionsForWorkspace(childWorkspaceId, database);
@@ -778,7 +823,7 @@ export function createWorkflowForkService(deps: {
     }
   }
 
-  return { onWorkspaceEnteredNode, cancelOverdueChild };
+  return { onWorkspaceEnteredNode, cancelOverdueChild, reconcileJoinedForkChild };
 }
 
 export type WorkflowForkService = ReturnType<typeof createWorkflowForkService>;

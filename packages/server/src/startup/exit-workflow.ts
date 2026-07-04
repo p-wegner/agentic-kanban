@@ -122,6 +122,15 @@ export interface WorkflowDeps {
   sessionManager: ReturnType<typeof createSessionManager>;
   boardEvents: ReturnType<typeof createBoardEvents>;
   autoMerge: (workspace: MergeWorkspace, projectId: string, issueId: string, doneStatusId: string | null, now: string) => Promise<void>;
+  /**
+   * #1000: reconcile a fork child that already sits on its join node (agent
+   * called propose_transition) but never got marked "joined" — the cross-process
+   * notify that normally does that has no delivery guarantee and can lose the
+   * race against this very session-exit status write. Called (best-effort) after
+   * a fork child's session exits into blocked/failed. Optional so tests that
+   * don't exercise fork workflows can omit it.
+   */
+  reconcileForkChildOnExit?: (workspaceId: string) => Promise<void>;
   /** Injectable database for testing (defaults to the global singleton). */
   database?: Database;
 }
@@ -240,7 +249,7 @@ async function isWorkspaceOnNonTerminalWorkflowNode(database: Database, currentN
   return !isTerminalNodeType(rows[0].nodeType);
 }
 
-export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, database }: WorkflowDeps) {
+export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, reconcileForkChildOnExit, database }: WorkflowDeps) {
   const db = database ?? defaultDb;
   const reviewSessionIds = new Set<string>(), fixAndMergeSessionIds = new Set<string>(), learningSessionIds = new Set<string>();
 
@@ -332,6 +341,17 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     // is never relaunched as if it were a builder (#950).
     const builder = !roleFlags.isReview && !roleFlags.isFixAndMerge && !roleFlags.isLearning;
 
+    // #1000: a fork child can independently finish and close itself (joined) via
+    // handleChildJoined WHILE this usage-limit exit is being processed for the
+    // same workspace (the classic race the ticket describes). Re-read fresh
+    // immediately before writing so that race's winner is respected instead of
+    // unconditionally overwriting a workspace another exit path already closed.
+    const freshRows = await db.select({ status: workspaces.status, forkStatus: workspaces.forkStatus }).from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
+    if (freshRows[0]?.status === "closed") {
+      console.log(`[workflow] ${cfg.label}-rate-limited session ${sessionId} exited but workspace ${workspaceId} is already closed (forkStatus=${freshRows[0].forkStatus ?? "n/a"}) — skipping blocked/relaunch write`);
+      return;
+    }
+
     if (decideRateLimitExit(rotation, builder).action === "relaunch") {
       try {
         const continuation = await buildRotationContinuationPrompt(db, issueId, cfg.label);
@@ -364,6 +384,16 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     const blockedReason = formatRateLimitBlockedReason(cfg.label, workspaceId, rotation);
     emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: blockedReason });
     console.warn(`[workflow] ${cfg.label}-rate-limited workspace ${workspaceId} from session ${sessionId} left blocked (${rotation.reason})`);
+    // #1000: a rate-limit exit can race a fork child's own propose_transition onto
+    // its join node — the child successfully finished and moved itself, but this
+    // blocked-write and the cross-process join notify are unordered. Reconcile
+    // now so a child that is actually done doesn't sit blocked until the 30-min
+    // overdue timeout wrongly cancels it.
+    if (reconcileForkChildOnExit) {
+      await reconcileForkChildOnExit(workspaceId).catch((err) =>
+        console.warn(`[workflow] fork-child join reconcile failed (non-fatal) for workspace ${workspaceId}:`, err instanceof Error ? err.message : String(err)),
+      );
+    }
   }
 
   async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCode: number | null, wasPlanMode?: boolean) {
