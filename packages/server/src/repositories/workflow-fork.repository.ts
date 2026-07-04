@@ -293,7 +293,31 @@ export async function selectForkChildrenForConsolidate(parentId: string, databas
 }
 
 export async function selectCancelOverdueChild(childWorkspaceId: string, database: Database = db) {
-  return database.select({ forkStatus: workspaces.forkStatus, parentWorkspaceId: workspaces.parentWorkspaceId, forkNodeId: workspaces.forkNodeId, forkJoinNodeId: workspaces.forkJoinNodeId }).from(workspaces).where(eq(workspaces.id, childWorkspaceId)).limit(1);
+  return database.select({ forkStatus: workspaces.forkStatus, parentWorkspaceId: workspaces.parentWorkspaceId, forkNodeId: workspaces.forkNodeId, forkJoinNodeId: workspaces.forkJoinNodeId, currentNodeId: workspaces.currentNodeId }).from(workspaces).where(eq(workspaces.id, childWorkspaceId)).limit(1);
+}
+
+/**
+ * Fork-child context for the post-session-exit join reconciler (#1000): does this
+ * workspace belong to a fork (has a parent) and, if so, is it already sitting on
+ * its recorded `forkJoinNodeId` (the agent successfully called propose_transition
+ * before its session exited) even though `forkStatus` was never flipped to
+ * "joined" — the fire-and-forget cross-process notify that normally does that
+ * (`notifyWorkflowAdvanced`) has no delivery guarantee and can be lost/raced by a
+ * concurrent session-exit status write (e.g. usage-limit -> blocked).
+ */
+export async function selectForkChildNodeContext(childWorkspaceId: string, database: Database = db) {
+  return database
+    .select({
+      id: workspaces.id,
+      currentNodeId: workspaces.currentNodeId,
+      parentWorkspaceId: workspaces.parentWorkspaceId,
+      forkNodeId: workspaces.forkNodeId,
+      forkJoinNodeId: workspaces.forkJoinNodeId,
+      forkStatus: workspaces.forkStatus,
+    })
+    .from(workspaces)
+    .where(eq(workspaces.id, childWorkspaceId))
+    .limit(1);
 }
 
 export async function updateChildWorkspaceCancelled(
