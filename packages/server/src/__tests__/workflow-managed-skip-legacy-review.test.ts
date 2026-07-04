@@ -224,6 +224,109 @@ describe("exit-workflow: workflow-managed workspaces skip legacy auto-review (is
   });
 });
 
+describe("exit-workflow: fork children are excluded from legacy auto-review (issue #998)", () => {
+  let db: ReturnType<typeof createTestDb>["db"];
+
+  beforeEach(() => {
+    ({ db } = createTestDb());
+  });
+
+  /** Same as seedWorkflowManagedBuilderExit but on a terminal node with fork markers set. */
+  async function seedForkChildBuilderExit(
+    dbHandle: ReturnType<typeof createTestDb>["db"],
+    opts: { parentWorkspaceId?: string | null; forkStatus?: string | null },
+  ) {
+    const now = new Date().toISOString();
+    const projectId = randomUUID();
+    const inProgressId = randomUUID();
+    const inReviewId = randomUUID();
+    const issueId = randomUUID();
+    const workspaceId = randomUUID();
+    const builderSessionId = randomUUID();
+
+    await dbHandle.insert(projects).values({
+      id: projectId, name: "Test", repoPath: "/repo", repoName: "repo",
+      defaultBranch: "master", createdAt: now, updatedAt: now,
+    });
+    await dbHandle.insert(projectStatuses).values([
+      { id: inProgressId, projectId, name: "In Progress", sortOrder: 0, isDefault: true, createdAt: now },
+      { id: inReviewId, projectId, name: "In Review", sortOrder: 1, isDefault: false, createdAt: now },
+    ]);
+    await dbHandle.insert(issues).values({
+      id: issueId, issueNumber: 998, title: "Fork child",
+      priority: "medium", sortOrder: 0,
+      statusId: inProgressId,
+      projectId, createdAt: now, updatedAt: now,
+    });
+    await dbHandle.insert(workspaces).values({
+      id: workspaceId, issueId,
+      branch: "feature/ak-996-test__fork-claude-plan",
+      workingDir: "/repo/.worktrees/ak-996-test__fork-claude-plan",
+      baseBranch: "master",
+      isDirect: false,
+      status: "idle",
+      readyForMerge: false,
+      requiresReview: true,
+      provider: "claude",
+      currentNodeId: null,
+      parentWorkspaceId: opts.parentWorkspaceId ?? null,
+      forkStatus: opts.forkStatus ?? null,
+      createdAt: now, updatedAt: now,
+    });
+    await dbHandle.insert(sessions).values({
+      id: builderSessionId, workspaceId,
+      status: "running",
+      triggerType: "builder",
+      createdAt: now, updatedAt: now,
+    });
+
+    return { projectId, issueId, workspaceId, builderSessionId };
+  }
+
+  it("does NOT launch legacy auto-review for a fork child identified by parentWorkspaceId", async () => {
+    const parentId = randomUUID();
+    const { workspaceId, builderSessionId } = await seedForkChildBuilderExit(db, { parentWorkspaceId: parentId });
+
+    const boardEvents = makeBoardEvents();
+    const sessionManager = makeSessionManager();
+
+    const engine = createWorkflowEngine({
+      sessionManager: sessionManager as never,
+      boardEvents: boardEvents as never,
+      autoMerge: vi.fn(async () => {}),
+      database: db as never,
+    });
+
+    await engine.runWorkflowOnExit(workspaceId, builderSessionId, 0);
+
+    expect(sessionManager.startSession).not.toHaveBeenCalled();
+    const [ws] = await db.select({ readyForMerge: workspaces.readyForMerge, status: workspaces.status })
+      .from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.readyForMerge).toBe(false);
+  });
+
+  it("does NOT launch legacy auto-review for a fork child identified by forkStatus alone", async () => {
+    const { workspaceId, builderSessionId } = await seedForkChildBuilderExit(db, { forkStatus: "joined" });
+
+    const boardEvents = makeBoardEvents();
+    const sessionManager = makeSessionManager();
+
+    const engine = createWorkflowEngine({
+      sessionManager: sessionManager as never,
+      boardEvents: boardEvents as never,
+      autoMerge: vi.fn(async () => {}),
+      database: db as never,
+    });
+
+    await engine.runWorkflowOnExit(workspaceId, builderSessionId, 0);
+
+    expect(sessionManager.startSession).not.toHaveBeenCalled();
+    const [ws] = await db.select({ readyForMerge: workspaces.readyForMerge })
+      .from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.readyForMerge).toBe(false);
+  });
+});
+
 describe("reconcileStrandedReviews: skips workflow-managed non-terminal workspaces (issue #997)", () => {
   let db: ReturnType<typeof createTestDb>["db"];
 
