@@ -562,6 +562,35 @@ export function WorkflowBuilder({
                   <span className="block text-[10px] text-gray-400 mt-0.5">Auto-merge suits additive work (each child writes a different file). Conflicting merges are auto-aborted and left for the agent.</span>
                 </label>
               )}
+              <div className="border-t border-gray-200 dark:border-gray-700 pt-2 space-y-2">
+                <label className="block text-xs">Agent harness
+                  <select
+                    value={readAgentField(selectedNode.data.config, "provider")}
+                    onChange={(e) => patchNode(selectedNode.id, { config: writeAgentField(selectedNode.data.config, "provider", e.target.value) })}
+                    className="w-full mt-0.5 border rounded px-2 py-1 dark:bg-gray-800 dark:border-gray-600"
+                  >
+                    <option value="">(board default)</option>
+                    {AGENT_PROVIDERS.map((p) => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                  <span className="block text-[10px] text-gray-400 mt-0.5">Overrides the provider for sessions the board launches at this node (fork branches, join consolidation, spec phases) — e.g. a Claude and a Codex reviewer in parallel.</span>
+                </label>
+                <label className="block text-xs">Agent profile (optional)
+                  <input
+                    value={readAgentField(selectedNode.data.config, "profile")}
+                    onChange={(e) => patchNode(selectedNode.id, { config: writeAgentField(selectedNode.data.config, "profile", e.target.value) })}
+                    placeholder="provider default"
+                    className="w-full mt-0.5 border rounded px-2 py-1 dark:bg-gray-800 dark:border-gray-600"
+                  />
+                </label>
+                <label className="block text-xs">Agent model (optional)
+                  <input
+                    value={readAgentField(selectedNode.data.config, "model")}
+                    onChange={(e) => patchNode(selectedNode.id, { config: writeAgentField(selectedNode.data.config, "model", e.target.value) })}
+                    placeholder="provider default"
+                    className="w-full mt-0.5 border rounded px-2 py-1 dark:bg-gray-800 dark:border-gray-600"
+                  />
+                </label>
+              </div>
               <button onClick={deleteSelected} className="text-xs text-red-600 hover:text-red-700">Delete node</button>
             </div>
           ) : selectedEdge ? (
@@ -639,6 +668,27 @@ function writeGuidance(config: string | null, value: string): string | null {
   let obj: Record<string, unknown> = {};
   if (config) { try { obj = JSON.parse(config) as Record<string, unknown>; } catch { obj = {}; } }
   if (value) obj.guidance = value; else delete obj.guidance;
+  return Object.keys(obj).length ? JSON.stringify(obj) : null;
+}
+
+const AGENT_PROVIDERS = ["claude", "codex", "copilot", "pi"] as const;
+
+/** Read one field of the node's `agent` override from its JSON config (defaults to ""). */
+function readAgentField(config: string | null, field: "provider" | "profile" | "model"): string {
+  if (!config) return "";
+  try {
+    const agent = (JSON.parse(config) as { agent?: Record<string, unknown> }).agent;
+    const value = agent?.[field];
+    return typeof value === "string" ? value : "";
+  } catch { return ""; }
+}
+/** Write one field of the node's `agent` override into its JSON config, preserving other keys. */
+function writeAgentField(config: string | null, field: "provider" | "profile" | "model", value: string): string | null {
+  let obj: Record<string, unknown> = {};
+  if (config) { try { obj = JSON.parse(config) as Record<string, unknown>; } catch { obj = {}; } }
+  const agent = typeof obj.agent === "object" && obj.agent !== null ? { ...(obj.agent as Record<string, unknown>) } : {};
+  if (value) agent[field] = value; else delete agent[field];
+  if (Object.keys(agent).length) obj.agent = agent; else delete obj.agent;
   return Object.keys(obj).length ? JSON.stringify(obj) : null;
 }
 
