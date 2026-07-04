@@ -1,5 +1,6 @@
-import { issues, preferences, projectStatuses, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, preferences, projectStatuses, sessions, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
+import { isTerminalNodeType } from "@agentic-kanban/shared/lib/workflow-engine";
 import { and, eq } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
@@ -74,10 +75,13 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
       baseBranch: workspaces.baseBranch,
       issueNumber: issues.issueNumber,
       projectId: issues.projectId,
+      currentNodeId: workspaces.currentNodeId,
+      currentNodeType: workflowNodes.nodeType,
     })
     .from(workspaces)
     .innerJoin(issues, eq(workspaces.issueId, issues.id))
     .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+    .leftJoin(workflowNodes, eq(workspaces.currentNodeId, workflowNodes.id))
     .where(and(
       eq(workspaces.status, "idle"),
       eq(workspaces.isDirect, false),
@@ -88,6 +92,11 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
   let recovered = 0;
   for (const c of candidates) {
     if (!c.workingDir || !c.baseBranch) continue;
+    // #997: a workspace parked on a non-terminal workflow-template node is owned
+    // by the graph — its own node-driven stages decide review/fix, not this
+    // legacy reconciler. Skip it so a mid-workflow branch never gets silently
+    // re-launched into review or marked readyForMerge.
+    if (c.currentNodeId && !isTerminalNodeType(c.currentNodeType)) continue;
     // Skip if a session is currently running for this workspace.
     const running = await database.select({ id: sessions.id }).from(sessions)
       .where(and(eq(sessions.workspaceId, c.wsId), eq(sessions.status, "running"))).limit(1);
