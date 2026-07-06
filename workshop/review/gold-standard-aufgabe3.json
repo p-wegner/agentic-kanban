@@ -1,36 +1,126 @@
 {
   "task": "aufgabe3",
-  "description": "feat: add audit log service and REST endpoints",
+  "description": "feat(webhook): add webhook dispatcher with rate limiting",
   "findings": [
     {
       "id": "F1",
       "severity": "high",
-      "description": "SQL-Injection in AuditLogService.query(): Der Parameter 'action' aus dem Query-String wird per Template-Literal direkt in den SQL-String interpoliert: `AND action = '${action}'`. Ein Angreifer kann action auf `' OR '1'='1` setzen und damit alle Audit-Einträge aller Projekte lesen, die projectId-Filterung aushebeln oder Daten exfiltrieren. Der Parameter muss als Prepared-Statement-Platzhalter übergeben werden.",
-      "location": "packages/server/src/services/audit-log.service.ts:76"
+      "description": "SSRF / fehlende URL-Validierung in CreateWebhookSchema: Das `url`-Feld wird nur per z.string() ohne .url() validiert. Dadurch akzeptiert der Endpoint beliebige Strings, inkl. file://, javascript:, data: oder interne Adressen wie http://169.254.169.254/latest/meta-data/. Ein Angreifer kann so den Server als Proxy für SSRF-Angriffe missbrauchen oder Cloud-Metadaten auslesen. Das Feld muss auf https:// / http:// eingeschränkt werden und SSRF-Ranges (RFC1918, Loopback, Link-Local) müssen geblockt werden.",
+      "location": "packages/server/src/services/webhook/webhook-schema.ts:35"
     },
     {
       "id": "F2",
-      "severity": "high",
-      "description": "Sensitive Data Exposure: Der rohe Authorization-Header-Wert (z.B. 'Bearer eyJ...') wird als actorToken unverändert in der audit_log-Tabelle persistiert. Wer Lesezugriff auf die Datenbank hat, kann damit alle Bearer-Tokens aus dem Audit-Log extrahieren und Requests als betroffene Nutzer absenden. Es darf nur ein sicherer Bezeichner (Hash, User-ID, anonymisierter Principal) gespeichert werden, niemals das Token selbst.",
-      "location": "packages/server/src/services/audit-log.service.ts:55"
+      "severity": "medium",
+      "description": "Fehlende Obergrenze für maxPayloadBytes in UpdateWebhookSchema: Das Feld hat zwar ein Minimum (1024), aber keine Obergrenze. Ein Caller kann Number.MAX_SAFE_INTEGER setzen und damit den Payload-Größencheck im Dispatcher effektiv deaktivieren. Unter hoher Last puffert der Dispatcher dann beliebig große Payloads im Heap — ein potentieller OOM-Vektor. Es muss eine sinnvolle Obergrenze (z. B. 10 MB = 10_485_760) als .max()-Validator ergänzt werden.",
+      "location": "packages/server/src/services/webhook/webhook-schema.ts:61"
     },
     {
       "id": "F3",
       "severity": "high",
-      "description": "Race Condition / TOCTOU in AuditLogService.record(): Der Duplikat-Check (SELECT) und die eigentliche Einfügung (INSERT) laufen ohne Datenbank-Transaktion. Treffen zwei gleichzeitige Requests ein, können beide den SELECT-Check bestehen bevor einer von ihnen den INSERT abgeschlossen hat. Das Ergebnis sind doppelte Audit-Einträge trotz Duplikatschutz. Die Lösung ist ein atomares BEGIN/COMMIT oder ein INSERT OR IGNORE mit einem Unique-Constraint.",
-      "location": "packages/server/src/services/audit-log.service.ts:43"
+      "description": "HMAC mit MD5 statt SHA-256 in signPayload(): MD5 ist kryptographisch gebrochen — Kollisionsangriffe sind trivial machbar. Eine HMAC-MD5-Signatur bietet keine zuverlässige Integritätsgarantie. Empfängende Server, die die Signatur prüfen, bekommen ein falsches Sicherheitsgefühl. Der Industriestandard für Webhook-Signaturen (GitHub, Stripe, Shopify) ist HMAC-SHA256. Der Algorithmus muss auf 'sha256' geändert werden.",
+      "location": "packages/server/src/services/webhook/webhook-crypto.ts:20"
     },
     {
       "id": "F4",
-      "severity": "medium",
-      "description": "Silent Error Swallow in POST /:projectId/audit: Der catch-Block loggt den Fehler, gibt aber trotzdem HTTP 200 mit { ok: true } zurück. Der Aufrufer kann einen fehlgeschlagenen Schreibvorgang nicht von einem erfolgreichen unterscheiden. Bei einem I/O-Fehler, DB-Fehler oder Constraint-Verletzung muss der Handler mit einem passenden Fehlercode antworten (z.B. 500 Internal Server Error), nicht mit einer Erfolgsantwort.",
-      "location": "packages/server/src/routes/audit.ts:74"
+      "severity": "high",
+      "description": "Timing-Attack-Anfälligkeit in verifySignature(): Wenn die Länge von expected und receivedSignature unterschiedlich ist, fällt die Funktion auf einen normalen String-Vergleich (`expected === receivedSignature`) zurück. Der naive Vergleich bricht beim ersten ungleichen Byte ab und leckt damit Timing-Informationen darüber, wie viele führende Bytes übereinstimmen. timingSafeEqual() muss bedingungslos verwendet werden, mit auf gleiche Länge null-gepaddeten Buffern.",
+      "location": "packages/server/src/services/webhook/webhook-crypto.ts:43"
     },
     {
       "id": "F5",
+      "severity": "high",
+      "description": "Race Condition im Rate-Limiter: checkAndIncrement() liest den aktuellen request_count per SELECT und schreibt ihn per UPDATE, ohne eine Datenbank-Transaktion zu verwenden. Treffen zwei Dispatch-Calls für denselben Webhook gleichzeitig ein (z. B. bei zwei parallel ausgelösten Board-Events), können beide den Limit-Check bestehen und beide inkrementieren — das konfigurierte Rate-Limit wird überschritten. Die Lösung ist BEGIN IMMEDIATE mit SELECT + UPDATE innerhalb derselben Transaktion.",
+      "location": "packages/server/src/services/webhook/rate-limiter.service.ts:57"
+    },
+    {
+      "id": "F6",
       "severity": "medium",
-      "description": "Memory Leak durch akkumulierende Event-Listener: createAuditRoute() ruft process.on('beforeExit', flushOnExit) bei jeder Instanziierung auf. In Tests, Hot-Reload-Szenarien oder mehrfachen createAuditRoute()-Aufrufen akkumulieren sich unbegrenzt viele Listener auf dem process-Objekt. Node.js gibt dabei eine MaxListenersExceededWarning aus, und der Heap wächst kontinuierlich. Der Listener muss entweder process.once() verwenden oder per process.off() beim Teardown entfernt werden.",
-      "location": "packages/server/src/routes/audit.ts:40"
+      "description": "Off-by-one im Rate-Limit-Check: Die Bedingung `requestCount >= config.maxRequests` lehnt den Request ab, sobald der Zähler genau das konfigurierte Limit erreicht — d. h. der letzte erlaubte Request wird fälschlicherweise geblockt. Bei einem Limit von 10 sind nur 9 Deliveries pro Fenster möglich. Die korrekte Bedingung ist `requestCount > config.maxRequests`.",
+      "location": "packages/server/src/services/webhook/rate-limiter.service.ts:89"
+    },
+    {
+      "id": "F7",
+      "severity": "high",
+      "description": "Memory Leak + fehlende Deduplication im pendingBuffer: RetryQueueService hält ein in-memory `pendingBuffer`-Array, das in enqueue() unbegrenzt wächst. Wenn die Datenbank temporär nicht erreichbar ist, akkumulieren sich alle fehlgeschlagenen Deliveries im Heap. Zusätzlich fehlt eine Deduplizierung: dieselbe deliveryId kann mehrfach eingereiht werden, wenn der Caller wiederholt ruft. Es braucht eine Größenoberschranke und eine Set-basierte Duplikatprüfung.",
+      "location": "packages/server/src/services/webhook/retry-queue.service.ts:59"
+    },
+    {
+      "id": "F8",
+      "severity": "high",
+      "description": "Double-Dispatch durch nicht-atomares SELECT+DELETE in drainDue(): Zwischen dem SELECT (fällige Einträge lesen) und dem anschließenden DELETE werden die Rows nicht gesperrt. In einer Umgebung mit mehreren Worker-Prozessen oder nach einem Hot-Reload können zwei Worker dieselben Retry-Einträge sehen und beide den Webhook ausliefern. Das Ergebnis ist eine Doppelauslieferung. Die Lösung ist `DELETE … RETURNING` (SQLite ≥ 3.35) oder ein `BEGIN IMMEDIATE` mit einem claimed_at-Flag.",
+      "location": "packages/server/src/services/webhook/retry-queue.service.ts:101"
+    },
+    {
+      "id": "F9",
+      "severity": "high",
+      "description": "SSL-Zertifikatsprüfung global deaktiviert: Der httpsAgent wird mit `rejectUnauthorized: false` konfiguriert. Damit akzeptiert jeder ausgehende Webhook-Call abgelaufene, selbstsignierte oder anderweitig ungültige TLS-Zertifikate. Ein Angreifer mit MITM-Position kann den Traffic unbemerkt abfangen und Webhook-Payloads — die sensible Board-Daten enthalten können — lesen oder manipulieren. Die Option muss entfernt werden; stattdessen muss ggf. ein projektspezifisches CA-Bundle konfigurierbar sein.",
+      "location": "packages/server/src/services/webhook/webhook-dispatcher.ts:48"
+    },
+    {
+      "id": "F10",
+      "severity": "high",
+      "description": "Kein Request-Timeout im Dispatcher: fetch() wird ohne AbortController und ohne Timeout aufgerufen. Ein Ziel-Server, der die TCP-Verbindung annimmt, aber keine Response schickt (Slow-Loris), hält den Worker-Thread dauerhaft blockiert. Alle nachfolgenden Deliveries stauen sich in der Queue. Es muss ein AbortController mit einem konfigurierbaren Timeout (z. B. 30 s) verwendet werden, der den Request abbricht wenn keine Response kommt.",
+      "location": "packages/server/src/services/webhook/webhook-dispatcher.ts:85"
+    },
+    {
+      "id": "F11",
+      "severity": "high",
+      "description": "Webhook-Secrets werden im Klartext in der Datenbank gespeichert: create() persistiert das secret-Feld unverändert in der webhook_endpoints-Tabelle. Jeder mit Lesezugriff auf die SQLite-Datei kann alle Secrets extrahieren und valide HMAC-Signaturen für beliebige Payloads erzeugen — d.h. Webhooks anderer Projekte fälschen. Secrets müssen vor dem Speichern verschlüsselt werden (z.B. AES-256-GCM mit einem aus einer Umgebungsvariable abgeleiteten Key) und dürfen im API-Response nur maskiert zurückgegeben werden.",
+      "location": "packages/server/src/services/webhook/webhook.service.ts:81"
+    },
+    {
+      "id": "F12",
+      "severity": "high",
+      "description": "SQL-Injection im Event-Filter von listByProject(): Der Parameter `event` aus dem Query-String wird per Template-Literal direkt in den LIKE-Ausdruck interpoliert: `AND events LIKE '%\"${event}\"%'`. Ein Angreifer kann z.B. `event=x%' OR '1'='1` übergeben und damit alle Webhook-Endpunkte aller Projekte auslesen, inklusive deren Klartext-Secrets. Der Parameter muss als Prepared-Statement-Placeholder übergeben werden.",
+      "location": "packages/server/src/services/webhook/webhook.service.ts:129"
+    },
+    {
+      "id": "F13",
+      "severity": "medium",
+      "description": "Ghost Deliveries bei Prozess-Crash: Der Delivery-Eintrag wird in der Datenbank mit `status = 'pending'` angelegt, bevor der HTTP-Call stattfindet. Stürzt der Prozess zwischen INSERT und dispatcher.dispatch() ab, bleibt der Eintrag dauerhaft auf 'pending' — er landet nie auf der Retry-Queue und wird nie erneut versucht. Aus Betreibersicht verschwindet die Delivery geräuschlos. Die Lösung ist, den Delivery-Eintrag erst nach dem Dispatch-Ergebnis zu schreiben, oder vorab als 'queued' zu markieren und die Retry-Queue als Single-Source-of-Truth zu verwenden.",
+      "location": "packages/server/src/services/webhook/webhook.service.ts:219"
+    },
+    {
+      "id": "F14",
+      "severity": "medium",
+      "description": "Dispatch blockiert den Request-Thread und hat kein Dead-Letter-Queue: fireEvent() wird synchron im Request-Handler aufgerufen. Wenn ein Webhook-Endpunkt langsam oder nicht erreichbar ist (kombiniert mit dem fehlenden Timeout aus F10), blockiert der gesamte API-Response bis alle Webhooks versucht wurden. Zusätzlich gibt es kein Dead-Letter-Queue für Events, bei denen fireEvent() selbst einen Fehler wirft — diese Events werden still verworfen. Der Dispatch muss in eine asynchrone Queue ausgelagert werden.",
+      "location": "packages/server/src/services/webhook/webhook-events.ts:58"
+    },
+    {
+      "id": "F15",
+      "severity": "medium",
+      "description": "Hardcoded Konfigurationswerte in WebhookConfig: Alle Timeouts, Retry-Limits und Concurrency-Werte sind als Compile-Time-Konstanten fest verdrahtet. Betreiber können diese Werte nicht ohne Code-Änderung und Re-Deployment anpassen. In Produktionsumgebungen, in denen ein langsamer Upstream-Webhook Probleme verursacht, gibt es keinen operativen Hebel. Alle Werte müssen aus Umgebungsvariablen gelesen werden (z.B. `process.env.WEBHOOK_DISPATCH_TIMEOUT_MS`) mit Fallback auf einen sinnvollen Default.",
+      "location": "packages/server/src/services/webhook/webhook-config.ts:32"
+    },
+    {
+      "id": "F16",
+      "severity": "medium",
+      "description": "WEBHOOKS_ENABLED=false aktiviert trotzdem Webhooks: isWebhooksEnabled() prüft per `Boolean(process.env.WEBHOOKS_ENABLED)`. Da jeder nicht-leere String truthy ist, führt das Setzen von `WEBHOOKS_ENABLED=false` dazu, dass Webhooks aktiv bleiben. Operatoren, die Webhooks über diese Variable abschalten wollen, bekommen das gegenteilige Verhalten. Die korrekte Prüfung ist `process.env.WEBHOOKS_ENABLED?.toLowerCase() !== 'false'`.",
+      "location": "packages/server/src/services/webhook/webhook-config.ts:63"
+    },
+    {
+      "id": "F17",
+      "severity": "low",
+      "description": "Fehlende secret_version-Spalte in der Migration: Die webhook_endpoints-Tabelle speichert das secret als plain TEXT ohne eine Version/Format-Markierung. Wird in Zukunft eine Verschlüsselung nachgerüstet, gibt es keine Möglichkeit, bereits gespeicherte Klartextzeilen von verschlüsselten zu unterscheiden — eine transparente Key-Rotation-Migration ist nicht möglich. Die Tabelle sollte von Anfang an eine Spalte `secret_version INTEGER NOT NULL DEFAULT 0` enthalten.",
+      "location": "packages/server/src/services/webhook/webhook-migrations.ts:37"
+    },
+    {
+      "id": "F18",
+      "severity": "low",
+      "description": "Fehlender Index auf (project_id, enabled) in webhook_endpoints: Der häufigste Abfragepfad — alle aktivierten Webhooks eines Projekts bei einem Board-Event — filtert nach project_id und enabled. Es existiert nur ein Index auf project_id allein. Auf einem Board mit vielen Projekten und vielen deaktivierten Webhooks muss SQLite bei jedem Event einen Full-Scan über den project_id-Index laufen und dabei alle deaktivierten Zeilen manuell filtern. Ein zusammengesetzter Index auf (project_id, enabled) würde diesen Scan eliminieren.",
+      "location": "packages/server/src/services/webhook/webhook-migrations.ts:56"
+    },
+    {
+      "id": "F19",
+      "severity": "high",
+      "description": "Keine Authentifizierung oder Autorisierung auf den Webhook-Routen: Alle Endpoints (POST, GET, PATCH, DELETE, Test) führen keine Prüfung durch, ob der Aufrufer überhaupt Zugriff auf das Projekt hat. Jeder unauthentifizierte Client kann Webhooks für fremde Projekte anlegen (und damit Board-Events an externe Server leiten), löschen (und damit Integrationen sabotieren) oder auslesen (und damit Klartext-Secrets stehlen). Jede Route muss mindestens die Projekt-Mitgliedschaft prüfen.",
+      "location": "packages/server/src/routes/webhooks.ts:54"
+    },
+    {
+      "id": "F20",
+      "severity": "medium",
+      "description": "Test-Endpoint verbraucht Rate-Limit-Budget und erzeugt nicht unterscheidbare Delivery-Einträge: POST /:webhookId/test durchläuft den kompletten Dispatch-Pfad inklusive Rate-Limiter. Ein Caller kann damit durch wiederholte Test-Calls das Rate-Limit-Kontingent für echte Deliveries aufbrauchen. Außerdem fehlt ein `is_test`-Flag auf dem Delivery-Record, sodass Betreiber Test-Deliveries nicht vom Produktionsverlauf trennen können. Test-Deliveries müssen den Rate-Limiter umgehen und als Test markiert werden.",
+      "location": "packages/server/src/routes/webhooks.ts:174"
     }
   ]
 }
