@@ -1,31 +1,25 @@
 ---
 name: review-aufgabe
-description: Workshop Review + Benchmark für eine Aufgabe — Parameter: Aufgabennummer als Freitext (z.B. "/review-aufgabe 1"). Pinnt Aufgabe und Branch und stellt vollen Tool-Zugriff bereit (den Diff zieht der Teilnehmer selbst über den Anker); führt das Review als eigenen Subagent aus (Fan-out für große Diffs möglich); gibt sofort den Benchmark-Score inkl. Token-Verbrauch aus. Fragt nach der Nummer falls kein Parameter angegeben.
+description: Workshop Review + Benchmark für eine Aufgabe — Parameter: Aufgabennummer (z.B. "/review-aufgabe 1"). Checkt aufgabeN als isolierten Worktree aus, startet eine neue claude -p Session mit dem Teilnehmer-Skill als --append-system-prompt, parst JSON-Findings aus stdout und benchmarkt gegen den Gold-Standard. Fragt nach der Nummer falls kein Parameter angegeben.
 argument-hint: "[Aufgabennummer, z.B. 1]"
 ---
 
 Du bist ein Workshop-Runner (das "Harness"), der Review und Benchmark in einem Durchlauf ausführt.
 
 Wichtiges Prinzip: **Der Teilnehmer-Skill besitzt die Review-Strategie, das Harness verankert nur die Aufgabe.**
-Das Harness pinnt zuverlässig Aufgabe und Branch (Branch-Name bleibt im Anker sichtbar) und stellt
-vollen Tool-Zugriff bereit; **den Diff zieht der Teilnehmer selbst** über das im Anker genannte
-Kommando. Es führt die Methodik des Teilnehmers treu aus, schreibt ihm **kein** Frontmatter-Schema vor
-und fetcht/chunkt **nicht** von sich aus: Braucht ein Review den Diff, Ticket/Acceptance Criteria,
-Quelldateien oder History, muss der Teilnehmer-Skill sich das über seine eigenen Tools holen.
-Ein naiver Teilnehmer-Skill, der nur einen mitgelieferten Diff erwartet, soll scheitern —
-das Harness liefert keinen vorgekauten Diff mehr.
+Der Teilnehmer-Skill aus `workshop/review/skill.md` wird per `--append-system-prompt` an `claude -p`
+übergeben; `claude -p` startet im aufgabeN-Worktree als eigenständige Session.
 
 **Ausgabe-Regel:** Arbeite still ab — keine Schritt-für-Schritt-Erklärungen, keine Tool-Kommentare.
 Gib **genau zwei Blöcke** aus (nichts sonst), und zwar an **zwei getrennten Zeitpunkten**:
 1. Das **Review-Ergebnis des Teilnehmer-Skills** (die Findings) direkt nach TEIL 3 — also **bevor**
-   TEIL 4 den Gold-Standard überhaupt liest (Format in TEIL 3.2).
+   TEIL 4 den Gold-Standard überhaupt liest (Format in TEIL 3.3).
 2. Den **Benchmark-Block** (die Bewertung) am Ende nach TEIL 4 (Format in TEIL 4.5).
 
 Diese Reihenfolge ist verbindlich: Der Review-Block muss ausgegeben sein, **bevor** die erste
 `Read`-Operation auf eine `gold-standard-*`-Datei stattfindet. So belegt die Reihenfolge der
 geloggten Tool-Aufrufe, dass der Reviewer die Bewertungsgrundlage nicht angefasst hat.
-Einzige weitere Ausgaben: Abbruchmeldungen (fehlender Branch in TEIL 0, fehlender
-Gold-Standard in TEIL 4.1).
+Einzige weitere Ausgaben: Abbruchmeldungen (fehlender Branch in TEIL 0, fehlender Gold-Standard in TEIL 4.1).
 
 ## Parameter
 
@@ -44,7 +38,7 @@ Warte auf die Antwort und verwende sie als AUFGABE_NR.
 
 Die Aufgaben-Branches existieren nur als Remote-Branches. Prüfe:
 
-```powershell
+```bash
 git rev-parse --verify --quiet origin/aufgabe{AUFGABE_NR}
 ```
 
@@ -54,140 +48,131 @@ Und beende.
 
 ---
 
-# TEIL 1: Aufgabe verankern
+# TEIL 1: Isolierten Worktree einrichten
 
-Das Harness parst **kein** vorgegebenes Frontmatter-Schema. Es pinnt die Aufgabe zuverlässig (Branch,
-Basis) und übergibt dem Reviewer diesen festen Anker plus vollen Tool-Zugriff. Den Diff und jeden
-weiteren Kontext holt sich der Teilnehmer-Skill über seine eigene Methodik.
+## Schritt 1.1: Skill-Datei prüfen
 
-## Schritt 1.1: Teilnehmer-Skill (Methodik) laden
+Prüfe, dass `workshop/review/skill.md` existiert und nicht leer ist.
+Der Skill wird in TEIL 2 direkt per `--append-system-prompt` übergeben — kein separates Laden nötig.
 
-Lese `workshop/review/skill.md`. Der gesamte Inhalt ist die **Review-Methodik** — der Prompt, dem der
-Reviewer folgt. Führende Doku-/Kommentarblöcke (`<!-- ... -->`) sind Anleitung für den Teilnehmer und
-gehören nicht in den Reviewer-Prompt; alles andere schon. **Keine Schlüssel-Interpretation** — was der
-Teilnehmer nicht in seiner Methodik beschreibt, passiert nicht.
+## Schritt 1.2: Worktree-Pfad bestimmen
 
-## Schritt 1.2: Diff bewusst NICHT vor-materialisieren
-
-Das Harness kaut den Diff **nicht** vor. Die Aufgabe ist über die in TEIL 0 verifizierte Branch-Ref
-bereits eindeutig gepinnt; den Diff-**Inhalt** holt sich der Teilnehmer-Skill selbst über das im Anker
-genannte Kommando (`git diff origin/master...origin/aufgabe{AUFGABE_NR}`). Ein naiver
-"review the following diff"-Skill findet nichts vor und scheitert — genau so gewollt. Wer den Diff
-braucht, zieht ihn per Bash im Reviewer-Subagenten (das hält den ggf. großen Diff ohnehin aus dem
-Trainer-Kontext); bei großen Diffs chunkt der Teilnehmer pro Datei/Modul selbst.
-
-## Schritt 1.3: Aufgaben-Anker bauen
-
-Baue einen festen Anker-Block, der dem Reviewer sagt, WORAN er arbeitet und WAS bereitsteht:
-- Aufgabe: {AUFGABE_NR}
-- Branch: `origin/aufgabe{AUFGABE_NR}` — Basis: `origin/master`
-- Diff selbst ziehen: `git diff origin/master...origin/aufgabe{AUFGABE_NR}`
-  (bei großen Diffs: `git diff --name-only origin/master...origin/aufgabe{AUFGABE_NR}`, dann pro Datei)
-- **Voller Tool-Zugriff** (Bash, Read, Grep, Agent): "Hol dir den Diff und jeden weiteren Kontext, den
-  deine Methodik braucht, selbst — z.B. verknüpftes Ticket/Acceptance Criteria, Quelldateien, History."
-- **Integritäts-Guard**: "Lies keine Workshop-Referenzdateien (`gold-standard-*`, `benchmark-result-*`) —
-  das ist die Bewertungsgrundlage, nicht Teil des Reviews."
-
-Der Anker ist vom Harness fest vorgegeben; er verlangt vom Teilnehmer **keine** Schlüssel.
-Der Branch-Name bleibt im Anker sichtbar, damit der Teilnehmer den Diff gezielt ziehen kann.
-
----
-
-# TEIL 2: Review als Subagent
-
-## Schritt 2.1: Reviewer-Subagent starten
-
-Starte **einen** Subagenten (Agent-Tool, `subagent_type: "general-purpose"`) mit vollem Tool-Zugriff.
-Führe das Review NICHT inline in dieser Session aus — die Isolation hält den (ggf. großen) Diff aus
-dem Trainer-Kontext und macht die Token-Messung sauber.
-
-Der Prompt an den Subagenten enthält, in dieser Reihenfolge:
-1. Den **Methodik-Body** des Teilnehmer-Skills (Schritt 1.1) — das ist die Anleitung, der der Subagent folgt.
-2. Den **Aufgaben-Anker** (Schritt 1.3).
-3. Einen festen **Output-Vertrag** (vom Harness angehängt):
-   > Schreibe deine Findings als valides JSON nach `workshop/review/findings-{AUFGABE_NR}.json`
-   > (Schema unten, kein Text davor/danach). Gib als Antwort nur eine einzeilige Zusammenfassung
-   > zurück (Anzahl Findings). Du darfst gemäß deiner Methodik eigene Subagenten pro Modul/Chunk starten.
-
-Output-Schema (Teil des Vertrags):
-
-```json
-{
-  "findings": [
-    {
-      "id": "F1",
-      "severity": "high|medium|low",
-      "description": "Klare Beschreibung des Problems",
-      "location": "dateiname.ts:zeilennummer"
-    }
-  ]
-}
+```bash
+echo "$(git rev-parse --show-toplevel)/../workshop-review-aufgabe{AUFGABE_NR}"
 ```
 
-## Schritt 2.2: Findings & Token-Verbrauch übernehmen
+Merke dir den ausgegebenen absoluten Pfad als **WORKTREE_PATH**.
 
-Nachdem der Subagent zurückkehrt, lese `workshop/review/findings-{AUFGABE_NR}.json`.
-Falls die Datei fehlt oder kein valides JSON enthält, vermerke das und behandle die Findings als leer.
+Falls der Pfad bereits existiert (fehlgeschlagener Vorläufer), erst aufräumen:
 
-Merke dir außerdem den vom Agent-Tool zurückgegebenen **`subagent_tokens`**-Wert (im `<usage>`-Block
-des Agent-Ergebnisses). Das ist die Selbstauskunft über den Token-Verbrauch des Reviews (Input inkl.
-bereitgestelltem Kontext + Output). Er wird in TEIL 3 als `tokens_used` verwendet.
+```bash
+git worktree remove "$WORKTREE_PATH" --force 2>/dev/null || true
+```
 
-(Noch keine Ausgabe hier — der Review-Block wird in TEIL 3.2 ausgegeben, sobald auch `tokens_used`
-feststeht. Siehe Ausgabe-Regel.)
+## Schritt 1.3: Worktree anlegen
+
+```bash
+git worktree add "$WORKTREE_PATH" origin/aufgabe{AUFGABE_NR}
+```
 
 ---
 
-# TEIL 3: Token-Abrechnung (Subagent-Selbstauskunft)
+# TEIL 2: Review via claude -p
 
-## Schritt 3.1: tokens_used bestimmen
+## Schritt 2.1: claude -p starten
 
-`tokens_used` = der in Schritt 2.2 gemerkte **`subagent_tokens`**-Wert aus dem `<usage>`-Block des
-Reviewer-Subagenten. Das ist der direkt vom Harness gemessene Token-Verbrauch des Reviews (Input inkl.
-bereitgestelltem Kontext + Output) — ohne den Trainer-Session-Kontext zu vermischen.
+Führe folgenden Bash-Befehl in **einem einzigen Aufruf** aus (**Timeout: mind. 5 Minuten**).
+Er liest den Skill, bereinigt HTML-Kommentarblöcke, übergibt ihn per `--append-system-prompt`
+und wechselt in den Worktree:
 
-Kein Transcript-Scan, kein Zeitfenster. Die Zahl kommt ausschließlich aus dem Agent-Ergebnis.
+```bash
+REPO_ROOT=$(git rev-parse --show-toplevel)
+WORKTREE_PATH="${REPO_ROOT}/../workshop-review-aufgabe{AUFGABE_NR}"
+SKILL_BODY=$(sed '/<!--/,/-->/d' "${REPO_ROOT}/workshop/review/skill.md" | sed '/^[[:space:]]*$/{ /./!d }')
+cd "$WORKTREE_PATH" && claude -p \
+  --append-system-prompt "$SKILL_BODY" \
+  --output-format text \
+  --permission-mode bypassPermissions << 'HARNESS_PROMPT'
+Aufgabe: {AUFGABE_NR}
+Du bist in einem Worktree, in dem der Branch aufgabe{AUFGABE_NR} ausgecheckt ist (basiert auf master).
 
-**Caveat bei Fan-out:** Wenn der Reviewer-Subagent gemäß seiner Strategie eigene Kind-Subagenten
-startet, ist deren Verbrauch je nach Harness evtl. **nicht** in `subagent_tokens` enthalten — dann ist
-`tokens_used` eine Untergrenze. Vermerke das in der Ausgabe, wenn du weißt, dass gefächert wurde. Falls
-das Agent-Ergebnis keinen `subagent_tokens`-Wert liefert, setze `tokens_used: null` und vermerke es.
+Folge deiner Review-Methodik (system prompt) und reviewe die Änderungen in diesem Branch.
 
-## Schritt 3.2: Review-Ergebnis ausgeben (VOR dem Gold-Standard-Zugriff)
+Diff ziehen:
+  git diff origin/master                      -- alle Änderungen zusammen
+  git diff origin/master -- <dateiname>       -- pro Datei (bei großen Diffs)
 
-Gib **jetzt** — bevor TEIL 4 irgendeine `gold-standard-*`-Datei liest — das Review-Ergebnis des
-Teilnehmer-Skills aus (die Findings aus `findings-{AUFGABE_NR}.json`, das ist, was der Teilnehmer-Skill
-selbst geliefert hat):
+Integritäts-Guard: Lies KEINE Referenzdateien in workshop/review/ (gold-standard-*, benchmark-*).
+
+Gib deine Findings als genau einen JSON-Block aus, nichts davor oder danach:
+
+{"findings": [{"id": "F1", "severity": "high|medium|low", "description": "...", "location": "datei.ts:zeile"}]}
+HARNESS_PROMPT
+```
+
+Erfasse den gesamten Stdout als **CLAUDE_OUTPUT**. Exit-Code merken.
+
+---
+
+# TEIL 3: Cleanup & Findings extrahieren
+
+## Schritt 3.1: Worktree aufräumen
+
+Unabhängig vom Exit-Code in TEIL 2:
+
+```bash
+git worktree remove "$WORKTREE_PATH" --force
+```
+
+Bei Fehler: Hinweis ausgeben und weitermachen:
+> "Worktree $WORKTREE_PATH konnte nicht automatisch aufgeräumt werden. Manuell: git worktree remove $WORKTREE_PATH --force"
+
+## Schritt 3.2: JSON aus CLAUDE_OUTPUT extrahieren
+
+Suche in CLAUDE_OUTPUT nach dem JSON-Block:
+- Mit Codeblock-Wrapper: extrahiere den Inhalt zwischen dem ersten ` ```json ` (oder ` ``` `) und
+  dem schließenden ` ``` `
+- Ohne Wrapper: nimm alles vom ersten `{` bis zum letzten `}`
+
+Parse das JSON und extrahiere das `findings`-Array als **FINDINGS**.
+
+Falls CLAUDE_OUTPUT kein valides JSON enthält oder Exit-Code ≠ 0 war: setze FINDINGS = [] und
+vermerke: "claude -p hat kein valides JSON geliefert — prüfe workshop/review/skill.md".
+
+Token-Hinweis: `--output-format text` liefert keine nativen Token-Counts. Setze tokens_used = null.
+
+## Schritt 3.3: Review-Ergebnis ausgeben (VOR dem Gold-Standard-Zugriff — Integritäts-Ankerpunkt)
+
+Gib **jetzt** — bevor TEIL 4 irgendeine `gold-standard-*`-Datei liest — das Review-Ergebnis aus:
 
 ```
 === Review-Ergebnis Aufgabe {AUFGABE_NR} (Teilnehmer-Skill) ===
-{Anzahl} Findings — Tokens: {tokens_used}
+{Anzahl} Findings — Tokens: n/a
 
 - F1 (high)   dateiname.ts:zeile — <kurzbeschreibung>
 - F2 (medium) dateiname.ts:zeile — <kurzbeschreibung>
 - ...
 ```
 
-Erst nach dieser Ausgabe mit TEIL 4 fortfahren. Dadurch steht im Transcript die erste `Read`-Operation
-auf `gold-standard-aufgabe{AUFGABE_NR}.json` nachweislich **nach** dem Review-Block.
+Erst nach dieser Ausgabe mit TEIL 4 fortfahren.
 
 ---
 
 # TEIL 4: Benchmark
 
-## Schritt 4.1: Inputs laden
+## Schritt 4.1: Gold-Standard laden
 
-Lese:
-- `workshop/review/findings-{AUFGABE_NR}.json` — der Output des Reviewer-Subagenten
-- `workshop/review/gold-standard-aufgabe{AUFGABE_NR}.json` — die Referenz-Findings
+Lese: `workshop/review/gold-standard-aufgabe{AUFGABE_NR}.json`
 
-Falls `gold-standard-aufgabe{AUFGABE_NR}.json` nicht existiert, gib aus:
+(Die Findings kommen aus Schritt 3.2, nicht aus einer Datei.)
+
+Falls die Datei nicht existiert, gib aus:
 > "Kein Gold-Standard für Aufgabe {AUFGABE_NR} gefunden (workshop/review/gold-standard-aufgabe{AUFGABE_NR}.json)."
 Und beende.
 
 ## Schritt 4.2: Bewertung
 
-Bewerte für jedes Finding im Gold Standard, ob es im Teilnehmer-Output enthalten ist:
+Bewerte für jedes Finding im Gold Standard, ob es in FINDINGS enthalten ist:
 
 - **found**: Das Finding wurde klar erkannt — Kern-Problem und ungefähre Location stimmen überein
 - **partial**: Das Finding wurde angedeutet, aber ungenau (z.B. falscher Ort, vages Problem, oder nur Symptom ohne Ursache)
@@ -205,15 +190,15 @@ Maximaler Score = Anzahl der Gold-Standard-Findings
 
 ## Schritt 4.4: Ergebnis schreiben
 
-Schreibe das Ergebnis nach `workshop/review/benchmark-result-{AUFGABE_NR}.json` (z.B. `benchmark-result-2.json`):
+Schreibe das Ergebnis nach `workshop/review/benchmark-result-{AUFGABE_NR}.json`:
 
 ```json
 {
   "score": 3.5,
   "max_score": 5,
   "tokens": {
-    "tokens_used": 18432,
-    "source": "subagent-self-report"
+    "tokens_used": null,
+    "source": "unavailable (claude -p --output-format text)"
   },
   "details": [
     { "gold_id": "F1", "verdict": "found", "note": "Null check korrekt erkannt" },
@@ -227,13 +212,10 @@ Schreibe das Ergebnis nach `workshop/review/benchmark-result-{AUFGABE_NR}.json` 
 
 ## Schritt 4.5: Benchmark-Block ausgeben
 
-Das Review-Ergebnis wurde bereits in TEIL 3.2 ausgegeben. Gib jetzt **nur noch** den Benchmark-Block
-aus (die Bewertung gegen den Gold-Standard):
-
 ```
 === Benchmark Aufgabe {AUFGABE_NR} ===
 Score: X / {MAX}
-Tokens: {tokens_used}  (Subagent-Selbstauskunft)
+Tokens: n/a
 
 ✓ F1 (high)   — found:   <kurze Note>
 ✓ F2 (high)   — found:   <kurze Note>
