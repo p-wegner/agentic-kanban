@@ -1,6 +1,6 @@
 import { issues, workspaces, sessions, projectStatuses, workflowNodes, tags, issueTags, issueDependencies, issueArtifacts, agentSkills } from "@agentic-kanban/shared/schema";
 import { parseSessionSummary } from "@agentic-kanban/shared";
-import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { eq, inArray, desc, and, gte } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
@@ -760,12 +760,7 @@ export async function createIssueWithNextNumber(
  * to the new status. Owns the workflow-engine call so the CLI need not hold db.
  */
 export async function moveIssueToStatus(issueId: string, statusId: string, database: Database = db): Promise<void> {
-  const now = new Date().toISOString();
-  await database
-    .update(issues)
-    .set({ statusId, statusChangedAt: now, updatedAt: now })
-    .where(eq(issues.id, issueId));
-  await syncCurrentNodeToStatus(database, issueId).catch(() => {});
+  await transitionIssueStatus(database, issueId, statusId);
 }
 
 /**

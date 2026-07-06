@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { getSettings, setSettings } from "../lib/settingsStore.js";
 import { suggestBranchName, sanitizeBranchName } from "@agentic-kanban/shared/lib/branch";
+import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import type { IssueWithStatus, ProfileSelection, WorkspaceResponse } from "@agentic-kanban/shared";
 import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import { PreflightModal } from "./PreflightModal.js";
@@ -78,7 +79,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
   const [branchName, setBranchName] = useState(suggestion);
   const [baseBranch, setBaseBranch] = useState("");
   const [isDirect, setIsDirect] = useState(false);
-  const [requiresReview, setRequiresReview] = useState(prefs.auto_review !== "false");
+  const [requiresReview, setRequiresReview] = useState(isAutoReviewEnabled(prefs.auto_review));
   // Per-launch override for the pre-flight check; defaults to the inherited `skip_preflight` setting.
   const [runPreflight, setRunPreflight] = useState(prefs.skip_preflight !== "true");
   const [planMode, setPlanMode] = useState(

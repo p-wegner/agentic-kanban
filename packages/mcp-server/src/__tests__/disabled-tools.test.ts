@@ -23,10 +23,9 @@ const MCP_PKG_DIR = resolve(MONOREPO_ROOT, "packages/mcp-server");
 const SERVER_ENTRY = resolve(MCP_PKG_DIR, "src/index.ts");
 
 // The two tools we declare disabled for this session, and one control that stays live.
-// NOTE: the gate (index.ts:205) does a raw `value.split(",")` + exact-case `Set.has`,
-// so it assumes a CLEAN comma-list — no surrounding spaces, exact tool-name case. We
-// seed it that way. Whitespace/case-insensitivity on this sole authority knob is a
-// known product gap (tracked separately) and is intentionally NOT asserted here.
+// NOTE: getDisabledTools (index.ts) now trims + lowercases each entry, so the gate accepts
+// a human-written comma-list (surrounding spaces, mixed case). The clean-list happy path is
+// covered here; the whitespace/case hardening is asserted by the second describe block below.
 const DISABLED = ["delete_issue", "delete_workspace"] as const;
 const CONTROL = "get_context";
 
@@ -201,5 +200,90 @@ describe("MCP disabled_mcp_tools governance gate", () => {
     const data = JSON.parse(resp.result.content[0].text);
     expect(data.project).toBeDefined();
     expect(data.project.name).toBe("Default Project");
+  });
+});
+
+// Ticket #926: the gate must normalize each pref entry (trim surrounding whitespace, apply
+// a case-insensitive policy) before matching. A pref a human types as a comma list with
+// spaces, or with the wrong case, must STILL disable the tools — otherwise a tool the user
+// believes is off stays callable, a silent security gap on the sole MCP authority knob.
+describe("MCP disabled_mcp_tools gate normalizes whitespace and case", () => {
+  let proc: ChildProcess;
+  let tmpDir: string;
+
+  // Deliberately messy: leading/trailing space around one entry, mixed-case on the other.
+  // Both must end up disabled. `delete_workspace` is written `Delete_Workspace`.
+  const RAW_PREF = "delete_issue , Delete_Workspace";
+  const EXPECTED_DISABLED = ["delete_issue", "delete_workspace"] as const;
+
+  beforeAll(async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "mcp-test-disabled-norm-"));
+    const dbPath = join(tmpDir, "test.db");
+    createTestDb(dbPath);
+
+    const db = new DatabaseSync(dbPath);
+    seedProject(db, { id: randomUUID(), name: "Default Project", active: true });
+    const now = new Date().toISOString();
+    db.exec(`INSERT INTO preferences (key, value, updated_at)
+      VALUES ('disabled_mcp_tools', '${RAW_PREF}', '${now}')`);
+    db.close();
+
+    proc = spawn(process.execPath, ["--conditions=development", "--import", "tsx", SERVER_ENTRY], {
+      cwd: MCP_PKG_DIR,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, DB_URL: `file:${dbPath}` },
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("MCP server didn't start")), 15000);
+      proc.stderr!.on("data", (data: Buffer) => {
+        if (data.toString().includes("running on stdio")) {
+          clearTimeout(timeout);
+          resolve();
+        }
+      });
+    });
+
+    const initResp = await sendAndReceive(proc, makeRequest("initialize", {
+      protocolVersion: "2024-11-05",
+      capabilities: {},
+      clientInfo: { name: "test-client", version: "0.1.0" },
+    }));
+    expect(initResp.result.serverInfo.name).toBe("agentic-kanban");
+    proc.stdin!.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
+  });
+
+  afterAll(async () => {
+    if (proc && proc.exitCode === null) {
+      const exited = new Promise<void>((res) => proc.once("exit", () => res()));
+      proc.kill();
+      await Promise.race([exited, new Promise<void>((res) => setTimeout(res, 5000))]);
+    }
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("disables both 'delete_issue' (whitespace-padded) and 'Delete_Workspace' (mixed case)", async () => {
+    const resp = await sendAndReceive(proc, makeRequest("tools/list"));
+    const tools = resp.result.tools as { name: string }[];
+    const registered = new Set<string>(tools.map((t) => t.name));
+
+    for (const name of EXPECTED_DISABLED) {
+      expect(registered.has(name), `'${name}' should be disabled despite messy pref formatting`).toBe(false);
+    }
+    // Control: a tool not named in the pref stays exposed, proving the gate is still selective.
+    expect(registered.has(CONTROL), `non-disabled tool '${CONTROL}' should stay exposed`).toBe(true);
+    expect(registered.size).toBeGreaterThan(10);
+  });
+
+  it("refuses a call to the mixed-case-named tool (it is genuinely unregistered)", async () => {
+    const resp = await sendAndReceive(proc, makeRequest("tools/call", {
+      name: "delete_workspace",
+      arguments: { workspaceId: randomUUID() },
+    }));
+    expect(resp.error).toBeUndefined();
+    expect(resp.result.isError, `expected isError for unregistered tool, got: ${JSON.stringify(resp.result)}`).toBe(true);
+    const text: string = resp.result.content[0].text;
+    expect(text, `expected the SDK 'Tool ... not found' signature, got: ${text}`).toMatch(/tool\s+.*\bnot found\b/i);
+    expect(text).toContain("delete_workspace");
   });
 });

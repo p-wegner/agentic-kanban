@@ -26,7 +26,14 @@ import { createWorkspaceService } from "../services/workspace.service.js";
 export interface MonitorWorkspaceActions {
   /** Relaunch the agent for an idle workspace. (POST /api/workspaces/:id/launch) */
   launch(workspaceId: string): Promise<void>;
-  /** Merge + close, deduped and repo-locked. (POST /api/workspaces/:id/merge) */
+  /**
+   * Merge + close, deduped and repo-locked. (POST /api/workspaces/:id/merge)
+   *
+   * #943: this call passes `skipPreMergeGate` so `doMerge` does NOT re-run the verify/smoke
+   * pre-merge gate — the monitor cycle already ran it (or it ran at review-exit for readyForMerge
+   * work) against the same worktree state in the same cycle. The manual /merge route and the
+   * merge-queue/orchestrator path do NOT skip and remain gated.
+   */
   merge(workspaceId: string): Promise<void>;
   /**
    * Launch a fix-and-merge session after a failed merge, registering the new
@@ -64,7 +71,13 @@ export function createMonitorWorkspaceActions(deps: {
       await workspaceService.launchSession(workspaceId);
     },
     async merge(workspaceId) {
-      await workspaceService.mergeWorkspaceDeduped(workspaceId);
+      // #943: the monitor's auto-merge paths (monitor-cycle.ts) already run the verify/smoke
+      // pre-merge gate against the same worktree state in the same cycle — either explicitly for
+      // un-ready In-Review work, or implicitly via the review-exit gate for readyForMerge work.
+      // Re-running it inside doMerge would double an expensive build/boot per merge, so suppress
+      // the redundant land-time re-run here. (The manual /merge route and the merge-queue/
+      // orchestrator do NOT pass this flag, so they stay gated.)
+      await workspaceService.mergeWorkspaceDeduped(workspaceId, { skipPreMergeGate: true });
     },
     async fixAndMerge(workspaceId, mergeError) {
       const result = await workspaceService.fixAndMerge(workspaceId, mergeError);

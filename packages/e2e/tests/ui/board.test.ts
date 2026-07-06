@@ -341,26 +341,33 @@ test.describe("Board interactions", () => {
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    await page.evaluate(
-      ({ iid, srcId, tgtId }) => {
-        (window as unknown as Record<string, unknown>).__dragData = {
-          issueId: iid,
-          sourceStatusId: srcId,
-        };
+    // Precondition: the card starts rendered in Todo.
+    const cardInTodo = page
+      .locator(`#column-${todoStatusId}`)
+      .getByLabel(`Open issue ${title}`);
+    await expect(cardInTodo).toBeVisible({ timeout: 10000 });
 
+    // Drive a real drag: fire `dragstart` on the card so the app's onDragStart
+    // handler populates its module-level drag payload (the board no longer reads
+    // a `window.__dragData` global), then dispatch `drop` on the target column.
+    await page.evaluate(
+      ({ cardLabel, tgtId }) => {
+        const card = document.querySelector<HTMLElement>(
+          `[aria-label="Open issue ${cardLabel}"]`,
+        );
+        if (!card) throw new Error(`card "${cardLabel}" not found`);
         const targetCol = document.getElementById(`column-${tgtId}`);
         if (!targetCol) throw new Error(`In Progress column ${tgtId} not found`);
 
-        const dropEvent = new DragEvent("drop", {
-          bubbles: true,
-          cancelable: true,
-        });
-        Object.defineProperty(dropEvent, "dataTransfer", {
-          value: new DataTransfer(),
-        });
+        const startEvent = new DragEvent("dragstart", { bubbles: true, cancelable: true });
+        Object.defineProperty(startEvent, "dataTransfer", { value: new DataTransfer() });
+        card.dispatchEvent(startEvent);
+
+        const dropEvent = new DragEvent("drop", { bubbles: true, cancelable: true });
+        Object.defineProperty(dropEvent, "dataTransfer", { value: new DataTransfer() });
         targetCol.dispatchEvent(dropEvent);
       },
-      { iid: issueId, srcId: todoStatusId, tgtId: inProgressStatusId },
+      { cardLabel: title, tgtId: inProgressStatusId },
     );
 
     await waitForIssueInColumn(request, projectId, title, "In Progress");

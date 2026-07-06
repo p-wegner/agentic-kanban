@@ -29,7 +29,8 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { rmSync } from "node:fs";
-import { eq } from "drizzle-orm";
+import { eq, is } from "drizzle-orm";
+import { getTableConfig, SQLiteTable } from "drizzle-orm/sqlite-core";
 import { createClient, type Client } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
 import * as schema from "@agentic-kanban/shared/schema";
@@ -135,6 +136,11 @@ const SUBTREE_SEEDERS: Record<string, (c: SeedCtx) => Promise<void>> = {
   session_messages: async (c) => {
     await c.db.insert(schema.sessionMessages).values({
       sessionId: c.sessionId, type: "stdout", data: "hello", createdAt: c.now,
+    });
+  },
+  test_runs: async (c) => {
+    await c.db.insert(schema.testRuns).values({
+      sessionId: c.sessionId, testName: "passes sometimes", passed: true, recordedAt: c.now,
     });
   },
   test_retry_decisions: async (c) => {
@@ -260,6 +266,33 @@ describe("deleteIssueCascade — completeness vs the schema FK graph", () => {
     expect(exercised).toEqual(schemaSubtree);
   });
 
+  it("every session/workspace/issue/project-id-named column declares an FK reference", () => {
+    // A table can only enter the deletion-subtree checks above if it has a DECLARED FK —
+    // a parent-id column WITHOUT `.references()` is invisible to the whole gate (that was
+    // #948: test_runs.session_id orphaned rows forever, silently). This check makes the
+    // next FK-less parent-id column turn the gate red instead.
+    //
+    // Allowlist: scheduled_run_history.{issue_id,workspace_id} are HISTORICAL log
+    // references, intentionally FK-less so run history survives issue/workspace deletion.
+    const ALLOWED_FKLESS = new Set(["scheduled_run_history.issue_id", "scheduled_run_history.workspace_id"]);
+    const offenders: string[] = [];
+    for (const value of Object.values(schema)) {
+      if (!is(value, SQLiteTable)) continue;
+      const config = getTableConfig(value);
+      const fkColumns = new Set(
+        config.foreignKeys.flatMap((fk) => fk.reference().columns.map((col) => col.name)),
+      );
+      for (const column of config.columns) {
+        if (!/^(session|workspace|issue|project)_id$/.test(column.name)) continue;
+        if (fkColumns.has(column.name)) continue;
+        const key = `${config.name}.${column.name}`;
+        if (ALLOWED_FKLESS.has(key)) continue;
+        offenders.push(key);
+      }
+    }
+    expect(offenders, "parent-id columns missing a .references() FK declaration").toEqual([]);
+  });
+
   it("deletes an issue seeded across EVERY deletion-subtree table with no orphan or FK violation", async () => {
     const c = makeCtx(db);
     await seedParents(c);
@@ -283,6 +316,7 @@ describe("deleteIssueCascade — completeness vs the schema FK graph", () => {
     expect(await db.select().from(schema.workspaces).where(eq(schema.workspaces.issueId, c.issueId))).toHaveLength(0);
     expect(await db.select().from(schema.sessions).where(eq(schema.sessions.workspaceId, c.workspaceId))).toHaveLength(0);
     expect(await db.select().from(schema.sessionMessages).where(eq(schema.sessionMessages.sessionId, c.sessionId))).toHaveLength(0);
+    expect(await db.select().from(schema.testRuns).where(eq(schema.testRuns.sessionId, c.sessionId))).toHaveLength(0);
     expect(await db.select().from(schema.testRetryDecisions)).toHaveLength(0);
     expect(await db.select().from(schema.diffComments)).toHaveLength(0);
     expect(await db.select().from(schema.repos)).toHaveLength(0);

@@ -252,6 +252,17 @@ export async function autoRenumberMigrations(
     JSON.stringify(rebuiltJournal, null, 2) + "\n",
   );
   await execGit(["add", "-A", "--", DRIZZLE_DIR], worktreePath);
+  // Guard EVERY staged drizzle file (all .sql files + meta/*.json), not just the
+  // journal re-asserted above: if both branches edited the same existing migration
+  // .sql, the merge leaves "<<<<<<<" markers in it, and committing that corrupts the
+  // migration (fatal SQL parse error on a fresh migrate). Abort and surface it instead.
+  const markerFiles = await listStagedConflictMarkerFiles(worktreePath);
+  if (markerFiles.length > 0) {
+    await execGit(["merge", "--abort"], worktreePath).catch(() => { /* best effort */ });
+    throw new Error(
+      `migration renumber aborted: conflict markers left in drizzle files (${markerFiles.join(", ")})`,
+    );
+  }
   try {
     await execGit(["commit", "--no-edit"], worktreePath);
   } catch { /* nothing to commit — base was already an ancestor */ }
@@ -263,6 +274,20 @@ export async function autoRenumberMigrations(
   return { renumbered: renames.length > 0, renames };
 }
 
+/**
+ * List staged files under the drizzle dir whose STAGED (index) content still contains
+ * git conflict markers — lines starting with "<<<<<<<". Scans `--cached` so it sees
+ * exactly what the upcoming commit would contain. `git grep` exits non-zero when
+ * nothing matches, so failures are treated as "no markers".
+ */
+async function listStagedConflictMarkerFiles(worktreePath: string): Promise<string[]> {
+  const out = await execGit(
+    ["grep", "--cached", "--name-only", "-e", "^<<<<<<<", "--", DRIZZLE_DIR],
+    worktreePath,
+  ).catch(() => "");
+  return splitGitLines(out);
+}
+
 /** Resolve the base branch to a local-or-remote ref that exists from this worktree. */
 async function resolveLocalBaseRef(worktreePath: string, baseBranch: string): Promise<string> {
   try {
@@ -271,4 +296,4 @@ async function resolveLocalBaseRef(worktreePath: string, baseBranch: string): Pr
   } catch {
     return `origin/${baseBranch}`;
   }
-}
+}

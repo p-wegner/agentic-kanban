@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { apiFetch, apiPost, apiPut, apiPatch } from "../lib/api.js";
 import { setSettings as savePreferences } from "../lib/settingsStore.js";
 import { invalidateClientSurfaceLocal } from "../lib/clientInvalidation.js";
@@ -375,7 +376,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
   const setBool = (key: keyof Settings) => (checked: boolean) =>
     setSettings((s) => ({ ...s, [key]: checked ? "true" : "false" }));
 
-  const autoReviewOn = settings.auto_review !== "false";
+  const autoReviewOn = isAutoReviewEnabled(settings.auto_review);
   const defaultBranchValue = projectSettings.defaultBranch.trim();
   const defaultBranchInvalid = !!defaultBranchValue && !!projectBranches && !projectBranches.local.includes(defaultBranchValue);
 

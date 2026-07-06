@@ -1,24 +1,30 @@
 import { homedir } from "node:os";
-import { resolve, join, dirname } from "node:path";
+import { resolve, dirname, join } from "node:path";
 import { mkdirSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { resolveDbLocation, type DbLocation } from "@agentic-kanban/shared/lib/db-path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-// In bundled mode (__dirname = dist/), one level up = packages/server/
-// In dev mode (__dirname = src/db/), two levels up = packages/server/
-const localDbDir = existsSync(resolve(__dirname, "../kanban.db"))
-  ? resolve(__dirname, "../")
-  : existsSync(resolve(__dirname, "../../kanban.db"))
-    ? resolve(__dirname, "../../")
-    : null;
+// In-checkout dev DB candidates, both pointing at packages/server/kanban.db:
+//   - bundled mode (__dirname = dist/)   → ../kanban.db
+//   - dev mode     (__dirname = src/db/) → ../../kanban.db
+const LOCAL_DB_CANDIDATES = [
+  resolve(__dirname, "../kanban.db"),
+  resolve(__dirname, "../../kanban.db"),
+];
 
-export const DATA_DIR = process.env.AGENTIC_KANBAN_DIR
-  || localDbDir
-  || join(homedir(), ".agentic-kanban");
+// Resolved ONCE at module load via the shared resolver so the HTTP server and the
+// MCP server (packages/mcp-server/src/db.ts) agree on ONE precedence (#962).
+export const DB_LOCATION: DbLocation = resolveDbLocation({
+  localDbCandidates: LOCAL_DB_CANDIDATES,
+});
+
+// Directory that holds the DB (and its .db-backups) — used by backup.ts and
+// ensureDataDir. A non-`file:` DB_URL has no dir, so fall back to the home dir.
+export const DATA_DIR = DB_LOCATION.dir ?? join(homedir(), ".agentic-kanban");
 
 export function getDbUrl(): string {
-  if (process.env.DB_URL) return process.env.DB_URL;
-  return `file:${resolve(DATA_DIR, "kanban.db")}`;
+  return DB_LOCATION.url;
 }
 
 export function ensureDataDir(): string {
@@ -29,8 +35,5 @@ export function ensureDataDir(): string {
 }
 
 export function dbExists(): boolean {
-  const url = getDbUrl();
-  if (!url.startsWith("file:")) return false;
-  const path = url.slice("file:".length);
-  return existsSync(path);
+  return DB_LOCATION.path ? existsSync(DB_LOCATION.path) : false;
 }

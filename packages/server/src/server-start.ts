@@ -29,6 +29,7 @@ import { runSessionRestore } from "./startup/session-restore.js";
 import { startBackupScheduler, stopBackupScheduler } from "./startup/backup-scheduler.js";
 import { startSessionMessagePruner, stopSessionMessagePruner } from "./services/session-message-pruner.service.js";
 import { getPreference } from "./repositories/preferences.repository.js";
+import { cleanupExpiredRuntimeState } from "./repositories/runtime-state.repository.js";
 import { invalidateAgentQuestionsCache } from "./services/agent-questions.service.js";
 import { domainErrorHandler } from "./middleware/error-handler.js";
 import { jsonGzip } from "./middleware/compress.js";
@@ -225,6 +226,12 @@ export async function startServer(port?: number, hostname?: string) {
   // Periodic session_messages pruning — keeps DB size bounded as workspace history grows.
   startSessionMessagePruner(db);
   cleanupCallbacks.push(stopSessionMessagePruner);
+
+  // Sweep expired runtime_state rows (TTL'd agent-question markers etc., #975) so the
+  // dedicated runtime-state table cannot grow without bound. Best-effort, one-shot.
+  void cleanupExpiredRuntimeState(new Date().toISOString(), db).catch((err: unknown) => {
+    console.warn("[runtime-state] cleanup sweep failed (non-fatal):", err instanceof Error ? err.message : err);
+  });
 
   return { app, sessionManager, boardEvents };
 }

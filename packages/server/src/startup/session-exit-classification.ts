@@ -72,3 +72,64 @@ export function classifySessionExit(inputs: SessionExitInputs): { action: Sessio
   if (isReview) return { action: "review" };
   return { action: "builder" };
 }
+
+/** The non-builder session roles the exit workflow routes on. */
+export type PersistedSessionRole = "review" | "fix-and-merge" | "learning";
+
+/**
+ * Map a session's PERSISTED `sessions.triggerType` to its exit-workflow role (#950).
+ *
+ * "fix-conflicts" maps to the fix-and-merge role because the resolve-conflicts route
+ * registers those sessions in the same `fixAndMergeSessionIds` set as fix-and-merge
+ * sessions — they share one terminal handler.
+ *
+ * Returns null for builder-like / unknown trigger types ("agent", "chat", "initial",
+ * "plan-implement", "verify", "reconcile", "bisect", "skill:*", null, …) — those fall
+ * through to the failed/review/builder priority in `classifySessionExit`.
+ */
+export function roleFromTriggerType(triggerType: string | null | undefined): PersistedSessionRole | null {
+  switch (triggerType) {
+    case "review":
+      return "review";
+    case "fix-and-merge":
+    case "fix-conflicts":
+      return "fix-and-merge";
+    case "learning":
+      return "learning";
+    default:
+      return null;
+  }
+}
+
+/** The three role flags `classifySessionExit` routes on. */
+export interface SessionRoleFlags {
+  isReview: boolean;
+  isFixAndMerge: boolean;
+  isLearning: boolean;
+}
+
+/**
+ * Resolve a session's role flags from BOTH the in-memory tracking sets (fast path,
+ * populated at launch time) and the persisted `sessions.triggerType` (source of
+ * truth that survives a server restart). The DB value wins when the set misses —
+ * the restart case (#950): a reattached review / fix-and-merge / learning session
+ * exits into empty sets and must NOT be misclassified as a builder exit (which
+ * bounced the issue back to In Review and spawned another review — the
+ * stranded-review / review-loop incident class).
+ */
+export function resolveSessionRoleFlags(
+  sessionId: string,
+  triggerType: string | null | undefined,
+  sets: {
+    reviewSessionIds: ReadonlySet<string>;
+    fixAndMergeSessionIds: ReadonlySet<string>;
+    learningSessionIds: ReadonlySet<string>;
+  },
+): SessionRoleFlags {
+  const dbRole = roleFromTriggerType(triggerType);
+  return {
+    isReview: sets.reviewSessionIds.has(sessionId) || dbRole === "review",
+    isFixAndMerge: sets.fixAndMergeSessionIds.has(sessionId) || dbRole === "fix-and-merge",
+    isLearning: sets.learningSessionIds.has(sessionId) || dbRole === "learning",
+  };
+}

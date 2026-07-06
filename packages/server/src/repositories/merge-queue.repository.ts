@@ -1,4 +1,4 @@
-import { workspaces, issues, projects } from "@agentic-kanban/shared/schema";
+import { workspaces, issues } from "@agentic-kanban/shared/schema";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -21,16 +21,6 @@ export async function getMergeQueueIssueRows(
     .select()
     .from(issues)
     .where(inArray(issues.id, issueIds));
-}
-
-export async function getMergeQueueProjectRows(
-  projectIds: string[],
-  database: Database = db,
-) {
-  return database
-    .select()
-    .from(projects)
-    .where(inArray(projects.id, projectIds));
 }
 
 export async function getWorkspaceStatus(

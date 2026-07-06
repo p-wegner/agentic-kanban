@@ -3,6 +3,7 @@ import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import type { ViewMode } from "../lib/viewRegistry.js";
 import { BoardErrorBoundary } from "./BoardErrorBoundary.js";
 import { boardSelectionActions } from "../stores/boardSelectionStore.js";
+import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 import {
   GraphView, TableView, AgentGrid, TimelineView, MetricsView, CrimeSceneCityView,
   QualityMetricsView, MilestonesOverview, ButlerView, WorkflowsView,
@@ -18,12 +19,10 @@ interface BoardSecondaryViewsProps {
   viewMode: string;
   activeProjectId: string | null;
   columns: StatusWithIssues[];
-  searchQuery: string;
   liveActivity: Record<string, string>;
   liveStats: Record<string, LiveSessionStats>;
   sessionTodos: Record<string, TodoItem[]>;
   graphFocusIssueId?: string;
-  createdDateFilter: string | null;
   activeAgentsTarget?: number;
   canStartWorkspace: boolean;
   butlerInitialPrompt: string | null;
@@ -33,7 +32,6 @@ interface BoardSecondaryViewsProps {
   onMilestoneClick: (milestoneId: string) => void;
   onOpenWorkspaceById: (workspaceId: string, issueId: string) => void | Promise<void>;
   onCreatedDateClick: (date: string) => void;
-  onClearCreatedDateFilter: () => void;
   onDropIssue?: (issue: IssueWithStatus) => void;
   onRefresh: () => void;
   onButlerPromptConsumed: () => void;
@@ -49,12 +47,10 @@ export function BoardSecondaryViews({
   viewMode,
   activeProjectId,
   columns,
-  searchQuery,
   liveActivity,
   liveStats,
   sessionTodos,
   graphFocusIssueId,
-  createdDateFilter,
   activeAgentsTarget,
   canStartWorkspace,
   butlerInitialPrompt,
@@ -64,13 +60,17 @@ export function BoardSecondaryViews({
   onMilestoneClick,
   onOpenWorkspaceById,
   onCreatedDateClick,
-  onClearCreatedDateFilter,
   onDropIssue,
   onRefresh,
   onButlerPromptConsumed,
 }: BoardSecondaryViewsProps) {
   const { setSelectedIssue, setWorkspaceIssue, setWorkspaceOpenCreate, setWorkspaceInitial } =
     boardSelectionActions;
+  // Filter slice (#958): read from the store; the lazy views below stay
+  // prop-driven, this coordinator is the single subscription point for them.
+  const searchQuery = useBoardFilterStore((s) => s.searchQuery);
+  const createdDateFilter = useBoardFilterStore((s) => s.createdDateFilter);
+  const setCreatedDateFilter = useBoardFilterStore((s) => s.setCreatedDateFilter);
   return (
     <>
       {viewMode === "graph" && activeProjectId ? (
@@ -94,7 +94,7 @@ export function BoardSecondaryViews({
             searchQuery={searchQuery}
             onRefresh={onRefresh}
             createdDateFilter={createdDateFilter}
-            onClearCreatedDateFilter={onClearCreatedDateFilter}
+            onClearCreatedDateFilter={() => setCreatedDateFilter(null)}
           />
         </BoardErrorBoundary>
       )}

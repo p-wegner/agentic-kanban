@@ -8,18 +8,31 @@ import {
   registerToolName,
   stringValue,
 } from "./shared.js";
+import { recordUnknownAgentEvent } from "./unknown-events.js";
+import { recordUnknownFieldDrift } from "./unknown-fields.js";
+import { codexThreadStartedSchema, codexTurnCompletedUsageSchema } from "./codex-schema.js";
 
-const CODEX_USAGE_LIMIT_PATTERN = /you(?:['\u2019])?ve hit your usage limit for\s+(.+?)(?:\.|$)/i;
-const CODEX_RETRY_AFTER_PATTERN = /try again at\s+(.+?)(?:\.|$)/i;
+/**
+ * Single source of truth for the codex usage-limit prose contract (#991).
+ * Matches upstream English prose like "you've hit your usage limit for ...".
+ * The server's codex-rate-limit service imports these \u2014 do NOT copy the regex.
+ */
+export const CODEX_USAGE_LIMIT_PATTERN = /you(?:['\u2019])?ve hit your usage limit for\s+(.+?)(?:\.|$)/i;
+export const CODEX_RETRY_AFTER_PATTERN = /try again at\s+(.+?)(?:\.|$)/i;
 
-function detectCodexUsageLimitText(text: string | undefined): { message: string; retryAfter?: string } | undefined {
+export interface CodexUsageLimitMatch {
+  message: string;
+  retryAfter?: string;
+}
+
+export function matchCodexUsageLimitText(text: string | null | undefined): CodexUsageLimitMatch | undefined {
   if (!text || !CODEX_USAGE_LIMIT_PATTERN.test(text)) return undefined;
   return { message: text.trim(), retryAfter: CODEX_RETRY_AFTER_PATTERN.exec(text)?.[1]?.trim() };
 }
 
 function handleCodexUsageLimit(obj: Record<string, unknown>, result: ParsedStreamEvent): void {
   const error = objectValue(obj.error);
-  const usageLimit = detectCodexUsageLimitText(stringValue(obj.message) ?? stringValue(error.message));
+  const usageLimit = matchCodexUsageLimitText(stringValue(obj.message) ?? stringValue(error.message));
   if (usageLimit) {
     result.rateLimitInfo = {
       status: "limited",
@@ -40,19 +53,21 @@ function handleCodexCommandExecution(
   const command = stringValue(item.command) ?? "";
   if ((type === "item.started" || item.status === "in_progress") && command) {
     result.toolActivity = { name: "shell", input: { command }, toolUseId: id || undefined };
-    registerToolName(context, id, "shell_command");
-    pushDisplay(result, { kind: "tool_use", id, name: "shell_command", input: command, inputParsed: { command } });
+    registerToolName(context, id, "shell");
+    pushDisplay(result, { kind: "tool_use", id, name: "shell", input: command, inputParsed: { command } });
   }
   if (type === "item.completed" || item.status === "completed") {
     const output = stringValue(item.aggregated_output) ?? "";
+    const exitCode = item.exit_code;
+    const isError = exitCode !== null && exitCode !== undefined && exitCode !== 0;
     result.toolResult = { toolUseId: id };
-    if (output) {
+    if (output || isError) {
       pushDisplay(result, {
         kind: "tool_result",
-        toolName: "shell_command",
+        toolName: "shell",
         toolUseId: id,
-        output,
-        isError: item.exit_code !== null && item.exit_code !== 0,
+        output: output || `exit code ${numberValue(exitCode)}`,
+        isError,
       });
     }
   }
@@ -72,11 +87,12 @@ function handleCodexMcpToolCall(
     registerToolName(context, id, name);
     pushDisplay(result, { kind: "tool_use", id, name, input: JSON.stringify(args, null, 2), inputParsed: args });
   }
-  if (type === "item.completed" || item.status === "completed") {
+  if (type === "item.completed" || item.status === "completed" || item.status === "failed" || item.status === "error") {
     const resultText = stringValue(item.result);
+    const failed = item.status === "failed" || item.status === "error";
     result.toolResult = { toolUseId: id, ...(resultText ? { agentResultText: resultText } : {}) };
-    if (resultText) {
-      pushDisplay(result, { kind: "tool_result", toolName: name, toolUseId: id, output: resultText, isError: false });
+    if (resultText || failed) {
+      pushDisplay(result, { kind: "tool_result", toolName: name, toolUseId: id, output: resultText ?? "failed", isError: failed });
     }
   }
 }
@@ -100,9 +116,39 @@ function handleCodexItem(obj: Record<string, unknown>, context: ParseContext, re
   } else if (itemType === "mcp_tool_call") {
     handleCodexMcpToolCall(item, type, result, id, context);
   } else if (itemType === "file_change") {
-    const path = stringValue(item.path) ?? "";
-    pushDisplay(result, { kind: "tool_use", id, name: "file_change", input: path, inputParsed: { path } });
+    handleCodexFileChange(item, result, id);
   }
+}
+
+/**
+ * Codex native `file_change` items: newer CLIs emit a `changes: [{path, kind}]`
+ * array (kind = add|update|delete); older payloads carried a flat `path`.
+ * Emitted as `file_change` tool_use display events so the summary layer can
+ * classify them into filesEdited/filesWritten (#951 — these were previously
+ * dropped by the offline summary parser entirely).
+ */
+function handleCodexFileChange(item: Record<string, unknown>, result: ParsedStreamEvent, id: string): void {
+  const changes = Array.isArray(item.changes) ? item.changes : [];
+  const entries = changes.length > 0
+    ? changes.map((change) => objectValue(change)).map((change) => ({
+      path: stringValue(change.path) ?? "",
+      kind: stringValue(change.kind),
+    }))
+    : [{ path: stringValue(item.path) ?? "", kind: stringValue(item.kind) }];
+  for (const entry of entries) {
+    if (!entry.path) continue;
+    pushDisplay(result, {
+      kind: "tool_use",
+      id,
+      name: "file_change",
+      input: entry.path,
+      inputParsed: entry.kind ? { path: entry.path, kind: entry.kind } : { path: entry.path },
+    });
+  }
+}
+
+function hasCodexTokenFields(usage: Record<string, unknown>): boolean {
+  return typeof usage.input_tokens === "number" || typeof usage.output_tokens === "number";
 }
 
 function handleCodexTurnCompleted(obj: Record<string, unknown>, result: ParsedStreamEvent): void {
@@ -112,7 +158,22 @@ function handleCodexTurnCompleted(obj: Record<string, unknown>, result: ParsedSt
   const inputTokens = numberValue(totalUsage.input_tokens);
   const outputTokens = numberValue(totalUsage.output_tokens);
   const contextTokens = numberValue(currentUsage.input_tokens) || inputTokens;
+  // #976/#994: when NONE of the expected usage shapes carry token fields, the
+  // numberValue() defaults above read an upstream usage-shape change as a
+  // silent "0 tokens". A zod parse of the raw `usage` object against the
+  // schema this parser actually relies on turns that into a reported field
+  // drift (with the exact zod issue paths) instead of just a silent zero.
+  if (!hasCodexTokenFields(totalUsage) && !hasCodexTokenFields(currentUsage)) {
+    recordUnknownAgentEvent("codex", "turn.completed#usage-shape-mismatch");
+    const parsed = codexTurnCompletedUsageSchema.safeParse(usage);
+    const detail = parsed.success
+      ? "usage object matched the schema but carried no known token fields"
+      : parsed.error.issues.map((issue) => `${issue.path.join(".") || "<root>"}: ${issue.message}`).join("; ");
+    recordUnknownFieldDrift("codex", "turn.completed", detail);
+  }
   result.stats = {
+    // The codex JSON stream carries no duration/cost — 0 means "not provided",
+    // not a measured value.
     durationMs: 0,
     totalCostUsd: 0,
     inputTokens,
@@ -145,6 +206,15 @@ export function parseCodexEvent(obj: Record<string, unknown>, context: ParseCont
     if (sessionId) {
       result.providerSessionId = sessionId;
       pushDisplay(result, { kind: "init", model: "codex", sessionId, cwd: "", tools: [], mcpServers: [], permissionMode: "" });
+    } else {
+      // A thread.started with no usable thread_id silently drops session-resume
+      // tracking (#994) — a renamed field reads identically to "no session id
+      // yet" with numberValue/stringValue-style coercion. Report it as drift.
+      const parsed = codexThreadStartedSchema.safeParse(obj);
+      const detail = parsed.success
+        ? "thread_id parsed but was empty"
+        : parsed.error.issues.map((issue) => `${issue.path.join(".") || "<root>"}: ${issue.message}`).join("; ");
+      recordUnknownFieldDrift("codex", "thread.started", detail);
     }
   }
 
