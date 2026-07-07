@@ -1,7 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { StatusWithIssues, MilestoneResponse } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { boardQueryKeys } from "../lib/boardQueryKeys.js";
+import { fetchBoardColumns } from "../lib/boardColumnsQuery.js";
 import type { Project, Tag } from "../routes/BoardPage.js";
 
 // Re-exported so existing importers that pull the key factory from this module

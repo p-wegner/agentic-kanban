@@ -187,6 +187,7 @@ export function BoardPage() {
     setApprovalRequests,
   } = useBoardRealtimeController({
     activeProjectId,
+    columns,
     columnsRef,
     creatingInColumnId,
     loadProjectsRef,
