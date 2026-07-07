@@ -1,36 +1,14 @@
 import type { Database } from "../db/index.js";
 import { createProjectService } from "../services/project.service.js";
-import { getProjectById, getDoneIssueProviderAttribution } from "../repositories/project.repository.js";
-import { computeThroughputByProvider } from "../services/dashboard-analytics.service.js";
-import { clampDays, cutoffDayFor } from "../lib/analytics-window.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../middleware/ai-operation.js";
-import { checkIssueOverlap } from "../services/issue-ai.service.js";
-import { getFileContention } from "../services/file-contention.service.js";
 import { getProjectActivity } from "../services/project-activity.service.js";
-import { listBoardHealthEvents, getBoardHealthEvent } from "../repositories/board-health-events.repository.js";
-import {
-  parseBoardHealthEventsLimit,
-  parseBoardHealthEventTypes,
-  parseBoardHealthCategories,
-  toBoardHealthEventSummary,
-  toBoardHealthEventDetail,
-} from "../lib/board-health-events-format.js";
-import { listMonitorCycles } from "../services/monitor-cycle-health.service.js";
-import { buildDependencyWavePlan, startNextDependencyWave } from "../services/dependency-wave.service.js";
-import { buildSprintCapacityPlan } from "../services/sprint-capacity.service.js";
-import { generateBoardRiskDigest } from "../services/board-risk-digest.service.js";
-import { getWorkspaceLaunchFailures } from "../services/workspace-launch-failures.service.js";
-import { getWorkspaceRisk } from "../services/workspace-risk.service.js";
-import { getProjectHealth } from "../services/project-health.service.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 import { createHash } from "node:crypto";
 import { createWorkspaceSummaryCache } from "../services/workspace-summary-cache.service.js";
-import { getStackProfile, populateStackProfile, saveManualStackProfile } from "../services/stack-profile.service.js";
 import { createBoardEtagCache } from "../services/board-etag-cache.service.js";
-import type { StackProfile } from "@agentic-kanban/shared";
 
 export function createProjectsRoute(database: Database, options?: { boardEvents?: BoardEvents; getSessionManager?: () => SessionManager }) {
   const router = createRouter();
@@ -193,35 +171,6 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
     return c.json(result);
   });
 
-  // GET /api/projects/:id/board-health-events
-  router.get("/:id/board-health-events", async (c) => {
-    const projectId = c.req.param("id");
-    const limit = parseBoardHealthEventsLimit(c.req.query("limit"));
-    const eventTypes = parseBoardHealthEventTypes(c.req.query("eventType"));
-    const categories = parseBoardHealthCategories(c.req.query("category"));
-    const events = await listBoardHealthEvents({ projectId, eventTypes, categories, limit }, database);
-    return c.json(events.map(toBoardHealthEventSummary));
-  });
-
-  // GET /api/projects/:id/monitor-cycles — aggregated cycle summaries
-  router.get("/:id/monitor-cycles", async (c) => {
-    const projectId = c.req.param("id");
-    const rawLimit = c.req.query("limit");
-    const parsed = Number.parseInt(rawLimit ?? "", 10);
-    const limit = Number.isFinite(parsed) ? Math.min(50, Math.max(1, parsed)) : 20;
-    const cycles = await listMonitorCycles(projectId, { limit }, database);
-    return c.json(cycles);
-  });
-
-  // GET /api/projects/:id/board-health-events/:eventId — full event details (not compacted)
-  router.get("/:id/board-health-events/:eventId", async (c) => {
-    const projectId = c.req.param("id");
-    const eventId = c.req.param("eventId");
-    const event = await getBoardHealthEvent(eventId, database);
-    if (!event || event.projectId !== projectId) return c.json({ error: "not found" }, 404);
-    return c.json(toBoardHealthEventDetail(event));
-  });
-
   // GET /api/projects/:id/worktrees
   router.get("/:id/worktrees", async (c) => {
     const projectId = c.req.param("id");
@@ -251,12 +200,6 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
   // GET /api/projects/all/workspaces — cross-project workspace summary (all projects)
   router.get("/all/workspaces", async (c) => {
     const result = await projectService.getCrossProjectWorkspaces();
-    return c.json(result);
-  });
-
-  // GET /api/projects/health — aggregated health overview for all registered projects
-  router.get("/health", async (c) => {
-    const result = await getProjectHealth(database);
     return c.json(result);
   });
 
@@ -297,61 +240,10 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
     });
   });
 
-  // GET /api/projects/:id/workspace-launch-failures
-  router.get("/:id/workspace-launch-failures", async (c) => {
-    const projectId = c.req.param("id");
-    const result = await getWorkspaceLaunchFailures(projectId, database);
-    return c.json(result);
-  });
-
-  // GET /api/projects/:id/board-risk-digest
-  router.get("/:id/board-risk-digest", async (c) => {
-    const projectId = c.req.param("id");
-    const digest = await generateBoardRiskDigest(projectId, database);
-    return c.json(digest);
-  });
-
-  // GET /api/projects/:id/workspace-risk — risk heatmap for active/review workspaces
-  router.get("/:id/workspace-risk", async (c) => {
-    const projectId = c.req.param("id");
-    const result = await getWorkspaceRisk(projectId, database);
-    return c.json(result);
-  });
-
-  // POST /api/projects/:id/check-overlap — check for file overlap between issues using cached predictions
-  router.post("/:id/check-overlap", async (c) => {
-    const body = await parseJsonBody<{ issueIds: string[] }>(c);
-    if (!Array.isArray(body.issueIds) || body.issueIds.length === 0) {
-      return c.json({ error: "issueIds array is required" }, 400);
-    }
-    return c.json(await checkIssueOverlap(body.issueIds, database));
-  });
-
-  // GET /api/projects/:id/file-contention — live file contention heatmap for active/reviewing workspaces
-  router.get("/:id/file-contention", async (c) => {
-    const projectId = c.req.param("id");
-    const result = await getFileContention(projectId, database);
-    return c.json(result);
-  });
-
   // GET /api/projects/:id/graph
   router.get("/:id/graph", async (c) => {
     const projectId = c.req.param("id");
     const result = await projectService.getGraph(projectId);
-    return c.json(result);
-  });
-
-  // GET /api/projects/:id/dependency-waves
-  router.get("/:id/dependency-waves", async (c) => {
-    const projectId = c.req.param("id");
-    const result = await buildDependencyWavePlan(database, projectId);
-    return c.json(result);
-  });
-
-  // POST /api/projects/:id/dependency-waves/start-next
-  router.post("/:id/dependency-waves/start-next", async (c) => {
-    const projectId = c.req.param("id");
-    const result = await startNextDependencyWave(database, projectId, options);
     return c.json(result);
   });
 
@@ -363,58 +255,6 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
     const limit = Number.isFinite(parsed) ? Math.min(200, Math.max(1, parsed)) : 100;
     const result = await getProjectActivity(projectId, database, limit);
     return c.json(result);
-  });
-
-  // GET /api/projects/:id/sprint-capacity
-  router.get("/:id/sprint-capacity", async (c) => {
-    const projectId = c.req.param("id");
-    const result = await buildSprintCapacityPlan(database, projectId);
-    return c.json(result);
-  });
-
-  // GET /api/projects/:id/dashboard/throughput-by-provider?days=14
-  // Rank providers/profiles by issues merged to master within a selectable time window.
-  // Returns count + median lead time per provider.
-  router.get("/:id/dashboard/throughput-by-provider", async (c) => {
-    const projectId = c.req.param("id");
-    const days = clampDays(c.req.query("days"), 14);
-
-    // Find Done issues with their merged workspace's provider/profile.
-    // An issue is counted if it's in "Done" status and moved to Done within the window.
-    // We join to workspaces where mergedAt is set (actual merge happened) to get the
-    // provider attribution. If multiple workspaces merged for the same issue, the first
-    // merged workspace wins (deduplicated by issue ID).
-    const rows = await getDoneIssueProviderAttribution(projectId, cutoffDayFor(new Date(), days), database);
-    return c.json(computeThroughputByProvider(rows, days));
-  });
-
-  // GET /api/projects/:id/stack-profile — the durable per-project stack descriptor (#786).
-  // Returns the persisted profile; computes+persists one on demand if absent (?refresh=true
-  // forces a recompute). The feedback harness reads this ONE descriptor.
-  router.get("/:id/stack-profile", async (c) => {
-    const projectId = c.req.param("id");
-    const refresh = c.req.query("refresh") === "true";
-
-    const project = await getProjectById(projectId, database);
-    if (!project) return c.json({ error: "Project not found" }, 404);
-
-    let profile = refresh ? null : await getStackProfile(projectId, database);
-    if (!profile) {
-      profile = await populateStackProfile(projectId, project.repoPath, database);
-    }
-    return c.json({ projectId, profile });
-  });
-
-  // PUT /api/projects/:id/stack-profile — override the stack profile from the UI.
-  // Marks the saved profile source="manual" so a later auto-detect won't silently clobber it.
-  router.put("/:id/stack-profile", async (c) => {
-    const projectId = c.req.param("id");
-    const project = await getProjectById(projectId, database);
-    if (!project) return c.json({ error: "Project not found" }, 404);
-
-    const body = await parseJsonBody<Partial<StackProfile>>(c);
-    const merged = await saveManualStackProfile(projectId, body, database, project.repoPath);
-    return c.json({ projectId, profile: merged });
   });
 
   return router;
