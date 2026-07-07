@@ -10,11 +10,16 @@
  *    enforces the terminal invariant — a workspace with status "closed" AND
  *    mergedAt set may not be revived without an explicit force+reason.
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import * as schema from "@agentic-kanban/shared/schema";
 import { transitionIssueStatus, initWorkspaceWorkflow } from "@agentic-kanban/shared/lib/workflow-engine";
+import {
+  setTransitionStrictness,
+  getTransitionStrictness,
+  IllegalStatusTransitionError,
+} from "@agentic-kanban/shared/lib/status-transitions";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { ensureBuiltinSkills } from "../db/seed.js";
 import { ensureBuiltinWorkflows } from "../db/builtin-workflows.js";
@@ -195,5 +200,188 @@ describe("setWorkspaceStatus (#953 workspace authority, terminal invariant)", ()
     await setWorkspaceStatus(db as any, wsId, "idle", { onlyIfCurrentStatus: "active" });
     const ws2 = (await db.select().from(schema.workspaces).where(eq(schema.workspaces.id, wsId)))[0];
     expect(ws2.status).toBe("idle");
+  });
+});
+
+/**
+ * Legal-transition-table enforcement (arch-review §1.1). The two setters now
+ * classify each transition against an explicit legal table and SURFACE illegal
+ * ones. Default policy is WARN-AND-ALLOW (illegal transitions log a warning but
+ * still apply); STRICT throws. The single truly-never-legal transition —
+ * reviving a terminal closed+merged workspace — stays blocked (no-op) under warn
+ * and throws under strict.
+ */
+describe("transition-table enforcement (arch-review §1.1)", () => {
+  let db: TestDb;
+  const originalStrictness = getTransitionStrictness();
+
+  beforeEach(async () => {
+    ({ db } = createTestDb());
+    await ensureBuiltinSkills(db as any);
+    await ensureBuiltinWorkflows(db as any);
+    setTransitionStrictness("warn");
+  });
+
+  afterEach(() => {
+    setTransitionStrictness(originalStrictness);
+    vi.restoreAllMocks();
+  });
+
+  async function seedCanonicalProject() {
+    const projectId = randomUUID();
+    const now = new Date().toISOString();
+    await db.insert(schema.projects).values({
+      id: projectId,
+      name: "Canonical",
+      repoPath: "/tmp/x",
+      defaultBranch: "main",
+      createdAt: now,
+      updatedAt: now,
+    } as any);
+    const names = ["Backlog", "Todo", "In Progress", "In Review", "AI Reviewed", "Done", "Cancelled"];
+    const statusIds: Record<string, string> = {};
+    let sort = 0;
+    for (const name of names) {
+      const id = randomUUID();
+      statusIds[name] = id;
+      await db.insert(schema.projectStatuses).values({
+        id,
+        projectId,
+        name,
+        sortOrder: sort++,
+        isDefault: name === "Todo",
+        createdAt: now,
+      });
+    }
+    return { projectId, statusIds };
+  }
+
+  const rowFor = async (wsId: string) =>
+    (await db.select().from(schema.workspaces).where(eq(schema.workspaces.id, wsId)))[0];
+  const issueFor = async (issueId: string) =>
+    (await db.select().from(schema.issues).where(eq(schema.issues.id, issueId)))[0];
+
+  // ---- setWorkspaceStatus ----
+
+  it("(a) a legal workspace transition applies silently (no illegal-transition warning)", async () => {
+    const { projectId, statusIds } = await seedCanonicalProject();
+    const issueId = await seedIssue(db, projectId, statusIds["Todo"]);
+    const wsId = await seedWorkspace(db, issueId, { status: "active" });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const ok = await setWorkspaceStatus(db as any, wsId, "idle"); // active -> idle is legal
+    expect(ok).toBe(true);
+    expect((await rowFor(wsId)).status).toBe("idle");
+    expect(warn.mock.calls.some((c) => String(c[0]).includes("illegal transition"))).toBe(false);
+  });
+
+  it("(b) an illegal workspace transition warns but still applies under the default warn policy", async () => {
+    const { projectId, statusIds } = await seedCanonicalProject();
+    const issueId = await seedIssue(db, projectId, statusIds["Todo"]);
+    const wsId = await seedWorkspace(db, issueId, { status: "error" });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // "error" is only allowed to move to active/idle/blocked/closed — never straight to "reviewing".
+    const ok = await setWorkspaceStatus(db as any, wsId, "reviewing");
+    expect(ok).toBe(true);
+    expect((await rowFor(wsId)).status).toBe("reviewing"); // still applied
+    const warned = warn.mock.calls
+      .map((c) => String(c[0]))
+      .some((m) => m.includes("illegal transition") && m.includes("warn-and-allow"));
+    expect(warned).toBe(true);
+  });
+
+  it("(c) reviving a terminal closed+merged workspace stays blocked under warn and THROWS under strict", async () => {
+    const { projectId, statusIds } = await seedCanonicalProject();
+    const issueId = await seedIssue(db, projectId, statusIds["Done"]);
+    const wsId = await seedWorkspace(db, issueId, {
+      status: "closed",
+      mergedAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // Default warn policy: existing terminal invariant still no-ops and returns false.
+    const ok = await setWorkspaceStatus(db as any, wsId, "idle");
+    expect(ok).toBe(false);
+    expect((await rowFor(wsId)).status).toBe("closed");
+
+    // Strict policy: the truly-never-legal transition throws.
+    setTransitionStrictness("strict");
+    await expect(setWorkspaceStatus(db as any, wsId, "idle")).rejects.toBeInstanceOf(
+      IllegalStatusTransitionError,
+    );
+    expect((await rowFor(wsId)).status).toBe("closed");
+  });
+
+  it("strict policy also throws on a warn-level illegal workspace transition", async () => {
+    const { projectId, statusIds } = await seedCanonicalProject();
+    const issueId = await seedIssue(db, projectId, statusIds["Todo"]);
+    const wsId = await seedWorkspace(db, issueId, { status: "error" });
+    setTransitionStrictness("strict");
+
+    await expect(setWorkspaceStatus(db as any, wsId, "reviewing")).rejects.toBeInstanceOf(
+      IllegalStatusTransitionError,
+    );
+    expect((await rowFor(wsId)).status).toBe("error"); // unchanged
+  });
+
+  // ---- transitionIssueStatus ----
+
+  it("(a) a legal issue transition applies silently", async () => {
+    const { projectId, statusIds } = await seedCanonicalProject();
+    const issueId = await seedIssue(db, projectId, statusIds["Todo"]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await transitionIssueStatus(db as any, issueId, statusIds["In Progress"]); // legal
+    expect((await issueFor(issueId)).statusId).toBe(statusIds["In Progress"]);
+    expect(warn.mock.calls.some((c) => String(c[0]).includes("illegal issue transition"))).toBe(false);
+  });
+
+  it("(b) an illegal issue transition warns but still applies under the default warn policy", async () => {
+    const { projectId, statusIds } = await seedCanonicalProject();
+    const issueId = await seedIssue(db, projectId, statusIds["Backlog"]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // Backlog -> AI Reviewed is not a legal canonical transition.
+    await transitionIssueStatus(db as any, issueId, statusIds["AI Reviewed"]);
+    expect((await issueFor(issueId)).statusId).toBe(statusIds["AI Reviewed"]); // still applied
+    const warned = warn.mock.calls
+      .map((c) => String(c[0]))
+      .some((m) => m.includes("illegal issue transition") && m.includes("warn-and-allow"));
+    expect(warned).toBe(true);
+  });
+
+  it("(c) strict policy throws on an illegal issue transition and the write is NOT applied", async () => {
+    const { projectId, statusIds } = await seedCanonicalProject();
+    const issueId = await seedIssue(db, projectId, statusIds["Backlog"]);
+    setTransitionStrictness("strict");
+
+    await expect(
+      transitionIssueStatus(db as any, issueId, statusIds["AI Reviewed"]),
+    ).rejects.toBeInstanceOf(IllegalStatusTransitionError);
+    expect((await issueFor(issueId)).statusId).toBe(statusIds["Backlog"]); // unchanged
+  });
+
+  it("a custom (non-canonical) issue status never warns", async () => {
+    const projectId = randomUUID();
+    const now = new Date().toISOString();
+    await db.insert(schema.projects).values({
+      id: projectId,
+      name: "Custom",
+      repoPath: "/tmp/x",
+      defaultBranch: "main",
+      createdAt: now,
+      updatedAt: now,
+    } as any);
+    const fromId = randomUUID();
+    const toId = randomUUID();
+    await db.insert(schema.projectStatuses).values({ id: fromId, projectId, name: "Intake", sortOrder: 0, isDefault: true, createdAt: now });
+    await db.insert(schema.projectStatuses).values({ id: toId, projectId, name: "Shipped", sortOrder: 1, isDefault: false, createdAt: now });
+    const issueId = await seedIssue(db, projectId, fromId);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await transitionIssueStatus(db as any, issueId, toId);
+    expect((await issueFor(issueId)).statusId).toBe(toId);
+    expect(warn.mock.calls.some((c) => String(c[0]).includes("illegal issue transition"))).toBe(false);
   });
 });
