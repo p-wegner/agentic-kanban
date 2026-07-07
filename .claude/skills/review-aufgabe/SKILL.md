@@ -75,6 +75,18 @@ git worktree remove "$WORKTREE_PATH" --force 2>/dev/null || true
 git worktree add "$WORKTREE_PATH" origin/aufgabe{AUFGABE_NR}
 ```
 
+## Schritt 1.4: Token-Budget vorbereiten
+
+Stelle sicher, dass `tokt` einsatzbereit ist:
+
+```bash
+TOKT_DIR="$(git rev-parse --show-toplevel)/.claude/skills/token-budget"
+[ ! -d "$TOKT_DIR/node_modules" ] && (cd "$TOKT_DIR" && npm install --silent --no-progress 2>&1 | tail -1)
+echo "$TOKT_DIR/bin/tokt.js"
+```
+
+Merke dir den ausgegebenen Pfad als **TOKT**.
+
 ---
 
 # TEIL 2: Review via claude -p
@@ -88,11 +100,12 @@ und wechselt in den Worktree:
 ```bash
 REPO_ROOT=$(git rev-parse --show-toplevel)
 WORKTREE_PATH="${REPO_ROOT}/../workshop-review-aufgabe{AUFGABE_NR}"
+ENVELOPE_FILE="${REPO_ROOT}/../review-aufgabe{AUFGABE_NR}-envelope.json"
 SKILL_BODY=$(sed '/<!--/,/-->/d' "${REPO_ROOT}/workshop/review/skill.md" | sed '/^[[:space:]]*$/{ /./!d }')
 cd "$WORKTREE_PATH" && claude -p \
   --append-system-prompt "$SKILL_BODY" \
-  --output-format text \
-  --permission-mode bypassPermissions << 'HARNESS_PROMPT'
+  --output-format json \
+  --permission-mode bypassPermissions << 'HARNESS_PROMPT' > "$ENVELOPE_FILE"
 Aufgabe: {AUFGABE_NR}
 Du bist in einem Worktree, in dem der Branch aufgabe{AUFGABE_NR} ausgecheckt ist (basiert auf master).
 
@@ -110,7 +123,7 @@ Gib deine Findings als genau einen JSON-Block aus, nichts davor oder danach:
 HARNESS_PROMPT
 ```
 
-Erfasse den gesamten Stdout als **CLAUDE_OUTPUT**. Exit-Code merken.
+Exit-Code merken. Das JSON-Envelope wird in `$ENVELOPE_FILE` geschrieben.
 
 ---
 
@@ -127,7 +140,35 @@ git worktree remove "$WORKTREE_PATH" --force
 Bei Fehler: Hinweis ausgeben und weitermachen:
 > "Worktree $WORKTREE_PATH konnte nicht automatisch aufgeräumt werden. Manuell: git worktree remove $WORKTREE_PATH --force"
 
-## Schritt 3.2: JSON aus CLAUDE_OUTPUT extrahieren
+## Schritt 3.2: CLAUDE_OUTPUT und Token-Info aus Envelope lesen
+
+Extrahiere den Reviewer-Text aus dem Envelope:
+
+```bash
+TOKT="$(git rev-parse --show-toplevel)/.claude/skills/token-budget/bin/tokt.js"
+ENVELOPE_FILE="$(git rev-parse --show-toplevel)/../review-aufgabe{AUFGABE_NR}-envelope.json"
+node "$TOKT" result "$ENVELOPE_FILE" 2>/dev/null
+```
+
+Merke als **CLAUDE_OUTPUT** (leer wenn Exit-Code ≠ 0 oder is_error).
+
+Extrahiere die Token-Zahl (input + output, ohne Cache):
+
+```bash
+ENVELOPE_FILE="$(git rev-parse --show-toplevel)/../review-aufgabe{AUFGABE_NR}-envelope.json"
+node -e "const e=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));const u=e.modelUsage||{};let n=0;Object.values(u).forEach(m=>{n+=(m.inputTokens||0)+(m.outputTokens||0)});console.log(n)" "$ENVELOPE_FILE" 2>/dev/null || echo null
+```
+
+Merke als **TOKENS_USED** (null wenn Envelope fehlt oder fehlerhaft).
+
+Extrahiere den Kostenbetrag:
+
+```bash
+ENVELOPE_FILE="$(git rev-parse --show-toplevel)/../review-aufgabe{AUFGABE_NR}-envelope.json"
+node -e "const e=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));console.log(e.total_cost_usd??'null')" "$ENVELOPE_FILE" 2>/dev/null || echo null
+```
+
+Merke als **COST_USD** (null wenn nicht verfügbar).
 
 Suche in CLAUDE_OUTPUT nach dem JSON-Block:
 - Mit Codeblock-Wrapper: extrahiere den Inhalt zwischen dem ersten ` ```json ` (oder ` ``` `) und
@@ -139,15 +180,13 @@ Parse das JSON und extrahiere das `findings`-Array als **FINDINGS**.
 Falls CLAUDE_OUTPUT kein valides JSON enthält oder Exit-Code ≠ 0 war: setze FINDINGS = [] und
 vermerke: "claude -p hat kein valides JSON geliefert — prüfe workshop/review/skill.md".
 
-Token-Hinweis: `--output-format text` liefert keine nativen Token-Counts. Setze tokens_used = null.
-
 ## Schritt 3.3: Review-Ergebnis ausgeben (VOR dem Gold-Standard-Zugriff — Integritäts-Ankerpunkt)
 
 Gib **jetzt** — bevor TEIL 4 irgendeine `gold-standard-*`-Datei liest — das Review-Ergebnis aus:
 
 ```
 === Review-Ergebnis Aufgabe {AUFGABE_NR} (Teilnehmer-Skill) ===
-{Anzahl} Findings — Tokens: n/a
+{Anzahl} Findings — {TOKENS_USED} tokens ($COST_USD USD)
 
 - F1 (high)   dateiname.ts:zeile — <kurzbeschreibung>
 - F2 (medium) dateiname.ts:zeile — <kurzbeschreibung>
@@ -197,8 +236,9 @@ Schreibe das Ergebnis nach `workshop/review/benchmark-result-{AUFGABE_NR}.json`:
   "score": 3.5,
   "max_score": 5,
   "tokens": {
-    "tokens_used": null,
-    "source": "unavailable (claude -p --output-format text)"
+    "tokens_used": {TOKENS_USED},
+    "cost_usd": {COST_USD},
+    "source": "claude -p --output-format json"
   },
   "details": [
     { "gold_id": "F1", "verdict": "found", "note": "Null check korrekt erkannt" },
@@ -215,7 +255,7 @@ Schreibe das Ergebnis nach `workshop/review/benchmark-result-{AUFGABE_NR}.json`:
 ```
 === Benchmark Aufgabe {AUFGABE_NR} ===
 Score: X / {MAX}
-Tokens: n/a
+Tokens: {TOKENS_USED} ($COST_USD USD)
 
 ✓ F1 (high)   — found:   <kurze Note>
 ✓ F2 (high)   — found:   <kurze Note>

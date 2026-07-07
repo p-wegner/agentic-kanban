@@ -1,0 +1,8 @@
+node_modules/
+.creds/
+*.log
+.DS_Store
+outputs/
+.env
+
+*.stackdump
