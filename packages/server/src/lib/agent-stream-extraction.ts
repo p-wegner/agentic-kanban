@@ -2,6 +2,7 @@ import {
   createAgentStreamParseContext,
   parseAgentStreamLine,
   type AgentDisplayEvent,
+  type AgentDisplayToolResultEvent,
   type AgentStreamProvider,
 } from "@agentic-kanban/shared/lib/agent-stream-parser";
 
@@ -58,7 +59,9 @@ export function parseAgentStreamExtractionLine(
       continue;
     }
     const toolResultText = parsed.toolResult?.agentResultText
-      ?? events.find((event) => event.kind === "tool_result" && event.output)?.output;
+      ?? events.find(
+        (event): event is AgentDisplayToolResultEvent => event.kind === "tool_result" && Boolean(event.output),
+      )?.output;
     return {
       provider,
       events,
