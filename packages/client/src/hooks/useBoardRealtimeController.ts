@@ -3,12 +3,20 @@ import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import type { StatusWithIssues } from "@agentic-kanban/shared";
 import { useBoardLiveHandlers } from "./useBoardLiveHandlers.js";
 import { useBoardRefetch } from "./useBoardRefetch.js";
+import {
+  deriveInactiveIssueIds,
+  prunePendingWorkspaceIssueIds,
+  pruneRecordKeys,
+} from "../lib/boardDataReconcile.js";
+import { boardBulkSelectionActions } from "../stores/boardBulkSelectionStore.js";
 import type { ApprovalRequest, LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 
 type NotificationIssue = { id: string; issueNumber?: number; title?: string; workspaceId?: string };
 
 interface BoardRealtimeControllerParams {
   activeProjectId: string | null;
+  /** Current-render board columns (react-query owned) — drives live-session pruning. */
+  columns: StatusWithIssues[];
   columnsRef: MutableRefObject<StatusWithIssues[]>;
   creatingInColumnId: string | null;
   loadProjectsRef: MutableRefObject<() => Promise<string | undefined>>;
@@ -19,6 +27,7 @@ interface BoardRealtimeControllerParams {
 
 export function useBoardRealtimeController({
   activeProjectId,
+  columns,
   columnsRef,
   creatingInColumnId,
   loadProjectsRef,
@@ -41,13 +50,22 @@ export function useBoardRealtimeController({
   const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
   const pendingBoardRefreshRef = useRef(false);
 
-  const { refetchBoard, scheduleRefetch } = useBoardRefetch({
-    activeProjectId,
-    columnsRef,
-    setColumns,
-    setLiveStats,
-    setSessionActivityRaw,
-  });
+  const { refetchBoard, scheduleRefetch } = useBoardRefetch({ activeProjectId });
+
+  // Prune live-session bookkeeping for now-inactive issues whenever the board
+  // data changes. This used to live inside the refetch engine's apply step;
+  // with react-query as the single owner it derives from the board query data,
+  // so it stays correct no matter which path (fetch, WS invalidation, optimistic
+  // mutation) updated the columns. The prune helpers return the same reference
+  // when nothing changed, so this is a no-op re-render in the common case.
+  useEffect(() => {
+    const inactiveIssueIds = deriveInactiveIssueIds(columns);
+    boardBulkSelectionActions.setPendingWorkspaceIssueIds((prev) => prunePendingWorkspaceIssueIds(prev, columns));
+    if (inactiveIssueIds.size > 0) {
+      setLiveStats((prev) => pruneRecordKeys(prev, inactiveIssueIds));
+      setSessionActivityRaw((prev) => pruneRecordKeys(prev, inactiveIssueIds));
+    }
+  }, [columns]);
 
   useBoardLiveHandlers({
     activeProjectId,
