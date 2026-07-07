@@ -30,13 +30,55 @@ import ts from "typescript";
  * catches git invocations regardless of how the command string is spelled, while
  * leaving the legitimate non-git spawns alone.
  *
+ * Scan surface (arch-review #17): we walk EVERY package directory (not just the
+ * src subtree) and parse .ts AND .js/.mjs/.cjs files. The earlier gate scanned
+ * only .ts files under packages/[pkg]/src, so the scaffold .js hook scripts and
+ * the e2e global-setup.ts (which live outside src or carry a .js extension)
+ * escaped by file-extension / location ACCIDENT rather than by an explicit
+ * decision. Every legitimate raw-git spawn is now either routed through the
+ * adapter or listed, with a justification, in ALLOWLIST below.
+ *
  * Tests are excluded: they legitimately drive real git to build fixtures.
  */
 
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../../../..");
 
-/** The only file allowed to spawn `git` via child_process. Relative to REPO_ROOT. */
-const ALLOWLIST = new Set([join("packages", "shared", "src", "lib", "git-exec.ts")]);
+/**
+ * The ONLY files allowed to spawn `git` via child_process, each an EXPLICIT,
+ * JUSTIFIED decision (not an accident of the scan glob). Keys are paths relative
+ * to REPO_ROOT; values document why the file cannot route through the adapter.
+ */
+const ALLOWLIST = new Map<string, string>([
+  [
+    join("packages", "shared", "src", "lib", "git-exec.ts"),
+    "The sanctioned git adapter itself — the single spawn site every other module must go through.",
+  ],
+  [
+    join("packages", "server", "src", "scaffold", "smart-hooks-runner.js"),
+    "Standalone hook script scaffolded into OTHER repos' .claude/hooks/. Runs dependency-free in " +
+      "arbitrary user projects where @agentic-kanban/shared is not on disk, so it cannot import the " +
+      "adapter; it applies windowsHide itself. Must stay a self-contained .js (do not rewrite to import shared).",
+  ],
+  [
+    join("packages", "server", "src", "scaffold", "vital-file-guard.js"),
+    "Dependency-free scaffolded PreToolUse guard shipped into user repos' .claude/hooks/. Same rationale " +
+      "as smart-hooks-runner: it must run standalone with no shared package available, so no adapter import.",
+  ],
+  [
+    join("packages", "server", "src", "scaffold", "prevent-cross-worktree-writes.js"),
+    "Dependency-free scaffolded PreToolUse guard shipped into user repos' .claude/hooks/. Runs standalone " +
+      "in scaffolded repos (no @agentic-kanban/shared on disk), so it cannot import the adapter.",
+  ],
+  [
+    join("packages", "e2e", "global-setup.ts"),
+    "Playwright global-setup — test-harness bootstrap that resolves the repo root (a single read-only " +
+      "`git rev-parse --git-common-dir`) before the app runs. Morally test infrastructure; the " +
+      ".test.ts/.spec.ts exclusion simply does not name it.",
+  ],
+]);
+
+/** Source file extensions the gate parses. `.js`/`.mjs`/`.cjs` added in #17 so scaffold hook scripts are visible. */
+const SOURCE_EXTENSIONS = [".ts", ".js", ".mjs", ".cjs"];
 
 /** child_process functions that actually launch a process given a command/file as arg 0. */
 const SPAWN_FNS = new Set(["exec", "execSync", "execFile", "execFileSync", "spawn", "spawnSync"]);
@@ -51,8 +93,7 @@ function isExcluded(absPath: string): boolean {
     parts.includes("dist") ||
     parts.includes(".worktrees") ||
     parts.includes("__tests__") ||
-    absPath.endsWith(".test.ts") ||
-    absPath.endsWith(".spec.ts")
+    /\.(test|spec)\.(ts|js|mjs|cjs)$/.test(absPath)
   );
 }
 
@@ -68,7 +109,7 @@ function collectSourceFiles(dir: string, out: string[]): void {
     if (isExcluded(full)) continue;
     if (statSync(full).isDirectory()) {
       collectSourceFiles(full, out);
-    } else if (full.endsWith(".ts")) {
+    } else if (SOURCE_EXTENSIONS.some((ext) => full.endsWith(ext))) {
       out.push(full);
     }
   }
@@ -297,13 +338,21 @@ describe("git-exec single-spawn gate", () => {
     expect(offenders[0]?.line).toBe(2); // the call expression starts on line 2
   });
 
-  it("no package source spawns git outside the git-exec adapter", () => {
+  /** Every .ts/.js/.mjs/.cjs source file across all packages, minus the isExcluded set. */
+  function collectAllPackageSources(): string[] {
     const packagesDir = join(REPO_ROOT, "packages");
     const files: string[] = [];
     for (const pkg of readdirSync(packagesDir)) {
       if (pkg === ".worktrees") continue;
-      collectSourceFiles(join(packagesDir, pkg, "src"), files);
+      // Walk the WHOLE package dir (not just src/) so files outside src — e.g.
+      // packages/e2e/global-setup.ts and the scaffold .js hook scripts — are visible.
+      collectSourceFiles(join(packagesDir, pkg), files);
     }
+    return files;
+  }
+
+  it("no package source spawns git outside the git-exec adapter", () => {
+    const files = collectAllPackageSources();
 
     const offenders: string[] = [];
     for (const file of files) {
@@ -318,13 +367,23 @@ describe("git-exec single-spawn gate", () => {
     expect(
       offenders,
       `These files spawn git directly instead of importing the adapter from ` +
-        `@agentic-kanban/shared/lib/git-exec:\n${offenders.join("\n")}`,
+        `@agentic-kanban/shared/lib/git-exec (route them through it, or if they must stay ` +
+        `standalone add a justified ALLOWLIST entry):\n${offenders.join("\n")}`,
     ).toEqual([]);
   });
 
-  it("the adapter itself is detected as a git spawn site (allowlist is live, not stale)", () => {
-    const adapterPath = join(REPO_ROOT, "packages", "shared", "src", "lib", "git-exec.ts");
-    const adapter = readFileSync(adapterPath, "utf8");
-    expect(findGitSpawns(adapterPath, adapter).length).toBeGreaterThan(0);
+  it("every ALLOWLIST entry is live — the file exists, is reached by the scan, and really spawns git", () => {
+    // Guards against the allowlist silently going stale: if the scan glob/roots ever
+    // narrow so an allowlisted file is no longer scanned, or the file stops spawning
+    // git (and should be de-listed), this fails instead of granting a dead exemption.
+    const scanned = new Set(collectAllPackageSources().map((f) => relative(REPO_ROOT, f)));
+    for (const rel of ALLOWLIST.keys()) {
+      expect(scanned.has(rel), `allowlisted file is not reached by the scan: ${rel}`).toBe(true);
+      const text = readFileSync(join(REPO_ROOT, rel), "utf8");
+      expect(
+        findGitSpawns(rel, text).length,
+        `allowlisted file no longer spawns git (de-list it): ${rel}`,
+      ).toBeGreaterThan(0);
+    }
   });
 });
