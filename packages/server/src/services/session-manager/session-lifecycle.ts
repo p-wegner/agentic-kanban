@@ -28,6 +28,13 @@ import {
   extractCapturedStderr,
   ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS as EXIT_WINDOW_MS,
 } from "./session-exit-state-machine.js";
+import {
+  buildZeroOutputLaunchFailureStats,
+  buildModelErrorLaunchFailureStats,
+  buildCodexUsageLimitStats,
+  buildClaudeUsageLimitStats,
+  buildIndeterminateExitStats,
+} from "./session-exit-stats.js";
 
 /** Subset of agent.service that the lifecycle depends on. Injectable for tests. */
 export type AgentService = typeof realAgentService;
@@ -65,92 +72,6 @@ async function mergeExistingSessionStats(database: Database, sessionId: string, 
   } catch {
     return statsToSave;
   }
-}
-
-function buildZeroOutputLaunchFailureStats(executor: string, durationMs: number, exitCode: number | null, stderrText?: string) {
-  // Surface the provider's captured stderr (#779). A detached claude.exe that dies on launch
-  // writes its reason to stderr, not stdout; including it here turns an opaque "zero output"
-  // crash into a diagnosable failure (e.g. a mid-rebase worktree, bad cwd, auth error).
-  const stderrSnippet = stderrText?.trim()
-    ? `\nProvider stderr:\n${stderrText.trim().length > 500 ? stderrText.trim().slice(0, 500) + "…" : stderrText.trim()}`
-    : "";
-  const reason =
-    `Agent launch failed: provider process exited within ${Math.round(ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS / 1000)}s ` +
-    "without assistant output, tool activity, or usage stats." +
-    stderrSnippet;
-  return {
-    durationMs,
-    totalCostUsd: 0,
-    inputTokens: 0,
-    outputTokens: 0,
-    numTurns: 0,
-    model: executor,
-    success: false,
-    launchFailure: true,
-    failureReason: reason,
-    providerExitCode: exitCode,
-    agentSummary: reason,
-  };
-}
-
-/** Build launch failure stats when the agent produced an error message but is still a failed launch (e.g. model/auth error). */
-function buildModelErrorLaunchFailureStats(executor: string, durationMs: number, exitCode: number | null, errorText: string) {
-  const truncated = errorText.length > 500 ? errorText.slice(0, 500) + "…" : errorText;
-  const reason =
-    `Agent launch failed: provider process exited within ${Math.round(ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS / 1000)}s ` +
-    `with non-zero exit code ${exitCode ?? "unknown"} and error output:\n${truncated}`;
-  return {
-    durationMs,
-    totalCostUsd: 0,
-    inputTokens: 0,
-    outputTokens: 0,
-    numTurns: 0,
-    model: executor,
-    success: false,
-    launchFailure: true,
-    failureReason: reason,
-    providerExitCode: exitCode,
-    agentSummary: truncated,
-  };
-}
-
-function buildCodexUsageLimitStats(executor: string, durationMs: number, exitCode: number | null, message: string, retryAfter: string | null) {
-  return {
-    durationMs,
-    totalCostUsd: 0,
-    inputTokens: 0,
-    outputTokens: 0,
-    numTurns: 0,
-    model: executor,
-    success: false,
-    launchFailure: true,
-    rateLimited: true,
-    rateLimitKind: "codex-usage-limit",
-    retryAfter,
-    failureReason: message,
-    providerExitCode: exitCode,
-    agentSummary: message,
-  };
-}
-
-function buildClaudeUsageLimitStats(executor: string, durationMs: number, exitCode: number | null, message: string, resetsAt: string | null) {
-  return {
-    durationMs,
-    totalCostUsd: 0,
-    inputTokens: 0,
-    outputTokens: 0,
-    numTurns: 0,
-    model: executor,
-    success: false,
-    launchFailure: true,
-    rateLimited: true,
-    rateLimitKind: "claude-usage-limit",
-    // Persisted so the exit-workflow rotation can stamp the right cooldown window.
-    retryAfter: resetsAt,
-    failureReason: message,
-    providerExitCode: exitCode,
-    agentSummary: message,
-  };
 }
 
 function lifecycleProviderName(provider: string | undefined, profile?: { provider?: string; name?: string }): ProviderName {
@@ -909,6 +830,16 @@ export function createSessionLifecycle(
     }
     state.sessionExitHandled.add(sessionId);
 
+    // Capture the in-memory exit signals BEFORE teardown so this exit can still be classified.
+    // A reattached agent may have streamed a usage-limit / crash message after the restart; if we
+    // dropped these we'd lose the only observable signal and misfile every external exit (review §3.2).
+    const bufferedMessages = state.messageBuffer.get(sessionId) ?? [];
+    const capturedFinalText = state.sessionFinalText.get(sessionId) ?? null;
+    const hadSubstantiveOutput =
+      state.sessionSubstantiveOutput.has(sessionId) || Boolean(capturedFinalText?.trim().length);
+    const stoppedByUser = state.stoppedByUser.has(sessionId);
+    const providerFromState = state.sessionProviders.get(sessionId);
+
     const ctx = state.sessionContexts.get(sessionId);
     // Clear in-memory state
     state.sessionContexts.delete(sessionId);
@@ -926,6 +857,8 @@ export function createSessionLifecycle(
     state.sessionFinalText.delete(sessionId);
     state.sessionSubstantiveOutput.delete(sessionId);
     state.sessionExitPlanModeDenied.delete(sessionId);
+    state.stoppedByUser.delete(sessionId);
+    state.messageBuffer.delete(sessionId);
     const externalExitTimer = state.dbWriteTimers.get(sessionId);
     if (externalExitTimer !== undefined) {
       clearTimeout(externalExitTimer);
@@ -945,14 +878,109 @@ export function createSessionLifecycle(
       options?.onTodos?.(ctx.projectId, ctx.issueId, []);
     }
 
-    // Update DB
     const now = new Date().toISOString();
-    await lifecycleRepo.updateSessionCompleted(sessionId, now, String(exitCode ?? 0), db);
-
-    // Fire workflow callback
     const wsId = ctx?.workspaceId;
-    if (wsId) {
-      options?.onSessionExit?.(wsId, sessionId, exitCode, false);
+    const executor = providerFromState ?? existing.executor ?? "claude-code";
+    const providerName = lifecycleProviderName(executor);
+    // A reattached session started before the restart, so its duration is large — outside the
+    // launch-failure window, exactly as a genuine long-running agent should be.
+    const startedAtMs = existing.startedAt ? new Date(existing.startedAt).getTime() : Date.now();
+    const durationMs = Math.max(0, new Date(now).getTime() - startedAtMs);
+    const capturedStderr = extractCapturedStderr(bufferedMessages);
+    const usageLimit = getProviderExitBehavior(providerName).detectUsageLimit(bufferedMessages);
+
+    // Route the external exit through the SAME classifier the live exit path uses, instead of the
+    // old raw `String(exitCode ?? 0)` shortcut that recorded every external exit as completed/"0".
+    // `exitCodeKnown: false` when the PID poll never observed a code (the reattach default).
+    const route = classifySessionExitRoute({
+      exitCode,
+      durationMs,
+      hadSubstantiveOutput,
+      stoppedByUser,
+      usageLimit,
+      planText: capturedFinalText,
+      capturedStderr,
+      exitCodeKnown: exitCode !== null,
+    });
+
+    const fireExit = (code: number | null) => {
+      if (wsId) options?.onSessionExit?.(wsId, sessionId, code, false);
+    };
+    const recordProfileFailure = (summary: string, code: number | null) =>
+      recordAgentProfileLaunchFailure(db, {
+        provider: providerName,
+        summary,
+        exitCode: code,
+        sessionId,
+        workspaceId: wsId ?? undefined,
+        at: now,
+      }).catch((err) => console.error("Failed to record external-exit profile failure:", err));
+
+    switch (route.phase) {
+      case "stopped":
+        // The user stopped it; stopSession already wrote "stopped". Just fire the callback.
+        fireExit(exitCode);
+        return;
+      case "usage-limit": {
+        const { usageLimit: ul, effectiveExitCode } = route;
+        const stats = ul.kind === "codex"
+          ? buildCodexUsageLimitStats(executor, durationMs, exitCode, ul.message, ul.retryAfter)
+          : buildClaudeUsageLimitStats(executor, durationMs, exitCode, ul.message, ul.retryAfter);
+        await recordProfileFailure(stats.failureReason, effectiveExitCode);
+        const mergedStats = await mergeExistingSessionStats(db, sessionId, stats);
+        await lifecycleRepo.updateSessionStoppedWithStats(sessionId, now, String(effectiveExitCode), JSON.stringify(mergedStats), db);
+        if (wsId) await lifecycleRepo.updateWorkspaceStatus(wsId, "blocked", now, db);
+        console.warn(`[agent] ${ul.kind}-rate-limited on external exit: sessionId=${sessionId} workspace=${wsId ?? "?"}`);
+        fireExit(effectiveExitCode);
+        return;
+      }
+      case "launch-failure": {
+        const { isZeroOutput, isNonZeroExit, effectiveExitCode, errorText } = route;
+        const stats = isZeroOutput
+          ? buildZeroOutputLaunchFailureStats(executor, durationMs, exitCode, capturedStderr)
+          : buildModelErrorLaunchFailureStats(executor, durationMs, exitCode, errorText);
+        await recordProfileFailure(stats.failureReason, effectiveExitCode);
+        const mergedStats = await mergeExistingSessionStats(db, sessionId, stats);
+        await lifecycleRepo.updateSessionStoppedWithStats(sessionId, now, String(effectiveExitCode), JSON.stringify(mergedStats), db);
+        await lifecycleRepo.insertSessionMessage({ sessionId, type: "stderr", data: stats.failureReason, exitCode: null }, db);
+        if (wsId) await lifecycleRepo.updateWorkspaceStatus(wsId, "idle", now, db);
+        if (ctx?.projectId && wsId) {
+          emitButlerSystemEvent({
+            projectId: ctx.projectId,
+            kind: "session_failed",
+            workspaceId: wsId,
+            text: isNonZeroExit
+              ? `Agent launch failed for workspace ${wsId}: exited with code ${effectiveExitCode}.`
+              : `Agent launch failed for workspace ${wsId}: zero output.`,
+          });
+        }
+        fireExit(effectiveExitCode);
+        return;
+      }
+      case "unknown-exit": {
+        // The exit code was never observed (reattached PID vanished after a restart). Record a
+        // distinct indeterminate terminal — status "stopped", exitCode NULL, stats flagged
+        // indeterminate — so a post-restart crash/quota-exhaustion is never logged as a clean "0".
+        const stats = buildIndeterminateExitStats(executor, durationMs, route.hadSubstantiveOutput, route.capturedStderr);
+        const mergedStats = await mergeExistingSessionStats(db, sessionId, stats);
+        await lifecycleRepo.updateSessionStoppedWithStats(sessionId, now, null, JSON.stringify(mergedStats), db);
+        if (ctx?.projectId && wsId) {
+          emitButlerSystemEvent({
+            projectId: ctx.projectId,
+            kind: "session_failed",
+            workspaceId: wsId,
+            text: `Agent session for workspace ${wsId} ended with an indeterminate exit after a server restart — its real exit code could not be observed. Recorded as indeterminate (not a verified success).`,
+          });
+        }
+        console.warn(`[agent] external exit indeterminate (exit code unobserved): sessionId=${sessionId} workspace=${wsId ?? "?"}`);
+        fireExit(exitCode); // exitCode is null — the workflow callback must NOT see a fabricated 0
+        return;
+      }
+      case "completed":
+        // A genuine, OBSERVED exit code (someone passed a real code, e.g. 0). Preserve it.
+        await lifecycleRepo.updateSessionCompleted(sessionId, now, String(route.exitCode ?? 0), db);
+        fireExit(exitCode);
+        return;
     }
   }
 
