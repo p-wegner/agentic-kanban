@@ -51,6 +51,7 @@ vi.mock("../services/merge-executor.service.js", () => ({
 import { db } from "../db/index.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
 import { createAutoMerge } from "../startup/merge-workflow.js";
+import { gateSkipExplicit } from "../services/pre-merge-gate.service.js";
 import { activeMerges } from "../services/workspace-internals.js";
 import type { createBoardEvents } from "../services/board-events.js";
 import type { createSessionManager } from "../services/session.manager.js";
@@ -152,7 +153,8 @@ describe("#945: both merge entry paths route through the shared merge executor c
       learningSessionIds: new Set(),
     });
 
-    await autoMerge(ws, projectId, issueId, doneStatusId, new Date().toISOString());
+    await autoMerge(ws, projectId, issueId, doneStatusId, new Date().toISOString(),
+      gateSkipExplicit("test: routing check — gate decision is exercised separately"));
 
     expect(runMergeCore).toHaveBeenCalledTimes(1);
     expect(runMergeCore).toHaveBeenCalledWith(expect.objectContaining({

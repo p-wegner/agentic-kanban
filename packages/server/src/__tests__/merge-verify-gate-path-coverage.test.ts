@@ -34,7 +34,8 @@ vi.mock("@agentic-kanban/shared/lib/smoke-check", () => ({
   runSmokeCheck: (...args: unknown[]) => runSmokeCheck(...args),
 }));
 
-const { runPreMergeGate } = await import("../services/pre-merge-gate.service.js");
+const { runPreMergeGate, resolveMergeGate, gateAlreadyPassed, gateSkipExplicit, MERGE_GATE_EVIDENCE_MAX_AGE_MS } =
+  await import("../services/pre-merge-gate.service.js");
 
 // Isolate the module-level per-repoPath merge lock between tests (see workspace-merge-service.test.ts).
 beforeEach(() => {
@@ -188,11 +189,13 @@ describe("review-merge.gate.verify-smoke — gate decision + which merge path ru
     expect(await issueStatusName(db, issueId)).toBe("Done");
   });
 
-  // #943: the in-process monitor's auto-merge paths already run the gate against the same worktree
-  // state in the same cycle (or rely on the review-exit gate for readyForMerge work). They pass
-  // `skipPreMergeGate` so `doMerge` does NOT re-run it — otherwise an expensive build/boot doubles
-  // per monitor merge. The skip is per-call, so the manual route (no flag) keeps gating.
-  it("skipPreMergeGate suppresses the doMerge gate re-run, so the verify_script is NOT spawned again (#943)", async () => {
+  // #943 / arch-review §1.2: the in-process monitor's auto-merge paths already run the gate against
+  // the same worktree state in the same cycle (or rely on the review-exit gate for readyForMerge
+  // work). They now pass an explicit `already-passed` PROOF token (not the old opaque
+  // `skipPreMergeGate: boolean`) so `resolveMergeGate` does NOT re-run it — otherwise an expensive
+  // build/boot doubles per monitor merge. The token is per-call, so the manual route (no token)
+  // keeps gating.
+  it("an `already-passed` gate token suppresses the doMerge gate re-run, so the verify_script is NOT spawned again (#943)", async () => {
     const { projectId, issueId, workspaceId } = await seedApprovedWorkspace(db);
     await setPreference(verifyScriptPrefKey(projectId), ".\\verify.sh", db);
     runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "" });
@@ -204,7 +207,9 @@ describe("review-merge.gate.verify-smoke — gate decision + which merge path ru
       createBackup: async () => {},
       processKiller: async () => 0,
     });
-    const result = await svc.mergeWorkspace(workspaceId, { skipPreMergeGate: true });
+    const result = await svc.mergeWorkspace(workspaceId, {
+      gate: gateAlreadyPassed({ ranAt: new Date().toISOString(), stage: "verify", source: "test:monitor-cycle" }),
+    });
 
     // The gate did NOT run a second build, but the merge still landed.
     expect(runSetupScript).not.toHaveBeenCalled();
@@ -212,11 +217,11 @@ describe("review-merge.gate.verify-smoke — gate decision + which merge path ru
     expect(await issueStatusName(db, issueId)).toBe("Done");
   });
 
-  // The monitor reaches doMerge via mergeWorkspaceDeduped — verify the skip flag threads through it too.
-  it("mergeWorkspaceDeduped threads skipPreMergeGate through to doMerge (#943)", async () => {
+  // The monitor reaches doMerge via mergeWorkspaceDeduped — verify the token threads through it too.
+  it("mergeWorkspaceDeduped threads the `already-passed` token through to doMerge (#943)", async () => {
     const { projectId, workspaceId } = await seedApprovedWorkspace(db);
     await setPreference(verifyScriptPrefKey(projectId), ".\\verify.sh", db);
-    // Even a FAILING verify must not be consulted when the gate is skipped — it never runs.
+    // Even a FAILING verify must not be consulted when valid proof is passed — it never runs.
     runSetupScript.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "would have failed" });
 
     const git = makeGit();
@@ -226,9 +231,141 @@ describe("review-merge.gate.verify-smoke — gate decision + which merge path ru
       createBackup: async () => {},
       processKiller: async () => 0,
     });
-    const result = await svc.mergeWorkspaceDeduped(workspaceId, { skipPreMergeGate: true });
+    const result = await svc.mergeWorkspaceDeduped(workspaceId, {
+      gate: gateAlreadyPassed({ ranAt: new Date().toISOString(), stage: "verify", source: "test:monitor-cycle" }),
+    });
 
     expect(runSetupScript).not.toHaveBeenCalled();
     expect(result.merged).toBe(true);
+  });
+
+  // arch-review §1.2 (b): a STALE `already-passed` token must NOT be trusted — resolveMergeGate
+  // re-runs the gate (closing the TOCTOU-by-boolean window). Here the stale-evidence re-gate runs a
+  // FAILING verify, so the merge is WITHHELD.
+  it("a STALE `already-passed` token forces the gate to re-run, so a now-failing verify withholds the merge (#943 TOCTOU)", async () => {
+    const { projectId, workspaceId } = await seedApprovedWorkspace(db);
+    await setPreference(verifyScriptPrefKey(projectId), ".\\verify.sh", db);
+    runSetupScript.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "stale proof — build now broken" });
+
+    const git = makeGit();
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+    const staleRanAt = new Date(Date.now() - (MERGE_GATE_EVIDENCE_MAX_AGE_MS + 60_000)).toISOString();
+    let merged: boolean | undefined;
+    try {
+      const result = await svc.mergeWorkspace(workspaceId, {
+        gate: gateAlreadyPassed({ ranAt: staleRanAt, stage: "verify", source: "test:stale" }),
+      });
+      merged = result.merged;
+    } catch {
+      merged = false; // withheld via a thrown CONFLICT
+    }
+
+    expect(runSetupScript).toHaveBeenCalled(); // stale proof forced the gate to re-run
+    expect(merged).toBe(false);
+  });
+
+  // arch-review §1.2 (c): a previously-ungated path can express a DELIBERATE ungated merge via a
+  // documented `skip-explicit` token — the gate is not run, and the merge lands.
+  it("a `skip-explicit` token merges WITHOUT running the verify gate (documented ungated path)", async () => {
+    const { projectId, workspaceId } = await seedApprovedWorkspace(db);
+    await setPreference(verifyScriptPrefKey(projectId), ".\\verify.sh", db);
+    runSetupScript.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "would have failed if gated" });
+
+    const git = makeGit();
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+    const result = await svc.mergeWorkspace(workspaceId, {
+      gate: gateSkipExplicit("test: deliberate ungated merge with a documented reason"),
+    });
+
+    expect(runSetupScript).not.toHaveBeenCalled();
+    expect(result.merged).toBe(true);
+  });
+});
+
+// arch-review §1.2: the single gate-decision OWNER. Unit-level proof that every trigger path's
+// token resolves to the same decision, so the review-exit path, the manual path, the monitor path
+// and the ungated paths can no longer DIVERGE — they all call resolveMergeGate / runPreMergeGate.
+describe("resolveMergeGate — single owner of the merge-gate decision (arch-review §1.2)", () => {
+  let db: ReturnType<typeof createTestDb>["db"];
+  beforeEach(() => { ({ db } = createTestDb()); });
+
+  it("run-gate runs runPreMergeGate — the SAME gate the manual merge path and review-exit call (no divergence)", async () => {
+    const { projectId, workspaceId } = await seedApprovedWorkspace(db);
+    await setPreference(verifyScriptPrefKey(projectId), ".\\verify.sh", db);
+    runSetupScript.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "compile error" });
+
+    const resolved = await resolveMergeGate({
+      token: { kind: "run-gate" },
+      workspace: { id: workspaceId, workingDir: "/repo/.worktrees/feature_ak-821-test" },
+      projectId,
+      database: db,
+    });
+    expect(runSetupScript).toHaveBeenCalled();
+    expect(resolved.ran).toBe(true);
+    expect(resolved.passed).toBe(false);
+    expect(resolved.stage).toBe("verify");
+    expect(resolved.decision).toBe("run-gate");
+  });
+
+  it("a fresh `already-passed` token passes WITHOUT running the gate", async () => {
+    const { projectId, workspaceId } = await seedApprovedWorkspace(db);
+    await setPreference(verifyScriptPrefKey(projectId), ".\\verify.sh", db);
+    runSetupScript.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "would fail if run" });
+
+    const resolved = await resolveMergeGate({
+      token: gateAlreadyPassed({ ranAt: new Date().toISOString(), stage: "verify", source: "review-exit" }),
+      workspace: { id: workspaceId, workingDir: "/repo/.worktrees/feature_ak-821-test" },
+      projectId,
+      database: db,
+    });
+    expect(runSetupScript).not.toHaveBeenCalled();
+    expect(resolved.passed).toBe(true);
+    expect(resolved.ran).toBe(false);
+    expect(resolved.decision).toBe("already-passed");
+  });
+
+  it("a STALE `already-passed` token is rejected and the gate re-runs (decision=run-gate-stale-evidence)", async () => {
+    const { projectId, workspaceId } = await seedApprovedWorkspace(db);
+    await setPreference(verifyScriptPrefKey(projectId), ".\\verify.sh", db);
+    runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "" });
+
+    const staleRanAt = new Date(Date.now() - (MERGE_GATE_EVIDENCE_MAX_AGE_MS + 60_000)).toISOString();
+    const resolved = await resolveMergeGate({
+      token: gateAlreadyPassed({ ranAt: staleRanAt, stage: "verify", source: "stale" }),
+      workspace: { id: workspaceId, workingDir: "/repo/.worktrees/feature_ak-821-test" },
+      projectId,
+      database: db,
+    });
+    expect(runSetupScript).toHaveBeenCalled();
+    expect(resolved.ran).toBe(true);
+    expect(resolved.decision).toBe("run-gate-stale-evidence");
+  });
+
+  it("a `skip-explicit` token passes WITHOUT running the gate and records the reason", async () => {
+    const { projectId, workspaceId } = await seedApprovedWorkspace(db);
+    await setPreference(verifyScriptPrefKey(projectId), ".\\verify.sh", db);
+    runSetupScript.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "would fail if run" });
+
+    const resolved = await resolveMergeGate({
+      token: gateSkipExplicit("done-unmerged recovery: already-approved work"),
+      workspace: { id: workspaceId, workingDir: "/repo/.worktrees/feature_ak-821-test" },
+      projectId,
+      database: db,
+    });
+    expect(runSetupScript).not.toHaveBeenCalled();
+    expect(resolved.passed).toBe(true);
+    expect(resolved.ran).toBe(false);
+    expect(resolved.decision).toBe("skip-explicit");
+    expect(resolved.message).toContain("already-approved work");
   });
 });

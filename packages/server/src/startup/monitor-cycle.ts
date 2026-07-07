@@ -13,7 +13,7 @@ import { startManualReview } from "../services/review.service.js";
 import { isCodexUsageLimitStats } from "../services/codex-rate-limit.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { getStackProfile, verifyScriptPrefKey } from "../services/stack-profile.service.js";
-import { runPreMergeGate } from "../services/pre-merge-gate.service.js";
+import { runPreMergeGate, gateAlreadyPassed, type MergeGateToken } from "../services/pre-merge-gate.service.js";
 import {
   MAX_SESSIONS,
   NON_TRIVIAL_WORKTREE_DIFF_CHARS,
@@ -215,10 +215,12 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
       return;
     }
     if (!canStartMerge(ws)) return;
+    // readyForMerge is only set by the review-exit handler AFTER its verify/smoke gate passed,
+    // so hand the merge that PROOF (arch-review §1.2) rather than a bare "trust me".
     await mergeWorkspaceWithFixFallback(ws, deps.workspaceActions, logAction, {
       conflictMsg: `[monitor] Merge conflict for idle+readyForMerge workspace ${ws.wsId}  triggered fix-and-merge`,
       successMsg: `[monitor] Triggered merge for idle+readyForMerge workspace ${ws.wsId}`,
-    });
+    }, gateAlreadyPassed({ ranAt: new Date().toISOString(), stage: "none", source: "review-exit gate (readyForMerge, idle)" }));
     stats.merged++;
     deps.boardEvents.broadcast(ws.projectId, "board_changed");
   } else if (sessionCount >= MAX_SESSIONS) {
@@ -243,6 +245,9 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
       // Run the shared pre-merge gate HERE before merging un-ready work; on failure, WITHHOLD the
       // merge (leave In Review + log) rather than silently land it. (Work the review already approved
       // — readyForMerge=true — has passed the gate at review-exit, so skip the re-run for it.)
+      // Build the explicit merge-gate PROOF token (arch-review §1.2): either the gate we run
+      // right here for un-ready work, or the review-exit gate that set readyForMerge.
+      let gateToken: MergeGateToken = gateAlreadyPassed({ ranAt: new Date().toISOString(), stage: "none", source: "review-exit gate (readyForMerge, auto_merge_in_review)" });
       if (!ws.readyForMerge) {
         const gate = await runPreMergeGate({ id: ws.wsId, workingDir: ws.workingDir }, ws.projectId, db);
         if (!gate.passed) {
@@ -258,12 +263,13 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
           return;
         }
         if (!gate.skipped) console.log(`[monitor] Pre-merge gate passed for idle In-Review workspace ${ws.wsId} (${gate.stage}); proceeding with auto_merge_in_review`);
+        gateToken = gateAlreadyPassed({ ranAt: new Date().toISOString(), stage: gate.stage, source: "monitor-cycle gate (auto_merge_in_review)" });
       }
       if (!canStartMerge(ws)) return;
       await mergeWorkspaceWithFixFallback(ws, deps.workspaceActions, logAction, {
         conflictMsg: `[monitor] Merge conflict for idle In-Review workspace ${ws.wsId} (auto_merge_in_review)  triggered fix-and-merge`,
         successMsg: `[monitor] Auto-merged idle In-Review workspace ${ws.wsId} (auto_merge_in_review, not marked ready)`,
-      });
+      }, gateToken);
       stats.merged++;
       deps.boardEvents.broadcast(ws.projectId, "board_changed");
     } else {
@@ -319,6 +325,9 @@ async function handleReviewingWorkspace(ws: WorkspaceCandidate, sess: LatestSess
     // If it isn't ready, run the shared pre-merge gate (#821) before landing — a non-zero verify or a
     // failed boot/render smoke WITHHOLDS the merge (leave In Review for re-review/fix). Work already
     // approved (readyForMerge=true) passed the gate at review-exit, so skip the re-run for it.
+    // Build the explicit merge-gate PROOF token (arch-review §1.2): either the gate we run right
+    // here for un-ready work, or the review-exit gate that set readyForMerge.
+    let gateToken: MergeGateToken = gateAlreadyPassed({ ranAt: new Date().toISOString(), stage: "none", source: "review-exit gate (readyForMerge, reviewing+stopped)" });
     if (!ws.readyForMerge) {
       const gate = await runPreMergeGate({ id: ws.wsId, workingDir: ws.workingDir }, ws.projectId, db);
       if (!gate.passed) {
@@ -333,13 +342,14 @@ async function handleReviewingWorkspace(ws: WorkspaceCandidate, sess: LatestSess
         deps.boardEvents.broadcast(ws.projectId, "workflow_error");
         return;
       }
+      gateToken = gateAlreadyPassed({ ranAt: new Date().toISOString(), stage: gate.stage, source: "monitor-cycle gate (reviewing+stopped)" });
     }
     if (!canStartMerge(ws)) return;
     // Deliberately NO fix-and-merge fallback on this path: a reviewing
     // workspace whose merge fails must not spawn a fix-and-merge session.
     let mergeOk = true;
     try {
-      await deps.workspaceActions.merge(ws.wsId);
+      await deps.workspaceActions.merge(ws.wsId, gateToken);
     } catch {
       mergeOk = false;
     }

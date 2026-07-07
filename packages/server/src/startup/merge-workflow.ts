@@ -19,6 +19,7 @@ import { getEffectiveProfile, parseProviderPref } from "./review-helpers.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { buildLearningStepPrompt } from "../services/merge-helpers.service.js";
+import { resolveMergeGate, type MergeGateToken } from "../services/pre-merge-gate.service.js";
 
 export type MergeWorkspace = Pick<typeof workspaces.$inferSelect, "id" | "isDirect" | "branch" | "workingDir" | "baseBranch" | "issueId">;
 
@@ -105,7 +106,7 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
     });
   }
 
-  return async function autoMerge(workspace: MergeWorkspace, projectId: string, issueId: string, doneStatusId: string | null, now: string) {
+  return async function autoMerge(workspace: MergeWorkspace, projectId: string, issueId: string, doneStatusId: string | null, now: string, gate: MergeGateToken) {
     try {
       const prefRowsLearning = await db.select().from(preferences);
       const prefMapLearning = new Map(prefRowsLearning.map((r) => [r.key, r.value]));
@@ -143,6 +144,21 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
       }
 
       if (!workspace.isDirect) {
+        // Merge-gate DECISION (arch-review §1.2): this path used to land branches with NO gate at
+        // all. It now resolves the explicit token the caller passed. The review-exit foundational
+        // merge hands over `already-passed` PROOF (the gate ran seconds earlier at review-exit), so
+        // resolveMergeGate does not re-run an expensive build; a fix-and-merge retry passes a
+        // documented `skip-explicit`. Stale/absent proof re-runs the gate; a failure aborts the
+        // merge (surfaced via the outer catch's conflict recording).
+        const gateResult = await resolveMergeGate({
+          token: gate,
+          workspace: { id: workspace.id, workingDir: workspace.workingDir },
+          projectId,
+          database: db,
+        });
+        if (!gateResult.passed) {
+          throw new Error(`Pre-merge gate failed (${gateResult.stage}) — merge withheld for workspace ${workspace.id} (branch ${workspace.branch}). ${gateResult.message}`);
+        }
         const projectRows = await db.select({ repoPath: projects.repoPath, teardownScript: projects.teardownScript, defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.id, projectId)).limit(1);
         if (projectRows.length === 0) {
           // Guard: project not found — refuse to set Done without a verified merge.
