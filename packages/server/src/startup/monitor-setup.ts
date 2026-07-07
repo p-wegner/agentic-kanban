@@ -28,6 +28,7 @@ import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
  * so the boot-time reset of the GLOBAL `auto_monitor` (startup-tasks.ts) never clobbers it.
  */
 const AUTODRIVE_KEY_RE = /^board_autodrive_([0-9a-f-]+)$/;
+const START_MODE_KEY_RE = /^start_mode_([0-9a-f-]+)$/;
 export function autoDriveProjectIds(prefMap: Map<string, string>): Set<string> {
   const ids = new Set<string>();
   for (const [key, value] of prefMap) {
@@ -36,9 +37,43 @@ export function autoDriveProjectIds(prefMap: Map<string, string>): Set<string> {
   }
   return ids;
 }
-/** The monitor cycle should run/reschedule when the global toggle is on OR any project is auto-driven. */
+
+/**
+ * Project ids whose *resolved* Start Mode is `monitor` — i.e. the in-process deterministic
+ * monitor is their driver. This routes through `resolveStartPolicy` (the single source of truth,
+ * decision 008) instead of reading `board_autodrive_*` raw, so it honours both an explicit
+ * `start_mode_<id>` AND the legacy-flag derivation, fixing two scheduling bugs:
+ *   (a) `start_mode=monitor` with autodrive unset & `auto_monitor` off (force-disabled every boot)
+ *       — previously never scheduled because the gate was purely `auto_monitor || board_autodrive`.
+ *   (b) `start_mode=manual` with a stale `board_autodrive=true` — no longer counts as driven, so
+ *       `manual` is a real kill-switch (the old regex would still schedule/act on it).
+ * `conductor` is intentionally NOT included: the external loop drives it and the in-process engine
+ * stands down. Candidate ids are gathered from both key families so any project that ever set a
+ * mode or a legacy flag is considered.
+ */
+export function monitorDrivenProjectIds(prefMap: Map<string, string>): Set<string> {
+  const candidates = new Set<string>();
+  for (const key of prefMap.keys()) {
+    const sm = START_MODE_KEY_RE.exec(key);
+    if (sm) candidates.add(sm[1]);
+    const ad = AUTODRIVE_KEY_RE.exec(key);
+    if (ad) candidates.add(ad[1]);
+  }
+  const ids = new Set<string>();
+  for (const projectId of candidates) {
+    if (resolveStartPolicy(prefMap, projectId).mode === "monitor") ids.add(projectId);
+  }
+  return ids;
+}
+
+/**
+ * The monitor cycle should run/reschedule when the global toggle is on OR any project resolves to
+ * `monitor` Start Mode. Start Mode (via `resolveStartPolicy`) — NOT the raw `board_autodrive` flag —
+ * is now the authoritative scheduling input, so a `monitor` project schedules even with autodrive
+ * unset, and a `manual` project with a stale autodrive flag does not.
+ */
 export function monitorShouldRun(prefMap: Map<string, string>): boolean {
-  return getBool(prefMap, "auto_monitor") || autoDriveProjectIds(prefMap).size > 0;
+  return getBool(prefMap, "auto_monitor") || monitorDrivenProjectIds(prefMap).size > 0;
 }
 
 export interface MonitorState {
@@ -192,10 +227,14 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
       if (!force && !monitorShouldRun(prefMap)) return;
       // Scope this cycle's actions: when the global toggle is on, act on every project
-      // (legacy behaviour); otherwise act only on projects in per-project hands-off mode.
+      // (legacy behaviour); otherwise act only on projects whose resolved Start Mode is
+      // `monitor`. Routing through `resolveStartPolicy` (not the raw `board_autodrive` flag)
+      // makes `manual` a TRUE kill-switch — relaunch/nudge/auto-merge no longer leak past it
+      // for a project with a stale `board_autodrive=true` — and stands the in-process engine
+      // down for `conductor` projects (the external loop drives those). §3.4 of the
+      // 2026-07-07 adversarial architecture review.
       const globalOn = getBool(prefMap, "auto_monitor");
-      const driveIds = autoDriveProjectIds(prefMap);
-      const allowProject = (projectId: string) => globalOn || driveIds.has(projectId);
+      const allowProject = (projectId: string) => globalOn || resolveStartPolicy(prefMap, projectId).mode === "monitor";
       // Auto-start, backlog refill, and backlog-pull eligibility all consult the project's
       // resolved Start Mode (the single source of truth) — NOT the raw flags above. The mode
       // supersedes the global toggle per-project; `manual` is a true stop. (`allowProject`
