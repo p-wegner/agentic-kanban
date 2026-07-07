@@ -445,7 +445,12 @@ function runProviderTurn(session: ButlerSession, content: string, isRetry = fals
     const lines = buffer.split(/\r?\n/);
     buffer = lines.pop() ?? "";
     for (const line of lines) {
-      const evt = provider.parseStreamEvent(line);
+      // Observed parser (#898): a valid-JSON line of an UNKNOWN event type is
+      // recorded as an unknown-event metric instead of silently swallowed. This
+      // is the same drift/telemetry guard the main agent launch uses via
+      // session-manager broadcast; the butler Codex path must not re-open the
+      // silent-swallow hole (arch-review §2.4, ticket #14).
+      const evt = provider.parseStreamEventObserved(line);
       if (!evt) continue;
       if (evt.providerSessionId) {
         session.sessionId = evt.providerSessionId;
@@ -492,7 +497,10 @@ function runProviderTurn(session: ButlerSession, content: string, isRetry = fals
       return;
     }
     if (buffer.trim()) {
-      const evt = provider.parseStreamEvent(buffer.trim());
+      // Drain-on-exit: parse the trailing partial line through the observed
+      // parser too, so a final unknown-event line is recorded rather than
+      // silently dropped (#898 / arch-review §2.4).
+      const evt = provider.parseStreamEventObserved(buffer.trim());
       if (evt?.assistantText) {
         assistantText += evt.assistantText;
         broadcast(session, { type: "text", text: evt.assistantText });
