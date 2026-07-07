@@ -216,6 +216,9 @@ importers:
 
   packages/shared:
     dependencies:
+      '@libsql/client':
+        specifier: 0.14.0
+        version: 0.14.0
       drizzle-orm:
         specifier: 0.45.2
         version: 0.45.2(@libsql/client@0.14.0)

@@ -51,6 +51,7 @@
     "./lib/failure-keywords": { "development": "./src/lib/failure-keywords.ts", "types": "./dist/lib/failure-keywords.d.ts", "import": "./dist/lib/failure-keywords.js", "default": "./src/lib/failure-keywords.ts" },
     "./lib/sanitize-utf8": { "development": "./src/lib/sanitize-utf8.ts", "types": "./dist/lib/sanitize-utf8.d.ts", "import": "./dist/lib/sanitize-utf8.js", "default": "./src/lib/sanitize-utf8.ts" },
     "./lib/db-path": { "development": "./src/lib/db-path.ts", "types": "./dist/lib/db-path.d.ts", "import": "./dist/lib/db-path.js", "default": "./src/lib/db-path.ts" },
+    "./lib/db-client": { "development": "./src/lib/db-client.ts", "types": "./dist/lib/db-client.d.ts", "import": "./dist/lib/db-client.js", "default": "./src/lib/db-client.ts" },
     "./lib/workspace-status": { "development": "./src/lib/workspace-status.ts", "types": "./dist/lib/workspace-status.d.ts", "import": "./dist/lib/workspace-status.js", "default": "./src/lib/workspace-status.ts" }
   },
   "scripts": {
@@ -60,6 +61,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@libsql/client": "0.14.0",
     "drizzle-orm": "0.45.2",
     "zod": "3.25.76"
   },
