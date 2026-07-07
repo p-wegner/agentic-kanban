@@ -11,24 +11,12 @@ import { createBoardEvents } from "./services/board-events.js";
 import { createSessionManager } from "./services/session.manager.js";
 import { createWorkflowEngine } from "./startup/exit-workflow.js";
 import { createAutoMerge } from "./startup/merge-workflow.js";
-import { startAutoMergeOrchestrator, stopAutoMergeOrchestrator } from "./startup/auto-merge-orchestrator.js";
-import { startStrandedReviewReconciler, stopStrandedReviewReconciler } from "./startup/stranded-review-reconciler.js";
-import { startStrandedPlanReconciler, stopStrandedPlanReconciler } from "./startup/plan-mode-reconciler.js";
-import { startZombieFixSessionReconciler, stopZombieFixSessionReconciler } from "./startup/zombie-fix-session-reconciler.js";
-import { startAncestorBranchReconciler, stopAncestorBranchReconciler } from "./startup/ancestor-branch-reconciler.js";
-import { startDoneUnmergedScanner, stopDoneUnmergedScanner } from "./startup/done-unmerged-invariant-scanner.js";
-import { startTerminalWorkspaceReaper, stopTerminalWorkspaceReaper } from "./startup/terminal-workspace-reaper.js";
 import { createMonitorSetup } from "./startup/monitor-setup.js";
 import { setupProcessHandlers } from "./startup/process-handlers.js";
 import { setupRoutes } from "./startup/route-setup.js";
-import { setupScheduledTasks, stopScheduledTasks } from "./startup/scheduled-tasks.js";
-import { startMonitorButler, stopMonitorButler } from "./services/monitor-butler.js";
-import { startProjectConductorSupervisor } from "./services/project-conductor.service.js";
+import { BACKGROUND_SERVICES } from "./startup/background-services.js";
 import { runStartupTasks } from "./startup/startup-tasks.js";
 import { runSessionRestore } from "./startup/session-restore.js";
-import { startBackupScheduler, stopBackupScheduler } from "./startup/backup-scheduler.js";
-import { startSessionMessagePruner, stopSessionMessagePruner } from "./services/session-message-pruner.service.js";
-import { getPreference } from "./repositories/preferences.repository.js";
 import { cleanupExpiredRuntimeState } from "./repositories/runtime-state.repository.js";
 import { invalidateAgentQuestionsCache } from "./services/agent-questions.service.js";
 import { domainErrorHandler } from "./middleware/error-handler.js";
@@ -166,66 +154,27 @@ export async function startServer(port?: number, hostname?: string) {
   (server as { keepAliveTimeout?: number }).keepAliveTimeout = 1000;
   injectWebSocket(server);
 
-  setupScheduledTasks(serverPort);
-  cleanupCallbacks.push(stopScheduledTasks);
-  startAutoMergeOrchestrator({
-    database: db,
+  // Start every background service (periodic reconcilers, schedulers, supervisors)
+  // from the plugin registry. Each entry's start() returns an optional cleanup that
+  // is collected into cleanupCallbacks in registry order, so shutdown (which reverses
+  // the list) tears them down last-started-first — identical to the previous inline
+  // start-call + cleanup-push list. The append target is background-services.ts, not
+  // this composition root (arch-review §1.5). Start errors propagate as before (only
+  // the backup scheduler swallows its own preference-read failure, internally).
+  const backgroundServiceContext = {
+    db,
     boardEvents,
     getSessionManager: () => sessionManager,
-  });
-  cleanupCallbacks.push(stopAutoMergeOrchestrator);
-  // Crash-safe recovery for work stranded in "In Review" because the auto-review
-  // handshake never fired (#529): re-launches the review so the chain can complete.
-  startStrandedReviewReconciler({
-    getSessionManager: () => sessionManager,
-    boardEvents,
+    serverPort,
     reviewSessionIds: workflow.reviewSessionIds,
-  });
-  cleanupCallbacks.push(stopStrandedReviewReconciler);
-  // Crash-safe recovery for plan-mode workspaces stranded with planMode stuck true (#924):
-  // recovers the captured plan (or clears planMode + marks blocked) so the workspace never
-  // silently parks idle re-running read-only on every follow-up turn.
-  startStrandedPlanReconciler({
-    getSessionManager: () => sessionManager,
-    boardEvents,
-  });
-  cleanupCallbacks.push(stopStrandedPlanReconciler);
-  // Crash-safe recovery for zombie fix-and-merge/review sessions: sessions that are
-  // marked 'running' but have zero output messages and no live process (#596).
-  startZombieFixSessionReconciler({ boardEvents });
-  cleanupCallbacks.push(stopZombieFixSessionReconciler);
-  startAncestorBranchReconciler();
-  cleanupCallbacks.push(stopAncestorBranchReconciler);
-  // Safe forward-only auto-recovery: merges clean ahead-only Done-but-unmerged branches
-  // directly into base (forward-merging can't lose work). Conflicted / too-far-behind /
-  // 0-ahead candidates remain log-only. Never reopens an issue.
-  startDoneUnmergedScanner();
-  cleanupCallbacks.push(stopDoneUnmergedScanner);
-  // Keeps terminal issue workspace rows from inflating WIP/merge-queue counts after
-  // git proves the branch has no unmerged ahead work.
-  startTerminalWorkspaceReaper();
-  cleanupCallbacks.push(stopTerminalWorkspaceReaper);
-  // Autonomous Monitor Butler — cron-driven board-health agent (gated by the
-  // monitor_butler_enabled preference; off by default). See services/monitor-butler.ts.
-  startMonitorButler();
-  cleanupCallbacks.push(stopMonitorButler);
-  const projectConductorSupervisor = startProjectConductorSupervisor({ database: db, boardRepoRoot: serverStartRepoRoot });
-  cleanupCallbacks.push(() => projectConductorSupervisor.stop());
-  setupProcessHandlers(server, agentService, { cleanupStartupTimers });
-
-  // Periodic database backups (interval from the backup_interval_min preference).
-  try {
-    const raw = await getPreference("backup_interval_min");
-    const intervalMin = raw == null || raw === "" ? 30 : Number(raw);
-    startBackupScheduler(Number.isFinite(intervalMin) ? intervalMin : 30);
-    cleanupCallbacks.push(stopBackupScheduler);
-  } catch (err) {
-    console.warn("[backup] failed to start scheduler (non-fatal):", err instanceof Error ? err.message : err);
+    boardRepoRoot: serverStartRepoRoot,
+  };
+  for (const service of BACKGROUND_SERVICES) {
+    const cleanup = await service.start(backgroundServiceContext);
+    if (cleanup) cleanupCallbacks.push(cleanup);
   }
 
-  // Periodic session_messages pruning — keeps DB size bounded as workspace history grows.
-  startSessionMessagePruner(db);
-  cleanupCallbacks.push(stopSessionMessagePruner);
+  setupProcessHandlers(server, agentService, { cleanupStartupTimers });
 
   // Sweep expired runtime_state rows (TTL'd agent-question markers etc., #975) so the
   // dedicated runtime-state table cannot grow without bound. Best-effort, one-shot.

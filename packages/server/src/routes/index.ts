@@ -1,4 +1,7 @@
 import { createProjectsRoute } from "./projects.js";
+import { createProjectAnalyticsRoute } from "./project-analytics.js";
+import { createProjectHealthRoute } from "./project-health.js";
+import { createProjectStackProfileRoute } from "./project-stack-profile.js";
 import { createProjectScriptsRoute } from "./project-scripts.js";
 import { createDriveRoute } from "./drive.js";
 import { createIssuesRoute } from "./issues.js";
@@ -62,6 +65,11 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   };
 
   routes.route("/projects", createProjectsRoute(database, { ...options, getSessionManager }));
+  // Non-CRUD project feature groups, extracted from the projects.ts grab-bag
+  // (arch-review §1.5). Mounted at the SAME `/projects` prefix so paths are unchanged.
+  routes.route("/projects", createProjectAnalyticsRoute(database, { ...options, getSessionManager }));
+  routes.route("/projects", createProjectHealthRoute(database));
+  routes.route("/projects", createProjectStackProfileRoute(database));
   routes.route("/projects", createProjectScriptsRoute(database));
   routes.route("/projects", createDriveRoute(database));
   routes.route("/projects", createButlerRoute(database, getSessionManager, options));
