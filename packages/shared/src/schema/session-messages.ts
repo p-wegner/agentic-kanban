@@ -10,6 +10,11 @@ export const sessionMessages = sqliteTable("session_messages", {
   type: text("type").notNull(), // stdout | stderr | exit | bisect
   data: text("data"),
   exitCode: text("exit_code"),
+  // Agent provider (claude | codex | copilot | pi) that produced this row, so
+  // offline transcript/summary parsing routes lines to the correct per-provider
+  // parser instead of sniffing per-event (arch-review §2.4). Nullable + forward-only:
+  // legacy rows stay NULL and fall back to per-event provider detection (0099).
+  provider: text("provider"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 }, (table) => ({
   sessionIdCreatedAtIdx: index("idx_session_messages_session_id_created_at").on(table.sessionId, table.createdAt),

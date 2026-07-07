@@ -5,7 +5,7 @@ import {
   updateProviderSessionId,
 } from "../../repositories/broadcast.repository.js";
 import * as agentService from "../agent.service.js";
-import { getProvider } from "../agent-provider.js";
+import { getProvider, narrowProviderName } from "../agent-provider.js";
 import type { ParsedStreamEvent } from "../agent-provider.js";
 import { parseSessionSummary, computeFrictionStats } from "@agentic-kanban/shared";
 import type { AgentOutputMessage, SessionFrictionStats } from "@agentic-kanban/shared";
@@ -88,7 +88,14 @@ function flushDbBuffer(state: SessionState, sessionId: string) {
   const rows = state.dbWriteBuffer.get(sessionId);
   if (!rows || rows.length === 0) return;
   state.dbWriteBuffer.delete(sessionId);
-  insertSessionMessages(sessionId, rows).catch((err: unknown) => {
+  // Record the session's provider on each row (arch-review §2.4) so offline
+  // summary parsing routes to the right per-provider parser instead of sniffing.
+  // narrowProviderName maps the legacy "claude-code" id → "claude"; unknown/
+  // absent falls back to "claude" (the default provider).
+  const provider = state.sessionProviders.has(sessionId)
+    ? narrowProviderName(state.sessionProviders.get(sessionId))
+    : null;
+  insertSessionMessages(sessionId, rows, provider).catch((err: unknown) => {
     // FK constraint failure means the session was already deleted (race with workspace cleanup) — ignore
     const msg = err instanceof Error ? err.message : String(err);
     if (!msg.includes("SQLITE_CONSTRAINT_FOREIGNKEY") && !msg.includes("FOREIGN KEY")) {

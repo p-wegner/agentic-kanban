@@ -1,6 +1,6 @@
 /**
- * Butler transcript service — parses Claude Agent SDK JSONL transcripts from disk
- * to surface past butler conversations in the UI.
+ * Butler transcript service — surfaces past butler conversations in the UI by
+ * reading the Claude Agent SDK JSONL transcripts on disk.
  *
  * The Claude Agent SDK writes per-session JSONL files to:
  *   ~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl
@@ -8,17 +8,18 @@
  * Encoding scheme: replace all `:`, `\`, and `/` characters in the cwd with `-`.
  * E.g. `C:\code\my-app` → `C--code-my-app`
  *
- * Each line is a JSON object. Relevant entries:
- *   - `{ type: "user", entrypoint: "sdk-cli"|"cli", message: { role: "user", content: string }, timestamp: ISO, sessionId }`
- *   - `{ type: "assistant", entrypoint: "sdk-cli"|"cli", message: { model, content: Array<{type,text}> }, timestamp: ISO, sessionId }`
- *   - `{ type: "ai-title", aiTitle: string, sessionId }`
- *
- * Note: older SDK versions wrote entrypoint: "sdk-cli"; newer versions write "cli".
- * Both are accepted.
+ * Parsing is delegated to the SHARED offline transcript reader
+ * (`@agentic-kanban/shared/lib/offline-transcript`), which routes each line
+ * through the canonical per-provider stream parser — the single source of
+ * transcript-format knowledge (arch-review §2.4). The butler is always a Claude
+ * SDK session, so we pass `provider: "claude"` and `requireSdkEntrypoint: true`
+ * (older SDK versions wrote `entrypoint: "sdk-cli"`, newer ones `"cli"`; both
+ * accepted by the reader).
  */
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { readOfflineTranscript } from "@agentic-kanban/shared/lib/offline-transcript";
 
 export interface ButlerSessionSummary {
   sessionId: string;
@@ -41,118 +42,42 @@ function encodeCwd(cwd: string): string {
   return cwd.replace(/[:\\/]/g, "-");
 }
 
-/** The Claude Agent SDK has used both "sdk-cli" and "cli" as the entrypoint value
- *  across versions. Accept either so session transcripts are readable regardless of
- *  which SDK version wrote them. */
-function isSdkEntry(entry: JsonlEntry): boolean {
-  return entry.entrypoint === "sdk-cli" || entry.entrypoint === "cli";
-}
-
 /** Resolve the Claude projects transcript directory for the given repo path. */
 export function resolveTranscriptDir(repoPath: string): string {
   const encoded = encodeCwd(repoPath);
   return join(homedir(), ".claude", "projects", encoded);
 }
 
-interface JsonlEntry {
-  type?: string;
-  entrypoint?: string;
-  sessionId?: string;
-  timestamp?: string;
-  message?: {
-    role?: string;
-    content?: string | Array<{ type?: string; text?: string; thinking?: string }>;
-    model?: string;
-  };
-  aiTitle?: string;
-}
-
-function parseJsonlEntry(line: string): JsonlEntry | null {
-  try {
-    return JSON.parse(line) as JsonlEntry;
-  } catch {
-    return null;
-  }
-}
-
-function extractTextFromContent(content: string | Array<{ type?: string; text?: string }> | undefined): string {
-  if (!content) return "";
-  if (typeof content === "string") return content;
-  for (const block of content) {
-    if (block.type === "text" && block.text) return block.text;
-  }
-  return "";
-}
+const EPOCH0 = new Date(0).toISOString();
 
 /**
- * Parse a JSONL transcript file and return a session summary.
- * Returns null if the file has no sdk-cli entries.
+ * Parse a JSONL transcript file into a session summary via the shared reader.
+ * Returns null if the file has no SDK-CLI entries (not a butler transcript).
  */
 async function parseSessionFile(filePath: string, sessionId: string): Promise<ButlerSessionSummary | null> {
-  let content: string;
-  try {
-    content = await readFile(filePath, "utf-8");
-  } catch {
-    return null;
-  }
+  const transcript = await readOfflineTranscript(filePath, {
+    provider: "claude",
+    requireSdkEntrypoint: true,
+  });
+  if (!transcript.hasSdkEntrypoint) return null;
 
-  const lines = content.split("\n");
-  let hasSdkCli = false;
-  let startedAt = "";
-  let endedAt = "";
-  let title = "";
-  let turnCount = 0;
-  let model: string | undefined;
-  let firstUserText = "";
-
-  for (const line of lines) {
-    if (!line.trim()) continue;
-    const entry = parseJsonlEntry(line);
-    if (!entry) continue;
-
-    if (entry.type === "ai-title" && entry.aiTitle) {
-      title = entry.aiTitle;
+  // ai-title if available, else first user message truncated to 60 chars.
+  let title = transcript.aiTitle ?? "";
+  if (!title) {
+    const firstUser = transcript.messages.find((m) => m.role === "user");
+    if (firstUser) {
+      title = firstUser.text.length > 60 ? `${firstUser.text.slice(0, 57)}…` : firstUser.text;
     }
-
-    if (!isSdkEntry(entry)) continue;
-    hasSdkCli = true;
-
-    if (entry.type === "user" && entry.message?.role === "user") {
-      turnCount++;
-      if (entry.timestamp) {
-        if (!startedAt) startedAt = entry.timestamp;
-        endedAt = entry.timestamp;
-      }
-      if (!firstUserText && entry.message.content) {
-        firstUserText = typeof entry.message.content === "string"
-          ? entry.message.content
-          : extractTextFromContent(entry.message.content);
-      }
-    }
-
-    if (entry.type === "assistant" && entry.message?.model && !model) {
-      model = entry.message.model;
-    }
-    if (entry.type === "assistant" && entry.timestamp) {
-      endedAt = entry.timestamp;
-    }
-  }
-
-  if (!hasSdkCli) return null;
-
-  // Use ai-title if available, else first user message truncated to 60 chars
-  if (!title && firstUserText) {
-    title = firstUserText.length > 60 ? `${firstUserText.slice(0, 57)}…` : firstUserText;
   }
   if (!title) title = sessionId.slice(0, 8);
 
   return {
     sessionId,
-    startedAt: startedAt || new Date(0).toISOString(),
-    endedAt: endedAt || startedAt || new Date(0).toISOString(),
+    startedAt: transcript.firstTimestamp ?? EPOCH0,
+    endedAt: transcript.lastTimestamp ?? transcript.firstTimestamp ?? EPOCH0,
     title,
-    turnCount,
-    model,
+    turnCount: transcript.userTurnCount,
+    model: transcript.model ?? undefined,
   };
 }
 
@@ -204,8 +129,8 @@ export async function listButlerSessions(
 }
 
 /**
- * Parse a single session's JSONL into user/assistant message pairs.
- * Skips tool-use, tool-result, and thinking blocks.
+ * Parse a single session's JSONL into user/assistant message pairs via the
+ * shared reader. Tool-use, tool-result, and thinking blocks are excluded.
  */
 export async function getButlerSessionMessages(
   repoPath: string,
@@ -213,42 +138,9 @@ export async function getButlerSessionMessages(
 ): Promise<ButlerSessionMessage[]> {
   const dir = resolveTranscriptDir(repoPath);
   const filePath = join(dir, `${sessionId}.jsonl`);
-
-  let content: string;
-  try {
-    content = await readFile(filePath, "utf-8");
-  } catch {
-    return [];
-  }
-
-  const messages: ButlerSessionMessage[] = [];
-  for (const line of content.split("\n")) {
-    if (!line.trim()) continue;
-    const entry = parseJsonlEntry(line);
-    if (!entry || !isSdkEntry(entry)) continue;
-
-    if (entry.type === "user" && entry.message?.role === "user") {
-      const text = typeof entry.message.content === "string"
-        ? entry.message.content
-        : extractTextFromContent(entry.message.content);
-      if (text.trim()) {
-        messages.push({
-          role: "user",
-          text,
-          ts: entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now(),
-        });
-      }
-    } else if (entry.type === "assistant") {
-      const text = extractTextFromContent(entry.message?.content);
-      if (text.trim()) {
-        messages.push({
-          role: "assistant",
-          text,
-          ts: entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now(),
-        });
-      }
-    }
-  }
-
-  return messages;
+  const transcript = await readOfflineTranscript(filePath, {
+    provider: "claude",
+    requireSdkEntrypoint: true,
+  });
+  return transcript.messages;
 }
