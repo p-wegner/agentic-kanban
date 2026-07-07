@@ -1,14 +1,13 @@
 import { readdirSync, statSync } from "node:fs";
-import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
-import { getPreference, setPreference, getAllPreferences, setPreferences } from "../repositories/preferences.repository.js";
-import { getProjectById } from "../repositories/project.repository.js";
+import { getPreference, setPreference, getAllPreferences } from "../repositories/preferences.repository.js";
 import { allHarnessSettingKeys } from "./harness-settings.js";
 import { SETTINGS_REGISTRY_KEYS } from "@agentic-kanban/shared/lib/settings-registry";
-import { commitObjectiveFile, isBoardStrategyKey, PROJECT_CONDUCTOR_OBJECTIVE_RELATIVE_PATH, projectIdFromBoardStrategyKey, writeStrategyObjective } from "./strategy-objective.service.js";
+import { isBoardStrategyKey } from "./strategy-objective.service.js";
+import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-preference-write";
 import {
   PREF_CLAUDE_SUBSCRIPTION_RING,
   PREF_CODEX_LICENSE_RING,
@@ -19,6 +18,14 @@ import { parseClaudeSubscriptionRing, ringProfileNames as claudeRingProfileNames
 import { isProjectScopedDynamicKey } from "../lib/dynamic-preference-keys.js";
 import { resolveProviderDivergence } from "./project-runtime-config.service.js";
 import type { ProviderName } from "./agent-provider.js";
+
+// The provider-divergence key set and the rejection shape are now owned by the
+// shared guard (arch-review §3.3). Re-exported so existing importers (the CLI's
+// `preferences set`, #973) keep their `preference.service` import path unchanged.
+import { PROVIDER_DIVERGENCE_KEYS } from "@agentic-kanban/shared/lib/strategy-policy";
+import type { ProviderDivergenceRejection } from "@agentic-kanban/shared/lib/strategy-policy";
+export { PROVIDER_DIVERGENCE_KEYS };
+export type { ProviderDivergenceRejection };
 
 /**
  * The write/read whitelist for global settings — DERIVED from the single source of
@@ -43,46 +50,6 @@ export const SETTINGS_KEYS: string[] = [
  */
 function isAllowedDynamicKey(key: string): boolean {
   return isProjectScopedDynamicKey(key) || isBoardStrategyKey(key);
-}
-
-/**
- * Returned (non-null) by `updateSettings` when the write-time divergence guard (#903)
- * rejects a provider/profile write that would drift from the active project's Bullseye.
- * No preferences are persisted when this is present.
- */
-export interface ProviderDivergenceRejection {
-  projectId: string;
-  bullseyeProvider: string | null;
-  bullseyeProfile: string | null;
-  settingsProvider: string | null;
-  settingsProfile: string | null;
-}
-
-/**
- * Provider/profile keys that participate in Bullseye divergence. A write that does
- * not touch any of these can never CREATE divergence, so the guard skips it (an
- * unrelated toggle save must never be blocked by a pre-existing, untouched drift).
- * Exported so other write paths (the CLI's `preferences set`, #973) can route
- * exactly these keys through the guarded `updateSettings` instead of the raw
- * repository `setPreference`.
- */
-export const PROVIDER_DIVERGENCE_KEYS: ReadonlySet<string> = new Set([
-  "provider",
-  "claude_profile",
-  "codex_profile",
-  "copilot_profile",
-  "pi_profile",
-]);
-
-function isConductorEnabledPreference(value: string | null | undefined): boolean {
-  if (!value) return false;
-  if (value === "true") return true;
-  try {
-    const parsed = JSON.parse(value) as { enabled?: unknown };
-    return parsed?.enabled === true;
-  } catch {
-    return false;
-  }
 }
 
 export function createPreferenceService({ database }: { database: Database }) {
@@ -137,61 +104,13 @@ export function createPreferenceService({ database }: { database: Database }) {
     }
     const entries = applied.map((key) => ({ key, value: body[key] ?? "" }));
 
-    const divergence = await checkProviderDivergenceGuard(entries);
+    // Persist + guard + objective.md regen all run through the ONE shared checked
+    // write path (arch-review §3.3) — the same path the CLI and the MCP
+    // `set_preference` tool use, so the guard and regen can never be skipped by one door.
+    const { divergence } = await setPreferenceChecked(database, entries);
     if (divergence) return { applied: [], dropped, divergence };
 
-    await setPreferences(entries, database);
-    await updateStrategyObjectives(entries);
     return { applied, dropped, divergence: null };
-  }
-
-  async function checkProviderDivergenceGuard(
-    entries: Array<{ key: string; value: string }>,
-  ): Promise<ProviderDivergenceRejection | null> {
-    if (!entries.some((e) => PROVIDER_DIVERGENCE_KEYS.has(e.key))) return null;
-
-    const projectId = await getActiveProjectId();
-    if (!projectId) return null;
-
-    // Project the write onto the current prefs and ask whether the RESULT diverges.
-    const rows = await getAllPreferences(database);
-    const projected = new Map(rows.map((r) => [r.key, r.value]));
-    for (const e of entries) projected.set(e.key, e.value);
-
-    const result = resolveProviderDivergence(projected, projectId);
-    if (!result.hasBullseye || !result.diverged) return null;
-
-    return {
-      projectId,
-      bullseyeProvider: result.bullseyeProvider,
-      bullseyeProfile: result.bullseyeProfile,
-      settingsProvider: result.settingsProvider,
-      settingsProfile: result.settingsProfile,
-    };
-  }
-
-  async function updateStrategyObjectives(entries: Array<{ key: string; value: string }>) {
-    const strategyEntries = entries.filter((entry) => isBoardStrategyKey(entry.key));
-    if (strategyEntries.length === 0) return;
-    // Default ON: a Bullseye save regenerates the git-tracked objective.md, and an
-    // uncommitted main checkout blocks the auto-merge queue. Opt out via the setting.
-    const autoCommit = parseBoolSetting("auto_commit_strategy_objective", await getPreference("auto_commit_strategy_objective", database));
-    for (const entry of strategyEntries) {
-      const projectId = projectIdFromBoardStrategyKey(entry.key);
-      if (!projectId) continue;
-      const project = await getProjectById(projectId, database);
-      const repoPath = project?.repoPath;
-      if (!repoPath) continue;
-      const conductorEnabled = isConductorEnabledPreference(await getPreference(`board_conductor_${projectId}`, database));
-      const changed = conductorEnabled
-        ? writeStrategyObjective(repoPath, entry.value, {
-            objectiveRelativePath: PROJECT_CONDUCTOR_OBJECTIVE_RELATIVE_PATH,
-            createIfMissing: true,
-            project,
-          })
-        : writeStrategyObjective(repoPath, entry.value);
-      if (changed && autoCommit && !conductorEnabled) commitObjectiveFile(repoPath);
-    }
   }
 
   async function listClaudeProfiles(): Promise<string[]> {

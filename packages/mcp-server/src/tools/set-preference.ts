@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { SETTINGS_REGISTRY_KEYS } from "@agentic-kanban/shared/lib/settings-registry";
+import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-preference-write";
 import {
   isProjectScopedDynamicKey,
   isBoardStrategyPreferenceKey,
@@ -51,7 +52,7 @@ const SET_PREFERENCE_DESCRIPTION =
   "Set (upsert) a preference value by key. Mirrors CLI `preferences set <key> <value>`. Validates like the settings route: unknown keys are rejected (allowed: static settings-registry keys, harness.<harness>.plan_auto_continue, per-project dynamic keys like start_mode_<projectId>, and board_strategy_<projectId>), and start_mode_* values must be exactly manual|monitor|conductor. Use get_preference to read it back.";
 
 export function registerSetPreference(server: McpServer, deps: ToolDeps = prodDeps) {
-  const { db, schema } = deps;
+  const { db } = deps;
   server.tool(
     "set_preference",
     SET_PREFERENCE_DESCRIPTION,
@@ -91,10 +92,32 @@ export function registerSetPreference(server: McpServer, deps: ToolDeps = prodDe
       }
 
       const now = new Date().toISOString();
-      await db
-        .insert(schema.preferences)
-        .values({ key, value, updatedAt: now })
-        .onConflictDoUpdate({ target: schema.preferences.key, set: { value, updatedAt: now } });
+      // Route through the ONE shared checked-write path (arch-review §3.3): this
+      // runs the provider-divergence guard and regenerates objective.md for
+      // board_strategy writes — obligations this tool used to skip with a raw
+      // upsert, recreating the #903 drift and desyncing the Conductor from the monitor.
+      const { divergence } = await setPreferenceChecked(db, [{ key, value }], { now });
+      if (divergence) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({
+                ok: false,
+                key,
+                value,
+                divergence,
+                error:
+                  `Refusing to set "${key}"="${value}": it would put the global provider/profile prefs OUT OF SYNC ` +
+                  `with the active project's Strategy Bullseye ` +
+                  `(Bullseye ${divergence.bullseyeProvider ?? "?"}:${divergence.bullseyeProfile ?? ""}). Nothing was written. ` +
+                  `Change the default via the Strategy Bullseye (board_strategy_<projectId>) instead, or write a value that agrees with it.`,
+              }),
+            },
+          ],
+        };
+      }
 
       return {
         content: [

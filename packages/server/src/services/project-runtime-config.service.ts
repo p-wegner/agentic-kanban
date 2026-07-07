@@ -9,11 +9,9 @@ import { narrowProviderName } from "./agent-provider.js";
 import type { ResolvedProviderConfig } from "./provider-config-resolution.js";
 import { resolveProviderConfig } from "./provider-config-resolution.js";
 import {
-  parseStrategyBullseyeConfig,
-  selectProviderFromStrategy,
   resolveStrategyProviderSelection,
 } from "./strategy-objective.service.js";
-import { providerProfilePrefKey, readSettingsProviderSelection } from "@agentic-kanban/shared/lib/strategy-policy";
+import { providerProfilePrefKey, readSettingsProviderSelection, resolveProviderDivergence as resolveProviderDivergenceShared } from "@agentic-kanban/shared/lib/strategy-policy";
 import { resolveStartPolicy, startModePrefKey, type StartPolicy } from "./start-policy.service.js";
 import { HARNESS_IDS, harnessSettingKey } from "./harness-settings.js";
 
@@ -169,6 +167,12 @@ export function buildDriveRuntimePreferencePatch(
   return entries;
 }
 
+/**
+ * Detect drift between the global provider/profile settings prefs and the project's
+ * Strategy Bullseye. Thin re-export of the pure shared implementation
+ * (`@agentic-kanban/shared/lib/strategy-policy`), which is now the SINGLE guard owner
+ * shared by the settings/CLI/MCP write paths (arch-review §3.3).
+ */
 export function resolveProviderDivergence(prefMap: Map<string, string>, projectId: string): {
   hasBullseye: boolean;
   bullseyeProvider: string | null;
@@ -177,34 +181,5 @@ export function resolveProviderDivergence(prefMap: Map<string, string>, projectI
   settingsProfile: string | null;
   diverged: boolean;
 } {
-  const strategyRaw = prefMap.get(`board_strategy_${projectId}`);
-  if (!strategyRaw) {
-    return { hasBullseye: false, bullseyeProvider: null, bullseyeProfile: null, settingsProvider: null, settingsProfile: null, diverged: false };
-  }
-
-  let bullseyeProvider: string | null = null;
-  let bullseyeProfile: string | null = null;
-  try {
-    const selected = selectProviderFromStrategy(parseStrategyBullseyeConfig(strategyRaw));
-    if (selected) {
-      bullseyeProvider = selected.provider;
-      bullseyeProfile = selected.profileName || null;
-    }
-  } catch {
-    return { hasBullseye: true, bullseyeProvider: null, bullseyeProfile: null, settingsProvider: null, settingsProfile: null, diverged: false };
-  }
-
-  const settingsSelection = readSettingsSelection(prefMap);
-  const settingsProvider = settingsSelection.provider;
-  const settingsProfile = settingsSelection.profileName;
-  const providerDiverged = bullseyeProvider !== null && bullseyeProvider !== settingsProvider;
-  const profileDiverged = bullseyeProfile !== null && bullseyeProfile !== "" && bullseyeProfile !== settingsProfile;
-  return {
-    hasBullseye: true,
-    bullseyeProvider,
-    bullseyeProfile,
-    settingsProvider,
-    settingsProfile,
-    diverged: providerDiverged || profileDiverged,
-  };
+  return resolveProviderDivergenceShared(prefMap, projectId);
 }
