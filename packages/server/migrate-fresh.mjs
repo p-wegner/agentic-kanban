@@ -1,11 +1,15 @@
-import { createClient } from '@libsql/client';
 import { applyMigrations } from './src/db/manual-migrate.ts';
+// Use the shared pragma factory so this entry point runs migrations with the SAME
+// connection semantics as the live server (foreign_keys=ON). Previously this used a
+// bare createClient — FK OFF — which silently diverged from the runner: FK-toggling
+// migrations (0010/0039/0096) behaved differently here than in production. (arch-review §3.1)
+import { createClientWithPragmas } from './src/db/pragmas.ts';
 import { pathToFileURL } from 'node:url';
 
 const dbUrl = pathToFileURL('./kanban.db').href;
 console.log('Creating database at:', dbUrl);
 
-const client = createClient({ url: dbUrl });
+const client = await createClientWithPragmas(dbUrl);
 
 try {
   console.log('Applying migrations...');
