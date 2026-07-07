@@ -23,7 +23,7 @@ import { parseClaudeEvent } from "./agent-stream/claude.js";
 import { parseCodexEvent } from "./agent-stream/codex.js";
 import { parseCopilotEvent } from "./agent-stream/copilot.js";
 import { parsePiEvent } from "./agent-stream/pi.js";
-import { detectAgentEventProvider } from "./agent-stream/detect-provider.js";
+import { detectAgentEventProviderOrUnknown } from "./agent-stream/detect-provider.js";
 import { classifyToolActivity } from "./agent-stream/tool-activity.js";
 
 export interface TaskSummaryItem {
@@ -252,6 +252,7 @@ function foldParsedEvent(
  */
 export function parseSessionSummary(
   rows: Array<{ type: string; data: string | null }>,
+  opts: { provider?: AgentStreamProvider } = {},
 ): SessionSummary {
   const acc: SummaryAccumulator = {
     toolUseCounts: new Map(),
@@ -289,7 +290,13 @@ export function parseSessionSummary(
       }
       if (typeof obj !== "object" || obj === null) continue;
 
-      const provider = detectAgentEventProvider(obj);
+      // Prefer a stored provider (arch-review §2.4: session_messages rows now
+      // record it) so we never sniff. When absent (legacy rows), detect per
+      // event; an unrecognized shape is reported as "unknown" + logged rather
+      // than silently claimed as copilot, but is still READ with the tolerant
+      // copilot parser for a best-effort fold.
+      const detected = opts.provider ?? detectAgentEventProviderOrUnknown(obj);
+      const provider: AgentStreamProvider = detected === "unknown" ? "copilot" : detected;
       let parsed: ParsedStreamEvent | undefined;
       switch (provider) {
         case "claude":

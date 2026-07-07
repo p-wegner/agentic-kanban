@@ -3,6 +3,7 @@ import { z } from "zod";
 import { homedir } from "node:os";
 import { readdirSync, statSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { parseOfflineTranscript } from "@agentic-kanban/shared/lib/offline-transcript";
 
 interface SessionResult {
   issueNum: number | null;
@@ -11,6 +12,8 @@ interface SessionResult {
   fileSizeBytes: number;
   lastModified: string;
   linesParsed: number;
+  /** Agent provider the transcript was parsed as (no longer assumed Claude). */
+  provider: string | null;
   turns: number;
   lastAssistantText: string | null;
   lastToolCall: string | null;
@@ -91,48 +94,11 @@ export function registerSessionHistory(server: McpServer) {
 
         for (const jf of jsonlFiles) {
           const raw = readFileSync(jf.path, "utf8");
-          const allLines = raw.split("\n").filter(Boolean);
-          const tailStart = Math.max(0, allLines.length - tailLines);
-          const linesToParse = allLines.slice(tailStart);
-
-          let turns = 0;
-          let lastAssistantText: string | null = null;
-          let lastToolCall: string | null = null;
-          let stopReason: string | null = null;
-          let sessionStarted = false;
-          let agentResponded = false;
-          let sessionId: string | null = null;
-
-          for (const line of linesToParse) {
-            let obj: Record<string, unknown>;
-            try {
-              obj = JSON.parse(line) as Record<string, unknown>;
-            } catch {
-              continue;
-            }
-
-            if (!sessionId && (obj.sessionId as string)) sessionId = obj.sessionId as string;
-
-            const type = obj.type as string;
-            if (type === "user") sessionStarted = true;
-
-            if (type === "assistant") {
-              agentResponded = true;
-              const msg = obj.message as { role: string; stop_reason?: string; content?: unknown[] };
-              if (msg.stop_reason) stopReason = msg.stop_reason;
-              const content = msg.content ?? [];
-              for (const block of content as { type: string; text?: string; name?: string; input?: unknown }[]) {
-                if (block.type === "text" && block.text) {
-                  lastAssistantText = block.text.replace(/\s+/g, " ").slice(0, 300);
-                  turns++;
-                }
-                if (block.type === "tool_use" && block.name) {
-                  const inputStr = block.input ? JSON.stringify(block.input).slice(0, 80) : "";
-                  lastToolCall = `${block.name}  ${inputStr}`;
-                }
-              }
-            }
-          }
+          // Parse via the SHARED offline transcript reader (arch-review §2.4):
+          // it auto-detects the provider per line and routes to the canonical
+          // per-provider parser, so codex/copilot/pi transcripts are no longer
+          // misread as Claude. `tailLines` bounds the parse to the file tail.
+          const transcript = parseOfflineTranscript(raw.split("\n"), { tailLines });
 
           results.push({
             issueNum: dir.issueNum,
@@ -140,14 +106,15 @@ export function registerSessionHistory(server: McpServer) {
             file: jf.name.replace(".jsonl", "").slice(0, 8) + "--",
             fileSizeBytes: jf.size,
             lastModified: jf.mtime.toISOString(),
-            linesParsed: linesToParse.length,
-            turns,
-            lastAssistantText,
-            lastToolCall,
-            stopReason,
-            sessionStarted,
-            agentResponded,
-            sessionId: sessionId ? (sessionId).slice(0, 8) + "--" : null,
+            linesParsed: transcript.linesParsed,
+            provider: transcript.provider,
+            turns: transcript.assistantTextCount,
+            lastAssistantText: transcript.lastAssistantText,
+            lastToolCall: transcript.lastToolCall,
+            stopReason: transcript.stopReason,
+            sessionStarted: transcript.sessionStarted,
+            agentResponded: transcript.assistantResponded,
+            sessionId: transcript.sessionId ? transcript.sessionId.slice(0, 8) + "--" : null,
           });
         }
       }
