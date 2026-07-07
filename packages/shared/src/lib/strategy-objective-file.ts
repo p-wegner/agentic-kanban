@@ -16,10 +16,7 @@
 import { gitExecSync } from "./git-exec.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  PROVIDER_POLICY_MODES,
-  PROVIDER_POLICY_PROVIDERS,
-} from "./strategy-policy.js";
+import { normalizeProviderPolicies } from "./strategy-policy.js";
 import type { ProviderPolicyMode, ProviderProfilePolicy } from "./strategy-policy.js";
 import { isBoardStrategyPreferenceKey } from "./dynamic-preference-keys.js";
 
@@ -95,44 +92,6 @@ function segmentWeight(segment: StrategyBullseyeSegment): number {
   return clampInt(segment.weight, 3, 1, 5);
 }
 
-const VALID_MODES: readonly ProviderPolicyMode[] = PROVIDER_POLICY_MODES;
-
-/** Untrusted shape of a single provider policy entry before validation. */
-interface RawProviderPolicy {
-  id: string;
-  provider: string;
-  profileName?: unknown;
-  label?: unknown;
-  mode?: unknown;
-  headroomPct?: unknown;
-  notes?: unknown;
-  quotaProviderId?: unknown;
-  model?: unknown;
-}
-
-function isRawProviderPolicy(p: unknown): p is RawProviderPolicy {
-  if (!p || typeof p !== "object") return false;
-  const candidate = p as Record<string, unknown>;
-  return typeof candidate.id === "string" && typeof candidate.provider === "string";
-}
-
-function parseProviderPolicies(raw: unknown): ProviderProfilePolicy[] {
-  if (!Array.isArray(raw)) return [];
-  return (raw as unknown[])
-    .filter(isRawProviderPolicy)
-    .map((p) => ({
-      id: p.id,
-      provider: ((PROVIDER_POLICY_PROVIDERS as readonly string[]).includes(p.provider) ? p.provider : "claude") as "claude" | "codex" | "copilot" | "pi",
-      profileName: typeof p.profileName === "string" ? p.profileName : "",
-      label: typeof p.label === "string" ? p.label : p.id,
-      mode: (typeof p.mode === "string" && VALID_MODES.includes(p.mode as ProviderPolicyMode) ? p.mode : "throttle") as ProviderPolicyMode,
-      headroomPct: clampInt(p.headroomPct, 20, 0, 100),
-      notes: typeof p.notes === "string" ? p.notes : "",
-      quotaProviderId: typeof p.quotaProviderId === "string" && p.quotaProviderId.trim() ? p.quotaProviderId.trim() : undefined,
-      model: typeof p.model === "string" && p.model.trim() ? p.model.trim() : undefined,
-    }));
-}
-
 export function parseStrategyBullseyeConfig(raw: string): StrategyBullseyeConfig {
   if (!raw.trim()) return { version: 1, segments: [] };
   const parsed = JSON.parse(raw) as StrategyBullseyeConfig;
@@ -154,7 +113,7 @@ export function parseStrategyBullseyeConfig(raw: string): StrategyBullseyeConfig
             keywords: segment.keywords,
           }))
       : [],
-    providerPolicies: parseProviderPolicies(parsed.providerPolicies),
+    providerPolicies: normalizeProviderPolicies(parsed.providerPolicies),
   };
 }
 

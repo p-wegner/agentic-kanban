@@ -162,6 +162,25 @@ export function narrowPolicyProvider(value: string | null | undefined): Provider
 }
 
 /**
+ * Normalize an untrusted `providerPolicies` array (already extracted from a parsed
+ * JSON object) into validated `ProviderProfilePolicy[]`.
+ *
+ * SINGLE parser semantics (#arch-review §3.3): entries are KEPT and their missing
+ * fields SYNTHESIZED (id/provider defaulted) via `normalizeProviderPolicy` — never
+ * silently DROPPED. This is the exact normalizer the client Strategy Targets UI
+ * uses to PERSIST the blob, so reading it back through any door (the server's
+ * `parseStrategyBullseyeConfig`, the MCP `resolveProviderProfileFromPrefs`, the
+ * client preview) yields the identical policy set. The server previously ran a
+ * stricter private parser that dropped any entry lacking a string `id`/`provider`,
+ * so the SAME `board_strategy_<id>` blob selected DIFFERENT providers depending on
+ * which door read it. Both doors now funnel through here.
+ */
+export function normalizeProviderPolicies(raw: unknown): ProviderProfilePolicy[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((p, i) => normalizeProviderPolicy(p, i));
+}
+
+/**
  * Parse the persisted `board_strategy_<projectId>` JSON into normalized provider
  * policies. Throws on malformed JSON (callers decide the fallback); a valid JSON
  * without policies yields `[]`.
@@ -169,8 +188,8 @@ export function narrowPolicyProvider(value: string | null | undefined): Provider
 export function parseProviderPoliciesFromStrategy(raw: string): ProviderProfilePolicy[] {
   if (!raw.trim()) return [];
   const parsed = JSON.parse(raw) as { providerPolicies?: unknown };
-  if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.providerPolicies)) return [];
-  return parsed.providerPolicies.map((p, i) => normalizeProviderPolicy(p, i));
+  if (!parsed || typeof parsed !== "object") return [];
+  return normalizeProviderPolicies(parsed.providerPolicies);
 }
 
 /** A resolved effective provider+profile decision and where it came from. */
