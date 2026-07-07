@@ -44,6 +44,16 @@ export interface SessionExitContext {
   planText: string | null;
   /** Provider stderr captured at exit (detached agents drain their .err file on exit — #779). */
   capturedStderr: string;
+  /**
+   * Whether the exit code is a genuinely OBSERVED value (default: true). The live process
+   * `exit` handler always observes the real code (possibly null-on-signal), so it leaves this
+   * unset. The external/reattach PID-poll path can NOT observe the exit code — a surviving
+   * detached agent whose PID simply vanishes after a `tsx watch` restart. When this is `false`,
+   * a `null` exitCode is INDETERMINATE (not a clean success), and — absent a usage-limit or
+   * fast-crash signal — the exit routes to `unknown-exit` instead of being silently recorded
+   * as a completed "0" (issue: external exit bypassed the state machine — review §3.2).
+   */
+  exitCodeKnown?: boolean;
 }
 
 /**
@@ -68,6 +78,19 @@ export type SessionExitRoute =
       effectiveExitCode: number;
       /** The error text to surface (plan text, then captured stderr). */
       errorText: string;
+    }
+  | {
+      /**
+       * The exit code was never observed (external/reattach PID poll) and no usage-limit or
+       * fast-crash signal was seen — the exit is INDETERMINATE. Must be recorded as a distinct
+       * terminal state, NOT a clean completed "0", so a post-restart crash/quota-exhaustion is
+       * never misfiled as success (review §3.2).
+       */
+      phase: "unknown-exit";
+      /** Whether any substantive output was seen before the process vanished (for diagnostics). */
+      hadSubstantiveOutput: boolean;
+      /** Provider stderr captured before the process vanished, if any. */
+      capturedStderr: string;
     }
   | { phase: "completed"; exitCode: number | null };
 
@@ -100,6 +123,16 @@ export function classifySessionExit(ctx: SessionExitContext): SessionExitRoute {
     const errorText = ctx.planText?.trim() || ctx.capturedStderr || "";
     const effectiveExitCode = isNonZeroExit ? (ctx.exitCode as number) : 1;
     return { phase: "launch-failure", isZeroOutput, isNonZeroExit, effectiveExitCode, errorText };
+  }
+
+  // Exit code genuinely undeterminable (external/reattach PID poll — the process survived a
+  // server restart and its PID simply vanished, so no `exit` event with a code was ever seen).
+  // With no usage-limit and no fast-crash signal, we CANNOT claim a clean "0" success — that
+  // was the bug (a post-restart crash/quota-exhaustion logged as completed/"0", review §3.2).
+  // Surface it as an explicit indeterminate terminal instead. The live process exit path never
+  // sets `exitCodeKnown`, so it defaults to `true` and this branch is unreachable there.
+  if (ctx.exitCodeKnown === false) {
+    return { phase: "unknown-exit", hadSubstantiveOutput: ctx.hadSubstantiveOutput, capturedStderr: ctx.capturedStderr };
   }
 
   return { phase: "completed", exitCode: ctx.exitCode };
