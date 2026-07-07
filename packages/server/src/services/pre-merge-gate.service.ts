@@ -104,3 +104,144 @@ export async function runPreMergeGate(
     message: ranSomething ? "pre-merge gate passed" : "no pre-merge gate configured",
   };
 }
+
+// ---------------------------------------------------------------------------
+// Merge-gate DECISION token (#943 / arch-review §1.2)
+// ---------------------------------------------------------------------------
+//
+// The gate DECISION — "run the gate now", "the gate already passed this cycle so
+// trust the proof", or "deliberately merge without gating" — used to be encoded as a
+// single opaque `skipPreMergeGate: boolean` threaded into `doMerge`, and re-implemented
+// (or silently absent) in every other merge trigger path. That made "no gate" an
+// invisible default and let the monitor's `skipPreMergeGate: true` assert a gate ran
+// with nothing to back it (the acknowledged TOCTOU-by-boolean, #943).
+//
+// A single OWNER (`resolveMergeGate`) now makes that decision for every trigger path,
+// driven by an explicit token the caller passes IN:
+//   - `run-gate`            → run the verify/smoke gate here and now.
+//   - `already-passed`      → the caller ran the gate this cycle; it must hand over
+//                             PROOF (timestamp + stage + source), not a bare boolean.
+//                             Stale or malformed evidence is REJECTED and the gate
+//                             re-runs — closing the TOCTOU-by-boolean shape.
+//   - `skip-explicit`       → merge WITHOUT gating, for a documented reason. Makes
+//                             every ungated merge a visible, auditable choice.
+
+/** Evidence that the verify/smoke pre-merge gate already ran and PASSED for this worktree state. */
+export interface MergeGateEvidence {
+  /** ISO timestamp when the gate ran and passed — used for staleness detection. */
+  ranAt: string;
+  /** Which gate stage produced the pass (verify/smoke/none). */
+  stage: PreMergeGateResult["stage"];
+  /** Which path ran the gate (for logs/diagnostics), e.g. "monitor-cycle", "review-exit". */
+  source: string;
+}
+
+/**
+ * Explicit gate-decision token passed by a merge trigger into the merge executor.
+ * Replaces the old opaque `skipPreMergeGate: boolean` (#943).
+ */
+export type MergeGateToken =
+  | { kind: "run-gate" }
+  | { kind: "already-passed"; evidence: MergeGateEvidence }
+  | { kind: "skip-explicit"; reason: string };
+
+/** Age past which `already-passed` evidence is treated as stale and the gate re-runs. */
+export const MERGE_GATE_EVIDENCE_MAX_AGE_MS = 15 * 60 * 1000;
+
+/** The default token: run the gate now. */
+export const RUN_GATE: MergeGateToken = { kind: "run-gate" };
+
+/** Construct an `already-passed` token carrying proof the gate ran and passed. */
+export function gateAlreadyPassed(evidence: MergeGateEvidence): MergeGateToken {
+  return { kind: "already-passed", evidence };
+}
+
+/** Construct a `skip-explicit` token: deliberately merge WITHOUT gating, with a documented reason. */
+export function gateSkipExplicit(reason: string): MergeGateToken {
+  return { kind: "skip-explicit", reason };
+}
+
+/** Outcome of resolving a {@link MergeGateToken} against the current worktree/project state. */
+export interface ResolvedMergeGate {
+  /** Whether the merge may proceed. */
+  passed: boolean;
+  /** True when the gate actually RAN this time (false for already-passed / skip-explicit). */
+  ran: boolean;
+  /** Which gate stage decided the outcome. */
+  stage: PreMergeGateResult["stage"];
+  /** Human-readable outcome, suitable for a board comment / log line. */
+  message: string;
+  /** How the decision was reached (for logs/tests). */
+  decision: "run-gate" | "already-passed" | "skip-explicit" | "run-gate-stale-evidence";
+}
+
+function evidenceIsFresh(evidence: MergeGateEvidence, now: number): boolean {
+  const ranAtMs = Date.parse(evidence.ranAt);
+  if (Number.isNaN(ranAtMs)) return false;
+  const ageMs = now - ranAtMs;
+  // Reject future timestamps too (clock skew / fabricated evidence) — anything outside
+  // [now - MAX_AGE, now] is not trustworthy proof.
+  return ageMs >= 0 && ageMs <= MERGE_GATE_EVIDENCE_MAX_AGE_MS;
+}
+
+function evidenceIsValid(evidence: MergeGateEvidence | undefined, now: number): boolean {
+  if (!evidence || typeof evidence.source !== "string" || !evidence.source.trim()) return false;
+  return evidenceIsFresh(evidence, now);
+}
+
+async function runGateAsResolved(
+  workspace: PreMergeGateWorkspace,
+  projectId: string | null,
+  database: Database,
+): Promise<Omit<ResolvedMergeGate, "decision">> {
+  // No project → nothing to look up a gate config against; a clean no-op (mirrors the
+  // pre-refactor `if (project && ...)` guard in doMerge).
+  if (!projectId) {
+    return { passed: true, ran: false, stage: "none", message: "no project — no pre-merge gate applies" };
+  }
+  const gate = await runPreMergeGate(workspace, projectId, database);
+  return { passed: gate.passed, ran: !gate.skipped, stage: gate.stage, message: gate.message };
+}
+
+/**
+ * Single OWNER of the pre-merge gate DECISION for every merge trigger path.
+ *
+ * Resolves the caller's {@link MergeGateToken} into whether the merge may proceed,
+ * running the shared {@link runPreMergeGate} only when the token says to (or when an
+ * `already-passed` token's evidence is stale/absent — the fail-safe that closes the
+ * TOCTOU-by-boolean window). `skip-explicit` and valid `already-passed` tokens return
+ * `passed: true` WITHOUT running an (expensive) build/boot again.
+ */
+export async function resolveMergeGate(args: {
+  token: MergeGateToken;
+  workspace: PreMergeGateWorkspace;
+  projectId: string | null;
+  database: Database;
+  /** Injectable clock for staleness tests; defaults to Date.now(). */
+  now?: number;
+}): Promise<ResolvedMergeGate> {
+  const { token, workspace, projectId, database } = args;
+  const now = args.now ?? Date.now();
+
+  if (token.kind === "skip-explicit") {
+    return { passed: true, ran: false, stage: "none", message: `pre-merge gate skipped (explicit): ${token.reason}`, decision: "skip-explicit" };
+  }
+
+  if (token.kind === "already-passed") {
+    if (evidenceIsValid(token.evidence, now)) {
+      return {
+        passed: true,
+        ran: false,
+        stage: token.evidence.stage,
+        message: `pre-merge gate already passed (${token.evidence.source}, stage ${token.evidence.stage}, ran ${token.evidence.ranAt})`,
+        decision: "already-passed",
+      };
+    }
+    // Stale/absent/fabricated proof → do NOT trust it; run the gate now (closes #943 TOCTOU).
+    const result = await runGateAsResolved(workspace, projectId, database);
+    return { ...result, decision: "run-gate-stale-evidence" };
+  }
+
+  const result = await runGateAsResolved(workspace, projectId, database);
+  return { ...result, decision: "run-gate" };
+}

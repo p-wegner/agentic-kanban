@@ -50,7 +50,7 @@ import {
 import { executeWorkspaceMerge } from "./workspace-merge-execution.service.js";
 import { runWorkspacePostMergeCleanup } from "./workspace-merge-cleanup.service.js";
 import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
-import { runPreMergeGate } from "./pre-merge-gate.service.js";
+import { resolveMergeGate, RUN_GATE, type MergeGateToken } from "./pre-merge-gate.service.js";
 
 export function createWorkspaceMergeService(deps: {
   database: Database;
@@ -69,15 +69,18 @@ export function createWorkspaceMergeService(deps: {
   /**
    * Options threaded from the merge entry points down into {@link doMerge}.
    *
-   * `skipPreMergeGate` lets a caller that has ALREADY run the verify/smoke pre-merge gate against
-   * the same worktree state in the same cycle suppress the otherwise-mandatory re-run inside
-   * `doMerge` (#943). It is set ONLY by the in-process monitor's merge action
-   * (monitor-workspace-actions.ts): the monitor either runs the gate itself just before merging
-   * un-ready In-Review work, or merges work the review-exit handler already gated (readyForMerge),
-   * so re-gating in `doMerge` would double an expensive build/boot per merge. It defaults to false,
-   * so the manual/operator `/merge` route and the merge-queue/orchestrator path keep gating.
+   * `gate` is the explicit merge-gate DECISION token (see pre-merge-gate.service.ts) — it
+   * replaced the old opaque `skipPreMergeGate: boolean` (#943 / arch-review §1.2). The single
+   * gate owner `resolveMergeGate` interprets it:
+   *   - omitted / `run-gate`  → run the verify/smoke gate before landing (manual/operator
+   *     `/merge`, the merge-queue/orchestrator, and the LLM-driven batch reconciler all default
+   *     here and stay gated);
+   *   - `already-passed`      → the in-process monitor already ran the gate this cycle (or the
+   *     work was gated at review-exit → readyForMerge) and hands over PROOF, so `doMerge` does
+   *     not double an expensive build/boot — but stale/absent proof forces the gate anyway;
+   *   - `skip-explicit`       → a documented, deliberate ungated merge.
    */
-  type MergeOptions = { skipPreMergeGate?: boolean };
+  type MergeOptions = { gate?: MergeGateToken };
 
   function warningMessage(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
@@ -265,22 +268,23 @@ export function createWorkspaceMergeService(deps: {
     if (preflight.kind === "completed") return preflight.result;
     await runWorkspacePreMergeValidation({ workspace, repoPath, baseBranch, gitService });
 
-    // #930: gate the MANUAL/operator merge path (and, since the orchestrator/merge-queue route
-    // through here too, those) with the SAME verify_script + boot/render smoke gate the in-process
-    // monitor (monitor-cycle.ts) and review-exit handler run. Without this a hand-merge could land
-    // build/test/boot-UNVERIFIED code on a project that explicitly configured a gate — exactly the
-    // failure the gate exists to prevent. Unlike the monitor we do NOT skip on readyForMerge: a
-    // manual merge is an explicit operator action, so we always re-verify before landing. On failure
-    // we WITHHOLD the merge (throw, surfaced to the operator) rather than silently land it.
-    //
-    // #943: the in-process monitor auto-merge paths (monitor-cycle.ts) already run this exact gate
-    // against the same worktree state in the same cycle (for un-ready In-Review work), and merge
-    // readyForMerge work that the review-exit handler already gated — so re-running here doubles an
-    // expensive build/boot per monitor merge. Those callers pass `skipPreMergeGate` to suppress the
-    // redundant re-run; the manual/operator route and the merge-queue/orchestrator leave it false
-    // and stay gated.
-    if (project && !opts.skipPreMergeGate) {
-      const gate = await runPreMergeGate({ id, workingDir: workspace.workingDir }, project.id, database);
+    // Gate the merge with the SAME verify_script + boot/render smoke gate every path shares
+    // (arch-review §1.2). The DECISION is delegated to the single owner `resolveMergeGate`,
+    // driven by the caller's explicit token (`opts.gate`):
+    //   - manual/operator `/merge`, the merge-queue/orchestrator, and the LLM batch reconciler
+    //     default to `run-gate` (no token) → always re-verify before landing (#930). Without this
+    //     a hand-merge could land build/test/boot-UNVERIFIED code on a gated project.
+    //   - the in-process monitor passes `already-passed` PROOF (#943): it ran the gate this cycle
+    //     for un-ready In-Review work, or the work was gated at review-exit (readyForMerge). Valid
+    //     proof avoids doubling an expensive build/boot; STALE/absent proof re-runs the gate.
+    // On failure we WITHHOLD the merge (throw, surfaced to the operator) rather than land it.
+    if (project) {
+      const gate = await resolveMergeGate({
+        token: opts.gate ?? RUN_GATE,
+        workspace: { id, workingDir: workspace.workingDir },
+        projectId: project.id,
+        database,
+      });
       if (!gate.passed) {
         await recordMergeAttempt(
           workspace,
@@ -294,8 +298,10 @@ export function createWorkspaceMergeService(deps: {
           { mergeReason: "pre_merge_gate_failed", gateStage: gate.stage },
         );
       }
-      if (!gate.skipped) {
+      if (gate.ran) {
         console.log(`[workspace-merge] pre-merge gate passed for workspace ${id} (${gate.stage}); proceeding with merge`);
+      } else if (gate.decision !== "run-gate") {
+        console.log(`[workspace-merge] pre-merge gate decision '${gate.decision}' for workspace ${id}: ${gate.message}`);
       }
     }
 

@@ -2,6 +2,7 @@ import type { createBoardEvents } from "../services/board-events.js";
 import type { createSessionManager } from "../services/session.manager.js";
 import type { Database } from "../db/index.js";
 import { createWorkspaceService } from "../services/workspace.service.js";
+import { RUN_GATE, type MergeGateToken } from "../services/pre-merge-gate.service.js";
 
 /**
  * The subset of workspace application-service operations the in-process board
@@ -29,12 +30,13 @@ export interface MonitorWorkspaceActions {
   /**
    * Merge + close, deduped and repo-locked. (POST /api/workspaces/:id/merge)
    *
-   * #943: this call passes `skipPreMergeGate` so `doMerge` does NOT re-run the verify/smoke
-   * pre-merge gate — the monitor cycle already ran it (or it ran at review-exit for readyForMerge
-   * work) against the same worktree state in the same cycle. The manual /merge route and the
-   * merge-queue/orchestrator path do NOT skip and remain gated.
+   * #943 / arch-review §1.2: the caller passes an explicit merge-gate DECISION token. The monitor
+   * hands over `already-passed` PROOF (it ran the gate this cycle for un-ready In-Review work, or
+   * the work was gated at review-exit → readyForMerge), so `doMerge` does NOT double an expensive
+   * verify/smoke build — but STALE/absent proof re-runs the gate inside `resolveMergeGate`. When
+   * omitted the merge defaults to `run-gate` (fully gated), so no caller can accidentally skip.
    */
-  merge(workspaceId: string): Promise<void>;
+  merge(workspaceId: string, gate?: MergeGateToken): Promise<void>;
   /**
    * Launch a fix-and-merge session after a failed merge, registering the new
    * session id in `fixAndMergeSessionIds` so the exit workflow classifies it as a
@@ -70,14 +72,13 @@ export function createMonitorWorkspaceActions(deps: {
     async launch(workspaceId) {
       await workspaceService.launchSession(workspaceId);
     },
-    async merge(workspaceId) {
-      // #943: the monitor's auto-merge paths (monitor-cycle.ts) already run the verify/smoke
-      // pre-merge gate against the same worktree state in the same cycle — either explicitly for
-      // un-ready In-Review work, or implicitly via the review-exit gate for readyForMerge work.
-      // Re-running it inside doMerge would double an expensive build/boot per merge, so suppress
-      // the redundant land-time re-run here. (The manual /merge route and the merge-queue/
-      // orchestrator do NOT pass this flag, so they stay gated.)
-      await workspaceService.mergeWorkspaceDeduped(workspaceId, { skipPreMergeGate: true });
+    async merge(workspaceId, gate) {
+      // #943 / arch-review §1.2: the monitor cycle already ran the verify/smoke gate this cycle
+      // (for un-ready In-Review work) or the work was gated at review-exit (readyForMerge), so it
+      // passes an `already-passed` PROOF token that `resolveMergeGate` honors (avoiding a doubled
+      // build/boot) — while stale/absent proof re-runs the gate. If a caller omits the token we
+      // default to fully gating, so "no gate" can never be an accident.
+      await workspaceService.mergeWorkspaceDeduped(workspaceId, { gate: gate ?? RUN_GATE });
     },
     async fixAndMerge(workspaceId, mergeError) {
       const result = await workspaceService.fixAndMerge(workspaceId, mergeError);

@@ -1,10 +1,8 @@
 import { isSpecPlanningStageName, transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
-import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
-import { runSmokeCheck } from "@agentic-kanban/shared/lib/smoke-check";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
-import { buildSmokeCheck, getStackProfile } from "../services/stack-profile.service.js";
 import { runUnderBuildGate } from "../services/jvm-build-gate.js";
+import { runPreMergeGate, gateAlreadyPassed, gateSkipExplicit, type MergeGateToken } from "../services/pre-merge-gate.service.js";
 import { issues, preferences, projectStatuses, projects, scheduledRunHistory, scheduledRuns, sessions, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { desc, eq } from "drizzle-orm";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
@@ -121,7 +119,7 @@ const USAGE_LIMIT_PROVIDERS: UsageLimitProviderConfig[] = [
 export interface WorkflowDeps {
   sessionManager: ReturnType<typeof createSessionManager>;
   boardEvents: ReturnType<typeof createBoardEvents>;
-  autoMerge: (workspace: MergeWorkspace, projectId: string, issueId: string, doneStatusId: string | null, now: string) => Promise<void>;
+  autoMerge: (workspace: MergeWorkspace, projectId: string, issueId: string, doneStatusId: string | null, now: string, gate: MergeGateToken) => Promise<void>;
   /** Injectable database for testing (defaults to the global singleton). */
   database?: Database;
 }
@@ -489,7 +487,12 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         console.log(`[workflow] fix-and-merge session ${sessionId} completed  retrying merge`);
         // autoMerge swallows its own conflict errors, so its return tells us nothing.
         // The landing guard below is what verifies the branch actually merged.
-        await autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now);
+        // Merge-gate DECISION (arch-review §1.2): a fix-and-merge session just rebuilt/verified the
+        // branch in its own worktree this cycle, so re-running the verify/smoke gate here would
+        // double that expensive build. Express that as an EXPLICIT documented skip rather than the
+        // old implicit no-gate.
+        await autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now,
+          gateSkipExplicit("fix-and-merge retry: the fix agent already rebuilt/verified the branch in-worktree this session"));
       }
     } else {
       console.log(`[workflow] fix-and-merge session ${sessionId} exited with code ${exitCode}  not retrying merge`);
@@ -544,140 +547,59 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
   }
 
   /**
-   * #531 pre-merge verify gate. Runs the project verify_script (build/test/run) in
-   * the worktree, after committing any #812 build-approval repair onto the branch.
-   * Returns false to WITHHOLD readyForMerge (no-op/pass returns true).
+   * #812 build-approval repair. NOT a gate — a repair run BEFORE the shared verify/smoke gate.
+   *
+   * A builder that created the build manifest may not have approved native build scripts or pinned
+   * a package-manager version that honors the approval, so a FRESH clone of master can fail to
+   * install even though the warm-store worktree builds. `ensureBuildableFromClean` dispatches per
+   * stack (pnpm → onlyBuiltDependencies, bun → trustedDependencies, npm/yarn → pin only, and
+   * cargo/go/python/java → a clean no-op). We commit that fix onto the branch BEFORE the verify
+   * build (which now runs inside the shared `runPreMergeGate`) so the fix merges to master and
+   * clones build clean. Only meaningful when a verify_script is configured and a worktree exists;
+   * a repair failure never blocks the merge — it reverts and returns.
+   *
+   * (arch-review §1.2: the verify/smoke DECISION itself is no longer duplicated here — it lives in
+   * the single owner `runPreMergeGate`, which the review-exit path below calls, exactly like the
+   * manual/monitor merge paths. This function keeps ONLY the repair that must precede that build.)
    */
-  async function runVerifyGate(ctx: ExitContext): Promise<boolean> {
+  async function applyBuildApprovalRepair(ctx: ExitContext): Promise<void> {
     const { workspace, projectId, prefMap } = ctx;
     const workspaceId = workspace.id;
-    // #531 quality gate: run the project's verify_script (build/test/run) in the
-    // worktree before approving for merge. Opt-in per project via the
-    // verify_script_<projectId> preference — a pure no-op when unset, so existing
-    // projects/the dev board are unaffected. A non-zero exit WITHHOLDS readyForMerge
-    // so code that doesn't compile/test/run can't be auto-approved and merged
-    // (the diff-only LLM review can't catch that on its own).
-    //
-    // #821: this same verify+smoke gate is extracted into `runPreMergeGate`
-    // (pre-merge-gate.service.ts) so the monitor's auto_merge_in_review path runs it too
-    // (it previously bypassed the gate entirely). The inline version below stays here because
-    // it interleaves the #812 build-approval repair (which must commit onto the branch BEFORE
-    // the verify build) and #826 diagnostics; keep the two in sync.
     const verifyScript = prefMap.get(`verify_script_${projectId}`);
-    // #826 diagnostic: capture the gate decision inputs. On the ktor-gallery drive verify+smoke
-    // ran 0× while readyForMerge was still set — this reveals exactly why (unset pref vs missing
-    // worktree vs profile) on the next drive.
-    const verifyConfigured = Boolean(verifyScript && verifyScript.trim());
-    console.log(`[workflow] verify gate eval ws=${workspaceId} project=${projectId}: verify_script=${verifyConfigured ? "set" : "UNSET"}, workingDir=${workspace.workingDir ? "present" : "MISSING"}`);
-    // #826 fail-closed: a CONFIGURED verify gate that cannot run (no worktree) must withhold
-    // readyForMerge — previously it skipped silently and still approved the code, so unverified
-    // work merged. Never set readyForMerge when the gate we were told to run didn't run.
-    if (verifyConfigured && !workspace.workingDir) {
-      console.log(`[workflow] verify_script configured but workspace ${workspaceId} has no worktree — withholding readyForMerge (cannot verify; #826)`);
-      boardEvents.broadcast(projectId, "workflow_error");
-      return false;
-    }
-    if (verifyScript && verifyScript.trim() && workspace.workingDir) {
-      // #783/#789/#812: a builder that created the build manifest may not have approved
-      // native build scripts or pinned a package-manager version that honors the approval —
-      // so a fresh clone of master can fail to install even though the per-worktree gate
-      // passes (the warm store hides it). `ensureBuildableFromClean` dispatches per stack
-      // (#812): pnpm → onlyBuiltDependencies, bun → trustedDependencies, npm/yarn → pin only,
-      // and cargo/go/python/java → a clean no-op. Repair and COMMIT onto the branch BEFORE
-      // the verify build, so the fix merges to master and clones build clean.
-      //
-      // BUILD_APPROVAL_REPAIR_PATHS is the complete set of files the repair can ever touch
-      // (any stack); we stage/revert only the ones that actually exist, so a non-pnpm project
-      // (no pnpm-workspace.yaml) or a non-Node project (no package.json) is a clean no-op
-      // rather than failing on a missing pathspec.
-      const BUILD_APPROVAL_REPAIR_PATHS = ["package.json", "pnpm-workspace.yaml"];
-      try {
-        const approvalChanged = ensureBuildableFromClean(workspace.workingDir);
-        if (approvalChanged) {
-          // Only stage files that actually exist — `git add -- <missing>` fails the WHOLE
-          // command on a missing pathspec (e.g. a single-package app has no
-          // pnpm-workspace.yaml), which would otherwise throw and leave the manifest dirty.
-          const candidatePaths = BUILD_APPROVAL_REPAIR_PATHS.filter((p) =>
-            existsSync(join(workspace.workingDir!, p)),
-          );
-          const committed = candidatePaths.length
-            ? await gitService.commitPaths(
-                workspace.workingDir,
-                candidatePaths,
-                "chore: make project buildable from a clean clone (verify gate #812)",
-              )
-            : false;
-          if (committed) console.log(`[workflow] committed build-approval repair for workspace ${workspaceId} (#812)`);
-        }
-      } catch (e) {
-        // Never let a repair failure leave the worktree dirty — an uncommitted manifest
-        // change would block the auto-merge (silent merge loss). Revert and continue.
-        console.warn(`[workflow] build-approval repair failed for workspace ${workspaceId}: ${e instanceof Error ? e.message : String(e)}`);
-        const revertPaths = BUILD_APPROVAL_REPAIR_PATHS.filter((p) =>
+    if (!verifyScript || !verifyScript.trim() || !workspace.workingDir) return;
+    // BUILD_APPROVAL_REPAIR_PATHS is the complete set of files the repair can ever touch (any
+    // stack); we stage/revert only the ones that actually exist, so a non-pnpm project (no
+    // pnpm-workspace.yaml) or a non-Node project (no package.json) is a clean no-op rather than
+    // failing on a missing pathspec.
+    const BUILD_APPROVAL_REPAIR_PATHS = ["package.json", "pnpm-workspace.yaml"];
+    try {
+      const approvalChanged = ensureBuildableFromClean(workspace.workingDir);
+      if (approvalChanged) {
+        const candidatePaths = BUILD_APPROVAL_REPAIR_PATHS.filter((p) =>
           existsSync(join(workspace.workingDir!, p)),
         );
-        if (revertPaths.length) {
-          try {
-            await gitExec(["checkout", "--", ...revertPaths], { cwd: workspace.workingDir! });
-          } catch { /* best-effort cleanup */ }
-        }
+        const committed = candidatePaths.length
+          ? await gitService.commitPaths(
+              workspace.workingDir,
+              candidatePaths,
+              "chore: make project buildable from a clean clone (verify gate #812)",
+            )
+          : false;
+        if (committed) console.log(`[workflow] committed build-approval repair for workspace ${workspaceId} (#812)`);
       }
-      // Run under the build-concurrency gate (#823): parallel reviews on a JVM stack would
-      // otherwise spawn many gradle daemons at once and starve the host / crash the backend.
-      const result = await runUnderBuildGate(() =>
-        runSetupScript(workspace.workingDir!, verifyScript).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e) })),
+    } catch (e) {
+      // Never let a repair failure leave the worktree dirty — an uncommitted manifest change would
+      // block the auto-merge (silent merge loss). Revert and continue.
+      console.warn(`[workflow] build-approval repair failed for workspace ${workspaceId}: ${e instanceof Error ? e.message : String(e)}`);
+      const revertPaths = BUILD_APPROVAL_REPAIR_PATHS.filter((p) =>
+        existsSync(join(workspace.workingDir!, p)),
       );
-      if (result.exitCode !== 0) {
-        console.log(`[workflow] verify_script failed (exit ${result.exitCode}) for workspace ${workspaceId} — withholding readyForMerge`);
-        boardEvents.broadcast(projectId, "workflow_error");
-        emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Verify script failed (exit ${result.exitCode}) for workspace ${workspaceId}; not approved for merge. ${(result.stderr || result.stdout || "").slice(0, 300)}` });
-        return false;
+      if (revertPaths.length) {
+        try {
+          await gitExec(["checkout", "--", ...revertPaths], { cwd: workspace.workingDir! });
+        } catch { /* best-effort cleanup */ }
       }
-      console.log(`[workflow] verify_script passed for workspace ${workspaceId}`);
     }
-    return true;
-  }
-
-  /**
-   * #791 run/smoke gate. For a web/service stack profile, boots the dev server and
-   * confirms it responds; a clean no-op for library/CLI projects. A harness error is
-   * non-fatal (returns true); only an actual failed boot withholds readyForMerge.
-   */
-  async function runSmokeGate(ctx: ExitContext): Promise<boolean> {
-    const { workspace, projectId } = ctx;
-    const workspaceId = workspace.id;
-    // #791 run/smoke gate: for a web/service project, boot the dev server and confirm it
-    // responds (HTTP-200 + render). Derived entirely from the project's stack profile, so a
-    // library/CLI project (no `isWeb`/dev command/health URL) yields no SmokeCheck and this is
-    // a clean no-op. A failed boot/response WITHHOLDS readyForMerge — the diff-only LLM review
-    // can't catch "compiles but doesn't boot". Generalizes the old `frontend-smoke.ps1`.
-      try {
-        const profile = await getStackProfile(projectId, db);
-        const smokeCheck = buildSmokeCheck(profile);
-        if (smokeCheck) {
-          // #826 fail-closed: a web project's smoke (UI) gate that can't run for lack of a
-          // worktree must withhold readyForMerge, not silently approve. (Profile load needs no
-          // worktree, so we can detect "gate applies" before checking workingDir.)
-          if (!workspace.workingDir) {
-            console.log(`[workflow] smoke/UI gate applies (web project) but workspace ${workspaceId} has no worktree — withholding readyForMerge (#826)`);
-            boardEvents.broadcast(projectId, "workflow_error");
-            return false;
-          }
-          console.log(`[workflow] running smoke check for workspace ${workspaceId}: ${smokeCheck.devCommand} -> ${smokeCheck.healthUrl}`);
-          const smoke = await runUnderBuildGate(() => runSmokeCheck(workspace.workingDir!, smokeCheck));
-          if (!smoke.passed) {
-            console.log(`[workflow] smoke check failed for workspace ${workspaceId} — withholding readyForMerge: ${smoke.message}`);
-            boardEvents.broadcast(projectId, "workflow_error");
-            emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Smoke check failed for workspace ${workspaceId}; not approved for merge. ${smoke.message}` });
-            return false;
-          }
-          console.log(`[workflow] smoke check passed for workspace ${workspaceId}: ${smoke.message}`);
-        }
-      } catch (smokeErr) {
-        // Non-fatal: a harness error must not block an otherwise-passing review. Log and proceed.
-        console.warn(`[workflow] smoke check errored (non-fatal) for workspace ${workspaceId}:`, smokeErr instanceof Error ? smokeErr.message : String(smokeErr));
-      }
-    return true;
   }
 
   /**
@@ -732,10 +654,19 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       boardEvents.broadcast(projectId, "issue_updated");
       return;
     }
-    // Pre-merge gates (#531 verify, #791 smoke, #792 cold-clone): each withholds
-    // readyForMerge on failure. A returned false means "do not approve" — stop here.
-    if (!(await runVerifyGate(ctx))) return;
-    if (!(await runSmokeGate(ctx))) return;
+    // Pre-merge gate (arch-review §1.2): the verify (#531) + smoke (#791) checks now run through
+    // the SINGLE shared owner `runPreMergeGate` — the SAME gate the manual/monitor merge paths run
+    // — instead of an inline copy that had to be kept "in sync". The #812 build-approval repair
+    // still runs FIRST (it must commit its fix onto the branch before the verify build); the #792
+    // cold-clone check stays a separate opt-in gate. Any failure WITHHOLDS readyForMerge.
+    await applyBuildApprovalRepair(ctx);
+    const preMergeGate = await runPreMergeGate({ id: workspaceId, workingDir: workspace.workingDir }, projectId, db);
+    if (!preMergeGate.passed) {
+      console.log(`[workflow] pre-merge gate failed (${preMergeGate.stage}) for workspace ${workspaceId} — withholding readyForMerge: ${preMergeGate.message}`);
+      boardEvents.broadcast(projectId, "workflow_error");
+      emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Pre-merge gate failed (${preMergeGate.stage}) for workspace ${workspaceId}; not approved for merge. ${preMergeGate.message.slice(0, 300)}` });
+      return;
+    }
     if (!(await runColdCloneGate(ctx))) return;
     // #629 Guard: re-verify the branch still has committed changes ahead of base.
     // A race (e.g. branch reset/rebased to equal base between review start and exit)
@@ -761,7 +692,11 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       const autoMergeDisabledHere = autoMergeDisabledProjectIds.has(projectId);
       if (!autoMergeDisabledHere && await isFoundationalBlocker(db, issueId)) {
         console.log(`[workflow] review session ${sessionId} completed  foundational blocker — merging synchronously (#797)`);
-        await autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now);
+        // Merge-gate DECISION (arch-review §1.2): the shared verify/smoke gate ran (and passed)
+        // moments ago above, so hand autoMerge that PROOF as an `already-passed` token — it won't
+        // re-run the expensive build. Stale/absent proof would force a re-gate in resolveMergeGate.
+        await autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now,
+          gateAlreadyPassed({ ranAt: now, stage: preMergeGate.stage, source: "review-exit gate" }));
       } else {
         console.log(`[workflow] review session ${sessionId} completed  queued for scheduled auto-merge`);
       }

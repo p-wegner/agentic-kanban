@@ -7,6 +7,7 @@ import type { MonitorActionName } from "../services/monitor-nudge.js";
 import type { MonitorAction } from "./monitor-helpers.js";
 import type { WorkspaceCandidate } from "./monitor-cycle.js";
 import type { MonitorWorkspaceActions } from "./monitor-workspace-actions.js";
+import type { MergeGateToken } from "../services/pre-merge-gate.service.js";
 
 export type LogMonitorActionFn = (action: MonitorActionName, workspaceId: string, issueId: string, extra?: Pick<MonitorAction, "endpoint" | "httpStatus" | "responseSummary" | "verificationResult">) => void;
 
@@ -31,9 +32,10 @@ export async function mergeWorkspaceWithFixFallback(
   workspaceActions: MonitorWorkspaceActions,
   logAction: LogMonitorActionFn,
   logs: { conflictMsg: string; successMsg: string },
+  gate: MergeGateToken,
 ): Promise<void> {
   try {
-    await workspaceActions.merge(ws.wsId);
+    await workspaceActions.merge(ws.wsId, gate);
     console.log(logs.successMsg);
     logAction("merge", ws.wsId, ws.issueId, {
       endpoint: `POST /api/workspaces/${ws.wsId}/merge`,

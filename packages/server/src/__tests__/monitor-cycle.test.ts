@@ -124,7 +124,7 @@ describe("processWorkspaceCandidates — idle + readyForMerge", () => {
     expect(stats.merged).toBe(1);
     expect(stats.relaunched).toBe(0);
 
-    expect(vi.mocked(deps.workspaceActions.merge)).toHaveBeenCalledWith("ws-1");
+    expect(vi.mocked(deps.workspaceActions.merge)).toHaveBeenCalledWith("ws-1", expect.objectContaining({ kind: "already-passed" }));
     expect(vi.mocked(deps.workspaceActions.launch)).not.toHaveBeenCalled();
     expect(vi.mocked(deps.boardEvents.broadcast)).toHaveBeenCalledWith("proj-1", "board_changed");
     const logCalls = vi.mocked(deps.logMonitorAction).mock.calls;
@@ -140,7 +140,7 @@ describe("processWorkspaceCandidates — idle + readyForMerge", () => {
     expect(stats.merged).toBe(1);
     expect(stats.relaunched).toBe(0);
 
-    expect(vi.mocked(deps.workspaceActions.merge)).toHaveBeenCalledWith("ws-1");
+    expect(vi.mocked(deps.workspaceActions.merge)).toHaveBeenCalledWith("ws-1", expect.objectContaining({ kind: "already-passed" }));
     expect(vi.mocked(deps.workspaceActions.fixAndMerge)).toHaveBeenCalledWith("ws-1", "Merge conflicts detected");
     expect(vi.mocked(deps.workspaceActions.launch)).not.toHaveBeenCalled();
   });
@@ -355,7 +355,7 @@ describe("processWorkspaceCandidates — auto_merge_in_review (not-ready In Revi
 
     expect(stats.merged).toBe(1);
     expect(stats.relaunched).toBe(0);
-    expect(vi.mocked(deps.workspaceActions.merge)).toHaveBeenCalledWith("ws-1");
+    expect(vi.mocked(deps.workspaceActions.merge)).toHaveBeenCalledWith("ws-1", expect.objectContaining({ kind: "already-passed" }));
     expect(vi.mocked(deps.workspaceActions.launch)).not.toHaveBeenCalled();
     const logCalls3 = vi.mocked(deps.logMonitorAction).mock.calls;
     expect(logCalls3.some(([, action, wsId, issueId]) => action === "merge" && wsId === "ws-1" && issueId === "issue-1")).toBe(true);
@@ -408,7 +408,7 @@ describe("processWorkspaceCandidates — auto_merge gating", () => {
     const stats = await processWorkspaceCandidates([baseCandidate], deps);
 
     expect(stats.merged).toBe(1);
-    expect(vi.mocked(deps.workspaceActions.merge)).toHaveBeenCalledWith("ws-1");
+    expect(vi.mocked(deps.workspaceActions.merge)).toHaveBeenCalledWith("ws-1", expect.objectContaining({ kind: "already-passed" }));
   });
 
   it("caps automatic merges per monitor cycle", async () => {
@@ -460,7 +460,7 @@ describe("processWorkspaceCandidates — auto_merge gating", () => {
     const stats = await processWorkspaceCandidates([candidate], deps);
 
     expect(stats.merged).toBe(1);
-    expect(vi.mocked(deps.workspaceActions.merge)).toHaveBeenCalledWith("ws-1");
+    expect(vi.mocked(deps.workspaceActions.merge)).toHaveBeenCalledWith("ws-1", expect.objectContaining({ kind: "already-passed" }));
     // The reviewing+stopped path must never fall back to fix-and-merge.
     expect(vi.mocked(deps.workspaceActions.fixAndMerge)).not.toHaveBeenCalled();
   });
@@ -489,8 +489,8 @@ describe("processWorkspaceCandidates — per-project auto_merge_disabled", () =>
     const stats = await processWorkspaceCandidates([disabledCandidate, enabledCandidate], deps);
 
     expect(stats.merged).toBe(1);
-    expect(vi.mocked(deps.workspaceActions.merge)).toHaveBeenCalledWith("ws-enabled");
-    expect(vi.mocked(deps.workspaceActions.merge)).not.toHaveBeenCalledWith("ws-disabled");
+    expect(vi.mocked(deps.workspaceActions.merge)).toHaveBeenCalledWith("ws-enabled", expect.objectContaining({ kind: "already-passed" }));
+    expect(vi.mocked(deps.workspaceActions.merge)).not.toHaveBeenCalledWith("ws-disabled", expect.anything());
   });
 
   it("does NOT merge a reviewing+stopped workspace when its project is in autoMergeDisabledProjectIds", async () => {

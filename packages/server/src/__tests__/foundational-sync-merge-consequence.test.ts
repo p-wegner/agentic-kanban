@@ -60,6 +60,10 @@ vi.mock("../startup/merge-strategy.js", () => ({
 vi.mock("../services/stack-profile.service.js", () => ({
   getStackProfile: vi.fn(async () => ({})),
   buildSmokeCheck: vi.fn(() => null),
+  // The review-exit path now calls the shared runPreMergeGate, which reads the verify_script pref
+  // via verifyScriptPrefKey — no verify_script is set for this test's project, so the gate is a
+  // clean no-op, but the export must exist on the mock.
+  verifyScriptPrefKey: (projectId: string) => `verify_script_${projectId}`,
 }));
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
