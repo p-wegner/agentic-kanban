@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { MERGE_RECONCILER_PROMPT } from "./services/merge-reconciler-prompt.js";
 
 const SPEC_PHASE_CONSTITUTION_GATE = `## Constitution Gate
@@ -685,29 +686,6 @@ Your role:
 For anything about the board (issues, statuses, counts, workspaces, sessions), use the "agentic-kanban" MCP tools (e.g. list_issues, get_board_status, get_issue) — they are authoritative. Do NOT guess board state or scrape it via curl.
 For questions about how a previous ticket was implemented, what an agent did, or what problems it hit, use search_sessions to find matching transcript snippets, then get_session_transcript for the relevant session id when more detail is needed.
 
-For "how does X work?" or architecture/behavior questions about this project, first use openspec_list_specs and show_spec. Answer from the living spec when a relevant domain exists, and cite the spec path/domain in your answer. If no relevant living spec exists, say that and then inspect code or docs as needed.
-
-## Delegate aggressively to sub-agents
-Use the Agent tool to spawn sub-agents for any task that requires code exploration, multi-file analysis, or research before acting. Your context window is precious — don't burn it reading dozens of files yourself when a sub-agent can do the exploration and return a concise summary.
-
-**Always delegate** when the user asks you to:
-- Create tickets/issue that require understanding code first (e.g. "create tickets for improving error handling", "make a ticket to refactor the auth flow")
-- Analyze a subsystem or area of the codebase
-- Investigate bugs or find root causes across multiple files
-- Compare implementations or find patterns across the codebase
-- Do anything that would require reading more than 3–4 files
-
-**How to delegate ticket creation:**
-Spawn a sub-agent with a clear prompt that includes the user's original request. The sub-agent explores the code, understands the scope, and uses the \`mcp__agentic-kanban__create_issue\` MCP tool to create the ticket with a well-informed title and description. Example sub-agent prompt:
-
-> "The user wants a ticket for improving error handling in the agent subsystem. Explore packages/server/src/services/agent*.ts and packages/shared/src/lib/ to understand the current error handling patterns. Then create a kanban ticket with a concrete description of what should change, referencing specific files and current patterns. Use mcp__agentic-kanban__create_issue."
-
-**Handle directly (no delegation needed):**
-- Quick questions about board state, issue status, or project structure
-- Simple ticket creation where no code exploration is needed (user already described exactly what they want)
-- Starting/merging/reviewing workspaces
-- UI how-to questions
-
 ## Helping the user use the board
 The user drives the board through the app's UI (clicking buttons and tabs), NOT the API. So when they ask "how do I…" / "how does X work" on the board, answer with SIMPLE UI steps — which tab or button to click — and keep it short; do not dump API calls, endpoints, or tool names at them. A UI how-to is bundled at \`{{boardGuidePath}}\`: READ it first and answer from it rather than from memory (button names are easy to get wrong). This is separate from you *doing* an action yourself — see "Starting work" below for that.
 
@@ -844,6 +822,63 @@ Use stable metric keys:
     model: null,
   },
   {
+    name: "workflow-builder",
+    description: "Design configurable workflow graphs (ticket-type pipelines with skill-attached stages, parallel fork/join, conditional edges) via the MCP tools.",
+    prompt: `You design and manage **configurable workflow graphs** for the kanban board. A workflow template is a directed graph of stages (nodes) and transitions (edges). Each issue of a given ticket type routes through one template; a workspace's agent is guided stage-by-stage and advances with the propose_transition tool.
+
+## MCP tools (prefix mcp__agentic-kanban__)
+- list_workflow_templates({ projectId? }) — list templates (built-in + project)
+- get_workflow_template({ templateId }) — full graph (nodes + edges)
+- create_workflow_template({ projectId?, name, description?, ticketType?, isDefault?, nodes, edges }) — create
+- update_workflow_template({ templateId, ...partial }) — edit a NON-built-in template (pass nodes+edges together to replace the graph)
+- delete_workflow_template({ templateId }) — delete a non-built-in template
+- propose_transition(...) — runtime: how a workspace agent advances stages (not used when designing)
+
+Built-in templates are read-only. To customize one, get it, then create a new template from the same shape.
+
+## Node shape
+Each node: { id (your own client id, referenced by edges), name, nodeType, statusName, skillName?, maxVisits?, config? }
+- nodeType: 'start' (exactly one), 'normal', 'parallel-fork', 'parallel-join', 'end' (>= one)
+- statusName: the board column this stage maps to (use an existing project status, e.g. "In Progress", "In Review", "Done")
+- skillName: a skill to inject into the worktree at this stage (e.g. "code-review", "deep-research")
+- maxVisits: per-node visit budget for loops (0 = unlimited); use a small number to bound retry loops
+- config: JSON string; set {"guidance":"..."} to inject stage instructions into the agent prompt
+
+## Edge shape
+Each edge: { fromNodeId, toNodeId, label?, condition? }
+- condition: 'manual' (agent/human chooses), 'auto_on_exit_0', 'tests_pass', 'tests_fail', 'diff_clean', 'diff_touches' (the agent reports testsPassed; diff conditions are computed from the committed diff). With tests_pass/tests_fail on two edges out of one node, the workflow auto-routes.
+
+## Graph rules (validated on save)
+- exactly one start node, at least one end node
+- no orphan nodes (every non-start has an inbound edge; every non-end has an outbound edge)
+- a parallel-fork requires a matching parallel-join, and vice-versa
+
+## Parallel fork/join
+A 'parallel-fork' node spawns one child sub-worktree+agent per outgoing edge; the children run concurrently (capped 2/workspace, 4/project). Each child path must converge to the 'parallel-join' node. When all children reach the join, the system writes WORKFLOW_FORK_ARTIFACTS.md (each child's diff + summary) into the parent worktree and launches a consolidation agent at the join. Use this to run independent research/work streams in parallel.
+
+## Worked example: "AI migration" workflow
+A good migration-with-parallel-research template:
+1. start "Scope & Plan" (statusName In Progress, guidance: read the migration ticket, identify target tech + legacy surface).
+2. parallel-fork "Investigate" — spawns concurrent research branches:
+   - "Best-practices research" (skillName deep-research, guidance: web-search current best practices, idioms, pitfalls for the TARGET tech; write findings to a markdown file and commit).
+   - "Tooling research" (skillName deep-research, guidance: find recommended agent skills, MCP servers, hooks, and project setup for the target tech; commit a tooling.md).
+   - "Legacy doc analysis" (guidance: parse the legacy docs/code; if the corpus is large, build a tiny local RAG over the migration content to answer questions; produce a requirements.md of behavior to preserve).
+3. parallel-join "Consolidate research" (skillName code-review, guidance: read WORKFLOW_FORK_ARTIFACTS.md, merge the three findings into one migration plan + a safety-net test list).
+4. normal "Safety net" (guidance: write API-agnostic E2E tests + mocks pinning current behavior).
+5. normal "Migrate (test-driven)" (maxVisits 10, guidance: migrate one module at a time keeping the safety net green; loop here until done) with a self-edge labeled "next module" and an edge "all migrated" -> review.
+6. normal "Review" (skillName code-review-thorough).
+7. end "Done" (statusName Done).
+
+Build it with create_workflow_template, giving each node a stable client id and wiring edges between those ids. Set ticketType only if it should auto-route a ticket type; otherwise leave it selectable.
+
+## Process
+1. Confirm the project's available statuses (the board columns) and skills before referencing them by name.
+2. Draft the node/edge list, validate the rules above, then call create_workflow_template.
+3. If creation returns validation errors, fix the graph and retry.
+4. Report the new template id and how to use it (pick it on issue create, or set isDefault for a ticket type).`,
+    model: null,
+  },
+  {
     name: "merge-reconciler",
     description: "Land a whole batch of stranded/conflicting workspaces efficiently: resolve each overlapping cluster's union ONCE, sequence migration collisions, reconcile siblings as Done. Launched automatically by the auto-merge orchestrator.",
     prompt: MERGE_RECONCILER_PROMPT,
@@ -852,3 +887,28 @@ Use stable metric keys:
 ] as const;
 
 export type BuiltinSkill = typeof BUILTIN_SKILLS[number];
+
+/**
+ * Stable content hash for a builtin skill's meaningful fields. Used by the seed
+ * refresh to detect when a shipped builtin prompt has changed vs the DB copy,
+ * and to tell an unedited row (hash still matches what we last wrote) from a
+ * user-edited one. Changing the fields hashed here changes every builtin's hash,
+ * so keep it to the substantive content.
+ */
+export function builtinSkillContentHash(skill: {
+  name: string;
+  description: string;
+  prompt: string;
+  model?: string | null;
+}): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        name: skill.name,
+        description: skill.description,
+        prompt: skill.prompt,
+        model: skill.model ?? null,
+      }),
+    )
+    .digest("hex");
+}

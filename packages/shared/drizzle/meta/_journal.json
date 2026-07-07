@@ -687,6 +687,13 @@
       "when": 1780906855000,
       "tag": "0097_runtime_state",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "6",
+      "when": 1780906856000,
+      "tag": "0098_agent_skill_content_hash",
+      "breakpoints": true
     }
   ]
 }
