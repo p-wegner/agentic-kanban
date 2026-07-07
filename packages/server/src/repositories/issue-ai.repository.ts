@@ -363,10 +363,13 @@ export async function getIssuesForContract(
   database: Database = db,
 ): Promise<Array<{ id: string; issueNumber: number; title: string; description: string | null; statusId: string; projectId: string }>> {
   if (issueIds.length === 0) return [];
-  return database
+  const rows = await database
     .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, description: issues.description, statusId: issues.statusId, projectId: issues.projectId })
     .from(issues)
     .where(inArray(issues.id, issueIds));
+  // issue_number is nullable in the schema but backfilled for every real issue
+  // (migration 0006); these are existing issues fetched by id, so it is non-null.
+  return rows.map((r) => ({ ...r, issueNumber: r.issueNumber! }));
 }
 
 /** Whether any of `issueIds` has an OPEN (non-closed) workspace — a contract must not absorb in-flight work. */
