@@ -1,8 +1,31 @@
-import { and, eq, inArray, like, or } from "drizzle-orm";
+import { and, eq, inArray, or, sql, type Column, type SQL } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import * as schema from "../schema/index.js";
 
 export type CascadeDb = LibSQLDatabase<typeof schema>;
+
+/**
+ * Escape the LIKE metacharacters (`\`, `%`, `_`) in a literal so it matches
+ * verbatim under a `... ESCAPE '\'` clause.
+ */
+function escapeLikeLiteral(literal: string): string {
+  return literal.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
+/**
+ * SQL predicate matching preference/runtime_state keys that end in the LITERAL
+ * suffix `_<projectId>` — the string convention by which those FK-less tables are
+ * project-scoped. Uses a properly-escaped LIKE so the separating underscore is a
+ * literal, NOT a single-char wildcard: the naive `LIKE '%_<id>'` treats `_` as
+ * "any char", so deleting project `276` would also match `..._3276` (project
+ * `3276`'s keys) in a DB carrying legacy NUMERIC project ids. Shared by the delete
+ * and the completeness assertion so they validate the exact same (non-overreaching)
+ * set. See adversarial-arch-review §3.6.
+ */
+function projectScopedKeyFilter(keyColumn: Column, projectId: string): SQL {
+  const pattern = `%${escapeLikeLiteral(`_${projectId}`)}`;
+  return sql`${keyColumn} LIKE ${pattern} ESCAPE '\\'`;
+}
 type CascadeTx = Parameters<Parameters<CascadeDb["transaction"]>[0]>[0];
 type DbOrTx = CascadeDb | CascadeTx;
 
@@ -239,12 +262,12 @@ async function deleteProjectCascadeRows(projectId: string, database: DbOrTx): Pr
   await database
     .delete(schema.preferences)
     .where(and(eq(schema.preferences.key, "activeProjectId"), eq(schema.preferences.value, projectId)));
-  await database.delete(schema.preferences).where(like(schema.preferences.key, `%_${projectId}`));
+  await database.delete(schema.preferences).where(projectScopedKeyFilter(schema.preferences.key, projectId));
 
   // Per-project RUNTIME STATE (#975): butler_session_<id> / butler_session_history_<id>
   // moved out of `preferences` into `runtime_state`, so the same suffix delete must
   // run there too or those rows orphan on project deletion.
-  await database.delete(schema.runtimeState).where(like(schema.runtimeState.key, `%_${projectId}`));
+  await database.delete(schema.runtimeState).where(projectScopedKeyFilter(schema.runtimeState.key, projectId));
 
   await database.delete(schema.projects).where(eq(schema.projects.id, projectId));
 
@@ -271,8 +294,8 @@ async function assertProjectCascadeComplete(projectId: string, database: DbOrTx)
     ["milestone", () => countRows(database.select({ id: schema.milestones.id }).from(schema.milestones).where(eq(schema.milestones.projectId, projectId)))],
     ["project repo", () => countRows(database.select({ id: schema.repos.id }).from(schema.repos).where(eq(schema.repos.projectId, projectId)))],
     ["project status", () => countRows(database.select({ id: schema.projectStatuses.id }).from(schema.projectStatuses).where(eq(schema.projectStatuses.projectId, projectId)))],
-    ["project-scoped preference", () => countRows(database.select({ key: schema.preferences.key }).from(schema.preferences).where(like(schema.preferences.key, `%_${projectId}`)))],
-    ["project-scoped runtime state", () => countRows(database.select({ key: schema.runtimeState.key }).from(schema.runtimeState).where(like(schema.runtimeState.key, `%_${projectId}`)))],
+    ["project-scoped preference", () => countRows(database.select({ key: schema.preferences.key }).from(schema.preferences).where(projectScopedKeyFilter(schema.preferences.key, projectId)))],
+    ["project-scoped runtime state", () => countRows(database.select({ key: schema.runtimeState.key }).from(schema.runtimeState).where(projectScopedKeyFilter(schema.runtimeState.key, projectId)))],
   ];
   for (const [label, count] of byProjectId) {
     await assertNoRows(label, count());

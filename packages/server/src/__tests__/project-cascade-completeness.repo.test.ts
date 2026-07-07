@@ -444,6 +444,46 @@ describe("deleteProjectCascade — completeness vs the schema FK graph", () => {
     expect(remainingState).toEqual([`butler_session_${c.otherProjectId}`]);
   });
 
+  it("does NOT over-delete a sibling project's keys when one id is a suffix of the other (legacy numeric ids)", async () => {
+    // Regression for adversarial-arch-review §3.6: the old `LIKE '%_${id}'` filter
+    // treats `_` as a single-char WILDCARD, so deleting project `276` also matched
+    // project `3276`'s keys (`..._3276` matches `%_276`). The live DB carries legacy
+    // NUMERIC project ids (fk-violations.ts cites `project_id='3276'`), so this is a
+    // real over-delete. The escaped-LIKE fix must match `_276` literally.
+    const now = new Date().toISOString();
+    const doomedId = "276";
+    const siblingId = "3276"; // ends in the doomed id — the exact overreach case
+    for (const [id, name] of [[doomedId, "Doomed"], [siblingId, "Sibling"]] as const) {
+      await db.insert(schema.projects).values({
+        id, name, repoPath: `C:/tmp/${id}`, repoName: name.toLowerCase(),
+        defaultBranch: "main", createdAt: now, updatedAt: now,
+      });
+    }
+    await db.insert(schema.preferences).values([
+      { key: "activeProjectId", value: doomedId, updatedAt: now },
+      { key: `start_mode_${doomedId}`, value: "monitor", updatedAt: now },
+      { key: `board_strategy_${doomedId}`, value: "{}", updatedAt: now },
+      { key: `start_mode_${siblingId}`, value: "manual", updatedAt: now },
+      { key: `board_strategy_${siblingId}`, value: "{}", updatedAt: now },
+    ]);
+    await db.insert(schema.runtimeState).values([
+      { key: `butler_session_${doomedId}`, value: "abc", updatedAt: now },
+      { key: `butler_session_${siblingId}`, value: "keep", updatedAt: now },
+      { key: `butler_session_history_${siblingId}`, value: "[]", updatedAt: now },
+    ]);
+
+    await deleteProjectCascade(doomedId, db);
+
+    // Only the doomed project's keys are gone; the sibling `3276`'s SURVIVE.
+    const prefs = (await db.select().from(schema.preferences)).map((p) => p.key).sort();
+    expect(prefs).toEqual([`board_strategy_${siblingId}`, `start_mode_${siblingId}`].sort());
+    const state = (await db.select().from(schema.runtimeState)).map((r) => r.key).sort();
+    expect(state).toEqual([`butler_session_${siblingId}`, `butler_session_history_${siblingId}`].sort());
+    // The sibling project row itself is untouched.
+    expect(await db.select().from(schema.projects).where(eq(schema.projects.id, siblingId))).toHaveLength(1);
+    expect(await db.select().from(schema.projects).where(eq(schema.projects.id, doomedId))).toHaveLength(0);
+  });
+
   it("is ATOMIC: a failure mid-cascade rolls back the entire walk", async () => {
     const c = makeCtx(db);
     await seedAll(c);
