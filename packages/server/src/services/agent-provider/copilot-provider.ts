@@ -6,7 +6,7 @@ import {
   COPILOT_DEFAULT_ALLOWED_TOOLS,
   resolveCopilotNpmLoader,
   getMcpConfigPath,
-  splitArgs,
+  spliceAgentArgs,
   mapCopilotProfile,
   nodeFileSystem,
 } from "./helpers.js";
@@ -95,9 +95,9 @@ export class CopilotProvider implements AgentProvider {
         }
       }
 
-      if (agentArgs) {
-        args.push(...splitArgs(agentArgs));
-      }
+      // Denied-flag stripping is applied centrally (see DENIED_ARGS); copilot has no
+      // denied flags today, but routing through spliceAgentArgs keeps the guard uniform.
+      args.push(...spliceAgentArgs(this.name, agentArgs));
     }
 
     return {
