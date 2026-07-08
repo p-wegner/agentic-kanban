@@ -73,6 +73,47 @@ export interface CliVersionResult {
   message: string | null;
 }
 
+/**
+ * A supported-range verdict distilled to what a CALLER should DO about it, so a
+ * launch path can act on "below-min" (upgrade required) distinctly from the
+ * merely-advisory "newer than we've verified". Derived from `CliVersionResult`
+ * via {@link classifyCliVersion} — the raw `status` stays the transport shape,
+ * this is the decision shape.
+ */
+export interface CliVersionActionability {
+  /**
+   * "below-min" — installed CLI is OLDER than the supported floor; hard-coded
+   * launch flags may not exist → the user must upgrade (the one ACTIONABLE case).
+   * "unknown-newer" — NEWER than the last verified `maxKnown`; its own state, NOT
+   * a failure (the CLI probably works; the flag contract is just unverified).
+   * "ok" — within range. "advisory" — unparseable/unavailable probe (no verdict).
+   */
+  level: "ok" | "below-min" | "unknown-newer" | "advisory";
+  /** True ONLY for "below-min": the user can and should act (upgrade the CLI). */
+  actionable: boolean;
+  /** The human-readable explanation carried over from the result, if any. */
+  message: string | null;
+}
+
+/**
+ * Distill a raw probe result into a caller decision. Pure. This is what makes a
+ * below-min result ACTIONABLE rather than one warn-among-many: callers branch on
+ * `actionable` / `level` instead of re-deriving intent from the `status` union.
+ */
+export function classifyCliVersion(result: CliVersionResult): CliVersionActionability {
+  switch (result.status) {
+    case "below-min":
+      return { level: "below-min", actionable: true, message: result.message };
+    case "above-known":
+      return { level: "unknown-newer", actionable: false, message: result.message };
+    case "ok":
+      return { level: "ok", actionable: false, message: null };
+    default:
+      // unparseable / unavailable — not a supported-range verdict; no action implied.
+      return { level: "advisory", actionable: false, message: result.message };
+  }
+}
+
 /** Injectable runner so tests don't spawn real binaries. Returns trimmed stdout or throws. */
 export type VersionRunner = (command: string, args: string[]) => Promise<string>;
 
@@ -254,26 +295,61 @@ export async function detectCliVersionCached(
 }
 
 /**
- * The launch-path check: probe (cached) and WARN — never block the launch — when
- * the installed CLI is below the supported floor or newer than the last verified
- * version. `unparseable`/`unavailable` stay silent here: test substitutes
+ * The launch-path check: probe (cached) and surface — never block the launch —
+ * when the installed CLI is below the supported floor or newer than the last
+ * verified version. It distinguishes the two, because they call for different
+ * action (review §2.2 / ticket #20 — the old code funnelled BOTH through one
+ * indistinguishable `console.warn`, so "you must upgrade" looked identical to
+ * "this is just newer than we've verified"):
+ *   - below-min → ACTIONABLE: routed to `error` (a distinct, prominent channel)
+ *     AND handed to the optional `onActionable` hook so a caller can surface it
+ *     further (health event / launch-time warning field) with context the spawn
+ *     site has (sessionId, worktree) that this pure function does not.
+ *   - above-known → advisory: routed to `warn` (unchanged).
+ * `unparseable`/`unavailable`/`ok` stay silent here: test substitutes
  * (AGENT_COMMAND, node scripts) legitimately have no semver, and "not installed"
  * is owned by profile-health preflight. Never throws.
  *
- * No board_health_events emission: that helper (board-health-events.repository)
- * requires a projectId + monitor cycleId that the spawn site does not have —
- * console.warn is the proportionate signal here; profile-health surfaces the
- * same verdict in the UI.
+ * Why no board_health_events emission INSIDE this function: that helper
+ * (board-health-events.repository) requires a projectId + monitor cycleId that
+ * the spawn site does not have. The `onActionable` hook is the seam for a caller
+ * that DOES have that context to record one — see agent.service launch path.
+ * (Fuller UI surfacing of the below-min alert is tracked as follow-up; the
+ * profile-health preflight already folds below-min into a hard error in the UI.)
  */
 export async function warnIfCliVersionRisky(
   provider: ProviderName,
   command: string,
-  opts?: { runner?: VersionRunner; nowFn?: () => number; ttlMs?: number; warn?: (message: string) => void },
+  opts?: {
+    runner?: VersionRunner;
+    nowFn?: () => number;
+    ttlMs?: number;
+    /** Advisory channel (above-known). Defaults to console.warn. */
+    warn?: (message: string) => void;
+    /** Prominent channel for the ACTIONABLE below-min case. Defaults to console.error. */
+    error?: (message: string) => void;
+    /** Fired ONLY for an actionable (below-min) verdict, so a caller with launch
+     *  context can surface it beyond the console. Failures here never break the launch. */
+    onActionable?: (result: CliVersionResult, actionability: CliVersionActionability) => void;
+  },
 ): Promise<CliVersionResult | null> {
   const warn = opts?.warn ?? ((message: string) => console.warn(message));
+  const error = opts?.error ?? ((message: string) => console.error(message));
   try {
     const result = await detectCliVersionCached(provider, command, opts);
-    if ((result.status === "below-min" || result.status === "above-known") && result.message) {
+    const actionability = classifyCliVersion(result);
+    if (actionability.actionable && actionability.message) {
+      // Below-min is a genuine "upgrade required" — prominent + distinct, and
+      // handed to any caller that can surface it with launch context.
+      error(`[agent-cli-version] ACTIONABLE — ${actionability.message}`);
+      if (opts?.onActionable) {
+        try {
+          opts.onActionable(result, actionability);
+        } catch {
+          // Surfacing must never escalate into a launch failure.
+        }
+      }
+    } else if (result.status === "above-known" && result.message) {
       warn(`[agent-cli-version] ${result.message}`);
     }
     return result;
