@@ -54,7 +54,6 @@ const BASELINE: Record<string, number> = {
   "server/src/services/auth-rotation-ring.ts::cfg.rotationDisabledPrefKey": 1,
   "server/src/services/autodrive-stall-warning.service.ts::<row-value>": 1,
   "server/src/services/autodrive-stall-warning.service.ts::auto_merge_disabled_${row.projectId}": 1,
-  "server/src/services/preference.service.ts::<row-value>": 1,
   "server/src/services/project.service.ts::export_skills_on_registration": 1,
   "server/src/services/start-policy.service.ts::board_autodrive_${projectId}": 1,
   "server/src/startup/ancestor-branch-reconciler.ts::<row-value>": 1,
