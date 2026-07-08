@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   CLI_VERSION_CONFIG,
+  classifyCliVersion,
   compareSemver,
   detectCliVersion,
   detectCliVersionCached,
   parseSemver,
   resetCliVersionCache,
   warnIfCliVersionRisky,
+  type CliVersionResult,
 } from "../services/agent-cli-version.service.js";
 
 describe("agent CLI version detection", () => {
@@ -178,40 +180,75 @@ describe("agent CLI version detection", () => {
   describe("warnIfCliVersionRisky (launch-path warn, #956)", () => {
     beforeEach(() => resetCliVersionCache());
 
-    it("warns (does not throw/block) when the CLI is above the last verified version", async () => {
+    it("routes an above-known CLI to the ADVISORY warn channel (not the actionable one)", async () => {
       const warnings: string[] = [];
+      const errors: string[] = [];
+      const actionables: string[] = [];
       const result = await warnIfCliVersionRisky("claude", process.execPath, {
         runner: async () => "999.0.0 (Claude Code)",
         warn: (message) => warnings.push(message),
+        error: (message) => errors.push(message),
+        onActionable: (_r, a) => actionables.push(a.level),
       });
       expect(result?.status).toBe("above-known");
+      // Advisory: warn only — NOT the actionable/error path.
       expect(warnings).toHaveLength(1);
       expect(warnings[0]).toContain("[agent-cli-version]");
       expect(warnings[0]).toContain("newer than the last verified version");
+      expect(errors).toHaveLength(0);
+      expect(actionables).toHaveLength(0);
     });
 
-    it("warns when the CLI is below the supported minimum", async () => {
+    it("routes a below-min CLI to the ACTIONABLE error channel + onActionable hook (ticket #20)", async () => {
       const warnings: string[] = [];
+      const errors: string[] = [];
+      const actionable: Array<{ result: CliVersionResult; level: string }> = [];
       const result = await warnIfCliVersionRisky("codex", process.execPath, {
         runner: async () => "codex-cli 0.1.0",
         warn: (message) => warnings.push(message),
+        error: (message) => errors.push(message),
+        onActionable: (r, a) => actionable.push({ result: r, level: a.level }),
       });
       expect(result?.status).toBe("below-min");
-      expect(warnings).toHaveLength(1);
-      expect(warnings[0]).toContain("below the supported minimum");
+      // Distinct from the advisory case: prominent error channel, and the hook fires
+      // so a caller with launch context can surface it further.
+      expect(warnings).toHaveLength(0);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toContain("ACTIONABLE");
+      expect(errors[0]).toContain("below the supported minimum");
+      expect(actionable).toHaveLength(1);
+      expect(actionable[0].level).toBe("below-min");
+      expect(actionable[0].result.status).toBe("below-min");
     });
 
-    it("stays silent for ok, unparseable, and unavailable results", async () => {
+    it("a failing onActionable hook never breaks the guard (returns the result)", async () => {
+      const result = await warnIfCliVersionRisky("codex", process.execPath, {
+        runner: async () => "codex-cli 0.1.0",
+        error: () => {},
+        onActionable: () => { throw new Error("surfacing blew up"); },
+      });
+      expect(result?.status).toBe("below-min");
+    });
+
+    it("stays silent (no warn/error/onActionable) for ok, unparseable, and unavailable results", async () => {
       const warnings: string[] = [];
-      const warn = (message: string) => warnings.push(message);
-      const ok = await warnIfCliVersionRisky("codex", process.execPath, { runner: async () => "codex-cli 0.142.0", warn });
+      const errors: string[] = [];
+      const actionables: string[] = [];
+      const opts = {
+        warn: (m: string) => warnings.push(m),
+        error: (m: string) => errors.push(m),
+        onActionable: (_r: CliVersionResult, a: { level: string }) => actionables.push(a.level),
+      };
+      const ok = await warnIfCliVersionRisky("codex", process.execPath, { ...opts, runner: async () => "codex-cli 0.142.0" });
       expect(ok?.status).toBe("ok");
       resetCliVersionCache();
-      const unparseable = await warnIfCliVersionRisky("codex", process.execPath, { runner: async () => "no semver here", warn });
+      const unparseable = await warnIfCliVersionRisky("codex", process.execPath, { ...opts, runner: async () => "no semver here" });
       expect(unparseable?.status).toBe("unparseable");
-      const unavailable = await warnIfCliVersionRisky("codex", "definitely-not-a-real-binary-xyz", { warn });
+      const unavailable = await warnIfCliVersionRisky("codex", "definitely-not-a-real-binary-xyz", opts);
       expect(unavailable?.status).toBe("unavailable");
       expect(warnings).toHaveLength(0);
+      expect(errors).toHaveLength(0);
+      expect(actionables).toHaveLength(0);
     });
 
     it("uses the cache — repeated launches do not re-probe", async () => {
@@ -220,6 +257,44 @@ describe("agent CLI version detection", () => {
       await warnIfCliVersionRisky("codex", process.execPath, { runner, nowFn: () => 0 });
       await warnIfCliVersionRisky("codex", process.execPath, { runner, nowFn: () => 1 });
       expect(calls).toBe(1);
+    });
+  });
+
+  describe("classifyCliVersion (actionable decision shape, ticket #20)", () => {
+    const make = (status: CliVersionResult["status"], message: string | null): CliVersionResult => ({
+      detected: status !== "unavailable" && status !== "unparseable",
+      raw: message,
+      version: status === "ok" || status === "below-min" || status === "above-known" ? "1.2.3" : null,
+      status,
+      message,
+    });
+
+    it("flags ONLY below-min as actionable (upgrade required)", () => {
+      const a = classifyCliVersion(make("below-min", "below the supported minimum 0.20.0"));
+      expect(a.level).toBe("below-min");
+      expect(a.actionable).toBe(true);
+      expect(a.message).toContain("below the supported minimum");
+    });
+
+    it("treats a newer-than-maxKnown CLI as its own non-actionable 'unknown-newer' state (not a failure)", () => {
+      const a = classifyCliVersion(make("above-known", "newer than the last verified version"));
+      expect(a.level).toBe("unknown-newer");
+      expect(a.actionable).toBe(false);
+    });
+
+    it("treats an in-range CLI as ok and non-actionable", () => {
+      const a = classifyCliVersion(make("ok", null));
+      expect(a.level).toBe("ok");
+      expect(a.actionable).toBe(false);
+      expect(a.message).toBeNull();
+    });
+
+    it("maps unparseable/unavailable to a neutral advisory (no action implied)", () => {
+      for (const status of ["unparseable", "unavailable"] as const) {
+        const a = classifyCliVersion(make(status, "some diagnostic"));
+        expect(a.level).toBe("advisory");
+        expect(a.actionable).toBe(false);
+      }
     });
   });
 

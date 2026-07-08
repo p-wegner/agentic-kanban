@@ -479,7 +479,17 @@ export function launch(
   // (one `--version` subprocess per provider:command per 30 min), warn-only —
   // never blocks or delays the spawn. Mock agents are not third-party CLIs.
   if (!isMockAgent) {
-    void warnIfCliVersionRisky(narrowProviderName(provider), command);
+    void warnIfCliVersionRisky(narrowProviderName(provider), command, {
+      // Below-min is ACTIONABLE (the user must upgrade the CLI), not just one
+      // warn among many (review §2.2 / ticket #20). Surface it with the launch
+      // context this spawn site has — sessionId + worktree — so it is traceable
+      // to a specific launch rather than a bare, context-free console line.
+      onActionable: (_result, actionability) => {
+        console.error(
+          `[agent] launch used an unsupported ${provider ?? "agent"} CLI (sessionId=${sessionId} worktree=${worktreePath}): ${actionability.message} — upgrade the CLI; hard-coded launch flags may not work.`,
+        );
+      },
+    });
   }
 
   // Agents that don't need a shell can be detached — they survive tsx watch hot-reloads.
