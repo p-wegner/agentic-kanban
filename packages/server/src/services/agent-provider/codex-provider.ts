@@ -1,7 +1,7 @@
 import { parseAgentProviderStreamLine, parseAgentProviderStreamLineObserved } from "@agentic-kanban/shared/lib/agent-stream-parser";
 import type { AgentLaunchConfig, AgentProvider, FileSystem, ParsedStreamEvent, ProviderLaunchOptions } from "./types.js";
 import { PLAN_BEGIN_MARKER, PLAN_END_MARKER } from "./types.js";
-import { resolveCodexDirect, splitArgs, nodeFileSystem } from "./helpers.js";
+import { resolveCodexDirect, spliceAgentArgs, nodeFileSystem } from "./helpers.js";
 
 export class CodexProvider implements AgentProvider {
   readonly name = "codex";
@@ -85,9 +85,9 @@ export class CodexProvider implements AgentProvider {
       if (model) {
         args.push("--model", model);
       }
-      if (agentArgs) {
-        args.push(...splitArgs(agentArgs));
-      }
+      // Denied-flag stripping is applied centrally (see DENIED_ARGS); codex has no
+      // denied flags today, but routing through spliceAgentArgs keeps the guard uniform.
+      args.push(...spliceAgentArgs(this.name, agentArgs));
       if (providerSessionId) {
         args.push("resume", providerSessionId);
       }

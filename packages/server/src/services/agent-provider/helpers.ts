@@ -209,6 +209,82 @@ export function splitArgs(input: string): string[] {
   return args;
 }
 
+/**
+ * A flag that must never reach a provider's CLI, declared as data so adding
+ * another known-bad flag later is a one-line change (see {@link DENIED_ARGS}).
+ */
+export interface DeniedFlag {
+  /** The exact long-flag token to strip, e.g. "--approve". */
+  flag: string;
+  /**
+   * If true, a separate following value token (`--flag value`) is also stripped.
+   * Leave false/undefined for boolean/valueless flags so an unrelated trailing
+   * token is NOT swallowed.
+   */
+  takesValue?: boolean;
+  /** Human-readable reason surfaced in the strip warning. */
+  reason: string;
+}
+
+/**
+ * Per-provider denylist of flags that poison a launch. The knowledge that "Pi
+ * 0.73.1 rejects --approve" lived ONLY in comments/CLAUDE.md prose, so a stray
+ * `--approve` in `agentArgs` (from a pref, stale config, or an agent) silently
+ * broke the spawn. Encoding it here — applied in one place by every provider's
+ * arg assembly via {@link spliceAgentArgs} — turns that prose into an enforced,
+ * extensible invariant. (arch-review §2.2 / ticket #19.)
+ */
+export const DENIED_ARGS: Record<string, DeniedFlag[]> = {
+  pi: [
+    {
+      flag: "--approve",
+      // Pi's approve flag is a valueless boolean; do NOT strip a following token.
+      takesValue: false,
+      reason: "Pi 0.73.1 rejects --approve and the launch fails outright",
+    },
+  ],
+};
+
+/**
+ * Strip any {@link DENIED_ARGS} flags for `providerName` out of an already-split
+ * token list, loudly warning (flag + provider + why) for each removal. Handles
+ * `--flag`, `--flag=value`, and (for `takesValue` flags) `--flag value`.
+ */
+export function stripDeniedArgs(providerName: string, tokens: string[]): string[] {
+  const denied = DENIED_ARGS[providerName];
+  if (!denied || denied.length === 0) return tokens;
+
+  const result: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    const match = denied.find((d) => token === d.flag || token.startsWith(`${d.flag}=`));
+    if (!match) {
+      result.push(token);
+      continue;
+    }
+    console.warn(
+      `[agent] Stripped denied flag "${token}" from ${providerName} agentArgs: ${match.reason}`,
+    );
+    // Only skip the following token when the flag genuinely takes a separate
+    // value AND was passed in the `--flag value` (not `--flag=value`) form.
+    if (match.takesValue && token === match.flag && i + 1 < tokens.length) {
+      i++;
+    }
+  }
+  return result;
+}
+
+/**
+ * The single sanctioned entry point for turning a user-supplied `agentArgs`
+ * string into spawn tokens: split, then strip this provider's denied flags.
+ * Every provider adapter routes `agentArgs` through here so a poison flag can't
+ * be spliced in blind on any launch path.
+ */
+export function spliceAgentArgs(providerName: string, agentArgs: string | undefined): string[] {
+  if (!agentArgs) return [];
+  return stripDeniedArgs(providerName, splitArgs(agentArgs));
+}
+
 export function mapCopilotProfile(profileName: string): { flag: "--model" | "--agent"; value: string } | undefined {
   const agentPrefix = "agent:";
   const modelPrefix = "model:";

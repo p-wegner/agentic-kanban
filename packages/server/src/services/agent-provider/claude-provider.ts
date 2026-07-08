@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseAgentProviderStreamLine, parseAgentProviderStreamLineObserved } from "@agentic-kanban/shared/lib/agent-stream-parser";
 import type { AgentLaunchConfig, AgentProvider, FileSystem, ParsedStreamEvent, ProviderLaunchOptions } from "./types.js";
-import { getMcpConfigPath, buildSpawnEnv, splitArgs, nodeFileSystem, profileDefinesCustomEndpoint } from "./helpers.js";
+import { getMcpConfigPath, buildSpawnEnv, spliceAgentArgs, nodeFileSystem, profileDefinesCustomEndpoint } from "./helpers.js";
 
 export class ClaudeProvider implements AgentProvider {
   readonly name = "claude";
@@ -87,9 +87,9 @@ export class ClaudeProvider implements AgentProvider {
       } catch (err) {
         console.warn(`[agent] Failed to generate MCP config: ${String(err)}`);
       }
-      if (agentArgs) {
-        args.push(...splitArgs(agentArgs));
-      }
+      // Denied-flag stripping is applied centrally (see DENIED_ARGS); claude has no
+      // denied flags today, but routing through spliceAgentArgs keeps the guard uniform.
+      args.push(...spliceAgentArgs(this.name, agentArgs));
       if (effectiveProfileName) {
         const settingsPath = join(homedir(), ".claude", `settings_${effectiveProfileName}.json`);
         if (this.fs.existsSync(settingsPath)) {
