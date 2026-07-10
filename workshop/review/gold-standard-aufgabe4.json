@@ -4,7 +4,7 @@
   "diff_base": "master",
   "challenge": "Adversarial Finding",
   "description": "Frontend adds 'Export with AI Summary' feature. The backend endpoint it calls does not exist. Some findings require adversarial thinking or Playwright to discover.",
-  "playwright_required": ["F4", "F5"],
+  "playwright_required": ["F4", "F5", "F6", "F7"],
   "findings": [
     {
       "id": "F1",
@@ -35,6 +35,18 @@
       "severity": "high",
       "description": "The modal content div has max-h-48 (192px) combined with overflow-hidden (line 43). The modal's actual rendered height exceeds 192px, so the action buttons (Cancel and Export) are clipped and invisible to the user. The feature is completely unusable: the form is shown but cannot be submitted. A static reviewer cannot predict the rendered content height from the code alone; only a browser render (screenshot or isVisible() assertion in Playwright) reveals that the buttons are hidden.",
       "location": "packages/client/src/components/ExportEnrichedModal.tsx:43"
+    },
+    {
+      "id": "F6",
+      "severity": "high",
+      "description": "The h3 heading has the additional class export-modal-heading. In packages/client/src/app.css the rule .export-modal-heading { font-size: 1.5rem; line-height: 0.85; margin-bottom: 0; } overrides the Tailwind text-sm utility. The heading renders at 24px (not 14px) with a line-height of 0.85, causing its rendered ink to extend below its CSS layout box. With only mb-1 (4px) separating it from the description paragraph, the heading glyphs visually overlap the first line of the description text. A static reviewer sees text-sm font-semibold (looks correct) and export-modal-heading (no obvious meaning without checking all CSS files). Only a browser render or Playwright screenshot reveals the overlapping text.",
+      "location": "packages/client/src/components/ExportEnrichedModal.tsx:46"
+    },
+    {
+      "id": "F7",
+      "severity": "medium",
+      "description": "The Export button has the additional class export-action-btn. In packages/client/src/app.css the rule .export-action-btn { background-color: #d1d5db !important; color: #9ca3af !important; } overrides the bg-violet-600 Tailwind class with a light gray background and muted gray text. The button visually appears identical to a disabled control even when it is active and fully clickable. A static reviewer sees bg-violet-600 text-white (correct for a primary action button) and export-action-btn (sounds like a generic BEM utility class, no inline definition). Only a browser render reveals that the computed background-color is gray rather than violet.",
+      "location": "packages/client/src/components/ExportEnrichedModal.tsx:97"
     }
   ]
 }
