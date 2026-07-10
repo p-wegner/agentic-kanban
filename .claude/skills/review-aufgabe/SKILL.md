@@ -25,6 +25,11 @@ Einzige weitere Ausgaben: Abbruchmeldungen (fehlender Branch in TEIL 0, fehlende
 
 Der erste übergebene Parameter ist die AUFGABE_NR (z.B. `1` bei `/review-aufgabe 1`).
 
+Der zweite optionale Parameter ist LOCAL_BRANCH — ein lokaler Branch-Name (z.B. `aufgabe4-dev`
+bei `/review-aufgabe 4 aufgabe4-dev`). Wenn angegeben, wird dieser lokale Branch statt
+`origin/aufgabe{AUFGABE_NR}` für den Worktree verwendet. Alle anderen Schritte (Review,
+Benchmark) laufen identisch ab.
+
 Falls kein Parameter angegeben wurde, frage:
 > "Für welche Aufgabe soll das Review durchgeführt werden? (z.B. 1)"
 
@@ -36,14 +41,18 @@ Warte auf die Antwort und verwende sie als AUFGABE_NR.
 
 ## Schritt 0.1: Branch prüfen
 
-Die Aufgaben-Branches existieren nur als Remote-Branches. Prüfe:
+Bestimme den zu verwendenden Branch-Ref:
+- Wenn LOCAL_BRANCH angegeben: `BRANCH_REF = LOCAL_BRANCH`
+- Sonst: `BRANCH_REF = origin/aufgabe{AUFGABE_NR}`
+
+Prüfe ob der Branch-Ref existiert:
 
 ```bash
-git rev-parse --verify --quiet origin/aufgabe{AUFGABE_NR}
+git rev-parse --verify --quiet {BRANCH_REF}
 ```
 
 Wenn der Befehl nichts zurückgibt (Branch fehlt), gib aus:
-> "Branch origin/aufgabe{AUFGABE_NR} nicht gefunden. Verfügbar: $(git branch -r)"
+> "Branch {BRANCH_REF} nicht gefunden. Verfügbar: $(git branch -a)"
 Und beende.
 
 ---
@@ -72,7 +81,7 @@ git worktree remove "$WORKTREE_PATH" --force 2>/dev/null || true
 ## Schritt 1.3: Worktree anlegen
 
 ```bash
-git worktree add "$WORKTREE_PATH" origin/aufgabe{AUFGABE_NR}
+git worktree add "$WORKTREE_PATH" {BRANCH_REF}
 ```
 
 ## Schritt 1.4: Token-Budget vorbereiten
