@@ -14,6 +14,8 @@ import { priorityColors } from "../lib/issueCardColorMap.js";
 import { getActiveAgentState, type ActiveAgentState } from "../lib/sessionBadgeHelpers.js";
 import { deriveAgingBucket, deriveIssueCardActions } from "../lib/issueCardDisplay.js";
 import { HighlightedText, TodoProgress } from "./IssueBadges.js";
+import { Badge } from "./Badge.js";
+import { badgeDotClass, badgeToneClass } from "../lib/badgeTones.js";
 import { InlineTagEditor, PriorityDropdown } from "./BadgeEditors.js";
 import { IssueCardContextMenu } from "./IssueCardContextMenu.js";
 import { WorkspaceSummarySection } from "./WorkspaceSummarySection.js";
@@ -198,53 +200,55 @@ function IssueCardBody({
       )}
       <div className={`flex items-center gap-1.5 flex-wrap ${compact ? "mt-0.5" : "mt-1"}`}>
         {isPendingIssue && (
-          <span className="inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded bg-brand-100 text-brand-700 dark:bg-brand-900/50 dark:text-brand-300">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-brand-500 animate-pulse" />
+          <Badge tone="brand" dot>
             Creating issue
-          </span>
+          </Badge>
         )}
         {issue.isBlocked && (
-          <span className="inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">
-            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 16 16"><path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0 2 2v2.5a.5.5 0 0 0 1 0V9a2 2 0 0 0 2-2z"/></svg>
+          <Badge
+            tone="warning"
+            icon={<svg className="w-3 h-3 shrink-0" fill="currentColor" viewBox="0 0 16 16"><path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0 2 2v2.5a.5.5 0 0 0 1 0V9a2 2 0 0 0 2-2z"/></svg>}
+          >
             blocked
-          </span>
+          </Badge>
         )}
         {issue.isStale && (
-          <span
-            className="inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300"
+          <Badge
+            tone="neutral"
             title={`No activity for ${issue.staleDays} day${issue.staleDays === 1 ? "" : "s"}`}
+            icon={
+              <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            }
           >
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
             Stale
-          </span>
+          </Badge>
         )}
         {issue.columnAgeDays != null && issue.columnAgeDays > 0 && (
-          <span
-            className={`inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded ${
-              issue.isColumnStale
-                ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
-                : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"
-            }`}
+          <Badge
+            tone={issue.isColumnStale ? "warning" : "neutral"}
             title={`In this column for ${issue.columnAgeDays} day${issue.columnAgeDays === 1 ? "" : "s"}${issue.isColumnStale ? " — past threshold" : ""}`}
+            icon={
+              <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            }
           >
-            <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
             {issue.columnAgeDays}d
-          </span>
+          </Badge>
         )}
         {!issue.isBlocked && (issue as IssueWithStatus & { dependencyCount?: number }).dependencyCount ? (
-          <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-brand-50 text-brand-600 dark:bg-brand-900/40 dark:text-brand-400" title={`${(issue as IssueWithStatus & { dependencyCount?: number }).dependencyCount} dependencies`}>
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          <Badge
+            tone="brand"
+            title={`${(issue as IssueWithStatus & { dependencyCount?: number }).dependencyCount} dependencies`}
+            icon={<svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M5 12h14M12 5l7 7-7 7"/></svg>}
+          >
             {(issue as IssueWithStatus & { dependencyCount?: number }).dependencyCount}
-          </span>
+          </Badge>
         ) : null}
         {typeBadgeColor && (
-          <span className={`inline-block max-w-full truncate text-xs font-medium px-1.5 py-0.5 rounded capitalize ${typeBadgeColor}`}>
-            {issueType}
-          </span>
+          <Badge className={`capitalize ${typeBadgeColor}`}>{issueType}</Badge>
         )}
         {quickUpdate ? (
           <PriorityDropdown
@@ -253,16 +257,10 @@ function IssueCardBody({
           />
         ) : (
           priorityBadgeColor && (
-            <span className={`inline-block max-w-full truncate text-xs font-medium px-1.5 py-0.5 rounded capitalize ${priorityBadgeColor}`}>
-              {issue.priority}
-            </span>
+            <Badge className={`capitalize ${priorityBadgeColor}`}>{issue.priority}</Badge>
           )
         )}
-        {issue.estimate && (
-          <span className="inline-block text-xs font-medium px-1.5 py-0.5 rounded bg-teal-100 text-teal-700">
-            {issue.estimate}
-          </span>
-        )}
+        {issue.estimate && <Badge tone="accent">{issue.estimate}</Badge>}
         {issue.externalUrl && (
           <a
             href={issue.externalUrl}
@@ -270,7 +268,7 @@ function IssueCardBody({
             rel="noreferrer noopener"
             onClick={(e) => e.stopPropagation()}
             title={`Open in external tracker${issue.externalKey ? `: ${issue.externalKey}` : ""}`}
-            className="inline-flex items-center gap-0.5 max-w-full truncate text-xs font-medium px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 hover:bg-indigo-200 dark:bg-indigo-900/40 dark:text-indigo-300 dark:hover:bg-indigo-900/70"
+            className="inline-flex items-center gap-0.5 max-w-full truncate text-xs font-medium px-1.5 py-0.5 rounded-full bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-900/40 dark:text-sky-300 dark:hover:bg-sky-900/70"
           >
             <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4m-4-6l6-6m0 0v4m0-4h-4" />
@@ -282,19 +280,29 @@ function IssueCardBody({
           const overdue = new Date(issue.dueDate) < new Date(new Date().toDateString()) &&
             issue.statusName !== "Done" && issue.statusName !== "Cancelled";
           return overdue ? (
-            <span className="inline-flex items-center gap-0.5 text-xs font-medium px-1.5 py-0.5 rounded bg-red-100 text-red-600" title={`Overdue: ${new Date(issue.dueDate).toLocaleDateString('en-US')}`}>
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
+            <Badge
+              tone="danger"
+              title={`Overdue: ${new Date(issue.dueDate).toLocaleDateString('en-US')}`}
+              icon={
+                <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              }
+            >
               overdue
-            </span>
+            </Badge>
           ) : (
-            <span className="inline-flex items-center gap-0.5 text-xs font-medium px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400" title={`Due: ${new Date(issue.dueDate).toLocaleDateString('en-US')}`}>
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
+            <Badge
+              tone="neutral"
+              title={`Due: ${new Date(issue.dueDate).toLocaleDateString('en-US')}`}
+              icon={
+                <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+              }
+            >
               {new Date(issue.dueDate).toLocaleDateString('en-US', { month: "short", day: "numeric" })}
-            </span>
+            </Badge>
           );
         })()}
         {issue.checklist && issue.checklist.length > 0 && (() => {
@@ -304,11 +312,7 @@ function IssueCardBody({
           const pct = Math.round((done / total) * 100);
           return (
             <span
-              className={`inline-flex flex-col gap-0.5 text-xs font-medium px-1.5 py-0.5 rounded ${
-                allDone
-                  ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300"
-                  : "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"
-              }`}
+              className={`inline-flex flex-col gap-0.5 text-xs font-medium px-1.5 py-0.5 rounded-md ${badgeToneClass(allDone ? "success" : "neutral")}`}
               title={`Acceptance criteria: ${done}/${total} done`}
             >
               <span className="inline-flex items-center gap-1">
@@ -317,9 +321,9 @@ function IssueCardBody({
                 </svg>
                 {done}/{total}
               </span>
-              <span className="w-full h-1 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+              <span className="w-full h-1 rounded-full bg-black/10 dark:bg-white/15 overflow-hidden">
                 <span
-                  className={`block h-full rounded-full ${allDone ? "bg-green-500" : "bg-blue-500"}`}
+                  className={`block h-full rounded-full ${badgeDotClass(allDone ? "success" : "brand")}`}
                   style={{ width: `${pct}%` }}
                 />
               </span>
@@ -336,22 +340,23 @@ function IssueCardBody({
         ) : (
           tags?.map((tag) =>
             tag.name === "needs-visual-verification" ? (
-              <span
+              <Badge
                 key={tag.id}
-                className="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 rounded"
-                style={{ backgroundColor: "#F59E0B22", color: "#F59E0B" }}
+                tone="warning"
                 title="Needs visual verification"
+                icon={
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                }
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                </svg>
                 verify
-              </span>
+              </Badge>
             ) : (
               <span
                 key={tag.id}
-                className="inline-block max-w-full truncate text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
+                className={`inline-block max-w-full truncate rounded-full px-1.5 py-0.5 text-xs font-medium ${tag.color ? "" : badgeToneClass("neutral")}`}
                 style={tag.color ? { backgroundColor: tag.color + "22", color: tag.color } : undefined}
                 title={tag.name}
               >
@@ -362,21 +367,21 @@ function IssueCardBody({
         )}
         {!isPendingIssue && <IssueWorkLogBadge issueId={issue.id} />}
         {ws?.showdown && (
-          <span
-            className={`inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded ${
+          <Badge
+            tone={
               ws.showdown.status === "decided"
-                ? "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300"
+                ? "success"
                 : ws.showdown.doneCount === ws.showdown.total
-                ? "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300"
-                : "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300"
-            }`}
+                ? "warning"
+                : "info"
+            }
+            icon={<span aria-hidden="true">⚔️</span>}
             title={`Showdown: ${ws.showdown.doneCount}/${ws.showdown.total} done`}
           >
-            ⚔️
             {ws.showdown.status === "decided"
               ? "Decided"
               : `${ws.showdown.doneCount}/${ws.showdown.total} done`}
-          </span>
+          </Badge>
         )}
       </div>
       <WorkspaceSummarySection
@@ -442,7 +447,7 @@ function IssueCardActions({
       {showResume && (
         <button
           onClick={(e) => { e.stopPropagation(); onWorkspaceClick!(issue, ws?.main?.id); }}
-          className="flex-1 flex items-center justify-center gap-1 text-xs text-green-700 hover:text-white hover:bg-green-600 border border-green-200 hover:border-green-600 rounded px-2 py-1 transition-colors"
+          className="flex-1 flex items-center justify-center gap-1 text-xs text-green-700 dark:text-green-400 hover:text-white dark:hover:text-white hover:bg-green-600 border border-green-200 dark:border-green-800 hover:border-green-600 rounded px-2 py-1 transition-colors"
           title="Resume the active workspace"
         >
           <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
