@@ -39,7 +39,8 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
   // POST /api/projects
   router.post("/", async (c) => {
     const body = await parseJsonBody<{
-      repoPath: string;
+      repoPath?: string;
+      cloneUrl?: string;
       name?: string;
       description?: string;
       color?: string;
