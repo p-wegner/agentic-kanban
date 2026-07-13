@@ -28,12 +28,16 @@ export function resolveMcpServerInvocation(fs: FileSystem = nodeFileSystem): { c
   for (const candidate of [resolve(__dirname, "mcp.js"), resolve(__dirname, "../mcp.js")]) {
     if (fs.existsSync(candidate)) return { command: "node", args: [candidate] };
   }
-  if (fs.existsSync(MCP_SERVER_PATH)) {
-    return { command: "node", args: ["--import", TSX_URL, MCP_SERVER_PATH] };
+  // Dev-checkout fallback (tsx + TypeScript source) — the pre-bundle-fix behavior.
+  // Returned even when the source path is missing (matching the old unconditional
+  // behavior; providers embed this config without probing), but warn loudly so a
+  // broken install is diagnosable instead of agents silently lacking MCP tools.
+  if (!fs.existsSync(MCP_SERVER_PATH)) {
+    console.warn(
+      `[agent] agentic-kanban MCP server not found — probed bundled paths ${resolve(__dirname, "mcp.js")}, ${resolve(__dirname, "../mcp.js")} and source path ${MCP_SERVER_PATH}. Agents may lack kanban MCP tools.`,
+    );
   }
-  throw new Error(
-    `agentic-kanban MCP server not found. Probed bundled paths ${resolve(__dirname, "mcp.js")} and ${resolve(__dirname, "../mcp.js")}, and source path ${MCP_SERVER_PATH}.`,
-  );
+  return { command: "node", args: ["--import", TSX_URL, MCP_SERVER_PATH] };
 }
 
 let claudeMcpConfigPath: string | null = null;

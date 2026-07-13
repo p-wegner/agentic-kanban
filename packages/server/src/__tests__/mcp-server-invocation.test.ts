@@ -47,7 +47,12 @@ describe("resolveMcpServerInvocation — bundled vs dev checkout", () => {
     expect(invocation.args[2].replace(/\\/g, "/")).toMatch(/mcp-server\/src\/index\.ts$/);
   });
 
-  it("fails loudly, naming all probed paths, when neither bundle nor source exists", () => {
-    expect(() => resolveMcpServerInvocation(fsWith())).toThrow(/MCP server not found.*mcp\.js/s);
+  it("still returns the source invocation when nothing exists (providers embed it unconditionally), warning loudly", () => {
+    // Pre-fix behavior preserved: an injected/fake FS with no matches (unit tests,
+    // broken installs) must not throw — the Copilot provider embeds this config
+    // without probing, and a throw would silently strip its --additional-mcp-config.
+    const invocation = resolveMcpServerInvocation(fsWith());
+    expect(invocation.command).toBe("node");
+    expect(invocation.args[0]).toBe("--import");
   });
 });
