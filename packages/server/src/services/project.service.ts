@@ -15,6 +15,7 @@ import { getProjectById, getProjectByRepoPath, getAllProjects, insertProject, de
 import { getProjectsBasePath, updateProjectFields, clearActiveProjectPreference, getProjectWorkspacesWithIssue, getWorkspaceWorkingDirById, getProjectStatusIdsAndNames, getBoardIssueRows, getProjectStatusesOrdered, getBoardIssues, getPreferenceValue, getGraphIssues, getCrossProjectIssues, getActiveWorkspaceCounts, getBoardSummaryRows } from "../repositories/project-service.repository.js";
 import { generateSetupScript as generateSetupScriptAI, generateTeardownScript as generateTeardownScriptAI, generateVerifyScript as generateVerifyScriptAI } from "./project-setup.service.js";
 import { populateStackProfile, populateVerifyScript, detectStackProfile } from "./stack-profile.service.js";
+import { cloneRepo } from "./repo-clone.service.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
 import type { WorkspaceSummaryCache } from "./workspace-summary-cache.service.js";
 import type { WorkspaceSummary } from "./workspace-summary.service.js";
@@ -125,7 +126,8 @@ export function createProjectService(deps: { database: Database; workspaceSummar
   const boardWarmupTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   async function registerProject(body: {
-    repoPath: string;
+    repoPath?: string;
+    cloneUrl?: string;
     name?: string;
     description?: string;
     color?: string;
@@ -133,13 +135,25 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     generateReadme?: boolean;
     exportSkillsOnRegistration?: boolean;
   }) {
-    if (!body.repoPath) {
-      throw new ProjectError("repoPath is required", "BAD_REQUEST");
+    if (!body.repoPath && !body.cloneUrl) {
+      throw new ProjectError("repoPath or cloneUrl is required", "BAD_REQUEST");
+    }
+    if (body.repoPath && body.cloneUrl) {
+      throw new ProjectError("Provide either repoPath or cloneUrl, not both", "BAD_REQUEST");
+    }
+
+    let localPath = body.repoPath;
+    if (body.cloneUrl) {
+      try {
+        localPath = await cloneRepo(body.cloneUrl, { name: body.name });
+      } catch (err) {
+        throw new ProjectError(`Clone failed: ${err instanceof Error ? err.message : String(err)}`, "BAD_REQUEST");
+      }
     }
 
     let repoInfo;
     try {
-      repoInfo = await detectRepoInfo(body.repoPath);
+      repoInfo = await detectRepoInfo(localPath!);
     } catch (err) {
       throw new ProjectError(`Invalid repo: ${err instanceof Error ? err.message : String(err)}`, "BAD_REQUEST");
     }
