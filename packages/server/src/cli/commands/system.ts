@@ -187,7 +187,7 @@ Network access example (HTTP/2 over TLS):
 
         if (options.open) {
           const { execFile } = await import("node:child_process");
-          const cmd = process.platform === "win32" ? "cmd" : "open";
+          const cmd = process.platform === "win32" ? "cmd" : process.platform === "darwin" ? "open" : "xdg-open";
           const args = process.platform === "win32" ? ["/c", "start", `http://${host}:${port}`] : [`http://${host}:${port}`];
           execFile(cmd, args, (err) => {
             if (err) console.warn("  Could not open browser:", err.message);
