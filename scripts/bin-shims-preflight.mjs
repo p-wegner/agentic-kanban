@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSyncPnpm } from "./pnpm-exec.mjs";
 
 // Shim specs: base name + which package subdirectory contains the .bin folder.
 // NOTE: only check the PACKAGE-LOCAL shims the dev servers actually invoke. `tsx` and `vite`
@@ -87,11 +87,9 @@ export function binShimsPreflight(rootDir, {
 }
 
 function _defaultRunPnpmInstallForce(rootDir) {
-  const result = spawnSync("pnpm", ["install", "--force"], {
+  const result = spawnSyncPnpm(["install", "--force"], {
     cwd: rootDir,
     stdio: "inherit",
-    shell: false,
-    windowsHide: true,
   });
   if (result.status !== 0) {
     console.error(

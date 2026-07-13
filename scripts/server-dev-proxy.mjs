@@ -1,6 +1,8 @@
 
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { createServer as createHttpServer, request as httpRequest } from "node:http";
+import { resolvePnpmInvocation } from "./pnpm-exec.mjs";
 import { createServer as createNetServer, connect as netConnect } from "node:net";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -188,18 +190,30 @@ function resolveServerPackageDir() {
   return resolve(scriptDir, "../packages/server");
 }
 
+function resolveTsxEntry(serverDir) {
+  const candidates = [
+    resolve(serverDir, "node_modules/tsx/dist/cli.mjs"),
+    resolve(serverDir, "../../node_modules/tsx/dist/cli.mjs"),
+  ];
+  return candidates.find((p) => existsSync(p));
+}
+
 export function spawnWatchedBackend({ serverDir, publicPort, internalPort, env = process.env }) {
-  return spawn(
-    "pnpm",
-    ["exec", "tsx", "watch", "--conditions", "development", "src/index.ts"],
-    {
-      cwd: serverDir,
-      env: buildBackendEnv(env, publicPort, internalPort),
-      stdio: "inherit",
-      shell: false,
-      windowsHide: true,
-    },
-  );
+  const tsxArgs = ["watch", "--conditions", "development", "src/index.ts"];
+  // Invoke tsx's JS entry through the current Node binary — no PATH/shim lookup,
+  // so this works regardless of how (or whether) pnpm is on PATH. Fall back to
+  // pnpm exec only if the local install is missing.
+  const tsxEntry = resolveTsxEntry(serverDir);
+  const inv = tsxEntry
+    ? { cmd: process.execPath, args: [tsxEntry, ...tsxArgs], shell: false }
+    : resolvePnpmInvocation(["exec", "tsx", ...tsxArgs]);
+  return spawn(inv.cmd, inv.args, {
+    cwd: serverDir,
+    env: buildBackendEnv(env, publicPort, internalPort),
+    stdio: "inherit",
+    shell: inv.shell,
+    windowsHide: true,
+  });
 }
 
 async function main() {

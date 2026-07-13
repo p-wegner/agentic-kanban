@@ -14,9 +14,6 @@ importers:
       '@eslint/js':
         specifier: ^9.18.0
         version: 9.39.4
-      '@rollup/rollup-win32-x64-msvc':
-        specifier: ^4.60.4
-        version: 4.60.4
       concurrently:
         specifier: ^9.1.2
         version: 9.2.1
@@ -219,6 +216,9 @@ importers:
 
   packages/shared:
     dependencies:
+      '@libsql/client':
+        specifier: 0.14.0
+        version: 0.14.0
       drizzle-orm:
         specifier: 0.45.2
         version: 0.45.2(@libsql/client@0.14.0)
@@ -1236,11 +1236,6 @@ packages:
 
   '@rollup/rollup-win32-x64-msvc@4.60.2':
     resolution: {integrity: sha512-Nd/SgG27WoA9e+/TdK74KnHz852TLa94ovOYySo/yMPuTmpckK/jIF2jSwS3g7ELSKXK13/cVdmg1Z/DaCWKxA==}
-    cpu: [x64]
-    os: [win32]
-
-  '@rollup/rollup-win32-x64-msvc@4.60.4':
-    resolution: {integrity: sha512-QVTUovf40zgTqlFVrKA1uXMVvU2QWEFWfAH8Wdc48IxLvrJMQVMBRjuQyUpzZCDkakImib9eVazbWlC6ksWtJw==}
     cpu: [x64]
     os: [win32]
 
@@ -4539,8 +4534,6 @@ snapshots:
 
   '@rollup/rollup-win32-x64-msvc@4.60.2':
     optional: true
-
-  '@rollup/rollup-win32-x64-msvc@4.60.4': {}
 
   '@stablelib/base64@1.0.1': {}
 

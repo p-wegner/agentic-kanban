@@ -11,7 +11,8 @@
  * Worktree (other): server 3001+hash, client 5173+hash
  */
 
-import { execFileSync, execSync, spawn, spawnSync } from "node:child_process";
+import { execFileSync, execSync, spawn } from "node:child_process";
+import { resolvePnpmInvocation, spawnSyncPnpm } from "./pnpm-exec.mjs";
 import { createServer } from "node:net";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -76,6 +77,23 @@ function getProcessCommandLine(pid) {
   }
 }
 
+function getUnixListenerPids(port) {
+  // -sTCP:LISTEN limits to actual listeners; omitting it would also return
+  // processes with established connections to the port (e.g. the Vite client).
+  try {
+    const out = execSync(`lsof -ti :${port} -sTCP:LISTEN`, { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
+    return [...new Set(out.split("\n").map((p) => p.trim()).filter(Boolean))];
+  } catch {
+    // lsof missing (minimal Linux images) or no matches — fall back to iproute2's ss.
+  }
+  try {
+    const out = execSync(`ss -ltnpH "sport = :${port}"`, { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
+    return [...new Set([...out.matchAll(/pid=(\d+)/g)].map((m) => m[1]))];
+  } catch {
+    return [];
+  }
+}
+
 async function freePort(port, label) {
   if (await isPortFree(port)) return;
   writeProcessAudit({ action: "dev-port-cleanup-start", port, label });
@@ -111,10 +129,7 @@ async function freePort(port, label) {
         }
       }
     } else {
-      // -sTCP:LISTEN limits to actual listeners; omitting it would also return
-      // processes with established connections to the port (e.g. the Vite client).
-      const out = execSync(`lsof -ti :${port} -sTCP:LISTEN`, { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
-      const pids = [...new Set(out.split("\n").map((p) => p.trim()).filter(Boolean))];
+      const pids = getUnixListenerPids(port);
       for (const pid of pids) {
         const decision = planPortOwnerKill({
           pid,
@@ -157,11 +172,9 @@ function installUpdatedDependencies(label) {
     `[dev] ${label} exited after workspace dependency manifests changed. ` +
     "Running `pnpm install --frozen-lockfile` before restarting...",
   );
-  const result = spawnSync("pnpm", ["install", "--frozen-lockfile"], {
+  const result = spawnSyncPnpm(["install", "--frozen-lockfile"], {
     cwd: process.cwd(),
     stdio: "inherit",
-    shell: false,
-    windowsHide: true,
   });
   if (result.status === 0) {
     dependencyRecovery.markRecovered(snapshotDependencyManifests(process.cwd()));
@@ -181,10 +194,9 @@ function rebuildSharedDist(label) {
     `[dev] ${label} crashed with ERR_MODULE_NOT_FOUND referencing packages/shared/dist. ` +
     "Running `pnpm --filter @agentic-kanban/shared build` before restarting...",
   );
-  const result = spawnSync(
-    "pnpm",
+  const result = spawnSyncPnpm(
     ["--filter", "@agentic-kanban/shared", "build"],
-    { cwd: process.cwd(), stdio: "inherit", shell: false, windowsHide: true },
+    { cwd: process.cwd(), stdio: "inherit" },
   );
   if (result.status === 0) {
     sharedDistRecovery.markRebuilt();
@@ -309,18 +321,20 @@ async function main() {
   await freePort(serverPort, "server");
   await freePort(clientPort, "client");
 
+  const serverInv = resolvePnpmInvocation(["--filter", "agentic-kanban", "dev"]);
   const serverProc = spawnProcess(
     "server",
-    "pnpm",
-    ["--filter", "agentic-kanban", "dev"],
-    { shell: false }
+    serverInv.cmd,
+    serverInv.args,
+    { shell: serverInv.shell, windowsHide: true }
   );
 
+  const clientInv = resolvePnpmInvocation(["--filter", "client", "dev"]);
   const clientProc = spawnProcess(
     "client",
-    "pnpm",
-    ["--filter", "client", "dev"],
-    { shell: false }
+    clientInv.cmd,
+    clientInv.args,
+    { shell: clientInv.shell, windowsHide: true }
   );
 
   function shutdown() {

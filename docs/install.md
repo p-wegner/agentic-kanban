@@ -4,7 +4,7 @@
 
 | Requirement | Version | Install |
 |-------------|---------|---------|
-| [Node.js](https://nodejs.org/) | 20 LTS | `winget install OpenJS.NodeJS.LTS` |
+| [Node.js](https://nodejs.org/) | 20.11+ (LTS 20/22) | `winget install OpenJS.NodeJS.LTS` |
 | [pnpm](https://pnpm.io/) | 10.12.1 | `corepack enable && corepack prepare pnpm@10.12.1 --activate` |
 | [Git](https://git-scm.com/) | 2.20+ | `winget install Git.Git` |
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | latest | `npm install -g @anthropic-ai/claude-code` |
@@ -87,11 +87,9 @@ Work through these in order if the app won't start on a fresh clone.
 
 ### 1. `spawn pnpm ENOENT`
 
-`scripts/dev.mjs` spawns `pnpm` with `{ shell: false }`, which needs a real `.exe` on PATH. `npm i -g pnpm` installs only `pnpm.ps1`, which `spawn` can't find.
+**Status: fixed.** The launcher/preflight scripts no longer spawn a bare `pnpm` binary. They re-invoke pnpm through `process.env.npm_execpath` (pnpm's own JS entry, set whenever a script runs under `pnpm run`), with a shell fallback on Windows — see `scripts/pnpm-exec.mjs`. Any pnpm install method (npm -g, corepack, Scoop, standalone) now works; no `pnpm.exe` needed.
 
-**Check:** `(Get-Command pnpm).Source` — must end in `.exe` or `.cmd`, not `.ps1`.
-
-**Fix:** `scoop install pnpm` or `corepack enable && corepack prepare pnpm@10.12.1 --activate`.
+If you still see it, pnpm itself is missing from PATH entirely: `corepack enable && corepack prepare pnpm@10.12.1 --activate` (or `scoop install pnpm`).
 
 ### 2. Client: `Failed to resolve entry for "@agentic-kanban/shared"`
 

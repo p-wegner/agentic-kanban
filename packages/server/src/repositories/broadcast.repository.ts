@@ -39,10 +39,15 @@ export function updateSessionStats(
 export function insertSessionMessages(
   sessionId: string,
   rows: Array<{ type: string; data: string | null; exitCode: string | null }>,
+  provider: string | null = null,
   database: Database = writeDb,
 ) {
+  // `provider` (arch-review §2.4) records which agent produced these rows so
+  // offline summary parsing can route to the right per-provider parser instead
+  // of sniffing per-event. Nullable — legacy rows lack it and fall back to
+  // detect-provider.
   return database.insert(sessionMessages).values(
-    rows.map((r) => ({ sessionId, ...r, data: r.data == null ? null : sanitizeUtf8(r.data) })),
+    rows.map((r) => ({ sessionId, ...r, provider, data: r.data == null ? null : sanitizeUtf8(r.data) })),
   );
 }
 

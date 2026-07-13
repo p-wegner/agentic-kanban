@@ -20,6 +20,7 @@ import { setWorkspaceStatus } from "../repositories/workspace-status.repository.
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
 import { recordDriveObstacle } from "../services/drive-obstacles.service.js";
 import { PREF_DONE_UNMERGED_SCANNER_ENABLED } from "../constants/preference-keys.js";
+import { resolveMergeGate, gateSkipExplicit } from "../services/pre-merge-gate.service.js";
 
 /** Issue status names that count as "terminal Done" — these are the ones we scan. */
 const DONE_STATUS_NAMES = ["Done", "AI Reviewed"];
@@ -357,6 +358,20 @@ export async function scanDoneUnmergedWorkspaces(
 
     // All guards passed: ahead>=1, behind<=limit, no conflicts — attempt auto-merge.
     attemptedWorkspaceIds.add(c.wsId);
+    // Merge-gate DECISION (arch-review §1.2): this recovery path forward-merges a branch whose
+    // issue is ALREADY Done, under strict clean/ahead-only/no-conflict/≤20-behind guards. The
+    // verify/smoke pre-merge quality gate does NOT apply to recovering already-approved work — so
+    // route that choice through the SAME single gate owner as an EXPLICIT, auditable skip rather
+    // than an accidental no-gate. (skip-explicit is a pure decision; it runs no build.)
+    const gateDecision = await resolveMergeGate({
+      token: gateSkipExplicit(
+        "done-unmerged recovery: forward-only merge of a clean, ahead-only, conflict-free branch whose issue is already Done — the pre-merge quality gate does not apply to recovering already-approved work",
+      ),
+      workspace: { id: c.wsId, workingDir: c.workingDir },
+      projectId: c.projectId,
+      database,
+    });
+    console.log(`[done-unmerged-scanner] merge-gate decision for workspace ${c.wsId}: ${gateDecision.decision} — ${gateDecision.message}`);
     // Narrow to locals: the top-of-function guard doesn't survive into the closure below.
     const repoPath = c.repoPath;
     const branch = c.branch;

@@ -269,6 +269,16 @@ export function createButlerRoute(
       const strategyRaw = prefMap.get(`board_strategy_${projectId}`);
       if (strategyRaw) {
         try {
+          // Single parser (arch-review §3.3): `parseStrategyBullseyeConfig` now
+          // normalizes the blob through the SAME shared `normalizeProviderPolicies`
+          // + `selectPolicyByPriority` the MCP `start_workspace` door
+          // (`resolveProviderProfileFromPrefs`) uses, so the butler and MCP agree on
+          // the provider for a given blob. Live-quota gating is deliberately NOT
+          // applied here: this selects the provider for the ONE warm butler assistant
+          // session (not a throughput of builder launches), so quota-headroom gating —
+          // whose purpose is keeping fill/throttle BUILDER launches within a rate-limit
+          // window — does not apply. The quota-aware door is the builder launch
+          // (`resolveStrategyProviderSelection`).
           const strategyConfig = parseStrategyBullseyeConfig(strategyRaw);
           const selected = selectProviderFromStrategy(strategyConfig);
           if (selected) {

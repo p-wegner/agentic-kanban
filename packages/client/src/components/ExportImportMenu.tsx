@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ImportIssuesModal } from "./ImportIssuesModal.js";
+import { showToast } from "./Toast.js";
+import { apiPost } from "../lib/api.js";
 
 interface ExportImportMenuProps {
   projectId: string | null;
@@ -8,7 +10,9 @@ interface ExportImportMenuProps {
 export function ExportImportMenu({ projectId }: ExportImportMenuProps) {
   const [open, setOpen] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [importingSnapshot, setImportingSnapshot] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const snapshotInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -40,6 +44,46 @@ export function ExportImportMenu({ projectId }: ExportImportMenuProps) {
   function handleImportClick() {
     setOpen(false);
     setShowImportModal(true);
+  }
+
+  function handleExportSnapshot() {
+    if (!projectId) return;
+    setOpen(false);
+    const anchor = document.createElement("a");
+    anchor.href = `/api/projects/${projectId}/backlog/export`;
+    anchor.download = "backlog-snapshot.json";
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+  }
+
+  async function handleSnapshotFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file
+    if (!file || !projectId) return;
+    setImportingSnapshot(true);
+    try {
+      let snapshot: unknown;
+      try {
+        snapshot = JSON.parse(await file.text());
+      } catch {
+        showToast("Import failed: file is not valid JSON", "error");
+        return;
+      }
+      const res = await apiPost<{ createdIssues: number; createdDependencies: number }>(
+        `/api/projects/${projectId}/backlog/import`,
+        snapshot,
+      );
+      const deps = res.createdDependencies;
+      showToast(
+        `Imported ${res.createdIssues} issue${res.createdIssues === 1 ? "" : "s"}${deps ? ` and ${deps} dependencies` : ""}`,
+        "success",
+      );
+    } catch (err) {
+      showToast(`Import failed: ${err instanceof Error ? err.message : String(err)}`, "error");
+    } finally {
+      setImportingSnapshot(false);
+    }
   }
 
   return (
@@ -89,6 +133,18 @@ export function ExportImportMenu({ projectId }: ExportImportMenuProps) {
               </svg>
               Download as CSV
             </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={handleExportSnapshot}
+              title="Lossless snapshot (issues, statuses, tags, milestones, dependencies) for moving a project between devices"
+              className="w-full text-left px-2.5 py-1.5 text-xs rounded hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-900 dark:text-gray-100 flex items-center gap-2"
+            >
+              <svg className="w-3 h-3 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+              </svg>
+              Full backlog snapshot
+            </button>
             <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
             <p className="px-2.5 pt-0.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
               Import
@@ -104,9 +160,33 @@ export function ExportImportMenu({ projectId }: ExportImportMenuProps) {
               </svg>
               Import issues…
             </button>
+            <button
+              type="button"
+              role="menuitem"
+              disabled={importingSnapshot}
+              onClick={() => {
+                setOpen(false);
+                snapshotInputRef.current?.click();
+              }}
+              title="Import a full backlog snapshot exported from another device"
+              className="w-full text-left px-2.5 py-1.5 text-xs rounded hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-900 dark:text-gray-100 flex items-center gap-2 disabled:opacity-50"
+            >
+              <svg className="w-3 h-3 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+              </svg>
+              {importingSnapshot ? "Importing snapshot…" : "Import backlog snapshot…"}
+            </button>
           </div>
         )}
       </div>
+
+      <input
+        ref={snapshotInputRef}
+        type="file"
+        accept="application/json,.json"
+        className="hidden"
+        onChange={handleSnapshotFile}
+      />
 
       {showImportModal && projectId && (
         <ImportIssuesModal projectId={projectId} onClose={() => setShowImportModal(false)} />

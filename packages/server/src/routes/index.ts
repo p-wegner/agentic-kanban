@@ -1,4 +1,7 @@
 import { createProjectsRoute } from "./projects.js";
+import { createProjectAnalyticsRoute } from "./project-analytics.js";
+import { createProjectHealthRoute } from "./project-health.js";
+import { createProjectStackProfileRoute } from "./project-stack-profile.js";
 import { createProjectScriptsRoute } from "./project-scripts.js";
 import { createDriveRoute } from "./drive.js";
 import { createIssuesRoute } from "./issues.js";
@@ -26,6 +29,7 @@ import { createCodemodsRoute } from "./codemods.js";
 import { createBoardMonitorRoute } from "./board-monitor.js";
 import { createRunbooksRoute } from "./runbooks.js";
 import { createIssueExportImportRoute } from "./issue-export-import.js";
+import { createBacklogSnapshotRoute } from "./backlog-snapshot.js";
 import { createConfigExportImportRoute } from "./config-export-import.js";
 import { createMetricsRoute } from "./metrics.js";
 import { createHealthRoute } from "./health.js";
@@ -61,6 +65,11 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   };
 
   routes.route("/projects", createProjectsRoute(database, { ...options, getSessionManager }));
+  // Non-CRUD project feature groups, extracted from the projects.ts grab-bag
+  // (arch-review §1.5). Mounted at the SAME `/projects` prefix so paths are unchanged.
+  routes.route("/projects", createProjectAnalyticsRoute(database, { ...options, getSessionManager }));
+  routes.route("/projects", createProjectHealthRoute(database));
+  routes.route("/projects", createProjectStackProfileRoute(database));
   routes.route("/projects", createProjectScriptsRoute(database));
   routes.route("/projects", createDriveRoute(database));
   routes.route("/projects", createButlerRoute(database, getSessionManager, options));
@@ -82,6 +91,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/projects", createBoardMonitorRoute(database));
   routes.route("/projects", createRunbooksRoute(database));
   routes.route("/projects", createIssueExportImportRoute(database, options));
+  routes.route("/projects", createBacklogSnapshotRoute(database, { boardEvents: options?.boardEvents }));
   routes.route("/projects", createConfigExportImportRoute(database));
   routes.route("/projects", createMilestonesRoute(database));
   routes.route("/projects", createDrivesRoute(database));

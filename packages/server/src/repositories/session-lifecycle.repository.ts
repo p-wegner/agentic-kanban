@@ -137,7 +137,9 @@ export async function updateSessionStoppedNoStats(
 export async function updateSessionStoppedWithStats(
   sessionId: string,
   endedAt: string,
-  exitCode: string,
+  // `null` when the real exit code was never observed (external/reattach PID poll) — stored as
+  // SQL NULL, never fabricated as "0", so an indeterminate exit is not mistaken for a clean one.
+  exitCode: string | null,
   stats: string,
   database: Database = db,
 ): Promise<void> {
@@ -212,7 +214,16 @@ export async function getSessionStatus(
   database: Database = db,
 ) {
   const status = await getSessionStatusCanonical(sessionId, database);
-  return status === null ? null : { status };
+  if (status === null) return null;
+  // startedAt/executor are needed by the external-exit classifier (durationMs for the
+  // launch-failure window + provider for usage-limit detection); one query keeps the
+  // repository surface flat (no extra function — the god-module gate is at its ceiling).
+  const rows = await database
+    .select({ startedAt: sessions.startedAt, executor: sessions.executor })
+    .from(sessions)
+    .where(eq(sessions.id, sessionId))
+    .limit(1);
+  return { status, startedAt: rows[0]?.startedAt ?? null, executor: rows[0]?.executor ?? null };
 }
 
 export async function getSessionWorkspaceId(

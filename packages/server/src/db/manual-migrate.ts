@@ -53,6 +53,155 @@ function stmtSnippet(stmt: string): string {
 }
 
 /**
+ * Does this migration toggle `PRAGMA foreign_keys`? Such migrations MUST run
+ * outside a transaction: SQLite documents `PRAGMA foreign_keys` as a NO-OP while
+ * a transaction is open, so wrapping them in `client.transaction("write")` (as
+ * every other migration is) silently ignores the OFF/ON toggle and runs the whole
+ * file under the connection's ambient FK state. The FK-off "table rebuild" pattern
+ * (0010/0039/0096: create `_new`, copy, DROP the old table, rename) then aborts on
+ * any populated DB where FK enforcement is ON — 0039 drops `projects`, the parent
+ * of nearly every table. Running these statement-by-statement in autocommit makes
+ * the pragma actually take effect. (arch-review 2026-07-07 §3.1)
+ */
+function togglesForeignKeys(statements: string[]): boolean {
+  return statements.some((s) => /\bPRAGMA\s+foreign_keys\b/i.test(s));
+}
+
+/**
+ * Execute one migration statement against `exec`, applying two tolerances shared
+ * by both the transactional and the outside-transaction runners:
+ *  - the spurious libsql SQLITE_OK "not an error" (always tolerated), and
+ *  - the legacy "duplicate column"/"already exists" idempotency shim, scoped to
+ *    migrations at or below LEGACY_IDEMPOTENCY_CUTOFF_IDX and never silent.
+ * Rethrows anything else so the caller can roll back / abort.
+ */
+async function runMigrationStatement(
+  exec: (stmt: string) => Promise<unknown>,
+  stmt: string,
+  entry: JournalEntry,
+): Promise<void> {
+  try {
+    await exec(stmt);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = (err as { code?: unknown } | null | undefined)?.code;
+    // Ignore spurious SQLITE_OK "not an error" from libsql (client bug,
+    // not a migration-state issue — always tolerated).
+    if (code === "SQLITE_OK" || message.includes("not an error")) {
+      return;
+    }
+    // Legacy idempotency shim: pre-tracking DBs may be part-applied, so
+    // re-running their DDL hits "duplicate column"/"already exists".
+    // Only tolerated below the cutoff, and never silently.
+    if (
+      entry.idx <= LEGACY_IDEMPOTENCY_CUTOFF_IDX &&
+      (message.includes("duplicate column name") || message.includes("already exists"))
+    ) {
+      console.warn(
+        `[migrate] idempotency shim fired for legacy migration ${entry.tag}: tolerating "${message}" ` +
+        `(statement: ${stmtSnippet(stmt)}) — pre-#954 DBs may be part-applied; a real failure here would be masked`,
+      );
+      return;
+    }
+    throw err;
+  }
+}
+
+/** Read the connection's current `PRAGMA foreign_keys` value (0/1), or null if unknown. */
+async function readForeignKeysState(client: Client): Promise<boolean | null> {
+  try {
+    const res = await client.execute("PRAGMA foreign_keys");
+    const raw = (res.rows[0] as { foreign_keys?: unknown } | undefined)?.foreign_keys
+      ?? (res.rows[0] ? Object.values(res.rows[0])[0] : undefined);
+    if (raw === undefined || raw === null) return null;
+    return Number(raw) === 1;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Apply a migration that toggles `PRAGMA foreign_keys` OUTSIDE a transaction so
+ * the pragma actually takes effect. File-level atomicity is not available here —
+ * that is inherent to the FK-off table-rebuild pattern (the pragma cannot live
+ * inside a tx) — but the connection's prior FK-enforcement state is captured and
+ * restored afterward (success AND failure) so a mid-migration abort can never
+ * leave FK enforcement silently off for the rest of the process.
+ */
+async function applyMigrationOutsideTransaction(
+  client: Client,
+  entry: JournalEntry,
+  statements: string[],
+): Promise<void> {
+  const priorForeignKeys = await readForeignKeysState(client);
+  let failingStmt = "";
+  try {
+    for (const stmt of statements) {
+      failingStmt = stmt;
+      await runMigrationStatement((s) => client.execute(s), stmt, entry);
+    }
+    await client.execute({
+      sql: "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)",
+      args: [entry.tag, entry.when],
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(
+      `[migrate] Migration ${entry.tag} FAILED (ran outside a transaction — FK-toggling migration). ` +
+      `Failing statement: ${stmtSnippet(failingStmt)}. Partial statements are NOT rolled back; aborting — ` +
+      `later migrations were NOT attempted.`,
+    );
+    throw new Error(`Migration ${entry.tag} failed: ${message}`, { cause: err });
+  } finally {
+    // Restore the connection's baseline FK-enforcement state regardless of where
+    // the migration's own OFF/ON toggles left it (or whether it aborted early).
+    if (priorForeignKeys !== null) {
+      try {
+        await client.execute(`PRAGMA foreign_keys=${priorForeignKeys ? "ON" : "OFF"}`);
+      } catch { /* best-effort restore */ }
+    }
+  }
+}
+
+/**
+ * Apply a normal migration inside ONE write transaction: its statements and the
+ * `__drizzle_migrations` bookkeeping row commit together, or the whole file rolls
+ * back and the run aborts (later migrations are never attempted).
+ */
+async function applyMigrationInTransaction(
+  client: Client,
+  entry: JournalEntry,
+  statements: string[],
+): Promise<void> {
+  const tx = await client.transaction("write");
+  let failingStmt = "";
+  try {
+    for (const stmt of statements) {
+      failingStmt = stmt;
+      await runMigrationStatement((s) => tx.execute(s), stmt, entry);
+    }
+    // Record migration as applied (use tag as hash to match drizzle-kit format)
+    await tx.execute({
+      sql: "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)",
+      args: [entry.tag, entry.when],
+    });
+    await tx.commit();
+  } catch (err: unknown) {
+    try {
+      await tx.rollback();
+    } catch { /* transaction already closed */ }
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(
+      `[migrate] Migration ${entry.tag} FAILED and was rolled back. ` +
+      `Failing statement: ${stmtSnippet(failingStmt)}. Aborting — later migrations were NOT attempted.`,
+    );
+    throw new Error(`Migration ${entry.tag} failed: ${message}`, { cause: err });
+  } finally {
+    tx.close();
+  }
+}
+
+/**
  * Apply migrations manually using the raw libsql client.
  *
  * Works around a libsql@0.4.7 + Node.js 26 bug where CREATE TABLE IF NOT EXISTS
@@ -127,58 +276,13 @@ export async function applyMigrations(client: Client, options?: { folder?: strin
       ? sql.split("--> statement-breakpoint").map(s => s.trim()).filter(Boolean)
       : [sql.trim()];
 
-    // One transaction per migration file: DDL/data statements and the tracking
-    // row commit atomically, or the whole file rolls back.
-    const tx = await client.transaction("write");
-    let failingStmt = "";
-    try {
-      for (const stmt of statements) {
-        failingStmt = stmt;
-        try {
-          await tx.execute(stmt);
-        } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : String(err);
-          const code = (err as { code?: unknown } | null | undefined)?.code;
-          // Ignore spurious SQLITE_OK "not an error" from libsql (client bug,
-          // not a migration-state issue — always tolerated).
-          if (code === "SQLITE_OK" || message.includes("not an error")) {
-            continue;
-          }
-          // Legacy idempotency shim: pre-tracking DBs may be part-applied, so
-          // re-running their DDL hits "duplicate column"/"already exists".
-          // Only tolerated below the cutoff, and never silently.
-          if (
-            entry.idx <= LEGACY_IDEMPOTENCY_CUTOFF_IDX &&
-            (message.includes("duplicate column name") || message.includes("already exists"))
-          ) {
-            console.warn(
-              `[migrate] idempotency shim fired for legacy migration ${entry.tag}: tolerating "${message}" ` +
-              `(statement: ${stmtSnippet(stmt)}) — pre-#954 DBs may be part-applied; a real failure here would be masked`,
-            );
-            continue;
-          }
-          throw err;
-        }
-      }
-
-      // Record migration as applied (use tag as hash to match drizzle-kit format)
-      await tx.execute({
-        sql: "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)",
-        args: [entry.tag, entry.when],
-      });
-      await tx.commit();
-    } catch (err: unknown) {
-      try {
-        await tx.rollback();
-      } catch { /* transaction already closed */ }
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(
-        `[migrate] Migration ${entry.tag} FAILED and was rolled back. ` +
-        `Failing statement: ${stmtSnippet(failingStmt)}. Aborting — later migrations were NOT attempted.`,
-      );
-      throw new Error(`Migration ${entry.tag} failed: ${message}`, { cause: err });
-    } finally {
-      tx.close();
+    // A migration that toggles `PRAGMA foreign_keys` MUST run outside a
+    // transaction (SQLite ignores the pragma inside one — the §3.1 bug); every
+    // other migration runs atomically inside one write transaction.
+    if (togglesForeignKeys(statements)) {
+      await applyMigrationOutsideTransaction(client, entry, statements);
+    } else {
+      await applyMigrationInTransaction(client, entry, statements);
     }
   }
 }

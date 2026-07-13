@@ -100,6 +100,18 @@ export function registerStartWorkspace(server: McpServer) {
         // prefs, and the settings fallback reads each provider's OWN profile key
         // (the old hand-rolled ladder ignored the Bullseye and fell through
         // copilot/pi to claude_profile).
+        //
+        // Single parser (arch-review §3.3): `resolveProviderProfileFromPrefs`
+        // parses the SAME blob through the SAME normalizer (`normalizeProviderPolicies`)
+        // and the SAME priority selection (`selectPolicyByPriority`) the server's
+        // `selectProviderFromStrategy` uses, so this door and the server door pick
+        // the same provider for a given blob. Live-quota gating (`isBlocked`) is
+        // deliberately NOT applied here: `start_workspace` creates a BARE worktree
+        // and launches NO agent, so it consumes no quota. The eventual agent launch
+        // (POST /api/workspaces → `resolveStrategyProviderSelection`) is the
+        // quota-aware door and re-resolves the provider with live usage at launch
+        // time. Quota state lives in the server-only `quota-usage.service` (network
+        // fetch) which the MCP package does not import.
         const prefRows = await db.select().from(schema.preferences);
         const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
         const { provider, profileName } = resolveProviderProfileFromPrefs(prefMap, issue.projectId);

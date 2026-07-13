@@ -27,6 +27,7 @@
     "./lib/session-files": { "development": "./src/lib/session-files.ts", "types": "./dist/lib/session-files.d.ts", "import": "./dist/lib/session-files.js", "default": "./src/lib/session-files.ts" },
     "./lib/openspec": { "development": "./src/lib/openspec.ts", "types": "./dist/lib/openspec.d.ts", "import": "./dist/lib/openspec.js", "default": "./src/lib/openspec.ts" },
     "./lib/session-output": { "development": "./src/lib/session-output.ts", "types": "./dist/lib/session-output.d.ts", "import": "./dist/lib/session-output.js", "default": "./src/lib/session-output.ts" },
+    "./lib/offline-transcript": { "development": "./src/lib/offline-transcript.ts", "types": "./dist/lib/offline-transcript.d.ts", "import": "./dist/lib/offline-transcript.js", "default": "./src/lib/offline-transcript.ts" },
     "./lib/session-output-handlers": { "development": "./src/lib/session-output-handlers.ts", "types": "./dist/lib/session-output-handlers.d.ts", "import": "./dist/lib/session-output-handlers.js", "default": "./src/lib/session-output-handlers.ts" },
     "./lib/status-view": { "development": "./src/lib/status-view.ts", "types": "./dist/lib/status-view.d.ts", "import": "./dist/lib/status-view.js", "default": "./src/lib/status-view.ts" },
     "./lib/board-status-classifiers": { "development": "./src/lib/board-status-classifiers.ts", "types": "./dist/lib/board-status-classifiers.d.ts", "import": "./dist/lib/board-status-classifiers.js", "default": "./src/lib/board-status-classifiers.ts" },
@@ -43,12 +44,15 @@
     "./lib/worktree-symlink-bootstrap": { "development": "./src/lib/worktree-symlink-bootstrap.ts", "types": "./dist/lib/worktree-symlink-bootstrap.d.ts", "import": "./dist/lib/worktree-symlink-bootstrap.js", "default": "./src/lib/worktree-symlink-bootstrap.ts" },
     "./lib/workflow-engine": { "development": "./src/lib/workflow-engine.ts", "types": "./dist/lib/workflow-engine.d.ts", "import": "./dist/lib/workflow-engine.js", "default": "./src/lib/workflow-engine.ts" },
     "./lib/strategy-policy": { "development": "./src/lib/strategy-policy.ts", "types": "./dist/lib/strategy-policy.d.ts", "import": "./dist/lib/strategy-policy.js", "default": "./src/lib/strategy-policy.ts" },
+    "./lib/strategy-objective-file": { "development": "./src/lib/strategy-objective-file.ts", "types": "./dist/lib/strategy-objective-file.d.ts", "import": "./dist/lib/strategy-objective-file.js", "default": "./src/lib/strategy-objective-file.ts" },
+    "./lib/checked-preference-write": { "development": "./src/lib/checked-preference-write.ts", "types": "./dist/lib/checked-preference-write.d.ts", "import": "./dist/lib/checked-preference-write.js", "default": "./src/lib/checked-preference-write.ts" },
     "./lib/issue-status-orchestration": { "development": "./src/lib/issue-status-orchestration.ts", "types": "./dist/lib/issue-status-orchestration.d.ts", "import": "./dist/lib/issue-status-orchestration.js", "default": "./src/lib/issue-status-orchestration.ts" },
     "./lib/smoke-check": { "development": "./src/lib/smoke-check.ts", "types": "./dist/lib/smoke-check.d.ts", "import": "./dist/lib/smoke-check.js", "default": "./src/lib/smoke-check.ts" },
     "./lib/drive-retro": { "development": "./src/lib/drive-retro.ts", "types": "./dist/lib/drive-retro.d.ts", "import": "./dist/lib/drive-retro.js", "default": "./src/lib/drive-retro.ts" },
     "./lib/failure-keywords": { "development": "./src/lib/failure-keywords.ts", "types": "./dist/lib/failure-keywords.d.ts", "import": "./dist/lib/failure-keywords.js", "default": "./src/lib/failure-keywords.ts" },
     "./lib/sanitize-utf8": { "development": "./src/lib/sanitize-utf8.ts", "types": "./dist/lib/sanitize-utf8.d.ts", "import": "./dist/lib/sanitize-utf8.js", "default": "./src/lib/sanitize-utf8.ts" },
     "./lib/db-path": { "development": "./src/lib/db-path.ts", "types": "./dist/lib/db-path.d.ts", "import": "./dist/lib/db-path.js", "default": "./src/lib/db-path.ts" },
+    "./lib/db-client": { "development": "./src/lib/db-client.ts", "types": "./dist/lib/db-client.d.ts", "import": "./dist/lib/db-client.js", "default": "./src/lib/db-client.ts" },
     "./lib/workspace-status": { "development": "./src/lib/workspace-status.ts", "types": "./dist/lib/workspace-status.d.ts", "import": "./dist/lib/workspace-status.js", "default": "./src/lib/workspace-status.ts" }
   },
   "scripts": {
@@ -58,6 +62,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@libsql/client": "0.14.0",
     "drizzle-orm": "0.45.2",
     "zod": "3.25.76"
   },

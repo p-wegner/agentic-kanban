@@ -162,6 +162,25 @@ export function narrowPolicyProvider(value: string | null | undefined): Provider
 }
 
 /**
+ * Normalize an untrusted `providerPolicies` array (already extracted from a parsed
+ * JSON object) into validated `ProviderProfilePolicy[]`.
+ *
+ * SINGLE parser semantics (#arch-review §3.3): entries are KEPT and their missing
+ * fields SYNTHESIZED (id/provider defaulted) via `normalizeProviderPolicy` — never
+ * silently DROPPED. This is the exact normalizer the client Strategy Targets UI
+ * uses to PERSIST the blob, so reading it back through any door (the server's
+ * `parseStrategyBullseyeConfig`, the MCP `resolveProviderProfileFromPrefs`, the
+ * client preview) yields the identical policy set. The server previously ran a
+ * stricter private parser that dropped any entry lacking a string `id`/`provider`,
+ * so the SAME `board_strategy_<id>` blob selected DIFFERENT providers depending on
+ * which door read it. Both doors now funnel through here.
+ */
+export function normalizeProviderPolicies(raw: unknown): ProviderProfilePolicy[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((p, i) => normalizeProviderPolicy(p, i));
+}
+
+/**
  * Parse the persisted `board_strategy_<projectId>` JSON into normalized provider
  * policies. Throws on malformed JSON (callers decide the fallback); a valid JSON
  * without policies yields `[]`.
@@ -169,8 +188,8 @@ export function narrowPolicyProvider(value: string | null | undefined): Provider
 export function parseProviderPoliciesFromStrategy(raw: string): ProviderProfilePolicy[] {
   if (!raw.trim()) return [];
   const parsed = JSON.parse(raw) as { providerPolicies?: unknown };
-  if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.providerPolicies)) return [];
-  return parsed.providerPolicies.map((p, i) => normalizeProviderPolicy(p, i));
+  if (!parsed || typeof parsed !== "object") return [];
+  return normalizeProviderPolicies(parsed.providerPolicies);
 }
 
 /** A resolved effective provider+profile decision and where it came from. */
@@ -234,4 +253,90 @@ export function resolveProviderProfileFromPrefs(
     }
   }
   return { ...readSettingsProviderSelection(prefMap), source: "settings" };
+}
+
+/**
+ * Provider/profile keys that participate in Bullseye divergence. A write that does
+ * not touch any of these can never CREATE divergence, so the guard skips it (an
+ * unrelated toggle save must never be blocked by a pre-existing, untouched drift).
+ *
+ * Single source of truth (#arch-review §3.3): the server `preference.service.ts`,
+ * the CLI `preferences set`, and the MCP `set_preference` checked write all read
+ * THIS set so the guard can never see different key lists per write door.
+ */
+export const PROVIDER_DIVERGENCE_KEYS: ReadonlySet<string> = new Set([
+  "provider",
+  "claude_profile",
+  "codex_profile",
+  "copilot_profile",
+  "pi_profile",
+]);
+
+export interface ProviderDivergenceResult {
+  hasBullseye: boolean;
+  bullseyeProvider: string | null;
+  bullseyeProfile: string | null;
+  settingsProvider: string | null;
+  settingsProfile: string | null;
+  diverged: boolean;
+}
+
+/**
+ * Returned (non-null) when the write-time divergence guard (#903) rejects a
+ * provider/profile write that would drift from the active project's Bullseye. No
+ * preferences are persisted when this is present.
+ */
+export interface ProviderDivergenceRejection {
+  projectId: string;
+  bullseyeProvider: string | null;
+  bullseyeProfile: string | null;
+  settingsProvider: string | null;
+  settingsProfile: string | null;
+}
+
+/**
+ * Detect drift between the global provider/profile settings prefs and the project's
+ * Strategy Bullseye (the single authoritative source). Pure and client-safe — prefs
+ * in, no DB, no quota fetch. This is the ONE guard implementation shared by the
+ * server (`resolveProviderDivergence` re-exports this), the CLI, and the MCP
+ * `set_preference` checked write.
+ *
+ * Returns `hasBullseye: false` when no Bullseye is configured for the project (no
+ * divergence possible); a malformed Bullseye JSON yields `hasBullseye: true,
+ * diverged: false` (nothing to compare against).
+ */
+export function resolveProviderDivergence(
+  prefMap: ReadonlyMap<string, string>,
+  projectId: string,
+): ProviderDivergenceResult {
+  const strategyRaw = prefMap.get(strategyPrefKey(projectId));
+  if (!strategyRaw) {
+    return { hasBullseye: false, bullseyeProvider: null, bullseyeProfile: null, settingsProvider: null, settingsProfile: null, diverged: false };
+  }
+
+  let bullseyeProvider: string | null = null;
+  let bullseyeProfile: string | null = null;
+  try {
+    // Match the server's historical selection: fill → throttle → fallback-only with
+    // fallback-only NOT auto-selected (allowFallback: false), no live-quota gating.
+    const selected = selectPolicyByPriority(parseProviderPoliciesFromStrategy(strategyRaw), { allowFallback: false });
+    if (selected) {
+      bullseyeProvider = selected.provider;
+      bullseyeProfile = selected.profileName || null;
+    }
+  } catch {
+    return { hasBullseye: true, bullseyeProvider: null, bullseyeProfile: null, settingsProvider: null, settingsProfile: null, diverged: false };
+  }
+
+  const settings = readSettingsProviderSelection(prefMap);
+  const providerDiverged = bullseyeProvider !== null && bullseyeProvider !== settings.provider;
+  const profileDiverged = bullseyeProfile !== null && bullseyeProfile !== "" && bullseyeProfile !== settings.profileName;
+  return {
+    hasBullseye: true,
+    bullseyeProvider,
+    bullseyeProfile,
+    settingsProvider: settings.provider,
+    settingsProfile: settings.profileName,
+    diverged: providerDiverged || profileDiverged,
+  };
 }

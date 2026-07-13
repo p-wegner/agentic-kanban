@@ -1,4 +1,5 @@
 import type { AgentStreamProvider } from "./types.js";
+import { recordUnknownFieldDrift } from "./unknown-fields.js";
 
 // Offline provider detection for stored session JSONL (#951).
 //
@@ -8,6 +9,14 @@ import type { AgentStreamProvider } from "./types.js";
 // provider PER EVENT from the wire `type` and routes the line to the canonical
 // parser (agent-stream/{claude,codex,copilot,pi}.ts). This keeps interpretation
 // in exactly one place — session-summary must never re-implement field parsing.
+//
+// Since arch-review §2.4 (Ticket 13) rows may carry a stored `provider` — when
+// present the caller passes it and this per-event guessing is skipped entirely.
+// The catch-all no longer SILENTLY claims an unrecognized event is Copilot
+// (misreporting a session's provider is worse than an explicit unknown): use
+// detectAgentEventProviderOrUnknown, which returns "unknown" and logs the drift.
+// The tolerant Copilot parser is still used to READ an unknown line, but the
+// classification is reported as unknown, not copilot.
 
 const CLAUDE_EVENT_TYPES = new Set([
   "system",
@@ -48,19 +57,39 @@ const PI_EVENT_TYPES = new Set([
  * - `assistant` with a `message.content` array → Claude streaming; `assistant`
  *   without content blocks → Copilot CLI nested format,
  * - `error` → Codex (Pi's `error` events are display-only either way),
- * - everything unrecognized → Copilot, whose parser is the tolerant catch-all.
+ * - everything unrecognized → "unknown" (see detectAgentEventProviderOrUnknown).
  */
-export function detectAgentEventProvider(obj: Record<string, unknown>): AgentStreamProvider {
+export function detectAgentEventProviderOrUnknown(
+  obj: Record<string, unknown>,
+): AgentStreamProvider | "unknown" {
   const type = typeof obj.type === "string" ? obj.type : "";
   if (type === "assistant") {
     const message = obj.message;
     const content = typeof message === "object" && message !== null
       ? (message as Record<string, unknown>).content
       : undefined;
+    // Claude streams assistant text as a `message.content` array; Copilot CLI
+    // nests it differently. A content-less `assistant` is Copilot's shape.
     return Array.isArray(content) ? "claude" : "copilot";
   }
   if (CLAUDE_EVENT_TYPES.has(type)) return "claude";
   if (CODEX_EVENT_TYPES.has(type)) return "codex";
   if (PI_EVENT_TYPES.has(type)) return "pi";
-  return "copilot";
+  // arch-review §2.4: an unrecognized event used to be SILENTLY called Copilot,
+  // which misreported the session's provider. Report it as unknown + log the
+  // drift (rate-limited) so it is observable; the caller still parses the line
+  // with the tolerant Copilot parser but does not classify the session as copilot.
+  recordUnknownFieldDrift("unknown", type || "<no-type>", "offline provider detection: unrecognized event shape");
+  return "unknown";
+}
+
+/**
+ * Back-compat wrapper: classify to a concrete provider, mapping the explicit
+ * "unknown" onto the tolerant Copilot parser (the historical catch-all) so
+ * existing parser-routing callers keep working. Prefer
+ * detectAgentEventProviderOrUnknown when the classification itself matters.
+ */
+export function detectAgentEventProvider(obj: Record<string, unknown>): AgentStreamProvider {
+  const provider = detectAgentEventProviderOrUnknown(obj);
+  return provider === "unknown" ? "copilot" : provider;
 }

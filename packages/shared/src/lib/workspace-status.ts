@@ -2,6 +2,11 @@ import { and, eq, isNull, ne, or } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import { workspaces } from "../schema/index.js";
 import type * as schema from "../schema/index.js";
+import {
+  checkWorkspaceTransition,
+  getTransitionStrictness,
+  IllegalStatusTransitionError,
+} from "./status-transitions.js";
 
 /**
  * Both the server (`packages/server/src/db/index.ts`) and mcp-server
@@ -45,6 +50,11 @@ export interface SetWorkspaceStatusOpts {
    * Requires a documented reason, which is logged.
    */
   force?: { reason: string };
+  /**
+   * Optional caller label included in transition-legality warnings
+   * (arch-review §1.1) so an illegal transition is attributable to a code path.
+   */
+  caller?: string;
 }
 
 /**
@@ -91,6 +101,29 @@ export async function setWorkspaceStatus(
         .where(eq(workspaces.id, workspaceId))
         .limit(1);
       const current = rows[0];
+      // Transition-legality observability (arch-review §1.1). The pre-read gives
+      // us the current status only on the non-close path; writes INTO "closed"
+      // are always legal (any workspace may be closed) so no read is added there.
+      // Default policy is WARN-AND-ALLOW: a "warn"-severity illegal transition is
+      // logged but still applied; a "forbidden" terminal resurrection falls to the
+      // existing terminal guard below (no-op / returns false). Under STRICT policy
+      // any illegal transition throws (rethrown past the catch below).
+      if (current?.status) {
+        const check = checkWorkspaceTransition(current.status as WorkspaceStatus, status, {
+          mergedAt: current.mergedAt,
+          force: !!opts.force,
+        });
+        if (!check.legal && getTransitionStrictness() === "strict") {
+          throw new IllegalStatusTransitionError(
+            `[workspace-status] illegal transition of workspace ${workspaceId} (caller: ${opts.caller ?? "unknown"}): ${check.message}`,
+          );
+        }
+        if (check.severity === "warn") {
+          console.warn(
+            `[workspace-status] illegal transition of workspace ${workspaceId} "${current.status}" -> "${status}" (caller: ${opts.caller ?? "unknown"}) — warn-and-allow (arch-review §1.1; set strictness=strict to enforce)`,
+          );
+        }
+      }
       if (current && current.status === "closed" && current.mergedAt) {
         if (opts.force) {
           console.warn(
@@ -132,6 +165,9 @@ export async function setWorkspaceStatus(
     }
     return true;
   } catch (err) {
+    // A STRICT-policy transition violation must propagate, not be swallowed into
+    // a `false` return like an incidental DB failure.
+    if (err instanceof IllegalStatusTransitionError) throw err;
     console.warn(
       `[workspace-status] failed to set workspace ${workspaceId} -> "${status}":`,
       err instanceof Error ? err.message : String(err),
