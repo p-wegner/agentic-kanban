@@ -11,6 +11,7 @@ import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
 import * as gitService from "../services/git.service.js";
 import { acquireRepoMergeLock } from "../services/workspace-internals.js";
 import { cleanupMergedWorktreeAndBranch, runMergeCore } from "../services/merge-executor.service.js";
+import { cleanupSiblingWorktrees } from "../services/workspace-repos.service.js";
 import { createBackup } from "../db/backup.js";
 import { killProcessesInDir } from "../services/process-cleanup.js";
 import { runScript } from "../services/script-runner.js";
@@ -223,6 +224,8 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
                 branch: workspace.branch,
                 gitService,
               });
+              // Multi-repo: drop sibling worktrees + branches (no-op single-repo).
+              await cleanupSiblingWorktrees(gitService, workspace.id, db);
 
               const verifyAgent = prefMapLearning.get("after_merge_verify_agent") || "none";
               const issueTagged = await db.select({ tagId: issueTags.tagId }).from(issueTags).where(eq(issueTags.issueId, issueId)).limit(100).then((rows) => rows.some((r) => r.tagId !== null));

@@ -14,6 +14,7 @@ import { autoStartFollowups } from "./followup-workspace.service.js";
 import { autoStartUnblockedDependencyIssue } from "./dependency-auto-chain.service.js";
 import { rebuildSharedIfChanged, runLearningStep } from "./merge-helpers.service.js";
 import { cleanupMergedWorktreeAndBranch } from "./merge-executor.service.js";
+import { cleanupSiblingWorktrees } from "./workspace-repos.service.js";
 import type { MergeWarning } from "./workspace-merge-prevalidation.service.js";
 import { applyDeferredWorkingTreeSync } from "@agentic-kanban/shared/lib/git-service";
 
@@ -62,6 +63,8 @@ export async function runWorkspacePostMergeCleanup(
   await collectCodeMetrics(args, deps.database, warnings);
   mergeResult = await applyOpenSpecPostMerge(args, deps, warnings, mergeResult);
   await removeWorktreeAndBranch(args, deps, warnings);
+  // Multi-repo: drop the sibling worktrees + branches too (no-op for single-repo).
+  await cleanupSiblingWorktrees(deps.gitService, args.workspaceId, deps.database);
   await recordCleanupWarnings(args, deps.database, warnings);
 
   const postMergeChangedFiles = await getPostMergeChangedFiles(args, deps.gitService);
