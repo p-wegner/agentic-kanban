@@ -9,6 +9,18 @@ export interface DiffResponse {
   };
   comments: DiffComment[];
   conflicts?: { hasConflicts: boolean; conflictingFiles: string[] } | null;
+  /**
+   * Multi-repo workspaces only: per-repo diff sections (leading repo first). The
+   * top-level `diff`/`stats` aggregate across all repos; single-repo workspaces
+   * omit this field entirely so their response is unchanged.
+   */
+  repos?: Array<{
+    name: string | null;
+    path: string;
+    diff: string;
+    stats: { filesChanged: number; insertions: number; deletions: number };
+    conflicts?: { hasConflicts: boolean; conflictingFiles: string[] } | null;
+  }>;
 }
 
 export interface DiffComment {
