@@ -111,6 +111,37 @@ describe("multi-repo sibling worktrees", () => {
     expect(branches.trim()).toBe("");
   }, 60000);
 
+  it("rolls back already-provisioned siblings when a later repo fails", async () => {
+    // Two additional repos; the second has a defaultBranch that doesn't exist, so
+    // provisioning fails AFTER the first sibling's worktree was created. The caller
+    // never receives the partial list (the throw prevents the assignment), so the
+    // function must remove the first sibling's worktree internally before rethrowing.
+    const rollbackProjectId = randomUUID();
+    await db.insert(projects).values({ id: rollbackProjectId, name: "rb", repoPath: leadRepo, repoName: "lead" });
+    const goodRepo = await createTempRepo("kanban-multirepo-good-");
+    const badRepo = await createTempRepo("kanban-multirepo-bad-");
+    try {
+      await insertProjectRepo({ projectId: rollbackProjectId, path: goodRepo, name: "good", defaultBranch: "main" }, db);
+      await insertProjectRepo({ projectId: rollbackProjectId, path: badRepo, name: "bad", defaultBranch: "does-not-exist" }, db);
+
+      await expect(provisionSiblingWorktrees({
+        gitService,
+        database: db as unknown as Database,
+        projectId: rollbackProjectId,
+        branch: "feature/rollback",
+      })).rejects.toThrow();
+
+      // The good repo's sibling worktree must be gone again — only the main checkout remains.
+      const worktrees = await exec("git", ["worktree", "list", "--porcelain"], goodRepo);
+      const count = worktrees.split("\n").filter((l) => l.startsWith("worktree ")).length;
+      expect(count).toBe(1);
+    } finally {
+      for (const dir of [goodRepo, badRepo]) {
+        try { await rm(join(dir, ".."), { recursive: true, force: true }); } catch { /* best effort */ }
+      }
+    }
+  }, 60000);
+
   it("is a no-op for a project with no additional repos", async () => {
     const otherProjectId = randomUUID();
     await db.insert(projects).values({ id: otherProjectId, name: "solo", repoPath: leadRepo, repoName: "lead" });

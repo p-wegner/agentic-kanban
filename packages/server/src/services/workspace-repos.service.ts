@@ -25,7 +25,9 @@ export interface SiblingWorktree {
  * Create a worktree on `branch` in every additional repo of the project (same branch
  * name as the leading repo — worktrees are namespaced per repo root, so they never
  * collide on disk). Throws on the first failure: full-peers semantics require every
- * repo present, and the caller's rollback removes whatever was already created.
+ * repo present. Siblings already provisioned in earlier iterations are rolled back
+ * HERE before the throw — the caller never sees the partial list (the throw prevents
+ * the assignment), so an internal rollback is the only way they get removed.
  */
 export async function provisionSiblingWorktrees(params: {
   gitService: GitService;
@@ -38,16 +40,21 @@ export async function provisionSiblingWorktrees(params: {
   if (projectRepos.length === 0) return [];
 
   const provisioned: SiblingWorktree[] = [];
-  for (const repo of projectRepos) {
-    const baseBranch = repo.defaultBranch;
-    if (!baseBranch) {
-      throw new Error(
-        `Additional repo ${repo.name ?? repo.path} has no default branch — re-add it or set one.`,
-      );
+  try {
+    for (const repo of projectRepos) {
+      const baseBranch = repo.defaultBranch;
+      if (!baseBranch) {
+        throw new Error(
+          `Additional repo ${repo.name ?? repo.path} has no default branch — re-add it or set one.`,
+        );
+      }
+      const baseCommitSha = await gitService.revParse(repo.path, baseBranch);
+      const worktreePath = await gitService.createWorktree(repo.path, branch, baseBranch);
+      provisioned.push({ path: repo.path, name: repo.name, worktreePath, branch, baseBranch, baseCommitSha });
     }
-    const baseCommitSha = await gitService.revParse(repo.path, baseBranch);
-    const worktreePath = await gitService.createWorktree(repo.path, branch, baseBranch);
-    provisioned.push({ path: repo.path, name: repo.name, worktreePath, branch, baseBranch, baseCommitSha });
+  } catch (err) {
+    await rollbackSiblingWorktrees(gitService, provisioned);
+    throw err;
   }
   return provisioned;
 }
@@ -122,6 +129,11 @@ export async function prevalidateSiblingMerges(params: {
     let uniqueCommits = 0;
     try {
       // countUniqueCommits(repoPath, baseSha, branchSha) = commits in base..branch.
+      // It NEVER throws — it returns 0 on any git error — which would silently drop
+      // an unverifiable repo from the merge plan. Resolve both refs first (revParse
+      // throws) so a missing repo/ref FAILS prevalidation instead.
+      await gitService.revParse(repo.path, repo.baseBranch);
+      await gitService.revParse(repo.path, repo.branch);
       uniqueCommits = await gitService.countUniqueCommits(repo.path, repo.baseBranch, repo.branch);
     } catch (err) {
       failures.push(`${label}: could not count commits (${err instanceof Error ? err.message : String(err)})`);
@@ -248,16 +260,30 @@ export async function cleanupSiblingWorktrees(
     if (mustPreserveCheck && repo.branch && repo.worktreePath) {
       // Safe-delete probe requires the worktree gone first (the branch is checked
       // out there), so probe via merge-tree-free ancestry instead: 0 commits ahead
-      // of base means nothing unmerged.
+      // of base means nothing unmerged. countUniqueCommits NEVER throws (it returns
+      // 0 on any git error) — which would read as "fully merged" and force-delete
+      // unverified work — so resolve the refs with revParse (throws) first. A
+      // branch ref that is GONE means there is nothing to preserve: fall through
+      // to the normal worktree/branch cleanup.
+      let branchExists = true;
       try {
-        const ahead = await gitService.countUniqueCommits(repo.path, repo.baseBranch ?? "HEAD", repo.branch);
-        if (ahead > 0) {
-          console.warn(`[workspaces] sibling cleanup: preserving ${repo.branch} in ${repo.path} — ${ahead} unmerged commit(s) (sibling merge did not land)`);
+        await gitService.revParse(repo.path, repo.branch);
+      } catch {
+        branchExists = false;
+      }
+      if (branchExists) {
+        try {
+          const base = repo.baseBranch ?? "HEAD";
+          await gitService.revParse(repo.path, base);
+          const ahead = await gitService.countUniqueCommits(repo.path, base, repo.branch);
+          if (ahead > 0) {
+            console.warn(`[workspaces] sibling cleanup: preserving ${repo.branch} in ${repo.path} — ${ahead} unmerged commit(s) (sibling merge did not land)`);
+            continue;
+          }
+        } catch {
+          console.warn(`[workspaces] sibling cleanup: preserving ${repo.branch} in ${repo.path} — could not verify merge state`);
           continue;
         }
-      } catch {
-        console.warn(`[workspaces] sibling cleanup: preserving ${repo.branch} in ${repo.path} — could not verify merge state`);
-        continue;
       }
     }
     if (repo.worktreePath) {
