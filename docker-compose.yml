@@ -1,0 +1,38 @@
+services:
+  kanban:
+    build: .
+    ports:
+      - "3001:3001"
+    environment:
+      AGENTIC_KANBAN_DIR: /data
+      KANBAN_REPOS_DIR: /data/repos
+      KANBAN_HOST: 0.0.0.0
+      PORT: "3001"
+      # Agent auth (either one; bridged into a Claude profile by the entrypoint):
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # Commit identity for merges/scaffold commits made inside the container:
+      GIT_AUTHOR_NAME: ${GIT_AUTHOR_NAME:-Agentic Kanban}
+      GIT_AUTHOR_EMAIL: ${GIT_AUTHOR_EMAIL:-kanban@localhost}
+      GIT_COMMITTER_NAME: ${GIT_AUTHOR_NAME:-Agentic Kanban}
+      GIT_COMMITTER_EMAIL: ${GIT_AUTHOR_EMAIL:-kanban@localhost}
+    volumes:
+      # DB, backups, cloned repos and their .worktrees — everything stateful.
+      - kanban-data:/data
+      # Optional: bind-mount host repos. Mount the PARENT directory (worktrees are
+      # created as a `.worktrees` sibling of each repo), then register /repos/<name>.
+      # - /srv/repos:/repos
+      # Optional: existing Claude credentials instead of ANTHROPIC_API_KEY:
+      # - ~/.claude:/root/.claude
+      # Optional: SSH key for clone-from-URL over ssh:
+      # - ~/.ssh:/root/.ssh:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  kanban-data:
