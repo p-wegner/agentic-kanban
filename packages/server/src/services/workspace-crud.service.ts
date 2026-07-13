@@ -21,6 +21,7 @@ import {
   type GitService,
 } from "./workspace-internals.js";
 import { createWorkspaceCleanupService } from "./workspace-cleanup.service.js";
+import { cleanupSiblingWorktrees } from "./workspace-repos.service.js";
 import { createWorkspaceCreateService } from "./workspace-create.service.js";
 
 export function createWorkspaceCrudService(deps: {
@@ -49,6 +50,10 @@ export function createWorkspaceCrudService(deps: {
     const isDirect = wsRow[0]?.isDirect;
     const repoPath = wsRow[0]?.repoPath;
     const deletedProjectId = wsRow[0]?.projectId;
+
+    // Multi-repo: remove sibling worktrees + branches BEFORE the cascade deletes
+    // the workspace's `repos` rows that record where they live. No-op single-repo.
+    await cleanupSiblingWorktrees(gitService, workspaceId, database);
 
     await deleteWorkspaceCascade(workspaceId, database);
 
@@ -108,6 +113,8 @@ export function createWorkspaceCrudService(deps: {
       if (repoPath) {
         try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch { /* best effort */ }
       }
+      // Multi-repo: sibling worktrees + branches too (no-op single-repo).
+      await cleanupSiblingWorktrees(gitService, workspaceId, database);
     }
 
     const now = new Date().toISOString();

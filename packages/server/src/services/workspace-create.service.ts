@@ -41,6 +41,12 @@ import {
   type GitService,
 } from "./workspace-internals.js";
 import { createWorkspaceProvisionService } from "./workspace-provision.service.js";
+import {
+  provisionSiblingWorktrees,
+  insertSiblingWorktreeRecords,
+  rollbackSiblingWorktrees,
+  type SiblingWorktree,
+} from "./workspace-repos.service.js";
 
 export function createWorkspaceCreateService(deps: {
   database: Database;
@@ -364,6 +370,9 @@ export function createWorkspaceCreateService(deps: {
     // Hoisted so it is in scope in the catch block's failure handler. The real
     // value (priority-derived default or explicit input) is assigned inside try.
     let planMode = input.planMode === true;
+    // Sibling worktrees provisioned for the project's additional repos (multi-repo);
+    // hoisted so the catch block can roll them back alongside the leading worktree.
+    let siblingWorktrees: SiblingWorktree[] = [];
 
     const phaseStart = Date.now();
     const timing = (phase: string, startMs: number) =>
@@ -388,6 +397,15 @@ export function createWorkspaceCreateService(deps: {
       ));
       timing("worktree-setup", t);
 
+      // Multi-repo (full-peers): a worktree on the same branch in every additional
+      // repo. No-op for single-repo projects and direct workspaces. A failure here
+      // throws so the catch-block rollback removes leading + sibling worktrees.
+      if (!isDirect) {
+        t = Date.now();
+        siblingWorktrees = await provisionSiblingWorktrees({ gitService, database, projectId: issue.projectId, branch });
+        if (siblingWorktrees.length > 0) timing("sibling-worktrees", t);
+      }
+
       // Run context packer (best-effort: never blocks workspace creation).
       let contextPrimer: string | null = null;
       if (!isDirect && !input.skipContextPacker) {
@@ -399,7 +417,12 @@ export function createWorkspaceCreateService(deps: {
       // Inject ticket details (+ optional context primer + stack profile) into the
       // worktree as a gitignored `CLAUDE.local.md`. Skipped for direct workspaces.
       const ticketContextPath = !isDirect && worktreePath
-        ? await writeWorktreeTicketContext(worktreePath, issue, contextPrimer)
+        ? await writeWorktreeTicketContext(
+            worktreePath,
+            issue,
+            contextPrimer,
+            siblingWorktrees.map((s) => ({ name: s.name, worktreePath: s.worktreePath })),
+          )
         : null;
 
       const { agentPrompt, skillName, effectiveSkillId, hasWorkflowStart } = await resolveAgentPromptAndSkill({
@@ -419,6 +442,12 @@ export function createWorkspaceCreateService(deps: {
           skillId: effectiveSkillId, claudeProfile, agentCommand, resolvedProvider, model: agentConfig.model,
           contextPrimer, latestSetup, latestSymlink, now, database: tx,
         });
+
+        // Multi-repo: per-repo worktree records ride the same transaction as the
+        // workspace row, so a rollback leaves no dangling repo rows.
+        if (siblingWorktrees.length > 0) {
+          await insertSiblingWorktreeRecords(id, issue.projectId, siblingWorktrees, tx);
+        }
 
         // Place the workspace on the workflow start node + sync the derived status.
         // Any failure here rolls back the workspace row inserted above.
@@ -486,11 +515,13 @@ export function createWorkspaceCreateService(deps: {
         // on-disk worktree+branch, leaving an orphan with no backing row (#893).
         // Compensate first, then surface the original WorkspaceError unchanged.
         await rollbackOrphanedWorktree(isDirect, worktreePath, repoPath);
+        await rollbackSiblingWorktrees(gitService, siblingWorktrees);
         throw err;
       }
       // Agent launch is now deferred (setImmediate), so failures there are handled
       // in the background callback and never reach this catch block. Only pre-return
       // failures (worktree setup, DB insert, workflow init) land here.
+      await rollbackSiblingWorktrees(gitService, siblingWorktrees);
       return handleCreateFailure(err, {
         id, issueId: input.issueId, branch, worktreePath, repoPath, baseBranch, isDirect,
         baseCommitSha, requiresReview, thoroughReview, planMode, includeVisualProof,
