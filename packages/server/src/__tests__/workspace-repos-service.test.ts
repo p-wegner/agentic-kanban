@@ -35,7 +35,13 @@ function exec(cmd: string, args: string[], cwd: string): Promise<string> {
 }
 
 async function createTempRepo(prefix: string): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), prefix));
+  // Repo nested one level below the mkdtemp dir: worktrees are created at
+  // dirname(repoPath)/.worktrees, so nesting keeps them INSIDE the unique temp
+  // dir instead of a shared %TEMP%/.worktrees that parallel tests would fight over.
+  const parent = await mkdtemp(join(tmpdir(), prefix));
+  const dir = join(parent, "repo");
+  const { mkdirSync } = await import("node:fs");
+  mkdirSync(dir);
   await exec("git", ["init"], dir);
   await exec("git", ["config", "user.email", "test@test.com"], dir);
   await exec("git", ["config", "user.name", "Test"], dir);
@@ -71,8 +77,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   for (const dir of [leadRepo, extraRepo]) {
-    try { await rm(dir, { recursive: true, force: true }); } catch { /* best effort */ }
-    try { await rm(join(dir, "..", ".worktrees"), { recursive: true, force: true }); } catch { /* best effort */ }
+    // Remove the whole mkdtemp parent (repo + its .worktrees sibling).
+    try { await rm(join(dir, ".."), { recursive: true, force: true }); } catch { /* best effort */ }
   }
 });
 

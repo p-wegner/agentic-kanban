@@ -63,8 +63,9 @@ export async function runWorkspacePostMergeCleanup(
   await collectCodeMetrics(args, deps.database, warnings);
   mergeResult = await applyOpenSpecPostMerge(args, deps, warnings, mergeResult);
   await removeWorktreeAndBranch(args, deps, warnings);
-  // Multi-repo: drop the sibling worktrees + branches too (no-op for single-repo).
-  await cleanupSiblingWorktrees(deps.gitService, args.workspaceId, deps.database);
+  // Multi-repo: drop the sibling worktrees + branches too (no-op for single-repo);
+  // an unmerged sibling (failed post-prevalidation) is preserved for fix-up.
+  await cleanupSiblingWorktrees(deps.gitService, args.workspaceId, deps.database, { preserveUnmerged: true });
   await recordCleanupWarnings(args, deps.database, warnings);
 
   const postMergeChangedFiles = await getPostMergeChangedFiles(args, deps.gitService);

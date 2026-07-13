@@ -11,7 +11,7 @@ import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
 import * as gitService from "../services/git.service.js";
 import { acquireRepoMergeLock } from "../services/workspace-internals.js";
 import { cleanupMergedWorktreeAndBranch, runMergeCore } from "../services/merge-executor.service.js";
-import { cleanupSiblingWorktrees } from "../services/workspace-repos.service.js";
+import { cleanupSiblingWorktrees, prevalidateSiblingMerges, executeSiblingMerges } from "../services/workspace-repos.service.js";
 import { createBackup } from "../db/backup.js";
 import { killProcessesInDir } from "../services/process-cleanup.js";
 import { runScript } from "../services/script-runner.js";
@@ -185,6 +185,12 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
               }
               await tagIfNeedsVisualVerification(repoPath, workspace.branch, workspace.baseBranch, issueId, now, projectId);
 
+              // Multi-repo: all-or-nothing sibling prevalidation BEFORE the leading
+              // merge lands (throws → auto-merge fails cleanly, nothing merged).
+              const siblingPlans = workspace.isDirect
+                ? []
+                : await prevalidateSiblingMerges({ gitService, database: db, workspaceId: workspace.id });
+
               const targetBranch = workspace.baseBranch || defaultBranch || "main";
               // The git-touching pipeline (dirty-main guard → pre-merge backup →
               // merge with append-conflict auto-resolution (#763) → post-merge
@@ -218,14 +224,34 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
                 { targetBranch, commitSha: mergeCommitSha || null, mergedAt: now, mergeOutput },
                 now,
               );
+
+              // Multi-repo: land the prevalidated sibling merges. Post-prevalidation
+              // failures are recorded per-repo, not thrown — the leading merge landed.
+              if (siblingPlans.length > 0) {
+                const siblingResults = await executeSiblingMerges({ gitService, database: db, createBackup, workspaceId: workspace.id, plans: siblingPlans });
+                const failedSiblings = siblingResults.filter((r) => !r.merged);
+                if (failedSiblings.length > 0) {
+                  await recordMergeAttempt(
+                    workspace,
+                    "conflict",
+                    `Multi-repo auto-merge PARTIAL: ${failedSiblings.length} sibling repo merge(s) failed after prevalidation: ` +
+                      failedSiblings.map((f) => `${f.name ?? f.path}: ${f.error}`).join("; ") +
+                      ". The unmerged sibling branches were preserved — merge them manually.",
+                    { mergeReason: "sibling_merge_failed", siblingResults, targetBranch },
+                    now,
+                  );
+                }
+              }
+
               await cleanupMergedWorktreeAndBranch({
                 repoPath,
                 workingDir: workspace.workingDir,
                 branch: workspace.branch,
                 gitService,
               });
-              // Multi-repo: drop sibling worktrees + branches (no-op single-repo).
-              await cleanupSiblingWorktrees(gitService, workspace.id, db);
+              // Multi-repo: drop sibling worktrees + branches (no-op single-repo);
+              // an unmerged sibling (failed post-prevalidation) is preserved.
+              await cleanupSiblingWorktrees(gitService, workspace.id, db, { preserveUnmerged: true });
 
               const verifyAgent = prefMapLearning.get("after_merge_verify_agent") || "none";
               const issueTagged = await db.select({ tagId: issueTags.tagId }).from(issueTags).where(eq(issueTags.issueId, issueId)).limit(100).then((rows) => rows.some((r) => r.tagId !== null));
