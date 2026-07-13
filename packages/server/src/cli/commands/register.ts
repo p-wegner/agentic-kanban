@@ -23,19 +23,35 @@ export function registerRegisterCommand(program: Command) {
   program
     .command("register")
     .description("Register a git repo as a project.\n\nAuto-detects repo name, default branch, and remote URL from the git repo at <path>. Creates the default statuses (Backlog, Todo, In Progress, In Review, AI Reviewed, Done, Cancelled) and sets the project as the active project.\n\nIf the repo is already registered (same path), it skips without error.")
-    .argument("<path>", "Path to the git repository")
+    .argument("[path]", "Path to the git repository")
     .option("-n, --name <name>", "Custom project name (defaults to repo directory name)")
+    .option("--clone <url>", "Clone this git URL into the repos root (KANBAN_REPOS_DIR or <data dir>/repos) and register the clone")
     .addHelpText("after", `
 Examples:
   $ agentic-kanban register .                 # register current directory
   $ agentic-kanban register /path/to/my-repo  # register a specific repo
   $ agentic-kanban register . --name "My App" # custom project name
+  $ agentic-kanban register --clone https://github.com/user/repo.git
 `)
-    .action(async (path: string, options: { name?: string }) => {
+    .action(async (path: string | undefined, options: { name?: string; clone?: string }) => {
       try {
+        if (!path && !options.clone) {
+          console.error("Error: provide a <path> or --clone <url>");
+          process.exit(1);
+        }
+        if (path && options.clone) {
+          console.error("Error: provide either <path> or --clone <url>, not both");
+          process.exit(1);
+        }
         await runMigrations();
 
-        const repoInfo = await detectRepoInfo(path);
+        if (options.clone) {
+          const { cloneRepo } = await import("../../services/repo-clone.service.js");
+          path = await cloneRepo(options.clone, { name: options.name });
+          console.log(`Cloned ${options.clone} to ${path}`);
+        }
+
+        const repoInfo = await detectRepoInfo(path!);
         const projectName = options.name || repoInfo.repoName;
 
         const existing = await getProjectByRepoPath(repoInfo.repoPath);

@@ -53,8 +53,8 @@ export function useProjectManagement(deps: UseProjectManagementDeps) {
     }
   }
 
-  async function handleRegisterProject({ repoPath, gitignoreTemplate, generateReadme }: { repoPath: string; gitignoreTemplate: string; generateReadme: boolean }) {
-    const result = await apiPost<{ id: string; name: string; error?: string }>("/api/projects", { repoPath, gitignoreTemplate: gitignoreTemplate || undefined, generateReadme: generateReadme || undefined });
+  async function handleRegisterProject({ repoPath, cloneUrl, gitignoreTemplate, generateReadme }: { repoPath?: string; cloneUrl?: string; gitignoreTemplate: string; generateReadme: boolean }) {
+    const result = await apiPost<{ id: string; name: string; error?: string }>("/api/projects", { repoPath, cloneUrl, gitignoreTemplate: gitignoreTemplate || undefined, generateReadme: generateReadme || undefined });
     if (result.error) throw new Error(result.error);
     await loadProjects();
     await handleProjectChange(result.id);

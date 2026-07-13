@@ -105,7 +105,7 @@ export async function startServer(port?: number, hostname?: string) {
   // Logs a [fatal] alert for every affected file+line.  Non-crashing so the
   // server can still start and the developer can reach the board to fix it.
   try {
-    const repoRoot = new URL("../../..", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1").replace(/\//g, "\\");
+    const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
     assertNoCommittedConflictMarkers(repoRoot);
   } catch (err) {
     console.warn("[conflict-marker-scanner] scan failed (non-fatal):", err instanceof Error ? err.message : err);

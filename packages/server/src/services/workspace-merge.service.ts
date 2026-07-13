@@ -49,6 +49,8 @@ import {
 } from "./workspace-merge-prevalidation.service.js";
 import { executeWorkspaceMerge } from "./workspace-merge-execution.service.js";
 import { runWorkspacePostMergeCleanup } from "./workspace-merge-cleanup.service.js";
+import { prevalidateSiblingMerges, executeSiblingMerges } from "./workspace-repos.service.js";
+import { listWorkspaceRepos } from "../repositories/repo.repository.js";
 import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
 import { resolveMergeGate, RUN_GATE, type MergeGateToken } from "./pre-merge-gate.service.js";
 
@@ -268,6 +270,13 @@ export function createWorkspaceMergeService(deps: {
     if (preflight.kind === "completed") return preflight.result;
     await runWorkspacePreMergeValidation({ workspace, repoPath, baseBranch, gitService });
 
+    // Multi-repo (full-peers): prevalidate ALL sibling repos BEFORE anything lands —
+    // all-or-nothing, so a conflicted sibling can never strand the leading repo
+    // merged alone. Empty for single-repo workspaces. Throws on any failure.
+    const siblingPlans = workspace.isDirect
+      ? []
+      : await prevalidateSiblingMerges({ gitService, database, workspaceId: id });
+
     // Gate the merge with the SAME verify_script + boot/render smoke gate every path shares
     // (arch-review §1.2). The DECISION is delegated to the single owner `resolveMergeGate`,
     // driven by the caller's explicit token (`opts.gate`):
@@ -317,6 +326,25 @@ export function createWorkspaceMergeService(deps: {
       createBackup,
       recordMergeAttempt,
     });
+
+    // Multi-repo: land the prevalidated sibling merges (leading repo first — just
+    // done above). A failure here is a post-prevalidation race; it's recorded
+    // per-repo on the issue rather than failing the already-landed leading merge,
+    // and post-merge cleanup preserves the unmerged sibling branch for fix-up.
+    if (siblingPlans.length > 0) {
+      const siblingResults = await executeSiblingMerges({ gitService, database, createBackup, workspaceId: id, plans: siblingPlans });
+      const failed = siblingResults.filter((r) => !r.merged);
+      if (failed.length > 0) {
+        await recordMergeAttempt(
+          workspace,
+          "conflict",
+          `Multi-repo merge PARTIAL: leading repo merged, but ${failed.length} sibling repo merge(s) failed after prevalidation: ` +
+            failed.map((f) => `${f.name ?? f.path}: ${f.error}`).join("; ") +
+            ". The unmerged sibling branches were preserved — merge them manually.",
+          { mergeReason: "sibling_merge_failed", siblingResults, targetBranch },
+        );
+      }
+    }
 
     const postMergeArgs = {
       workspaceId: id,
@@ -371,6 +399,12 @@ export function createWorkspaceMergeService(deps: {
 
     const { repoPath, defaultBranch } = await resolveProjectRepo(id, database);
     const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
+
+    // Multi-repo: update-base currently rebases/merges the LEADING repo only (B4 polish).
+    const siblingRows = await listWorkspaceRepos(id, database);
+    if (siblingRows.length > 0) {
+      console.warn(`[workspace-service] update-base: workspace ${id} has ${siblingRows.length} sibling repo(s) — only the leading repo is updated; rebase siblings manually if needed`);
+    }
 
     // Refuse if main checkout HEAD has drifted off the target branch (consistent with /merge guard).
     const currentHeadBranch = await gitService.getCurrentBranch(repoPath);

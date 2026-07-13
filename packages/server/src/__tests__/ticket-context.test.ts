@@ -60,6 +60,23 @@ describe("ticket-context", () => {
       expect(buildTicketContextMarkdown({ title: "t", description: "   " })).toContain("_(No description provided.)_");
     });
 
+    it("lists sibling worktrees for a multi-repo project, and omits the section otherwise", () => {
+      const md = buildTicketContextMarkdown({
+        title: "t",
+        description: "d",
+        additionalRepos: [
+          { name: "backend", worktreePath: "/repos/.worktrees/feature-x-backend" },
+          { name: null, worktreePath: "/repos/.worktrees/feature-x-infra" },
+        ],
+      });
+      expect(md).toContain("## Additional repositories");
+      expect(md).toContain("**backend**: `/repos/.worktrees/feature-x-backend`");
+      expect(md).toContain("`/repos/.worktrees/feature-x-infra`");
+
+      expect(buildTicketContextMarkdown({ title: "t", description: "d" })).not.toContain("Additional repositories");
+      expect(buildTicketContextMarkdown({ title: "t", description: "d", additionalRepos: [] })).not.toContain("Additional repositories");
+    });
+
     it("injects the stack profile's exact feedback commands when provided", () => {
       const md = buildTicketContextMarkdown({
         title: "t",
