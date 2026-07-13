@@ -13,10 +13,14 @@ export function getReposRoot(): string {
   return process.env.KANBAN_REPOS_DIR || join(DATA_DIR, "repos");
 }
 
+/** Reduce to a filesystem-safe directory name (no separators, no leading dots/dashes). */
+function sanitizeDirName(raw: string): string {
+  return raw.replace(/[^a-zA-Z0-9._-]/g, "-").replace(/^[.-]+/, "");
+}
+
 /** Derive a filesystem-safe directory name from a git URL (basename minus .git). */
 export function repoDirNameFromUrl(cloneUrl: string): string {
-  const tail = basename(cloneUrl.replace(/\/+$/, "")).replace(/\.git$/i, "");
-  const sanitized = tail.replace(/[^a-zA-Z0-9._-]/g, "-").replace(/^[.-]+/, "");
+  const sanitized = sanitizeDirName(basename(cloneUrl.replace(/\/+$/, "")).replace(/\.git$/i, ""));
   if (!sanitized) throw new Error(`Cannot derive a repository name from URL "${cloneUrl}"`);
   return sanitized;
 }
@@ -27,7 +31,10 @@ export function repoDirNameFromUrl(cloneUrl: string): string {
  * GIT_TERMINAL_PROMPT=0 makes a missing credential fail fast instead of hanging.
  */
 export async function cloneRepo(cloneUrl: string, opts: { name?: string } = {}): Promise<string> {
-  const dirName = opts.name ? opts.name.replace(/[^a-zA-Z0-9._-]/g, "-") : repoDirNameFromUrl(cloneUrl);
+  // Same sanitization as the URL path — without the leading-dot strip, a name like
+  // "." or ".." resolves to the repos root itself / its parent instead of a child dir.
+  const dirName = opts.name ? sanitizeDirName(opts.name) : repoDirNameFromUrl(cloneUrl);
+  if (!dirName) throw new Error(`Cannot derive a repository directory name from "${opts.name ?? cloneUrl}"`);
   const root = getReposRoot();
   const target = resolve(root, dirName);
   if (!target.startsWith(resolve(root))) {
