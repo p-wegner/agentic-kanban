@@ -25,7 +25,7 @@ interface LayoutProps {
   onArchiveProject?: (id: string) => Promise<void>;
   onUnarchiveProject?: (id: string) => Promise<void>;
   archivedProjects?: Project[];
-  onRegisterProject?: (args: { repoPath: string; gitignoreTemplate: string; generateReadme: boolean }) => Promise<void>;
+  onRegisterProject?: (args: { repoPath?: string; cloneUrl?: string; gitignoreTemplate: string; generateReadme: boolean }) => Promise<void>;
   onCreateProject?: (name: string, path: string, gitignoreTemplate: string, generateReadme: boolean) => Promise<void>;
   priorityFilter?: string;
   onPriorityFilterChange?: (priority: string) => void;
@@ -84,6 +84,7 @@ export function Layout({
   const [archiving, setArchiving] = useState(false);
   const [unarchivingId, setUnarchivingId] = useState<string | null>(null);
   const [modalTab, setModalTab] = useState<"import" | "create">("import");
+  const [importMode, setImportMode] = useState<"path" | "clone">("path");
   const [repoPath, setRepoPath] = useState("");
   const [gitignoreTemplate, setGitignoreTemplate] = useState("");
   const [generateReadme, setGenerateReadme] = useState(false);
@@ -121,7 +122,11 @@ export function Layout({
     setRegistering(true);
     setRegisterError(null);
     try {
-      await onRegisterProject?.({ repoPath: repoPath.trim(), gitignoreTemplate, generateReadme });
+      await onRegisterProject?.({
+        ...(importMode === "clone" ? { cloneUrl: repoPath.trim() } : { repoPath: repoPath.trim() }),
+        gitignoreTemplate,
+        generateReadme,
+      });
       setShowRegister(false);
       setRepoPath("");
       setGitignoreTemplate("");
@@ -488,19 +493,40 @@ export function Layout({
             {modalTab === "import" && (
               <form onSubmit={handleRegisterSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Repository path
-                  </label>
+                  <div className="flex items-center gap-4 mb-1">
+                    <label className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
+                      <input
+                        type="radio"
+                        name="import-mode"
+                        checked={importMode === "path"}
+                        onChange={() => setImportMode("path")}
+                        className="h-3.5 w-3.5 text-brand-600 focus:ring-brand-500"
+                      />
+                      Local path
+                    </label>
+                    <label className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
+                      <input
+                        type="radio"
+                        name="import-mode"
+                        checked={importMode === "clone"}
+                        onChange={() => setImportMode("clone")}
+                        className="h-3.5 w-3.5 text-brand-600 focus:ring-brand-500"
+                      />
+                      Clone from URL
+                    </label>
+                  </div>
                   <input
                     ref={inputRef}
                     type="text"
                     value={repoPath}
                     onChange={(e) => setRepoPath(e.target.value)}
-                    placeholder="C:/path/to/repo"
+                    placeholder={importMode === "clone" ? "https://github.com/user/repo.git" : "C:/path/to/repo"}
                     className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
                   />
                   <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    Absolute path to a git repository. Branch and remote URL are auto-detected.
+                    {importMode === "clone"
+                      ? "Git URL to clone into the server's repos directory. Branch and remote URL are auto-detected."
+                      : "Absolute path to a git repository. Branch and remote URL are auto-detected."}
                   </p>
                 </div>
                 <div>

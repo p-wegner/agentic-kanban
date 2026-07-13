@@ -286,6 +286,7 @@ exit 1
     worktreePath: string,
     issue: { issueNumber: number | null; title: string; description: string | null; projectId: string },
     contextPrimer: string | null,
+    additionalRepos?: Array<{ name: string | null; worktreePath: string }>,
   ): Promise<string | null> {
     let stackProfile = null;
     try {
@@ -299,6 +300,7 @@ exit 1
       description: issue.description,
       contextPrimer,
       stackProfile,
+      additionalRepos,
     });
   }
 

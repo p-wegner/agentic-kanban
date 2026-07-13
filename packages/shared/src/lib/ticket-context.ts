@@ -14,6 +14,12 @@ export type TicketContext = {
    * commands from turn 1 instead of guessing them.
    */
   stackProfile?: StackProfile | null;
+  /**
+   * Multi-repo projects: the sibling worktrees created for the project's additional
+   * repos (same branch as this worktree). Rendered so the agent knows it may edit
+   * them and where they live.
+   */
+  additionalRepos?: Array<{ name: string | null; worktreePath: string }> | null;
 };
 
 /**
@@ -88,6 +94,20 @@ export function buildTicketContextMarkdown(ctx: TicketContext): string {
   const stackSection = buildStackProfileSection(ctx.stackProfile);
   if (stackSection) {
     lines.push(stackSection);
+    lines.push("");
+  }
+  if (ctx.additionalRepos && ctx.additionalRepos.length > 0) {
+    lines.push(
+      "## Additional repositories",
+      "",
+      "This is a multi-repo project. Each repo below has a worktree checked out on the",
+      "SAME branch as this one — you may read and edit files there when the task requires",
+      "it; commits you make there are diffed, reviewed, and merged together with this repo.",
+      "",
+    );
+    for (const repo of ctx.additionalRepos) {
+      lines.push(`- ${repo.name ? `**${repo.name}**: ` : ""}\`${repo.worktreePath}\``);
+    }
     lines.push("");
   }
   if (ctx.contextPrimer?.trim()) {

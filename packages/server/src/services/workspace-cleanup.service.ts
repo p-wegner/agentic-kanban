@@ -20,6 +20,7 @@ import { teardownWorktree, killProcessTree, removeDirWithRetry } from "./workspa
 import { resolveProjectRepo, getWorkspaceById } from "../repositories/workspace.repository.js";
 import * as crudRepo from "../repositories/workspace-crud.repository.js";
 import type { GitService } from "./workspace-internals.js";
+import { cleanupSiblingWorktrees } from "./workspace-repos.service.js";
 
 export interface StaleWorktreeEntry {
   id: string;
@@ -238,6 +239,9 @@ export function createWorkspaceCleanupService(deps: {
       const message = err instanceof Error ? err.message : String(err);
       return { success: false, error: `Failed to remove worktree: ${message}` };
     }
+
+    // Multi-repo: sibling worktrees + branches too (no-op single-repo).
+    await cleanupSiblingWorktrees(gitService, workspaceId, database);
 
     // Null out workingDir so it no longer shows as stale
     const now = new Date().toISOString();

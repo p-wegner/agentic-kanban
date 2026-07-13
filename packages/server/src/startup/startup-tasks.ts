@@ -5,6 +5,7 @@ import { applyMigrations } from "../db/manual-migrate.js";
 import { deduplicateProjects } from "../services/project-registration.js";
 import type * as agentServiceType from "../services/agent.service.js";
 import * as agentService from "../services/agent.service.js";import * as gitService from "../services/git.service.js";
+import { cleanupSiblingWorktrees } from "../services/workspace-repos.service.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { Database } from "../db/index.js";
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
@@ -339,6 +340,8 @@ export async function pruneStaleWorktrees(): Promise<void> {
           try { await gitService.removeWorktree(repoPath, ws.workingDir!); } catch { /* locked — skip */ }
         }
       }
+      // Multi-repo: sibling worktrees + branches too (no-op single-repo).
+      await cleanupSiblingWorktrees(gitService, ws.id, db);
       await db.update(workspaces).set({ workingDir: null, updatedAt: new Date().toISOString() }).where(eq(workspaces.id, ws.id));
     } catch (err) {
       console.warn(`[startup] Failed to prune worktree for workspace ${ws.id}:`, err);

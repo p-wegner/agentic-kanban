@@ -45,6 +45,27 @@ export interface ProjectResponse {
   updatedAt: string;
 }
 
+/**
+ * An ADDITIONAL repo of a multi-repo project (full-peers model). The leading repo
+ * stays on ProjectResponse.repoPath; single-repo projects return an empty list.
+ */
+export interface ProjectRepoResponse {
+  id: string;
+  projectId: string;
+  path: string;
+  name: string | null;
+  defaultBranch: string | null;
+  createdAt: string;
+}
+
+export interface AddProjectRepoRequest {
+  /** Local path to an existing git repo. Exactly one of path/cloneUrl. */
+  path?: string;
+  /** Git URL to clone into the server's repos root. Exactly one of path/cloneUrl. */
+  cloneUrl?: string;
+  name?: string;
+}
+
 export interface ProjectStatsResponse {
   commitCount: number;
   recentCommits: { hash: string; message: string; date: string }[];

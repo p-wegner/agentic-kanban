@@ -10,6 +10,7 @@ import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js
 import { teardownWorktree } from "./workspace-teardown.service.js";
 import { WorkspaceError, type GitService, type MergeResolutionState } from "./workspace-internals.js";
 import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
+import { cleanupSiblingWorktrees } from "./workspace-repos.service.js";
 
 export type MergeWarning = { step: string; message: string; recoverable: true };
 
@@ -155,6 +156,9 @@ async function reconcileAlreadyMergedRetry(args: {
   } catch (err) {
     addRecoverableWarning(warnings, "delete-branch", err);
   }
+
+  // Multi-repo: sibling worktrees + branches too (no-op single-repo).
+  await cleanupSiblingWorktrees(gitService, id, database);
 
   const now = new Date().toISOString();
   await finalizeMergeCleanup({
