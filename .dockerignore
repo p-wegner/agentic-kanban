@@ -1,0 +1,14 @@
+.git
+node_modules
+**/node_modules
+**/dist
+**/kanban.db*
+**/.worktrees
+packages/desktop/src-tauri/target
+packages/e2e/test-results
+packages/e2e/playwright-report
+code-metrics-out
+docs
+openspec
+*.log
+.env

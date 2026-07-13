@@ -438,25 +438,22 @@ sudo systemctl start agentic-kanban
 
 ### Docker
 
-There is no official Docker image yet. To run in a container:
+The repo ships a production `Dockerfile` (multi-stage, `node:22-bookworm-slim` — Debian/glibc is required by `@libsql/client` and the Claude Agent SDK native binary) and a `docker-compose.yml`. The image bundles git, pnpm, and the `claude` CLI; the server serves the built client UI on one port.
 
-```dockerfile
-FROM node:20-slim
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
-WORKDIR /app
-COPY . .
-RUN corepack enable && pnpm install && pnpm build
-WORKDIR /app/packages/server
-EXPOSE 3001
-CMD ["node", "dist/index.js"]
+```bash
+# .env next to docker-compose.yml (or export in the shell):
+#   ANTHROPIC_API_KEY=sk-...        # or CLAUDE_CODE_OAUTH_TOKEN=...
+docker compose up -d --build
+# UI + API on http://<host>:3001
 ```
 
-```powershell
-docker build -t agentic-kanban .
-docker run -p 3001:3001 -v /path/to/your/repos:/repos agentic-kanban
-```
+Key points:
 
-**Note:** Git operations (worktree creation, branching, merging) require the container to have access to the host's git repositories via volume mounts. This is only practical for local Docker usage.
+- **State** lives in the `kanban-data` volume mounted at `/data`: the database (`AGENTIC_KANBAN_DIR=/data`), cloned repos (`KANBAN_REPOS_DIR=/data/repos`), and their `.worktrees`.
+- **Agent auth**: the server strips `ANTHROPIC_*`/`CLAUDE_CODE_*` from agent spawn envs (cross-profile bleed guard), so the entrypoint (`docker/entrypoint.sh`) bridges `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` into a Claude profile (`~/.claude/settings_docker.json`) and selects it via the `claude_profile` preference. Alternatively mount an authenticated `~/.claude` to `/root/.claude` and set no env vars. The interactive `claude /login` flow does not work headless.
+- **Getting repos in**: either register with a clone URL (Settings → Register project → "Clone from URL", or `agentic-kanban register --clone <url>`) — the server clones into `/data/repos` — or bind-mount host checkouts. When bind-mounting, mount the **parent** directory of the repos (worktrees are created as a `.worktrees` sibling of each repo) and register `/repos/<name>`. `safe.directory '*'` is preconfigured for foreign-UID mounts.
+- **Commit identity** comes from `GIT_AUTHOR_*`/`GIT_COMMITTER_*` env (defaults set in compose).
+- **No app-level auth** — run on a trusted network (VPN/Tailscale) or behind an authenticating reverse proxy.
 
 ---
 
