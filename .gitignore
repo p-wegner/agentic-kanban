@@ -56,3 +56,4 @@ build/
 
 # npm lockfile — this repo is pnpm-managed (pnpm-lock.yaml is the lockfile of record)
 package-lock.json
+docker-compose.override.yml

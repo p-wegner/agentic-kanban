@@ -40,12 +40,16 @@ RUN node -e "const p=require('./package.json');delete p.devDependencies;require(
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+# IS_SANDBOX=1: the container runs as root, and Claude Code refuses
+# --dangerously-skip-permissions under root unless it knows it's inside a sandbox.
+# buildSpawnEnv passes this through to every spawned agent.
 ENV AGENTIC_KANBAN_DIR=/data \
     KANBAN_REPOS_DIR=/data/repos \
     KANBAN_HOST=0.0.0.0 \
     PORT=3001 \
     HOME=/root \
-    COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+    COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+    IS_SANDBOX=1
 EXPOSE 3001
 VOLUME ["/data"]
 ENTRYPOINT ["/entrypoint.sh"]
