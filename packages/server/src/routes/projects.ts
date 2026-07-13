@@ -9,6 +9,22 @@ import type { SessionManager } from "../services/session.manager.js";
 import { createHash } from "node:crypto";
 import { createWorkspaceSummaryCache } from "../services/workspace-summary-cache.service.js";
 import { createBoardEtagCache } from "../services/board-etag-cache.service.js";
+import { listProjectRepos, insertProjectRepo, deleteProjectRepo, type RepoRow } from "../repositories/repo.repository.js";
+import { getProjectById } from "../repositories/project.repository.js";
+import { detectRepoInfo } from "../services/git-info.service.js";
+import { cloneRepo } from "../services/repo-clone.service.js";
+import type { ProjectRepoResponse } from "@agentic-kanban/shared";
+
+function toProjectRepoResponse(row: RepoRow): ProjectRepoResponse {
+  return {
+    id: row.id,
+    projectId: row.projectId!,
+    path: row.path,
+    name: row.name,
+    defaultBranch: row.defaultBranch,
+    createdAt: row.createdAt,
+  };
+}
 
 export function createProjectsRoute(database: Database, options?: { boardEvents?: BoardEvents; getSessionManager?: () => SessionManager }) {
   const router = createRouter();
@@ -163,6 +179,67 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
     const projectId = c.req.param("id");
     const branches = await projectService.getBranches(projectId);
     return c.json(branches);
+  });
+
+  // --- Multi-repo project repo set (additional repos; leading repo = project.repoPath) ---
+
+  // GET /api/projects/:id/repos
+  router.get("/:id/repos", async (c) => {
+    const projectId = c.req.param("id");
+    const rows = await listProjectRepos(projectId, database);
+    return c.json(rows.map(toProjectRepoResponse));
+  });
+
+  // POST /api/projects/:id/repos — add an additional repo (local path or clone URL)
+  router.post("/:id/repos", async (c) => {
+    const projectId = c.req.param("id");
+    const body = await parseJsonBody<{ path?: string; cloneUrl?: string; name?: string }>(c);
+    if (!body.path === !body.cloneUrl) {
+      return c.json({ error: "Provide exactly one of path or cloneUrl" }, 400);
+    }
+    const project = await getProjectById(projectId, database);
+    if (!project) return c.json({ error: "Project not found" }, 404);
+
+    let localPath = body.path;
+    if (body.cloneUrl) {
+      try {
+        localPath = await cloneRepo(body.cloneUrl, { name: body.name });
+      } catch (err) {
+        return c.json({ error: `Clone failed: ${err instanceof Error ? err.message : String(err)}` }, 400);
+      }
+    }
+    let repoInfo;
+    try {
+      repoInfo = await detectRepoInfo(localPath!);
+    } catch (err) {
+      return c.json({ error: `Invalid repo: ${err instanceof Error ? err.message : String(err)}` }, 400);
+    }
+    if (repoInfo.repoPath === project.repoPath) {
+      return c.json({ error: "This is already the project's leading repo" }, 409);
+    }
+    const existing = await listProjectRepos(projectId, database);
+    if (existing.some((r) => r.path === repoInfo.repoPath)) {
+      return c.json({ error: "Repo is already part of this project" }, 409);
+    }
+    const row = await insertProjectRepo({
+      projectId,
+      path: repoInfo.repoPath,
+      name: body.name ?? repoInfo.repoName,
+      defaultBranch: repoInfo.defaultBranch,
+    }, database);
+    options?.boardEvents?.broadcastProjectsChanged(projectId, "project_updated");
+    return c.json(toProjectRepoResponse(row), 201);
+  });
+
+  // DELETE /api/projects/:id/repos/:repoId — remove an additional repo from the set
+  // (does not touch the checkout on disk; existing workspaces keep their worktrees)
+  router.delete("/:id/repos/:repoId", async (c) => {
+    const projectId = c.req.param("id");
+    const repoId = c.req.param("repoId");
+    const deleted = await deleteProjectRepo(repoId, projectId, database);
+    if (!deleted) return c.json({ error: "Repo not found" }, 404);
+    options?.boardEvents?.broadcastProjectsChanged(projectId, "project_updated");
+    return c.json({ success: true });
   });
 
   // GET /api/projects/:id/stats — lightweight project stats

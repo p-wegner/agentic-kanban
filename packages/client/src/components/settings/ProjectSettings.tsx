@@ -2,6 +2,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { apiFetch, apiPost } from "../../lib/api.js";
 import { ProjectScriptsSettingsSection } from "../ProjectScriptsSettingsSection.js";
 import { StackProfileSettingsSection } from "../StackProfileSettingsSection.js";
+import { ProjectReposSection } from "../ProjectReposSection.js";
 import { DriveSettingsSection } from "../DriveSettingsSection.js";
 import { showToast } from "../Toast.js";
 import { ArchiveDoneSection, CollapsibleSection, Field, Toggle, type ProjectSettingsState, type Settings, type SkillSetting } from "../SettingsPanel.shared.js";
@@ -126,6 +127,7 @@ export function ProjectSettings({ activeProjectId, settings, setSettings, projec
                       </Field>
                       <ProjectScriptsSettingsSection projectId={activeProjectId} />
                       <StackProfileSettingsSection projectId={activeProjectId} />
+                      <ProjectReposSection projectId={activeProjectId} />
                       <div className="pt-2">
                         <h3 className="text-sm font-semibold text-gray-700">Worktree Setup</h3>
                         <p className="text-xs text-gray-500 mt-1">
