@@ -1,0 +1,53 @@
+# Per-workspace service stacks: Docker-in-Docker (DinD) overlay.
+#
+# This is a COMPOSE OVERRIDE for docker-compose.yml. Use it when a project declares a
+# service stack (decision 011) and you want a NESTED, isolated Docker daemon instead of
+# sharing the host's (DooD). Run BOTH files together:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dind.yml up -d --build
+#
+# Why DinD over DooD here:
+#   The agents inside the board run `docker compose up` for the project's stack. A project's
+#   compose file often BIND-MOUNTS source (a repo checkout, a data dir) from /data/repos.
+#   With DooD those bind-mounts resolve on the HOST filesystem and break unless the host has
+#   an identical path (see the pitfall note in docker-compose.yml). DinD avoids that: the
+#   nested `dind` daemon and the board SHARE the repos volume at the SAME path (/data), so
+#   a bind-mount of /data/repos/<repo> resolves to the exact same bytes on both sides.
+#
+# The board's `docker` CLI is pointed at the sidecar via DOCKER_HOST=tcp://dind:2375. The
+# entrypoint waits (polls `docker version`) for the daemon to come up before starting the
+# server. TLS is disabled (DOCKER_TLS_CERTDIR="") because the daemon is only reachable on the
+# private compose network `dind-net` — never expose 2375 to a public network.
+
+services:
+  dind:
+    image: docker:27-dind
+    privileged: true            # DinD requires privileged to run its own daemon
+    environment:
+      DOCKER_TLS_CERTDIR: ""     # plain tcp on the internal network only (no public exposure)
+    command: ["dockerd", "--host=tcp://0.0.0.0:2375", "--host=unix:///var/run/docker.sock"]
+    networks:
+      - dind-net
+    volumes:
+      # SAME repos volume, SAME path as the board → project compose bind-mounts of
+      # /data/repos/<repo> resolve identically on the nested daemon.
+      - kanban-data:/data
+      # dind's own image/layer/container storage (kept off the repos volume).
+      - dind-storage:/var/lib/docker
+    restart: unless-stopped
+
+  kanban:
+    environment:
+      # Point the board's `docker` CLI at the nested daemon instead of a local socket.
+      DOCKER_HOST: tcp://dind:2375
+    networks:
+      - dind-net
+    depends_on:
+      - dind
+
+networks:
+  dind-net:
+    driver: bridge
+
+volumes:
+  dind-storage:

@@ -339,6 +339,60 @@ export function ProjectSettings({ activeProjectId, settings, setSettings, projec
                           )}
                         </button>
                       </CollapsibleSection>
+                      <CollapsibleSection
+                        title="Service stack (Docker Compose)"
+                        configured={projectSettings.servicesEnabled}
+                        defaultOpen={projectSettings.servicesEnabled}
+                      >
+                        <p className="text-xs text-gray-500">
+                          Bring a declared Docker Compose stack (e.g. a postgres sidecar) UP per workspace on
+                          create and DOWN on merge/delete. Each workspace gets its own isolated compose project
+                          and free host ports. Requires Docker; disabled = zero behavior change.
+                        </p>
+                        <Toggle
+                          checked={projectSettings.servicesEnabled}
+                          onChange={(v) => setProjectSettings(s => ({ ...s, servicesEnabled: v }))}
+                          label="Enable service stack"
+                          hint="When enabled, the compose stack is provisioned for each new workspace."
+                        />
+                        {projectSettings.servicesEnabled && (
+                          <div className="space-y-2">
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">Compose file path</label>
+                              <input
+                                type="text"
+                                value={projectSettings.servicesComposeFile}
+                                onChange={(e) => setProjectSettings(s => ({ ...s, servicesComposeFile: e.target.value }))}
+                                placeholder="docker-compose.yml"
+                                className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 font-mono"
+                              />
+                              <p className="text-xs text-gray-400 mt-1">Relative to its repo root. Defaults to <code>docker-compose.yml</code>.</p>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">Compose repo</label>
+                              <input
+                                type="text"
+                                value={projectSettings.servicesComposeRepo}
+                                onChange={(e) => setProjectSettings(s => ({ ...s, servicesComposeRepo: e.target.value }))}
+                                placeholder="(leading repo)"
+                                className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 font-mono"
+                              />
+                              <p className="text-xs text-gray-400 mt-1">Name of the additional repo holding the compose file. Leave empty for the project's leading repo.</p>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">Port names</label>
+                              <input
+                                type="text"
+                                value={projectSettings.servicesPorts}
+                                onChange={(e) => setProjectSettings(s => ({ ...s, servicesPorts: e.target.value }))}
+                                placeholder="db, cache"
+                                className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 font-mono"
+                              />
+                              <p className="text-xs text-gray-400 mt-1">Comma-separated names (<code>[a-zA-Z0-9_]</code>). Each gets a free host port injected as <code>KANBAN_SVC_&lt;UPPER&gt;_PORT</code>.</p>
+                            </div>
+                          </div>
+                        )}
+                      </CollapsibleSection>
                       <Field label="Default Skill" hint="Skill applied to new workspaces when no explicit skill is chosen and the issue has no workflow. Fixes 'No Skill' in Insights.">
                         <select
                           value={projectSettings.defaultSkillId || ""}

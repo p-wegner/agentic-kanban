@@ -23,6 +23,7 @@ import {
 import { createWorkspaceCleanupService } from "./workspace-cleanup.service.js";
 import { cleanupSiblingWorktrees } from "./workspace-repos.service.js";
 import { createWorkspaceCreateService } from "./workspace-create.service.js";
+import { workspaceServicesService, parseStoredComposeProjectName } from "./workspace-services.service.js";
 
 export function createWorkspaceCrudService(deps: {
   database: Database;
@@ -70,6 +71,16 @@ export function createWorkspaceCrudService(deps: {
     }
 
     if (workingDir && !isDirect && repoPath && !sharedByOthers) {
+      // Per-workspace Docker service stack down (only when one was provisioned) before
+      // the worktree is removed. Uses the STORED compose project name (never a recompute,
+      // #F1). Best-effort — the engine never throws.
+      const delComposeName = parseStoredComposeProjectName(wsRow[0]?.serviceState);
+      if (delComposeName) {
+        await workspaceServicesService.teardownWorkspaceServices({
+          composeProjectName: delComposeName,
+          composeWorktreePath: workingDir,
+        });
+      }
       await removeWorktreeAndBranch({
         workingDir,
         repoPath,
@@ -109,6 +120,16 @@ export function createWorkspaceCrudService(deps: {
 
     // Clean up the worktree for non-direct workspaces (mirrors merge/close behaviour).
     if (!workspace.isDirect && workspace.workingDir) {
+      // Per-workspace Docker service stack down (only when one was provisioned) before
+      // the worktree goes away. Uses the STORED compose project name (#F1). Best-effort —
+      // the engine never throws.
+      const closeComposeName = parseStoredComposeProjectName(workspace.serviceState);
+      if (closeComposeName) {
+        await workspaceServicesService.teardownWorkspaceServices({
+          composeProjectName: closeComposeName,
+          composeWorktreePath: workspace.workingDir,
+        });
+      }
       const { repoPath } = await resolveProjectRepo(workspaceId, database).catch(() => ({ repoPath: null as string | null }));
       if (repoPath) {
         try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch { /* best effort */ }

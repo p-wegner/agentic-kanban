@@ -12,8 +12,15 @@ export * from "./butler-ticket-prompt.js";
 export * from "./outbound-webhook.js";
 export * from "./settings-registry.js";
 export * from "./sanitize-utf8.js";
+// Pure string helpers (no Node builtins) — safe as value exports for the client bundle.
+export * from "./service-ports.js";
 // Type-only: smoke-check.ts imports node:child_process (runSmokeCheck), which crashes
 // the browser bundle if pulled into the client via this barrel. The sole runtime consumer
 // (server exit-workflow) imports runSmokeCheck from the deep path; only the SmokeCheck type
 // is needed through the barrel. (Fixes #791 client white-screen.)
 export type * from "./smoke-check.js";
+// Type-only: docker-exec.ts imports node:child_process (dockerExec/dockerAvailable),
+// which crashes the browser bundle if pulled into the client via this barrel. The
+// runtime is imported from the deep path (@agentic-kanban/shared/lib/docker-exec)
+// server-side; only the types are needed through the barrel. (#791 client white-screen.)
+export type * from "./docker-exec.js";

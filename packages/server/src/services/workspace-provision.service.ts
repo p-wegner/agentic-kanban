@@ -287,6 +287,7 @@ exit 1
     issue: { issueNumber: number | null; title: string; description: string | null; projectId: string },
     contextPrimer: string | null,
     additionalRepos?: Array<{ name: string | null; worktreePath: string }>,
+    serviceStack?: { ports: Record<string, number>; envFilePath: string; composeProjectName: string; serviceHost: string } | null,
   ): Promise<string | null> {
     let stackProfile = null;
     try {
@@ -301,6 +302,7 @@ exit 1
       contextPrimer,
       stackProfile,
       additionalRepos,
+      serviceStack,
     });
   }
 

@@ -6,6 +6,7 @@ import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
 import type { GitService } from "./workspace-internals.js";
 import { teardownWorktree } from "./workspace-teardown.service.js";
+import { workspaceServicesService, parseStoredComposeProjectName } from "./workspace-services.service.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import { generateAndPersistGithubHandoffDraft } from "./github-handoff-draft.service.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
@@ -33,6 +34,8 @@ export type WorkspacePostMergeCleanupArgs = {
   isDirect: boolean;
   /** SHA returned by mergeBranch({ deferWorkingTreeSync: true }) — apply before any other cleanup. */
   pendingWorkingTreeSyncSha?: string | null;
+  /** Persisted ServiceStackState JSON (workspaces.service_state); non-null → tear the stack down. */
+  serviceState?: string | null;
 };
 
 export async function runWorkspacePostMergeCleanup(
@@ -83,6 +86,16 @@ async function teardownMergedWorktree(
   warnings: MergeWarning[],
 ): Promise<void> {
   if (!args.workingDir || args.isDirect) return;
+  // Per-workspace Docker service stack down (only when one was provisioned) BEFORE the
+  // worktree is removed. Uses the STORED compose project name (#F1). Best-effort — the
+  // engine never throws.
+  const mergeComposeName = parseStoredComposeProjectName(args.serviceState);
+  if (mergeComposeName) {
+    await workspaceServicesService.teardownWorkspaceServices({
+      composeProjectName: mergeComposeName,
+      composeWorktreePath: args.workingDir,
+    });
+  }
   try {
     await teardownWorktree(
       {
