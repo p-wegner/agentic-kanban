@@ -55,10 +55,10 @@ curl -X PATCH http://localhost:3001/api/projects/<projectId> \
 For each new workspace the board:
 
 1. Allocates a **free host port** for `db` (e.g. `54187`) — collision-free across all projects/workspaces.
-2. Computes a deterministic `COMPOSE_PROJECT_NAME` — an `ak-`-prefixed name derived from the workspace's **unique id** (see `composeProjectName` in `packages/shared/src/lib/service-ports.ts`), so no two workspaces (even on the same issue) ever share a stack.
+2. Computes a deterministic `COMPOSE_PROJECT_NAME` — `ak-<instanceId8>-ws-<workspaceId12>`, derived from the workspace's **unique id** plus this board instance's persisted id (see `composeProjectName` in `packages/shared/src/lib/service-ports.ts`), so no two workspaces (even on the same issue) — and no two board instances sharing one Docker daemon — ever share a stack.
 3. Writes `<backendWorktree>/.kanban/services.env`:
    ```sh
-   COMPOSE_PROJECT_NAME=ak-ws-b3d9f01a2c4e
+   COMPOSE_PROJECT_NAME=ak-1f3a9c2b-ws-b3d9f01a2c4e
    KANBAN_STACK=1
    KANBAN_SERVICE_HOST=localhost
    KANBAN_SVC_DB_PORT=54187
@@ -79,7 +79,7 @@ Always use `${KANBAN_SERVICE_HOST:-localhost}` rather than a hardcoded `localhos
 
 ## 4. Teardown
 
-On merge / delete / abandon the board runs `docker compose -p <name> down -v --remove-orphans` — containers, network, and the `pgdata` volume all vanish (the DB is disposable by design). Orphaned stacks left by a crash are reaped on server startup — the reaper only touches compose projects whose name matches the board's own managed `ak-`-prefixed shape (`isManagedComposeProject` in `packages/shared/src/lib/service-ports.ts`), never unrelated compose projects.
+On merge / delete / abandon the board runs `docker compose -p <name> down -v --remove-orphans` — containers, network, and the `pgdata` volume all vanish (the DB is disposable by design). Orphaned stacks left by a crash are reaped on server startup — the reaper only touches compose projects whose name carries **this instance's** id (`isInstanceManagedComposeProject` in `packages/shared/src/lib/service-ports.ts`), never another board instance's stacks on the same daemon and never unrelated compose projects. Legacy pre-instance-scoped stacks (`ak-ws-*`) are never auto-downed — clean those up once manually after upgrading (`docker compose -p <name> down -v`).
 
 ## Running the board where this works
 

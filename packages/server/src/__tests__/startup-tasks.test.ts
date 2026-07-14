@@ -23,10 +23,12 @@ vi.mock("../services/git.service.js", () => ({
 vi.mock("../db/manual-migrate.js", () => ({ applyMigrations: vi.fn(async () => {}) }));
 vi.mock("../db/seed.js", () => ({ ensureBuiltinTags: vi.fn(async () => {}), ensureBuiltinSkills: vi.fn(async () => {}) }));
 vi.mock("../services/project-registration.js", () => ({ deduplicateProjects: vi.fn(async () => {}) }));
+vi.mock("../services/workspace-repos.service.js", () => ({ cleanupSiblingWorktrees: vi.fn(async () => {}) }));
 
-import { abortStaleMerges, shouldKillOrphanedServerProcess } from "../startup/startup-tasks.js";
+import { abortStaleMerges, pruneStaleWorktrees, shouldKillOrphanedServerProcess } from "../startup/startup-tasks.js";
 import { db } from "../db/index.js";
 import * as gitService from "../services/git.service.js";
+import { cleanupSiblingWorktrees } from "../services/workspace-repos.service.js";
 
 const mockDb = db as unknown as {
   select: ReturnType<typeof vi.fn>;
@@ -102,6 +104,56 @@ describe("abortStaleMerges", () => {
 
     // Should not throw
     await expect(abortStaleMerges()).resolves.toBeUndefined();
+  });
+});
+
+describe("pruneStaleWorktrees", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("prunes sibling worktrees with preserveUnmerged so unshipped sibling branches survive", async () => {
+    // Query order inside pruneStaleWorktrees: closed workspaces -> issue -> project.
+    mockDb.select
+      .mockReturnValueOnce({
+        from: vi.fn(() => ({
+          where: vi.fn(() => Promise.resolve([
+            { id: "ws-1", branch: "feature/x", workingDir: "C:/wt/x", issueId: "issue-1" },
+          ])),
+        })),
+      })
+      .mockReturnValueOnce({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({ limit: vi.fn(() => Promise.resolve([{ projectId: "proj-1" }])) })),
+        })),
+      })
+      .mockReturnValueOnce({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({ limit: vi.fn(() => Promise.resolve([{ repoPath: "C:/repo" }])) })),
+        })),
+      });
+
+    await pruneStaleWorktrees();
+
+    const mockCleanup = vi.mocked(cleanupSiblingWorktrees);
+    expect(mockCleanup).toHaveBeenCalledTimes(1);
+    const [, workspaceId, , opts] = mockCleanup.mock.calls[0];
+    expect(workspaceId).toBe("ws-1");
+    // This path never deletes the leading branch of a closed workspace, so an
+    // unmerged sibling branch must be preserved too — not force-deleted at startup.
+    expect(opts).toEqual({ preserveUnmerged: true });
+  });
+
+  it("does nothing when no closed workspace still has a workingDir", async () => {
+    mockDb.select.mockReturnValueOnce({
+      from: vi.fn(() => ({
+        where: vi.fn(() => Promise.resolve([{ id: "ws-2", branch: "b", workingDir: null, issueId: "i" }])),
+      })),
+    });
+
+    await pruneStaleWorktrees();
+
+    expect(vi.mocked(cleanupSiblingWorktrees)).not.toHaveBeenCalled();
   });
 });
 
