@@ -7,6 +7,7 @@ import {
   createDefaultComposeRunner,
   buildServicesEnvFile,
   parseStoredComposeProjectName,
+  parseStoredServiceStackState,
   type ComposeRunner,
 } from "../services/workspace-services.service.js";
 import type { ServiceStackConfig } from "@agentic-kanban/shared";
@@ -40,7 +41,8 @@ const INSTANCE = "testinst";
 
 /**
  * Construct the engine with SAFE fakes for every DB-touching default (getInstanceId /
- * markServiceStateDown lazily hit the repository → real DB when not injected).
+ * markServiceStateDown / findLiveStackReferences lazily hit the repository → real DB
+ * when not injected).
  */
 function makeService(deps: Parameters<typeof createWorkspaceServicesService>[0] = {}): {
   svc: ReturnType<typeof createWorkspaceServicesService>;
@@ -52,6 +54,7 @@ function makeService(deps: Parameters<typeof createWorkspaceServicesService>[0] 
     markServiceStateDown: async (name) => {
       markedDown.push(name);
     },
+    findLiveStackReferences: async () => [],
     ...deps,
   });
   return { svc, markedDown };
@@ -168,6 +171,29 @@ describe("parseStoredComposeProjectName", () => {
     expect(parseStoredComposeProjectName("not json")).toBeNull();
     expect(parseStoredComposeProjectName(JSON.stringify({ ports: {} }))).toBeNull();
     expect(parseStoredComposeProjectName(JSON.stringify({ composeProjectName: "" }))).toBeNull();
+  });
+});
+
+describe("parseStoredServiceStackState", () => {
+  it("round-trips a full stored state and tolerates null/garbage/invalid shapes", () => {
+    const stored = {
+      composeProjectName: "ak-testinst-ws-abc123def456",
+      ports: { db: 61000 },
+      envFilePath: "C:/wt/.kanban/services.env",
+      status: "up",
+      updatedAt: new Date().toISOString(),
+    };
+    const parsed = parseStoredServiceStackState(JSON.stringify(stored));
+    expect(parsed).not.toBeNull();
+    expect(parsed!.composeProjectName).toBe(stored.composeProjectName);
+    expect(parsed!.ports).toEqual({ db: 61000 });
+    expect(parsed!.status).toBe("up");
+
+    expect(parseStoredServiceStackState(null)).toBeNull();
+    expect(parseStoredServiceStackState(undefined)).toBeNull();
+    expect(parseStoredServiceStackState("not json")).toBeNull();
+    expect(parseStoredServiceStackState(JSON.stringify({ composeProjectName: "x", status: "weird" }))).toBeNull();
+    expect(parseStoredServiceStackState(JSON.stringify({ status: "up" }))).toBeNull();
   });
 });
 
@@ -403,6 +429,103 @@ describe("teardownWorkspaceServices", () => {
     await expect(
       svc.teardownWorkspaceServices({ composeProjectName: "ak-testinst-ws-abc123def", composeWorktreePath: workDir }),
     ).resolves.toBeUndefined();
+  });
+});
+
+/**
+ * Shared-worktree last-reference guard (finding 12): co-resident workspaces (worktree
+ * reuse / fork children) ADOPT one shared stack, so several live rows can reference the
+ * same compose project. The down must only run when the RELEASING workspace is the last
+ * live referent.
+ */
+describe("teardownWorkspaceServices — shared-stack last-reference guard", () => {
+  const OWNER_ID = "550e8400-e29b-41d4-a716-446655440000"; // sanitizes to 550e8400e29b
+  const ADOPTER_ID = "99998888-7777-6666-5555-444433332222";
+  const STACK = composeProjectName(OWNER_ID, INSTANCE); // ak-testinst-ws-550e8400e29b
+
+  it("skips the down (and does not mark the state down) while ANOTHER live workspace references the stack", async () => {
+    const { runner, downs } = makeFakeRunner();
+    const { svc, markedDown } = makeService({
+      runner,
+      findLiveStackReferences: async () => [{ id: ADOPTER_ID }],
+    });
+    await svc.teardownWorkspaceServices({
+      composeProjectName: STACK,
+      composeWorktreePath: workDir,
+      releasedByWorkspaceId: OWNER_ID,
+    });
+    expect(downs).toHaveLength(0);
+    expect(markedDown).toEqual([]);
+  });
+
+  it("downs the stack when the only live reference is the RELEASING workspace itself (last sharer)", async () => {
+    const { runner, downs } = makeFakeRunner();
+    const { svc, markedDown } = makeService({
+      runner,
+      findLiveStackReferences: async () => [{ id: ADOPTER_ID }],
+    });
+    await svc.teardownWorkspaceServices({
+      composeProjectName: STACK,
+      composeWorktreePath: workDir,
+      releasedByWorkspaceId: ADOPTER_ID,
+    });
+    expect(downs).toHaveLength(1);
+    expect(downs[0].projectName).toBe(STACK);
+    expect(markedDown).toEqual([STACK]);
+  });
+
+  it("legacy caller (no releasedByWorkspaceId): the stack's OWNER row never blocks its own teardown", async () => {
+    // Merge-reconcile paths tear down BEFORE the workspace row goes terminal and cannot
+    // name the releaser; the owner (the row the compose name derives from) is treated
+    // as the releaser so single-workspace behavior is unchanged.
+    const { runner, downs } = makeFakeRunner();
+    const { svc } = makeService({
+      runner,
+      findLiveStackReferences: async () => [{ id: OWNER_ID }],
+    });
+    await svc.teardownWorkspaceServices({ composeProjectName: STACK, composeWorktreePath: workDir });
+    expect(downs).toHaveLength(1);
+  });
+
+  it("legacy caller: a live ADOPTER (non-owner) reference still blocks the down", async () => {
+    const { runner, downs } = makeFakeRunner();
+    const { svc, markedDown } = makeService({
+      runner,
+      findLiveStackReferences: async () => [{ id: ADOPTER_ID }],
+    });
+    await svc.teardownWorkspaceServices({ composeProjectName: STACK, composeWorktreePath: workDir });
+    expect(downs).toHaveLength(0);
+    expect(markedDown).toEqual([]);
+  });
+
+  it("legacy caller: owner exclusion also matches the legacy unscoped name shape (ak-ws-<ws12>)", async () => {
+    const legacyName = "ak-ws-550e8400e29b";
+    const { runner, downs } = makeFakeRunner();
+    const { svc } = makeService({
+      runner,
+      findLiveStackReferences: async () => [{ id: OWNER_ID }],
+    });
+    await svc.teardownWorkspaceServices({ composeProjectName: legacyName, composeWorktreePath: workDir });
+    expect(downs).toHaveLength(1);
+  });
+
+  it("skips the down when the sharer check fails (leak beats pulling a live shared stack)", async () => {
+    const { runner, downs } = makeFakeRunner();
+    const { svc, markedDown } = makeService({
+      runner,
+      findLiveStackReferences: async () => {
+        throw new Error("db unavailable");
+      },
+    });
+    await expect(
+      svc.teardownWorkspaceServices({
+        composeProjectName: STACK,
+        composeWorktreePath: workDir,
+        releasedByWorkspaceId: OWNER_ID,
+      }),
+    ).resolves.toBeUndefined();
+    expect(downs).toHaveLength(0);
+    expect(markedDown).toEqual([]);
   });
 });
 

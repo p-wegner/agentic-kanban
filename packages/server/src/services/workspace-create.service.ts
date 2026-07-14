@@ -14,7 +14,7 @@ import { randomUUID } from "node:crypto";
 import { isResolvedDependencyStatusView } from "@agentic-kanban/shared/lib/status-view";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { derivePortsFromBranch } from "./worktree-ports.js";
-import { workspaceServicesService, resolveServiceHost } from "./workspace-services.service.js";
+import { workspaceServicesService, resolveServiceHost, parseStoredServiceStackState } from "./workspace-services.service.js";
 import {
   DEFAULT_SERVICE_STACK_CONFIG,
   type ServiceStackConfig,
@@ -44,6 +44,7 @@ import { moveIssueToInProgressStrict } from "../repositories/workspace.repositor
 import {
   updateWorkspaceServiceState,
   getWorkspaceLifecycleStatus,
+  findLiveWorkspacesSharingWorkingDir,
 } from "../repositories/workspace-service-state.repository.js";
 import {
   WorkspaceError,
@@ -106,22 +107,90 @@ export function createWorkspaceCreateService(deps: {
   }
 
   /**
+   * SHARED-WORKTREE STACK SEMANTICS (finding 12, design: REUSE). createWorktree hands
+   * a second workspace on the same branch the SAME worktree (and fork children copy
+   * the parent's workingDir), so provisioning a second stack here would overwrite the
+   * shared `.kanban/services.env` and cross-wire the co-resident agent onto the new
+   * stack's ports. Instead:
+   *  - a live co-resident with an "up" stack → ADOPT it: record the SAME compose
+   *    project (state copied), bring up NO second stack, leave services.env untouched;
+   *  - a SENIOR live co-resident (created before this workspace) without an adoptable
+   *    stack (e.g. its provisioning is still inside the up-to-120s `up --wait`
+   *    window) → REFUSE with an "error" state, never race it for the env file;
+   *  - only JUNIOR co-residents (created after; they will defer to us) → provision
+   *    normally.
+   * Returns null = no co-resident constraint; the caller provisions its own stack.
+   */
+  async function resolveSharedWorktreeStack(params: {
+    workspaceId: string;
+    workspaceCreatedAt: string;
+    leadingWorktreePath: string;
+  }): Promise<{ state: ServiceStackState; adopted: boolean } | null> {
+    let sharers: { id: string; serviceState: string | null; createdAt: string | null }[] = [];
+    try {
+      sharers = await findLiveWorkspacesSharingWorkingDir(params.leadingWorktreePath, params.workspaceId, database);
+    } catch (err) {
+      // Invariant 4 (single-workspace behavior unchanged) wins on a failed check: warn
+      // loudly and provision normally — a genuinely-shared worktree is the rare case.
+      console.warn(`[services] shared-worktree check failed for ${params.leadingWorktreePath} (provisioning proceeds): ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    }
+    if (sharers.length === 0) return null;
+
+    const adoptable = sharers
+      .map((s) => ({ id: s.id, createdAt: s.createdAt ?? "", state: parseStoredServiceStackState(s.serviceState) }))
+      .filter((s): s is { id: string; createdAt: string; state: ServiceStackState } =>
+        s.state !== null && s.state.status === "up" && s.state.composeProjectName.length > 0)
+      .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : 1));
+    if (adoptable.length > 0) {
+      const donor = adoptable[0];
+      console.log(`[services] workspace ${params.workspaceId} shares worktree ${params.leadingWorktreePath} with workspace ${donor.id} — adopting its stack ${donor.state.composeProjectName} (no second stack, services.env untouched)`);
+      return { adopted: true, state: { ...donor.state, updatedAt: new Date().toISOString() } };
+    }
+
+    const senior = sharers.filter((s) =>
+      (s.createdAt ?? "") < params.workspaceCreatedAt ||
+      ((s.createdAt ?? "") === params.workspaceCreatedAt && s.id < params.workspaceId));
+    if (senior.length > 0) {
+      const message =
+        `worktree is shared with live workspace ${senior[0].id}, which has no adoptable (status "up") service stack yet — ` +
+        `this workspace's stack was NOT started so the shared .kanban/services.env is never overwritten (cross-wiring guard). ` +
+        `Once the co-resident's stack is up its services are shared; or close/delete the co-resident workspace.`;
+      console.warn(`[services] ${message}`);
+      return {
+        adopted: false,
+        state: { composeProjectName: "", ports: {}, envFilePath: "", status: "error", error: message, updatedAt: new Date().toISOString() },
+      };
+    }
+
+    // Only junior sharers — they defer to this workspace; provision normally.
+    return null;
+  }
+
+  /**
    * Bring the project's declared per-workspace Docker service stack up. Runs in the
    * DEFERRED launch path (OFF the HTTP hot path, #F3b) AFTER the workspace row exists,
    * keyed on the workspace's UNIQUE id (#F1) so its compose project name can never
    * collide with a sibling workspace on the same issue. NON-FATAL — any failure yields
    * an "error" ServiceStackState that is persisted and surfaced. Returns null when the
-   * project has no (enabled) stack.
+   * project has no (enabled) stack. `adopted: true` marks a state that records a
+   * CO-RESIDENT workspace's stack (shared worktree) — this workspace never owns it, so
+   * the deferred convergence paths must not down it on a failed persist.
    */
   async function provisionServicesForLaunch(params: {
     servicesConfigRaw: string | null;
     workspaceId: string;
+    workspaceCreatedAt: string;
     branch: string;
     leadingWorktreePath: string;
     siblings: SiblingWorktree[];
-  }): Promise<ServiceStackState | null> {
+  }): Promise<{ state: ServiceStackState; adopted: boolean } | null> {
     const config = parseServicesConfig(params.servicesConfigRaw);
     if (!config) return null;
+
+    // Shared-worktree guard BEFORE any provisioning side effect (finding 12).
+    const shared = await resolveSharedWorktreeStack(params);
+    if (shared) return shared;
 
     let composeWorktreePath = params.leadingWorktreePath;
     if (config.composeRepo) {
@@ -136,36 +205,43 @@ export function createWorkspaceCreateService(deps: {
           `Set composeRepo to one of the project's additional repo names, or leave it empty to use the leading repo's compose file.`;
         console.warn(`[services] ${message}`);
         return {
-          composeProjectName: "",
-          ports: {},
-          envFilePath: "",
-          status: "error",
-          error: message,
-          updatedAt: new Date().toISOString(),
+          adopted: false,
+          state: {
+            composeProjectName: "",
+            ports: {},
+            envFilePath: "",
+            status: "error",
+            error: message,
+            updatedAt: new Date().toISOString(),
+          },
         };
       }
       composeWorktreePath = sibling.worktreePath;
     }
 
     try {
-      return await workspaceServicesService.provisionWorkspaceServices({
+      const state = await workspaceServicesService.provisionWorkspaceServices({
         config,
         workspaceId: params.workspaceId,
         composeWorktreePath,
         extraEnv: { KANBAN_WORKTREE_BRANCH: params.branch },
       });
+      return { adopted: false, state };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.warn(`[services] provisioning threw (non-fatal) for branch ${params.branch}: ${message}`);
       // No stack came up, so an empty compose name is safe here: every teardown path
       // (parseStoredComposeProjectName) treats it as "nothing to down".
       return {
-        composeProjectName: "",
-        ports: {},
-        envFilePath: "",
-        status: "error",
-        error: message.slice(0, 2000),
-        updatedAt: new Date().toISOString(),
+        adopted: false,
+        state: {
+          composeProjectName: "",
+          ports: {},
+          envFilePath: "",
+          status: "error",
+          error: message.slice(0, 2000),
+          updatedAt: new Date().toISOString(),
+        },
       };
     }
   }
@@ -422,6 +498,7 @@ export function createWorkspaceCreateService(deps: {
       worktreePath: string | null;
       servicesConfigRaw: string | null;
       branch: string;
+      createdAt: string;
       siblings: SiblingWorktree[];
       issue: { issueNumber: number | null; title: string; description: string | null; projectId: string };
       contextPrimer: string | null;
@@ -435,15 +512,22 @@ export function createWorkspaceCreateService(deps: {
         //    (null, no fs/docker) when the project declares no enabled stack — so the
         //    common no-stack deferred path is launch-only.
         let serviceState: ServiceStackState | null = null;
+        // Shared-worktree ADOPTION (finding 12): an adopted state records a CO-RESIDENT
+        // workspace's stack — this workspace never owns it, so the convergence teardowns
+        // below must never down it (the engine's last-reference guard is the backstop).
+        let stackAdopted = false;
         if (!ctx.isDirect && ctx.worktreePath) {
           const t = Date.now();
-          serviceState = await provisionServicesForLaunch({
+          const provisioned = await provisionServicesForLaunch({
             servicesConfigRaw: ctx.servicesConfigRaw,
             workspaceId,
+            workspaceCreatedAt: ctx.createdAt,
             branch: ctx.branch,
             leadingWorktreePath: ctx.worktreePath,
             siblings: ctx.siblings,
           });
+          serviceState = provisioned?.state ?? null;
+          stackAdopted = provisioned?.adopted ?? false;
           if (serviceState) {
             timing("service-stack", t);
             if (serviceState.status === "error") {
@@ -464,11 +548,13 @@ export function createWorkspaceCreateService(deps: {
             } catch (dbErr) {
               // #F5b: if the state can't be persisted, no teardown path can find the stack
               // (they all gate on the STORED state) — it would orphan. Tear it down now.
-              console.warn(`[services] failed to persist service_state for ${workspaceId}; tearing the stack down to avoid an orphan: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`);
-              if (serviceState.status === "up") {
+              // Never for an ADOPTED stack: the co-resident owner still references it.
+              console.warn(`[services] failed to persist service_state for ${workspaceId}; ${stackAdopted ? "adopted stack left to its owner" : "tearing the stack down to avoid an orphan"}: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`);
+              if (serviceState.status === "up" && !stackAdopted) {
                 await workspaceServicesService.teardownWorkspaceServices({
                   composeProjectName: serviceState.composeProjectName,
                   composeWorktreePath: ctx.worktreePath,
+                  releasedByWorkspaceId: workspaceId,
                 });
               }
               serviceState = null;
@@ -477,13 +563,15 @@ export function createWorkspaceCreateService(deps: {
             // A 0-row persist means the workspace was DELETED or closed/merged during
             // the long `up --wait` window: its delete/close teardown ran BEFORE the
             // state existed, so nothing else will ever down the fresh stack (#F5c).
-            // Converge here — tear it down and abandon the rest of the launch chain.
+            // Converge here — tear it down (unless it is a co-resident's ADOPTED stack,
+            // which the owner still references) and abandon the rest of the launch chain.
             if (serviceState && persistedRows === 0) {
-              console.warn(`[services] workspace ${workspaceId} was deleted/closed during service provisioning; tearing the stack down and skipping the agent launch`);
-              if (serviceState.status === "up") {
+              console.warn(`[services] workspace ${workspaceId} was deleted/closed during service provisioning; ${stackAdopted ? "leaving the adopted co-resident stack up" : "tearing the stack down"} and skipping the agent launch`);
+              if (serviceState.status === "up" && !stackAdopted) {
                 await workspaceServicesService.teardownWorkspaceServices({
                   composeProjectName: serviceState.composeProjectName,
                   composeWorktreePath: ctx.worktreePath,
+                  releasedByWorkspaceId: workspaceId,
                 });
               }
               return;
@@ -720,6 +808,7 @@ export function createWorkspaceCreateService(deps: {
         worktreePath,
         servicesConfigRaw: project.servicesConfig,
         branch,
+        createdAt: now,
         siblings: siblingWorktrees,
         issue: { issueNumber: issue.issueNumber, title: issue.title, description: issue.description, projectId: issue.projectId },
         contextPrimer,
