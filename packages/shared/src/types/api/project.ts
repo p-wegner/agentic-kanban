@@ -1,5 +1,7 @@
 // Project resource wire-contract types (pure DTOs). See ../api.ts barrel.
 
+import type { ServiceStackConfig } from "../service-stack.js";
+
 export interface CreateProjectRequest {
   name?: string;
   repoPath: string;
@@ -21,6 +23,8 @@ export interface UpdateProjectRequest {
   maxRetries?: number;
   symlinkEnabled?: boolean;
   symlinkDirs?: string | string[] | null;
+  /** Declared per-workspace Docker Compose service stack. null/"" clears it. */
+  servicesConfig?: ServiceStackConfig | string | null;
 }
 
 export interface ProjectResponse {
@@ -40,6 +44,8 @@ export interface ProjectResponse {
   maxRetries: number | null;
   symlinkEnabled: boolean;
   symlinkDirs: string | null;
+  /** Declared per-workspace Docker Compose service stack (parsed), or null when none. */
+  servicesConfig: ServiceStackConfig | null;
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
