@@ -23,6 +23,9 @@ describe("Workspaces API", () => {
     // Create project + status + issue
     projectId = await createProjectDirectly(database, { name: "Workspace Test Project" });
     const statusId = await createStatusDirectly(database, projectId, "Todo", 0);
+    // Workspace creation moves the issue to In Progress transactionally and rolls the
+    // whole create back if the status is missing — seed it like a real project has.
+    await createStatusDirectly(database, projectId, "In Progress", 1);
 
     const issueRes = await app.request("/api/issues", {
       method: "POST",
@@ -193,7 +196,6 @@ describe("Workspaces API", () => {
     });
     expect(res.status).toBe(201);
     const body = await res.json() as any;
-    if (body.status === "error") console.error("DEBUG workspace error:", body.error, JSON.stringify(body.serviceState));
     expect(body.branch).toBe("feature/test");
     expect(body.status).toBe("active");
     expect(body.id).toBeDefined();
@@ -252,6 +254,7 @@ describe("Workspaces API", () => {
       setupEnabled: true,
     });
     const directStatusId = await createStatusDirectly(database, directProjectId, "Todo", 0);
+    await createStatusDirectly(database, directProjectId, "In Progress", 1);
     const issueRes = await app.request("/api/issues", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -286,6 +289,7 @@ describe("Workspaces API", () => {
       setupEnabled: true,
     });
     const setupStatusId = await createStatusDirectly(database, setupProjectId, "Todo", 0);
+    await createStatusDirectly(database, setupProjectId, "In Progress", 1);
     const issueRes = await app.request("/api/issues", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

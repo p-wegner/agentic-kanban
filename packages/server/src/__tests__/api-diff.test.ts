@@ -21,6 +21,9 @@ describe("Diff Comments API", () => {
   beforeAll(async () => {
     const projectId = await createProjectDirectly(database, { name: "Comments Test Project" });
     const statusId = await createStatusDirectly(database, projectId, "Todo", 0);
+    // Workspace creation moves the issue to In Progress transactionally and rolls the
+    // whole create back if the status is missing — seed it like a real project has.
+    await createStatusDirectly(database, projectId, "In Progress", 1);
 
     const issueRes = await app.request("/api/issues", {
       method: "POST",
