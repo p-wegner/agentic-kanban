@@ -17,12 +17,20 @@ services:
       GIT_COMMITTER_NAME: ${GIT_AUTHOR_NAME:-Agentic Kanban}
       GIT_COMMITTER_EMAIL: ${GIT_AUTHOR_EMAIL:-kanban@localhost}
     volumes:
-      # DB, backups, cloned repos and their .worktrees — everything stateful.
+      # DB, backups, cloned repos and their .worktrees.
       - kanban-data:/data
+      # Agent session state. The Claude CLI keeps session transcripts in ~/.claude/projects;
+      # every follow-up turn / relaunch runs `claude --resume <sessionId>` against them, with
+      # the matching ids persisted in the DB on /data. Without this volume an image rebuild
+      # (`up -d --build`) wipes the transcripts: each pre-rebuild workspace's next turn fails
+      # once and its conversation history is permanently lost. (If you add other agent CLIs
+      # to the image, persist their state dirs the same way: ~/.codex, ~/.copilot.)
+      - claude-state:/root/.claude
       # Optional: bind-mount host repos. Mount the PARENT directory (worktrees are
       # created as a `.worktrees` sibling of each repo), then register /repos/<name>.
       # - /srv/repos:/repos
-      # Optional: existing Claude credentials instead of ANTHROPIC_API_KEY:
+      # Optional: existing Claude credentials instead of ANTHROPIC_API_KEY — REPLACE the
+      # `claude-state` volume above with this bind mount (one mount per target path):
       # - ~/.claude:/root/.claude
       # Optional: SSH key for clone-from-URL over ssh:
       # - ~/.ssh:/root/.ssh:ro
@@ -66,7 +74,8 @@ services:
     #   environment:
     #     KANBAN_SERVICE_HOST: host.docker.internal   # add alongside the env keys above
     # (Windows-native / board-on-host needs neither — the default `localhost` is correct.
-    #  For DinD, set KANBAN_SERVICE_HOST=dind instead — see docs/deployment.md.)
+    #  For DinD, docker-compose.dind.yml already sets KANBAN_SERVICE_HOST=dind — see
+    #  docs/deployment.md.)
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
@@ -77,3 +86,4 @@ services:
 
 volumes:
   kanban-data:
+  claude-state:

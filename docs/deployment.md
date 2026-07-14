@@ -450,8 +450,8 @@ docker compose up -d --build
 
 Key points:
 
-- **State** lives in the `kanban-data` volume mounted at `/data`: the database (`AGENTIC_KANBAN_DIR=/data`), cloned repos (`KANBAN_REPOS_DIR=/data/repos`), and their `.worktrees`.
-- **Agent auth**: the server strips `ANTHROPIC_*`/`CLAUDE_CODE_*` from agent spawn envs (cross-profile bleed guard), so the entrypoint (`docker/entrypoint.sh`) bridges `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` into a Claude profile (`~/.claude/settings_docker.json`) and selects it via the `claude_profile` preference. Alternatively mount an authenticated `~/.claude` to `/root/.claude` and set no env vars. The interactive `claude /login` flow does not work headless.
+- **State** lives in two named volumes. `kanban-data` (at `/data`) holds the database (`AGENTIC_KANBAN_DIR=/data`), cloned repos (`KANBAN_REPOS_DIR=/data/repos`), and their `.worktrees`. `claude-state` (at `/root/.claude`) holds the Claude CLI's session transcripts (`~/.claude/projects`) and settings: the DB stores each session's resume id, but `claude --resume <id>` needs the matching transcript file — without this volume an image rebuild (`docker compose up -d --build`) wipes the transcripts, so every pre-rebuild workspace's next follow-up turn fails once and its conversation history is permanently lost (the retry starts a fresh session from the worktree's handoff notes).
+- **Agent auth**: the server strips `ANTHROPIC_*`/`CLAUDE_CODE_*` from agent spawn envs (cross-profile bleed guard), so the entrypoint (`docker/entrypoint.sh`) bridges `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` into a Claude profile (`~/.claude/settings_docker.json`) and selects it via the `claude_profile` preference. Alternatively mount an authenticated `~/.claude` to `/root/.claude` (replacing the `claude-state` named volume — a container can't mount two things at one path) and set no env vars. The interactive `claude /login` flow does not work headless.
 - **Getting repos in**: either register with a clone URL (Settings → Register project → "Clone from URL", or `agentic-kanban register --clone <url>`) — the server clones into `/data/repos` — or bind-mount host checkouts. When bind-mounting, mount the **parent** directory of the repos (worktrees are created as a `.worktrees` sibling of each repo) and register `/repos/<name>`. `safe.directory '*'` is preconfigured for foreign-UID mounts.
 - **Commit identity** comes from `GIT_AUTHOR_*`/`GIT_COMMITTER_*` env (defaults set in compose).
 - **No app-level auth** — run on a trusted network (VPN/Tailscale) or behind an authenticating reverse proxy.
@@ -463,7 +463,7 @@ Key points:
 
 A project can declare a **service stack** — a Docker Compose file (typically a database sidecar such as postgres) — and the board gives *every* workspace its own isolated instance, brought **up** on workspace create (`docker compose up -d --wait`) and **down** on merge/delete/abandon, with orphaned stacks reaped on startup. See [decision 011](decisions/011-per-workspace-service-stacks.md) for the full rationale, and the worked [`examples/multi-repo-postgres/`](../examples/multi-repo-postgres/) reference.
 
-Isolation is by a deterministic, project-scoped Compose project name (`ak-<projectId8>-ws-<offset>`) plus **free host ports allocated at create time** (never colliding across projects/workspaces), exposed to the agent as `KANBAN_SVC_<NAME>_PORT` env vars.
+Isolation is by a deterministic, **unique-per-workspace** Compose project name — an `ak-`-prefixed name derived from the workspace's unique id (see `composeProjectName` in `packages/shared/src/lib/service-ports.ts`), so no two workspaces (even on the same issue) ever share a stack — plus **free host ports allocated at create time** (never colliding across projects/workspaces), exposed to the agent as `KANBAN_SVC_<NAME>_PORT` env vars.
 
 ### Two-tier model: where the Docker daemon lives
 
@@ -484,7 +484,7 @@ Once the board is containerized, **three things live in three different network 
 |---|---|---|
 | **Windows-native / board-on-host** | `localhost` (default) | Board, daemon, and the published port all share the host namespace — `localhost:${KANBAN_SVC_DB_PORT}` just works. No setting needed. |
 | **DooD** (host socket) | `host.docker.internal` | The port is published in the **host** namespace, not the board container's. The board service also needs `extra_hosts: ["host.docker.internal:host-gateway"]` so `host.docker.internal` resolves to the host gateway. Set both (see `docker-compose.yml`). |
-| **DinD** (nested daemon) | `dind` | The port is published on the **dind container**, reachable from the board over the shared `dind-net`. Dial the dind **service name** (`dind:${KANBAN_SVC_DB_PORT}`) rather than a host-published port. |
+| **DinD** (nested daemon) | `dind` | The port is published on the **dind container**, reachable from the board over the shared `dind-net`. Dial the dind **service name** (`dind:${KANBAN_SVC_DB_PORT}`) rather than a host-published port. The overlay `docker-compose.dind.yml` already sets this — nothing to configure. |
 
 The agent's connection string should therefore use `${KANBAN_SERVICE_HOST:-localhost}:${KANBAN_SVC_DB_PORT}` rather than a hardcoded `localhost`.
 
@@ -516,7 +516,7 @@ Recommended when project compose files bind-mount source. Overlay `docker-compos
 docker compose -f docker-compose.yml -f docker-compose.dind.yml up -d --build
 ```
 
-This adds a privileged `docker:27-dind` sidecar that shares the **same repos volume at the same path** (`/data`) as the board, so `/data/repos/<repo>` resolves to identical bytes on both the board and the nested daemon — the DooD pitfall disappears. The board's `docker` CLI is pointed at the sidecar via `DOCKER_HOST=tcp://dind:2375` over a private compose network (TLS off, never publicly exposed). The entrypoint waits (polls `docker version`, up to 30s) for the nested daemon before starting the server.
+This adds a privileged `docker:27-dind` sidecar that shares the **same repos volume at the same path** (`/data`) as the board, so `/data/repos/<repo>` resolves to identical bytes on both the board and the nested daemon — the DooD pitfall disappears. The board's `docker` CLI is pointed at the sidecar via `DOCKER_HOST=tcp://dind:2375` over a private compose network (TLS off, never publicly exposed). The overlay also sets `KANBAN_SERVICE_HOST=dind`, so the generated `.kanban/services.env` and the agent's injected context point at the sidecar — where the stack's ports are actually published — instead of `localhost`. The entrypoint waits (polls `docker version`, up to 30s) for the nested daemon before starting the server.
 
 ### ⚠️ Security: DooD/DinD give agents host-root
 
@@ -533,7 +533,7 @@ Every in-flight workspace with an enabled stack runs a full copy of that stack. 
 
 ### Cross-namespace port allocation (containerized only)
 
-Free host ports are probed for availability **inside the board container's** network namespace, but the stack actually publishes them in the **host** (DooD) or **dind** (DinD) namespace. Those namespaces don't share their port tables, so a port the board saw as free can already be taken on the publishing side. Under heavy parallel WIP this can surface as a `port already allocated` provisioning error — **non-fatal**: the workspace is still created with `serviceState.status = "error"` and the stack is retried. If it recurs, widen the port ranges or reduce the board's WIP limit. For DinD, prefer reaching services by the `dind` **service name** rather than host-published ports, which sidesteps host-side port pressure entirely.
+Free host ports are probed for availability **inside the board container's** network namespace, but the stack actually publishes them in the **host** (DooD) or **dind** (DinD) namespace. Those namespaces don't share their port tables, so a port the board saw as free can already be taken on the publishing side. There is no port-range setting to tune — ports are OS-assigned ephemeral ports (the allocator binds port `0` and takes what the OS hands back). On a `port already allocated` failure the board automatically reallocates fresh ports and retries the `up` (bounded, a few attempts); if it still fails, the error is **non-fatal** — the workspace is created anyway with `serviceState.status = "error"` and the compose stderr preserved for diagnosis. If collisions recur under heavy parallel WIP, reduce the board's WIP limit. For DinD, prefer reaching services by the `dind` **service name** rather than host-published ports, which sidesteps host-side port pressure entirely.
 
 ### Declaring a stack on a project
 

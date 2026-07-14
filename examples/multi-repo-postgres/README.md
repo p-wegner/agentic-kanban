@@ -55,13 +55,14 @@ curl -X PATCH http://localhost:3001/api/projects/<projectId> \
 For each new workspace the board:
 
 1. Allocates a **free host port** for `db` (e.g. `54187`) — collision-free across all projects/workspaces.
-2. Computes a deterministic `COMPOSE_PROJECT_NAME` = `ak-<projectId8>-ws-<offset>`.
+2. Computes a deterministic `COMPOSE_PROJECT_NAME` — an `ak-`-prefixed name derived from the workspace's **unique id** (see `composeProjectName` in `packages/shared/src/lib/service-ports.ts`), so no two workspaces (even on the same issue) ever share a stack.
 3. Writes `<backendWorktree>/.kanban/services.env`:
    ```sh
-   COMPOSE_PROJECT_NAME=ak-1a2b3c4d-ws-42
+   COMPOSE_PROJECT_NAME=ak-ws-b3d9f01a2c4e
+   KANBAN_STACK=1
+   KANBAN_SERVICE_HOST=localhost
    KANBAN_SVC_DB_PORT=54187
    POSTGRES_PASSWORD=kanban
-   KANBAN_STACK=1
    ```
 4. Runs `docker compose -p <name> -f docker-compose.yml --env-file .kanban/services.env up -d --wait` — blocking on the postgres healthcheck.
 5. Tells the agent (in `CLAUDE.local.md`) that the stack is up, the allocated port, and to `source .kanban/services.env`.
@@ -78,7 +79,7 @@ Always use `${KANBAN_SERVICE_HOST:-localhost}` rather than a hardcoded `localhos
 
 ## 4. Teardown
 
-On merge / delete / abandon the board runs `docker compose -p <name> down -v --remove-orphans` — containers, network, and the `pgdata` volume all vanish (the DB is disposable by design). Orphaned stacks left by a crash are reaped on server startup (matched by the `ak-…-ws-…` project-name prefix).
+On merge / delete / abandon the board runs `docker compose -p <name> down -v --remove-orphans` — containers, network, and the `pgdata` volume all vanish (the DB is disposable by design). Orphaned stacks left by a crash are reaped on server startup — the reaper only touches compose projects whose name matches the board's own managed `ak-`-prefixed shape (`isManagedComposeProject` in `packages/shared/src/lib/service-ports.ts`), never unrelated compose projects.
 
 ## Running the board where this works
 
