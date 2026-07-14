@@ -8,16 +8,9 @@ import {
 import type { BoardEvents } from "./board-events.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import { teardownWorktree } from "./workspace-teardown.service.js";
-import {
-  WorkspaceError,
-  listPendingSiblingMerges,
-  checkPendingSiblingMergeGuards,
-  type GitService,
-  type MergeResolutionState,
-} from "./workspace-internals.js";
+import { WorkspaceError, type GitService, type MergeResolutionState } from "./workspace-internals.js";
 import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
-import { cleanupSiblingWorktrees, executeSiblingMerges, type SiblingMergeResult } from "./workspace-repos.service.js";
-import { workspaceServicesService, parseStoredComposeProjectName } from "./workspace-services.service.js";
+import { cleanupSiblingWorktrees } from "./workspace-repos.service.js";
 
 export type MergeWarning = { step: string; message: string; recoverable: true };
 
@@ -46,7 +39,6 @@ export async function handleWorkspaceMergeResolution(args: {
   database: Database;
   boardEvents?: BoardEvents;
   gitService: GitService;
-  createBackup: (reason: string) => Promise<unknown>;
   killProcesses: (dir: string) => Promise<number>;
   killWorktreeProcesses: KillWorktreeProcesses;
   addRecoverableWarning: AddRecoverableWarning;
@@ -131,7 +123,6 @@ async function reconcileAlreadyMergedRetry(args: {
   database: Database;
   boardEvents?: BoardEvents;
   gitService: GitService;
-  createBackup: (reason: string) => Promise<unknown>;
   killProcesses: (dir: string) => Promise<number>;
   killWorktreeProcesses: KillWorktreeProcesses;
   addRecoverableWarning: AddRecoverableWarning;
@@ -139,57 +130,7 @@ async function reconcileAlreadyMergedRetry(args: {
 }) {
   const { id, workspace, project, repoPath, database, boardEvents, gitService, addRecoverableWarning } = args;
   const warnings: MergeWarning[] = [];
-
-  // Multi-repo: a crash between the leading merge and the sibling merges — or a
-  // post-prevalidation sibling failure — leaves sibling repos with UNMERGED work while
-  // mergedAt is already stamped. This retry path is the recovery point: land the pending
-  // sibling merges BEFORE any cleanup, and refuse (throw, nothing destroyed) when they
-  // cannot land cleanly right now.
-  const pendingSiblings = await listPendingSiblingMerges(gitService, database, id);
-  let siblingResults: SiblingMergeResult[] = [];
-  if (pendingSiblings.length > 0) {
-    const guardFailures = await checkPendingSiblingMergeGuards(gitService, pendingSiblings);
-    if (guardFailures.length > 0) {
-      throw new WorkspaceError(
-        `Workspace is marked merged, but ${pendingSiblings.length} sibling repo(s) still have unmerged commits ` +
-          `that cannot be landed right now:\n- ${guardFailures.join("\n- ")}\n` +
-          "Nothing was cleaned up — the sibling branches are preserved. Fix the blockers and retry the merge.",
-        "CONFLICT",
-        { mergeReason: "sibling_merge_pending", failures: guardFailures },
-      );
-    }
-    siblingResults = await executeSiblingMerges({
-      gitService,
-      database,
-      createBackup: args.createBackup,
-      workspaceId: id,
-      plans: pendingSiblings,
-    });
-    const failedSiblings = siblingResults.filter((r) => !r.merged);
-    if (failedSiblings.length > 0) {
-      await args.recordMergeAttempt(
-        workspace,
-        "conflict",
-        `Multi-repo merge retry PARTIAL: ${failedSiblings.length} sibling repo merge(s) still failed: ` +
-          failedSiblings.map((f) => `${f.name ?? f.path}: ${f.error}`).join("; ") +
-          ". The unmerged sibling branches were preserved — merge them manually.",
-        { mergeReason: "sibling_merge_failed", siblingResults },
-      );
-    }
-  }
-
   if (workspace.workingDir && !workspace.isDirect) {
-    // Per-workspace service stack down BEFORE the worktree is removed — this resolution
-    // ends the workspace without ever reaching post-merge cleanup, so the compose stack
-    // (containers, volumes, host ports) would otherwise leak until the next restart's
-    // reaper. Uses the STORED compose project name; gated on a persisted serviceState.
-    const composeName = parseStoredComposeProjectName(workspace.serviceState);
-    if (composeName) {
-      await workspaceServicesService.teardownWorkspaceServices({
-        composeProjectName: composeName,
-        composeWorktreePath: workspace.workingDir,
-      });
-    }
     await teardownWorktree(
       {
         workingDir: workspace.workingDir,
@@ -216,11 +157,8 @@ async function reconcileAlreadyMergedRetry(args: {
     addRecoverableWarning(warnings, "delete-branch", err);
   }
 
-  // Multi-repo: sibling worktrees + branches too (no-op single-repo). preserveUnmerged is
-  // REQUIRED here: an unmerged sibling branch that post-merge cleanup deliberately
-  // preserved (or that executeSiblingMerges above still failed to land) holds the only
-  // ref to that work — a retry must never force-delete it.
-  await cleanupSiblingWorktrees(gitService, id, database, { preserveUnmerged: true });
+  // Multi-repo: sibling worktrees + branches too (no-op single-repo).
+  await cleanupSiblingWorktrees(gitService, id, database);
 
   const now = new Date().toISOString();
   await finalizeMergeCleanup({
@@ -234,20 +172,17 @@ async function reconcileAlreadyMergedRetry(args: {
     mergedAt: workspace.mergedAt,
   });
 
-  const landedSiblings = siblingResults.filter((r) => r.merged).length;
   await args.recordMergeAttempt(
     workspace,
     "already-merged",
-    `Merge already recorded for workspace ${id} at ${workspace.mergedAt}. Reconciled cleanup and issue status.` +
-      (landedSiblings > 0 ? ` Landed ${landedSiblings} pending sibling repo merge(s).` : ""),
-    { mergedAt: workspace.mergedAt, warnings, ...(siblingResults.length > 0 ? { siblingResults } : {}) },
+    `Merge already recorded for workspace ${id} at ${workspace.mergedAt}. Reconciled cleanup and issue status.`,
+    { mergedAt: workspace.mergedAt, warnings },
     now,
   );
 
   return {
     id,
-    mergeOutput: `Workspace was already marked as merged at ${workspace.mergedAt}; reconciled without requiring branch ref.` +
-      (landedSiblings > 0 ? ` Landed ${landedSiblings} pending sibling repo merge(s).` : ""),
+    mergeOutput: `Workspace was already marked as merged at ${workspace.mergedAt}; reconciled without requiring branch ref.`,
     ...(warnings.length > 0 ? { warnings } : {}),
   };
 }
@@ -291,34 +226,16 @@ async function reconcileAncestorWorkspace(
     database: Database;
     boardEvents?: BoardEvents;
     baseBranch: string;
-    gitService: GitService;
     recordMergeAttempt: RecordMergeAttempt;
   },
   resolution: Extract<MergeResolutionState, { kind: "reconcile" }>,
 ) {
-  const { id, workspace, database, boardEvents, baseBranch, gitService } = args;
+  const { id, workspace, database, boardEvents, baseBranch } = args;
   const { branchSha, baseSha, uniqueCommits } = resolution;
   const now = new Date().toISOString();
   console.log(
     `[workspace-merge] auto-Done audit: ws=${id} baseSha=${baseSha} branchSha=${branchSha} uniqueCommits=${uniqueCommits} reconciledAt=${now}`,
   );
-  // Per-workspace service stack down — this resolution closes the workspace and nulls
-  // workingDir without ever reaching post-merge cleanup, so no later lifecycle path
-  // could still find the stack. Uses the STORED compose project name.
-  if (workspace.workingDir && !workspace.isDirect) {
-    const composeName = parseStoredComposeProjectName(workspace.serviceState);
-    if (composeName) {
-      await workspaceServicesService.teardownWorkspaceServices({
-        composeProjectName: composeName,
-        composeWorktreePath: workspace.workingDir,
-      });
-    }
-  }
-  // Multi-repo: drop the sibling worktrees + branches (no-op single-repo). The merge
-  // pre-flight only resolves to 'reconcile' when no sibling has pending work, and
-  // preserveUnmerged re-verifies per repo before deleting, so real work is never
-  // destroyed here — but merged/no-commit sibling worktrees must not orphan.
-  await cleanupSiblingWorktrees(gitService, id, database, { preserveUnmerged: true });
   await finalizeMergeCleanup({
     database,
     boardEvents,

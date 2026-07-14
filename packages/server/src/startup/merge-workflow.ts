@@ -1,19 +1,15 @@
-import { issueTags, preferences, projects, repos, sessions, tags, workspaces } from "@agentic-kanban/shared/schema";
+import { issueTags, preferences, projects, sessions, tags, workspaces } from "@agentic-kanban/shared/schema";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { runDoneUnmergedScannerNow } from "./done-unmerged-invariant-scanner.js";
 import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
-import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
-import { db, type Database } from "../db/index.js";
+import { db } from "../db/index.js";
 import { MOCK_AGENT_COMMAND, isMockProfile, toExecutorProvider } from "../services/agent-settings.service.js";
 import { createBoardEvents } from "../services/board-events.js";
 import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
 import * as gitService from "../services/git.service.js";
-import {
-  acquireRepoMergeLock,
-  listPendingSiblingMerges,
-  checkPendingSiblingMergeGuards,
-} from "../services/workspace-internals.js";
+import { acquireRepoMergeLock } from "../services/workspace-internals.js";
 import { cleanupMergedWorktreeAndBranch, runMergeCore } from "../services/merge-executor.service.js";
 import { cleanupSiblingWorktrees, prevalidateSiblingMerges, executeSiblingMerges } from "../services/workspace-repos.service.js";
 import { workspaceServicesService, parseStoredComposeProjectName } from "../services/workspace-services.service.js";
@@ -89,117 +85,6 @@ export async function tagIfNeedsVisualVerification(repoPath: string, branch: str
   } catch (err) {
     console.warn("[workflow] tagIfNeedsVisualVerification failed (non-fatal):", err);
   }
-}
-
-/**
- * Startup reconciler for the multi-repo crash gap: `executeWorkspaceMerge` stamps
- * mergedAt and closes the workspace BEFORE the sibling merges run, so a crash /
- * hot-reload in that seconds-wide window strands sibling repos unmerged while the
- * issue reads Done — and no other startup reconciler sees them (they all key off the
- * LEADING branch or non-closed workspaces). The persisted progress state is the
- * workspace-scoped `repos` rows themselves: a row WITHOUT a stamped mergedHeadSha on a
- * mergedAt-stamped workspace is a potential strand.
- *
- * Each candidate is git-verified (`listPendingSiblingMerges`: branch still exists AND
- * is ahead of its base — rows with no commits or already-cleaned branches are not
- * strands). Verified strands are landed through the same guarded pipeline the merge
- * path uses (guards → `executeSiblingMerges`, each under its own repo merge lock);
- * anything that cannot land cleanly is recorded LOUDLY on the issue and its branch is
- * preserved. Best-effort and non-fatal throughout — safe to call on every boot.
- */
-export async function reconcileStrandedSiblingMerges(database: Database = db): Promise<{ landed: number; preserved: number }> {
-  const result = { landed: 0, preserved: 0 };
-  try {
-    const candidateRows = await database
-      .select({
-        workspaceId: workspaces.id,
-        issueId: workspaces.issueId,
-        branch: workspaces.branch,
-        mergedAt: workspaces.mergedAt,
-      })
-      .from(repos)
-      .innerJoin(workspaces, eq(repos.workspaceId, workspaces.id))
-      .where(and(isNotNull(workspaces.mergedAt), isNull(repos.mergedHeadSha)));
-
-    const byWorkspace = new Map<string, (typeof candidateRows)[number]>();
-    for (const row of candidateRows) byWorkspace.set(row.workspaceId, row);
-    if (byWorkspace.size === 0) return result;
-
-    for (const ws of byWorkspace.values()) {
-      try {
-        const pending = await listPendingSiblingMerges(gitService, database, ws.workspaceId);
-        if (pending.length === 0) continue; // no-commit rows / already-cleaned branches — not strands
-        const now = new Date().toISOString();
-        console.warn(
-          `[stranded-siblings] workspace ${ws.workspaceId} (branch ${ws.branch}) is marked merged at ${ws.mergedAt} ` +
-            `but ${pending.length} sibling repo(s) still have unmerged commits — reconciling`,
-        );
-
-        const guardFailures = await checkPendingSiblingMergeGuards(gitService, pending);
-        if (guardFailures.length > 0) {
-          result.preserved += pending.length;
-          console.warn(`[stranded-siblings] cannot land stranded sibling merge(s) for workspace ${ws.workspaceId}:\n- ${guardFailures.join("\n- ")}`);
-          await recordStrandedSiblingComment(database, ws, "conflict",
-            `Multi-repo merge INCOMPLETE: this workspace is marked merged, but ${pending.length} sibling repo(s) still have ` +
-              `unmerged commits (likely a crash between the leading and sibling merges) and they cannot be landed automatically: ` +
-              guardFailures.join("; ") +
-              ". The sibling branches were preserved — fix the blockers and retry the workspace merge, or merge them manually.",
-            { mergeReason: "sibling_merge_pending", failures: guardFailures, detectedAt: now });
-          continue;
-        }
-
-        const siblingResults = await executeSiblingMerges({ gitService, database, createBackup, workspaceId: ws.workspaceId, plans: pending });
-        const landed = siblingResults.filter((r) => r.merged);
-        const failed = siblingResults.filter((r) => !r.merged);
-        result.landed += landed.length;
-        result.preserved += failed.length;
-
-        if (landed.length > 0) {
-          console.log(`[stranded-siblings] landed ${landed.length} stranded sibling merge(s) for workspace ${ws.workspaceId}`);
-          await recordStrandedSiblingComment(database, ws, "merged",
-            `Startup reconciliation: landed ${landed.length} sibling repo merge(s) stranded by an interrupted multi-repo merge: ` +
-              landed.map((r) => r.name ?? r.path).join(", ") + ".",
-            { siblingResults, reconciledAt: now });
-          // Merged siblings' worktrees + branches can now be dropped; anything that
-          // still failed stays preserved (preserveUnmerged re-verifies per repo).
-          await cleanupSiblingWorktrees(gitService, ws.workspaceId, database, { preserveUnmerged: true });
-        }
-        if (failed.length > 0) {
-          console.warn(`[stranded-siblings] ${failed.length} stranded sibling merge(s) still failed for workspace ${ws.workspaceId}`);
-          await recordStrandedSiblingComment(database, ws, "conflict",
-            `Multi-repo merge INCOMPLETE: ${failed.length} stranded sibling repo merge(s) still failed at startup reconciliation: ` +
-              failed.map((f) => `${f.name ?? f.path}: ${f.error}`).join("; ") +
-              ". The unmerged sibling branches were preserved — merge them manually.",
-            { mergeReason: "sibling_merge_failed", siblingResults, detectedAt: now });
-        }
-      } catch (err) {
-        console.warn(`[stranded-siblings] reconciliation failed for workspace ${ws.workspaceId} (non-fatal):`, err instanceof Error ? err.message : String(err));
-      }
-    }
-  } catch (err) {
-    console.warn("[stranded-siblings] reconcileStrandedSiblingMerges failed (non-fatal):", err instanceof Error ? err.message : String(err));
-  }
-  return result;
-}
-
-async function recordStrandedSiblingComment(
-  database: Database,
-  ws: { workspaceId: string; issueId: string; branch: string },
-  eventType: "merged" | "conflict",
-  body: string,
-  payload: Record<string, unknown>,
-): Promise<void> {
-  await insertIssueComment({
-    issueId: ws.issueId,
-    workspaceId: ws.workspaceId,
-    kind: "merge-attempt",
-    author: "system",
-    body,
-    payload: { eventType, workspaceId: ws.workspaceId, branch: ws.branch, ...payload },
-    createdAt: new Date().toISOString(),
-  }, database).catch((err) => {
-    console.warn("[stranded-siblings] failed to record issue comment:", err instanceof Error ? err.message : String(err));
-  });
 }
 
 export function createAutoMerge({ sessionManager, boardEvents, learningSessionIds }: MergeDeps) {
