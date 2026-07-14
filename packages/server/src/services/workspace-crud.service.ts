@@ -58,6 +58,24 @@ export function createWorkspaceCrudService(deps: {
 
     await deleteWorkspaceCascade(workspaceId, database);
 
+    // Per-workspace Docker service stack teardown runs UNCONDITIONALLY (stacks are
+    // keyed per workspace/compose project, NOT per worktree) — it must not hide behind
+    // the sharedByOthers worktree gate below, or a deleted sharer's own stack leaks
+    // (finding 12). The engine's last-reference guard skips the down while another
+    // live workspace still references the SAME compose project (shared-worktree
+    // adoption), so the last sharer to go downs the shared stack. Uses the STORED
+    // compose project name (never a recompute, #F1). Best-effort — never throws.
+    if (workingDir && !isDirect && repoPath) {
+      const delComposeName = parseStoredComposeProjectName(wsRow[0]?.serviceState);
+      if (delComposeName) {
+        await workspaceServicesService.teardownWorkspaceServices({
+          composeProjectName: delComposeName,
+          composeWorktreePath: workingDir,
+          releasedByWorkspaceId: workspaceId,
+        });
+      }
+    }
+
     // A shared-worktree fork child reuses its parent's workingDir. Never remove the
     // directory while another (e.g. the parent) workspace still points at it — this
     // row is already deleted above, so any match here is a genuine other sharer.
@@ -71,16 +89,6 @@ export function createWorkspaceCrudService(deps: {
     }
 
     if (workingDir && !isDirect && repoPath && !sharedByOthers) {
-      // Per-workspace Docker service stack down (only when one was provisioned) before
-      // the worktree is removed. Uses the STORED compose project name (never a recompute,
-      // #F1). Best-effort — the engine never throws.
-      const delComposeName = parseStoredComposeProjectName(wsRow[0]?.serviceState);
-      if (delComposeName) {
-        await workspaceServicesService.teardownWorkspaceServices({
-          composeProjectName: delComposeName,
-          composeWorktreePath: workingDir,
-        });
-      }
       await removeWorktreeAndBranch({
         workingDir,
         repoPath,
@@ -122,12 +130,15 @@ export function createWorkspaceCrudService(deps: {
     if (!workspace.isDirect && workspace.workingDir) {
       // Per-workspace Docker service stack down (only when one was provisioned) before
       // the worktree goes away. Uses the STORED compose project name (#F1). Best-effort —
-      // the engine never throws.
+      // the engine never throws. This workspace's own (still-live) row must not block
+      // its own release, so it is passed as the releaser; the engine's last-reference
+      // guard still skips the down while a co-resident sharer references the stack.
       const closeComposeName = parseStoredComposeProjectName(workspace.serviceState);
       if (closeComposeName) {
         await workspaceServicesService.teardownWorkspaceServices({
           composeProjectName: closeComposeName,
           composeWorktreePath: workspace.workingDir,
+          releasedByWorkspaceId: workspaceId,
         });
       }
       const { repoPath } = await resolveProjectRepo(workspaceId, database).catch(() => ({ repoPath: null as string | null }));

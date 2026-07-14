@@ -6,7 +6,7 @@
 // grandfathered workspace repositories past their god-module baselines.
 
 import { randomUUID } from "node:crypto";
-import { and, eq, notInArray, sql } from "drizzle-orm";
+import { and, eq, ne, notInArray, sql } from "drizzle-orm";
 import { workspaces, preferences } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -85,6 +85,58 @@ export async function getWorkspaceLifecycleStatus(
     .where(eq(workspaces.id, workspaceId))
     .limit(1);
   return rows[0] ?? null;
+}
+
+/**
+ * OTHER live (non-terminal) workspaces that point at the same leading worktree
+ * directory. Shared-worktree stack semantics (finding 12): createWorktree REUSES the
+ * existing worktree for a second workspace on the same branch, and fork children copy
+ * the parent's workingDir — so before provisioning a service stack the create flow
+ * must know whether a co-resident workspace already lives (and possibly owns a stack)
+ * in that directory. Exact string equality mirrors findWorkspacesByWorkingDir (both
+ * sides of a share store the path from the same createWorktree/copy source).
+ */
+export async function findLiveWorkspacesSharingWorkingDir(
+  workingDir: string,
+  excludeWorkspaceId: string,
+  database: Database = db,
+): Promise<{ id: string; serviceState: string | null; createdAt: string | null }[]> {
+  if (!workingDir) return [];
+  return database
+    .select({ id: workspaces.id, serviceState: workspaces.serviceState, createdAt: workspaces.createdAt })
+    .from(workspaces)
+    .where(
+      and(
+        eq(workspaces.workingDir, workingDir),
+        ne(workspaces.id, excludeWorkspaceId),
+        notInArray(workspaces.status, TERMINAL_WORKSPACE_STATUSES),
+      ),
+    );
+}
+
+/**
+ * Live (non-terminal) workspaces whose persisted ServiceStackState still CLAIMS the
+ * given compose project with status "up" — i.e. the workspaces that would break if the
+ * stack were downed right now. The teardown engine's last-reference guard consults
+ * this so a stack shared across co-resident workspaces (worktree reuse / fork
+ * children) is only downed when the LAST live sharer releases it. Rows whose state is
+ * "down"/"error" hold no claim; terminal (closed/merged) rows only persist as history.
+ */
+export async function findLiveWorkspacesReferencingComposeProject(
+  composeProjectName: string,
+  database: Database = db,
+): Promise<{ id: string }[]> {
+  if (!composeProjectName) return [];
+  return database
+    .select({ id: workspaces.id })
+    .from(workspaces)
+    .where(
+      and(
+        notInArray(workspaces.status, TERMINAL_WORKSPACE_STATUSES),
+        sql`json_extract(${workspaces.serviceState}, '$.composeProjectName') = ${composeProjectName}`,
+        sql`json_extract(${workspaces.serviceState}, '$.status') = 'up'`,
+      ),
+    );
 }
 
 /** Preference key holding this server instance's persisted service-stack identity. */

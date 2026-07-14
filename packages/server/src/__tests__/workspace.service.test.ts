@@ -1749,6 +1749,182 @@ describe("createWorkspace — service stack deferred chain", () => {
     expect(teardownSpy).not.toHaveBeenCalled(); // nothing came up, nothing to down
   });
 
+  it("ADOPTS a live co-resident's stack on a shared worktree: no second provision, services.env untouched (finding 12)", async () => {
+    const worktreeDir = await mkdtemp(join(tmpdir(), "ak-ws-shared-"));
+    try {
+      const { issueId } = await seedServicesProject(SERVICES_CONFIG);
+      const donorId = randomUUID();
+      const donorState = {
+        composeProjectName: "ak-testinst-ws-donor0000001",
+        ports: { db: 61234 },
+        envFilePath: join(worktreeDir, ".kanban", "services.env"),
+        status: "up",
+        updatedAt: new Date(Date.now() - 60_000).toISOString(),
+      };
+      // Live co-resident (the donor) already on this worktree with its stack up.
+      await db.insert(workspaces).values({
+        id: donorId,
+        issueId,
+        branch: "feature/ak-1-shared",
+        status: "active",
+        workingDir: worktreeDir,
+        serviceState: JSON.stringify(donorState),
+        createdAt: new Date(Date.now() - 60_000).toISOString(),
+        updatedAt: new Date(Date.now() - 60_000).toISOString(),
+      });
+      // The donor's generated env file — must never be rewritten by the second create.
+      const { mkdir, writeFile } = await import("node:fs/promises");
+      await mkdir(join(worktreeDir, ".kanban"), { recursive: true });
+      await writeFile(join(worktreeDir, ".kanban", "services.env"), "SENTINEL='donor'\n", "utf-8");
+
+      const provisionSpy = vi
+        .spyOn(workspaceServicesService, "provisionWorkspaceServices")
+        .mockResolvedValue(upState(worktreeDir));
+      const gitService = createFakeGitService({ createWorktree: vi.fn(async () => worktreeDir) });
+      const { service, sessionManager } = makeService(gitService);
+
+      const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-shared" });
+      expect(result.error).toBeUndefined();
+      await flushDeferred();
+
+      // No second stack was brought up …
+      expect(provisionSpy).not.toHaveBeenCalled();
+      // … the donor's env file is byte-identical …
+      const env = await readFile(join(worktreeDir, ".kanban", "services.env"), "utf-8");
+      expect(env).toBe("SENTINEL='donor'\n");
+      // … and the new workspace RECORDS the donor's compose project (adoption).
+      const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, result.id));
+      const state = JSON.parse(wsRows[0].serviceState!) as { composeProjectName: string; status: string; ports: Record<string, number> };
+      expect(state.composeProjectName).toBe(donorState.composeProjectName);
+      expect(state.status).toBe("up");
+      expect(state.ports).toEqual({ db: 61234 });
+      // The agent still launches, wired to the shared (adopted) stack.
+      expect(sessionManager.startSession).toHaveBeenCalledOnce();
+    } finally {
+      await rm(worktreeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("REFUSES to provision on a shared worktree when the senior co-resident has no adoptable stack yet", async () => {
+    const worktreeDir = await mkdtemp(join(tmpdir(), "ak-ws-shared-pend-"));
+    try {
+      const { issueId } = await seedServicesProject(SERVICES_CONFIG);
+      const seniorId = randomUUID();
+      // Senior co-resident whose own provisioning hasn't persisted a state yet
+      // (e.g. still inside its `up --wait` window).
+      await db.insert(workspaces).values({
+        id: seniorId,
+        issueId,
+        branch: "feature/ak-1-pending",
+        status: "active",
+        workingDir: worktreeDir,
+        serviceState: null,
+        createdAt: new Date(Date.now() - 60_000).toISOString(),
+        updatedAt: new Date(Date.now() - 60_000).toISOString(),
+      });
+      const provisionSpy = vi
+        .spyOn(workspaceServicesService, "provisionWorkspaceServices")
+        .mockResolvedValue(upState(worktreeDir));
+      const gitService = createFakeGitService({ createWorktree: vi.fn(async () => worktreeDir) });
+      const { service, sessionManager } = makeService(gitService);
+
+      const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-pending" });
+      expect(result.error).toBeUndefined();
+      await flushDeferred();
+
+      // Never raced the senior sharer for .kanban/services.env.
+      expect(provisionSpy).not.toHaveBeenCalled();
+      const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, result.id));
+      const state = JSON.parse(wsRows[0].serviceState!) as { composeProjectName: string; status: string; error?: string };
+      expect(state.status).toBe("error");
+      expect(state.composeProjectName).toBe("");
+      expect(state.error).toContain(seniorId);
+      // Non-fatal, like every other stack error: the agent still launches.
+      expect(sessionManager.startSession).toHaveBeenCalledOnce();
+    } finally {
+      await rm(worktreeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("delete runs the stack teardown UNCONDITIONALLY (with releaser id) even while the worktree is shared", async () => {
+    const { issueId } = await seedServicesProject(SERVICES_CONFIG);
+    const sharedDir = "/tmp/test-repo/.worktrees/feature-del-shared";
+    const stack = "ak-testinst-ws-shared000001";
+    const stateJson = JSON.stringify({
+      composeProjectName: stack,
+      ports: { db: 61000 },
+      envFilePath: join(sharedDir, ".kanban", "services.env"),
+      status: "up",
+      updatedAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+    const keeperId = randomUUID();
+    const goingId = randomUUID();
+    for (const [id, offset] of [[keeperId, 120_000], [goingId, 60_000]] as const) {
+      await db.insert(workspaces).values({
+        id,
+        issueId,
+        branch: "feature/ak-1-del-shared",
+        status: "active",
+        workingDir: sharedDir,
+        serviceState: stateJson,
+        createdAt: new Date(Date.now() - offset).toISOString(),
+        updatedAt: new Date(Date.now() - offset).toISOString(),
+      });
+    }
+    const teardownSpy = vi
+      .spyOn(workspaceServicesService, "teardownWorkspaceServices")
+      .mockResolvedValue(undefined);
+    const gitService = createFakeGitService();
+    const { service } = makeService(gitService);
+
+    await service.deleteWorkspace(goingId);
+
+    // The per-workspace teardown was NOT skipped behind the shared-worktree gate; the
+    // engine's last-reference guard (given the releaser id) decides whether to down.
+    expect(teardownSpy).toHaveBeenCalledOnce();
+    expect(teardownSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ composeProjectName: stack, releasedByWorkspaceId: goingId }),
+    );
+    // The shared worktree itself stays (the keeper still points at it).
+    expect(gitService.removeWorktree).not.toHaveBeenCalled();
+    // The keeper row survives untouched.
+    const keeperRows = await db.select().from(workspaces).where(eq(workspaces.id, keeperId));
+    expect(keeperRows).toHaveLength(1);
+  });
+
+  it("close passes the releaser id to the stack teardown", async () => {
+    const { issueId } = await seedServicesProject(SERVICES_CONFIG);
+    const wsId = randomUUID();
+    const stack = "ak-testinst-ws-close0000001";
+    await db.insert(workspaces).values({
+      id: wsId,
+      issueId,
+      branch: "feature/ak-1-close",
+      status: "active",
+      workingDir: "/tmp/test-repo/.worktrees/feature-close",
+      serviceState: JSON.stringify({
+        composeProjectName: stack,
+        ports: {},
+        envFilePath: "/tmp/test-repo/.worktrees/feature-close/.kanban/services.env",
+        status: "up",
+        updatedAt: new Date(Date.now() - 60_000).toISOString(),
+      }),
+      createdAt: new Date(Date.now() - 60_000).toISOString(),
+      updatedAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+    const teardownSpy = vi
+      .spyOn(workspaceServicesService, "teardownWorkspaceServices")
+      .mockResolvedValue(undefined);
+    const { service } = makeService();
+
+    await service.closeWorkspace(wsId);
+
+    expect(teardownSpy).toHaveBeenCalledOnce();
+    expect(teardownSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ composeProjectName: stack, releasedByWorkspaceId: wsId }),
+    );
+  });
+
   it("rewrites the ticket-context with an explicit stack-FAILED note when the stack errors (#20)", async () => {
     const worktreeDir = await mkdtemp(join(tmpdir(), "ak-ws-svcerr-"));
     try {

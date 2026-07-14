@@ -10,6 +10,13 @@
  * The board brings the stack UP on workspace create (health-gated via `up --wait`),
  * DOWN on merge/delete/close, and reaps its own orphans on startup.
  *
+ * SHARED WORKTREES (finding 12): workspaces can share ONE worktree (fork children; a
+ * second workspace on the same branch — createWorktree reuses the directory). Those
+ * co-residents share ONE stack: the later workspace ADOPTS the earlier one's stack
+ * (same compose project recorded in its serviceState; `.kanban/services.env` is never
+ * rewritten while a sharer lives), and `teardownWorkspaceServices` only downs a stack
+ * when the LAST live workspace referencing it releases it (last-reference guard).
+ *
  * Everything here degrades gracefully when docker is absent: the default runner guards
  * every invocation with `dockerAvailable()`, so the single-user local (no-docker)
  * workflow — where `servicesConfig` is disabled — is completely unaffected.
@@ -180,6 +187,45 @@ export function parseStoredComposeProjectName(serviceStateJson: string | null | 
   }
 }
 
+/**
+ * Parse a persisted ServiceStackState JSON blob into a typed state, or null when it is
+ * absent/unparseable/structurally invalid. Used by the shared-worktree ADOPTION path
+ * (a second workspace on a reused worktree records its co-resident's stack instead of
+ * provisioning a second one), which needs the FULL state (name, ports, env file), not
+ * just the compose name.
+ */
+export function parseStoredServiceStackState(serviceStateJson: string | null | undefined): ServiceStackState | null {
+  if (!serviceStateJson) return null;
+  try {
+    const parsed = JSON.parse(serviceStateJson) as Partial<ServiceStackState> | null;
+    if (!parsed || typeof parsed !== "object") return null;
+    if (typeof parsed.composeProjectName !== "string") return null;
+    if (parsed.status !== "up" && parsed.status !== "error" && parsed.status !== "down") return null;
+    return {
+      composeProjectName: parsed.composeProjectName,
+      ports: parsed.ports && typeof parsed.ports === "object" ? (parsed.ports as Record<string, number>) : {},
+      envFilePath: typeof parsed.envFilePath === "string" ? parsed.envFilePath : "",
+      status: parsed.status,
+      ...(typeof parsed.error === "string" ? { error: parsed.error } : {}),
+      updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date().toISOString(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Does this compose project name derive from this workspace id? Matches BOTH shapes
+ * the board has ever generated — instance-scoped `ak-<inst8>-ws-<ws12>` and legacy
+ * `ak-ws-<ws12>` — by their common `-ws-<first 12 sanitized id chars>` suffix. Used by
+ * the teardown guard to recognize the stack's OWNER among live referencing rows when
+ * the caller could not identify the releasing workspace (legacy merge call sites).
+ */
+function composeNameDerivesFromWorkspace(composeProjectName: string, workspaceId: string): boolean {
+  const token = workspaceId.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12);
+  return token.length > 0 && composeProjectName.endsWith(`-ws-${token}`);
+}
+
 /** Heuristic: does a compose `up` stderr indicate a host/namespace port collision? */
 function isPortInUseError(stderr: string): boolean {
   return /port is already allocated|address already in use|bind for .* failed|ports are not available|failed to bind|Only one usage of each socket address/i.test(stderr);
@@ -237,6 +283,12 @@ export function createWorkspaceServicesService(deps: {
   getInstanceId?: () => Promise<string>;
   /** Persist "stack is down" onto the owning workspace row after a successful down. */
   markServiceStateDown?: (composeProjectName: string) => Promise<void>;
+  /**
+   * Live workspaces whose persisted state still claims a compose project as "up" —
+   * the teardown last-reference guard (shared worktrees, finding 12). Injected for
+   * testability; the default lazily reads the repository.
+   */
+  findLiveStackReferences?: (composeProjectName: string) => Promise<{ id: string }[]>;
 } = {}) {
   const runner = deps.runner ?? createDefaultComposeRunner();
   const allocatePorts = deps.allocatePorts ?? allocateFreePorts;
@@ -251,6 +303,12 @@ export function createWorkspaceServicesService(deps: {
     (async (name: string) => {
       const { markWorkspaceServiceStateDown } = await import("../repositories/workspace-service-state.repository.js");
       await markWorkspaceServiceStateDown(name);
+    });
+  const findLiveStackReferences =
+    deps.findLiveStackReferences ??
+    (async (name: string) => {
+      const { findLiveWorkspacesReferencingComposeProject } = await import("../repositories/workspace-service-state.repository.js");
+      return findLiveWorkspacesReferencingComposeProject(name);
     });
 
   /**
@@ -337,11 +395,44 @@ export function createWorkspaceServicesService(deps: {
    * not be blocked by a docker hiccup. Takes the STORED compose project name (from the
    * persisted ServiceStackState) — NEVER a recomputed one — so it can never target the
    * wrong (or a sibling workspace's) stack (F1).
+   *
+   * LAST-REFERENCE GUARD (shared worktrees, finding 12): co-resident workspaces
+   * (worktree reuse / fork children) ADOPT one shared stack — several live rows can
+   * reference the same compose project. The down only runs when the RELEASING
+   * workspace is the last live referent; otherwise it is skipped (and the state stays
+   * "up", because the stack IS up). `releasedByWorkspaceId` identifies the releaser
+   * exactly; legacy call sites that don't pass it always tear down on behalf of a
+   * workspace whose own state references the name, so for them the stack's OWNER row
+   * (the one the name derives from) is treated as the releaser instead. Mirrors the
+   * findLiveSiblingSharers guard for sibling worktrees — on a failed sharer check the
+   * down is skipped too (a leaked stack beats downing a live shared one; the startup
+   * reaper reclaims true orphans).
    */
   async function teardownWorkspaceServices(args: {
     composeProjectName: string;
     composeWorktreePath: string;
+    /** The workspace releasing the stack (excluded from the live-sharer count). */
+    releasedByWorkspaceId?: string;
   }): Promise<void> {
+    try {
+      const refs = await findLiveStackReferences(args.composeProjectName);
+      const otherSharers = refs.filter((r) =>
+        args.releasedByWorkspaceId !== undefined
+          ? r.id !== args.releasedByWorkspaceId
+          : !composeNameDerivesFromWorkspace(args.composeProjectName, r.id),
+      );
+      if (otherSharers.length > 0) {
+        console.log(
+          `[services] stack ${args.composeProjectName} is still referenced by ${otherSharers.length} other live workspace(s) (${otherSharers.map((r) => r.id).join(", ")}) — skipping the down (last sharer releases it)`,
+        );
+        return;
+      }
+    } catch (err) {
+      console.warn(
+        `[services] teardown sharer check failed for ${args.composeProjectName} — skipping the down to be safe (the startup reaper reclaims true orphans): ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return;
+    }
     try {
       const { ok, stderr } = await runner.down({ projectName: args.composeProjectName, cwd: args.composeWorktreePath });
       // dockerExec never throws, so a failed down surfaces only here as ok:false (F6).
