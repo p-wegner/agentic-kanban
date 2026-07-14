@@ -40,6 +40,11 @@ services:
     environment:
       # Point the board's `docker` CLI at the nested daemon instead of a local socket.
       DOCKER_HOST: tcp://dind:2375
+      # A stack's published ports live in the DIND container's network namespace, not
+      # this container's — `localhost:<port>` here reaches nothing. The board reads this
+      # var (resolveServiceHost) and writes it into each workspace's .kanban/services.env
+      # and the agent context, so agents dial `dind:<port>` over the shared dind-net.
+      KANBAN_SERVICE_HOST: dind
     networks:
       - dind-net
     depends_on:
