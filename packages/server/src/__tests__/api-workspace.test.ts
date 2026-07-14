@@ -193,6 +193,7 @@ describe("Workspaces API", () => {
     });
     expect(res.status).toBe(201);
     const body = await res.json() as any;
+    if (body.status === "error") console.error("DEBUG workspace error:", body.error, JSON.stringify(body.serviceState));
     expect(body.branch).toBe("feature/test");
     expect(body.status).toBe("active");
     expect(body.id).toBeDefined();
