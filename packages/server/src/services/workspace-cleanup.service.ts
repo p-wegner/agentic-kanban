@@ -240,8 +240,11 @@ export function createWorkspaceCleanupService(deps: {
       return { success: false, error: `Failed to remove worktree: ${message}` };
     }
 
-    // Multi-repo: sibling worktrees + branches too (no-op single-repo).
-    await cleanupSiblingWorktrees(gitService, workspaceId, database);
+    // Multi-repo: sibling worktrees + branches too (no-op single-repo). Stale
+    // cleanup, like closeWorkspace, never touches the LEADING branch — so mirror
+    // that per sibling repo: preserveUnmerged keeps a sibling branch that still
+    // carries unmerged commits instead of force-deleting the work.
+    await cleanupSiblingWorktrees(gitService, workspaceId, database, { preserveUnmerged: true });
 
     // Null out workingDir so it no longer shows as stale
     const now = new Date().toISOString();

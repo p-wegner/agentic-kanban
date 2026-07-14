@@ -8,6 +8,7 @@ import { projects, projectStatuses, issues, workspaces, preferences, sessions, i
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createMockSessionManager } from "./helpers/mocks.js";
 import { createWorkspaceService, type GitService } from "../services/workspace.service.js";
+import { workspaceServicesService } from "../services/workspace-services.service.js";
 import { activeMerges, MERGE_LOCK_STALE_MS } from "../services/workspace-internals.js";
 import { getWorkspaceDetails } from "../repositories/workspace.repository.js";
 
@@ -1603,5 +1604,183 @@ describe("getWorkspaceDetails — live session fields", () => {
     expect(details!.lastSessionTriggerType).toBe("chat");
     expect(details!.contextTokens).toBe(42000);
     expect(details!.lastTool).toBe("Write");
+  });
+});
+
+/**
+ * The deferred provision+launch chain around per-workspace service stacks. The compose
+ * engine singleton is spied so no docker/fs is touched; what is under test is the
+ * ORCHESTRATION: fail-loud composeRepo resolution, the delete/close-during-provisioning
+ * race (0-row persist → teardown, no launch), the pre-launch lifecycle re-check, and
+ * the stack-FAILED ticket-context note.
+ */
+describe("createWorkspace — service stack deferred chain", () => {
+  let db: TestDb;
+
+  beforeEach(() => {
+    ({ db } = createTestDb());
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const SERVICES_CONFIG = JSON.stringify({ enabled: true, composeFile: "docker-compose.yml", ports: ["db"] });
+
+  async function seedServicesProject(servicesConfig: string): Promise<{ projectId: string; issueId: string }> {
+    const seeded = await seedProjectAndIssue(db);
+    await db.update(projects).set({ servicesConfig }).where(eq(projects.id, seeded.projectId));
+    return seeded;
+  }
+
+  function makeService(gitService = createFakeGitService()) {
+    const sessionManager = createMockSessionManager();
+    const service = createWorkspaceService({
+      database: db,
+      getSessionManager: () => sessionManager,
+      gitService,
+    });
+    return { service, sessionManager };
+  }
+
+  function upState(worktree: string): { composeProjectName: string; ports: Record<string, number>; envFilePath: string; status: "up"; updatedAt: string } {
+    return {
+      composeProjectName: "ak-testinst-ws-abc123def456",
+      ports: { db: 61000 },
+      envFilePath: join(worktree, ".kanban", "services.env"),
+      status: "up",
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  it("fails LOUDLY when composeRepo doesn't resolve: persists an error state, never provisions a fallback stack (#15)", async () => {
+    const { issueId } = await seedServicesProject(JSON.stringify({ enabled: true, composeRepo: "infra" }));
+    const provisionSpy = vi
+      .spyOn(workspaceServicesService, "provisionWorkspaceServices")
+      .mockResolvedValue(upState("/nowhere"));
+    const { service, sessionManager } = makeService();
+
+    const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-badrepo" });
+    expect(result.error).toBeUndefined();
+    await flushDeferred();
+
+    // The engine was NEVER invoked — no unrelated compose file was brought up.
+    expect(provisionSpy).not.toHaveBeenCalled();
+
+    const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, result.id));
+    const state = JSON.parse(wsRows[0].serviceState!) as { status: string; error?: string };
+    expect(state.status).toBe("error");
+    expect(state.error).toContain("composeRepo 'infra'");
+
+    // The workspace itself still lives and the agent still launches (non-fatal error).
+    expect(sessionManager.startSession).toHaveBeenCalledOnce();
+  });
+
+  it("tears the stack down and skips the launch when the workspace is DELETED during provisioning (#11)", async () => {
+    const { issueId } = await seedServicesProject(SERVICES_CONFIG);
+    const teardownSpy = vi
+      .spyOn(workspaceServicesService, "teardownWorkspaceServices")
+      .mockResolvedValue(undefined);
+    // Deterministic race: the delete happens INSIDE the (mocked) provisioning window.
+    const provisionSpy = vi
+      .spyOn(workspaceServicesService, "provisionWorkspaceServices")
+      .mockImplementation(async (args) => {
+        await db.delete(workspaces).where(eq(workspaces.id, args.workspaceId));
+        return upState("/tmp/test-repo/.worktrees/feature-1");
+      });
+    const { service, sessionManager } = makeService();
+
+    const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-deleted" });
+    expect(result.error).toBeUndefined();
+    await flushDeferred();
+
+    expect(provisionSpy).toHaveBeenCalledOnce();
+    // The freshly-started stack was downed (0-row persist → convergent teardown) …
+    expect(teardownSpy).toHaveBeenCalledOnce();
+    expect(teardownSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ composeProjectName: "ak-testinst-ws-abc123def456" }),
+    );
+    // … and no agent was launched into the removed workspace.
+    expect(sessionManager.startSession).not.toHaveBeenCalled();
+  });
+
+  it("tears the stack down and skips the launch when the workspace is CLOSED during provisioning (#11 close variant)", async () => {
+    const { issueId } = await seedServicesProject(SERVICES_CONFIG);
+    const teardownSpy = vi
+      .spyOn(workspaceServicesService, "teardownWorkspaceServices")
+      .mockResolvedValue(undefined);
+    vi.spyOn(workspaceServicesService, "provisionWorkspaceServices").mockImplementation(async (args) => {
+      await db
+        .update(workspaces)
+        .set({ status: "closed", closedAt: new Date().toISOString() })
+        .where(eq(workspaces.id, args.workspaceId));
+      return upState("/tmp/test-repo/.worktrees/feature-1");
+    });
+    const { service, sessionManager } = makeService();
+
+    const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-closed" });
+    expect(result.error).toBeUndefined();
+    await flushDeferred();
+
+    expect(teardownSpy).toHaveBeenCalledOnce();
+    expect(sessionManager.startSession).not.toHaveBeenCalled();
+    // The closed row's state was NOT clobbered by the late persist.
+    const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, result.id));
+    expect(wsRows[0].serviceState).toBeNull();
+  });
+
+  it("skips the deferred agent launch when the workspace vanished even WITHOUT a stack (pre-launch re-check)", async () => {
+    const { issueId } = await seedServicesProject(SERVICES_CONFIG);
+    const teardownSpy = vi
+      .spyOn(workspaceServicesService, "teardownWorkspaceServices")
+      .mockResolvedValue(undefined);
+    // Provisioning reports "no stack" (null) but the workspace is deleted meanwhile.
+    vi.spyOn(workspaceServicesService, "provisionWorkspaceServices").mockImplementation(async (args) => {
+      await db.delete(workspaces).where(eq(workspaces.id, args.workspaceId));
+      return null as never;
+    });
+    const { service, sessionManager } = makeService();
+
+    const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-gone" });
+    expect(result.error).toBeUndefined();
+    await flushDeferred();
+
+    expect(sessionManager.startSession).not.toHaveBeenCalled();
+    expect(teardownSpy).not.toHaveBeenCalled(); // nothing came up, nothing to down
+  });
+
+  it("rewrites the ticket-context with an explicit stack-FAILED note when the stack errors (#20)", async () => {
+    const worktreeDir = await mkdtemp(join(tmpdir(), "ak-ws-svcerr-"));
+    try {
+      const { issueId } = await seedServicesProject(SERVICES_CONFIG);
+      vi.spyOn(workspaceServicesService, "provisionWorkspaceServices").mockResolvedValue({
+        composeProjectName: "ak-testinst-ws-abc123def456",
+        ports: {},
+        envFilePath: join(worktreeDir, ".kanban", "services.env"),
+        status: "error",
+        error: "image xyz not found",
+        updatedAt: new Date().toISOString(),
+      });
+      const gitService = createFakeGitService({ createWorktree: vi.fn(async () => worktreeDir) });
+      const { service, sessionManager } = makeService(gitService);
+
+      const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-stackerr" });
+      expect(result.error).toBeUndefined();
+      await flushDeferred();
+
+      // The agent's context file states the services are NOT available, with the reason.
+      const ctx = await readFile(join(worktreeDir, "CLAUDE.local.md"), "utf-8");
+      expect(ctx).toContain("FAILED TO START");
+      expect(ctx).toContain("image xyz not found");
+
+      // serviceState carries the error, and the agent still launches (non-fatal).
+      const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, result.id));
+      const state = JSON.parse(wsRows[0].serviceState!) as { status: string; error?: string };
+      expect(state.status).toBe("error");
+      expect(state.error).toContain("image xyz not found");
+      expect(sessionManager.startSession).toHaveBeenCalledOnce();
+    } finally {
+      await rm(worktreeDir, { recursive: true, force: true });
+    }
   });
 });

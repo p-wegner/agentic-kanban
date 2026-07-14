@@ -41,6 +41,13 @@ export const GENERIC_AGENT_GITIGNORE = [
   "/classpath.txt",
   ".verify/", // the directory visual-verification is told to write screenshots/logs into
   "/*-review.png", // reviewer screenshots that miss the verify-*.png pattern
+  // Board-generated per-workspace state: the service-stack env file (allocated ports +
+  // the project's servicesConfig secrets, e.g. POSTGRES_PASSWORD) plus conductor state.
+  // Machine-written, never project source — committing it leaks credentials into
+  // history and churns every diff/review. Provisioning also drops a self-ignoring
+  // .kanban/.gitignore sentinel; this entry covers the main checkout and repos where
+  // the sentinel write failed.
+  ".kanban/",
 ];
 
 const AGENT_GITIGNORE_HEADER = "# AI agent artifacts (written during a workspace session; not project source)";

@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, rm, stat, lstat, unlink, readdir } from "node:fs/promises";
+import { mkdir, rm, stat, lstat, unlink, readdir, readFile } from "node:fs/promises";
 import { join, dirname, sep, resolve, parse, relative } from "node:path";
 import { gitExec } from "../git-exec.js";
 import { execGit } from "./internal.js";
@@ -36,15 +36,24 @@ export async function listWorktrees(
 
 /**
  * Create a git worktree for a branch. The worktree is created in a
- * `.worktrees/<branch>` directory sibling to the repo root.
+ * `.worktrees/<branch>` directory sibling to the repo root — or, when
+ * `opts.pathNamespace` is given, in `.worktrees/<namespace>/<branch>`.
+ *
+ * The namespace exists for multi-repo workspaces: every repo of a workspace uses
+ * the SAME branch name, and repos sharing a parent directory (the guaranteed
+ * layout for clone-from-URL repos) share the same `.worktrees` root — without a
+ * per-repo namespace the sibling repos' worktrees would collide on disk with the
+ * leading repo's. Single-repo callers pass no namespace, so their path scheme
+ * (`<parent>/.worktrees/<branch>`) is unchanged.
+ *
  * If the branch doesn't exist yet, it is created from the given baseBranch
  * (or HEAD if no baseBranch is specified).
- * Throws if a worktree for this branch already exists.
  */
 export async function createWorktree(
   repoPath: string,
   branch: string,
   baseBranch?: string,
+  opts: { pathNamespace?: string } = {},
 ): Promise<string> {
   // Prune stale worktree references (directories deleted but git still tracks them).
   // This is critical on Windows where locked directories can survive removal.
@@ -73,24 +82,41 @@ export async function createWorktree(
     }
   }
 
-  // Sanitize branch name for directory use
+  // Sanitize branch name (and optional per-repo namespace) for directory use
   const safeName = branch.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const worktreesDir = join(dirname(repoPath), ".worktrees");
+  const safeNamespace = (opts.pathNamespace ?? "").replace(/[^a-zA-Z0-9._-]/g, "_");
+  const worktreesDir = safeNamespace && safeNamespace !== "." && safeNamespace !== ".."
+    ? join(dirname(repoPath), ".worktrees", safeNamespace)
+    : join(dirname(repoPath), ".worktrees");
   let worktreePath = join(worktreesDir, safeName);
 
   await mkdir(worktreesDir, { recursive: true });
 
-  // If the target directory exists but isn't a registered worktree (e.g. leftover from a
-  // deleted workspace), remove it so git worktree add doesn't fail with "already exists".
-  // On Windows, directories can be locked by stale process handles — if rm fails, fall back
-  // to an alternative path with a numeric suffix.
+  // If the target directory exists but is only a LEFTOVER (e.g. from a deleted
+  // workspace), remove it so git worktree add doesn't fail with "already exists".
+  // Never blind-delete, though: the directory may be a registered worktree of THIS
+  // repo under a different branch (two branches can sanitize to the same directory
+  // name), or a checkout belonging to ANOTHER repo — repos sharing a parent
+  // directory share the same `.worktrees` root, so deleting it would destroy that
+  // repo's live worktree (the multi-repo sibling collision bug). In those cases —
+  // and when the removal fails (locked on Windows) — fall back to an alternative
+  // path with a numeric suffix instead.
   try {
     await stat(worktreePath);
-    // Directory exists — try to remove it
-    try {
-      await rm(worktreePath, { recursive: true, force: true });
-    } catch {
-      // Locked on Windows — find an alternative path
+    let removed = false;
+    const claimedByThisRepo = isRegisteredWorktreePath(existing, worktreePath);
+    if (!claimedByThisRepo && !(await isForeignCheckout(repoPath, worktreePath))) {
+      // Break junctions first (top-level + nested) so the recursive delete cannot
+      // traverse a Windows junction into a main checkout's shared store (#518/#780).
+      await breakJunctionsRecursively(worktreePath).catch(() => undefined);
+      try {
+        await rm(worktreePath, { recursive: true, force: true });
+        removed = true;
+      } catch {
+        // Locked on Windows — fall through to the alternative path
+      }
+    }
+    if (!removed) {
       for (let suffix = 2; suffix <= 10; suffix++) {
         const altPath = join(worktreesDir, `${safeName}-${suffix}`);
         try {
@@ -267,6 +293,55 @@ async function breakJunctionsRecursively(dirPath: string, depth = 0): Promise<vo
   }
 }
 
+/**
+ * True when `dirPath` is one of the repo's registered worktrees. Paths are compared
+ * resolved + case-insensitively — a false positive only means we DON'T delete the
+ * directory (the safe direction), so loose matching is deliberate.
+ */
+function isRegisteredWorktreePath(
+  worktrees: { path: string }[],
+  dirPath: string,
+): boolean {
+  const target = resolve(dirPath).toLowerCase();
+  return worktrees.some((wt) => resolve(wt.path.replace(/\//g, sep)).toLowerCase() === target);
+}
+
+/**
+ * True when the existing directory is some OTHER repo's checkout: a full clone
+ * (`.git` directory) or a worktree whose `.git` file points outside this repo's
+ * own `.git`. Repos sharing a parent directory place worktrees under the same
+ * `.worktrees` root, so a same-named directory here can be another repo's LIVE
+ * worktree — deleting it would destroy that repo's workspace. An unreadable or
+ * unparseable `.git` entry is treated as foreign: never delete a directory we
+ * cannot positively identify as this repo's own leftover.
+ */
+async function isForeignCheckout(repoPath: string, dirPath: string): Promise<boolean> {
+  const gitEntry = join(dirPath, ".git");
+  let entryStat;
+  try {
+    entryStat = await lstat(gitEntry);
+  } catch {
+    return false; // no .git — a plain leftover directory, not any repo's checkout
+  }
+  if (entryStat.isDirectory()) return true; // a full clone parked here — never one of our worktrees
+
+  let gitdirTarget: string;
+  try {
+    const content = await readFile(gitEntry, "utf-8");
+    const match = content.match(/^gitdir:\s*(.+?)\s*$/m);
+    if (!match) return true;
+    gitdirTarget = resolve(dirname(gitEntry), match[1]);
+  } catch {
+    return true;
+  }
+
+  const ownGitDir = resolve(repoPath, ".git");
+  const rel = relative(ownGitDir, gitdirTarget);
+  const isInsideOwnGit = rel === ""
+    || (rel !== ".." && !rel.startsWith(`..${sep}`) && parse(rel).root === "");
+  return !isInsideOwnGit;
+}
+
 async function removeLeftoverWorktreeDirectory(repoPath: string, worktreePath: string): Promise<boolean> {
   if (!existsSync(worktreePath)) return false;
 
@@ -291,4 +366,4 @@ async function removeLeftoverWorktreeDirectory(repoPath: string, worktreePath: s
 
   await rm(worktreePath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   return !existsSync(worktreePath);
-}
+}

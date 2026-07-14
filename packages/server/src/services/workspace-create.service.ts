@@ -17,10 +17,10 @@ import { derivePortsFromBranch } from "./worktree-ports.js";
 import { workspaceServicesService, resolveServiceHost } from "./workspace-services.service.js";
 import {
   DEFAULT_SERVICE_STACK_CONFIG,
-  composeProjectName,
   type ServiceStackConfig,
   type ServiceStackState,
 } from "@agentic-kanban/shared";
+import type { TicketContext } from "@agentic-kanban/shared/lib/ticket-context";
 import { withTransaction, type Database, type TransactionClient } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
@@ -41,7 +41,10 @@ import { toExecutorProvider } from "./agent-settings.service.js";
 import { preflightAgentProfile } from "./agent-profile-health.service.js";
 import { emitButlerSystemEvent } from "./butler-event-feed.js";
 import { moveIssueToInProgressStrict } from "../repositories/workspace.repository.js";
-import { updateWorkspaceServiceState } from "../repositories/workspace-service-state.repository.js";
+import {
+  updateWorkspaceServiceState,
+  getWorkspaceLifecycleStatus,
+} from "../repositories/workspace-service-state.repository.js";
 import {
   WorkspaceError,
   type CreateWorkspaceInput,
@@ -123,11 +126,25 @@ export function createWorkspaceCreateService(deps: {
     let composeWorktreePath = params.leadingWorktreePath;
     if (config.composeRepo) {
       const sibling = params.siblings.find((s) => s.name === config.composeRepo);
-      if (sibling) {
-        composeWorktreePath = sibling.worktreePath;
-      } else {
-        console.warn(`[services] composeRepo '${config.composeRepo}' not found among sibling worktrees — falling back to leading worktree`);
+      if (!sibling) {
+        // A configured-but-unresolvable composeRepo (typo, or the repo was removed from
+        // the project) must FAIL LOUDLY, never fall back to the leading worktree — the
+        // leading repo's docker-compose.yml can be a completely unrelated (e.g. full
+        // app-deployment) stack that would be brought up per workspace by accident.
+        const message =
+          `servicesConfig.composeRepo '${config.composeRepo}' does not match any of the project's additional repos — the service stack was NOT started. ` +
+          `Set composeRepo to one of the project's additional repo names, or leave it empty to use the leading repo's compose file.`;
+        console.warn(`[services] ${message}`);
+        return {
+          composeProjectName: "",
+          ports: {},
+          envFilePath: "",
+          status: "error",
+          error: message,
+          updatedAt: new Date().toISOString(),
+        };
       }
+      composeWorktreePath = sibling.worktreePath;
     }
 
     try {
@@ -140,8 +157,10 @@ export function createWorkspaceCreateService(deps: {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.warn(`[services] provisioning threw (non-fatal) for branch ${params.branch}: ${message}`);
+      // No stack came up, so an empty compose name is safe here: every teardown path
+      // (parseStoredComposeProjectName) treats it as "nothing to down".
       return {
-        composeProjectName: composeProjectName(params.workspaceId),
+        composeProjectName: "",
         ports: {},
         envFilePath: "",
         status: "error",
@@ -429,10 +448,19 @@ export function createWorkspaceCreateService(deps: {
             timing("service-stack", t);
             if (serviceState.status === "error") {
               console.warn(`[services] stack for branch ${ctx.branch} came up with status=error: ${serviceState.error ?? ""}`);
+              // Surface the failure via the Butler feed too — a non-throwing error
+              // state never reaches the deferred catch handler below (#20).
+              emitButlerSystemEvent({
+                projectId,
+                kind: "workspace_error",
+                workspaceId,
+                text: `Service stack failed to start for branch ${ctx.branch}: ${(serviceState.error ?? "unknown error").slice(0, 200)}`,
+              });
             }
+            let persistedRows = 0;
             try {
-              await updateWorkspaceServiceState(workspaceId, stringifyJson(serviceState), database);
-              boardEvents?.broadcast(projectId, "workspace_setup");
+              persistedRows = await updateWorkspaceServiceState(workspaceId, stringifyJson(serviceState), database);
+              if (persistedRows > 0) boardEvents?.broadcast(projectId, "workspace_setup");
             } catch (dbErr) {
               // #F5b: if the state can't be persisted, no teardown path can find the stack
               // (they all gate on the STORED state) — it would orphan. Tear it down now.
@@ -446,27 +474,62 @@ export function createWorkspaceCreateService(deps: {
               serviceState = null;
             }
 
-            // 2. If the stack came up, REWRITE the ticket-context (already written
-            //    pre-insert, minus the service section) to add the running-stack section
-            //    so the agent knows the sidecars are up, on which host+ports.
-            if (serviceState && serviceState.status === "up" && ctx.worktreePath) {
+            // A 0-row persist means the workspace was DELETED or closed/merged during
+            // the long `up --wait` window: its delete/close teardown ran BEFORE the
+            // state existed, so nothing else will ever down the fresh stack (#F5c).
+            // Converge here — tear it down and abandon the rest of the launch chain.
+            if (serviceState && persistedRows === 0) {
+              console.warn(`[services] workspace ${workspaceId} was deleted/closed during service provisioning; tearing the stack down and skipping the agent launch`);
+              if (serviceState.status === "up") {
+                await workspaceServicesService.teardownWorkspaceServices({
+                  composeProjectName: serviceState.composeProjectName,
+                  composeWorktreePath: ctx.worktreePath,
+                });
+              }
+              return;
+            }
+
+            // 2. REWRITE the ticket-context (already written pre-insert, minus the
+            //    service section): on "up" add the running-stack section (host+ports);
+            //    on "error" add an explicit stack-FAILED note so the agent knows the
+            //    declared services are absent instead of burning the session against a
+            //    missing database (#20).
+            if (serviceState && ctx.worktreePath) {
+              const stackSection: NonNullable<TicketContext["serviceStack"]> =
+                serviceState.status === "up"
+                  ? {
+                      ports: serviceState.ports,
+                      envFilePath: serviceState.envFilePath,
+                      composeProjectName: serviceState.composeProjectName,
+                      serviceHost: resolveServiceHost(),
+                    }
+                  : {
+                      status: "error",
+                      error: serviceState.error ?? null,
+                      ports: serviceState.ports,
+                      envFilePath: serviceState.envFilePath,
+                      composeProjectName: serviceState.composeProjectName,
+                      serviceHost: resolveServiceHost(),
+                    };
               await writeWorktreeTicketContext(
                 ctx.worktreePath,
                 ctx.issue,
                 ctx.contextPrimer,
                 ctx.siblings.map((s) => ({ name: s.name, worktreePath: s.worktreePath })),
-                {
-                  ports: serviceState.ports,
-                  envFilePath: serviceState.envFilePath,
-                  composeProjectName: serviceState.composeProjectName,
-                  serviceHost: resolveServiceHost(),
-                },
+                stackSection,
               );
             }
           }
         }
 
-        // 3. Launch the builder agent.
+        // 3. Launch the builder agent — after re-checking the workspace still exists
+        //    and is open: it may have been deleted or closed while the (up to 120s)
+        //    provisioning ran, and an agent must never launch into a removed workspace.
+        const lifecycle = await getWorkspaceLifecycleStatus(workspaceId, database);
+        if (!lifecycle || lifecycle.status === "closed" || lifecycle.status === "merged") {
+          console.warn(`[workspaces] workspace ${workspaceId} is ${lifecycle ? lifecycle.status : "deleted"} — skipping the deferred agent launch`);
+          return;
+        }
         const t2 = Date.now();
         await launchAgent(agentLaunchArgs);
         timing("agent-launch", t2);

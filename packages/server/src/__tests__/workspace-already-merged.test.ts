@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
+import { insertWorkspaceRepo, listWorkspaceRepos, setWorkspaceRepoMergedSha } from "../repositories/repo.repository.js";
 
 // Minimal git service fake
 function makeGitService(overrides: Partial<{
@@ -441,5 +442,98 @@ describe("reconcileAlreadyMerged", () => {
     await svc.reconcileAlreadyMerged(workspaceId);
 
     expect(removeWorktree).toHaveBeenCalledWith("/repo", "/repo/.worktrees/ws");
+  });
+});
+
+// ─── Multi-repo sibling awareness (review finding #16) ──────────────────────────────
+// checkAlreadyMerged must judge "fully merged" across EVERY repo of the workspace, and
+// reconcileAlreadyMerged must clean up the sibling worktrees instead of orphaning them.
+
+describe("already-merged reconciliation — multi-repo siblings (#16)", () => {
+  const SIBLING_PATH = "/extra";
+  let db: ReturnType<typeof createTestDb>["db"];
+  beforeEach(() => {
+    ({ db } = createTestDb());
+  });
+
+  /** Fake git where the LEADING branch reads fully merged, sibling probes dispatch on repo path. */
+  function makeMultiRepoGit(siblingAhead: number) {
+    return {
+      ...makeGitService({
+        getDiff: async () => "",
+        revParse: async (repoPath, ref) => {
+          if (repoPath === SIBLING_PATH) return "sib-sha";
+          return ref === "feature/ak-42-test" ? "deadbeef" : "headsha";
+        },
+        isAncestor: async () => true,
+      }),
+      countUniqueCommits: vi.fn(async (repoPath: string) => (repoPath === SIBLING_PATH ? siblingAhead : 1)),
+      getCurrentBranch: vi.fn(async () => "master"),
+    };
+  }
+
+  async function insertSibling(db2: ReturnType<typeof createTestDb>["db"], ids: { workspaceId: string; projectId: string }, opts: { mergedHeadSha?: string } = {}) {
+    await insertWorkspaceRepo({
+      workspaceId: ids.workspaceId,
+      projectId: ids.projectId,
+      path: SIBLING_PATH,
+      name: "extra",
+      worktreePath: `${SIBLING_PATH}/.worktrees/ws`,
+      branch: "feature/ak-42-test",
+      baseBranch: "master",
+    }, db2);
+    if (opts.mergedHeadSha) {
+      const [row] = await listWorkspaceRepos(ids.workspaceId, db2);
+      await setWorkspaceRepoMergedSha(row.id, opts.mergedHeadSha, db2);
+    }
+  }
+
+  it("checkAlreadyMerged refuses when a sibling repo still has unmerged commits", async () => {
+    const ids = await seedScenario(db, {});
+    await insertSibling(db, ids);
+    const git = makeMultiRepoGit(2);
+
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+    const result = await svc.checkAlreadyMerged(ids.workspaceId);
+
+    expect(result.isAlreadyMerged).toBe(false);
+    expect(result.reason).toMatch(/sibling/i);
+    expect(result.reason).toContain("extra");
+  });
+
+  it("checkAlreadyMerged still passes when the sibling merge already landed (mergedHeadSha stamped)", async () => {
+    const ids = await seedScenario(db, {});
+    await insertSibling(db, ids, { mergedHeadSha: "landed-sha" });
+    const git = makeMultiRepoGit(5 /* would be pending if unstamped */);
+
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+    const result = await svc.checkAlreadyMerged(ids.workspaceId);
+
+    expect(result.isAlreadyMerged).toBe(true);
+  });
+
+  it("reconcileAlreadyMerged refuses (throws) while a sibling has unmerged commits", async () => {
+    const ids = await seedScenario(db, {});
+    await insertSibling(db, ids);
+    const git = makeMultiRepoGit(1);
+
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+    await expect(svc.reconcileAlreadyMerged(ids.workspaceId)).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+    // Nothing destroyed: the sibling branch was never touched.
+    expect(git.deleteBranch).not.toHaveBeenCalledWith(SIBLING_PATH, "feature/ak-42-test", expect.anything());
+  });
+
+  it("reconcileAlreadyMerged cleans up landed sibling worktrees + branches (no orphans)", async () => {
+    const ids = await seedScenario(db, {});
+    await insertSibling(db, ids, { mergedHeadSha: "landed-sha" });
+    const git = makeMultiRepoGit(0);
+
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+    const result = await svc.reconcileAlreadyMerged(ids.workspaceId);
+    expect(result.reconciledAt).toBeTruthy();
+
+    expect(git.removeWorktree).toHaveBeenCalledWith(SIBLING_PATH, `${SIBLING_PATH}/.worktrees/ws`);
+    expect(git.deleteBranch).toHaveBeenCalledWith(SIBLING_PATH, "feature/ak-42-test", { force: true });
   });
 });

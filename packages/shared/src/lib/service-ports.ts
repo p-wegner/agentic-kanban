@@ -6,36 +6,68 @@
  * reaper never destroy a sibling workspace's stack. It is keyed on the workspace's
  * unique id (NOT the branch offset — two workspaces on the same issue share an offset,
  * so an offset-keyed name would collide and one workspace's `down -v` would wipe the
- * other's live containers + volumes). Shape: `ak-ws-<first 12 sanitized chars of the
- * workspace id>`, lowercased and stripped to Compose's legal charset. Host PORTS, by
- * contrast, are allocated from free ports at create time (see server `port-allocator.ts`)
- * — only the NAME is derived.
+ * other's live containers + volumes).
+ *
+ * The name is ALSO scoped to a per-server-instance id (persisted in that instance's
+ * DB, see server `workspace-service-state.repository.ts`): the Docker daemon is shared
+ * by every board instance on the host (main checkout + worktree dev servers on the
+ * ~/.agentic-kanban fallback DB, DooD-containerized boards on the host socket), so a
+ * purely global `ak-ws-*` namespace let one instance's startup reaper `down -v`
+ * ANOTHER instance's live stacks. Shape: `ak-<instanceId8>-ws-<first 12 sanitized
+ * chars of the workspace id>`, lowercased and stripped to Compose's legal charset.
+ * Host PORTS, by contrast, are allocated from free ports at create time (see server
+ * `port-allocator.ts`) — only the NAME is derived.
  *
  * No Node builtins here — safe to export as VALUES from the shared lib barrel.
  */
 
-/** Prefix marking a Compose project the board owns (per-workspace). */
-const MANAGED_PREFIX = "ak-ws-";
-
-/**
- * Deterministic, UNIQUE-per-workspace, Compose-legal stack name:
- * `ak-ws-<first 12 alphanumerics of the workspace id, lowercased>`. Keyed on the
- * workspace's unique id so no two workspaces (even on the same issue) ever collide.
- */
-export function composeProjectName(workspaceId: string): string {
-  const scope = workspaceId.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12);
-  return `${MANAGED_PREFIX}${scope}`;
+/** Strip a token down to Compose's legal lowercase-alphanumeric charset. */
+function sanitizeToken(token: string, maxLen: number): string {
+  return token.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, maxLen);
 }
 
 /**
- * Precise matcher for names WE generate: exactly `ak-ws-` + at least 6 lowercase
- * alphanumerics and NOTHING ELSE. Deliberately strict so the reaper can never `down`
- * a user's unrelated compose project that merely happens to start with `ak-` or contain
- * `ws` (e.g. `ak-myapp-ws-1`).
+ * Deterministic, UNIQUE-per-workspace, instance-scoped, Compose-legal stack name:
+ * `ak-<instanceId8>-ws-<first 12 alphanumerics of the workspace id, lowercased>`.
+ * Keyed on the workspace's unique id so no two workspaces (even on the same issue)
+ * ever collide, and on the server instance's persisted id so no two board INSTANCES
+ * sharing one Docker daemon ever claim (or reap) each other's stacks.
+ *
+ * Throws on an empty/unsanitizable instance id — silently falling back to an
+ * unscoped name would reopen the cross-instance reaping hazard.
  */
-const MANAGED_COMPOSE_RE = /^ak-ws-[0-9a-z]{6,}$/;
+export function composeProjectName(workspaceId: string, instanceId: string): string {
+  const inst = sanitizeToken(instanceId, 8);
+  if (!inst) throw new Error("composeProjectName requires a non-empty alphanumeric instanceId");
+  const scope = sanitizeToken(workspaceId, 12);
+  return `ak-${inst}-ws-${scope}`;
+}
 
-/** true if a compose project name is one WE manage (`ak-ws-<alnum>`). */
+/**
+ * Precise matcher for names THIS INSTANCE generates: exactly `ak-<instanceId>-ws-` +
+ * at least 6 lowercase alphanumerics and NOTHING ELSE. The startup reaper filters on
+ * this BEFORE downing, so it can never touch:
+ *  - another board instance's stacks (`ak-<otherId>-ws-…`) sharing the same daemon,
+ *  - legacy pre-instance-scoped stacks (`ak-ws-…`) — left alone, never downed,
+ *  - a user's unrelated compose project that merely resembles the shape.
+ * Returns false (never a permissive fallback) when the instance id is unusable.
+ */
+export function isInstanceManagedComposeProject(name: string, instanceId: string): boolean {
+  const inst = sanitizeToken(instanceId, 8);
+  if (!inst) return false;
+  return new RegExp(`^ak-${inst}-ws-[0-9a-z]{6,}$`).test(name);
+}
+
+/**
+ * LEGACY matcher for the pre-instance-scoped shape (`ak-ws-<alnum6+>`). Retained only
+ * so callers can RECOGNIZE old-format names (e.g. for display); the reaper must NOT
+ * use it — legacy-named stacks may belong to ANY instance on the shared daemon and
+ * are deliberately left alone (their normal merge/close/delete teardown still works
+ * via the STORED name).
+ */
+const LEGACY_MANAGED_COMPOSE_RE = /^ak-ws-[0-9a-z]{6,}$/;
+
+/** true if a compose project name matches the LEGACY unscoped shape (`ak-ws-<alnum>`). */
 export function isManagedComposeProject(name: string): boolean {
-  return MANAGED_COMPOSE_RE.test(name);
+  return LEGACY_MANAGED_COMPOSE_RE.test(name);
 }

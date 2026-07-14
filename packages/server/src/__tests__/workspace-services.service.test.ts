@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -11,6 +11,7 @@ import {
 } from "../services/workspace-services.service.js";
 import type { ServiceStackConfig } from "@agentic-kanban/shared";
 import { composeProjectName } from "@agentic-kanban/shared";
+import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 
 /** A fake ComposeRunner recording calls and returning scripted results. */
 function makeFakeRunner(overrides: Partial<ComposeRunner> = {}): {
@@ -35,6 +36,27 @@ function makeFakeRunner(overrides: Partial<ComposeRunner> = {}): {
   return { runner, ups, downs };
 }
 
+const INSTANCE = "testinst";
+
+/**
+ * Construct the engine with SAFE fakes for every DB-touching default (getInstanceId /
+ * markServiceStateDown lazily hit the repository → real DB when not injected).
+ */
+function makeService(deps: Parameters<typeof createWorkspaceServicesService>[0] = {}): {
+  svc: ReturnType<typeof createWorkspaceServicesService>;
+  markedDown: string[];
+} {
+  const markedDown: string[] = [];
+  const svc = createWorkspaceServicesService({
+    getInstanceId: async () => INSTANCE,
+    markServiceStateDown: async (name) => {
+      markedDown.push(name);
+    },
+    ...deps,
+  });
+  return { svc, markedDown };
+}
+
 const CONFIG: ServiceStackConfig = {
   enabled: true,
   composeFile: "docker-compose.yml",
@@ -57,19 +79,19 @@ afterEach(async () => {
 describe("buildServicesEnvFile", () => {
   it("writes COMPOSE_PROJECT_NAME, KANBAN_STACK, KANBAN_SERVICE_HOST, named ports, config env, and extra env", () => {
     const body = buildServicesEnvFile({
-      composeProjectName: "ak-ws-abc12345def6",
+      composeProjectName: "ak-testinst-ws-abc12345def6",
       ports: { db: 51000, cache: 51001 },
       config: CONFIG,
       extraEnv: { KANBAN_WORKTREE_BRANCH: "feature/ak-7-x" },
       serviceHost: "host.docker.internal",
     });
-    expect(body).toContain("COMPOSE_PROJECT_NAME=ak-ws-abc12345def6");
-    expect(body).toContain("KANBAN_STACK=1");
-    expect(body).toContain("KANBAN_SERVICE_HOST=host.docker.internal");
-    expect(body).toContain("KANBAN_SVC_DB_PORT=51000");
-    expect(body).toContain("KANBAN_SVC_CACHE_PORT=51001");
-    expect(body).toContain("POSTGRES_PASSWORD=secret");
-    expect(body).toContain("KANBAN_WORKTREE_BRANCH=feature/ak-7-x");
+    expect(body).toContain("COMPOSE_PROJECT_NAME='ak-testinst-ws-abc12345def6'");
+    expect(body).toContain("KANBAN_STACK='1'");
+    expect(body).toContain("KANBAN_SERVICE_HOST='host.docker.internal'");
+    expect(body).toContain("KANBAN_SVC_DB_PORT='51000'");
+    expect(body).toContain("KANBAN_SVC_CACHE_PORT='51001'");
+    expect(body).toContain("POSTGRES_PASSWORD='secret'");
+    expect(body).toContain("KANBAN_WORKTREE_BRANCH='feature/ak-7-x'");
     expect(body.endsWith("\n")).toBe(true);
   });
 
@@ -77,43 +99,84 @@ describe("buildServicesEnvFile", () => {
     const prev = process.env.KANBAN_SERVICE_HOST;
     delete process.env.KANBAN_SERVICE_HOST;
     try {
-      const body = buildServicesEnvFile({ composeProjectName: "ak-ws-abc123", ports: {}, config: { ...CONFIG, env: {} } });
-      expect(body).toContain("KANBAN_SERVICE_HOST=localhost");
+      const body = buildServicesEnvFile({ composeProjectName: "ak-testinst-ws-abc123", ports: {}, config: { ...CONFIG, env: {} } });
+      expect(body).toContain("KANBAN_SERVICE_HOST='localhost'");
     } finally {
       if (prev !== undefined) process.env.KANBAN_SERVICE_HOST = prev;
     }
   });
 
+  it("single-quotes values so compose --env-file and shell sourcing read the SAME bytes (F12)", () => {
+    // `$`, spaces and ` #` all diverge between the two parsers when unquoted; single
+    // quotes are literal for both.
+    const body = buildServicesEnvFile({
+      composeProjectName: "ak-testinst-ws-abc123",
+      ports: {},
+      config: {
+        ...CONFIG,
+        env: {
+          POSTGRES_PASSWORD: "pa$$word",
+          JAVA_OPTS: "-Xmx512m -Xms256m",
+          NOTE: "value with # hash",
+        },
+      },
+    });
+    expect(body).toContain("POSTGRES_PASSWORD='pa$$word'");
+    expect(body).toContain("JAVA_OPTS='-Xmx512m -Xms256m'");
+    expect(body).toContain("NOTE='value with # hash'");
+  });
+
   it("drops env entries whose value contains a CR/LF so the file is never broken (F11)", () => {
     const body = buildServicesEnvFile({
-      composeProjectName: "ak-ws-abc123",
+      composeProjectName: "ak-testinst-ws-abc123",
       ports: {},
       config: { ...CONFIG, env: { GOOD: "ok", EVIL: "x\nBAR=injected" } },
       extraEnv: { ALSO_EVIL: "y\r\nZAP=1" },
     });
-    expect(body).toContain("GOOD=ok");
+    expect(body).toContain("GOOD='ok'");
     expect(body).not.toContain("BAR=injected");
     expect(body).not.toContain("ZAP=1");
     // Exactly one line per legit key — no smuggled extra lines.
     expect(body.split("\n").filter((l) => l.startsWith("BAR=") || l.startsWith("ZAP="))).toHaveLength(0);
   });
+
+  it("drops entries that cannot be represented identically for both parsers (quote in value, non-identifier key)", () => {
+    const body = buildServicesEnvFile({
+      composeProjectName: "ak-testinst-ws-abc123",
+      ports: {},
+      config: {
+        ...CONFIG,
+        env: {
+          GOOD: "ok",
+          QUOTED: "it's broken",
+          "BAD-KEY": "aborts shell sourcing",
+          "1LEADING": "not an identifier",
+        },
+      },
+    });
+    expect(body).toContain("GOOD='ok'");
+    expect(body).not.toContain("QUOTED");
+    expect(body).not.toContain("BAD-KEY");
+    expect(body).not.toContain("1LEADING");
+  });
 });
 
 describe("parseStoredComposeProjectName", () => {
   it("extracts the stored name and tolerates null/garbage", () => {
-    expect(parseStoredComposeProjectName(JSON.stringify({ composeProjectName: "ak-ws-abc123def456" }))).toBe("ak-ws-abc123def456");
+    expect(parseStoredComposeProjectName(JSON.stringify({ composeProjectName: "ak-testinst-ws-abc123def456" }))).toBe("ak-testinst-ws-abc123def456");
     expect(parseStoredComposeProjectName(null)).toBeNull();
     expect(parseStoredComposeProjectName("not json")).toBeNull();
     expect(parseStoredComposeProjectName(JSON.stringify({ ports: {} }))).toBeNull();
+    expect(parseStoredComposeProjectName(JSON.stringify({ composeProjectName: "" }))).toBeNull();
   });
 });
 
 describe("provisionWorkspaceServices", () => {
-  it("allocates ports, writes the env file, uses the workspace-id-keyed project name, and calls up", async () => {
+  it("allocates ports, writes the env file, uses the instance+workspace-keyed project name, and calls up", async () => {
     const { runner, ups } = makeFakeRunner();
     const allocatePorts = async (names: string[]) =>
       Object.fromEntries(names.map((n, i) => [n, 60000 + i]));
-    const svc = createWorkspaceServicesService({ runner, allocatePorts });
+    const { svc } = makeService({ runner, allocatePorts });
 
     const state = await svc.provisionWorkspaceServices({
       config: CONFIG,
@@ -121,15 +184,15 @@ describe("provisionWorkspaceServices", () => {
       composeWorktreePath: workDir,
     });
 
-    const expectedName = composeProjectName(WORKSPACE_ID);
+    const expectedName = composeProjectName(WORKSPACE_ID, INSTANCE);
     expect(state.status).toBe("up");
     expect(state.composeProjectName).toBe(expectedName);
     expect(state.ports).toEqual({ db: 60000, cache: 60001 });
     expect(state.envFilePath).toBe(join(workDir, ".kanban", "services.env"));
 
     const written = await readFile(state.envFilePath, "utf-8");
-    expect(written).toContain(`COMPOSE_PROJECT_NAME=${expectedName}`);
-    expect(written).toContain("KANBAN_SVC_DB_PORT=60000");
+    expect(written).toContain(`COMPOSE_PROJECT_NAME='${expectedName}'`);
+    expect(written).toContain("KANBAN_SVC_DB_PORT='60000'");
 
     expect(ups).toHaveLength(1);
     expect(ups[0].projectName).toBe(expectedName);
@@ -139,11 +202,50 @@ describe("provisionWorkspaceServices", () => {
     expect(ups[0].cwd).toBe(workDir);
   });
 
+  it("writes a self-ignoring .kanban/.gitignore so the env file (secrets/ports) never enters git status", async () => {
+    // Real git repo + LINKED WORKTREE — the exact context provisioning writes into.
+    const repoDir = await mkdtemp(join(tmpdir(), "ak-svc-git-"));
+    const wtParent = await mkdtemp(join(tmpdir(), "ak-svc-wt-"));
+    const wtDir = join(wtParent, "wt");
+    try {
+      const git = async (args: string[], cwd: string) => {
+        const res = await gitExec(args, { cwd });
+        expect(res.code, `git ${args.join(" ")} failed: ${res.stderr}`).toBe(0);
+        return res;
+      };
+      await git(["init"], repoDir);
+      await writeFile(join(repoDir, "README.md"), "hello\n", "utf-8");
+      await git(["add", "."], repoDir);
+      await git(["-c", "user.email=test@test.local", "-c", "user.name=test", "commit", "-m", "init"], repoDir);
+      await git(["worktree", "add", wtDir, "-b", "svc-sentinel-test"], repoDir);
+
+      const { runner } = makeFakeRunner();
+      const { svc } = makeService({ runner, allocatePorts: async () => ({ db: 60000 }) });
+      const state = await svc.provisionWorkspaceServices({
+        config: CONFIG,
+        workspaceId: WORKSPACE_ID,
+        composeWorktreePath: wtDir,
+      });
+      expect(state.status).toBe("up");
+
+      // The env file exists (the check below must not pass vacuously) …
+      await expect(readFile(state.envFilePath, "utf-8")).resolves.toContain("POSTGRES_PASSWORD");
+      // … yet git sees NOTHING under .kanban/ — no diff/review leak, nothing an
+      // agent's `git add -A` could commit.
+      const status = await git(["status", "--porcelain", "--untracked-files=all"], wtDir);
+      expect(status.stdout).not.toContain(".kanban");
+    } finally {
+      await gitExec(["worktree", "remove", "--force", wtDir], { cwd: repoDir }).catch(() => {});
+      await rm(wtParent, { recursive: true, force: true }).catch(() => {});
+      await rm(repoDir, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
   it("returns an error state (not throwing) when compose up fails, still writing the env file", async () => {
     const { runner } = makeFakeRunner({
       up: async () => ({ ok: false, stderr: "postgres exited (1)" }),
     });
-    const svc = createWorkspaceServicesService({ runner, allocatePorts: async () => ({}) });
+    const { svc } = makeService({ runner, allocatePorts: async () => ({}) });
 
     const state = await svc.provisionWorkspaceServices({
       config: { ...CONFIG, ports: [] },
@@ -158,11 +260,31 @@ describe("provisionWorkspaceServices", () => {
     expect(written).toContain("COMPOSE_PROJECT_NAME=");
   });
 
+  it("returns an error state when the instance id cannot be resolved (no unscoped fallback)", async () => {
+    const { runner, ups } = makeFakeRunner();
+    const svc = createWorkspaceServicesService({
+      runner,
+      allocatePorts: async () => ({}),
+      getInstanceId: async () => {
+        throw new Error("db unavailable");
+      },
+      markServiceStateDown: async () => {},
+    });
+    const state = await svc.provisionWorkspaceServices({
+      config: { ...CONFIG, ports: [] },
+      workspaceId: WORKSPACE_ID,
+      composeWorktreePath: workDir,
+    });
+    expect(state.status).toBe("error");
+    expect(state.error).toContain("instance id");
+    expect(ups).toHaveLength(0);
+  });
+
   it("runs a compensating down when up fails so partial containers don't linger (F5a)", async () => {
     const { runner, downs } = makeFakeRunner({
       up: async () => ({ ok: false, stderr: "dependency failed to start: container unhealthy" }),
     });
-    const svc = createWorkspaceServicesService({ runner, allocatePorts: async () => ({}) });
+    const { svc } = makeService({ runner, allocatePorts: async () => ({}) });
 
     const state = await svc.provisionWorkspaceServices({
       config: { ...CONFIG, ports: [] },
@@ -172,7 +294,7 @@ describe("provisionWorkspaceServices", () => {
 
     expect(state.status).toBe("error");
     expect(downs).toHaveLength(1);
-    expect(downs[0].projectName).toBe(composeProjectName("ws-fail-1"));
+    expect(downs[0].projectName).toBe(composeProjectName("ws-fail-1", INSTANCE));
   });
 
   it("reallocates ports and retries up on a port-in-use failure (PORT-RETRY)", async () => {
@@ -191,7 +313,7 @@ describe("provisionWorkspaceServices", () => {
       const base = allocCalls === 1 ? 60000 : 61000;
       return Object.fromEntries(names.map((n, i) => [n, base + i]));
     };
-    const svc = createWorkspaceServicesService({ runner, allocatePorts });
+    const { svc } = makeService({ runner, allocatePorts });
 
     const state = await svc.provisionWorkspaceServices({
       config: CONFIG,
@@ -207,7 +329,7 @@ describe("provisionWorkspaceServices", () => {
     expect(downs.length).toBeGreaterThanOrEqual(1);
     // Env file reflects the retried (fresh) ports.
     const written = await readFile(state.envFilePath, "utf-8");
-    expect(written).toContain("KANBAN_SVC_DB_PORT=61000");
+    expect(written).toContain("KANBAN_SVC_DB_PORT='61000'");
   });
 
   it("does NOT retry a non-port failure", async () => {
@@ -218,7 +340,7 @@ describe("provisionWorkspaceServices", () => {
         return { ok: false, stderr: "image not found" };
       },
     });
-    const svc = createWorkspaceServicesService({ runner, allocatePorts: async (n) => Object.fromEntries(n.map((x, i) => [x, 60000 + i])) });
+    const { svc } = makeService({ runner, allocatePorts: async (n) => Object.fromEntries(n.map((x, i) => [x, 60000 + i])) });
     const state = await svc.provisionWorkspaceServices({ config: CONFIG, workspaceId: "ws-noretry", composeWorktreePath: workDir });
     expect(state.status).toBe("error");
     expect(upCalls).toBe(1);
@@ -227,7 +349,7 @@ describe("provisionWorkspaceServices", () => {
   it("skips port allocation when no ports are declared", async () => {
     let allocCalled = false;
     const { runner } = makeFakeRunner();
-    const svc = createWorkspaceServicesService({
+    const { svc } = makeService({
       runner,
       allocatePorts: async (names) => {
         allocCalled = true;
@@ -247,23 +369,31 @@ describe("provisionWorkspaceServices", () => {
 describe("teardownWorkspaceServices", () => {
   it("downs the STORED compose project name and never throws", async () => {
     const { runner, downs } = makeFakeRunner();
-    const svc = createWorkspaceServicesService({ runner });
-    await svc.teardownWorkspaceServices({ composeProjectName: "ak-ws-stored123abc", composeWorktreePath: workDir });
+    const { svc } = makeService({ runner });
+    await svc.teardownWorkspaceServices({ composeProjectName: "ak-testinst-ws-stored123abc", composeWorktreePath: workDir });
     expect(downs).toHaveLength(1);
-    expect(downs[0].projectName).toBe("ak-ws-stored123abc");
+    expect(downs[0].projectName).toBe("ak-testinst-ws-stored123abc");
     expect(downs[0].cwd).toBe(workDir);
   });
 
-  it("warns but does not throw when down reports ok:false (F6)", async () => {
-    const { runner } = makeFakeRunner({ down: async () => ({ ok: false, stderr: "no such project" }) });
-    const svc = createWorkspaceServicesService({ runner });
+  it("marks the stored service state 'down' after a SUCCESSFUL down (stale-DTO fix)", async () => {
+    const { runner } = makeFakeRunner();
+    const { svc, markedDown } = makeService({ runner });
+    await svc.teardownWorkspaceServices({ composeProjectName: "ak-testinst-ws-stored123abc", composeWorktreePath: workDir });
+    expect(markedDown).toEqual(["ak-testinst-ws-stored123abc"]);
+  });
+
+  it("does NOT mark the state down when the down failed (containers may still run)", async () => {
+    const { runner } = makeFakeRunner({ down: async () => ({ ok: false, stderr: "daemon busy" }) });
+    const { svc, markedDown } = makeService({ runner });
     await expect(
-      svc.teardownWorkspaceServices({ composeProjectName: "ak-ws-abc123def", composeWorktreePath: workDir }),
+      svc.teardownWorkspaceServices({ composeProjectName: "ak-testinst-ws-abc123def", composeWorktreePath: workDir }),
     ).resolves.toBeUndefined();
+    expect(markedDown).toEqual([]);
   });
 
   it("swallows a runner failure", async () => {
-    const svc = createWorkspaceServicesService({
+    const { svc } = makeService({
       runner: makeFakeRunner({
         down: async () => {
           throw new Error("daemon gone");
@@ -271,24 +401,42 @@ describe("teardownWorkspaceServices", () => {
       }).runner,
     });
     await expect(
-      svc.teardownWorkspaceServices({ composeProjectName: "ak-ws-abc123def", composeWorktreePath: workDir }),
+      svc.teardownWorkspaceServices({ composeProjectName: "ak-testinst-ws-abc123def", composeWorktreePath: workDir }),
     ).resolves.toBeUndefined();
   });
 });
 
 describe("reapOrphanServiceStacks", () => {
-  it("downs managed stacks that no open workspace expects, leaving known + foreign ones", async () => {
-    const known = composeProjectName("known-ws-0001");
-    const orphan = composeProjectName("orphan-ws-9999");
+  it("downs THIS instance's orphans only — known, foreign-instance, legacy, and unrelated stacks are untouched", async () => {
+    const known = composeProjectName("known-ws-0001", INSTANCE);
+    const orphan = composeProjectName("orphan-ws-9999", INSTANCE);
+    const otherInstanceLive = composeProjectName("other-boards-ws", "otherbrd");
+    const legacyUnscoped = "ak-ws-legacy12345"; // pre-instance-id stack — owner unknowable
     const { runner, downs } = makeFakeRunner({
-      list: async () => [known, orphan, "some-unrelated-project", "ak-myapp-ws-1"],
+      list: async () => [known, orphan, otherInstanceLive, legacyUnscoped, "some-unrelated-project", "ak-myapp-ws-1"],
     });
-    const svc = createWorkspaceServicesService({ runner });
+    const { svc } = makeService({ runner });
     const { reaped } = await svc.reapOrphanServiceStacks({
       knownComposeProjectNames: new Set([known]),
     });
     expect(reaped).toEqual([orphan]);
     expect(downs.map((d) => d.projectName)).toEqual([orphan]);
+  });
+
+  it("reaps NOTHING when the instance id cannot be resolved (identity before destruction)", async () => {
+    const { runner, downs } = makeFakeRunner({
+      list: async () => [composeProjectName("some-ws-1", INSTANCE)],
+    });
+    const svc = createWorkspaceServicesService({
+      runner,
+      getInstanceId: async () => {
+        throw new Error("db unavailable");
+      },
+      markServiceStateDown: async () => {},
+    });
+    const { reaped } = await svc.reapOrphanServiceStacks({ knownComposeProjectNames: new Set() });
+    expect(reaped).toEqual([]);
+    expect(downs).toHaveLength(0);
   });
 });
 
@@ -304,7 +452,7 @@ describe("default compose runner — docker-unavailable path", () => {
     const up = await runner.up({
       composeFile: "docker-compose.yml",
       cwd: workDir,
-      projectName: "ak-ws-test1",
+      projectName: "ak-testinst-ws-test1",
       envFile: join(workDir, ".env"),
       timeoutMs: 3000,
     });

@@ -2,12 +2,13 @@
  * Per-workspace Docker Compose "service stack" engine.
  *
  * A project may declare a Compose stack (e.g. a postgres sidecar). Every workspace
- * gets its OWN isolated stack — a deterministic, UNIQUE-per-workspace compose project
- * name (`ak-ws-<workspaceId12>`, see `@agentic-kanban/shared/lib/service-ports`) and
- * its own FREE host ports allocated at create time — so many tickets run in parallel
- * without port/container collisions. The board brings the stack UP on workspace create
- * (health-gated via `up --wait`), DOWN on merge/delete/close, and reaps orphans on
- * startup.
+ * gets its OWN isolated stack — a deterministic, UNIQUE-per-workspace, INSTANCE-scoped
+ * compose project name (`ak-<instanceId8>-ws-<workspaceId12>`, see
+ * `@agentic-kanban/shared/lib/service-ports`) and its own FREE host ports allocated at
+ * create time — so many tickets run in parallel without port/container collisions, and
+ * parallel board INSTANCES sharing one Docker daemon never reap each other's stacks.
+ * The board brings the stack UP on workspace create (health-gated via `up --wait`),
+ * DOWN on merge/delete/close, and reaps its own orphans on startup.
  *
  * Everything here degrades gracefully when docker is absent: the default runner guards
  * every invocation with `dockerAvailable()`, so the single-user local (no-docker)
@@ -21,7 +22,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ServiceStackConfig, ServiceStackState } from "@agentic-kanban/shared";
-import { composeProjectName, isManagedComposeProject } from "@agentic-kanban/shared";
+import { composeProjectName, isInstanceManagedComposeProject } from "@agentic-kanban/shared";
 import { dockerExec, dockerAvailable } from "@agentic-kanban/shared/lib/docker-exec";
 import { allocateFreePorts } from "./port-allocator.js";
 
@@ -60,6 +61,23 @@ export interface ProvisionServicesArgs {
 /** Relative location (from a worktree root) of the generated compose env file. */
 const ENV_FILE_REL = join(".kanban", "services.env");
 
+/**
+ * Make the generated `.kanban/` dir self-ignoring by dropping a `.gitignore` with `*`
+ * into it (the cargo-target/npm-cache pattern; works identically in linked worktrees).
+ * The env file carries allocated ports AND the project's servicesConfig secrets — an
+ * un-ignored copy lands in every diff/review (getWorkingTreeDiff inlines untracked
+ * content) and gets `git add -A`-committed by agents/auto-commit. Best-effort: a
+ * sentinel write failure is warned loudly (secrets would leak into diffs), not fatal.
+ */
+async function ensureKanbanDirGitIgnored(worktreePath: string): Promise<void> {
+  try {
+    await writeFile(join(worktreePath, ".kanban", ".gitignore"), "*\n", { encoding: "utf-8", flag: "wx" });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "EEXIST") return;
+    console.warn(`[services] failed to write .kanban/.gitignore sentinel (services.env may show up in diffs): ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 /** Uppercase + sanitize a port name into an env-var-safe token: KANBAN_SVC_<NAME>_PORT. */
 function portEnvVar(name: string): string {
   return `KANBAN_SVC_${name.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_PORT`;
@@ -76,21 +94,46 @@ export function resolveServiceHost(env: NodeJS.ProcessEnv = process.env): string
   return v && v.length > 0 ? v : "localhost";
 }
 
+/** Keys must be valid POSIX shell identifiers or `. services.env` breaks mid-file. */
+const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 /**
- * An env value is safe to emit into the `--env-file` only if it carries no line breaks —
- * a CR/LF would split one KEY=value into a bogus extra line (or inject an unintended var).
- * The project route validates env on write, but the WRITER must not emit a broken file
- * regardless of how the value arrived here (F11).
+ * The generated file has TWO consumers with different parsers: docker's `--env-file`
+ * format and the POSIX shell dot-source the ticket-context tells the agent to run
+ * (`set -a; . .kanban/services.env; set +a`). Values are emitted SINGLE-QUOTED — the
+ * one representation both parsers read back byte-identically (no `$` interpolation,
+ * no ` #` inline-comment truncation, no word splitting) — so an entry is safe only if:
+ *  - the key is a valid shell identifier (a `MY-VAR=…` line aborts the dot-source), and
+ *  - the value carries no line break (would split one KEY=value into a bogus extra
+ *    line, or inject an unintended var — F11) and no single quote (cannot be quoted
+ *    identically for both parsers: shell needs `'\''`, compose ends the value there).
+ * Unsafe entries are DROPPED with a loud warning, never emitted divergently (F12).
  */
 function isEnvLineSafe(key: string, value: string): boolean {
-  if (/[\r\n]/.test(key) || /[\r\n]/.test(value)) {
-    console.warn(`[services] dropping env entry with a line break in key/value: ${JSON.stringify(key)}`);
+  if (!ENV_KEY_RE.test(key)) {
+    console.warn(`[services] dropping env entry whose key is not a valid identifier: ${JSON.stringify(key)}`);
+    return false;
+  }
+  if (/[\r\n]/.test(value)) {
+    console.warn(`[services] dropping env entry with a line break in its value: ${JSON.stringify(key)}`);
+    return false;
+  }
+  if (value.includes("'")) {
+    console.warn(`[services] dropping env entry with a single quote in its value (cannot be represented identically for compose --env-file AND shell sourcing): ${JSON.stringify(key)}`);
     return false;
   }
   return true;
 }
 
-/** Serialize the generated env file body (KEY=value lines, docker --env-file format). */
+/**
+ * One `KEY='value'` line. Single quotes are literal for BOTH docker's env-file parser
+ * and POSIX shell sourcing, so the containers and the agent see the same bytes (F12).
+ */
+function envLine(key: string, value: string): string {
+  return `${key}='${value}'`;
+}
+
+/** Serialize the generated env file body (compose --env-file AND shell-sourceable). */
 export function buildServicesEnvFile(args: {
   composeProjectName: string;
   ports: Record<string, number>;
@@ -101,20 +144,20 @@ export function buildServicesEnvFile(args: {
 }): string {
   const serviceHost = args.serviceHost ?? resolveServiceHost();
   const lines: string[] = [
-    `COMPOSE_PROJECT_NAME=${args.composeProjectName}`,
-    "KANBAN_STACK=1",
+    envLine("COMPOSE_PROJECT_NAME", args.composeProjectName),
+    envLine("KANBAN_STACK", "1"),
   ];
   if (isEnvLineSafe("KANBAN_SERVICE_HOST", serviceHost)) {
-    lines.push(`KANBAN_SERVICE_HOST=${serviceHost}`);
+    lines.push(envLine("KANBAN_SERVICE_HOST", serviceHost));
   }
   for (const [name, port] of Object.entries(args.ports)) {
-    lines.push(`${portEnvVar(name)}=${port}`);
+    lines.push(envLine(portEnvVar(name), String(port)));
   }
   for (const [key, value] of Object.entries(args.config.env ?? {})) {
-    if (isEnvLineSafe(key, value)) lines.push(`${key}=${value}`);
+    if (isEnvLineSafe(key, value)) lines.push(envLine(key, value));
   }
   for (const [key, value] of Object.entries(args.extraEnv ?? {})) {
-    if (isEnvLineSafe(key, value)) lines.push(`${key}=${value}`);
+    if (isEnvLineSafe(key, value)) lines.push(envLine(key, value));
   }
   return lines.join("\n") + "\n";
 }
@@ -186,9 +229,29 @@ export function createDefaultComposeRunner(): ComposeRunner {
 export function createWorkspaceServicesService(deps: {
   runner?: ComposeRunner;
   allocatePorts?: typeof allocateFreePorts;
+  /**
+   * This server instance's persisted id (scopes compose names, see service-ports.ts).
+   * Injected for testability; the default lazily reads/creates it in the DB — lazy so
+   * unit tests that inject a fake never touch the repository/DB module at load.
+   */
+  getInstanceId?: () => Promise<string>;
+  /** Persist "stack is down" onto the owning workspace row after a successful down. */
+  markServiceStateDown?: (composeProjectName: string) => Promise<void>;
 } = {}) {
   const runner = deps.runner ?? createDefaultComposeRunner();
   const allocatePorts = deps.allocatePorts ?? allocateFreePorts;
+  const getInstanceId =
+    deps.getInstanceId ??
+    (async () => {
+      const { getOrCreateServiceStackInstanceId } = await import("../repositories/workspace-service-state.repository.js");
+      return getOrCreateServiceStackInstanceId();
+    });
+  const markServiceStateDown =
+    deps.markServiceStateDown ??
+    (async (name: string) => {
+      const { markWorkspaceServiceStateDown } = await import("../repositories/workspace-service-state.repository.js");
+      await markWorkspaceServiceStateDown(name);
+    });
 
   /**
    * Bring a workspace's declared stack up. Allocates free host ports, writes the
@@ -198,11 +261,20 @@ export function createWorkspaceServicesService(deps: {
    */
   async function provisionWorkspaceServices(args: ProvisionServicesArgs): Promise<ServiceStackState> {
     const { config, workspaceId, composeWorktreePath, extraEnv } = args;
-    const name = composeProjectName(workspaceId);
     const envFilePath = join(composeWorktreePath, ENV_FILE_REL);
     const composeFile = config.composeFile || "docker-compose.yml";
     const timeoutMs = config.readyTimeoutMs ?? 120000;
     const portNames = (config.ports ?? []).filter((n) => n.trim().length > 0);
+
+    // The compose name is scoped to this instance's persisted id (see service-ports.ts)
+    // so parallel board instances sharing the daemon never claim each other's stacks.
+    let name: string;
+    try {
+      name = composeProjectName(workspaceId, await getInstanceId());
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { composeProjectName: "", ports: {}, envFilePath, status: "error", error: `failed to resolve the service-stack instance id: ${message}`.slice(0, MAX_ERROR_CHARS), updatedAt: new Date().toISOString() };
+    }
 
     // Allocate free host ports (if any) and (re)write the env file. Broken out so the
     // port-collision retry below can re-run it with a fresh set of ports.
@@ -210,6 +282,7 @@ export function createWorkspaceServicesService(deps: {
     async function allocateAndWriteEnv(): Promise<void> {
       ports = portNames.length > 0 ? await allocatePorts(portNames) : {};
       await mkdir(join(composeWorktreePath, ".kanban"), { recursive: true });
+      await ensureKanbanDirGitIgnored(composeWorktreePath);
       await writeFile(
         envFilePath,
         buildServicesEnvFile({ composeProjectName: name, ports, config, extraEnv }),
@@ -275,21 +348,38 @@ export function createWorkspaceServicesService(deps: {
       if (!ok && stderr) {
         console.warn(`[services] teardown down for ${args.composeProjectName} reported failure (non-fatal): ${stderr}`);
       }
+      // Persist status "down" onto the owning row so the workspace DTO stops reporting
+      // a downed stack as up (with ports that may get reassigned). Only after a
+      // SUCCESSFUL down — a failed down may have left containers running.
+      if (ok) {
+        await markServiceStateDown(args.composeProjectName);
+      }
     } catch (err) {
       console.warn(`[services] teardown failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
   /**
-   * Reap stacks the board owns (`isManagedComposeProject`) that no open workspace
-   * expects — orphans left by a crash/hard-restart. `knownComposeProjectNames` is the
-   * set of names every currently-open workspace maps to; anything managed and NOT in it
-   * gets downed. Best-effort per stack.
+   * Reap stacks THIS INSTANCE owns (`isInstanceManagedComposeProject`, i.e. names
+   * carrying this instance's persisted id) that no open workspace expects — orphans
+   * left by a crash/hard-restart. `knownComposeProjectNames` is the set of names every
+   * currently-open workspace maps to; anything instance-managed and NOT in it gets
+   * downed. Names of OTHER instances sharing the daemon (`ak-<otherId>-ws-…`) and
+   * legacy unscoped names (`ak-ws-…`, pre-instance-id stacks whose owner is unknowable)
+   * are NEVER touched. Best-effort per stack.
    */
   async function reapOrphanServiceStacks(args: {
     knownComposeProjectNames: Set<string>;
   }): Promise<{ reaped: string[] }> {
     const reaped: string[] = [];
+    let instanceId: string;
+    try {
+      instanceId = await getInstanceId();
+    } catch (err) {
+      // Without a proven identity we must not down ANYTHING on the shared daemon.
+      console.warn(`[services] reaper skipped — could not resolve this instance's id: ${err instanceof Error ? err.message : String(err)}`);
+      return { reaped };
+    }
     let names: string[] = [];
     try {
       names = await runner.list();
@@ -298,10 +388,13 @@ export function createWorkspaceServicesService(deps: {
       return { reaped };
     }
     for (const name of names) {
-      if (!isManagedComposeProject(name)) continue;
+      if (!isInstanceManagedComposeProject(name, instanceId)) continue;
       if (args.knownComposeProjectNames.has(name)) continue;
       try {
         await runner.down({ projectName: name, cwd: process.cwd() });
+        // A matching row can only be a terminal (closed) workspace's stale blob; mark
+        // it down so it stops reporting a reaped stack as up. Best-effort.
+        await markServiceStateDown(name).catch(() => {});
         reaped.push(name);
       } catch (err) {
         console.warn(`[services] reaper down failed for ${name} (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
