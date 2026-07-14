@@ -138,6 +138,16 @@ describe("#945: both merge entry paths route through the shared merge executor c
 
     const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
     expect(issue.statusId).toBe(doneStatusId);
+
+    // Drain the deferred post-merge cleanup (setImmediate under the repo merge lock,
+    // #970): it calls the mocked cleanupMergedWorktreeAndBranch AFTER this test's
+    // assertions, and without draining it races the next test's mockReset — landing in
+    // the autoMerge test's call tally (observed as a deterministic "called 2 times"
+    // failure). The lock entry is only removed once the cleanup settles, so an empty
+    // activeMerges map proves the deferred chain finished.
+    await vi.waitFor(() => {
+      expect(activeMerges.size).toBe(0);
+    });
   });
 
   it("autoMerge (review-exit / fix-and-merge retry path) calls the same runMergeCore", async () => {

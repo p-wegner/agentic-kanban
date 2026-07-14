@@ -4,6 +4,7 @@ import { workspaces } from "@agentic-kanban/shared/schema";
 import type { WorkspaceSetupRun, WorkspaceSymlinkRun } from "@agentic-kanban/shared";
 import { tryAcquireRepoLock, type RepoLockHandle } from "@agentic-kanban/shared/lib/repo-lock";
 import type { Database } from "../db/index.js";
+import { listWorkspaceRepos, type RepoRow } from "../repositories/repo.repository.js";
 import type { ProviderName } from "./agent-provider.js";
 import type { AgentSettings } from "./agent-settings.service.js";
 import { loadProjectRuntimeConfig } from "./project-runtime-config.service.js";
@@ -185,6 +186,14 @@ export type ResolveMergeStateDeps = {
   gitService: GitService;
   /** When true, skip the readyForMerge gate so auto_merge_in_review can land committed In Review work. */
   autoMergeInReview?: boolean;
+  /**
+   * Multi-repo awareness: when provided, the ancestor short-circuits (`reconcile` /
+   * `clean-ancestor`) additionally verify that NO sibling repo still has unmerged
+   * commits. Sibling-only work (the core multi-repo use case) must `proceed` to the
+   * full merge pipeline instead of being skipped — or worse, marked Done — on the
+   * leading repo's evidence alone. Optional so single-repo callers/tests are unchanged.
+   */
+  database?: Database;
 };
 
 /**
@@ -278,6 +287,23 @@ export async function resolveMergeState(
     const originalUniqueCommits = uniqueCommits === 0 && branchSha !== baseSha && workspace.baseCommitSha
       ? await gitService.countUniqueCommits(repoPath, workspace.baseCommitSha, branchSha).catch(() => 0)
       : 0;
+    // Multi-repo: the leading repo being clean/landed does NOT mean the workspace is
+    // done — a sibling repo may hold the workspace's actual work (a sibling-only
+    // ticket's leading branch is a fresh 0-commit cut, which used to short-circuit to
+    // clean-ancestor forever, or to reconcile→Done with the sibling work unlanded).
+    // When any sibling still has unmerged commits, proceed with the full merge: the
+    // leading merge is a no-op ("Already up to date") and the sibling pipeline
+    // (prevalidateSiblingMerges → executeSiblingMerges) lands the real work.
+    const pendingSiblings = deps.database
+      ? await listPendingSiblingMerges(gitService, deps.database, workspace.id)
+      : [];
+    if (pendingSiblings.length > 0) {
+      console.log(
+        `[workspace-merge] leading branch '${workspace.branch}' is clean on ${baseBranch} but ` +
+          `${pendingSiblings.length} sibling repo(s) still have unmerged commits — proceeding with the multi-repo merge instead of short-circuiting`,
+      );
+      return { kind: "proceed" };
+    }
     if (uniqueCommits > 0 || originalUniqueCommits > 0) {
       return { kind: "reconcile", branchSha, baseSha, uniqueCommits };
     }
@@ -306,6 +332,104 @@ export async function resolveMergeState(
 
   return { kind: "proceed" };
 }
+
+// ─── Multi-repo pending-sibling helpers ──────────────────────────────────────
+
+/**
+ * A sibling repo with unmerged work. Structurally compatible with
+ * `SiblingMergePlan` (workspace-repos.service.ts) so callers can hand the pending
+ * set straight to `executeSiblingMerges`.
+ */
+export interface PendingSiblingMerge {
+  repo: RepoRow;
+  uniqueCommits: number;
+}
+
+/**
+ * List the workspace's sibling repos that still have UNMERGED work: workspace-scoped
+ * `repos` rows WITHOUT a stamped mergedHeadSha whose branch still exists and is ahead
+ * of its base branch. Rows already landed (mergedHeadSha set), already cleaned (branch
+ * ref gone) or with nothing to land (0 commits ahead) are not pending.
+ *
+ * This is the shared "is the workspace REALLY fully merged?" probe used by the merge
+ * pre-flight, the already-merged reconciliations, and the stranded-sibling startup
+ * reconciler. Deliberately DISTINCT from `prevalidateSiblingMerges`, which fails hard
+ * on any unresolvable row — after a partial merge + cleanup, rows whose branch was
+ * legitimately deleted are expected and must not read as failures.
+ *
+ * Best-effort reads: a git error on one repo skips it (reads as "not pending").
+ * That is the safe direction — every deletion path re-verifies with its own
+ * preserveUnmerged probe before destroying anything.
+ */
+export async function listPendingSiblingMerges(
+  gitService: GitService,
+  database: Database,
+  workspaceId: string,
+): Promise<PendingSiblingMerge[]> {
+  let rows: RepoRow[];
+  try {
+    rows = await listWorkspaceRepos(workspaceId, database);
+  } catch (err) {
+    console.warn(
+      `[workspace-merge] pending-sibling scan: failed to list repos for ${workspaceId}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return [];
+  }
+  const pending: PendingSiblingMerge[] = [];
+  for (const repo of rows) {
+    if (repo.mergedHeadSha) continue; // landed and stamped
+    if (!repo.branch || !repo.baseBranch) continue;
+    try {
+      // countUniqueCommits NEVER throws (returns 0 on any git error), which would read
+      // an unreachable repo as "nothing pending" — resolve both refs first (revParse
+      // throws). A branch ref that is GONE genuinely has nothing left to land.
+      await gitService.revParse(repo.path, repo.baseBranch);
+      await gitService.revParse(repo.path, repo.branch);
+    } catch {
+      continue;
+    }
+    const ahead = await gitService.countUniqueCommits(repo.path, repo.baseBranch, repo.branch).catch(() => 0);
+    if (ahead > 0) pending.push({ repo, uniqueCommits: ahead });
+  }
+  return pending;
+}
+
+/**
+ * The same per-repo guards `prevalidateSiblingMerges` runs (dirty main checkout,
+ * HEAD-on-baseBranch, read-only conflict check), applied to an already-detected
+ * PENDING set. Returns human-readable failures; empty means the pending merges are
+ * safe to land via `executeSiblingMerges`. Conflict detection uses the branch-name
+ * variant so it works even when the sibling worktree was already removed.
+ */
+export async function checkPendingSiblingMergeGuards(
+  gitService: GitService,
+  pending: PendingSiblingMerge[],
+): Promise<string[]> {
+  const failures: string[] = [];
+  for (const { repo } of pending) {
+    const label = repo.name ?? repo.path;
+    const dirty = await gitService.getUncommittedTrackedChanges(repo.path).catch(() => [] as string[]);
+    if (dirty.length > 0) {
+      failures.push(`${label}: main checkout has ${dirty.length} uncommitted tracked change(s)`);
+      continue;
+    }
+    const head = await gitService.getCurrentBranch(repo.path).catch(() => "");
+    if (head !== repo.baseBranch) {
+      failures.push(`${label}: main checkout HEAD is on '${head}' but the workspace targets '${repo.baseBranch}'`);
+      continue;
+    }
+    if (typeof gitService.detectConflictsByBranch === "function") {
+      const conflicts = await gitService.detectConflictsByBranch(repo.path, repo.branch!, repo.baseBranch!).catch(() => null);
+      if (conflicts?.hasConflicts) {
+        failures.push(
+          `${label}: merge conflicts in ${conflicts.conflictingFiles.slice(0, 5).join(", ")}${conflicts.conflictingFiles.length > 5 ? ", …" : ""}`,
+        );
+      }
+    }
+  }
+  return failures;
+}
+
 export const MERGE_LOCK_STALE_MS = 15 * 60 * 1000;
 
 export interface ActiveMergeLock {
