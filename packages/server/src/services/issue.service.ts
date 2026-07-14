@@ -1,4 +1,5 @@
 import { isTerminalStatusName, isTerminalStatusView } from "@agentic-kanban/shared";
+import type { ServiceStackState } from "@agentic-kanban/shared";
 import type { WebhookIssueStatusPayload } from "@agentic-kanban/shared/lib";
 import { buildIssueStatusPayload } from "@agentic-kanban/shared/lib";
 import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
@@ -70,6 +71,22 @@ export { IssueError } from "./issue-error.js";
 export { validateBatchDependencies } from "./issue-dependency.service.js";
 
 const ISSUE_NUMBER_INSERT_ATTEMPTS = 3;
+
+/**
+ * Parse a persisted `workspaces.service_state` JSON blob into the wire shape,
+ * mirroring the details projection's mapServiceState (workspace-details-projection.ts)
+ * exactly — the issue-workspaces LIST rows must match the details DTO so the client's
+ * per-workspace serviceState hydration can self-retire.
+ */
+function parseServiceStateJson(raw: string | null | undefined): ServiceStackState | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as ServiceStackState;
+    return parsed && typeof parsed === "object" && typeof parsed.composeProjectName === "string" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
 
 type ContractIssueRow = {
   id: string;
@@ -763,6 +780,7 @@ export function createIssueService(deps: {
         diffStatCacheInsertions,
         diffStatCacheDeletions,
         scorecardScore,
+        serviceState: serviceStateRaw,
         ...workspace
       } = w;
       const conflicts = conflictCacheHasConflicts !== null && conflictCacheHasConflicts !== undefined
@@ -807,6 +825,7 @@ export function createIssueService(deps: {
           endedAt: latestSymlinkEndedAt,
           error: latestSymlinkError,
         } : null,
+        serviceState: parseServiceStateJson(serviceStateRaw),
         contextTokens: contextTokensMap.get(w.id) ?? null,
         lastTool: lastToolMap.get(w.id) ?? null,
       };

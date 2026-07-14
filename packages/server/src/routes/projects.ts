@@ -31,6 +31,10 @@ const SERVICE_PORT_NAME_RE = /^[a-zA-Z0-9_]+$/;
 // A newline/CR in any string field would inject extra lines into the generated
 // docker `--env-file` (e.g. an env value "x\nBAR=1" smuggles a second var). Reject.
 const NEWLINE_RE = /[\r\n]/;
+// Mirror of the env-writer's key constraint (isEnvLineSafe in
+// workspace-services.service.ts): the generated `.kanban/services.env` is BOTH a
+// docker `--env-file` and shell-sourced, so keys must be valid shell identifiers.
+const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /**
  * Validate + normalize an incoming `servicesConfig` (from PATCH /api/projects/:id).
@@ -102,7 +106,19 @@ function validateServicesConfig(
     }
     // F11: a newline in an env value injects extra lines into the generated env file.
     if (Object.values(cfg.env).some((v) => NEWLINE_RE.test(v as string))) {
-      return { ok: false, error: "servicesConfig.env values must not contain newlines" };
+      return { ok: false, error: "servicesConfig.env values must not contain CR/LF (they would inject extra lines into the generated .kanban/services.env)" };
+    }
+    // Mirror the env-writer constraints (isEnvLineSafe in workspace-services.service.ts):
+    // it DROPS entries with non-identifier keys or single-quoted values at provision
+    // time (values are emitted single-quoted). Reject at save time instead of silently
+    // losing the entry later.
+    const badEnvKey = Object.keys(cfg.env).find((k) => !ENV_KEY_RE.test(k));
+    if (badEnvKey !== undefined) {
+      return { ok: false, error: `servicesConfig.env key ${JSON.stringify(badEnvKey)} is invalid: keys must match ^[A-Za-z_][A-Za-z0-9_]*$ (the env file is shell-sourced, so keys must be valid shell identifiers)` };
+    }
+    const quotedEnvEntry = Object.entries(cfg.env).find(([, v]) => (v as string).includes("'"));
+    if (quotedEnvEntry !== undefined) {
+      return { ok: false, error: `servicesConfig.env value for ${JSON.stringify(quotedEnvEntry[0])} must not contain single quotes (values are emitted single-quoted in .kanban/services.env, which cannot represent a ' identically for docker --env-file AND shell sourcing)` };
     }
   }
   const normalized: ServiceStackConfig = {

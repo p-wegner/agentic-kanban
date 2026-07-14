@@ -236,6 +236,41 @@ describe("Projects API", () => {
     expect(clearedRows[0].servicesConfig).toBeNull();
   });
 
+  it("PATCH /api/projects/:id rejects servicesConfig env entries the env-file writer would drop", async () => {
+    // Mirrors isEnvLineSafe in workspace-services.service.ts: the writer silently DROPS
+    // (with a warning) entries with non-identifier keys or values carrying ' or CR/LF.
+    // These must 422 at save time instead of vanishing at provision time.
+    const envProjectId = await createProjectDirectly(database, { name: "Svc Env Guard", repoPath: "/tmp/svc-env-guard" });
+    const patch = (env: Record<string, string>) =>
+      app.request(`/api/projects/${envProjectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ servicesConfig: { enabled: true, composeFile: "docker-compose.yml", env } }),
+      });
+
+    // Key with a dash is not a shell identifier (`MY-VAR=…` aborts `. services.env`).
+    const dashKey = await patch({ "MY-VAR": "x" });
+    expect(dashKey.status).toBe(422);
+    expect(((await dashKey.json()) as { error: string }).error).toContain("A-Za-z_");
+
+    // Key starting with a digit is not a shell identifier either.
+    const digitKey = await patch({ "1FOO": "x" });
+    expect(digitKey.status).toBe(422);
+
+    // Value with a single quote cannot be emitted identically for compose + shell.
+    const quoteValue = await patch({ FOO: "it's" });
+    expect(quoteValue.status).toBe(422);
+    expect(((await quoteValue.json()) as { error: string }).error).toContain("single quote");
+
+    // Value with a CR (not just LF) still injects a line break into the env file.
+    const crValue = await patch({ FOO: "x\rBAR=1" });
+    expect(crValue.status).toBe(422);
+
+    // Sanity: identifier keys + quote-free values still pass.
+    const okEnv = await patch({ POSTGRES_PASSWORD: "kanban", _UNDERSCORE_OK: "a b c" });
+    expect(okEnv.status).toBe(200);
+  });
+
   it("GET /api/projects/:id/stats includes code metrics and history", async () => {
     const repoPath = mkdtempSync(join(tmpdir(), "kanban-project-metrics-"));
     execFileSync("git", ["init", "-b", "main"], { cwd: repoPath });

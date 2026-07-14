@@ -341,7 +341,10 @@ export async function pruneStaleWorktrees(): Promise<void> {
         }
       }
       // Multi-repo: sibling worktrees + branches too (no-op single-repo).
-      await cleanupSiblingWorktrees(gitService, ws.id, db);
+      // preserveUnmerged: this path prunes stale WORKTREES of closed workspaces — it
+      // never deletes the leading branch, so an unmerged sibling branch (unshipped
+      // work) must not be force-deleted either.
+      await cleanupSiblingWorktrees(gitService, ws.id, db, { preserveUnmerged: true });
       await db.update(workspaces).set({ workingDir: null, updatedAt: new Date().toISOString() }).where(eq(workspaces.id, ws.id));
     } catch (err) {
       console.warn(`[startup] Failed to prune worktree for workspace ${ws.id}:`, err);
@@ -519,6 +522,16 @@ export async function runStartupTasks(sessionManager: SessionManager, _deps?: { 
   await abortStaleRebases();
   await cleanupStaleSessions(sessionManager);
   await reconcileSilentlyMergedWorkspaces();
+  try {
+    // Multi-repo crash gap: a crash between the leading merge and the sibling merges
+    // strands sibling repos unmerged on a mergedAt-stamped workspace — no other startup
+    // reconciler sees them. Dynamically imported: merge-workflow pulls in the whole
+    // merge pipeline, which other startup-task consumers don't need at module load.
+    const { reconcileStrandedSiblingMerges } = await import("./merge-workflow.js");
+    await reconcileStrandedSiblingMerges();
+  } catch (err) {
+    console.warn("[startup] reconcileStrandedSiblingMerges failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
   try {
     await reconcileAncestorBranchWorkspaces();
   } catch (err) {

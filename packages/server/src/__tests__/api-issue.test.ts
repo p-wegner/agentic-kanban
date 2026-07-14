@@ -222,6 +222,60 @@ describe("Issues API", () => {
     expect(showdownRows).toHaveLength(0);
   });
 
+  it("GET /api/issues/:id/workspaces carries serviceState parsed like the details DTO", async () => {
+    const createRes = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Service state issue", statusId, projectId }),
+    });
+    const issue = await createRes.json() as any;
+    const now = new Date().toISOString();
+
+    const upState = {
+      composeProjectName: "ak-1f3a9c2b-ws-b3d9f01a2c4e",
+      ports: { db: 54187 },
+      envFilePath: "C:/wt/x/.kanban/services.env",
+      status: "up",
+      updatedAt: now,
+    };
+    const withStackId = randomUUID();
+    const noStackId = randomUUID();
+    const corruptId = randomUUID();
+    for (const [id, serviceState] of [
+      [withStackId, JSON.stringify(upState)],
+      [noStackId, null],
+      // Corrupt / shape-less JSON must degrade to null, not crash the list.
+      [corruptId, "{not json"],
+    ] as const) {
+      await database.insert(schema.workspaces).values({
+        id,
+        issueId: issue.id,
+        branch: `feature/svc-${id.slice(0, 8)}`,
+        serviceState,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    const res = await app.request(`/api/issues/${issue.id}/workspaces`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as any[];
+    const byId = new Map(body.map((w) => [w.id, w]));
+
+    // The list row must carry the field (client hydration self-retires on this),
+    // parsed to the same shape the details projection returns.
+    const withStack = byId.get(withStackId);
+    expect(withStack.serviceState).toMatchObject({
+      composeProjectName: "ak-1f3a9c2b-ws-b3d9f01a2c4e",
+      ports: { db: 54187 },
+      status: "up",
+    });
+    // No stack and corrupt JSON both surface as an explicit null (not undefined).
+    expect(byId.get(noStackId).serviceState).toBeNull();
+    expect(byId.get(corruptId).serviceState).toBeNull();
+    expect("serviceState" in byId.get(noStackId)).toBe(true);
+  });
+
   it("GET /api/issues/:id/showdown returns 200 with null when no showdown exists", async () => {
     // The issue detail panel probes this on every open. "No showdown" is the
     // normal case, so it must NOT 404 (a 404 floods the browser console).

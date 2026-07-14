@@ -30,10 +30,19 @@ orphaned stacks on startup.
 
 Isolation rests on two pillars:
 
-- **Deterministic compose project name** — `ak-<projectId8>-ws-<offset>`, sanitized to
-  Compose's legal charset (`[a-z0-9-]`). Deterministic + project-scoped so teardown and the
-  startup reaper never have to guess which stacks are ours (`isManagedComposeProject`). The
-  `offset` is the existing `portOffsetFromName(branch)` (issue number, else a stable hash).
+- **Deterministic compose project name** — `ak-<instanceId8>-ws-<workspaceId12>`, sanitized to
+  Compose's legal charset (see `composeProjectName` in `packages/shared/src/lib/service-ports.ts`).
+  Keyed on the **workspace's unique id** (an earlier revision used the branch/port offset, which
+  two workspaces on the same issue share — one's `down -v` wiped the other's live stack) and
+  scoped to a **per-board-instance id** persisted in the preferences table
+  (`getOrCreateServiceStackInstanceId`): every board instance on a host shares the Docker daemon
+  (main checkout, worktree dev servers, DooD containers), so an unscoped namespace let one
+  instance's startup reaper down ANOTHER instance's live stacks. The reaper filters candidates
+  through `isInstanceManagedComposeProject` — exactly this instance's names, never another
+  instance's, never unrelated compose projects. Legacy pre-instance-scoped names (`ak-ws-*`,
+  still recognizable via `isManagedComposeProject`) are deliberately never auto-downed — their
+  normal teardown still works via the STORED name, but orphans from before the upgrade need one
+  manual `docker compose -p <name> down -v` sweep.
 - **Free host ports allocated at CREATE time** — NOT derived deterministically, so stacks from
   different projects/workspaces can never collide. Ports are bound from `:0` on `127.0.0.1`,
   collected, then released for Compose to bind. The allocated `name -> port` map is stored on
@@ -63,7 +72,8 @@ semantics.
 - Shared types `ServiceStackConfig` / `ServiceStackState` + `DEFAULT_SERVICE_STACK_CONFIG`.
 - `docker-exec.ts` — the single sanctioned `docker` CLI adapter (mirrors `git-exec.ts`,
   node-only, barrel-exported as `export type *`).
-- `service-ports.ts` — pure `composeProjectName` / `isManagedComposeProject` helpers.
+- `service-ports.ts` — pure `composeProjectName` / `isInstanceManagedComposeProject` helpers
+  (plus the legacy-shape recognizer `isManagedComposeProject`).
 - `port-allocator.ts` — `allocateFreePorts(names)` free-port allocator (server).
 
 ## Deployment (Agent D)
