@@ -28,6 +28,9 @@ function toProjectRepoResponse(row: RepoRow): ProjectRepoResponse {
 }
 
 const SERVICE_PORT_NAME_RE = /^[a-zA-Z0-9_]+$/;
+// A newline/CR in any string field would inject extra lines into the generated
+// docker `--env-file` (e.g. an env value "x\nBAR=1" smuggles a second var). Reject.
+const NEWLINE_RE = /[\r\n]/;
 
 /**
  * Validate + normalize an incoming `servicesConfig` (from PATCH /api/projects/:id).
@@ -64,16 +67,29 @@ function validateServicesConfig(
   } else if (composeFile !== undefined && typeof composeFile !== "string") {
     return { ok: false, error: "servicesConfig.composeFile must be a string" };
   }
+  if (typeof composeFile === "string" && NEWLINE_RE.test(composeFile)) {
+    return { ok: false, error: "servicesConfig.composeFile must not contain newlines" };
+  }
   if (cfg.ports !== undefined) {
     if (!Array.isArray(cfg.ports) || !cfg.ports.every((p) => typeof p === "string" && SERVICE_PORT_NAME_RE.test(p))) {
       return { ok: false, error: "servicesConfig.ports must be an array of [a-zA-Z0-9_]+ names" };
+    }
+    // F7: names collapse to KANBAN_SVC_<UPPER>_PORT env vars — a case-insensitive
+    // collision (e.g. ["db","DB"]) would silently clobber one port. Reject it.
+    const portNames = cfg.ports as string[];
+    if (new Set(portNames.map((p) => p.toUpperCase())).size !== portNames.length) {
+      return { ok: false, error: "servicesConfig.ports names must be unique case-insensitively (they map to KANBAN_SVC_<UPPER>_PORT)" };
     }
   }
   if (cfg.composeRepo !== undefined && cfg.composeRepo !== null && typeof cfg.composeRepo !== "string") {
     return { ok: false, error: "servicesConfig.composeRepo must be a string or null" };
   }
-  if (cfg.readyTimeoutMs !== undefined && (typeof cfg.readyTimeoutMs !== "number" || !Number.isFinite(cfg.readyTimeoutMs))) {
-    return { ok: false, error: "servicesConfig.readyTimeoutMs must be a number" };
+  if (typeof cfg.composeRepo === "string" && NEWLINE_RE.test(cfg.composeRepo)) {
+    return { ok: false, error: "servicesConfig.composeRepo must not contain newlines" };
+  }
+  // F8: 0 or negative would become "no timeout" and hang the `up -d --wait` indefinitely.
+  if (cfg.readyTimeoutMs !== undefined && (typeof cfg.readyTimeoutMs !== "number" || !Number.isFinite(cfg.readyTimeoutMs) || cfg.readyTimeoutMs <= 0)) {
+    return { ok: false, error: "servicesConfig.readyTimeoutMs must be a finite number greater than 0" };
   }
   if (cfg.env !== undefined) {
     if (
@@ -83,6 +99,10 @@ function validateServicesConfig(
       !Object.values(cfg.env).every((v) => typeof v === "string")
     ) {
       return { ok: false, error: "servicesConfig.env must be a record of strings" };
+    }
+    // F11: a newline in an env value injects extra lines into the generated env file.
+    if (Object.values(cfg.env).some((v) => NEWLINE_RE.test(v as string))) {
+      return { ok: false, error: "servicesConfig.env values must not contain newlines" };
     }
   }
   const normalized: ServiceStackConfig = {
@@ -189,6 +209,9 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
     const result = await projectService.updateProject(id, body);
     if (servicesConfigJson !== undefined) {
       await updateProjectServicesConfig(id, servicesConfigJson, database);
+      // F12: the ProjectResponse DTO promises a PARSED ServiceStackConfig | null, not the
+      // raw JSON string. Reflect the value we just persisted, parsed the same way GET does.
+      (result as { servicesConfig?: unknown }).servicesConfig = parseServicesConfig(servicesConfigJson);
     }
     options?.boardEvents?.broadcastProjectsChanged(id, "project_updated");
     return c.json(result);

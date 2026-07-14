@@ -163,6 +163,10 @@ describe("Projects API", () => {
       body: JSON.stringify({ servicesConfig: { enabled: true, composeFile: "docker-compose.yml", ports: ["db", "cache"], composeRepo: "backend" } }),
     });
     expect(ok.status).toBe(200);
+    // F12: the PATCH response itself returns the PARSED config (matching ProjectResponse), not the raw string.
+    const okBody = await ok.json() as { servicesConfig: unknown };
+    expect(okBody.servicesConfig).toMatchObject({ enabled: true, composeFile: "docker-compose.yml", ports: ["db", "cache"], composeRepo: "backend" });
+    expect(typeof okBody.servicesConfig).toBe("object");
 
     const stored = await database.select({ servicesConfig: schema.projects.servicesConfig }).from(schema.projects).where(eq(schema.projects.id, svcProjectId));
     expect(typeof stored[0].servicesConfig).toBe("string");
@@ -196,6 +200,30 @@ describe("Projects API", () => {
       body: JSON.stringify({ servicesConfig: { enabled: true, composeFile: "docker-compose.yml", ports: ["db-1"] } }),
     });
     expect(badPort.status).toBe(422);
+
+    // F7: case-insensitive port-name collision (both map to KANBAN_SVC_DB_PORT) → 422
+    const collidingPorts = await app.request(`/api/projects/${svcProjectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ servicesConfig: { enabled: true, composeFile: "docker-compose.yml", ports: ["db", "DB"] } }),
+    });
+    expect(collidingPorts.status).toBe(422);
+
+    // F8: readyTimeoutMs <= 0 (would become "no timeout" → indefinite hang) → 422
+    const zeroTimeout = await app.request(`/api/projects/${svcProjectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ servicesConfig: { enabled: true, composeFile: "docker-compose.yml", readyTimeoutMs: 0 } }),
+    });
+    expect(zeroTimeout.status).toBe(422);
+
+    // F11: an env value with a newline injects extra lines into the generated env file → 422
+    const newlineEnv = await app.request(`/api/projects/${svcProjectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ servicesConfig: { enabled: true, composeFile: "docker-compose.yml", env: { FOO: "x\nBAR=1" } } }),
+    });
+    expect(newlineEnv.status).toBe(422);
 
     // null clears it back to none
     const cleared = await app.request(`/api/projects/${svcProjectId}`, {
