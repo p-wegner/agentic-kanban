@@ -2,32 +2,20 @@
   "aufgabe": 5,
   "branch": "aufgabe5",
   "diff_base": "master",
-  "challenge": "Codebase-Aware Review",
-  "description": "Adds velocity tracking to the board stats panel — shows issues completed in the last N days with a 7d/30d window selector. The feature is fully functional and all tests pass. All findings require cross-referencing the implementation against project-specific conventions in CLAUDE.md, packages/client/CLAUDE.md, and packages/shared/src/lib/settings-registry.ts.",
+  "challenge": "SOLID Principles Review",
+  "description": "Adds velocity tracking to the board stats panel — shows issues completed in the last N days with a 7d/30d window selector. The feature is fully functional and all tests pass. All findings require identifying violations of SOLID design principles in the new code.",
   "findings": [
     {
       "id": "F1",
       "severity": "medium",
-      "description": "computeVelocityStats uses `new Date()` directly to compute the cutoff date without accepting a `nowOverride?: string` parameter. The project convention (CLAUDE.md, 'Time-dependent tests') requires every function that compares against the current time for staleness or window logic to accept `nowOverride` so unit tests can inject a controlled timestamp. This pattern appears in 20+ functions across packages/server and packages/shared (e.g. archiveDoneIssues, getIssueCycleTime, backlog-snapshot.service.ts). Without it, testing boundary conditions — e.g. an issue completed exactly 7 days ago — requires manipulating real wall-clock time rather than passing a controlled 'now'.",
-      "location": "packages/client/src/lib/boardStats.ts:92"
+      "description": "VelocityStats includes lastCompletedFormatted: string, which violates the Single Responsibility Principle. computeVelocityStats is a domain computation function in a lib module; its sole responsibility is to derive velocity metrics from raw issue data. Producing a formatted display string (e.g. 'Jun 3') is a presentation concern that belongs in the component consuming the result. Embedding it here means the function must change for two unrelated reasons: (1) a change to the velocity algorithm, and (2) a change to how the date is displayed (locale, format, surrounding text). The fix is to remove lastCompletedFormatted from VelocityStats and derive the display string inside BoardStats.tsx from the raw lastDate.",
+      "location": "packages/client/src/lib/boardStats.ts:84"
     },
     {
       "id": "F2",
-      "severity": "medium",
-      "description": "getBool is called with the key 'velocity_tracking_enabled' which is not declared in SETTINGS_REGISTRY (packages/shared/src/lib/settings-registry.ts). Every global static setting must be registered in SETTINGS_REGISTRY with a type and default; the derived SETTINGS_KEYS, DEFAULT_SETTINGS, and Settings TypeScript type are all auto-generated from it. A missing key means: (1) any API write for 'velocity_tracking_enabled' returns 422 because the key is absent from SETTINGS_KEYS; (2) the TypeScript Settings type has no such member — the code compiles only because getBool accepts a loose string key. The fix is to add `velocity_tracking_enabled: { type: 'bool', default: 'true' }` to SETTINGS_REGISTRY.",
-      "location": "packages/client/src/components/BoardStats.tsx:54"
-    },
-    {
-      "id": "F3",
       "severity": "low",
-      "description": "The velocity window selector uses two independent <button> elements for 7d and 30d. packages/client/CLAUDE.md documents the SplitButton pattern: 'Use <SplitButton> whenever an action has one clear default and one or more less-frequent variants' and explicitly states 'Two separate buttons that do the same thing but differently (intensity, model, mode flag) should become one SplitButton.' The 7d/30d pair is exactly this: same action (set velocity window), different intensity. The SplitButton component is available at src/components/SplitButton.tsx.",
-      "location": "packages/client/src/components/BoardStats.tsx:254"
-    },
-    {
-      "id": "F4",
-      "severity": "medium",
-      "description": "computeVelocityStats violates the Single Responsibility Principle: it both computes velocity metrics (domain logic) and produces a formatted display string lastCompletedFormatted (presentation concern). A pure computation function in a lib module should return raw data only; the component consuming the result is responsible for formatting. Mixing formatting into the lib function prevents reuse in non-UI contexts (server-side export, headless reporting) and means fixing a display concern requires editing domain logic. The fix is to remove lastCompletedFormatted from VelocityStats and derive the formatted string inside BoardStats.tsx.",
-      "location": "packages/client/src/lib/boardStats.ts:80"
+      "description": "The velocity window selector renders two hard-coded <button> elements — one for '7d' and one for '30d' — with duplicated class logic. This violates the Open/Closed Principle: adding a third window (e.g. '90d') requires modifying the component's JSX by adding a third button block, rather than extending a data structure. The fix is to define a VELOCITY_WINDOWS constant (e.g. ['7d', '30d'] as VelocityWindow[]) and render the buttons by mapping over it, so adding a new option only requires extending the array.",
+      "location": "packages/client/src/components/BoardStats.tsx:271"
     }
   ]
 }
