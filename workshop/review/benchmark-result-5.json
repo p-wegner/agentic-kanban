@@ -1,0 +1,15 @@
+{
+  "score": 1,
+  "max_score": 4,
+  "tokens": {
+    "tokens_used": 6117,
+    "cost_usd": 0.3345,
+    "source": "claude -p --output-format json"
+  },
+  "details": [
+    { "gold_id": "F1", "verdict": "found", "note": "Reviewer explicitly quoted CLAUDE.md 'nowOverride' convention and identified the missing parameter" },
+    { "gold_id": "F2", "verdict": "missed", "note": "getBool with unregistered key not detected — reviewer read CLAUDE.md but not settings-registry.ts" },
+    { "gold_id": "F3", "verdict": "missed", "note": "SplitButton pattern not mentioned — reviewer unaware of the component convention" },
+    { "gold_id": "F4", "verdict": "missed", "note": "SRP violation not identified — reviewer did not apply SOLID principles analysis" }
+  ]
+}
