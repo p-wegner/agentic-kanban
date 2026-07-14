@@ -1,4 +1,4 @@
-import type { WorkspaceSetupRun, WorkspaceSymlinkRun } from "@agentic-kanban/shared";
+import type { WorkspaceSetupRun, WorkspaceSymlinkRun, ServiceStackState } from "@agentic-kanban/shared";
 
 // Pure row -> DTO projection for getWorkspaceDetails. The repository owns the two
 // queries; this module owns turning the joined row + latest session into the
@@ -38,6 +38,7 @@ export interface WorkspaceDetails {
   lastTool: string | null;
   latestSetup: WorkspaceSetupRun | null;
   latestSymlink: WorkspaceSymlinkRun | null;
+  serviceState: ServiceStackState | null;
   createdAt: string;
   updatedAt: string;
   issue: { title: string; priority: string | null };
@@ -88,6 +89,7 @@ export interface WorkspaceDetailsRow {
   latestSymlinkSkipped: string | null;
   latestSymlinkFailed: string | null;
   latestSymlinkError: string | null;
+  serviceState: string | null;
   createdAt: string;
   updatedAt: string;
   issueTitle: string;
@@ -163,6 +165,17 @@ function mapCachedDiffStats(row: WorkspaceDetailsRow): WorkspaceDetails["diffSta
   return { filesChanged: row.diffStatCacheFilesChanged, insertions: row.diffStatCacheInsertions ?? 0, deletions: row.diffStatCacheDeletions ?? 0 };
 }
 
+/** Parse the persisted ServiceStackState JSON, tolerating null/garbage. */
+function mapServiceState(row: WorkspaceDetailsRow): ServiceStackState | null {
+  if (!row.serviceState) return null;
+  try {
+    const parsed = JSON.parse(row.serviceState) as ServiceStackState;
+    return parsed && typeof parsed === "object" && typeof parsed.composeProjectName === "string" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 function mapLatestSetup(row: WorkspaceDetailsRow): WorkspaceSetupRun | null {
   if (!row.latestSetupState) return null;
   return {
@@ -213,6 +226,7 @@ export function mapWorkspaceDetailsRow(row: WorkspaceDetailsRow, sess: Workspace
     lastTool,
     latestSetup: mapLatestSetup(row),
     latestSymlink: mapSymlinkRun(row),
+    serviceState: mapServiceState(row),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     issue: { title: row.issueTitle, priority: row.issuePriority },

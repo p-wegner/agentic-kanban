@@ -1,6 +1,7 @@
 // Workspace / showdown / launch-failure / timeline wire-contract types (pure DTOs).
 // See ../api.ts barrel.
 import type { ProfileSelection } from "./common.js";
+import type { ServiceStackState } from "../service-stack.js";
 
 export interface MainWorkspaceInfo {
   id: string;
@@ -156,6 +157,8 @@ export interface WorkspaceResponse {
   conflicts?: { hasConflicts: boolean; conflictingFiles: string[] } | null;
   latestSetup?: WorkspaceSetupRun | null;
   latestSymlink?: WorkspaceSymlinkRun | null;
+  /** Per-workspace Docker service stack status + allocated host ports (null = no stack). */
+  serviceState?: ServiceStackState | null;
 }
 
 export interface ShowdownContestant {
