@@ -10,6 +10,7 @@ import { WorkspaceTimelinePanel } from "./WorkspaceTimelinePanel.js";
 import { FailurePatternHint } from "./FailurePatternHint.js";
 import TicketMentionInput from "./TicketMentionInput.js";
 import { SetupStatusPanel } from "./SetupStatusPanel.js";
+import { ServiceStackStatusPanel } from "./ServiceStackStatusPanel.js";
 import { WorkspaceScorecardPanel } from "./WorkspaceScorecardPanel.js";
 import { WorkspaceViewTabs } from "./WorkspaceViewTabs.js";
 import { WorkspaceClosedActions } from "./WorkspaceClosedActions.js";
@@ -573,6 +574,8 @@ export function WorkspaceCard({
       )}
 
       <SetupStatusPanel setup={ws.latestSetup ?? null} />
+
+      <ServiceStackStatusPanel serviceState={ws.serviceState ?? null} />
 
       {isThisRunning && (ws.contextTokens || ws.lastTool) && (
         <div className="flex items-center gap-2 text-[10px] text-gray-400 dark:text-gray-500">
