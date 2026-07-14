@@ -26,6 +26,30 @@ services:
       # - ~/.claude:/root/.claude
       # Optional: SSH key for clone-from-URL over ssh:
       # - ~/.ssh:/root/.ssh:ro
+      #
+      # ─── Per-workspace service stacks: Docker-out-of-Docker (DooD) ───────────────
+      # If a project declares a service stack (decision 011 — a compose sidecar such as
+      # postgres), agents INSIDE this container run `docker compose up`. That needs a
+      # Docker daemon. The lightest option is DooD: mount the HOST's docker socket so the
+      # container's `docker` CLI talks to the host daemon.
+      #   - /var/run/docker.sock:/var/run/docker.sock
+      #
+      # ⚠️ CRITICAL PATH PITFALL with DooD:
+      # The compose commands run inside the container, but the daemon that actually creates
+      # the stack containers is the HOST daemon. Any bind-mount in a PROJECT's compose file
+      # (e.g. `./data:/var/lib/postgresql/data`, or a repo checkout mounted into a service)
+      # is resolved by the HOST daemon against the HOST filesystem — NOT this container's
+      # filesystem. If the repos live in a NAMED VOLUME (`kanban-data` above), their paths
+      # (/data/repos/...) do NOT exist on the host, and every source bind-mount silently
+      # breaks or mounts an empty host dir.
+      #
+      # FIX: with DooD, repos MUST live on a HOST bind-mount at an IDENTICAL path on both
+      # sides, so `/data/repos/...` means the same thing inside and on the host. Replace the
+      # `kanban-data:/data` line above (or at least /data/repos) with a bind-mount like:
+      #   - /srv/kanban-data:/data          # same path both sides → compose bind-mounts resolve
+      # and set KANBAN_REPOS_DIR=/data/repos (already the default). If you can't guarantee
+      # identical paths, use the DinD overlay instead (docker-compose.dind.yml), which shares
+      # the repos VOLUME with the nested daemon at the same path and avoids this entirely.
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
