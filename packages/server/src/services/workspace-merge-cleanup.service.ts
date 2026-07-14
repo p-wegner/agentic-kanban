@@ -6,6 +6,8 @@ import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
 import type { GitService } from "./workspace-internals.js";
 import { teardownWorktree } from "./workspace-teardown.service.js";
+import { workspaceServicesService } from "./workspace-services.service.js";
+import { portOffsetFromName } from "./worktree-ports.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import { generateAndPersistGithubHandoffDraft } from "./github-handoff-draft.service.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
@@ -33,6 +35,8 @@ export type WorkspacePostMergeCleanupArgs = {
   isDirect: boolean;
   /** SHA returned by mergeBranch({ deferWorkingTreeSync: true }) — apply before any other cleanup. */
   pendingWorkingTreeSyncSha?: string | null;
+  /** Persisted ServiceStackState JSON (workspaces.service_state); non-null → tear the stack down. */
+  serviceState?: string | null;
 };
 
 export async function runWorkspacePostMergeCleanup(
@@ -83,6 +87,15 @@ async function teardownMergedWorktree(
   warnings: MergeWarning[],
 ): Promise<void> {
   if (!args.workingDir || args.isDirect) return;
+  // Per-workspace Docker service stack down (only when one was provisioned) BEFORE the
+  // worktree is removed. Best-effort — the engine never throws.
+  if (args.serviceState && args.projectId) {
+    await workspaceServicesService.teardownWorkspaceServices({
+      projectId: args.projectId,
+      offset: portOffsetFromName(args.branch),
+      composeWorktreePath: args.workingDir,
+    });
+  }
   try {
     await teardownWorktree(
       {

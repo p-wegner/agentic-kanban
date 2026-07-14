@@ -23,6 +23,8 @@ import {
 import { createWorkspaceCleanupService } from "./workspace-cleanup.service.js";
 import { cleanupSiblingWorktrees } from "./workspace-repos.service.js";
 import { createWorkspaceCreateService } from "./workspace-create.service.js";
+import { workspaceServicesService } from "./workspace-services.service.js";
+import { portOffsetFromName } from "./worktree-ports.js";
 
 export function createWorkspaceCrudService(deps: {
   database: Database;
@@ -70,6 +72,15 @@ export function createWorkspaceCrudService(deps: {
     }
 
     if (workingDir && !isDirect && repoPath && !sharedByOthers) {
+      // Per-workspace Docker service stack down (only when one was provisioned) before
+      // the worktree is removed. Best-effort — the engine never throws.
+      if (wsRow[0]?.serviceState && deletedProjectId && wsRow[0]?.branch) {
+        await workspaceServicesService.teardownWorkspaceServices({
+          projectId: deletedProjectId,
+          offset: portOffsetFromName(wsRow[0].branch),
+          composeWorktreePath: workingDir,
+        });
+      }
       await removeWorktreeAndBranch({
         workingDir,
         repoPath,
@@ -109,6 +120,18 @@ export function createWorkspaceCrudService(deps: {
 
     // Clean up the worktree for non-direct workspaces (mirrors merge/close behaviour).
     if (!workspace.isDirect && workspace.workingDir) {
+      // Per-workspace Docker service stack down (only when one was provisioned) before
+      // the worktree goes away. Best-effort — the engine never throws.
+      if (workspace.serviceState && workspace.branch) {
+        const closeProjectId = await resolveProjectId(workspaceId, database).catch(() => null);
+        if (closeProjectId) {
+          await workspaceServicesService.teardownWorkspaceServices({
+            projectId: closeProjectId,
+            offset: portOffsetFromName(workspace.branch),
+            composeWorktreePath: workspace.workingDir,
+          });
+        }
+      }
       const { repoPath } = await resolveProjectRepo(workspaceId, database).catch(() => ({ repoPath: null as string | null }));
       if (repoPath) {
         try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch { /* best effort */ }

@@ -20,6 +20,16 @@ export type TicketContext = {
    * them and where they live.
    */
   additionalRepos?: Array<{ name: string | null; worktreePath: string }> | null;
+  /**
+   * Per-workspace Docker service stack, when the project declares one and it came up.
+   * Rendered so the agent knows the sidecar services are already running, on which
+   * host ports, and where the env vars live (so it can source them).
+   */
+  serviceStack?: {
+    ports: Record<string, number>;
+    envFilePath: string;
+    composeProjectName: string;
+  } | null;
 };
 
 /**
@@ -60,6 +70,37 @@ export function buildStackProfileSection(profile: StackProfile | null | undefine
   }
   if (profile.isWeb && profile.devHealthUrl) {
     lines.push(`- **Dev health URL:** ${profile.devHealthUrl}`);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Render the running service-stack section, or null when there is no stack. Tells the
+ * agent the sidecar services are already up, on which host ports, and that the matching
+ * env vars are in `.kanban/services.env` (source it before running app commands).
+ */
+export function buildServiceStackSection(
+  stack: TicketContext["serviceStack"],
+): string | null {
+  if (!stack) return null;
+  const lines = [
+    "## Service stack",
+    "",
+    "This workspace has an isolated Docker Compose service stack that is ALREADY RUNNING",
+    `(compose project \`${stack.composeProjectName}\`). Do not start it yourself.`,
+    "",
+    `The allocated host ports and connection env vars are in \`.kanban/services.env\``,
+    "(absolute path below). Source that file before running app/test commands that need",
+    "the services, e.g. `set -a; . .kanban/services.env; set +a`.",
+    "",
+    `- **Env file:** \`${stack.envFilePath}\``,
+  ];
+  const portEntries = Object.entries(stack.ports);
+  if (portEntries.length > 0) {
+    lines.push("- **Allocated host ports:**");
+    for (const [name, port] of portEntries) {
+      lines.push(`  - \`${name}\` → \`${port}\` (env \`KANBAN_SVC_${name.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_PORT\`)`);
+    }
   }
   return lines.join("\n");
 }
@@ -108,6 +149,11 @@ export function buildTicketContextMarkdown(ctx: TicketContext): string {
     for (const repo of ctx.additionalRepos) {
       lines.push(`- ${repo.name ? `**${repo.name}**: ` : ""}\`${repo.worktreePath}\``);
     }
+    lines.push("");
+  }
+  const serviceSection = buildServiceStackSection(ctx.serviceStack);
+  if (serviceSection) {
+    lines.push(serviceSection);
     lines.push("");
   }
   if (ctx.contextPrimer?.trim()) {
