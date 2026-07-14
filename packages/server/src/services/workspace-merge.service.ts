@@ -367,28 +367,54 @@ export function createWorkspaceMergeService(deps: {
       pendingWorkingTreeSyncSha: postMergeContext.pendingWorkingTreeSyncSha,
       serviceState: workspace.serviceState ?? null,
     };
-    // Post-merge cleanup — including the deferred `git reset --hard` sync of the
-    // MAIN checkout's working tree — must run INSIDE the repo merge lock (#970):
-    // otherwise a second merge acquires the lock while the sync is still pending,
-    // its dirty-main guard sees the stale tree, and it blocks (the recurring
-    // "auto-merge blocked by dirty main" incident class).
+    // Deferred post-merge cleanup. The repo merge lock outlives the response ONLY
+    // for the deferred `git reset --hard` sync of the MAIN checkout (#970): until
+    // that sync applies, a second merge's dirty-main guard would see the stale
+    // tree and block (the recurring "auto-merge blocked by dirty main" incident
+    // class). So:
+    //
+    // - pendingWorkingTreeSyncSha set → extendHold keeps the lock exactly until
+    //   the cleanup signals onMainCheckoutSettled (the sync has been applied —
+    //   a `finally` inside the cleanup fires it even on a throw, so the lock
+    //   can never leak).
+    // - pendingWorkingTreeSyncSha null → the main checkout is already consistent
+    //   (mergeBranch only emits the pending tag when it actually skipped a
+    //   reset), so the lock releases with the merge result itself.
+    //
+    // The rest of the chain — process kills, worktree/branch removal, metrics,
+    // OpenSpec, handoff, learning step, auto-starts — always runs AFTER the lock
+    // is released. Holding the lock through that long tail serialized every
+    // other merge on the repo behind multi-second subprocess hops (and up to 3
+    // MINUTES with the learning-step pref on): callers got "A merge is already
+    // in progress". Failures there strand at most resources the startup
+    // reconcilers already recover.
     //
     // Two earlier constraints are preserved:
     // - setImmediate defers the cleanup past the current call stack so the Hono
     //   response write (JSON body flush) happens first (#563 keep-alive drop).
     // - The reset --hard runs after the HTTP response is already flushed, so a
     //   tsx hot-reload can no longer drop the in-flight connection (#686).
-    // extendHold keeps the lock held until the cleanup settles, while the HTTP
-    // caller still receives `response` immediately.
-    extendHold(new Promise<void>((resolve) => {
+    // The HTTP caller still receives `response` immediately.
+    const scheduleDeferredCleanup = (onMainCheckoutSettled?: () => void) => {
       setImmediate(() => {
-        runWorkspacePostMergeCleanup(postMergeArgs, { database, gitService, killProcesses, getSessionManager, boardEvents })
+        runWorkspacePostMergeCleanup(
+          postMergeArgs,
+          { database, gitService, killProcesses, getSessionManager, boardEvents },
+          { onMainCheckoutSettled },
+        )
           .catch((err) => {
             console.warn("[workspace-merge] post-merge cleanup failed (non-fatal):", err instanceof Error ? err.message : String(err));
           })
-          .finally(resolve);
+          // Safety net: resolve is idempotent — this only matters if the cleanup
+          // threw before signalling.
+          .finally(() => onMainCheckoutSettled?.());
       });
-    }));
+    };
+    if (postMergeContext.pendingWorkingTreeSyncSha) {
+      extendHold(new Promise<void>((releaseLockHold) => scheduleDeferredCleanup(releaseLockHold)));
+    } else {
+      scheduleDeferredCleanup();
+    }
 
     return response;
   }
