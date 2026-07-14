@@ -708,6 +708,13 @@
       "when": 1780906858000,
       "tag": "0100_multi_repo",
       "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "6",
+      "when": 1780906859000,
+      "tag": "0101_service_stacks",
+      "breakpoints": true
     }
   ]
 }
