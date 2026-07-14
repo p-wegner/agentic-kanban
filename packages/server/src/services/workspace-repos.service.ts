@@ -6,8 +6,11 @@
  * which is the zero-regression mechanism.
  */
 
+import { basename, resolve as pathResolve } from "node:path";
+import { repos } from "@agentic-kanban/shared/schema";
 import type { Database, TransactionClient } from "../db/index.js";
 import { listProjectRepos, listWorkspaceRepos, insertWorkspaceRepo, setWorkspaceRepoMergedSha, type RepoRow } from "../repositories/repo.repository.js";
+import { getWorkspaceById } from "../repositories/workspace.repository.js";
 import { WorkspaceError, acquireRepoMergeLock, type GitService } from "./workspace-internals.js";
 import { runMergeCore } from "./merge-executor.service.js";
 
@@ -23,11 +26,15 @@ export interface SiblingWorktree {
 
 /**
  * Create a worktree on `branch` in every additional repo of the project (same branch
- * name as the leading repo — worktrees are namespaced per repo root, so they never
- * collide on disk). Throws on the first failure: full-peers semantics require every
- * repo present. Siblings already provisioned in earlier iterations are rolled back
- * HERE before the throw — the caller never sees the partial list (the throw prevents
- * the assignment), so an internal rollback is the only way they get removed.
+ * name as the leading repo). Worktrees land at `dirname(repoPath)/.worktrees/...`,
+ * which repos sharing a parent directory SHARE — the guaranteed layout for
+ * clone-from-URL repos — so sibling worktrees are additionally namespaced by the
+ * repo's directory name (`.worktrees/<repoDirName>/<branch>`) to keep them from
+ * colliding with the leading repo's worktree (which keeps the un-namespaced
+ * single-repo scheme). Throws on the first failure: full-peers semantics require
+ * every repo present. Siblings already provisioned in earlier iterations are rolled
+ * back HERE before the throw — the caller never sees the partial list (the throw
+ * prevents the assignment), so an internal rollback is the only way they get removed.
  */
 export async function provisionSiblingWorktrees(params: {
   gitService: GitService;
@@ -49,7 +56,9 @@ export async function provisionSiblingWorktrees(params: {
         );
       }
       const baseCommitSha = await gitService.revParse(repo.path, baseBranch);
-      const worktreePath = await gitService.createWorktree(repo.path, branch, baseBranch);
+      const worktreePath = await gitService.createWorktree(repo.path, branch, baseBranch, {
+        pathNamespace: basename(repo.path),
+      });
       provisioned.push({ path: repo.path, name: repo.name, worktreePath, branch, baseBranch, baseCommitSha });
     }
   } catch (err) {
@@ -231,6 +240,12 @@ export async function executeSiblingMerges(params: {
  * Best-effort per repo; never throws. The `repos` rows themselves are removed by
  * cascade-delete when the workspace row goes away, so they are left untouched here
  * (they double as the merge audit trail via mergedHeadSha).
+ *
+ * Shared-worktree guard: createWorktree's reuse path hands a second workspace on
+ * the same branch the SAME sibling worktree, so multiple workspaces' repos rows can
+ * reference one worktree/branch. A repo whose worktree or branch is still referenced
+ * by another live (non-closed) workspace is skipped entirely — the sibling analog of
+ * deleteWorkspace's findWorkspacesByWorkingDir guard for the leading worktree.
  */
 export async function cleanupSiblingWorktrees(
   gitService: GitService,
@@ -238,12 +253,14 @@ export async function cleanupSiblingWorktrees(
   database: Database,
   opts: {
     /**
-     * Post-merge mode: a row WITHOUT mergedHeadSha is either "had no commits"
-     * (safe to clean) or "sibling merge failed" (work would be destroyed). Use a
-     * SAFE branch delete (-d) to tell them apart — it succeeds for the former and
-     * refuses the latter, in which case the worktree is kept too for fix-up.
-     * Delete/close/teardown paths leave this off: the work is being discarded,
-     * force-delete everything (stale-branch reuse guard).
+     * Preserve-work mode: a row WITHOUT mergedHeadSha is either "had no commits"
+     * (safe to clean) or "carries unmerged commits" (work would be destroyed).
+     * Probe via base..branch ancestry to tell them apart — an unmerged sibling
+     * keeps its worktree AND branch for fix-up/recovery. Post-merge cleanup and
+     * the branch-preserving paths (closeWorkspace, stale-worktree cleanup) set
+     * this so sibling semantics mirror the leading repo's, which those paths never
+     * force-delete either. deleteWorkspace leaves it off: the workspace is being
+     * destroyed outright, force-delete everything (stale-branch reuse guard).
      */
     preserveUnmerged?: boolean;
   } = {},
@@ -256,6 +273,20 @@ export async function cleanupSiblingWorktrees(
     return;
   }
   for (const repo of rows) {
+    // Shared-worktree guard: skip repos whose worktree/branch another live
+    // workspace still references — removing them would blank that workspace's
+    // diffs, break its merge prevalidation, and force-delete its commits.
+    // On a failed check, skip too (leak beats destroying shared work).
+    try {
+      const sharers = await findLiveSiblingSharers(repo, workspaceId, database);
+      if (sharers.length > 0) {
+        console.log(`[workspaces] sibling worktree ${repo.worktreePath ?? repo.branch} in ${repo.path} still referenced by ${sharers.length} other workspace(s) — skipping removal`);
+        continue;
+      }
+    } catch (err) {
+      console.warn(`[workspaces] sibling cleanup: sharer check failed for ${repo.path}: ${err instanceof Error ? err.message : String(err)} — skipping removal to be safe`);
+      continue;
+    }
     const mustPreserveCheck = opts.preserveUnmerged === true && !repo.mergedHeadSha;
     if (mustPreserveCheck && repo.branch && repo.worktreePath) {
       // Safe-delete probe requires the worktree gone first (the branch is checked
@@ -301,4 +332,43 @@ export async function cleanupSiblingWorktrees(
       }
     }
   }
+}
+
+/**
+ * The ids of OTHER live (non-closed) workspaces whose repos rows reference the same
+ * sibling worktree path or the same branch in the same repo. Closed workspaces don't
+ * count: their rows persist only as the merge audit trail (and their leading
+ * workingDir is nulled on close, so the leading guard skips them the same way) —
+ * counting them would leak shared worktrees forever. The repos table holds one row
+ * per additional repo per workspace, so the unfiltered read stays tiny.
+ */
+async function findLiveSiblingSharers(
+  repo: RepoRow,
+  workspaceId: string,
+  database: Database,
+): Promise<string[]> {
+  const allRows = await database.select().from(repos);
+  const sameTarget = allRows.filter((r) =>
+    r.workspaceId !== null &&
+    r.workspaceId !== workspaceId &&
+    samePath(r.path, repo.path) &&
+    ((r.worktreePath !== null && repo.worktreePath !== null && samePath(r.worktreePath, repo.worktreePath))
+      || (r.branch !== null && r.branch === repo.branch)),
+  );
+  const sharerIds: string[] = [];
+  for (const sharerWorkspaceId of new Set(sameTarget.map((r) => r.workspaceId as string))) {
+    const ws = await getWorkspaceById(sharerWorkspaceId, database);
+    if (ws && ws.status !== "closed") sharerIds.push(sharerWorkspaceId);
+  }
+  return sharerIds;
+}
+
+/**
+ * Loose path equality (resolved + case-insensitive): worktree paths recorded by
+ * different code paths (fresh join vs. git worktree-list reuse) can differ in
+ * separators/case on Windows. A false positive only means cleanup is skipped —
+ * the safe direction.
+ */
+function samePath(a: string, b: string): boolean {
+  return pathResolve(a).toLowerCase() === pathResolve(b).toLowerCase();
 }

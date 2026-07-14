@@ -134,8 +134,12 @@ export function createWorkspaceCrudService(deps: {
       if (repoPath) {
         try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch { /* best effort */ }
       }
-      // Multi-repo: sibling worktrees + branches too (no-op single-repo).
-      await cleanupSiblingWorktrees(gitService, workspaceId, database);
+      // Multi-repo: sibling worktrees + branches too (no-op single-repo). Close
+      // deliberately preserves the LEADING branch (worktree removal only, above) so
+      // abandoned work stays recoverable — preserveUnmerged mirrors that per sibling
+      // repo: a sibling branch with unmerged commits survives instead of being
+      // force-deleted (only fully-merged/empty sibling branches are dropped).
+      await cleanupSiblingWorktrees(gitService, workspaceId, database, { preserveUnmerged: true });
     }
 
     const now = new Date().toISOString();

@@ -39,6 +39,7 @@ import {
   tryRecoverStaleMergeLock,
   describeMergeLock,
   resolveMergeState,
+  listPendingSiblingMerges,
   type GitService,
 } from "./workspace-internals.js";
 import { buildReconcilerPrompt } from "./reconciler.service.js";
@@ -50,7 +51,7 @@ import {
 } from "./workspace-merge-prevalidation.service.js";
 import { executeWorkspaceMerge } from "./workspace-merge-execution.service.js";
 import { runWorkspacePostMergeCleanup } from "./workspace-merge-cleanup.service.js";
-import { prevalidateSiblingMerges, executeSiblingMerges } from "./workspace-repos.service.js";
+import { prevalidateSiblingMerges, executeSiblingMerges, cleanupSiblingWorktrees } from "./workspace-repos.service.js";
 import { listWorkspaceRepos } from "../repositories/repo.repository.js";
 import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
 import { resolveMergeGate, RUN_GATE, type MergeGateToken } from "./pre-merge-gate.service.js";
@@ -252,7 +253,9 @@ export function createWorkspaceMergeService(deps: {
     const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
     const prefMap = await loadMergePreferences(database);
     const autoMergeInReview = getBool(prefMap, "auto_merge_in_review");
-    const resolution = await resolveMergeState(workspace, repoPath, baseBranch, { gitService, autoMergeInReview });
+    // `database` makes the pre-flight multi-repo aware: the reconcile/clean-ancestor
+    // short-circuits only fire when NO sibling repo has pending unmerged commits.
+    const resolution = await resolveMergeState(workspace, repoPath, baseBranch, { gitService, autoMergeInReview, database });
     const preflight = await handleWorkspaceMergeResolution({
       id,
       workspace,
@@ -263,6 +266,7 @@ export function createWorkspaceMergeService(deps: {
       database,
       boardEvents,
       gitService,
+      createBackup,
       killProcesses,
       killWorktreeProcesses,
       addRecoverableWarning,
@@ -759,6 +763,22 @@ export function createWorkspaceMergeService(deps: {
       };
     }
 
+    // Multi-repo: "fully merged" must hold for EVERY repo of the workspace, not just
+    // the leading one — a sibling repo with unmerged commits means the work has NOT
+    // landed, and reconciling as Done would strand it (and orphan its worktree).
+    const pendingSiblings = await listPendingSiblingMerges(gitService, database, id);
+    if (pendingSiblings.length > 0) {
+      return {
+        isAlreadyMerged: false,
+        branch: workspace.branch,
+        baseBranch,
+        mergeCommitSha: null,
+        issueNumber,
+        reason: "Sibling repo(s) still have unmerged commits: " +
+          pendingSiblings.map((p) => `${p.repo.name ?? p.repo.path} (${p.uniqueCommits})`).join(", "),
+      };
+    }
+
     // Find the merge commit: the commit on baseBranch that first introduced this SHA
     let mergeCommitSha: string | null = null;
     try {
@@ -820,6 +840,13 @@ export function createWorkspaceMergeService(deps: {
       }
       try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch { /* non-fatal */ }
     }
+
+    // Multi-repo: drop the sibling worktrees + branches too (no-op single-repo) —
+    // without this they orphan forever (the workspace's workingDir is nulled above, so
+    // pruneStaleWorktrees never revisits it). checkAlreadyMerged already refused when a
+    // sibling still had unmerged commits, and preserveUnmerged re-verifies per repo
+    // before deleting anything.
+    await cleanupSiblingWorktrees(gitService, id, database, { preserveUnmerged: true });
 
     try {
       await recordMergeAttempt(

@@ -10,10 +10,11 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { projects, workspaces, issues, projectStatuses } from "@agentic-kanban/shared/schema";
 import * as gitService from "../services/git.service.js";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
@@ -32,6 +33,21 @@ function exec(cmd: string, args: string[], cwd: string): Promise<string> {
       else resolve(stdout.toString());
     });
   });
+}
+
+/** Init a git repo at parentDir/<name> with a marker file named after the repo. */
+async function initRepoIn(parentDir: string, name: string): Promise<string> {
+  const dir = join(parentDir, name);
+  const { mkdirSync } = await import("node:fs");
+  mkdirSync(dir, { recursive: true });
+  await exec("git", ["init"], dir);
+  await exec("git", ["config", "user.email", "test@test.com"], dir);
+  await exec("git", ["config", "user.name", "Test"], dir);
+  await writeFile(join(dir, `${name}.txt`), `marker for ${name}\n`);
+  await exec("git", ["add", "."], dir);
+  await exec("git", ["commit", "-m", "Initial commit"], dir);
+  await exec("git", ["branch", "-M", "main"], dir);
+  return dir;
 }
 
 async function createTempRepo(prefix: string): Promise<string> {
@@ -56,6 +72,7 @@ let db: TestDb;
 let leadRepo: string;
 let extraRepo: string;
 let projectId: string;
+let issueId: string;
 let workspaceId: string;
 
 beforeAll(async () => {
@@ -67,7 +84,7 @@ beforeAll(async () => {
   await db.insert(projects).values({ id: projectId, name: "p", repoPath: leadRepo, repoName: "lead", defaultBranch: "main" });
   const statusId = randomUUID();
   await db.insert(projectStatuses).values({ id: statusId, projectId, name: "Todo", sortOrder: 0 });
-  const issueId = randomUUID();
+  issueId = randomUUID();
   await db.insert(issues).values({ id: issueId, projectId, statusId, title: "t", issueNumber: 1 });
   workspaceId = randomUUID();
   await db.insert(workspaces).values({ id: workspaceId, issueId, branch: "feature/multi" });
@@ -153,4 +170,83 @@ describe("multi-repo sibling worktrees", () => {
     });
     expect(siblings).toEqual([]);
   }, 30000);
+
+  it("does not destroy the leading worktree when the additional repo shares its parent directory", async () => {
+    // Regression (adversarial finding #1): every worktree lands at
+    // dirname(repoPath)/.worktrees/<sanitized-branch>, and multi-repo workspaces use
+    // the SAME branch in every repo — so repos sharing ONE parent directory (the
+    // guaranteed layout for clone-from-URL repos, which all land in getReposRoot())
+    // computed the identical path, and the sibling fan-out rm -rf'd the just-created
+    // leading worktree and checked the sibling out in its place. The other tests in
+    // this file nest each repo under a unique mkdtemp parent, which is exactly why
+    // this collision was never caught — so this test shares ONE parent.
+    const parent = await mkdtemp(join(tmpdir(), "kanban-multirepo-sharedparent-"));
+    try {
+      const lead = await initRepoIn(parent, "app");
+      const extra = await initRepoIn(parent, "lib");
+      const sharedProjectId = randomUUID();
+      await db.insert(projects).values({ id: sharedProjectId, name: "sp", repoPath: lead, repoName: "app", defaultBranch: "main" });
+      await insertProjectRepo({ projectId: sharedProjectId, path: extra, name: "lib", defaultBranch: "main" }, db);
+
+      // The leading worktree, exactly as workspace-provision creates it.
+      const leadingWt = await gitService.createWorktree(lead, "feature/shared-parent", "main");
+      expect(existsSync(join(leadingWt, "app.txt"))).toBe(true);
+
+      const siblings = await provisionSiblingWorktrees({
+        gitService,
+        database: db as unknown as Database,
+        projectId: sharedProjectId,
+        branch: "feature/shared-parent",
+      });
+
+      expect(siblings).toHaveLength(1);
+      // The sibling landed elsewhere (namespaced by repo dir name), and the leading
+      // worktree is still the LEAD repo's checkout — not overwritten by lib's.
+      expect(resolve(siblings[0].worktreePath)).not.toBe(resolve(leadingWt));
+      expect(existsSync(join(leadingWt, "app.txt"))).toBe(true);
+      expect(existsSync(join(leadingWt, "lib.txt"))).toBe(false);
+      expect(existsSync(join(siblings[0].worktreePath, "lib.txt"))).toBe(true);
+
+      // The lead repo's worktree registration must still be intact.
+      const leadWorktrees = await gitService.listWorktrees(lead);
+      expect(leadWorktrees.some((wt) => resolve(wt.path) === resolve(leadingWt))).toBe(true);
+    } finally {
+      try { await rm(parent, { recursive: true, force: true }); } catch { /* best effort */ }
+    }
+  }, 60000);
+
+  it("skips sibling cleanup while another live workspace still references the shared worktree/branch", async () => {
+    // Regression (adversarial findings #5/#9): a second workspace on the same branch
+    // reuses the first one's sibling worktrees (createWorktree's reuse path), so both
+    // workspaces' repos rows point at ONE worktree/branch. Cleaning up one workspace
+    // must not destroy the other's checkout or force-delete the shared branch — the
+    // sibling analog of deleteWorkspace's findWorkspacesByWorkingDir guard.
+    const wsA = randomUUID();
+    const wsB = randomUUID();
+    await db.insert(workspaces).values([
+      { id: wsA, issueId, branch: "feature/guarded", status: "active" },
+      { id: wsB, issueId, branch: "feature/guarded", status: "active" },
+    ]);
+
+    const siblings = await provisionSiblingWorktrees({
+      gitService,
+      database: db as unknown as Database,
+      projectId,
+      branch: "feature/guarded",
+    });
+    expect(siblings).toHaveLength(1);
+    await insertSiblingWorktreeRecords(wsA, projectId, siblings, db);
+    await insertSiblingWorktreeRecords(wsB, projectId, siblings, db);
+
+    // Cleaning up A while B is still live must leave the shared worktree + branch alone.
+    await cleanupSiblingWorktrees(gitService, wsA, db as unknown as Database);
+    expect(existsSync(siblings[0].worktreePath)).toBe(true);
+    expect((await exec("git", ["branch", "--list", "feature/guarded"], extraRepo)).trim()).not.toBe("");
+
+    // Once B is closed there is no live sharer left — cleanup now removes both.
+    await db.update(workspaces).set({ status: "closed" }).where(eq(workspaces.id, wsB));
+    await cleanupSiblingWorktrees(gitService, wsA, db as unknown as Database);
+    expect(existsSync(siblings[0].worktreePath)).toBe(false);
+    expect((await exec("git", ["branch", "--list", "feature/guarded"], extraRepo)).trim()).toBe("");
+  }, 60000);
 });

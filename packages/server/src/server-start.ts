@@ -37,9 +37,14 @@ let activeStartupTimerCleanup: (() => void) | null = null;
 
 /**
  * Reap orphaned per-workspace Docker service stacks left by a crash/hard-restart:
- * managed compose projects (`ak-…-ws-…`) that no still-open workspace expects. Guarded
- * by `dockerAvailable()` so non-docker hosts (the single-user local default) no-op
- * silently. Best-effort — never blocks startup.
+ * compose projects THIS instance owns (`ak-<instanceId>-ws-…`, keyed on the id
+ * persisted in this DB) that no still-open workspace expects. The Docker daemon is
+ * shared by every board instance on the host (worktree dev servers on the
+ * ~/.agentic-kanban fallback DB, DooD containers), so the engine filters on the
+ * instance-scoped name before downing — other instances' stacks and legacy unscoped
+ * `ak-ws-…` names are never touched. Guarded by `dockerAvailable()` so non-docker
+ * hosts (the single-user local default) no-op silently. Best-effort — never blocks
+ * startup.
  */
 async function reapOrphanServiceStacksOnStartup(): Promise<void> {
   try {

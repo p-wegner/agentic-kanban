@@ -21,11 +21,17 @@ export type TicketContext = {
    */
   additionalRepos?: Array<{ name: string | null; worktreePath: string }> | null;
   /**
-   * Per-workspace Docker service stack, when the project declares one and it came up.
-   * Rendered so the agent knows the sidecar services are already running, on which
-   * host ports, and where the env vars live (so it can source them).
+   * Per-workspace Docker service stack, when the project declares one. Rendered so
+   * the agent knows the sidecar services are already running (on which host ports,
+   * and where the env vars live so it can source them) — or, when the stack FAILED
+   * to come up (`status: "error"`), so the agent knows the declared services are NOT
+   * available instead of burning the session debugging their absence.
    */
   serviceStack?: {
+    /** "up" (default when omitted) renders the running-stack section; "error" a failure note. */
+    status?: "up" | "error";
+    /** Compose stderr / config error when status is "error". */
+    error?: string | null;
     ports: Record<string, number>;
     envFilePath: string;
     composeProjectName: string;
@@ -81,14 +87,34 @@ export function buildStackProfileSection(profile: StackProfile | null | undefine
 }
 
 /**
- * Render the running service-stack section, or null when there is no stack. Tells the
- * agent the sidecar services are already up, on which host ports, and that the matching
- * env vars are in `.kanban/services.env` (source it before running app commands).
+ * Render the service-stack section, or null when there is no stack. For a running
+ * stack it tells the agent the sidecar services are already up, on which host ports,
+ * and that the matching env vars are in `.kanban/services.env` (source it before
+ * running app commands). For a FAILED stack it states explicitly that the declared
+ * services are NOT running, with the failure reason — so the agent doesn't spend the
+ * session failing integration tests against a missing database and guessing why.
  */
 export function buildServiceStackSection(
   stack: TicketContext["serviceStack"],
 ): string | null {
   if (!stack) return null;
+  if (stack.status === "error") {
+    const lines = [
+      "## Service stack — FAILED TO START",
+      "",
+      "This project declares a per-workspace Docker Compose service stack (sidecar",
+      "services such as a database), but it FAILED to come up for this workspace.",
+      "The declared services are **NOT running** — do not assume a database or other",
+      "sidecar is available, and do not spend the session debugging their absence.",
+      "",
+      "Work on what does not require the services (unit tests, code changes) and state",
+      "clearly in your final summary that the service stack was unavailable.",
+    ];
+    if (stack.error?.trim()) {
+      lines.push("", "Failure reason:", "", "```", stack.error.trim(), "```");
+    }
+    return lines.join("\n");
+  }
   const lines = [
     "## Service stack",
     "",
