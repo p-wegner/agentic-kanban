@@ -24,12 +24,48 @@ import { jsonGzip } from "./middleware/compress.js";
 import { slowRequestLogger } from "./middleware/slow-request-logger.js";
 import { assertNoCommittedConflictMarkers } from "./startup/conflict-marker-scanner.js";
 import { checkHealthDeps } from "./services/health-deps.service.js";
+import { workspaceServicesService } from "./services/workspace-services.service.js";
+import { workspaces } from "@agentic-kanban/shared/schema";
+import { and, isNotNull, ne } from "drizzle-orm";
+import { dockerAvailable } from "@agentic-kanban/shared/lib/docker-exec";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const serverStartRepoRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../../");
 
 let activeStartupTimerCleanup: (() => void) | null = null;
+
+/**
+ * Reap orphaned per-workspace Docker service stacks left by a crash/hard-restart:
+ * managed compose projects (`ak-…-ws-…`) that no still-open workspace expects. Guarded
+ * by `dockerAvailable()` so non-docker hosts (the single-user local default) no-op
+ * silently. Best-effort — never blocks startup.
+ */
+async function reapOrphanServiceStacksOnStartup(): Promise<void> {
+  try {
+    if (!(await dockerAvailable())) return;
+    const openRows = await db
+      .select({ serviceState: workspaces.serviceState })
+      .from(workspaces)
+      .where(and(ne(workspaces.status, "closed"), isNotNull(workspaces.serviceState)));
+    const known = new Set<string>();
+    for (const row of openRows) {
+      if (!row.serviceState) continue;
+      try {
+        const parsed = JSON.parse(row.serviceState) as { composeProjectName?: unknown };
+        if (typeof parsed.composeProjectName === "string" && parsed.composeProjectName) {
+          known.add(parsed.composeProjectName);
+        }
+      } catch { /* skip unparseable state */ }
+    }
+    const { reaped } = await workspaceServicesService.reapOrphanServiceStacks({ knownComposeProjectNames: known });
+    if (reaped.length > 0) {
+      console.log(`[startup] reaped ${reaped.length} orphan service stack(s): ${reaped.join(", ")}`);
+    }
+  } catch (err) {
+    console.warn("[startup] service-stack reaper failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
+}
 
 export function cleanupStartupTimers(): void {
   if (!activeStartupTimerCleanup) return;
@@ -100,6 +136,9 @@ export async function startServer(port?: number, hostname?: string) {
   runWorkflowOnExit = workflow.runWorkflowOnExit;
 
   await runStartupTasks(sessionManager, { agentService });
+
+  // Reap orphan service stacks after stale-session cleanup (runs inside runStartupTasks).
+  await reapOrphanServiceStacksOnStartup();
 
   // Fail-fast guard: scan committed source files for conflict markers.
   // Logs a [fatal] alert for every affected file+line.  Non-crashing so the
