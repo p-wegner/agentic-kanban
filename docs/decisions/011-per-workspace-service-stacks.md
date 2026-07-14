@@ -66,11 +66,52 @@ semantics.
 - `service-ports.ts` — pure `composeProjectName` / `isManagedComposeProject` helpers.
 - `port-allocator.ts` — `allocateFreePorts(names)` free-port allocator (server).
 
-## Deployment (Agent D — to be expanded)
-_Docker image (docker CLI + compose plugin), the DooD (`docker-compose.yml`) and DinD
-(`docker-compose.dind.yml`) options, the bind-mount path pitfall, the entrypoint daemon wait,
-`docs/deployment.md`, and the `examples/multi-repo-postgres/` reference example are documented
-here by Agent D._
+## Deployment (Agent D)
+
+The full operator guide lives in
+[`docs/deployment.md` → Per-workspace service stacks](../deployment.md#per-workspace-service-stacks-dinddood);
+this section records the deployment *decisions*.
+
+### Image: CLI-only Docker, no bundled daemon
+The runtime image (`Dockerfile`) installs `docker-ce-cli` + `docker-compose-plugin` from
+Docker's **official apt repo** — the CLI and Compose **v2** plugin only, **not** the engine.
+Rationale: the agents run inside the container and shell out to `docker compose`, so they need
+the client, but the daemon is provided externally (DooD/DinD). Debian's `docker.io` was rejected
+because it drags in the whole engine (heavy) and ships the deprecated Compose **v1**; Docker's
+repo gives a lean, current CLI + the `compose` subcommand the board actually invokes.
+
+### Two runtime options, one image
+- **DooD (`docker-compose.yml`, commented option):** mount `/var/run/docker.sock`. Lightest, but
+  carries the **bind-mount path pitfall** — the host daemon resolves a project compose file's
+  bind-mounts against the **host** filesystem, so a named-volume repos dir (`/data/repos`) that
+  doesn't exist on the host breaks every source bind-mount. Mitigation: repos MUST be a **host
+  bind-mount at an identical path both sides** (`- /srv/kanban-data:/data`). Documented inline in
+  the compose file and in deployment.md.
+- **DinD (`docker-compose.dind.yml`, overlay):** a privileged `docker:27-dind` sidecar
+  (`DOCKER_TLS_CERTDIR=""`, private `dind-net`) sharing the **same repos volume at the same path**
+  (`/data`) as the board, with the board overriding `DOCKER_HOST=tcp://dind:2375`. Because daemon
+  and board see identical paths, project bind-mounts resolve consistently — this is the
+  recommended option when project compose files bind-mount source. Run as
+  `docker compose -f docker-compose.yml -f docker-compose.dind.yml up`.
+
+### Entrypoint daemon wait
+When a daemon is wired in (`DOCKER_HOST` set, or `/var/run/docker.sock` present) the entrypoint
+polls `docker version` for up to ~30s before `exec`-ing the server, so the startup orphan-stack
+reaper and the first `compose up` don't race a not-yet-listening daemon (the DinD sidecar takes a
+few seconds to boot). Best-effort: it starts the server anyway on timeout, and the existing
+Claude auth-bridge logic is preserved unchanged and runs first.
+
+### Two-tier model & resource caps (recorded)
+- **Windows-native (local):** Docker Desktop on the host, board talks to it directly — **no DinD**.
+- **Linux-container (server):** DooD or DinD as above.
+- **Capacity:** peak resource use ≈ **WIP × per-stack footprint** (CPU/RAM/disk **and host
+  ports**). Size the host for the peak or lower the WIP limit; teardown-on-merge + the startup
+  reaper keep it bounded between bursts.
+
+### Reference example
+`examples/multi-repo-postgres/` — a 2-repo (frontend + backend) project with a postgres sidecar
+that publishes `${KANBAN_SVC_DB_PORT}:5432` and namespaces everything via
+`COMPOSE_PROJECT_NAME`, plus the registration + `servicesConfig` walkthrough.
 
 ## Consequences
 - Parallel tickets each get a clean, isolated stack; no shared-service contention.
