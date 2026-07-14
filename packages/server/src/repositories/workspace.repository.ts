@@ -384,6 +384,7 @@ export async function getWorkspaceDetails(
       latestSymlinkSkipped: workspaces.latestSymlinkSkipped,
       latestSymlinkFailed: workspaces.latestSymlinkFailed,
       latestSymlinkError: workspaces.latestSymlinkError,
+      serviceState: workspaces.serviceState,
       createdAt: workspaces.createdAt,
       updatedAt: workspaces.updatedAt,
       issueTitle: issues.title,

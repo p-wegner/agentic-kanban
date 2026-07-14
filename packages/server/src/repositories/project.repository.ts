@@ -126,6 +126,22 @@ export async function deleteProjectCascade(
   await deleteProjectCascadeShared(projectId, database);
 }
 
+/**
+ * Persist a project's declared Docker service-stack config (JSON string) or clear it
+ * (null). Kept out of the generic `updateProjectFields` mapper so the route can own
+ * the servicesConfig validation + JSON serialization (mirrors setup-script handling).
+ */
+export async function updateProjectServicesConfig(
+  projectId: string,
+  servicesConfigJson: string | null,
+  database: Database = db,
+): Promise<void> {
+  await database
+    .update(projects)
+    .set({ servicesConfig: servicesConfigJson, updatedAt: new Date().toISOString() })
+    .where(eq(projects.id, projectId));
+}
+
 export async function getProjectStats(
   projectId: string,
   database: Database = db,

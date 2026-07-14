@@ -1,0 +1,48 @@
+# Reference service stack for a multi-repo project: a disposable postgres sidecar.
+#
+# This file lives in ONE of the project's repos (here: the `backend` repo, at its root).
+# The board runs it once PER WORKSPACE with:
+#
+#   docker compose -p $COMPOSE_PROJECT_NAME -f docker-compose.yml \
+#                  --env-file .kanban/services.env up -d --wait
+#
+# Everything that must be unique per workspace comes from the generated
+# `.kanban/services.env` file the board writes before invoking compose:
+#
+#   COMPOSE_PROJECT_NAME=ak-<projectId8>-ws-<offset>   # isolates containers/networks/volumes
+#   KANBAN_SVC_DB_PORT=<free host port>                # allocated collision-free at create time
+#   POSTGRES_PASSWORD=kanban                           # from servicesConfig.env (see README)
+#   KANBAN_STACK=1
+#
+# Because COMPOSE_PROJECT_NAME differs per workspace, the container name, the default network,
+# and the named volume below are all namespaced automatically — many tickets run in parallel
+# without colliding. The published host port is the allocated free port, so nothing fights over
+# 5432 on the host.
+
+services:
+  db:
+    image: postgres:16
+    # Publish the daemon-allocated free host port → container's 5432. The agent reads the host
+    # port from KANBAN_SVC_DB_PORT (or from .kanban/services.env) to connect from the app repos,
+    # dialing ${KANBAN_SERVICE_HOST:-localhost} (host differs by deployment mode — see README).
+    ports:
+      - "${KANBAN_SVC_DB_PORT}:5432"
+    environment:
+      POSTGRES_USER: kanban
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kanban}
+      POSTGRES_DB: app
+    # Volume name is prefixed with COMPOSE_PROJECT_NAME, so each workspace gets a fresh DB.
+    # Torn down with `docker compose down -v` on merge/delete, so data is disposable by design.
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # `up -d --wait` blocks on this healthcheck, so the board only proceeds once postgres
+    # actually accepts connections (health-gated provisioning).
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kanban -d app"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+volumes:
+  pgdata:

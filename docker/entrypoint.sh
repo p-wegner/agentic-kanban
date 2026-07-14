@@ -32,4 +32,27 @@ if [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
   fi
 fi
 
+# Per-workspace service stacks (decision 011): if a Docker daemon is wired up — either DinD
+# (DOCKER_HOST=tcp://dind:2375) or DooD (host socket mounted at /var/run/docker.sock) — wait
+# for it to accept connections before starting the server, so the startup orphan-stack reaper
+# and the first workspace's `compose up` don't race a daemon that isn't listening yet. This is
+# best-effort: if no daemon is configured, or it never comes up, we log and start anyway (the
+# board's dockerAvailable() guard makes stacks degrade gracefully). The DinD sidecar can take a
+# few seconds to boot its nested daemon.
+if [ -n "$DOCKER_HOST" ] || [ -S /var/run/docker.sock ]; then
+  echo "[entrypoint] docker daemon configured (DOCKER_HOST=${DOCKER_HOST:-unix:///var/run/docker.sock}); waiting up to 30s..."
+  waited=0
+  until docker version >/dev/null 2>&1; do
+    if [ "$waited" -ge 30 ]; then
+      echo "[entrypoint] docker daemon not ready after 30s — starting server anyway (service stacks will retry / degrade)"
+      break
+    fi
+    waited=$((waited + 2))
+    sleep 2
+  done
+  if docker version >/dev/null 2>&1; then
+    echo "[entrypoint] docker daemon ready after ${waited}s"
+  fi
+fi
+
 exec "$@"

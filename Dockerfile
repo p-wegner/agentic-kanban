@@ -15,8 +15,24 @@ RUN pnpm build
 
 # ---- runtime stage: dist bundle + Linux-native runtime deps ----
 FROM node:22-bookworm-slim
+# docker CLI + compose plugin: per-workspace service stacks (decision 011) let a project
+# declare a Docker Compose sidecar (e.g. a postgres). The agents run INSIDE this container and
+# shell out to `docker compose up` for that stack, so the client + `compose` plugin must exist
+# here. We install the CLI ONLY (docker-ce-cli + docker-compose-plugin) from Docker's official
+# apt repo — NOT the daemon: the daemon is provided externally via DooD (host socket mount) or
+# DinD (sidecar), see docker-compose.yml / docker-compose.dind.yml. Debian's `docker.io` pulls
+# in the whole engine (heavy, and its compose is the deprecated v1); Docker's repo gives a lean,
+# current CLI + the v2 `compose` subcommand this project invokes.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git openssh-client ca-certificates curl \
+ && apt-get install -y --no-install-recommends git openssh-client ca-certificates curl gnupg \
+ && install -m 0755 -d /etc/apt/keyrings \
+ && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
+ && chmod a+r /etc/apt/keyrings/docker.asc \
+ && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" > /etc/apt/sources.list.d/docker.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
+ && apt-get purge -y gnupg \
+ && apt-get autoremove -y \
  && rm -rf /var/lib/apt/lists/* \
  && corepack enable \
  # Pre-activate pnpm (worktree setup scripts run `pnpm install -r`) so first use doesn't

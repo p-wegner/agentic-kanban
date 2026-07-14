@@ -262,4 +262,4 @@ export type SettingsTextSetter = (key: keyof Settings) => (value: string) => voi
 export type SettingsBoolSetter = (key: keyof Settings) => (checked: boolean) => void;
 export type SkillSetting = { id: string; name: string; description: string; prompt: string; model: string | null; projectId: string | null; isBuiltin: boolean };
 export type TagSetting = { id: string; name: string; color: string | null; isBuiltin: boolean };
-export type ProjectSettingsState = { defaultBranch: string; setupScript: string; setupBlocking: boolean; setupEnabled: boolean; teardownScript: string; verifyScript: string; color: string | null; symlinkEnabled: boolean; symlinkDirs: string; defaultSkillId: string | null };
+export type ProjectSettingsState = { defaultBranch: string; setupScript: string; setupBlocking: boolean; setupEnabled: boolean; teardownScript: string; verifyScript: string; color: string | null; symlinkEnabled: boolean; symlinkDirs: string; defaultSkillId: string | null; servicesEnabled: boolean; servicesComposeFile: string; servicesComposeRepo: string; servicesPorts: string };
