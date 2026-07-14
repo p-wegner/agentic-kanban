@@ -12,8 +12,7 @@ import * as gitService from "../services/git.service.js";
 import { acquireRepoMergeLock } from "../services/workspace-internals.js";
 import { cleanupMergedWorktreeAndBranch, runMergeCore } from "../services/merge-executor.service.js";
 import { cleanupSiblingWorktrees, prevalidateSiblingMerges, executeSiblingMerges } from "../services/workspace-repos.service.js";
-import { workspaceServicesService } from "../services/workspace-services.service.js";
-import { portOffsetFromName } from "../services/worktree-ports.js";
+import { workspaceServicesService, parseStoredComposeProjectName } from "../services/workspace-services.service.js";
 import { createBackup } from "../db/backup.js";
 import { killProcessesInDir } from "../services/process-cleanup.js";
 import { runScript } from "../services/script-runner.js";
@@ -246,13 +245,14 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
               }
 
               // Per-workspace Docker service stack down (only when one was provisioned)
-              // before the worktree is removed. Best-effort — the engine never throws.
+              // before the worktree is removed. Uses the STORED compose project name
+              // (#F1). Best-effort — the engine never throws.
               if (workspace.workingDir) {
                 const svcRows = await db.select({ serviceState: workspaces.serviceState }).from(workspaces).where(eq(workspaces.id, workspace.id)).limit(1);
-                if (svcRows[0]?.serviceState) {
+                const wfComposeName = parseStoredComposeProjectName(svcRows[0]?.serviceState);
+                if (wfComposeName) {
                   await workspaceServicesService.teardownWorkspaceServices({
-                    projectId,
-                    offset: portOffsetFromName(workspace.branch),
+                    composeProjectName: wfComposeName,
                     composeWorktreePath: workspace.workingDir,
                   });
                 }

@@ -27,6 +27,7 @@ import {
   buildFixAndMergePrompt,
 } from "./merge-helpers.service.js";
 import { toExecutorProvider } from "./agent-settings.service.js";
+import { workspaceServicesService, parseStoredComposeProjectName } from "./workspace-services.service.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 import {
@@ -807,6 +808,16 @@ export function createWorkspaceMergeService(deps: {
 
     // Best-effort worktree cleanup
     if (workspace.workingDir && !workspace.isDirect) {
+      // Tear the per-workspace service stack down BEFORE the worktree is removed, like
+      // every other end path — reconcile-already-merged previously leaked it (#F4). Uses
+      // the STORED compose project name; gated on a persisted serviceState.
+      const reconcileComposeName = parseStoredComposeProjectName(workspace.serviceState);
+      if (reconcileComposeName) {
+        await workspaceServicesService.teardownWorkspaceServices({
+          composeProjectName: reconcileComposeName,
+          composeWorktreePath: workspace.workingDir,
+        });
+      }
       try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch { /* non-fatal */ }
     }
 

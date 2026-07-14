@@ -29,6 +29,12 @@ export type TicketContext = {
     ports: Record<string, number>;
     envFilePath: string;
     composeProjectName: string;
+    /**
+     * Host the agent must use to reach the services — `localhost` when the board runs
+     * on the host, `host.docker.internal` (DooD) or the `dind` sidecar name (DinD) when
+     * the board itself runs in a container. Sourced from KANBAN_SERVICE_HOST (F2).
+     */
+    serviceHost: string;
   } | null;
 };
 
@@ -89,17 +95,20 @@ export function buildServiceStackSection(
     "This workspace has an isolated Docker Compose service stack that is ALREADY RUNNING",
     `(compose project \`${stack.composeProjectName}\`). Do not start it yourself.`,
     "",
-    `The allocated host ports and connection env vars are in \`.kanban/services.env\``,
-    "(absolute path below). Source that file before running app/test commands that need",
-    "the services, e.g. `set -a; . .kanban/services.env; set +a`.",
+    `Reach the services at **\`${stack.serviceHost}:<port>\`** (NOT necessarily \`localhost\` —`,
+    `the host is \`${stack.serviceHost}\`). The connection host \`KANBAN_SERVICE_HOST\` and the`,
+    "allocated `KANBAN_SVC_<NAME>_PORT` values are in `.kanban/services.env` (absolute path",
+    "below). Source that file before running app/test commands that need the services,",
+    "e.g. `set -a; . .kanban/services.env; set +a`.",
     "",
+    `- **Service host:** \`${stack.serviceHost}\` (env \`KANBAN_SERVICE_HOST\`)`,
     `- **Env file:** \`${stack.envFilePath}\``,
   ];
   const portEntries = Object.entries(stack.ports);
   if (portEntries.length > 0) {
     lines.push("- **Allocated host ports:**");
     for (const [name, port] of portEntries) {
-      lines.push(`  - \`${name}\` → \`${port}\` (env \`KANBAN_SVC_${name.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_PORT\`)`);
+      lines.push(`  - \`${name}\` → \`${stack.serviceHost}:${port}\` (env \`KANBAN_SVC_${name.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_PORT\`)`);
     }
   }
   return lines.join("\n");

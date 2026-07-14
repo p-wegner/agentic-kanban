@@ -24,8 +24,8 @@ import { jsonGzip } from "./middleware/compress.js";
 import { slowRequestLogger } from "./middleware/slow-request-logger.js";
 import { assertNoCommittedConflictMarkers } from "./startup/conflict-marker-scanner.js";
 import { checkHealthDeps } from "./services/health-deps.service.js";
-import { workspaceServicesService } from "./services/workspace-services.service.js";
-import { workspaces } from "@agentic-kanban/shared/schema";
+import { workspaceServicesService, parseStoredComposeProjectName } from "./services/workspace-services.service.js";
+import { workspaces, projects } from "@agentic-kanban/shared/schema";
 import { and, isNotNull, ne } from "drizzle-orm";
 import { dockerAvailable } from "@agentic-kanban/shared/lib/docker-exec";
 import { resolve } from "node:path";
@@ -43,20 +43,34 @@ let activeStartupTimerCleanup: (() => void) | null = null;
  */
 async function reapOrphanServiceStacksOnStartup(): Promise<void> {
   try {
-    if (!(await dockerAvailable())) return;
+    // Cheap DB pre-check BEFORE the (up to 5s) docker probe (#F3a): if NO workspace ever
+    // provisioned a stack AND no project even has services enabled, there is nothing to
+    // reap — skip the probe entirely so a "docker installed but stopped" host doesn't pay
+    // 5s on every boot.
     const openRows = await db
       .select({ serviceState: workspaces.serviceState })
       .from(workspaces)
       .where(and(ne(workspaces.status, "closed"), isNotNull(workspaces.serviceState)));
+    let anyProjectStackEnabled = false;
+    if (openRows.length === 0) {
+      const projectRows = await db
+        .select({ servicesConfig: projects.servicesConfig })
+        .from(projects)
+        .where(isNotNull(projects.servicesConfig));
+      anyProjectStackEnabled = projectRows.some((r) => {
+        try {
+          const parsed = JSON.parse(r.servicesConfig ?? "null") as { enabled?: unknown } | null;
+          return parsed?.enabled === true;
+        } catch { return false; }
+      });
+    }
+    if (openRows.length === 0 && !anyProjectStackEnabled) return;
+
+    if (!(await dockerAvailable())) return;
     const known = new Set<string>();
     for (const row of openRows) {
-      if (!row.serviceState) continue;
-      try {
-        const parsed = JSON.parse(row.serviceState) as { composeProjectName?: unknown };
-        if (typeof parsed.composeProjectName === "string" && parsed.composeProjectName) {
-          known.add(parsed.composeProjectName);
-        }
-      } catch { /* skip unparseable state */ }
+      const name = parseStoredComposeProjectName(row.serviceState);
+      if (name) known.add(name);
     }
     const { reaped } = await workspaceServicesService.reapOrphanServiceStacks({ knownComposeProjectNames: known });
     if (reaped.length > 0) {

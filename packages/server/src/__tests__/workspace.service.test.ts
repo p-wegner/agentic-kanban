@@ -22,6 +22,17 @@ vi.mock("../services/process-cleanup.js", () => ({
  * fake git service and session manager. No real git, no subprocesses, no E2E.
  */
 
+/**
+ * Drain the deferred provision+launch chain (setImmediate → async provisioning →
+ * service_state persist → ticket-context write → agent launch). Since the chain has
+ * several real fs/DB awaits before the agent launches, flush multiple event-loop turns.
+ */
+async function flushDeferred(times = 25): Promise<void> {
+  for (let i = 0; i < times; i++) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+}
+
 /** Seed a project (with Todo/In Progress/Done statuses) and one issue. */
 async function seedProjectAndIssue(
   db: TestDb,
@@ -214,8 +225,8 @@ describe("workspace.service", () => {
       // Worktree was created off the project default branch
       expect(gitService.revParse).toHaveBeenCalledWith("/tmp/test-repo", "main");
       expect(gitService.createWorktree).toHaveBeenCalledWith("/tmp/test-repo", "feature/ak-1-test", "main");
-      // Agent launch happened (deferred — flush the setImmediate first)
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      // Agent launch happened (deferred — flush the provision+launch chain first)
+      await flushDeferred();
       expect(sessionManager.startSession).toHaveBeenCalledOnce();
 
       // Workspace row persisted
@@ -248,6 +259,8 @@ describe("workspace.service", () => {
         const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-test" });
         expect(result.error).toBeUndefined();
 
+        // Ticket-context write is deferred (with provisioning + launch) off the hot path.
+        await flushDeferred();
         const ctx = (await readFile(join(worktreeDir, "CLAUDE.local.md"), "utf-8")).trim();
         // Seed issue: number 1, title "Implement feature", description "Do the thing"
         expect(ctx).toContain("# Ticket #1: Implement feature");
@@ -281,8 +294,8 @@ describe("workspace.service", () => {
       const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, result.id));
       expect(wsRows[0].provider).toBe("codex");
       expect(wsRows[0].claudeProfile).toBeNull();
-      // Agent launch is deferred (#587) — flush the setImmediate before asserting the call.
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      // Agent launch is deferred (#587) — flush the provision+launch chain before asserting.
+      await flushDeferred();
       expect(sessionManager.startSession).toHaveBeenCalledWith(expect.objectContaining({
         provider: "codex",
         profile: undefined,
@@ -310,8 +323,8 @@ describe("workspace.service", () => {
       const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, result.id));
       expect(wsRows[0].provider).toBe("codex");
       expect(wsRows[0].claudeProfile).toBe("fast");
-      // Agent launch is deferred (#587) — flush the setImmediate before asserting the call.
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      // Agent launch is deferred (#587) — flush the provision+launch chain before asserting.
+      await flushDeferred();
       expect(sessionManager.startSession).toHaveBeenCalledWith(expect.objectContaining({
         provider: "codex",
         profile: { provider: "codex", name: "fast" },
@@ -336,8 +349,8 @@ describe("workspace.service", () => {
       const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-fail" });
       expect(result.error).toBeUndefined();
 
-      // Let the deferred setImmediate fire so the failing launch + status update run.
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      // Let the deferred chain fire so the failing launch + status update run.
+      await flushDeferred();
 
       // The workspace row remains (relaunchable) and is marked idle with the launch error.
       const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, result.id));

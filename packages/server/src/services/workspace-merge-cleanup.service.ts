@@ -6,8 +6,7 @@ import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
 import type { GitService } from "./workspace-internals.js";
 import { teardownWorktree } from "./workspace-teardown.service.js";
-import { workspaceServicesService } from "./workspace-services.service.js";
-import { portOffsetFromName } from "./worktree-ports.js";
+import { workspaceServicesService, parseStoredComposeProjectName } from "./workspace-services.service.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import { generateAndPersistGithubHandoffDraft } from "./github-handoff-draft.service.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
@@ -88,11 +87,12 @@ async function teardownMergedWorktree(
 ): Promise<void> {
   if (!args.workingDir || args.isDirect) return;
   // Per-workspace Docker service stack down (only when one was provisioned) BEFORE the
-  // worktree is removed. Best-effort — the engine never throws.
-  if (args.serviceState && args.projectId) {
+  // worktree is removed. Uses the STORED compose project name (#F1). Best-effort — the
+  // engine never throws.
+  const mergeComposeName = parseStoredComposeProjectName(args.serviceState);
+  if (mergeComposeName) {
     await workspaceServicesService.teardownWorkspaceServices({
-      projectId: args.projectId,
-      offset: portOffsetFromName(args.branch),
+      composeProjectName: mergeComposeName,
       composeWorktreePath: args.workingDir,
     });
   }
