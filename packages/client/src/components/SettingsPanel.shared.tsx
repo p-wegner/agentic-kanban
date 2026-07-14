@@ -19,6 +19,7 @@ export * from "./SettingsPrimitives.js";
 export * from "./WorkflowSections.js";
 import { CAPABILITY_DEFS, getProviderCapabilities } from "../lib/settings-shared.js";
 import type { Settings, AgentProvider } from "../lib/settings-shared.js";
+import type { ServicesConfigFormFields } from "../lib/services-config.js";
 
 const ARCHIVE_THRESHOLDS = [
   { label: "14 days", value: 14 },
@@ -262,4 +263,4 @@ export type SettingsTextSetter = (key: keyof Settings) => (value: string) => voi
 export type SettingsBoolSetter = (key: keyof Settings) => (checked: boolean) => void;
 export type SkillSetting = { id: string; name: string; description: string; prompt: string; model: string | null; projectId: string | null; isBuiltin: boolean };
 export type TagSetting = { id: string; name: string; color: string | null; isBuiltin: boolean };
-export type ProjectSettingsState = { defaultBranch: string; setupScript: string; setupBlocking: boolean; setupEnabled: boolean; teardownScript: string; verifyScript: string; color: string | null; symlinkEnabled: boolean; symlinkDirs: string; defaultSkillId: string | null; servicesEnabled: boolean; servicesComposeFile: string; servicesComposeRepo: string; servicesPorts: string };
+export type ProjectSettingsState = { defaultBranch: string; setupScript: string; setupBlocking: boolean; setupEnabled: boolean; teardownScript: string; verifyScript: string; color: string | null; symlinkEnabled: boolean; symlinkDirs: string; defaultSkillId: string | null } & ServicesConfigFormFields;
