@@ -360,6 +360,7 @@ export function createWorkspaceMergeService(deps: {
       setupEnabled: project?.setupEnabled ?? true,
       isDirect: workspace.isDirect,
       pendingWorkingTreeSyncSha: postMergeContext.pendingWorkingTreeSyncSha,
+      serviceState: workspace.serviceState ?? null,
     };
     // Post-merge cleanup — including the deferred `git reset --hard` sync of the
     // MAIN checkout's working tree — must run INSIDE the repo merge lock (#970):

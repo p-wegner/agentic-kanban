@@ -13,7 +13,14 @@
 import { randomUUID } from "node:crypto";
 import { isResolvedDependencyStatusView } from "@agentic-kanban/shared/lib/status-view";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
-import { derivePortsFromBranch } from "./worktree-ports.js";
+import { derivePortsFromBranch, portOffsetFromName } from "./worktree-ports.js";
+import { workspaceServicesService } from "./workspace-services.service.js";
+import {
+  DEFAULT_SERVICE_STACK_CONFIG,
+  composeProjectName,
+  type ServiceStackConfig,
+  type ServiceStackState,
+} from "@agentic-kanban/shared";
 import { withTransaction, type Database, type TransactionClient } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
@@ -72,6 +79,78 @@ export function createWorkspaceCreateService(deps: {
     return JSON.stringify(value);
   }
 
+  /**
+   * Parse a project's persisted servicesConfig JSON defensively. Missing/invalid/
+   * disabled all collapse to null (no stack), so the no-docker single-user workflow is
+   * a true zero-behavior-change path. Merges over DEFAULT_SERVICE_STACK_CONFIG so
+   * partial configs get sane defaults.
+   */
+  function parseServicesConfig(raw: string | null): ServiceStackConfig | null {
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw) as Partial<ServiceStackConfig> | null;
+      if (!parsed || typeof parsed !== "object" || parsed.enabled !== true) return null;
+      return {
+        ...DEFAULT_SERVICE_STACK_CONFIG,
+        ...parsed,
+        enabled: true,
+        composeFile: parsed.composeFile?.trim() || DEFAULT_SERVICE_STACK_CONFIG.composeFile,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Bring the project's declared per-workspace Docker service stack up, BLOCKING (so a
+   * healthy DB is running before the agent launches) but NON-FATAL — any failure yields
+   * an "error" ServiceStackState that is persisted and surfaced, never a rolled-back
+   * worktree (matches setup-script semantics). Returns null when the project has no
+   * (enabled) stack.
+   */
+  async function provisionServicesForCreate(params: {
+    servicesConfigRaw: string | null;
+    projectId: string;
+    branch: string;
+    leadingWorktreePath: string;
+    siblings: SiblingWorktree[];
+  }): Promise<ServiceStackState | null> {
+    const config = parseServicesConfig(params.servicesConfigRaw);
+    if (!config) return null;
+
+    let composeWorktreePath = params.leadingWorktreePath;
+    if (config.composeRepo) {
+      const sibling = params.siblings.find((s) => s.name === config.composeRepo);
+      if (sibling) {
+        composeWorktreePath = sibling.worktreePath;
+      } else {
+        console.warn(`[services] composeRepo '${config.composeRepo}' not found among sibling worktrees — falling back to leading worktree`);
+      }
+    }
+
+    const offset = portOffsetFromName(params.branch);
+    try {
+      return await workspaceServicesService.provisionWorkspaceServices({
+        config,
+        projectId: params.projectId,
+        offset,
+        composeWorktreePath,
+        extraEnv: { KANBAN_WORKTREE_BRANCH: params.branch },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[services] provisioning threw (non-fatal) for branch ${params.branch}: ${message}`);
+      return {
+        composeProjectName: composeProjectName(params.projectId, offset),
+        ports: {},
+        envFilePath: "",
+        status: "error",
+        error: message.slice(0, 2000),
+        updatedAt: new Date().toISOString(),
+      };
+    }
+  }
+
   async function updateLatestSetupRun(workspaceId: string, run: LatestSetupRun, projectId?: string): Promise<void> {
     await crudRepo.updateLatestSetupRunFields(workspaceId, run, database);
     if (projectId) boardEvents?.broadcast(projectId, "workspace_setup");
@@ -79,7 +158,7 @@ export function createWorkspaceCreateService(deps: {
 
   async function resolveIssueAndProject(issueId: string): Promise<{
     issue: { projectId: string; issueNumber: number | null; title: string; description: string | null; priority: string | null };
-    project: { repoPath: string; defaultBranch: string | null; defaultSkillId: string | null };
+    project: { repoPath: string; defaultBranch: string | null; defaultSkillId: string | null; servicesConfig: string | null };
     setupConfig: { setupScript: string | null; setupBlocking: boolean; setupEnabled: boolean };
     symlinkConfig: { enabled: boolean; dirs: string[] };
   }> {
@@ -100,7 +179,7 @@ export function createWorkspaceCreateService(deps: {
     const projectRow = projectRows[0];
     return {
       issue,
-      project: { repoPath: projectRow.repoPath, defaultBranch: projectRow.defaultBranch, defaultSkillId: projectRow.defaultSkillId ?? null },
+      project: { repoPath: projectRow.repoPath, defaultBranch: projectRow.defaultBranch, defaultSkillId: projectRow.defaultSkillId ?? null, servicesConfig: projectRow.servicesConfig ?? null },
       setupConfig: {
         setupScript: projectRow.setupScript ?? null,
         setupBlocking: projectRow.setupBlocking ?? true,
@@ -132,6 +211,7 @@ export function createWorkspaceCreateService(deps: {
     resolvedProvider: ProviderName;
     model: string | undefined;
     contextPrimer: string | null;
+    serviceState: string | null;
     latestSetup: LatestSetupRun;
     latestSymlink: LatestSymlinkRun;
     now: string;
@@ -173,6 +253,7 @@ export function createWorkspaceCreateService(deps: {
       latestSymlinkFailed: stringifyJson(params.latestSymlink.failed),
       latestSymlinkError: params.latestSymlink.error,
       contextPrimer: params.contextPrimer,
+      serviceState: params.serviceState,
       createdAt: params.now,
       updatedAt: params.now,
     }, params.database ?? database);
@@ -406,6 +487,27 @@ export function createWorkspaceCreateService(deps: {
         if (siblingWorktrees.length > 0) timing("sibling-worktrees", t);
       }
 
+      // Per-workspace Docker service stack: bring it up BEFORE the agent launches so a
+      // healthy DB/sidecar is running from turn 1. Blocking + non-fatal + persisted;
+      // no-op (null) when the project declares no enabled stack. See B1 engine.
+      let serviceState: ServiceStackState | null = null;
+      if (!isDirect && worktreePath) {
+        t = Date.now();
+        serviceState = await provisionServicesForCreate({
+          servicesConfigRaw: project.servicesConfig,
+          projectId: issue.projectId,
+          branch,
+          leadingWorktreePath: worktreePath,
+          siblings: siblingWorktrees,
+        });
+        if (serviceState) {
+          timing("service-stack", t);
+          if (serviceState.status === "error") {
+            console.warn(`[services] stack for branch ${branch} came up with status=error: ${serviceState.error ?? ""}`);
+          }
+        }
+      }
+
       // Run context packer (best-effort: never blocks workspace creation).
       let contextPrimer: string | null = null;
       if (!isDirect && !input.skipContextPacker) {
@@ -414,14 +516,24 @@ export function createWorkspaceCreateService(deps: {
         timing("context-packer", t);
       }
 
-      // Inject ticket details (+ optional context primer + stack profile) into the
-      // worktree as a gitignored `CLAUDE.local.md`. Skipped for direct workspaces.
+      // Inject ticket details (+ optional context primer + stack profile + running
+      // service stack) into the worktree as a gitignored `CLAUDE.local.md`. Skipped for
+      // direct workspaces.
+      const serviceStackForContext =
+        serviceState && serviceState.status === "up"
+          ? {
+              ports: serviceState.ports,
+              envFilePath: serviceState.envFilePath,
+              composeProjectName: serviceState.composeProjectName,
+            }
+          : null;
       const ticketContextPath = !isDirect && worktreePath
         ? await writeWorktreeTicketContext(
             worktreePath,
             issue,
             contextPrimer,
             siblingWorktrees.map((s) => ({ name: s.name, worktreePath: s.worktreePath })),
+            serviceStackForContext,
           )
         : null;
 
@@ -440,7 +552,8 @@ export function createWorkspaceCreateService(deps: {
           id, issueId: input.issueId, branch, worktreePath, baseBranch, isDirect,
           baseCommitSha, requiresReview, thoroughReview, planMode, tddMode, includeVisualProof,
           skillId: effectiveSkillId, claudeProfile, agentCommand, resolvedProvider, model: agentConfig.model,
-          contextPrimer, latestSetup, latestSymlink, now, database: tx,
+          contextPrimer, serviceState: serviceState ? stringifyJson(serviceState) : null,
+          latestSetup, latestSymlink, now, database: tx,
         });
 
         // Multi-repo: per-repo worktree records ride the same transaction as the
