@@ -2,6 +2,7 @@ import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { getWorkspaceDevPorts } from "../lib/workspace-preview.js";
 import type { WorkspaceResponse } from "@agentic-kanban/shared";
 import { SetupStatusPanel } from "./SetupStatusPanel.js";
+import { ServiceStackStatusPanel } from "./ServiceStackStatusPanel.js";
 
 interface ProjectDiagnostics {
   setupScript?: string | null;
@@ -22,8 +23,8 @@ function asJsonDirs(raw: string | null | undefined): string[] {
 }
 
 function statusClass(state: string | null | undefined): string {
-  if (state === "success" || state === "linked" || state === "ready") return "bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-300";
-  if (state === "failed") return "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300";
+  if (state === "success" || state === "linked" || state === "ready" || state === "up") return "bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-300";
+  if (state === "failed" || state === "error") return "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300";
   if (state === "running") return "bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300";
   return "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300";
 }
@@ -43,6 +44,7 @@ function failureMessages(workspace: WorkspaceResponse): string[] {
     compactMessage(workspace.latestSetup?.stdoutTail),
     workspace.latestSymlink?.error ?? null,
     ...(workspace.latestSymlink?.failed.map((failure) => `${failure.dir}: ${failure.error}`) ?? []),
+    workspace.serviceState?.status === "error" ? (compactMessage(workspace.serviceState.error) ?? "service stack failed to start") : null,
   ].filter((message): message is string => !!message);
   return [...new Set(messages)].slice(0, 4);
 }
@@ -64,6 +66,8 @@ function DiagnosticsRow({ label, value, detail }: { label: string; value: string
 export function WorkspaceDiagnosticsPanel({ workspace, project }: { workspace: WorkspaceResponse; project: ProjectDiagnostics | null }) {
   const ports = getWorkspaceDevPorts(workspace);
   const symlink = workspace.latestSymlink;
+  const serviceState = workspace.serviceState;
+  const servicePortEntries = Object.entries(serviceState?.ports ?? {});
   const configuredSymlinkDirs = asJsonDirs(project?.symlinkDirs);
   const failures = failureMessages(workspace);
   const setupConfigured = !!project?.setupScript;
@@ -106,9 +110,20 @@ export function WorkspaceDiagnosticsPanel({ workspace, project }: { workspace: W
               : "No working directory available for dev-server bootstrap"
           }
         />
+        <DiagnosticsRow
+          label="Service stack"
+          value={serviceState?.status ?? "none"}
+          detail={
+            serviceState
+              ? `${serviceState.composeProjectName}${servicePortEntries.length > 0 ? ` — ${servicePortEntries.map(([name, port]) => `${name}:${port}`).join(", ")}` : ""}`
+              : "No service stack for this workspace"
+          }
+        />
       </div>
 
       {workspace.latestSetup && <SetupStatusPanel setup={workspace.latestSetup} />}
+
+      {serviceState && <ServiceStackStatusPanel serviceState={serviceState} />}
 
       {symlink && (
         <div className="rounded border border-gray-200 dark:border-gray-700 p-2 text-xs">
