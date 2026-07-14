@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
+import type { ServiceStackConfig } from "@agentic-kanban/shared";
 import { apiFetch, apiPost, apiPut, apiPatch } from "../lib/api.js";
 import { setSettings as savePreferences } from "../lib/settingsStore.js";
 import { invalidateClientSurfaceLocal } from "../lib/clientInvalidation.js";
@@ -26,10 +27,12 @@ type ProjectRow = {
   symlinkEnabled?: boolean;
   symlinkDirs?: string | null;
   defaultSkillId?: string | null;
+  servicesConfig?: ServiceStackConfig | null;
 };
 
 /** Map a raw project row + its verify-script pref into the panel's ProjectSettingsState. */
 function buildProjectSettingsState(project: ProjectRow, verifyScript: string): ProjectSettingsState {
+  const svc = project.servicesConfig ?? null;
   return {
     defaultBranch: project.defaultBranch || "",
     setupScript: project.setupScript || "",
@@ -41,7 +44,27 @@ function buildProjectSettingsState(project: ProjectRow, verifyScript: string): P
     symlinkEnabled: project.symlinkEnabled === true,
     symlinkDirs: project.symlinkDirs || "",
     defaultSkillId: project.defaultSkillId || null,
+    servicesEnabled: svc?.enabled === true,
+    servicesComposeFile: svc?.composeFile || "",
+    servicesComposeRepo: svc?.composeRepo || "",
+    servicesPorts: (svc?.ports ?? []).join(", "),
   };
+}
+
+/** Build the servicesConfig PATCH payload from the panel's flat form fields (or null to clear). */
+function buildServicesConfig(s: ProjectSettingsState): ServiceStackConfig | null {
+  const composeFile = s.servicesComposeFile.trim();
+  const composeRepo = s.servicesComposeRepo.trim();
+  const ports = s.servicesPorts.split(",").map((p) => p.trim()).filter(Boolean);
+  // Nothing configured and disabled → clear the stack entirely.
+  if (!s.servicesEnabled && !composeFile && !composeRepo && ports.length === 0) return null;
+  const cfg: ServiceStackConfig = {
+    enabled: s.servicesEnabled,
+    composeFile: composeFile || "docker-compose.yml",
+    ports,
+  };
+  if (composeRepo) cfg.composeRepo = composeRepo;
+  return cfg;
 }
 import { AgentSettings } from "./settings/AgentSettings.js";
 import { WorkflowSettings } from "./settings/WorkflowSettings.js";
@@ -80,6 +103,10 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
     symlinkEnabled: false,
     symlinkDirs: "",
     defaultSkillId: null,
+    servicesEnabled: false,
+    servicesComposeFile: "",
+    servicesComposeRepo: "",
+    servicesPorts: "",
   });
   const [projectBranches, setProjectBranches] = useState<{ local: string[]; remote: string[] } | null>(null);
   const [generatingScript, setGeneratingScript] = useState(false);
@@ -351,6 +378,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
               symlinkEnabled: projectSettings.symlinkEnabled,
               symlinkDirs: projectSettings.symlinkDirs.trim() || null,
               defaultSkillId: projectSettings.defaultSkillId || null,
+              servicesConfig: buildServicesConfig(projectSettings),
             }),
         );
       }
