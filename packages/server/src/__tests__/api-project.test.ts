@@ -112,7 +112,15 @@ describe("Projects API", () => {
   });
 
   it("GET /api/projects/:id/branches returns error for non-git path", async () => {
-    const res = await app.request(`/api/projects/${projectId}/branches`);
+    // Explicitly a NON-git directory: the suite's default project now points at a
+    // real throwaway git repo (hermetic fixture), so this test must bring its own
+    // plain directory instead of relying on the default path not being a repo.
+    const nonGitPath = mkdtempSync(join(tmpdir(), "kanban-non-git-"));
+    const nonGitProjectId = await createProjectDirectly(database, {
+      name: "Non-Git Project",
+      repoPath: nonGitPath,
+    });
+    const res = await app.request(`/api/projects/${nonGitProjectId}/branches`);
     expect(res.status).toBe(500);
     const body = await res.json() as any;
     expect(body.error).toBeTruthy();
