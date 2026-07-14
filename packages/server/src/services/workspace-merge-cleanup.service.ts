@@ -47,21 +47,53 @@ export async function runWorkspacePostMergeCleanup(
     getSessionManager?: () => SessionManager;
     boardEvents?: BoardEvents;
   },
+  hooks: {
+    /**
+     * Fired as soon as the MAIN checkout's git state is consistent again — i.e.
+     * the deferred `git reset --hard` sync (the reason #970 extended the repo
+     * merge lock into this chain) has been applied. This is the point where the
+     * caller may release the per-repo merge lock: everything after it is
+     * worktree-/DB-/orchestration-scoped and a concurrent merge can no longer
+     * trip its dirty-main guard on the stale tree.
+     *
+     * Holding the lock through the WHOLE chain instead starved concurrent
+     * merges for many seconds ("A merge is already in progress", ages 1–20s) —
+     * and up to 3 MINUTES when the learning-step pref is on, because
+     * runLearningStep polls the learning session to completion in this chain.
+     */
+    onMainCheckoutSettled?: () => void;
+  } = {},
 ): Promise<void> {
   const warnings: MergeWarning[] = [];
   let mergeResult = args.mergeResult;
 
-  // Apply the deferred working-tree sync FIRST — before teardown frees the worktree —
-  // so git reset --hard runs after the HTTP response is already flushed and tsx
-  // hot-reload can no longer drop the in-flight connection.
-  if (args.pendingWorkingTreeSyncSha) {
-    try {
-      await applyDeferredWorkingTreeSync(args.repoPath, args.pendingWorkingTreeSyncSha);
-    } catch (err) {
-      console.warn("[workspace-merge] deferred working-tree sync failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  // ── Locked prologue (when the caller extended the merge-lock hold): apply the
+  // deferred working-tree sync FIRST — before teardown frees the worktree — so
+  // git reset --hard runs after the HTTP response is already flushed and tsx
+  // hot-reload can no longer drop the in-flight connection (#686).
+  try {
+    if (args.pendingWorkingTreeSyncSha) {
+      try {
+        await applyDeferredWorkingTreeSync(args.repoPath, args.pendingWorkingTreeSyncSha);
+      } catch (err) {
+        console.warn("[workspace-merge] deferred working-tree sync failed (non-fatal):", err instanceof Error ? err.message : String(err));
+      }
     }
+  } finally {
+    hooks.onMainCheckoutSettled?.();
   }
 
+  // ── Lock-free long tail: worktree/DB/orchestration cleanup ──
+  // Every step is best-effort with its own guards; a failure here strands at most
+  // resources the startup reconcilers already recover (pruneStaleWorktrees for the
+  // worktree/branch, the stranded-sibling reconciler for sibling repos, the
+  // orphan-stack reaper for per-workspace service stacks).
+  //
+  // OpenSpec apply+commit below briefly dirties the main checkout outside the lock
+  // (rare — only when the merged branch shipped openspec deltas). At worst a
+  // concurrent merge in that ~subsecond window is refused with a transient
+  // dirty-main CONFLICT the monitor retries — strictly better than the pre-fix
+  // behavior of refusing EVERY merge for the whole chain's duration.
   await teardownMergedWorktree(args, deps, warnings);
   await collectCodeMetrics(args, deps.database, warnings);
   mergeResult = await applyOpenSpecPostMerge(args, deps, warnings, mergeResult);

@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
+import { activeMerges } from "../services/workspace-internals.js";
 
 /**
  * Regression test: POST /workspaces/:id/merge must return its JSON response
@@ -390,5 +391,66 @@ describe("merge endpoint response before cleanup", () => {
     expect(result).toMatchObject({ id: workspaceId, mergeOutput: expect.any(String) });
     // The processKiller must never have run while mergeResolved was still false.
     expect(killerCalledBeforeResolve).toBe(false);
+  });
+
+  it("repo merge lock releases at main-checkout-settled — a second merge is not refused while the cleanup long tail still runs", async () => {
+    // Regression for the merge-lock starvation class: the lock hold (#970) used to
+    // cover the ENTIRE post-merge cleanup chain (process kills, worktree/branch
+    // removal, metrics, handoff, learning step, auto-starts). A slow step there —
+    // subprocess hops, a failing DB write, or the up-to-3-minute learning poll —
+    // kept `activeMerges` populated, so every other merge on the repo was refused
+    // with "A merge is already in progress" for the whole duration. The lock must
+    // release as soon as the MAIN checkout is consistent (deferred reset --hard +
+    // OpenSpec commit), with the long tail running lock-free.
+    const first = await seedWorkspace(db);
+    const second = await seedWorkspace(db);
+
+    // Gate the phase-2 long tail: processKiller (teardown step) blocks until released.
+    let releaseTeardown!: () => void;
+    const teardownGate = new Promise<void>((resolve) => { releaseTeardown = resolve; });
+    const processKiller = vi.fn(async () => {
+      await teardownGate;
+      return 0;
+    });
+
+    // Per-call ancestry: odd calls = pre-merge (not an ancestor → real merge),
+    // even calls = post-merge verification (merge landed). Works for BOTH merges,
+    // unlike the shared default counter (which would route merge 2 down the
+    // already-merged reconcile path).
+    let ancestorCalls = 0;
+    const git = makeGitService({
+      checkBranchTipIsAncestor: vi.fn(async () => {
+        ancestorCalls++;
+        if (ancestorCalls % 2 === 1) return { isAncestor: false as const, branchSha: "branch-sha-456", baseSha: "base-sha-789" };
+        return { isAncestor: true as const, branchSha: "branch-sha-456", baseSha: "merge-sha-123" };
+      }),
+    });
+
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller,
+    });
+
+    const result1 = await svc.mergeWorkspace(first.workspaceId);
+    expect(result1).toMatchObject({ id: first.workspaceId, merged: true });
+
+    // Phase 2 is parked inside processKiller, yet the lock must already be gone.
+    await vi.waitFor(() => {
+      expect(processKiller).toHaveBeenCalled();
+      expect(activeMerges.size).toBe(0);
+    });
+
+    // Second merge on the SAME repo proceeds instead of throwing
+    // "A merge is already in progress".
+    const result2 = await svc.mergeWorkspace(second.workspaceId);
+    expect(result2).toMatchObject({ id: second.workspaceId, merged: true });
+
+    // Unblock both cleanups and drain them so they cannot race later tests.
+    releaseTeardown();
+    await vi.waitFor(() => {
+      expect(git.deleteBranch).toHaveBeenCalledTimes(2);
+    });
   });
 });

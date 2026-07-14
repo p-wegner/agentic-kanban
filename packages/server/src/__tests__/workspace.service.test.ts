@@ -881,14 +881,19 @@ describe("workspace.service", () => {
       expect(activeMerges.has("/tmp/test-repo")).toBe(false);
     });
 
-    it("holds the repo merge lock until the deferred post-merge cleanup completes (#970)", { timeout: 30000 }, async () => {
+    it("holds the repo merge lock until the deferred MAIN-checkout sync applies (#970), then releases while the cleanup long tail is still running", { timeout: 30000 }, async () => {
       const { projectId, issueId } = await seedProjectAndIssue(db);
       const wsId = await seedWorkspaceForMerge(projectId, issueId);
       let releaseCleanup!: () => void;
       const cleanupGate = new Promise<void>((resolve) => { releaseCleanup = resolve; });
       const gitService = createFakeGitService({
-        // removeWorktree runs only in the deferred post-merge cleanup — gate it
-        // so the cleanup stays in flight while we probe the lock.
+        // Emit the [pending-wt-sync] tag: the merge deferred the git reset --hard
+        // of the MAIN checkout, so the repo lock must outlive the merge result
+        // until that sync has been applied (#970). Without the tag the main
+        // checkout is already consistent and no hold is registered at all.
+        mergeBranch: vi.fn(async () => "Merge made by the 'ort' strategy. [pending-wt-sync:abc123def456]"),
+        // removeWorktree runs in the post-sync long tail — gate it so the
+        // cleanup stays in flight while we probe the lock-release boundary.
         removeWorktree: vi.fn(async () => { await cleanupGate; }),
       });
       const service = createWorkspaceService({
@@ -901,20 +906,30 @@ describe("workspace.service", () => {
       const result = await service.mergeWorkspace(wsId);
       expect(result.id).toBe(wsId);
 
-      // The HTTP-facing result resolved, but the deferred cleanup (which applies
-      // the git reset --hard sync of the MAIN checkout) has not finished: the
-      // repo lock must still be held so a second merge cannot acquire it and
-      // observe the main checkout mid-cleanup (#970).
+      // The HTTP-facing result resolved, but the deferred cleanup runs in a
+      // setImmediate that cannot have fired yet (no macrotask boundary since the
+      // result settled), so the reset --hard of the MAIN checkout is still
+      // pending — the repo lock must still be held (#970): a second merge must
+      // not acquire it and observe the stale main tree.
       const lock = activeMerges.get("/tmp/test-repo");
       expect(lock?.workspaceId).toBe(wsId);
 
-      // A second merge for a different workspace is refused, not admitted.
+      // A second merge for a different workspace is refused while the sync is pending.
       const otherWsId = await seedWorkspaceForMerge(projectId, issueId);
       await expect(service.mergeWorkspace(otherWsId)).rejects.toMatchObject({ code: "CONFLICT" });
 
-      releaseCleanup();
+      // Once the deferred sync has been applied, the lock releases EVEN THOUGH
+      // the long tail (gated removeWorktree) is still in flight — holding it
+      // through the whole chain starved every other merge on the repo with
+      // "A merge is already in progress" (seconds to minutes).
       await lock!.promise;
       expect(activeMerges.has("/tmp/test-repo")).toBe(false);
+
+      // Unblock and drain the long tail so it cannot race later tests.
+      releaseCleanup();
+      await vi.waitFor(() => {
+        expect(gitService.deleteBranch).toHaveBeenCalled();
+      });
     });
 
   });
@@ -1946,9 +1961,14 @@ describe("createWorkspace — service stack deferred chain", () => {
       await flushDeferred();
 
       // The agent's context file states the services are NOT available, with the reason.
-      const ctx = await readFile(join(worktreeDir, "CLAUDE.local.md"), "utf-8");
-      expect(ctx).toContain("FAILED TO START");
-      expect(ctx).toContain("image xyz not found");
+      // Poll the read: the deferred chain rewrites CLAUDE.local.md with a plain
+      // (non-atomic) writeFile, so a single read under event-loop contention can
+      // interleave between truncate and write and observe an empty file.
+      await vi.waitFor(async () => {
+        const ctx = await readFile(join(worktreeDir, "CLAUDE.local.md"), "utf-8");
+        expect(ctx).toContain("FAILED TO START");
+        expect(ctx).toContain("image xyz not found");
+      }, { timeout: 5000 });
 
       // serviceState carries the error, and the agent still launches (non-fatal).
       const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, result.id));
