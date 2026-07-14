@@ -105,6 +105,7 @@ describe("merge resolution paths tear down the workspace service stack (#13)", (
     expect(teardownSpy).toHaveBeenCalledWith({
       composeProjectName: "ak-ws-teardown-test",
       composeWorktreePath: "/repo/.worktrees/ws",
+      releasedByWorkspaceId: workspaceId,
     });
   });
 
@@ -124,6 +125,7 @@ describe("merge resolution paths tear down the workspace service stack (#13)", (
     expect(teardownSpy).toHaveBeenCalledWith({
       composeProjectName: "ak-ws-teardown-test",
       composeWorktreePath: "/repo/.worktrees/ws",
+      releasedByWorkspaceId: workspaceId,
     });
   });
 
