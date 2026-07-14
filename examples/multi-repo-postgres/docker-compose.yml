@@ -23,7 +23,8 @@ services:
   db:
     image: postgres:16
     # Publish the daemon-allocated free host port → container's 5432. The agent reads the host
-    # port from KANBAN_SVC_DB_PORT (or from .kanban/services.env) to connect from the app repos.
+    # port from KANBAN_SVC_DB_PORT (or from .kanban/services.env) to connect from the app repos,
+    # dialing ${KANBAN_SERVICE_HOST:-localhost} (host differs by deployment mode — see README).
     ports:
       - "${KANBAN_SVC_DB_PORT}:5432"
     environment:

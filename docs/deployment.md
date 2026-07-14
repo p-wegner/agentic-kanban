@@ -476,6 +476,18 @@ The board shells out to `docker compose`, which needs a Docker **daemon**. Where
 
 The runtime image ships the `docker` CLI + the `compose` v2 plugin (see `Dockerfile`), but **no daemon** — the daemon is supplied by one of the two Linux-container options below. When no stack is declared, or Docker is absent, everything degrades gracefully (`dockerAvailable()` guard) and the no-docker workflow is completely unaffected.
 
+### Reaching the stack: `KANBAN_SERVICE_HOST`
+
+Once the board is containerized, **three things live in three different network namespaces**: the board process, the Docker daemon that creates the stack, and the published service port. So the host the agent must dial to reach its stack's DB **differs by deployment mode**. The board injects `KANBAN_SERVICE_HOST` (default `localhost`) into the generated `.kanban/services.env` and the agent context; set it to match your mode:
+
+| Mode | `KANBAN_SERVICE_HOST` | Why / extra wiring |
+|---|---|---|
+| **Windows-native / board-on-host** | `localhost` (default) | Board, daemon, and the published port all share the host namespace — `localhost:${KANBAN_SVC_DB_PORT}` just works. No setting needed. |
+| **DooD** (host socket) | `host.docker.internal` | The port is published in the **host** namespace, not the board container's. The board service also needs `extra_hosts: ["host.docker.internal:host-gateway"]` so `host.docker.internal` resolves to the host gateway. Set both (see `docker-compose.yml`). |
+| **DinD** (nested daemon) | `dind` | The port is published on the **dind container**, reachable from the board over the shared `dind-net`. Dial the dind **service name** (`dind:${KANBAN_SVC_DB_PORT}`) rather than a host-published port. |
+
+The agent's connection string should therefore use `${KANBAN_SERVICE_HOST:-localhost}:${KANBAN_SVC_DB_PORT}` rather than a hardcoded `localhost`.
+
 ### Option A — DooD (Docker-out-of-Docker): mount the host socket
 
 Lightest option. Uncomment in `docker-compose.yml`:
@@ -506,9 +518,22 @@ docker compose -f docker-compose.yml -f docker-compose.dind.yml up -d --build
 
 This adds a privileged `docker:27-dind` sidecar that shares the **same repos volume at the same path** (`/data`) as the board, so `/data/repos/<repo>` resolves to identical bytes on both the board and the nested daemon — the DooD pitfall disappears. The board's `docker` CLI is pointed at the sidecar via `DOCKER_HOST=tcp://dind:2375` over a private compose network (TLS off, never publicly exposed). The entrypoint waits (polls `docker version`, up to 30s) for the nested daemon before starting the server.
 
+### ⚠️ Security: DooD/DinD give agents host-root
+
+This feature widens the trust boundary. **Mounting `/var/run/docker.sock` (DooD) gives every agent effectively ROOT on the host.** Agents run **autonomously** with `--dangerously-skip-permissions` (the container sets `IS_SANDBOX=1`), so a compromised or misdirected agent can do `docker run -v /:/host …` to read/write the entire host filesystem as root — and doing it *through the Docker socket* **bypasses the board's PreToolUse safety hooks** (those gate the agent's own shell/file tools, not the daemon it drives). The privileged `docker:dind` daemon on `dind-net` (DinD) is similarly reachable by a compromised agent and is a comparable escalation surface.
+
+Treat DooD as **host-root-equivalent for all agent code**. Recommendations:
+- Run the server **only on a trusted, isolated host/network** (a dedicated VM, no other tenants), never on a shared/production host.
+- Prefer DinD over DooD where the pitfall allows — the blast radius is the dind container rather than the host — but still treat the dind daemon as privileged and reachable by agents.
+- Do not expose the board (or the dind daemon) to any untrusted network.
+
 ### Resource caps: WIP × stack size
 
 Every in-flight workspace with an enabled stack runs a full copy of that stack. **Peak resource use ≈ (WIP limit) × (per-stack footprint)** — CPU, RAM, disk, *and host ports*. A postgres-per-workspace at WIP 4 means up to 4 postgres containers and 4 published ports simultaneously. Size the host (and any `mem_limit` you set) for the peak, or lower the board's WIP limit. Teardown-on-merge and the startup reaper keep this bounded, but a burst of parallel tickets hits the peak. DinD also needs disk for its own image/layer cache (`dind-storage` volume).
+
+### Cross-namespace port allocation (containerized only)
+
+Free host ports are probed for availability **inside the board container's** network namespace, but the stack actually publishes them in the **host** (DooD) or **dind** (DinD) namespace. Those namespaces don't share their port tables, so a port the board saw as free can already be taken on the publishing side. Under heavy parallel WIP this can surface as a `port already allocated` provisioning error — **non-fatal**: the workspace is still created with `serviceState.status = "error"` and the stack is retried. If it recurs, widen the port ranges or reduce the board's WIP limit. For DinD, prefer reaching services by the `dind` **service name** rather than host-published ports, which sidesteps host-side port pressure entirely.
 
 ### Declaring a stack on a project
 
