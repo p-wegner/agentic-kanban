@@ -7,7 +7,12 @@
       "Bash(git show HEAD:*)",
       "Bash(git rev-parse*)",
       "Bash(git branch*)",
-      "Bash(git worktree list*)"
+      "Bash(git worktree list*)",
+      "Bash(git worktree add *)",
+      "Bash(git worktree remove *)",
+      "Bash(git worktree prune)",
+      "Bash(node * tokt.js *)",
+      "Bash(test -s \"$(git rev-parse --show-toplevel)/workshop/review/skill.md\")"
     ]
   },
   "mcpServers": {
