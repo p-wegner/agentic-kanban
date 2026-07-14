@@ -1786,6 +1786,8 @@ describe("createWorkspace — service stack deferred chain", () => {
       const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-shared" });
       expect(result.error).toBeUndefined();
       await flushDeferred();
+      // The agent launch is the LAST deferred step — once it ran, the whole chain ran.
+      await vi.waitFor(() => expect(sessionManager.startSession).toHaveBeenCalledOnce());
 
       // No second stack was brought up …
       expect(provisionSpy).not.toHaveBeenCalled();
@@ -1798,8 +1800,6 @@ describe("createWorkspace — service stack deferred chain", () => {
       expect(state.composeProjectName).toBe(donorState.composeProjectName);
       expect(state.status).toBe("up");
       expect(state.ports).toEqual({ db: 61234 });
-      // The agent still launches, wired to the shared (adopted) stack.
-      expect(sessionManager.startSession).toHaveBeenCalledOnce();
     } finally {
       await rm(worktreeDir, { recursive: true, force: true });
     }
@@ -1831,6 +1831,9 @@ describe("createWorkspace — service stack deferred chain", () => {
       const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-pending" });
       expect(result.error).toBeUndefined();
       await flushDeferred();
+      // Refusal is non-fatal, like every other stack error: the agent still launches.
+      // The launch is the LAST deferred step — once it ran, the whole chain ran.
+      await vi.waitFor(() => expect(sessionManager.startSession).toHaveBeenCalledOnce());
 
       // Never raced the senior sharer for .kanban/services.env.
       expect(provisionSpy).not.toHaveBeenCalled();
@@ -1839,8 +1842,6 @@ describe("createWorkspace — service stack deferred chain", () => {
       expect(state.status).toBe("error");
       expect(state.composeProjectName).toBe("");
       expect(state.error).toContain(seniorId);
-      // Non-fatal, like every other stack error: the agent still launches.
-      expect(sessionManager.startSession).toHaveBeenCalledOnce();
     } finally {
       await rm(worktreeDir, { recursive: true, force: true });
     }
