@@ -66,7 +66,15 @@ For each new workspace the board:
 4. Runs `docker compose -p <name> -f docker-compose.yml --env-file .kanban/services.env up -d --wait` — blocking on the postgres healthcheck.
 5. Tells the agent (in `CLAUDE.local.md`) that the stack is up, the allocated port, and to `source .kanban/services.env`.
 
-The agent then connects the backend to `postgres://kanban:kanban@localhost:${KANBAN_SVC_DB_PORT}/app`.
+The agent then connects the backend to `postgres://kanban:kanban@${KANBAN_SERVICE_HOST:-localhost}:${KANBAN_SVC_DB_PORT}/app`.
+
+`KANBAN_SERVICE_HOST` (also written into `.kanban/services.env`) is the host the agent must dial to reach the stack, and it **differs by deployment mode** because the board, the Docker daemon, and the published port can live in different network namespaces:
+
+- **Windows-native / board-on-host** — `localhost` (the default; nothing to set).
+- **DooD** (host socket) — `host.docker.internal` (the port is published on the host; the board also needs `extra_hosts: ["host.docker.internal:host-gateway"]`).
+- **DinD** (nested daemon) — `dind` (reach the postgres by the dind service name over the shared `dind-net`).
+
+Always use `${KANBAN_SERVICE_HOST:-localhost}` rather than a hardcoded `localhost`. See [deployment.md → Per-workspace service stacks](../../docs/deployment.md#per-workspace-service-stacks-dinddood).
 
 ## 4. Teardown
 

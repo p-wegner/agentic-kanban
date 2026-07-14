@@ -108,6 +108,37 @@ Claude auth-bridge logic is preserved unchanged and runs first.
   ports**). Size the host for the peak or lower the WIP limit; teardown-on-merge + the startup
   reaper keep it bounded between bursts.
 
+### Service-host reachability (`KANBAN_SERVICE_HOST`)
+Once the board is containerized, the board process, the Docker daemon, and the published service
+port live in **three different network namespaces**, so the host an agent dials to reach its stack
+differs by mode. The board injects `KANBAN_SERVICE_HOST` (default `localhost`) into the generated
+env file + agent context:
+- **Windows-native / board-on-host:** `localhost` (default) — all three share the host namespace.
+- **DooD:** `host.docker.internal` — the port is published in the **host** namespace; the board
+  service also needs `extra_hosts: ["host.docker.internal:host-gateway"]` to resolve it.
+- **DinD:** `dind` — the port is on the dind container, reached over the shared `dind-net` by the
+  dind **service name** rather than a host-published port.
+Connection strings use `${KANBAN_SERVICE_HOST:-localhost}:${KANBAN_SVC_<NAME>_PORT}`.
+
+### ⚠️ Security posture (recorded decision)
+This feature deliberately widens the trust boundary and is opt-in for that reason. Mounting
+`/var/run/docker.sock` (DooD) gives **every agent effectively ROOT on the host** — agents run
+autonomously with `--dangerously-skip-permissions` (`IS_SANDBOX=1`), so `docker run -v /:/host …`
+reads/writes the whole host as root, and doing it **through the Docker socket bypasses the board's
+PreToolUse safety hooks** (which gate the agent's own tools, not the daemon it drives). The
+privileged `docker:dind` daemon on `dind-net` (DinD) is a comparable escalation surface. Decision:
+**treat DooD as host-root-equivalent for all agent code** — run the server only on a trusted,
+isolated host/network, never a shared/production host, and never expose the board or dind daemon to
+an untrusted network. Documented for operators in deployment.md.
+
+### Cross-namespace port allocation (known limitation)
+Free host ports are probed inside the **board container's** network namespace, but published in the
+**host** (DooD) or **dind** (DinD) namespace — which don't share port tables. So under heavy parallel
+WIP a port seen as free can already be taken on the publishing side, surfacing as a
+`port already allocated` provisioning error. This is **non-fatal** (workspace still created,
+`serviceState.status="error"`, retried), consistent with the graceful-degradation contract. Mitigate
+by widening ranges / lowering WIP; for DinD, prefer the `dind` service name over host-published ports.
+
 ### Reference example
 `examples/multi-repo-postgres/` — a 2-repo (frontend + backend) project with a postgres sidecar
 that publishes `${KANBAN_SVC_DB_PORT}:5432` and namespaces everything via
