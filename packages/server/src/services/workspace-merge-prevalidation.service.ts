@@ -188,6 +188,7 @@ async function reconcileAlreadyMergedRetry(args: {
       await workspaceServicesService.teardownWorkspaceServices({
         composeProjectName: composeName,
         composeWorktreePath: workspace.workingDir,
+        releasedByWorkspaceId: workspace.id,
       });
     }
     await teardownWorktree(
@@ -311,6 +312,7 @@ async function reconcileAncestorWorkspace(
       await workspaceServicesService.teardownWorkspaceServices({
         composeProjectName: composeName,
         composeWorktreePath: workspace.workingDir,
+        releasedByWorkspaceId: workspace.id,
       });
     }
   }

@@ -369,6 +369,7 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
                   await workspaceServicesService.teardownWorkspaceServices({
                     composeProjectName: wfComposeName,
                     composeWorktreePath: workspace.workingDir,
+                    releasedByWorkspaceId: workspace.id,
                   });
                 }
               }
