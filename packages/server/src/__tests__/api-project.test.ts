@@ -153,6 +153,61 @@ describe("Projects API", () => {
     }
   });
 
+  it("PATCH /api/projects/:id persists+validates servicesConfig; GET returns it parsed", async () => {
+    const svcProjectId = await createProjectDirectly(database, { name: "Svc Stack", repoPath: "/tmp/svc-stack" });
+
+    // Valid config round-trips (stored as JSON string, GET returns parsed object).
+    const ok = await app.request(`/api/projects/${svcProjectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ servicesConfig: { enabled: true, composeFile: "docker-compose.yml", ports: ["db", "cache"], composeRepo: "backend" } }),
+    });
+    expect(ok.status).toBe(200);
+
+    const stored = await database.select({ servicesConfig: schema.projects.servicesConfig }).from(schema.projects).where(eq(schema.projects.id, svcProjectId));
+    expect(typeof stored[0].servicesConfig).toBe("string");
+    expect(JSON.parse(stored[0].servicesConfig as string)).toMatchObject({ enabled: true, composeFile: "docker-compose.yml", ports: ["db", "cache"], composeRepo: "backend" });
+
+    const list = await app.request("/api/projects");
+    const projects = await list.json() as Array<{ id: string; servicesConfig: unknown }>;
+    const svc = projects.find((p) => p.id === svcProjectId);
+    expect(svc?.servicesConfig).toMatchObject({ enabled: true, composeFile: "docker-compose.yml", ports: ["db", "cache"] });
+
+    // enabled but empty composeFile → 422
+    const missingFile = await app.request(`/api/projects/${svcProjectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ servicesConfig: { enabled: true, composeFile: "" } }),
+    });
+    expect(missingFile.status).toBe(422);
+
+    // enabled not a boolean → 422
+    const badEnabled = await app.request(`/api/projects/${svcProjectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ servicesConfig: { enabled: "yes", composeFile: "docker-compose.yml" } }),
+    });
+    expect(badEnabled.status).toBe(422);
+
+    // illegal port name → 422
+    const badPort = await app.request(`/api/projects/${svcProjectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ servicesConfig: { enabled: true, composeFile: "docker-compose.yml", ports: ["db-1"] } }),
+    });
+    expect(badPort.status).toBe(422);
+
+    // null clears it back to none
+    const cleared = await app.request(`/api/projects/${svcProjectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ servicesConfig: null }),
+    });
+    expect(cleared.status).toBe(200);
+    const clearedRows = await database.select({ servicesConfig: schema.projects.servicesConfig }).from(schema.projects).where(eq(schema.projects.id, svcProjectId));
+    expect(clearedRows[0].servicesConfig).toBeNull();
+  });
+
   it("GET /api/projects/:id/stats includes code metrics and history", async () => {
     const repoPath = mkdtempSync(join(tmpdir(), "kanban-project-metrics-"));
     execFileSync("git", ["init", "-b", "main"], { cwd: repoPath });
