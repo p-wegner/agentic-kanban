@@ -86,6 +86,14 @@
             "command": "node $CLAUDE_PROJECT_DIR/.claude/hooks/check-conflict-markers.js"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $CLAUDE_PROJECT_DIR/.claude/hooks/check-skill-frontmatter.js"
+          }
+        ]
       }
     ]
   }
