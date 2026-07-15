@@ -70,7 +70,8 @@ export async function removeDirWithRetry(dir: string, attempts = 5, backoffMs = 
 
   const resolved = resolve(dir);
   const segments = resolved.split(sep);
-  if (!segments.includes(".worktrees")) {
+  const worktreesIndex = segments.lastIndexOf(".worktrees");
+  if (worktreesIndex === -1 || worktreesIndex === segments.length - 1) {
     console.warn(`[workspaces] refusing to remove path outside a managed .worktrees directory: ${dir}`);
     return false;
   }

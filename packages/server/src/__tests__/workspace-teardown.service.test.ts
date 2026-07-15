@@ -63,6 +63,22 @@ describe("removeDirWithRetry", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("refuses to remove the .worktrees directory itself (would wipe every worktree)", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ak-removeDirWithRetry-"));
+    const worktreesRoot = join(root, ".worktrees");
+    mkdirSync(join(worktreesRoot, "feature_ak-30-foo"), { recursive: true });
+    try {
+      // Simulates a corrupt row whose workingDir was set to the .worktrees root
+      // itself rather than a specific worktree subdirectory — deleting it would
+      // destroy every other active worktree, not just this workspace's.
+      const result = await removeDirWithRetry(worktreesRoot, 1, 1);
+      expect(result).toBe(false);
+      expect(existsSync(worktreesRoot)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("teardownWorktree", () => {
