@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { existsSync as fsExistsSync } from "node:fs";
 import { resolve, join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 /**
  * Single source of truth for resolving the kanban.db location.
@@ -56,6 +57,24 @@ export interface ResolveDbLocationOptions {
   homeDir?: string;
 }
 
+/**
+ * Extract the on-disk path from a `file:` DB_URL. A proper `file://` URL with a
+ * Windows drive letter (`file:///C:/Users/...`) MUST go through `fileURLToPath` —
+ * naively slicing the `file:` scheme off leaves the URL's leading `///`, which
+ * `path.resolve`/`dirname` then treat as `/C:/...` and rewrite into a bogus
+ * `<drive>:/C:/...` location (silently breaking `createBackup` on Windows). Plain
+ * `file:/relative/or/unix/path` strings (no drive letter, used verbatim in a few
+ * tests/configs) aren't valid Windows file URLs — `fileURLToPath` throws on those,
+ * so fall back to the old scheme-strip for them.
+ */
+function filePathFromFileUrl(fileUrl: string): string {
+  try {
+    return fileURLToPath(fileUrl);
+  } catch {
+    return fileUrl.slice("file:".length);
+  }
+}
+
 function fileUrl(path: string): DbLocation {
   const abs = resolve(path);
   return { url: `file:${abs}`, path: abs, dir: dirname(abs), source: "AGENTIC_KANBAN_DIR" };
@@ -71,7 +90,7 @@ export function resolveDbLocation(opts: ResolveDbLocationOptions = {}): DbLocati
   //    remote libsql endpoint) has no on-disk path/dir.
   const dbUrl = env.DB_URL;
   if (dbUrl) {
-    const path = dbUrl.startsWith("file:") ? dbUrl.slice("file:".length) : null;
+    const path = dbUrl.startsWith("file:") ? filePathFromFileUrl(dbUrl) : null;
     return { url: dbUrl, path, dir: path ? dirname(path) : null, source: "DB_URL" };
   }
 
