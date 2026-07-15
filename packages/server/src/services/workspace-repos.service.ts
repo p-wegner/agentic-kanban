@@ -6,11 +6,9 @@
  * which is the zero-regression mechanism.
  */
 
-import { basename, resolve as pathResolve } from "node:path";
-import { repos } from "@agentic-kanban/shared/schema";
+import { basename } from "node:path";
 import type { Database, TransactionClient } from "../db/index.js";
-import { listProjectRepos, listWorkspaceRepos, insertWorkspaceRepo, setWorkspaceRepoMergedSha, type RepoRow } from "../repositories/repo.repository.js";
-import { getWorkspaceById } from "../repositories/workspace.repository.js";
+import { listProjectRepos, listWorkspaceRepos, insertWorkspaceRepo, setWorkspaceRepoMergedSha, findLiveSiblingSharers, type RepoRow } from "../repositories/repo.repository.js";
 import { WorkspaceError, acquireRepoMergeLock, type GitService } from "./workspace-internals.js";
 import { runMergeCore } from "./merge-executor.service.js";
 
@@ -332,43 +330,4 @@ export async function cleanupSiblingWorktrees(
       }
     }
   }
-}
-
-/**
- * The ids of OTHER live (non-closed) workspaces whose repos rows reference the same
- * sibling worktree path or the same branch in the same repo. Closed workspaces don't
- * count: their rows persist only as the merge audit trail (and their leading
- * workingDir is nulled on close, so the leading guard skips them the same way) —
- * counting them would leak shared worktrees forever. The repos table holds one row
- * per additional repo per workspace, so the unfiltered read stays tiny.
- */
-async function findLiveSiblingSharers(
-  repo: RepoRow,
-  workspaceId: string,
-  database: Database,
-): Promise<string[]> {
-  const allRows = await database.select().from(repos);
-  const sameTarget = allRows.filter((r) =>
-    r.workspaceId !== null &&
-    r.workspaceId !== workspaceId &&
-    samePath(r.path, repo.path) &&
-    ((r.worktreePath !== null && repo.worktreePath !== null && samePath(r.worktreePath, repo.worktreePath))
-      || (r.branch !== null && r.branch === repo.branch)),
-  );
-  const sharerIds: string[] = [];
-  for (const sharerWorkspaceId of new Set(sameTarget.map((r) => r.workspaceId as string))) {
-    const ws = await getWorkspaceById(sharerWorkspaceId, database);
-    if (ws && ws.status !== "closed") sharerIds.push(sharerWorkspaceId);
-  }
-  return sharerIds;
-}
-
-/**
- * Loose path equality (resolved + case-insensitive): worktree paths recorded by
- * different code paths (fresh join vs. git worktree-list reuse) can differ in
- * separators/case on Windows. A false positive only means cleanup is skipped —
- * the safe direction.
- */
-function samePath(a: string, b: string): boolean {
-  return pathResolve(a).toLowerCase() === pathResolve(b).toLowerCase();
 }
