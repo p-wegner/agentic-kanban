@@ -275,13 +275,6 @@ export function createWorkspaceMergeService(deps: {
     if (preflight.kind === "completed") return preflight.result;
     await runWorkspacePreMergeValidation({ workspace, repoPath, baseBranch, gitService });
 
-    // Multi-repo (full-peers): prevalidate ALL sibling repos BEFORE anything lands —
-    // all-or-nothing, so a conflicted sibling can never strand the leading repo
-    // merged alone. Empty for single-repo workspaces. Throws on any failure.
-    const siblingPlans = workspace.isDirect
-      ? []
-      : await prevalidateSiblingMerges({ gitService, database, workspaceId: id });
-
     // Gate the merge with the SAME verify_script + boot/render smoke gate every path shares
     // (arch-review §1.2). The DECISION is delegated to the single owner `resolveMergeGate`,
     // driven by the caller's explicit token (`opts.gate`):
@@ -318,6 +311,17 @@ export function createWorkspaceMergeService(deps: {
         console.log(`[workspace-merge] pre-merge gate decision '${gate.decision}' for workspace ${id}: ${gate.message}`);
       }
     }
+
+    // Multi-repo (full-peers): prevalidate ALL sibling repos BEFORE anything lands —
+    // all-or-nothing, so a conflicted sibling can never strand the leading repo
+    // merged alone. Empty for single-repo workspaces. Throws on any failure.
+    // Deliberately run AFTER the pre-merge gate above (which can block for
+    // minutes on tests/review), not before it — running it earlier would leave
+    // a wide TOCTOU window in which sibling repo state could drift before the
+    // all-or-nothing sibling merge actually lands (adversarial-review finding 22).
+    const siblingPlans = workspace.isDirect
+      ? []
+      : await prevalidateSiblingMerges({ gitService, database, workspaceId: id });
 
     const targetBranch = baseBranch;
     const { response, postMergeContext } = await executeWorkspaceMerge({
