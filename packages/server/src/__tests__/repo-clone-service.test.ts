@@ -5,10 +5,17 @@
 // pure parts — URL → directory-name derivation and repos-root resolution; the actual
 // `git clone` is exercised by registering a real repo in integration/verification.
 
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getReposRoot, repoDirNameFromUrl } from "../services/repo-clone.service.js";
+import { cloneRepo, getReposRoot, repoDirNameFromUrl } from "../services/repo-clone.service.js";
 import { DATA_DIR } from "../db/data-dir.js";
+import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
+
+vi.mock("@agentic-kanban/shared/lib/git-exec", () => ({
+  gitExecOrThrow: vi.fn(),
+}));
 
 describe("repoDirNameFromUrl", () => {
   it("uses the URL basename minus .git", () => {
@@ -42,5 +49,51 @@ describe("getReposRoot", () => {
   it("falls back to <data dir>/repos", () => {
     delete process.env.KANBAN_REPOS_DIR;
     expect(getReposRoot()).toBe(join(DATA_DIR, "repos"));
+  });
+});
+
+describe("cloneRepo failure cleanup", () => {
+  const savedRoot = process.env.KANBAN_REPOS_DIR;
+  let root: string;
+
+  afterEach(() => {
+    if (savedRoot === undefined) delete process.env.KANBAN_REPOS_DIR;
+    else process.env.KANBAN_REPOS_DIR = savedRoot;
+    if (root && existsSync(root)) rmSync(root, { recursive: true, force: true });
+    vi.mocked(gitExecOrThrow).mockReset();
+  });
+
+  it("removes the partial target dir it created when the clone fails, so a retry is not blocked", async () => {
+    root = mkdtempSync(join(tmpdir(), "kanban-repo-clone-test-"));
+    process.env.KANBAN_REPOS_DIR = root;
+    vi.mocked(gitExecOrThrow).mockImplementation(async (args) => {
+      const target = args[args.length - 1];
+      mkdirSync(target, { recursive: true });
+      writeFileSync(join(target, ".git"), "partial");
+      throw new Error("simulated timeout/kill mid-clone");
+    });
+
+    await expect(cloneRepo("https://example.com/some-repo.git")).rejects.toThrow(
+      "simulated timeout/kill mid-clone",
+    );
+
+    const target = join(root, "some-repo");
+    expect(existsSync(target)).toBe(false);
+
+    // Retry must not be blocked by the previous attempt's leftovers.
+    vi.mocked(gitExecOrThrow).mockResolvedValue("");
+    await expect(cloneRepo("https://example.com/some-repo.git")).resolves.toBe(target);
+  });
+
+  it("does not delete a pre-existing empty target dir when the clone fails", async () => {
+    root = mkdtempSync(join(tmpdir(), "kanban-repo-clone-test-"));
+    process.env.KANBAN_REPOS_DIR = root;
+    const target = join(root, "some-repo");
+    mkdirSync(target, { recursive: true });
+    vi.mocked(gitExecOrThrow).mockRejectedValue(new Error("simulated failure"));
+
+    await expect(cloneRepo("https://example.com/some-repo.git")).rejects.toThrow("simulated failure");
+
+    expect(existsSync(target)).toBe(true);
   });
 });
