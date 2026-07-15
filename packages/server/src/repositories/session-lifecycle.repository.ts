@@ -5,7 +5,12 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
-import { getSessionStatsRaw, getSessionStatus as getSessionStatusCanonical } from "./session.repository.js";
+import {
+  clearSessionProviderSessionId,
+  getSessionStatsRaw,
+  getSessionStatus as getSessionStatusCanonical,
+  getSessionWorkspaceId as getSessionWorkspaceIdCanonical,
+} from "./session.repository.js";
 
 export async function getWorkspaceById(
   workspaceId: string,
@@ -57,7 +62,7 @@ export async function clearProviderSessionId(
   sessionId: string,
   database: Database = db,
 ): Promise<void> {
-  await database.update(sessions).set({ providerSessionId: null }).where(eq(sessions.id, sessionId));
+  await clearSessionProviderSessionId(sessionId, database);
 }
 
 export async function getPreferenceValue(
@@ -229,9 +234,6 @@ export async function getSessionWorkspaceId(
   sessionId: string,
   database: Database = db,
 ) {
-  const rows = await database.select({ workspaceId: sessions.workspaceId })
-    .from(sessions)
-    .where(eq(sessions.id, sessionId))
-    .limit(1);
-  return rows[0] ?? null;
+  const workspaceId = await getSessionWorkspaceIdCanonical(sessionId, database);
+  return workspaceId === null ? null : { workspaceId };
 }

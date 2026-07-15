@@ -151,6 +151,14 @@ export async function getSessionsForWorkspacesSince(
     .where(and(inArray(sessions.workspaceId, workspaceIds), gte(sessions.startedAt, sinceIso)));
 }
 
+/** Clear a session's stored provider session id (#26 missing-transcript fallback). */
+export async function clearSessionProviderSessionId(
+  sessionId: string,
+  database: Database = db,
+): Promise<void> {
+  await database.update(sessions).set({ providerSessionId: null }).where(eq(sessions.id, sessionId));
+}
+
 export async function getSessionWorkspaceId(
   sessionId: string,
   database: Database = db,
