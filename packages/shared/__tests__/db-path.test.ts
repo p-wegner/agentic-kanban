@@ -42,6 +42,13 @@ describe("resolveDbLocation precedence", () => {
     expect(loc.path).toBe("/explicit/custom.db");
   });
 
+  it("a Windows file:///C:/... DB_URL resolves to the real drive path, not a bogus <drive>:/C:/... nesting", () => {
+    const loc = resolveDbLocation(base({ env: { DB_URL: "file:///C:/Users/pete/kanban.db" } }));
+    expect(loc.source).toBe("DB_URL");
+    expect(loc.path).toBe("C:\\Users\\pete\\kanban.db");
+    expect(loc.dir).toBe("C:\\Users\\pete");
+  });
+
   it("a non-file DB_URL has no on-disk path/dir", () => {
     const loc = resolveDbLocation(base({ env: { DB_URL: "libsql://remote.example/db" } }));
     expect(loc.source).toBe("DB_URL");
