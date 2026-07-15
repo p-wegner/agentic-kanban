@@ -55,10 +55,26 @@ export async function killProcessTree(pid: number): Promise<void> {
   }
 }
 
-/** Remove a directory recursively, retrying to ride out async Windows file-handle release. */
+/**
+ * Remove a directory recursively, retrying to ride out async Windows file-handle
+ * release. Refuses to touch anything outside a managed `.worktrees` directory —
+ * this is the ONLY containment check standing between a corrupt/legacy workspace
+ * row (e.g. `workingDir` equal to the project's `repoPath`) and a recursive delete
+ * of a real repo; callers gating on `!isDirect` are not sufficient on their own
+ * (mirrors the guard in `removeLeftoverWorktreeDirectory`/`removeStaleWorktree`).
+ */
 export async function removeDirWithRetry(dir: string, attempts = 5, backoffMs = 300): Promise<boolean> {
   const { rm } = await import("node:fs/promises");
   const { existsSync } = await import("node:fs");
+  const { resolve, sep } = await import("node:path");
+
+  const resolved = resolve(dir);
+  const segments = resolved.split(sep);
+  if (!segments.includes(".worktrees")) {
+    console.warn(`[workspaces] refusing to remove path outside a managed .worktrees directory: ${dir}`);
+    return false;
+  }
+
   for (let i = 0; i < attempts; i++) {
     try {
       await rm(dir, { recursive: true, force: true });
