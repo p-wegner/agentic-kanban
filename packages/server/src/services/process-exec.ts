@@ -189,8 +189,17 @@ export async function listOsProcesses(): Promise<OsProcessRecord[]> {
     return parsePowerShellProcessList(stdout);
   }
 
-  const { stdout } = await execCommand("ps", ["-eo", "pid=,ppid=,comm=,args="], { timeout: 10000 });
-  return parsePsProcessList(stdout);
+  try {
+    const { stdout } = await execCommand("ps", ["-eo", "pid=,ppid=,comm=,args="], { timeout: 10000 });
+    return parsePsProcessList(stdout);
+  } catch (err) {
+    // procps ("ps") is not installed in every runtime image (e.g. node:*-slim Docker
+    // images). Resource-sweep hygiene is best-effort, not load-bearing, so degrade to
+    // "no processes found" instead of throwing and spamming [resource-sweep] warnings
+    // every monitor cycle.
+    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return [];
+    throw err;
+  }
 }
 
 export async function listOsPortListeners(): Promise<OsPortListener[]> {
