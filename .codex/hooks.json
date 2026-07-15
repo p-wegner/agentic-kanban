@@ -60,6 +60,17 @@
             "statusMessage": "Checking for committed conflict markers"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/check-skill-frontmatter.js\"",
+            "commandWindows": "node .claude/hooks/check-skill-frontmatter.js",
+            "timeout": 15,
+            "statusMessage": "Checking for duplicated skill frontmatter"
+          }
+        ]
       }
     ]
   }

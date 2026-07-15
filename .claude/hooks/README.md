@@ -81,6 +81,26 @@ down.  `done-unmerged-invariant-scanner.ts` also calls `assertNoCommittedConflic
 at server startup so a `[fatal]` alert appears in the server log even if the hook was
 bypassed.  See ticket #599.
 
+## check-skill-frontmatter.js
+
+Stop hook that scans committed `.claude/skills/*/SKILL.md` files in the current HEAD
+for a duplicated YAML frontmatter block (4+ `---` fence lines within the file's
+opening 14 lines — a legitimate `---` markdown divider used far down in a skill body
+falls outside this window and is not flagged). Uses `git ls-tree`/`git show` against
+HEAD, same pattern as `check-conflict-markers.js` — working-tree edits are ignored.
+
+**Why:** recurring pattern across many agent sessions where `board-navigator/SKILL.md`
+(the project's default skill, materialized into nearly every workspace) picks up a
+second, redundant frontmatter block mid-session — source unconfirmed, but not the
+board's own write path (`writeAgentSkillFile` always overwrites cleanly). Every prior
+occurrence was caught manually by code review and reverted as out-of-scope, costing a
+review round-trip each time. This hook catches it before the agent stops so it's fixed
+in the same session instead.
+
+If a duplicate is found the hook blocks agent exit, lists the affected file(s), and
+asks the agent to revert to master and commit the fix. Wired as a direct Stop hook in
+both `.claude/settings.json` (Claude) and `.codex/hooks.json` (Codex).
+
 ## settings.json entries
 
 Hook entries were **appended** to `.claude/settings.json` (never overwritten). The
