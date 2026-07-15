@@ -1,4 +1,4 @@
-import { sessions, sessionMessages, workspaces, issues, preferences, agentSkills } from "@agentic-kanban/shared/schema";
+import { sessions, sessionMessages, workspaces, issues, preferences } from "@agentic-kanban/shared/schema";
 import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
 import { setWorkspaceStatus, type WorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import { eq } from "drizzle-orm";
@@ -58,18 +58,6 @@ export async function clearProviderSessionId(
   database: Database = db,
 ): Promise<void> {
   await database.update(sessions).set({ providerSessionId: null }).where(eq(sessions.id, sessionId));
-}
-
-export async function getAgentSkillName(
-  skillId: string,
-  database: Database = db,
-): Promise<string | null> {
-  const rows = await database
-    .select({ name: agentSkills.name })
-    .from(agentSkills)
-    .where(eq(agentSkills.id, skillId))
-    .limit(1);
-  return rows[0]?.name ?? null;
 }
 
 export async function getPreferenceValue(

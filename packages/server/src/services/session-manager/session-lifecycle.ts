@@ -1,11 +1,11 @@
 import { db as realDb } from "../../db/index.js";
 import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
 import type { Database } from "../../db/index.js";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import * as lifecycleRepo from "../../repositories/session-lifecycle.repository.js";
+import * as agentSkillRepo from "../../repositories/agent-skill.repository.js";
 import * as realAgentService from "../agent.service.js";
-import { extractPlanFromMessages, writePlanFile, buildImplementPrompt } from "../plan-mode.service.js";
-import { getHarnessBoolSetting } from "../harness-settings.js";
+import { extractPlanFromMessages } from "../plan-mode.service.js";
 import { computeScorecard } from "../workspace-scorecard.service.js";
 import { computeWorkspaceCodeMetrics } from "../workspace-code-metrics.service.js";
 import { recordAgentProfileLaunchFailure } from "../agent-profile-health.service.js";
@@ -36,6 +36,16 @@ import {
   buildClaudeUsageLimitStats,
   buildIndeterminateExitStats,
 } from "./session-exit-stats.js";
+import {
+  CODEX_SPARK_MODEL,
+  CODEX_SAFE_DEFAULT_MODEL,
+  isBuilderSession,
+  buildStaleResumeHandoffPrompt,
+  instructionFingerprint,
+  mergeExistingSessionStats,
+  lifecycleProviderName,
+} from "./session-launch-helpers.js";
+import { finalizePlanModeExit } from "./plan-mode-exit.js";
 
 /** Bounds the missing-transcript fallback (#26) to one automatic retry per workspace. */
 const MAX_STALE_RESUME_RECOVERIES = 1;
@@ -52,50 +62,6 @@ export interface SessionLifecycleDeps {
 
 /** Re-exported from the exit state machine, which now owns the canonical value. */
 export const ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS = EXIT_WINDOW_MS;
-const CODEX_SPARK_MODEL = "gpt-5.3-codex-spark";
-const CODEX_SAFE_DEFAULT_MODEL = "gpt-5.5";
-
-function isBuilderSession(triggerType: string | undefined, planMode: boolean | undefined): boolean {
-  if (planMode) return false;
-  if (!triggerType) return true;
-  return triggerType === "agent" || triggerType === "auto-start" || triggerType === "plan-implement" || triggerType.startsWith("skill:");
-}
-
-/** Handoff note prefixed onto the prompt when relaunching fresh after a missing-transcript resume failure (#26). */
-function buildStaleResumeHandoffPrompt(originalPrompt: string): string {
-  return (
-    "[SESSION HANDOFF — resume recovery] The previous session's conversation transcript could not " +
-    "be found by the provider (state likely lost — volume deleted, config dir pruned, or an image " +
-    "rebuild without persisted state). Starting fresh: treat the current state of the worktree/branch " +
-    "and any HANDOFF.md notes as the source of truth for what has already been done, then continue.\n\n" +
-    originalPrompt
-  );
-}
-
-function instructionFingerprint(value: string | undefined): string | null {
-  const text = (value ?? "").trim();
-  if (!text) return null;
-  return createHash("sha256").update(text).digest("hex").slice(0, 16);
-}
-
-async function mergeExistingSessionStats(database: Database, sessionId: string, statsToSave: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const stats = await lifecycleRepo.getSessionStats(sessionId, database);
-  if (!stats) return statsToSave;
-  try {
-    const existing = JSON.parse(stats) as Record<string, unknown>;
-    return { ...existing, ...statsToSave };
-  } catch {
-    return statsToSave;
-  }
-}
-
-function lifecycleProviderName(provider: string | undefined, profile?: { provider?: string; name?: string }): ProviderName {
-  // A recorded profile.provider (a valid ProviderName) wins; otherwise narrow the
-  // launch provider string (handles the legacy "claude-code" id, defaults to claude).
-  const fromProfile = profile?.provider;
-  if (fromProfile === "codex" || fromProfile === "copilot" || fromProfile === "claude" || fromProfile === "pi") return fromProfile;
-  return narrowProviderName(provider);
-}
 
 export function createSessionLifecycle(
   state: SessionState,
@@ -236,7 +202,8 @@ export function createSessionLifecycle(
     const sessionSkillId: string | null = workspace.skillId ?? null;
     let sessionSkillName: string | null = null;
     if (sessionSkillId) {
-      sessionSkillName = await lifecycleRepo.getAgentSkillName(sessionSkillId, db);
+      const skillRow = await agentSkillRepo.getAgentSkillById(sessionSkillId, db);
+      sessionSkillName = skillRow?.name ?? null;
     }
 
     // Cache session context for activity broadcasting
@@ -565,92 +532,21 @@ export function createSessionLifecycle(
       //   2. no plan / non-zero exit → mark the workspace blocked (needs-attention).
       if (planMode) {
         void sessionFinalized.then(() =>
-          finalizePlanModeExit(workspaceId, exitCode, planText, {
-            agentCommand,
-            agentArgs: effectiveAgentArgs,
-            claudeProfile,
-            permissionPromptTool,
-            provider,
-            profile,
-          }),
-        );
-      }
-    }
-
-    /**
-     * Plan-mode completion (#924). Always clears planMode and lands the workspace in a
-     * VISIBLE state — never a silent idle In Progress with planMode stuck true. Extracted
-     * so the "no plan captured / non-zero exit" recovery path is explicit and testable.
-     */
-    async function finalizePlanModeExit(
-      workspaceId: string,
-      exitCode: number | null,
-      planText: string | null,
-      relaunch: {
-        agentCommand: string | undefined;
-        agentArgs: string | undefined;
-        claudeProfile: string | undefined;
-        permissionPromptTool: string | undefined;
-        provider: import("../agent-provider.js").ProviderId | undefined;
-        profile: { provider: ProviderName; name: string } | undefined;
-      },
-    ): Promise<void> {
-      try {
-        // `planText` is already the strict marker-block (or null) from the raw-buffer scan;
-        // a non-zero exit invalidates it (a crashed run can't have produced a real plan).
-        const plan = exitCode === 0 ? planText : null;
-        const nowIso = () => new Date().toISOString();
-
-        // No usable plan (empty text, extract failed, or non-zero exit): clear plan mode
-        // and surface a needs-attention state instead of stranding the workspace. A normal
-        // follow-up turn then implements (never re-runs read-only — planMode is now false).
-        if (!plan || !workspace.workingDir) {
-          await lifecycleRepo.updateWorkspacePlanMode(workspaceId, false, nowIso(), db);
-          await lifecycleRepo.updateWorkspaceStatusOnly(workspaceId, "blocked", nowIso(), db);
-          const reason = exitCode !== 0
-            ? `plan run exited with code ${exitCode}`
-            : "plan run produced no plan text";
-          console.warn(`[session] plan-mode run produced no usable plan (${reason}): workspaceId=${workspaceId} — cleared planMode, marked blocked`);
-          if (projectId) {
-            emitButlerSystemEvent({
-              projectId,
-              kind: "session_failed",
-              workspaceId,
-              text: `Plan-mode run for workspace ${workspaceId} produced no usable plan (${reason}). Cleared plan mode and marked the workspace blocked — a normal turn will now implement.`,
-            });
-          }
-          return;
-        }
-
-        const planPath = writePlanFile(workspace.workingDir, plan);
-        await lifecycleRepo.updateWorkspacePlanMode(workspaceId, false, nowIso(), db);
-
-        const harness = relaunch.provider === "codex" ? "codex" : relaunch.provider === "copilot" ? "copilot" : "claude";
-        const prefRows = await lifecycleRepo.getAllPreferences(db);
-        const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
-        const autoContinue = getHarnessBoolSetting(prefMap, harness, "plan_auto_continue");
-
-        if (autoContinue) {
-          console.log(`[session] plan ready (${planPath}) — auto-continuing to implementation: workspaceId=${workspaceId}`);
-          await lifecycleRepo.updateWorkspaceStatusOnly(workspaceId, "active", nowIso(), db);
-          await startSession({
+          finalizePlanModeExit(
             workspaceId,
-            prompt: buildImplementPrompt(),
-            agentCommand: relaunch.agentCommand,
-            agentArgs: relaunch.agentArgs,
-            claudeProfile: relaunch.claudeProfile,
-            permissionPromptTool: relaunch.permissionPromptTool,
-            planMode: false,
-            provider: relaunch.provider,
-            triggerType: "plan-implement",
-            profile: relaunch.profile,
-          });
-        } else {
-          console.log(`[session] plan ready (${planPath}) — awaiting human approval: workspaceId=${workspaceId}`);
-          await lifecycleRepo.updateWorkspacePendingPlan(workspaceId, planPath, "awaiting-plan-approval", nowIso(), db);
-        }
-      } catch (err) {
-        console.error(`[session] plan completion handling failed: workspaceId=${workspaceId}`, err);
+            exitCode,
+            planText,
+            {
+              agentCommand,
+              agentArgs: effectiveAgentArgs,
+              claudeProfile,
+              permissionPromptTool,
+              provider,
+              profile,
+            },
+            { db, workspaceWorkingDir: workspace.workingDir, projectId, startSession },
+          ),
+        );
       }
     }
 
