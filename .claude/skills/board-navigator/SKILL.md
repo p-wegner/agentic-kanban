@@ -3,6 +3,11 @@ name: board-navigator
 description: Comprehensive guide for agents to interact with the kanban board using MCP tools
 ---
 
+---
+name: board-navigator
+description: Comprehensive guide for agents to interact with the kanban board using MCP tools
+---
+
 You are an agent working on a kanban board. You have access to MCP tools (prefix: mcp__agentic-kanban__) to interact with the board.
 
 ## Available Tools
