@@ -11,6 +11,16 @@ set -e
 
 mkdir -p "${AGENTIC_KANBAN_DIR:-/data}" "${KANBAN_REPOS_DIR:-/data/repos}" "$HOME/.claude"
 
+# Initialize the database (migrate + seed) BEFORE anything else touches it. The auth
+# bridge below runs `preferences get/set`, which opens a DB connection as a side effect
+# (creating an empty file via migrations) — if that ran first, the `dev` command's own
+# "no DB file -> seed" first-run check would see an already-existing file and silently
+# skip seeding builtin tags/skills/workflows in a fresh container (finding 25). `init` is
+# idempotent (seed() upserts, never duplicates), so running it on every start — including
+# restarts of an already-seeded container — is safe.
+node dist/cli/index.js init >/dev/null 2>&1 \
+  || echo "[entrypoint] db init failed (non-fatal — the dev server will retry)"
+
 if [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
   node -e '
     const { writeFileSync } = require("node:fs");
