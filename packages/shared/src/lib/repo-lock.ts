@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
 
@@ -141,8 +141,12 @@ export function tryAcquireRepoLock(repoPath: string, holder: string, nowMs = Dat
     heartbeatAt: new Date(nowMs).toISOString(),
   };
 
+  if (!existsSync(join(repoPath, ".git"))) {
+    console.warn(`[repo-lock] refusing to acquire: ${join(repoPath, ".git")} does not exist (repoPath misconfigured?)`);
+    return null;
+  }
+
   try {
-    mkdirSync(join(repoPath, ".git"), { recursive: true });
     writeFileSync(lockPath, JSON.stringify(contents), { flag: "wx" });
   } catch {
     // Lost the race to another acquirer between our staleness check and the write.

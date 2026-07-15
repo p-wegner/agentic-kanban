@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -119,6 +119,16 @@ describe("repo-lock (#993 on-disk cross-process merge lock)", () => {
     const recovered = tryAcquireRepoLock(repo, "new-holder");
     expect(recovered).not.toBeNull();
     expect(recovered!.contents.holder).toBe("new-holder");
+  });
+
+  it("refuses to acquire (and does not fabricate .git) for a repoPath with no .git directory", () => {
+    const dir = mkdtempSync(join(tmpdir(), "repo-lock-test-nogit-"));
+    dirs.push(dir);
+
+    const handle = tryAcquireRepoLock(dir, "test-holder");
+
+    expect(handle).toBeNull();
+    expect(existsSync(join(dir, ".git"))).toBe(false);
   });
 
   it("refuses recovery of a fresh (non-stale) lock even from a different holder string", () => {
