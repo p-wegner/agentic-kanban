@@ -31,10 +31,14 @@ import {
 import {
   buildZeroOutputLaunchFailureStats,
   buildModelErrorLaunchFailureStats,
+  buildStaleResumeLaunchFailureStats,
   buildCodexUsageLimitStats,
   buildClaudeUsageLimitStats,
   buildIndeterminateExitStats,
 } from "./session-exit-stats.js";
+
+/** Bounds the missing-transcript fallback (#26) to one automatic retry per workspace. */
+const MAX_STALE_RESUME_RECOVERIES = 1;
 
 /** Subset of agent.service that the lifecycle depends on. Injectable for tests. */
 export type AgentService = typeof realAgentService;
@@ -55,6 +59,17 @@ function isBuilderSession(triggerType: string | undefined, planMode: boolean | u
   if (planMode) return false;
   if (!triggerType) return true;
   return triggerType === "agent" || triggerType === "auto-start" || triggerType === "plan-implement" || triggerType.startsWith("skill:");
+}
+
+/** Handoff note prefixed onto the prompt when relaunching fresh after a missing-transcript resume failure (#26). */
+function buildStaleResumeHandoffPrompt(originalPrompt: string): string {
+  return (
+    "[SESSION HANDOFF — resume recovery] The previous session's conversation transcript could not " +
+    "be found by the provider (state likely lost — volume deleted, config dir pruned, or an image " +
+    "rebuild without persisted state). Starting fresh: treat the current state of the worktree/branch " +
+    "and any HANDOFF.md notes as the source of truth for what has already been done, then continue.\n\n" +
+    originalPrompt
+  );
 }
 
 function instructionFingerprint(value: string | undefined): string | null {
@@ -383,7 +398,19 @@ export function createSessionLifecycle(
         .finally(() => options?.onSessionExit?.(workspaceId, sessionId, effectiveExitCode, planMode));
     }
 
-    /** launch-failure route: a fast zero-output crash or a non-zero exit with error text. */
+    /**
+     * launch-failure route: a fast zero-output crash or a non-zero exit with error text.
+     *
+     * Special-cased sub-route: a resumed launch whose error text names a missing provider
+     * transcript ("No conversation found with session ID: <uuid>" for Claude — volume
+     * deleted, ~/.claude pruned, image rebuild without the state volume). The butler SDK
+     * path already recovers from this (`isStaleResumeError` in butler-sdk.service.ts);
+     * workspace agents did not, so a stale `--resume` used to be reported as a plain
+     * launch failure and left the workspace idle awaiting a manual relaunch. Instead: clear
+     * the dead provider session id so it can't be forwarded again, and relaunch fresh with
+     * a handoff note — bounded to one automatic retry per workspace so a launch failure for
+     * an unrelated reason can't loop.
+     */
     function finalizeLaunchFailureExit(
       route: Extract<ReturnType<typeof classifySessionExitRoute>, { phase: "launch-failure" }>,
       endNow: string,
@@ -392,10 +419,20 @@ export function createSessionLifecycle(
       capturedStderr: string,
     ): void {
       const { isZeroOutput, isNonZeroExit, effectiveExitCode, errorText } = route;
-      const stats = isZeroOutput
-        ? buildZeroOutputLaunchFailureStats(executor, durationMs, exitCode, capturedStderr)
-        : buildModelErrorLaunchFailureStats(executor, durationMs, exitCode, errorText);
-      void (async () => {
+      const usedProviderSessionId = resumeWithNewModel ? undefined : providerSessionId;
+      const staleResumeRecoveryCount = state.workspaceStaleResumeRecoveryCount.get(workspaceId) ?? 0;
+      const isStaleResume =
+        Boolean(usedProviderSessionId) &&
+        staleResumeRecoveryCount < MAX_STALE_RESUME_RECOVERIES &&
+        getProviderExitBehavior(narrowProviderName(executor)).isStaleResumeError(errorText || capturedStderr);
+
+      const stats = isStaleResume
+        ? buildStaleResumeLaunchFailureStats(executor, durationMs, exitCode, errorText || capturedStderr)
+        : isZeroOutput
+          ? buildZeroOutputLaunchFailureStats(executor, durationMs, exitCode, capturedStderr)
+          : buildModelErrorLaunchFailureStats(executor, durationMs, exitCode, errorText);
+
+      const sessionFinalized = (async () => {
         await recordAgentProfileLaunchFailure(db, {
           provider: lifecycleProviderName(provider, profile),
           profileName: profile?.name,
@@ -413,20 +450,51 @@ export function createSessionLifecycle(
           data: stats.failureReason,
           exitCode: null,
         }, db);
-        await lifecycleRepo.updateWorkspaceStatus(workspaceId, "idle", endNow, db);
+        if (isStaleResume) {
+          if (resumeFromId) await lifecycleRepo.clearProviderSessionId(resumeFromId, db);
+        } else {
+          await lifecycleRepo.updateWorkspaceStatus(workspaceId, "idle", endNow, db);
+        }
         if (projectId) {
           emitButlerSystemEvent({
             projectId,
             kind: "session_failed",
             workspaceId,
-            text: isNonZeroExit
-              ? `Agent launch failed for workspace ${workspaceId}: exited with code ${effectiveExitCode} in ${Math.round(durationMs / 1000)}s${errorText ? ` — ${errorText.slice(0, 200)}` : ""}.`
-              : `Agent launch failed for workspace ${workspaceId}: zero output within ${Math.round(durationMs / 1000)}s.`,
+            text: isStaleResume
+              ? `Agent resume failed for workspace ${workspaceId}: the previous conversation transcript was missing. Clearing the stale resume id and relaunching fresh.`
+              : isNonZeroExit
+                ? `Agent launch failed for workspace ${workspaceId}: exited with code ${effectiveExitCode} in ${Math.round(durationMs / 1000)}s${errorText ? ` — ${errorText.slice(0, 200)}` : ""}.`
+                : `Agent launch failed for workspace ${workspaceId}: zero output within ${Math.round(durationMs / 1000)}s.`,
           });
         }
       })()
-        .catch((err) => console.error("Failed to record launch failure:", err))
-        .finally(() => options?.onSessionExit?.(workspaceId, sessionId, effectiveExitCode, planMode));
+        .catch((err) => console.error("Failed to record launch failure:", err));
+
+      void sessionFinalized.finally(() => options?.onSessionExit?.(workspaceId, sessionId, effectiveExitCode, planMode));
+
+      if (isStaleResume) {
+        state.workspaceStaleResumeRecoveryCount.set(workspaceId, staleResumeRecoveryCount + 1);
+        sessionFinalized.finally(() => startSession({
+          workspaceId,
+          prompt: buildStaleResumeHandoffPrompt(prompt),
+          agentCommand,
+          agentArgs: effectiveAgentArgs,
+          resumeFromId: sessionId,
+          claudeProfile,
+          multiTurn,
+          permissionPromptTool,
+          planMode,
+          provider,
+          triggerType: triggerType ?? "agent",
+          profile,
+          model,
+          systemInstructions,
+          contextFiles,
+          extraEnv,
+          workingDirOverride,
+          skipPermissions: skipPermissionsOpt,
+        })).catch((err) => console.error(`[session] stale-resume relaunch failed: workspaceId=${workspaceId}`, err));
+      }
     }
 
     /**

@@ -53,6 +53,34 @@ export function buildModelErrorLaunchFailureStats(executor: string, durationMs: 
   };
 }
 
+/**
+ * Stats for a launch that failed because the provider could not find the resumed
+ * conversation's transcript (missing-transcript fallback). Distinct from a plain
+ * model/auth launch failure so the recovery is visible in session history — the
+ * caller still relaunches fresh right after persisting this.
+ */
+export function buildStaleResumeLaunchFailureStats(executor: string, durationMs: number, exitCode: number | null, errorText: string) {
+  const truncated = errorText.length > 500 ? errorText.slice(0, 500) + "…" : errorText;
+  const reason =
+    "Agent resume failed: the provider could not find the previous conversation's transcript " +
+    "(likely lost/pruned state). Clearing the stale resume id and relaunching fresh." +
+    (truncated ? `\n${truncated}` : "");
+  return {
+    durationMs,
+    totalCostUsd: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    numTurns: 0,
+    model: executor,
+    success: false,
+    launchFailure: true,
+    staleResumeRecovered: true,
+    failureReason: reason,
+    providerExitCode: exitCode,
+    agentSummary: reason,
+  };
+}
+
 export function buildCodexUsageLimitStats(executor: string, durationMs: number, exitCode: number | null, message: string, retryAfter: string | null) {
   return {
     durationMs,

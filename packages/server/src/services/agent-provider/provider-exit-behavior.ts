@@ -85,6 +85,17 @@ export interface ProviderExitBehavior {
    * instructions. Default providers return the input unchanged.
    */
   injectBuilderInstructions(instructions: string | undefined): string | undefined;
+
+  /**
+   * True when a launch-failure's error text indicates the provider could not find the
+   * resumed conversation's transcript (volume deleted, config dir pruned, image rebuilt
+   * without persisted state). This is provider-specific — the butler SDK path already
+   * recognizes Claude's "No conversation found with session ID" via its own
+   * `isStaleResumeError`; workspace-agent launches need the same signal so a stale
+   * `--resume` can fall back to a fresh launch instead of being reported as a plain
+   * launch failure. Providers with no resume-transcript concept return false.
+   */
+  isStaleResumeError(errorText: string): boolean;
 }
 
 const CODEX_BUILDER_COUNTER_INSTRUCTIONS =
@@ -111,6 +122,7 @@ const codexExitBehavior: ProviderExitBehavior = {
   injectBuilderInstructions(instructions) {
     return appendCodexBuilderCounterInstructions(instructions);
   },
+  isStaleResumeError: () => false,
 };
 
 const claudeExitBehavior: ProviderExitBehavior = {
@@ -126,6 +138,11 @@ const claudeExitBehavior: ProviderExitBehavior = {
   injectBuilderInstructions(instructions) {
     return instructions;
   },
+  // Mirrors butler-sdk.service.ts's isStaleResumeError: the CLI surfaces the same
+  // missing-transcript error as the SDK — "No conversation found with session ID: <uuid>".
+  isStaleResumeError(errorText) {
+    return /no conversation found/i.test(errorText);
+  },
 };
 
 /** A no-op behavior for providers with no usage-limit / OAuth-rotation / instruction quirks. */
@@ -135,6 +152,7 @@ function makeNoopBehavior(provider: ProviderName): ProviderExitBehavior {
     detectUsageLimit: () => null,
     resolveConfigDir: () => undefined,
     injectBuilderInstructions: (instructions) => instructions,
+    isStaleResumeError: () => false,
   };
 }
 
