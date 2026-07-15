@@ -24,7 +24,7 @@ FROM node:22-bookworm-slim
 # in the whole engine (heavy, and its compose is the deprecated v1); Docker's repo gives a lean,
 # current CLI + the v2 `compose` subcommand this project invokes.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git openssh-client ca-certificates curl gnupg \
+ && apt-get install -y --no-install-recommends git openssh-client ca-certificates curl gnupg procps \
  && install -m 0755 -d /etc/apt/keyrings \
  && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
  && chmod a+r /etc/apt/keyrings/docker.asc \
