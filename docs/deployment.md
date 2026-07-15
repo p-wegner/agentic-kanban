@@ -448,6 +448,14 @@ docker compose up -d --build
 # UI + API on http://<host>:3001
 ```
 
+**Using the published image instead of building locally:** each tagged release also publishes `<dockerhub-username>/agentic-kanban` to Docker Hub (`linux/amd64`, tagged `latest` and `vX.Y.Z`) via the `docker-publish` GitHub Actions workflow — see [Publishing a New Release](#publishing-a-new-release). Pull it directly:
+
+```bash
+docker pull <dockerhub-username>/agentic-kanban:latest
+```
+
+or swap `docker-compose.yml`'s `build: .` for `image: <dockerhub-username>/agentic-kanban:latest` to skip the local build entirely — everything else (volumes, env vars, DooD/DinD options below) is unchanged.
+
 Key points:
 
 - **State** lives in two named volumes. `kanban-data` (at `/data`) holds the database (`AGENTIC_KANBAN_DIR=/data`), cloned repos (`KANBAN_REPOS_DIR=/data/repos`), and their `.worktrees`. `claude-state` (at `/root/.claude`) holds the Claude CLI's session transcripts (`~/.claude/projects`) and settings: the DB stores each session's resume id, but `claude --resume <id>` needs the matching transcript file — without this volume an image rebuild (`docker compose up -d --build`) wipes the transcripts, so every pre-rebuild workspace's next follow-up turn fails once and its conversation history is permanently lost (the retry starts a fresh session from the worktree's handoff notes).
@@ -603,6 +611,16 @@ Users install the beta with:
 ```powershell
 npx agentic-kanban@beta dev
 ```
+
+### Docker Hub Image (CI)
+
+Pushing a `v*` git tag (Standard Release step above, or the `release` skill) also triggers `.github/workflows/docker-publish.yml`, which builds the root `Dockerfile` and pushes `<dockerhub-username>/agentic-kanban:vX.Y.Z` + `:latest` to Docker Hub. One-time setup (already done for this repo, listed for reference/recovery):
+
+1. A Docker Hub account + `agentic-kanban` repository (public repos are free, unlimited).
+2. A Docker Hub access token (Account Settings → Security → New Access Token).
+3. Two GitHub repo secrets: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`.
+
+To re-run the image build without cutting a new release (e.g. after a transient push failure): `gh workflow run docker-publish.yml --ref vX.Y.Z`.
 
 ---
 
