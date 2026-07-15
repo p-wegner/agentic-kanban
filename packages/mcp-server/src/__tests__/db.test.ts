@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 describe("MCP DB connection pragmas", () => {
   const originalDbUrl = process.env.DB_URL;
@@ -17,7 +18,7 @@ describe("MCP DB connection pragmas", () => {
 
   it("enables SQLite foreign key enforcement on startup", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ak-mcp-db-"));
-    process.env.DB_URL = join(dir, "kanban.db");
+    process.env.DB_URL = pathToFileURL(join(dir, "kanban.db")).href;
     vi.resetModules();
 
     const { rawClient } = await import("../db.js");
@@ -60,14 +61,14 @@ describe("MCP DB connection pragmas", () => {
         },
       }),
     }));
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     await expect(import("../db.js")).resolves.toBeDefined();
 
-    expect(errSpy).toHaveBeenCalledWith(
+    expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining("PRAGMA journal_mode=WAL failed"),
     );
-    errSpy.mockRestore();
+    warnSpy.mockRestore();
     vi.doUnmock("@libsql/client");
   });
 });
