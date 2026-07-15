@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { DATA_DIR } from "../db/data-dir.js";
@@ -43,10 +43,20 @@ export async function cloneRepo(cloneUrl: string, opts: { name?: string } = {}):
   if (existsSync(target) && readdirSync(target).length > 0) {
     throw new Error(`Target directory already exists and is not empty: ${target}`);
   }
+  // Track whether this attempt is the one creating `target` so a failed/timed-out clone
+  // can clean up after itself without touching a directory that predates this attempt.
+  const createdByThisAttempt = !existsSync(target);
   mkdirSync(root, { recursive: true });
-  await gitExecOrThrow(["clone", cloneUrl, target], {
-    timeout: CLONE_TIMEOUT_MS,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-  });
+  try {
+    await gitExecOrThrow(["clone", cloneUrl, target], {
+      timeout: CLONE_TIMEOUT_MS,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    });
+  } catch (err) {
+    if (createdByThisAttempt) {
+      rmSync(target, { recursive: true, force: true });
+    }
+    throw err;
+  }
   return target;
 }
