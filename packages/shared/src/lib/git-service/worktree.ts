@@ -84,6 +84,15 @@ export async function createWorktree(
 
   // Sanitize branch name (and optional per-repo namespace) for directory use
   const safeName = branch.replace(/[^a-zA-Z0-9._-]/g, "_");
+  if (safeName === "" || safeName === "." || safeName === "..") {
+    // A branch name sanitizing down to '', '.', or '..' would make the worktree
+    // leaf resolve to the .worktrees dir itself or its parent (the repo's parent
+    // directory) — the leftover-cleanup rm -rf above would then recursively
+    // delete that directory before git ever validates the branch name.
+    throw new Error(
+      `Refusing to create worktree for branch "${branch}": sanitized name "${safeName}" is not a safe directory leaf`,
+    );
+  }
   const safeNamespace = (opts.pathNamespace ?? "").replace(/[^a-zA-Z0-9._-]/g, "_");
   const worktreesDir = safeNamespace && safeNamespace !== "." && safeNamespace !== ".."
     ? join(dirname(repoPath), ".worktrees", safeNamespace)
