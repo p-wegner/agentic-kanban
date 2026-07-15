@@ -49,6 +49,17 @@ export async function getPrevSessionResumeInfo(
   return rows[0] ?? null;
 }
 
+/**
+ * Clear a session's stored provider session id (#26 missing-transcript fallback) so a
+ * future resume off this row can't keep forwarding a dead `--resume <id>`.
+ */
+export async function clearProviderSessionId(
+  sessionId: string,
+  database: Database = db,
+): Promise<void> {
+  await database.update(sessions).set({ providerSessionId: null }).where(eq(sessions.id, sessionId));
+}
+
 export async function getAgentSkillName(
   skillId: string,
   database: Database = db,

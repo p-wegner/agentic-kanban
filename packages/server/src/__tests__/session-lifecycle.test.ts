@@ -733,4 +733,104 @@ describe("session-lifecycle", () => {
       expect(stats.launch.resolvedModel).toBeNull();
     });
   });
+
+  // #26: missing-transcript fallback. A resumed launch dies immediately because the provider
+  // can't find the resumed conversation's transcript (volume deleted, ~/.claude pruned, image
+  // rebuild without the state volume). This used to be reported as a plain launch failure and
+  // left the workspace idle; it must instead clear the dead resume id and relaunch fresh.
+  describe("missing-transcript resume fallback", () => {
+    it("clears the stale provider session id and relaunches fresh when resume finds no transcript", async () => {
+      const workspaceId = await seedWorkspace(db);
+      const { service: agentService, getOnOutput } = createFakeAgentService();
+      const onSessionExit = vi.fn();
+      const state = createSessionState();
+      const broadcast = vi.fn((sid: string, message: AgentOutputMessage) => {
+        if (!state.messageBuffer.has(sid)) state.messageBuffer.set(sid, []);
+        state.messageBuffer.get(sid)!.push(message);
+      });
+
+      const lifecycle = createSessionLifecycle(
+        state,
+        { onSessionExit },
+        broadcast,
+        { db, agentService, preflight: okPreflight() },
+      );
+
+      // A prior session that captured a provider resume token whose transcript has since vanished.
+      const staleToken = "claude-stale-" + randomUUID();
+      const prevSessionId = randomUUID();
+      const startedAt = new Date().toISOString();
+      await db.insert(sessions).values({
+        id: prevSessionId, workspaceId, executor: "claude-code", status: "completed",
+        startedAt, providerSessionId: staleToken,
+      });
+
+      const sessionId = await lifecycle.startSession({ workspaceId, prompt: "continue the work", resumeFromId: prevSessionId });
+      expect(agentService.launch).toHaveBeenCalledOnce();
+      // The first (resumed) launch forwarded the stale token as --resume.
+      const firstArgs = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(firstArgs[5]).toBe(staleToken);
+
+      const onOutput = getOnOutput();
+      expect(onOutput).toBeDefined();
+      onOutput!({ type: "stderr", data: `No conversation found with session ID: ${staleToken}` } as never);
+      onOutput!({ type: "exit", exitCode: 1 } as never);
+
+      await flush(() => (agentService.launch as ReturnType<typeof vi.fn>).mock.calls.length >= 2);
+
+      // The failed resumed session is recorded (visible in history), flagged as a recovered stale resume.
+      const failedRows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
+      expect(failedRows[0].status).toBe("stopped");
+      const failedStats = JSON.parse(failedRows[0].stats!);
+      expect(failedStats.staleResumeRecovered).toBe(true);
+
+      // The old session's stored resume token was cleared so it can't be forwarded again.
+      const prevRows = await db.select().from(sessions).where(eq(sessions.id, prevSessionId));
+      expect(prevRows[0].providerSessionId).toBeNull();
+
+      // A fresh session was launched automatically, WITHOUT --resume, carrying a handoff note.
+      expect(agentService.launch).toHaveBeenCalledTimes(2);
+      const secondArgs = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[1];
+      expect(secondArgs[5]).toBeUndefined();
+      expect(secondArgs[2]).toContain("resume recovery");
+      expect(secondArgs[2]).toContain("continue the work");
+
+      // The workspace is NOT left idle awaiting a manual relaunch.
+      const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+      expect(wsRows[0].status).not.toBe("idle");
+    });
+
+    it("does not loop: a second consecutive stale-resume failure for the same workspace is reported as a plain launch failure", async () => {
+      const workspaceId = await seedWorkspace(db);
+      const { service: agentService, getOnOutput } = createFakeAgentService();
+      const state = createSessionState();
+      const broadcast = vi.fn((sid: string, message: AgentOutputMessage) => {
+        if (!state.messageBuffer.has(sid)) state.messageBuffer.set(sid, []);
+        state.messageBuffer.get(sid)!.push(message);
+      });
+
+      const lifecycle = createSessionLifecycle(state, undefined, broadcast, { db, agentService, preflight: okPreflight() });
+
+      const staleToken = "claude-stale-" + randomUUID();
+      const prevSessionId = randomUUID();
+      await db.insert(sessions).values({
+        id: prevSessionId, workspaceId, executor: "claude-code", status: "completed",
+        startedAt: new Date().toISOString(), providerSessionId: staleToken,
+      });
+
+      await lifecycle.startSession({ workspaceId, prompt: "continue the work", resumeFromId: prevSessionId });
+      state.workspaceStaleResumeRecoveryCount.set(workspaceId, 1); // already used the one automatic retry
+
+      const onOutput = getOnOutput();
+      onOutput!({ type: "stderr", data: `No conversation found with session ID: ${staleToken}` } as never);
+      onOutput!({ type: "exit", exitCode: 1 } as never);
+
+      await flush();
+
+      // No second relaunch — the failure is reported normally and the workspace goes idle.
+      expect(agentService.launch).toHaveBeenCalledOnce();
+      const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+      expect(wsRows[0].status).toBe("idle");
+    });
+  });
 });
