@@ -104,6 +104,16 @@ async function proxyWithRetry(req, res, body, opts) {
 
 function proxyUpgrade(req, socket, head, opts) {
   const backendSocket = netConnect(opts.backendPort, opts.backendHost);
+
+  // Both legs of this pipe are raw net.Sockets with no other 'error' listener.
+  // A WS client disconnecting abruptly (ECONNRESET) or the backend socket erroring
+  // fires an 'error' event that, left unhandled, is a Node uncaught exception —
+  // it crashes this whole dev-proxy process (and takes the backend down with it,
+  // since scripts/dev.mjs treats that as a fatal, non-retried exit).
+  socket.on("error", () => {
+    backendSocket.destroy();
+  });
+
   backendSocket.on("connect", () => {
     backendSocket.write(`${req.method} ${req.url} HTTP/${req.httpVersion}\r\n`);
     for (let i = 0; i < req.rawHeaders.length; i += 2) {
@@ -121,7 +131,13 @@ function proxyUpgrade(req, socket, head, opts) {
     backendSocket.pipe(socket);
   });
   backendSocket.on("error", () => {
-    socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+    if (!socket.destroyed) {
+      try {
+        socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+      } catch {
+        // client socket already gone — nothing to respond to
+      }
+    }
     socket.destroy();
   });
 }
