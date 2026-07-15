@@ -17,6 +17,7 @@ import { generateSetupScript as generateSetupScriptAI, generateTeardownScript as
 import { populateStackProfile, populateVerifyScript, detectStackProfile } from "./stack-profile.service.js";
 import { cloneRepo } from "./repo-clone.service.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
+import { workspaceServicesService, parseStoredComposeProjectName } from "./workspace-services.service.js";
 import type { WorkspaceSummaryCache } from "./workspace-summary-cache.service.js";
 import type { WorkspaceSummary } from "./workspace-summary.service.js";
 import { buildBoardColumns } from "../lib/board-view.js";
@@ -485,6 +486,24 @@ export function createProjectService(deps: { database: Database; workspaceSummar
 
       const ws = wsRows[0];
       if (ws.workingDir) removedPath = ws.workingDir;
+
+      // Per-workspace Docker service stack teardown runs UNCONDITIONALLY, before the
+      // cascade delete, mirroring deleteWorkspace (workspace-crud.service.ts) — a
+      // fork-child worktree removal must not strand its compose stack until the
+      // startup reaper. Uses the STORED compose project name; the engine's
+      // last-reference guard still skips the down while another live workspace
+      // shares the same compose project. Best-effort — never throws.
+      if (ws.workingDir && !ws.isDirect) {
+        const composeName = parseStoredComposeProjectName(ws.serviceState);
+        if (composeName) {
+          await workspaceServicesService.teardownWorkspaceServices({
+            composeProjectName: composeName,
+            composeWorktreePath: ws.workingDir,
+            releasedByWorkspaceId: ws.id,
+          });
+        }
+      }
+
       await deleteWorkspaceCascade(ws.id, database);
     }
 
