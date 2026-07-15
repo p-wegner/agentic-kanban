@@ -1,5 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
-import { teardownWorktree } from "../services/workspace-teardown.service.js";
+import { mkdtempSync, rmSync, mkdirSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { teardownWorktree, removeDirWithRetry } from "../services/workspace-teardown.service.js";
 import { resolveWorktreeDevPorts } from "../services/worktree-ports.js";
 
 describe("resolveWorktreeDevPorts", () => {
@@ -28,6 +31,53 @@ describe("resolveWorktreeDevPorts", () => {
     expect(ports!.serverPort).toBeLessThanOrEqual(3001 + 1000);
     // deterministic
     expect(resolveWorktreeDevPorts("C:/andrena/.worktrees/spike-thing")).toEqual(ports);
+  });
+});
+
+describe("removeDirWithRetry", () => {
+  it("refuses to remove a directory outside a managed .worktrees directory", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ak-removeDirWithRetry-"));
+    const repoLikeDir = join(root, "some-real-repo");
+    mkdirSync(repoLikeDir, { recursive: true });
+    try {
+      // Simulates a corrupt/legacy workspace row whose workingDir equals the
+      // project's repoPath (or any path outside <parent>/.worktrees) — this must
+      // NOT be recursively deleted.
+      const result = await removeDirWithRetry(repoLikeDir, 1, 1);
+      expect(result).toBe(false);
+      expect(existsSync(repoLikeDir)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("removes a directory that is inside a managed .worktrees directory", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ak-removeDirWithRetry-"));
+    const worktreeDir = join(root, ".worktrees", "feature_ak-30-foo");
+    mkdirSync(worktreeDir, { recursive: true });
+    try {
+      const result = await removeDirWithRetry(worktreeDir, 1, 1);
+      expect(result).toBe(true);
+      expect(existsSync(worktreeDir)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to remove the .worktrees directory itself (would wipe every worktree)", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ak-removeDirWithRetry-"));
+    const worktreesRoot = join(root, ".worktrees");
+    mkdirSync(join(worktreesRoot, "feature_ak-30-foo"), { recursive: true });
+    try {
+      // Simulates a corrupt row whose workingDir was set to the .worktrees root
+      // itself rather than a specific worktree subdirectory — deleting it would
+      // destroy every other active worktree, not just this workspace's.
+      const result = await removeDirWithRetry(worktreesRoot, 1, 1);
+      expect(result).toBe(false);
+      expect(existsSync(worktreesRoot)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
