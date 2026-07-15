@@ -1,9 +1,11 @@
 import { createClient } from "@libsql/client";
 import type { Client } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
-import { readFileSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { readFileSync, rmSync } from "node:fs";
+import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
 import * as schema from "@agentic-kanban/shared/schema";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -40,10 +42,49 @@ export function applyMigrationsToClient(client: Client): void {
   }
 }
 
-/** Create an in-memory libsql DB with all migrations applied. */
+/**
+ * Temp-file paths created by createTestDb(), removed once on process exit.
+ * Most callers don't dispose the DB (the return shape is just `{ client, db }`),
+ * so a single best-effort sweep keeps the OS temp dir from accumulating files
+ * across a full test run.
+ */
+const createdTempDbFiles: string[] = [];
+let exitCleanupRegistered = false;
+
+function registerExitCleanup(): void {
+  if (exitCleanupRegistered) return;
+  exitCleanupRegistered = true;
+  process.on("exit", () => {
+    for (const file of createdTempDbFiles) {
+      for (const suffix of ["", "-wal", "-shm"]) {
+        try {
+          rmSync(`${file}${suffix}`, { force: true });
+        } catch {
+          /* best-effort temp cleanup */
+        }
+      }
+    }
+  });
+}
+
+/**
+ * Create a file-backed libsql DB (temp file) with all migrations applied.
+ *
+ * A temp FILE is used instead of `:memory:` because the libsql native binding
+ * loses an in-memory database across a `db.transaction()` commit on newer Node
+ * runtimes (Node 26 + @libsql/client 0.14 / libsql 0.4.7): a subsequent
+ * base-connection SELECT throws "no such table". This made every transactional
+ * cascade test (delete_workspace/delete_issue) baseline-red. A file-backed DB is
+ * connection-stable, so the behaviour under test is exercised honestly and
+ * deterministically. Temp files are swept on process exit.
+ */
 export function createTestDb(): { client: Client; db: TestDb } {
-  const client = createClient({ url: ":memory:" });
+  registerExitCleanup();
+  const file = join(tmpdir(), `mcp-test-db-${randomUUID()}.db`);
+  createdTempDbFiles.push(file);
+  const client = createClient({ url: `file:${file}` });
   applyMigrationsToClient(client);
+  client.execute("PRAGMA foreign_keys=ON");
   const db = drizzle(client, { schema });
   return { client, db };
 }
