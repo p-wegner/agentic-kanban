@@ -56,7 +56,12 @@ export async function getWorkspaceWorkingDirById(
   database: Database = db,
 ) {
   return database
-    .select({ id: workspaces.id, workingDir: workspaces.workingDir })
+    .select({
+      id: workspaces.id,
+      workingDir: workspaces.workingDir,
+      isDirect: workspaces.isDirect,
+      serviceState: workspaces.serviceState,
+    })
     .from(workspaces)
     .where(eq(workspaces.id, workspaceId))
     .limit(1);
