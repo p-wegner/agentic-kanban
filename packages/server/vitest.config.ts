@@ -12,8 +12,15 @@ import os from "node:os";
 //
 // Both knobs are env-overridable so a dedicated CI runner can opt back into full
 // parallelism / tighter timeouts without touching this file.
+//
+// `maxWorkers`/`minWorkers` are TOP-LEVEL in vitest 4. They were `poolOptions.forks.maxForks`
+// in v3, which v4 REMOVED — it prints a deprecation warning and IGNORES the block entirely, so
+// every knob above was silently inert and the pool still fanned out to one fork per core. The
+// headroom this file describes only actually took effect in #49. Keep these top-level: the
+// failure mode is invisible (a passing config that does nothing), so re-nesting them would
+// quietly undo it again.
 const cpuCount = os.cpus().length || 4;
-const maxForks = Number(process.env.VITEST_MAX_FORKS) || Math.max(2, Math.floor(cpuCount / 2));
+const maxWorkers = Number(process.env.VITEST_MAX_WORKERS) || Math.max(2, Math.floor(cpuCount / 2));
 const testTimeout = Number(process.env.VITEST_TEST_TIMEOUT) || 20_000;
 
 export default defineConfig({
@@ -23,12 +30,8 @@ export default defineConfig({
     testTimeout,
     hookTimeout: testTimeout,
     pool: "forks",
-    poolOptions: {
-      forks: {
-        maxForks,
-        minForks: 1,
-      },
-    },
+    maxWorkers,
+    minWorkers: 1,
   },
   resolve: {
     alias: {

@@ -18,8 +18,11 @@ import os from "node:os";
 // This is NOT papering over a hang: a genuine hang never completes, so it still trips the
 // (raised) budget. Both knobs are env-overridable so a dedicated CI runner can opt back into
 // full parallelism / tighter timeouts without touching this file.
+//
+// `maxWorkers`/`minWorkers` are TOP-LEVEL in vitest 4 — see the note in
+// packages/server/vitest.config.ts. The v3 `poolOptions.forks` form is ignored with a warning.
 const cpuCount = os.cpus().length || 4;
-const maxForks = Number(process.env.VITEST_MAX_FORKS) || Math.max(2, Math.floor(cpuCount / 2));
+const maxWorkers = Number(process.env.VITEST_MAX_WORKERS) || Math.max(2, Math.floor(cpuCount / 2));
 const testTimeout = Number(process.env.VITEST_TEST_TIMEOUT) || 20_000;
 
 export default defineConfig({
@@ -29,11 +32,7 @@ export default defineConfig({
     testTimeout,
     hookTimeout: testTimeout,
     pool: "forks",
-    poolOptions: {
-      forks: {
-        maxForks,
-        minForks: 1,
-      },
-    },
+    maxWorkers,
+    minWorkers: 1,
   },
 });
