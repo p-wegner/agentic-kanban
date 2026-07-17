@@ -27,6 +27,7 @@ import { decideRateLimitExit, formatRateLimitBlockedReason } from "./rate-limit-
 import { classifySessionExit, resolveSessionRoleFlags } from "./session-exit-classification.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { listWorkspaceRepos, type RepoRow } from "../repositories/repo.repository.js";
+import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
 import type { SessionRoleFlags } from "./session-exit-classification.js";
 import { buildLearningStepPrompt } from "../services/merge-helpers.service.js";
 import { isFoundationalBlocker } from "../services/foundational-merge.service.js";
@@ -770,12 +771,20 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       const currentStatusName2 = currentIssueRows2.length > 0 ? statuses.find((s) => s.id === currentIssueRows2[0].statusId)?.name : undefined;
       if (currentStatusName2 === "In Review") {
         const doneStatus = findStatus("Done");
-        await setWorkspaceStatus(db, workspaceId, "closed", { now, set: { workingDir: null } });
+        // The issue only reaches In Review AFTER committedChanges was true (the builder
+        // produced work). "No committed changes now, was In Review" therefore means the
+        // work already LANDED (a sibling-only ticket's auto-merge cleans its branch, so a
+        // later exit pass sees the leading repo clean and the sibling branch gone). Stamp
+        // mergedAt via closeWorkspace(markMerged) instead of setWorkspaceStatus, which left
+        // mergedAt null and made a genuinely-merged workspace read as not-merged to the
+        // merge-queue guard / analytics (#74). Genuinely-empty workspaces never reach In
+        // Review — they fall through to the "leaving issue in current status" branch below.
+        await closeWorkspace({ database: db, workspaceId, now, markMerged: true, clearWorkingDir: true });
         if (doneStatus) {
           await transitionIssueStatus(db, issueId, doneStatus.id, { now });
         }
         boardEvents.broadcast(projectId, "workspace_merged");
-        console.log(`[workflow] non-direct workspace ${workspaceId} closed on agent exit (no committed changes, was In Review)  issue moved to Done`);
+        console.log(`[workflow] non-direct workspace ${workspaceId} closed on agent exit (no committed changes, was In Review, work already landed  mergedAt stamped)  issue moved to Done`);
         return;
       }
       console.log(`[workflow] agent session ${sessionId} completed but no committed changes  leaving issue in current status`);
