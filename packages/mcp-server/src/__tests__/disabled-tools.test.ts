@@ -8,7 +8,7 @@
 // the actual gate, not a re-implementation — and asserts both the positive (a disabled
 // tool vanishes + its call is refused) and the control (a non-disabled tool stays live).
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess } from "node:child_process";
 import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
@@ -16,11 +16,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { migrationFilesInOrder } from "./helpers/test-db.js";
+import { startMcpServer, stopMcpServer } from "./helpers/server-process.js";
 
 const MONOREPO_ROOT = resolve(import.meta.dirname, "../../../..");
 const SHARED_DRIZZLE = resolve(MONOREPO_ROOT, "packages/shared/drizzle");
-const MCP_PKG_DIR = resolve(MONOREPO_ROOT, "packages/mcp-server");
-const SERVER_ENTRY = resolve(MCP_PKG_DIR, "src/index.ts");
+
+// Real server launch — see helpers/server-process.ts. Not vitest's 10s default, which
+// measures machine load rather than the gate under test (#46).
+const SPAWN_HOOK_TIMEOUT_MS = 60_000;
 
 // The two tools we declare disabled for this session, and one control that stays live.
 // NOTE: getDisabledTools (index.ts) now trims + lowercases each entry, so the gate accepts
@@ -112,21 +115,7 @@ describe("MCP disabled_mcp_tools governance gate", () => {
     // Spawn the server as a SINGLE node process (node --import tsx) rather than via
     // `pnpm dev`. `pnpm` would fork a tsx/node grandchild that proc.kill() can't reach
     // on Windows, orphaning a process that holds DB_URL open and making rmSync fail.
-    proc = spawn(process.execPath, ["--conditions=development", "--import", "tsx", SERVER_ENTRY], {
-      cwd: MCP_PKG_DIR,
-      stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, DB_URL: `file:${dbPath}` },
-    });
-
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error("MCP server didn't start")), 15000);
-      proc.stderr!.on("data", (data: Buffer) => {
-        if (data.toString().includes("running on stdio")) {
-          clearTimeout(timeout);
-          resolve();
-        }
-      });
-    });
+    proc = await startMcpServer(dbPath);
 
     const initResp = await sendAndReceive(proc, makeRequest("initialize", {
       protocolVersion: "2024-11-05",
@@ -141,11 +130,7 @@ describe("MCP disabled_mcp_tools governance gate", () => {
     // Kill the (single) server process and AWAIT its exit before removing the temp DB —
     // otherwise the still-open DB_URL handle makes rmSync fail. We do NOT swallow rmSync
     // errors: a failure here means we leaked a live process and must surface, not hide.
-    if (proc && proc.exitCode === null) {
-      const exited = new Promise<void>((res) => proc.once("exit", () => res()));
-      proc.kill();
-      await Promise.race([exited, new Promise<void>((res) => setTimeout(res, 5000))]);
-    }
+    await stopMcpServer(proc);
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -228,21 +213,7 @@ describe("MCP disabled_mcp_tools gate normalizes whitespace and case", () => {
       VALUES ('disabled_mcp_tools', '${RAW_PREF}', '${now}')`);
     db.close();
 
-    proc = spawn(process.execPath, ["--conditions=development", "--import", "tsx", SERVER_ENTRY], {
-      cwd: MCP_PKG_DIR,
-      stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, DB_URL: `file:${dbPath}` },
-    });
-
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error("MCP server didn't start")), 15000);
-      proc.stderr!.on("data", (data: Buffer) => {
-        if (data.toString().includes("running on stdio")) {
-          clearTimeout(timeout);
-          resolve();
-        }
-      });
-    });
+    proc = await startMcpServer(dbPath);
 
     const initResp = await sendAndReceive(proc, makeRequest("initialize", {
       protocolVersion: "2024-11-05",
@@ -251,14 +222,10 @@ describe("MCP disabled_mcp_tools gate normalizes whitespace and case", () => {
     }));
     expect(initResp.result.serverInfo.name).toBe("agentic-kanban");
     proc.stdin!.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
-  });
+  }, SPAWN_HOOK_TIMEOUT_MS);
 
   afterAll(async () => {
-    if (proc && proc.exitCode === null) {
-      const exited = new Promise<void>((res) => proc.once("exit", () => res()));
-      proc.kill();
-      await Promise.race([exited, new Promise<void>((res) => setTimeout(res, 5000))]);
-    }
+    await stopMcpServer(proc);
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
