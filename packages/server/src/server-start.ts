@@ -109,6 +109,18 @@ export async function startServer(port?: number, hostname?: string) {
   // since it runs concurrently with live creates. Both share this one engine (#52).
   await reapOrphanServiceStacksOnce({ shieldMidProvision: false, logLabel: "startup" });
 
+  // Boot preflight (#55): fail LOUDLY on the silent DooD misconfigs (undialable
+  // KANBAN_SERVICE_HOST, a daemon that can't see the data root). No-op unless a project
+  // declares an enabled stack AND docker is available; never blocks startup.
+  try {
+    const { runServiceStackPreflight } = await import("./startup/service-stack-preflight.js");
+    const { anyProjectHasEnabledServiceStack } = await import("./repositories/workspace-service-state.repository.js");
+    const { DATA_DIR } = await import("./db/data-dir.js");
+    await runServiceStackPreflight({ dataRoot: DATA_DIR, hasEnabledStack: anyProjectHasEnabledServiceStack });
+  } catch (err) {
+    console.warn("[services-preflight] preflight bootstrap failed (non-fatal):", err instanceof Error ? err.message : err);
+  }
+
   // Fail-fast guard: scan committed source files for conflict markers.
   // Logs a [fatal] alert for every affected file+line.  Non-crashing so the
   // server can still start and the developer can reach the board to fix it.
