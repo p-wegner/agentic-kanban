@@ -41,10 +41,25 @@ const INITIAL_COMMIT_MESSAGE = "chore: initialise repository";
  * scaffold, so it can only ever pick up the caller's own file in a directory this service
  * just created. A machine with no `user.name`/`user.email` configured cannot commit at all,
  * so an identity is supplied for that case only — a configured identity still wins.
+ *
+ * This bootstrap commit is deliberately insulated from the user's global git config, because
+ * unlike the scaffold commit (which is non-fatal and merely degrades) a failure here aborts
+ * project creation and removes the directory. `commit.gpgsign=true` with no usable key, and a
+ * global `core.hooksPath` pre-commit hook that rejects an empty/near-empty tree, are both
+ * common enough that they would otherwise make createProject refuse to work at all — on a
+ * commit whose only job is to give HEAD a parent.
  */
 function createInitialCommit(repoPath: string): void {
   gitExecSync(["add", "-A"], { cwd: repoPath, stdio: "pipe" });
-  const commit = ["commit", "--allow-empty", "-m", INITIAL_COMMIT_MESSAGE];
+  const commit = [
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "--no-verify",
+    "--allow-empty",
+    "-m",
+    INITIAL_COMMIT_MESSAGE,
+  ];
   try {
     gitExecSync(commit, { cwd: repoPath, stdio: "pipe" });
   } catch {
