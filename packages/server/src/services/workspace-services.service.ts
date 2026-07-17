@@ -43,6 +43,10 @@ const MAX_ERROR_CHARS = 2000;
 export interface ComposeRunner {
   up(args: {
     composeFile: string;
+    /** Additional compose files (absolute paths) merged in via extra `-f` flags — one per
+     *  registered repo that ships its own docker-compose.yml (#71). Same compose project,
+     *  same env file, torn down together with the primary stack. */
+    extraComposeFiles?: string[];
     cwd: string;
     projectName: string;
     envFile: string;
@@ -227,12 +231,13 @@ function isPortInUseError(stderr: string): boolean {
  */
 export function createDefaultComposeRunner(): ComposeRunner {
   return {
-    async up({ composeFile, cwd, projectName, envFile, timeoutMs, env }) {
+    async up({ composeFile, extraComposeFiles, cwd, projectName, envFile, timeoutMs, env }) {
       if (!(await dockerAvailable(env))) {
         return { ok: false, stderr: "docker is not available on this host (service stack skipped)" };
       }
+      const fileArgs = ["-f", composeFile, ...(extraComposeFiles ?? []).flatMap((f) => ["-f", f])];
       const res = await dockerExec(
-        ["compose", "-p", projectName, "-f", composeFile, "--env-file", envFile, "up", "-d", "--wait"],
+        ["compose", "-p", projectName, ...fileArgs, "--env-file", envFile, "up", "-d", "--wait"],
         { cwd, env, timeoutMs },
       );
       return { ok: res.code === 0, stderr: res.stderr || res.error || "" };
@@ -278,6 +283,13 @@ export function createWorkspaceServicesService(deps: {
    * testability; the default lazily reads the repository.
    */
   findLiveStackReferences?: (composeProjectName: string) => Promise<{ id: string }[]>;
+  /**
+   * Resolve additional compose files (absolute paths) contributed by the workspace's
+   * registered sibling repos that ship their own docker-compose.yml (#71). Injected for
+   * testability; the default reads the workspace's repo rows and keeps only files that
+   * exist on disk.
+   */
+  resolveExtraComposeFiles?: (workspaceId: string) => Promise<string[]>;
 } = {}) {
   const runner = deps.runner ?? createDefaultComposeRunner();
   // Default allocator: draws from KANBAN_STACK_PORT_RANGE (or ephemeral when unset) and
@@ -309,6 +321,21 @@ export function createWorkspaceServicesService(deps: {
       const { findLiveWorkspacesReferencingComposeProject } = await import("../repositories/workspace-service-state.repository.js");
       return findLiveWorkspacesReferencingComposeProject(name);
     });
+  const resolveExtraComposeFiles =
+    deps.resolveExtraComposeFiles ??
+    (async (workspaceId: string): Promise<string[]> => {
+      const { listWorkspaceRepos } = await import("../repositories/repo.repository.js");
+      const { existsSync } = await import("node:fs");
+      const repos = await listWorkspaceRepos(workspaceId).catch(() => []);
+      const files: string[] = [];
+      for (const repo of repos) {
+        if (!repo.composeFile || !repo.worktreePath) continue;
+        const abs = join(repo.worktreePath, repo.composeFile);
+        if (existsSync(abs)) files.push(abs);
+        else console.warn(`[services] sibling ${repo.name ?? repo.path} declares composeFile '${repo.composeFile}' but ${abs} does not exist — skipping`);
+      }
+      return files;
+    });
 
   /**
    * Bring a workspace's declared stack up. Allocates free host ports, writes the
@@ -322,6 +349,10 @@ export function createWorkspaceServicesService(deps: {
     const composeFile = config.composeFile || "docker-compose.yml";
     const timeoutMs = config.readyTimeoutMs ?? 120000;
     const portNames = (config.ports ?? []).filter((n) => n.trim().length > 0);
+    // Additional compose files from sibling repos that ship their own stack (#71). They
+    // join THIS workspace's compose project + env file (so they share the declared port
+    // block and are torn down together by the project-name `down`). Best-effort.
+    const extraComposeFiles = await resolveExtraComposeFiles(workspaceId).catch(() => [] as string[]);
 
     // The compose name is scoped to this instance's persisted id (see service-ports.ts)
     // so parallel board instances sharing the daemon never claim each other's stacks.
@@ -372,7 +403,7 @@ export function createWorkspaceServicesService(deps: {
       const MAX_UP_ATTEMPTS = 3; // initial + 2 retries
       let lastStderr = "";
       for (let attempt = 1; attempt <= MAX_UP_ATTEMPTS; attempt++) {
-        const { ok, stderr } = await runner.up({ composeFile, cwd: composeWorktreePath, projectName: name, envFile: envFilePath, timeoutMs });
+        const { ok, stderr } = await runner.up({ composeFile, extraComposeFiles, cwd: composeWorktreePath, projectName: name, envFile: envFilePath, timeoutMs });
         if (ok) {
           return { composeProjectName: name, ports, envFilePath, status: "up", updatedAt: new Date().toISOString() };
         }

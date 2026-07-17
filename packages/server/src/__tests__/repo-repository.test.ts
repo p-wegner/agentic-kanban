@@ -14,6 +14,7 @@ import {
   listProjectRepos,
   listWorkspaceRepos,
   insertProjectRepo,
+  updateProjectRepo,
   insertWorkspaceRepo,
   setWorkspaceRepoMergedSha,
   deleteProjectRepo,
@@ -79,6 +80,24 @@ describe("repo.repository — project-scoped vs workspace-scoped rows", () => {
     await setWorkspaceRepoMergedSha(row.id, "deadbeef", db);
     const [updated] = await listWorkspaceRepos(workspaceId, db);
     expect(updated.mergedHeadSha).toBe("deadbeef");
+  });
+
+  it("persists + updates per-repo setupScript and composeFile (#71)", async () => {
+    const row = await insertProjectRepo(
+      { projectId, path: "/repo/extra", setupScript: "pnpm install", composeFile: "docker-compose.yml" },
+      db,
+    );
+    expect(row.setupScript).toBe("pnpm install");
+    expect(row.composeFile).toBe("docker-compose.yml");
+
+    const updated = await updateProjectRepo(row.id, { setupScript: "cargo fetch", composeFile: null }, db);
+    expect(updated?.setupScript).toBe("cargo fetch");
+    expect(updated?.composeFile).toBeNull();
+
+    // Untouched keys are preserved when omitted from the patch.
+    const partial = await updateProjectRepo(row.id, { composeFile: "compose.dev.yml" }, db);
+    expect(partial?.setupScript).toBe("cargo fetch");
+    expect(partial?.composeFile).toBe("compose.dev.yml");
   });
 
   it("deleteProjectRepo removes only project-scoped rows and reports not-found", async () => {
