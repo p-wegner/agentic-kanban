@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   buildTicketContextMarkdown,
   buildStackProfileSection,
+  buildServiceStackSection,
   writeTicketContextFile,
   TICKET_CONTEXT_FILENAME,
 } from "@agentic-kanban/shared/lib/ticket-context";
@@ -123,6 +124,47 @@ describe("ticket-context", () => {
       expect(section).not.toContain("Build:");
       expect(section).not.toContain("Dev server:");
       expect(section).not.toContain("Dev health URL");
+    });
+  });
+
+  describe("buildServiceStackSection", () => {
+    function makeStack(
+      overrides: Partial<NonNullable<Parameters<typeof buildServiceStackSection>[0]>> = {},
+    ) {
+      return {
+        ports: { postgres: 54321 },
+        envFilePath: "/repos/wt/.kanban/services.env",
+        composeProjectName: "ak-6ae5fa71-ws-579ec97e8b82",
+        serviceHost: "localhost",
+        ...overrides,
+      };
+    }
+
+    it("omits the 'NOT necessarily localhost' warning when the service host IS localhost", () => {
+      const section = buildServiceStackSection(makeStack());
+      expect(section).not.toContain("NOT necessarily");
+      expect(section).toContain("Reach the services at **`localhost:<port>`**.");
+      // The rest of the section is unchanged
+      expect(section).toContain("`KANBAN_SERVICE_HOST`");
+      expect(section).toContain("- **Env file:** `/repos/wt/.kanban/services.env`");
+      expect(section).toContain("set -a; . .kanban/services.env; set +a");
+      expect(section).toContain("`postgres` → `localhost:54321`");
+    });
+
+    it("warns against localhost and names the real host in the DooD case", () => {
+      const section = buildServiceStackSection(makeStack({ serviceHost: "host.docker.internal" }));
+      expect(section).toContain("NOT necessarily `localhost`");
+      expect(section).toContain("the host is `host.docker.internal`");
+      expect(section).toContain("Reach the services at **`host.docker.internal:<port>`**");
+      expect(section).toContain("`postgres` → `host.docker.internal:54321`");
+    });
+
+    it("returns null when there is no stack, and a failure note when it errored", () => {
+      expect(buildServiceStackSection(null)).toBeNull();
+      const errored = buildServiceStackSection(makeStack({ status: "error", error: "port in use" }));
+      expect(errored).toContain("FAILED TO START");
+      expect(errored).toContain("port in use");
+      expect(errored).not.toContain("NOT necessarily");
     });
   });
 

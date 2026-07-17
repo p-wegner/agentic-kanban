@@ -115,14 +115,26 @@ export function buildServiceStackSection(
     }
     return lines.join("\n");
   }
+  // The "NOT necessarily localhost" warning is only true — and only useful — when the
+  // board runs in a container (DooD/DinD) and the host really is something else. When the
+  // host IS localhost it contradicts itself, so state the reach address plainly instead.
+  const isLocalhost = stack.serviceHost === "localhost";
+  const reachLines = isLocalhost
+    ? [
+        `Reach the services at **\`${stack.serviceHost}:<port>\`**. The connection host`,
+        "`KANBAN_SERVICE_HOST` and the",
+      ]
+    : [
+        `Reach the services at **\`${stack.serviceHost}:<port>\`** (NOT necessarily \`localhost\` —`,
+        `the host is \`${stack.serviceHost}\`). The connection host \`KANBAN_SERVICE_HOST\` and the`,
+      ];
   const lines = [
     "## Service stack",
     "",
     "This workspace has an isolated Docker Compose service stack that is ALREADY RUNNING",
     `(compose project \`${stack.composeProjectName}\`). Do not start it yourself.`,
     "",
-    `Reach the services at **\`${stack.serviceHost}:<port>\`** (NOT necessarily \`localhost\` —`,
-    `the host is \`${stack.serviceHost}\`). The connection host \`KANBAN_SERVICE_HOST\` and the`,
+    ...reachLines,
     "allocated `KANBAN_SVC_<NAME>_PORT` values are in `.kanban/services.env` (absolute path",
     "below). Source that file before running app/test commands that need the services,",
     "e.g. `set -a; . .kanban/services.env; set +a`.",
