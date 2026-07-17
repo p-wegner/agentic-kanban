@@ -6,8 +6,8 @@
 // grandfathered workspace repositories past their god-module baselines.
 
 import { randomUUID } from "node:crypto";
-import { and, eq, ne, notInArray, sql } from "drizzle-orm";
-import { workspaces, preferences } from "@agentic-kanban/shared/schema";
+import { and, eq, ne, notInArray, isNotNull, sql } from "drizzle-orm";
+import { workspaces, preferences, projects } from "@agentic-kanban/shared/schema";
 import { TERMINAL_WORKSPACE_STATUSES } from "@agentic-kanban/shared/lib/workspace-status";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -173,6 +173,66 @@ export async function getLiveStackHostPorts(database: Database = db): Promise<nu
     }
   }
   return [...ports];
+}
+
+/**
+ * How many DISTINCT service stacks this board currently has "up" — the live count the
+ * admission cap (`max_concurrent_stacks`, #56) compares against before provisioning an
+ * (N+1)th. Counts DISTINCT composeProjectName so co-resident workspaces that ADOPTED
+ * one shared stack (worktree reuse / fork children) count once, not per-workspace.
+ * Only non-terminal rows whose state is "up" hold a real running stack.
+ */
+export async function countLiveStacks(database: Database = db): Promise<number> {
+  const rows = await database
+    .select({ composeProjectName: sql<string>`json_extract(${workspaces.serviceState}, '$.composeProjectName')` })
+    .from(workspaces)
+    .where(
+      and(
+        notInArray(workspaces.status, TERMINAL_STATUSES),
+        sql`json_extract(${workspaces.serviceState}, '$.status') = 'up'`,
+      ),
+    );
+  const names = new Set<string>();
+  for (const row of rows) {
+    if (typeof row.composeProjectName === "string" && row.composeProjectName.length > 0) {
+      names.add(row.composeProjectName);
+    }
+  }
+  return names.size;
+}
+
+/**
+ * The ids of every LIVE (non-terminal) workspace in this DB. The wide GC sweep (#53)
+ * maps these to ws-tokens (`serviceStackWsToken`) to tell an in-use stack from an
+ * orphan across an instance-id change — the token, not the `ak-<inst>-` prefix, is the
+ * stable identity that survives a DB reset/restore or the home-fallback.
+ */
+export async function getNonTerminalWorkspaceIds(database: Database = db): Promise<string[]> {
+  const rows = await database
+    .select({ id: workspaces.id })
+    .from(workspaces)
+    .where(notInArray(workspaces.status, TERMINAL_STATUSES));
+  return rows.map((r) => r.id);
+}
+
+/**
+ * True if ANY project declares an enabled service stack — the gate for the boot
+ * preflight (#55) and a cheap pre-check elsewhere. Reads the JSON `servicesConfig`
+ * defensively; a malformed blob simply doesn't count.
+ */
+export async function anyProjectHasEnabledServiceStack(database: Database = db): Promise<boolean> {
+  const rows = await database
+    .select({ servicesConfig: projects.servicesConfig })
+    .from(projects)
+    .where(isNotNull(projects.servicesConfig));
+  return rows.some((r) => {
+    try {
+      const parsed = JSON.parse(r.servicesConfig ?? "null") as { enabled?: unknown } | null;
+      return parsed?.enabled === true;
+    } catch {
+      return false;
+    }
+  });
 }
 
 /** Preference key holding this server instance's persisted service-stack identity. */

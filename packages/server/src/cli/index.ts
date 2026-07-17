@@ -20,6 +20,7 @@ import { registerSystemCommands } from "./commands/system.js";
 import { registerTagCommand } from "./commands/tag.js";
 import { registerOpenspecCommand } from "./commands/openspec.js";
 import { registerBoardCommand } from "./commands/board.js";
+import { registerServicesCommand } from "./commands/services.js";
 import { runMigrations, logDefaultBranch } from "./shared.js";
 
 const program = new Command();
@@ -57,6 +58,7 @@ registerSystemCommands(program);
 registerTagCommand(program);
 registerOpenspecCommand(program);
 registerBoardCommand(program);
+registerServicesCommand(program);
 
 // ── `pnpm cli -- <args>` forwards a literal "--" as the first script argument.
 // Commander treats a leading "--" as "end of options", so every token after it

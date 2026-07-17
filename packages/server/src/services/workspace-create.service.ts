@@ -365,7 +365,11 @@ export function createWorkspaceCreateService(deps: {
           stackAdopted = provisioned?.adopted ?? false;
           if (serviceState) {
             timing("service-stack", t);
-            if (serviceState.status === "error") {
+            if (serviceState.status === "error" && serviceState.deferred) {
+              // A deliberate capacity deferral (#56), not a failure — log calmly and do
+              // NOT raise a workspace_error alarm on the Butler feed.
+              console.log(`[services] stack for branch ${ctx.branch} deferred (admission cap): ${serviceState.error ?? ""}`);
+            } else if (serviceState.status === "error") {
               console.warn(`[services] stack for branch ${ctx.branch} came up with status=error: ${serviceState.error ?? ""}`);
               // Surface the failure via the Butler feed too — a non-throwing error
               // state never reaches the deferred catch handler below (#20).
