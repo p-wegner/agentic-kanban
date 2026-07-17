@@ -201,6 +201,20 @@ export async function countLiveStacks(database: Database = db): Promise<number> 
   return names.size;
 }
 
+/**
+ * The ids of every LIVE (non-terminal) workspace in this DB. The wide GC sweep (#53)
+ * maps these to ws-tokens (`serviceStackWsToken`) to tell an in-use stack from an
+ * orphan across an instance-id change — the token, not the `ak-<inst>-` prefix, is the
+ * stable identity that survives a DB reset/restore or the home-fallback.
+ */
+export async function getNonTerminalWorkspaceIds(database: Database = db): Promise<string[]> {
+  const rows = await database
+    .select({ id: workspaces.id })
+    .from(workspaces)
+    .where(notInArray(workspaces.status, TERMINAL_STATUSES));
+  return rows.map((r) => r.id);
+}
+
 /** Preference key holding this server instance's persisted service-stack identity. */
 const SERVICE_STACK_INSTANCE_ID_KEY = "service_stack_instance_id";
 
