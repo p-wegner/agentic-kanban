@@ -232,6 +232,70 @@ describe("provisionWorkspaceServices", () => {
     expect(ups[0].cwd).toBe(workDir);
   });
 
+  // #71 union port allocation: a compose that publishes a port the project never declared
+  // in servicesConfig.ports still gets a free host port + env var allocated for it.
+  it("discovers + allocates a port the primary compose references but config.ports omits", async () => {
+    await writeFile(
+      join(workDir, "docker-compose.yml"),
+      [
+        "services:",
+        "  db:",
+        "    image: postgres:16-alpine",
+        "    ports: [\"${KANBAN_SVC_DB_PORT}:5432\"]",
+        "  broker:",
+        "    image: redis:7-alpine",
+        "    ports: [\"${KANBAN_SVC_BROKER_PORT}:6379\"]",
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+    const requested: string[][] = [];
+    const allocatePorts = async (names: string[]) => {
+      requested.push(names);
+      return Object.fromEntries(names.map((n, i) => [n, 60000 + i]));
+    };
+    const { runner } = makeFakeRunner();
+    const { svc } = makeService({ runner, allocatePorts, resolveExtraComposeFiles: async () => [] });
+
+    const state = await svc.provisionWorkspaceServices({
+      config: CONFIG, // declares db + cache only
+      workspaceId: WORKSPACE_ID,
+      composeWorktreePath: workDir,
+    });
+
+    // db + cache (declared) plus broker (discovered from the compose). cache is not in the
+    // compose but stays declared; broker is unioned in, deduped by canonical env var.
+    expect(requested[0]).toEqual(["db", "cache", "broker"]);
+    expect(state.ports).toHaveProperty("broker");
+    const written = await readFile(state.envFilePath, "utf-8");
+    expect(written).toContain("KANBAN_SVC_BROKER_PORT=");
+  });
+
+  it("allocates ports for a sibling compose's own services and passes it as an extra -f (#71)", async () => {
+    const siblingCompose = join(workDir, "sibling-compose.yml");
+    await writeFile(
+      siblingCompose,
+      "services:\n  queue:\n    image: rabbitmq:3\n    ports: [\"${KANBAN_SVC_QUEUE_PORT}:5672\"]\n",
+      "utf-8",
+    );
+    const requested: string[][] = [];
+    const allocatePorts = async (names: string[]) => {
+      requested.push(names);
+      return Object.fromEntries(names.map((n, i) => [n, 60000 + i]));
+    };
+    const { runner, ups } = makeFakeRunner();
+    const { svc } = makeService({ runner, allocatePorts, resolveExtraComposeFiles: async () => [siblingCompose] });
+
+    await svc.provisionWorkspaceServices({
+      config: CONFIG_1PORT, // declares db only
+      workspaceId: WORKSPACE_ID,
+      composeWorktreePath: workDir,
+    });
+
+    expect(requested[0]).toContain("queue");
+    expect(ups[0].extraComposeFiles).toEqual([siblingCompose]);
+  });
+
   it("writes a self-ignoring .kanban/.gitignore so the env file (secrets/ports) never enters git status", async () => {
     // Real git repo + LINKED WORKTREE — the exact context provisioning writes into.
     const repoDir = await mkdtemp(join(tmpdir(), "ak-svc-git-"));

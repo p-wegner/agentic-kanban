@@ -26,7 +26,7 @@
  * injected so the engine is unit-testable with a fake runner (no docker required).
  */
 
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ServiceStackConfig, ServiceStackState } from "@agentic-kanban/shared";
 import { composeProjectName, isInstanceManagedComposeProject } from "@agentic-kanban/shared";
@@ -92,6 +92,32 @@ async function ensureKanbanDirGitIgnored(worktreePath: string): Promise<void> {
 /** Uppercase + sanitize a port name into an env-var-safe token: KANBAN_SVC_<NAME>_PORT. */
 function portEnvVar(name: string): string {
   return `KANBAN_SVC_${name.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_PORT`;
+}
+
+/**
+ * Discover host-port names a compose file references via `${KANBAN_SVC_<NAME>_PORT}` that
+ * are NOT already declared in `existingNames` (#71 union port allocation). Lets a sibling
+ * repo ship its OWN published ports (a broker, a second DB, …) and have them allocated +
+ * injected, instead of being limited to the project's declared port block. Deduped by the
+ * canonical env var so "db" (declared) and a compose's "DB" reference never double-allocate.
+ * Best-effort text scan (not full YAML) — an unreadable file contributes nothing.
+ */
+async function discoverComposePortNames(composeFiles: string[], existingNames: string[]): Promise<string[]> {
+  const seenEnv = new Set(existingNames.map(portEnvVar));
+  const discovered: string[] = [];
+  const re = /KANBAN_SVC_([A-Z0-9_]+?)_PORT/g;
+  for (const file of composeFiles) {
+    let text: string;
+    try { text = await readFile(file, "utf-8"); } catch { continue; }
+    for (const m of text.matchAll(re)) {
+      const name = m[1].toLowerCase();
+      const env = portEnvVar(name);
+      if (seenEnv.has(env)) continue;
+      seenEnv.add(env);
+      discovered.push(name);
+    }
+  }
+  return discovered;
 }
 
 /**
@@ -348,11 +374,20 @@ export function createWorkspaceServicesService(deps: {
     const envFilePath = join(composeWorktreePath, ENV_FILE_REL);
     const composeFile = config.composeFile || "docker-compose.yml";
     const timeoutMs = config.readyTimeoutMs ?? 120000;
-    const portNames = (config.ports ?? []).filter((n) => n.trim().length > 0);
+    const declaredPortNames = (config.ports ?? []).filter((n) => n.trim().length > 0);
     // Additional compose files from sibling repos that ship their own stack (#71). They
-    // join THIS workspace's compose project + env file (so they share the declared port
-    // block and are torn down together by the project-name `down`). Best-effort.
+    // join THIS workspace's compose project + env file and are torn down together by the
+    // project-name `down`. Best-effort.
     const extraComposeFiles = await resolveExtraComposeFiles(workspaceId).catch(() => [] as string[]);
+    // Union port allocation (#71): a sibling (or the primary) compose may publish ports the
+    // project never declared in `servicesConfig.ports`. Discover every `${KANBAN_SVC_*_PORT}`
+    // referenced across all compose files and allocate the union, so those services get a
+    // free host port + env var instead of failing on an unset variable.
+    const discoveredPortNames = await discoverComposePortNames(
+      [join(composeWorktreePath, composeFile), ...extraComposeFiles],
+      declaredPortNames,
+    ).catch(() => [] as string[]);
+    const portNames = [...declaredPortNames, ...discoveredPortNames];
 
     // The compose name is scoped to this instance's persisted id (see service-ports.ts)
     // so parallel board instances sharing the daemon never claim each other's stacks.
