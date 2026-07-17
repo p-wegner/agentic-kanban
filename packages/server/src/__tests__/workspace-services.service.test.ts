@@ -474,39 +474,37 @@ describe("teardownWorkspaceServices — shared-stack last-reference guard", () =
     expect(markedDown).toEqual([STACK]);
   });
 
-  it("legacy caller (no releasedByWorkspaceId): the stack's OWNER row never blocks its own teardown", async () => {
-    // Merge-reconcile paths tear down BEFORE the workspace row goes terminal and cannot
-    // name the releaser; the owner (the row the compose name derives from) is treated
-    // as the releaser so single-workspace behavior is unchanged.
-    const { runner, downs } = makeFakeRunner();
-    const { svc } = makeService({
-      runner,
-      findLiveStackReferences: async () => [{ id: OWNER_ID }],
-    });
-    await svc.teardownWorkspaceServices({ composeProjectName: STACK, composeWorktreePath: workDir });
-    expect(downs).toHaveLength(1);
-  });
-
-  it("legacy caller: a live ADOPTER (non-owner) reference still blocks the down", async () => {
+  it("an ADOPTER releasing does NOT down the live OWNER's stack (#50)", async () => {
+    // The adopter merges: its own row is already closed, so the only live referent is
+    // the OWNER, whose agent is mid-ticket. The down must be skipped — `down -v` here
+    // would destroy the owner's running containers AND its named volumes.
     const { runner, downs } = makeFakeRunner();
     const { svc, markedDown } = makeService({
       runner,
-      findLiveStackReferences: async () => [{ id: ADOPTER_ID }],
+      findLiveStackReferences: async () => [{ id: OWNER_ID }],
     });
-    await svc.teardownWorkspaceServices({ composeProjectName: STACK, composeWorktreePath: workDir });
+    await svc.teardownWorkspaceServices({
+      composeProjectName: STACK,
+      composeWorktreePath: workDir,
+      releasedByWorkspaceId: ADOPTER_ID,
+    });
     expect(downs).toHaveLength(0);
     expect(markedDown).toEqual([]);
   });
 
-  it("legacy caller: owner exclusion also matches the legacy unscoped name shape (ak-ws-<ws12>)", async () => {
-    const legacyName = "ak-ws-550e8400e29b";
+  it("the OWNER releasing with no other live referent downs its own stack", async () => {
     const { runner, downs } = makeFakeRunner();
-    const { svc } = makeService({
+    const { svc, markedDown } = makeService({
       runner,
       findLiveStackReferences: async () => [{ id: OWNER_ID }],
     });
-    await svc.teardownWorkspaceServices({ composeProjectName: legacyName, composeWorktreePath: workDir });
+    await svc.teardownWorkspaceServices({
+      composeProjectName: STACK,
+      composeWorktreePath: workDir,
+      releasedByWorkspaceId: OWNER_ID,
+    });
     expect(downs).toHaveLength(1);
+    expect(markedDown).toEqual([STACK]);
   });
 
   it("skips the down when the sharer check fails (leak beats pulling a live shared stack)", async () => {
