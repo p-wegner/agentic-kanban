@@ -65,9 +65,30 @@ describe("deriveTestScaffold", () => {
     });
     expect(s!.path).toBe("tests/scaffold.test.js");
     expect(s!.content).not.toContain("vitest");
-    expect(s!.content).toContain('from "node:test"');
-    expect(s!.content).toContain('import assert from "node:assert"');
+    // A `.js` file in a CommonJS package (no isEsm hint) must use require, not ESM import, or Node
+    // prints MODULE_TYPELESS_PACKAGE_JSON and reparses on every run (#67).
+    expect(s!.content).toContain('require("node:test")');
+    expect(s!.content).toContain('const assert = require("node:assert")');
+    expect(s!.content).not.toContain("import");
     expect(s!.content).toContain("assert.strictEqual(1 + 1, 2)");
+  });
+
+  it("emits ESM import for a node:test .js scaffold when the package is type:module (#67)", () => {
+    const s = deriveTestScaffold(profile({ testRunner: null, testCommand: "node --test", testDir: "tests" }), false, false, {
+      resolvedTestCommand: "node --test",
+      isEsm: true,
+    });
+    expect(s!.path).toBe("tests/scaffold.test.js");
+    expect(s!.content).toContain('import test from "node:test"');
+    expect(s!.content).toContain('import assert from "node:assert"');
+    expect(s!.content).not.toContain("require(");
+  });
+
+  it("keeps ESM import for a node:test .ts scaffold regardless of module type (#67)", () => {
+    const s = deriveTestScaffold(profile({ testRunner: null, testCommand: "node --test", testDir: "tests" }), true);
+    expect(s!.path).toBe("tests/scaffold.test.ts");
+    expect(s!.content).toContain('import test from "node:test"');
+    expect(s!.content).not.toContain("require(");
   });
 
   it("derives the runner from the profile's own testCommand when no runner is detected", () => {
@@ -76,7 +97,7 @@ describe("deriveTestScaffold", () => {
     expect(deriveTestScaffold(profile({ testRunner: null, testCommand: "npx jest" }))!.content)
       .toContain('describe("scaffold"');
     expect(deriveTestScaffold(profile({ testRunner: null, testCommand: "node --test" }))!.content)
-      .toContain('from "node:test"');
+      .toContain("node:test");
   });
 
   it("prefers the declared runner over a declared-dep fallback when the command names one", () => {
@@ -171,7 +192,21 @@ describe("writeTestScaffold", () => {
     expect(written).toBe("tests/scaffold.test.js");
     const body = await readFile(join(dir, "tests", "scaffold.test.js"), "utf8");
     expect(body).not.toContain("vitest");
-    expect(body).toContain('from "node:test"');
+    // No "type":"module" in package.json → CommonJS → require, not ESM import (#67).
+    expect(body).toContain('require("node:test")');
+    expect(body).not.toContain("import");
+  });
+
+  it("emits ESM import for node:test when package.json declares type:module (#67)", async () => {
+    await writeFile(
+      join(dir, "package.json"),
+      JSON.stringify({ type: "module", scripts: { test: "node --test" }, dependencies: { pg: "^8.11.3" } }),
+    );
+    const written = writeTestScaffold(dir, profile({ testCommand: "npm test", testRunner: null, testDir: "tests" }));
+    expect(written).toBe("tests/scaffold.test.js");
+    const body = await readFile(join(dir, "tests", "scaffold.test.js"), "utf8");
+    expect(body).toContain('import test from "node:test"');
+    expect(body).not.toContain("require(");
   });
 
   it("still scaffolds vitest for a genuine vitest project (#39 no regression)", async () => {

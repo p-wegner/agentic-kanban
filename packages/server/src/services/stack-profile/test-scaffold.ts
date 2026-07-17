@@ -49,6 +49,13 @@ export interface ScaffoldHints {
    * `testCommand` of "npm test" resolved through package.json `scripts.test` to "node --test".
    */
   resolvedTestCommand?: string | null;
+  /**
+   * Whether the Node package declares `"type": "module"` (true = ESM). Absent/false = CommonJS.
+   * A `.js` scaffold written with ESM `import` syntax into a CommonJS package triggers Node's
+   * MODULE_TYPELESS_PACKAGE_JSON reparse warning (noise + overhead), and would outright fail the
+   * scaffold's test under a package that sets `"type":"commonjs"` explicitly (#67).
+   */
+  isEsm?: boolean;
 }
 
 /** Node runners we can positively identify from a test command's text. */
@@ -126,7 +133,12 @@ function nodeTestExtension(profile: StackProfile, isTypeScript?: boolean): "ts" 
 }
 
 /** Build the runnable scaffold (path + content) for a given runner key. Pure. */
-function scaffoldForRunner(runner: string, profile: StackProfile, isTypeScript?: boolean): TestScaffold | null {
+function scaffoldForRunner(
+  runner: string,
+  profile: StackProfile,
+  isTypeScript?: boolean,
+  isEsm?: boolean,
+): TestScaffold | null {
   const dir = (profile.testDir ?? STACK_DEFAULT_TEST_DIR[profile.stack ?? ""] ?? "tests").replace(/\\/g, "/").replace(/\/+$/, "");
   const join2 = (d: string, f: string) => (d === "." || d === "" ? f : `${d}/${f}`);
 
@@ -151,10 +163,18 @@ describe("scaffold", () => {
       // Node's built-in runner (`node --test`): no dependency, so the scaffold must import only
       // from node: builtins — the whole point being that it runs under the project's own command.
       const ext = nodeTestExtension(profile, isTypeScript);
+      // A `.js` file in a CommonJS package (no `"type":"module"`) must use `require`, not `import`,
+      // or Node prints MODULE_TYPELESS_PACKAGE_JSON and reparses on every run (#67). `.ts` and ESM
+      // packages keep `import`.
+      const cjs = ext === "js" && !isEsm;
+      const header = cjs
+        ? `const test = require("node:test");
+const assert = require("node:assert");`
+        : `import test from "node:test";
+import assert from "node:assert";`;
       return {
         path: join2(dir, `scaffold.test.${ext}`),
-        content: `import test from "node:test";
-import assert from "node:assert";
+        content: `${header}
 
 // Stack-aware scaffold (agentic-kanban): a runnable starting point in this project's real test
 // dir + runner. Replace with a real test for the feature you're building.
@@ -167,7 +187,10 @@ test("scaffold", () => {
     case "jest":
     case "mocha": {
       const ext = nodeTestExtension(profile, isTypeScript);
-      // jest + mocha share the BDD describe/it globals; mocha pairs with node:assert.
+      // jest + mocha share the BDD describe/it globals; mocha pairs with node:assert. In a CommonJS
+      // `.js` package that assert import must be `require`, else MODULE_TYPELESS_PACKAGE_JSON (#67).
+      const cjs = ext === "js" && !isEsm;
+      const mochaAssert = cjs ? `const assert = require("node:assert");` : `import assert from "node:assert";`;
       const body =
         runner === "jest"
           ? `describe("scaffold", () => {
@@ -176,7 +199,7 @@ test("scaffold", () => {
   });
 });
 `
-          : `import assert from "node:assert";
+          : `${mochaAssert}
 
 describe("scaffold", () => {
   it("runs", () => {
@@ -317,7 +340,7 @@ export function deriveTestScaffold(
   if (!profile) return null;
   const runner = resolveRunnerKey(profile, isKotlin, hints);
   if (!runner) return null;
-  return scaffoldForRunner(runner, profile, isTypeScript);
+  return scaffoldForRunner(runner, profile, isTypeScript, hints?.isEsm);
 }
 
 /**
@@ -328,6 +351,7 @@ function readScaffoldHints(repoPath: string, profile: StackProfile): ScaffoldHin
   if (profile.stack !== "node") return {};
   try {
     const pkg = JSON.parse(readFileSync(join(repoPath, "package.json"), "utf8")) as {
+      type?: string;
       scripts?: Record<string, string>;
       dependencies?: Record<string, string>;
       devDependencies?: Record<string, string>;
@@ -338,6 +362,7 @@ function readScaffoldHints(repoPath: string, profile: StackProfile): ScaffoldHin
         ...Object.keys(pkg.devDependencies ?? {}),
       ],
       resolvedTestCommand: resolveScriptCommand(profile.testCommand, pkg.scripts),
+      isEsm: pkg.type === "module",
     };
   } catch {
     return {};
