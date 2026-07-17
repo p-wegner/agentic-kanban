@@ -8,6 +8,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, ne, notInArray, sql } from "drizzle-orm";
 import { workspaces, preferences } from "@agentic-kanban/shared/schema";
+import { TERMINAL_WORKSPACE_STATUSES } from "@agentic-kanban/shared/lib/workspace-status";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
@@ -16,8 +17,10 @@ import type { Database } from "../db/index.js";
  * (merge/close), so a late deferred-provision persist must NOT land on them — a
  * 0-row persist tells the caller to tear the freshly-started stack down instead
  * (finding: delete/close during the up-to-120s `up --wait` window leaked the stack).
+ * Imported from shared as the SINGLE source of truth so this filter and the
+ * service-stack reaper's open-row filter can never drift (#57).
  */
-const TERMINAL_WORKSPACE_STATUSES = ["closed", "merged"];
+const TERMINAL_STATUSES: string[] = [...TERMINAL_WORKSPACE_STATUSES];
 
 /**
  * Persist (or clear, with null) a workspace's serialized service-stack state.
@@ -37,7 +40,7 @@ export async function updateWorkspaceServiceState(
   const updated = await database
     .update(workspaces)
     .set({ serviceState: serviceStateJson, updatedAt: new Date().toISOString() })
-    .where(and(eq(workspaces.id, workspaceId), notInArray(workspaces.status, TERMINAL_WORKSPACE_STATUSES)))
+    .where(and(eq(workspaces.id, workspaceId), notInArray(workspaces.status, TERMINAL_STATUSES)))
     .returning({ id: workspaces.id });
   return updated.length;
 }
@@ -109,7 +112,7 @@ export async function findLiveWorkspacesSharingWorkingDir(
       and(
         eq(workspaces.workingDir, workingDir),
         ne(workspaces.id, excludeWorkspaceId),
-        notInArray(workspaces.status, TERMINAL_WORKSPACE_STATUSES),
+        notInArray(workspaces.status, TERMINAL_STATUSES),
       ),
     );
 }
@@ -132,7 +135,7 @@ export async function findLiveWorkspacesReferencingComposeProject(
     .from(workspaces)
     .where(
       and(
-        notInArray(workspaces.status, TERMINAL_WORKSPACE_STATUSES),
+        notInArray(workspaces.status, TERMINAL_STATUSES),
         sql`json_extract(${workspaces.serviceState}, '$.composeProjectName') = ${composeProjectName}`,
         sql`json_extract(${workspaces.serviceState}, '$.status') = 'up'`,
       ),
@@ -152,7 +155,7 @@ export async function getLiveStackHostPorts(database: Database = db): Promise<nu
     .from(workspaces)
     .where(
       and(
-        notInArray(workspaces.status, TERMINAL_WORKSPACE_STATUSES),
+        notInArray(workspaces.status, TERMINAL_STATUSES),
         sql`json_extract(${workspaces.serviceState}, '$.status') = 'up'`,
       ),
     );
