@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { resolve, sep, join } from "node:path";
-import { ensureAgentGitignore, ensureStarterClaudeMd, ensureStarterAgentsMd, ensureHookScaffold, ensureVerifyGateRunner, getDefaultSkillId, commitProjectScaffoldArtifacts } from "./project-scaffold.js";
+import { getDefaultSkillId } from "./project-scaffold.js";
 import { scaffoldAndPopulateProject } from "./project-registration.js";
 import { isSkillsDirAbsentOrEmpty, writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { listAgentSkills } from "../repositories/agent-skill.repository.js";
@@ -15,7 +15,6 @@ import { buildWorkspaceSummaryMap, buildBlockedMap, buildTagMap, buildGraphEdges
 import { getProjectById, getProjectByRepoPath, getAllProjects, insertProject, deleteProjectCascade, setProjectArchived, getProjectStats, getProjectStatuses, createProjectStatus, deleteProjectStatus, updateProjectStatusSortOrder } from "../repositories/project.repository.js";
 import { getProjectsBasePath, updateProjectFields, clearActiveProjectPreference, getProjectWorkspacesWithIssue, getWorkspaceWorkingDirById, getProjectStatusIdsAndNames, getBoardIssueRows, getProjectStatusesOrdered, getBoardIssues, getPreferenceValue, getGraphIssues, getCrossProjectIssues, getActiveWorkspaceCounts, getBoardSummaryRows } from "../repositories/project-service.repository.js";
 import { generateSetupScript as generateSetupScriptAI, generateTeardownScript as generateTeardownScriptAI, generateVerifyScript as generateVerifyScriptAI } from "./project-setup.service.js";
-import { detectStackProfile } from "./stack-profile.service.js";
 import { cloneRepo } from "./repo-clone.service.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
 import { workspaceServicesService, parseStoredComposeProjectName } from "./workspace-services.service.js";
@@ -297,16 +296,28 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       remoteUrl: repoInfo.remoteUrl,
       defaultSkillId: await getDefaultSkillId(database),
     }, database);
-    // Scaffold the fresh repo with the generic agent-artifact ignores + a starter CLAUDE.md + hooks.
-    // A just-`git init`-ed repo usually has no stack markers yet (stack === null ⇒ no per-stack
-    // block); detect anyway so a pre-seeded directory still gets its build-output ignores (#811).
-    const freshStack = detectStackProfile(repoInfo.repoPath).stack;
-    ensureAgentGitignore(repoInfo.repoPath, body.gitignoreTemplate ? GITIGNORE_TEMPLATES[body.gitignoreTemplate] : undefined, freshStack);
-    ensureStarterClaudeMd(repoInfo.repoPath);
-    ensureStarterAgentsMd(repoInfo.repoPath);
-    ensureHookScaffold(repoInfo.repoPath);
-    ensureVerifyGateRunner(repoInfo.repoPath);
-    await commitProjectScaffoldArtifacts(repoInfo.repoPath);
+    // THE shared registration step (#43/#44) — see scaffoldAndPopulateProject in
+    // project-registration.ts: scaffold → populate the derived config → commit what the board
+    // wrote (#41). This path used to hand-roll the ensure*/commit chain AND never call
+    // populateStackProfile / populateVerifyScript / populateSetupScript at all, so a project
+    // created here had setup_script = null (no dependency install in worktrees — #37/#810) and
+    // verify_script = null (the #788 auto-merge gate never live) forever.
+    //
+    // `skipLlm: true` on purpose (#44). Unlike every other registration entry point, this one
+    // OWNS the directory: it refuses a pre-existing path and `git init`s an empty one, so at
+    // population time the repo provably contains nothing but the board's own scaffold. The LLM
+    // gap-fill would therefore be handed "Detected marker files: none / Repo root entries:
+    // .claude, .gitignore, CLAUDE.md, AGENTS.md" — any non-null answer is invention, not
+    // detection, and an invented setup_script is strictly WORSE than null: it is executed in
+    // every worktree, so a guessed `npm install` fails on what the user then builds as a Python
+    // project, whereas null lets the Builder install correctly. Skipping also costs a ~30s
+    // `claude` subprocess per project creation. As a bonus it makes the #41 hazard unreachable
+    // rather than merely defused: no enrichment is scheduled at all, so nothing can settle after
+    // the scaffold commit and re-dirty the user's checkout.
+    await scaffoldAndPopulateProject(id, repoInfo.repoPath, database, {
+      gitignoreTemplate: body.gitignoreTemplate ? GITIGNORE_TEMPLATES[body.gitignoreTemplate] : undefined,
+      skipLlm: true,
+    });
 
     if (body.generateReadme) {
       const readmePath = join(repoInfo.repoPath, "README.md");
