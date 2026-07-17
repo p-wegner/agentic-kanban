@@ -31,7 +31,7 @@ import { join } from "node:path";
 import type { ServiceStackConfig, ServiceStackState } from "@agentic-kanban/shared";
 import { composeProjectName, isInstanceManagedComposeProject } from "@agentic-kanban/shared";
 import { dockerExec, dockerAvailable } from "@agentic-kanban/shared/lib/docker-exec";
-import { allocateFreePorts } from "./port-allocator.js";
+import { createStackPortAllocator, releaseStackPorts, type StackPortAllocator } from "./port-allocator.js";
 
 /** Max chars of compose stderr preserved on an error state (keep DB rows bounded). */
 const MAX_ERROR_CHARS = 2000;
@@ -262,7 +262,7 @@ export function createDefaultComposeRunner(): ComposeRunner {
 
 export function createWorkspaceServicesService(deps: {
   runner?: ComposeRunner;
-  allocatePorts?: typeof allocateFreePorts;
+  allocatePorts?: StackPortAllocator;
   /**
    * This server instance's persisted id (scopes compose names, see service-ports.ts).
    * Injected for testability; the default lazily reads/creates it in the DB — lazy so
@@ -279,7 +279,17 @@ export function createWorkspaceServicesService(deps: {
   findLiveStackReferences?: (composeProjectName: string) => Promise<{ id: string }[]>;
 } = {}) {
   const runner = deps.runner ?? createDefaultComposeRunner();
-  const allocatePorts = deps.allocatePorts ?? allocateFreePorts;
+  // Default allocator: draws from KANBAN_STACK_PORT_RANGE (or ephemeral when unset) and
+  // excludes ports held by this board's live stacks (queried from the DB) so a restart —
+  // which empties the in-process reservation registry — never re-hands a live port (#51).
+  const allocatePorts =
+    deps.allocatePorts ??
+    createStackPortAllocator({
+      getInUsePorts: async () => {
+        const { getLiveStackHostPorts } = await import("../repositories/workspace-service-state.repository.js");
+        return getLiveStackHostPorts();
+      },
+    });
   const getInstanceId =
     deps.getInstanceId ??
     (async () => {
@@ -322,10 +332,13 @@ export function createWorkspaceServicesService(deps: {
       return { composeProjectName: "", ports: {}, envFilePath, status: "error", error: `failed to resolve the service-stack instance id: ${message}`.slice(0, MAX_ERROR_CHARS), updatedAt: new Date().toISOString() };
     }
 
-    // Allocate free host ports (if any) and (re)write the env file. Broken out so the
-    // port-collision retry below can re-run it with a fresh set of ports.
+    // Allocate host ports (if any) and (re)write the env file. Broken out so the
+    // port-collision retry below can re-run it with a fresh set of ports. Each call
+    // RELEASES the previous set's reservation before allocating again, so a retry never
+    // leaks the abandoned ports out of the range.
     let ports: Record<string, number> = {};
     async function allocateAndWriteEnv(): Promise<void> {
+      releaseStackPorts(Object.values(ports));
       ports = portNames.length > 0 ? await allocatePorts(portNames) : {};
       await mkdir(join(composeWorktreePath, ".kanban"), { recursive: true });
       await ensureKanbanDirGitIgnored(composeWorktreePath);
@@ -336,45 +349,55 @@ export function createWorkspaceServicesService(deps: {
       );
     }
 
+    // The allocator holds each returned port in its in-process reservation registry so a
+    // concurrent provision can't be handed the same number in the allocate→`up` window
+    // (#51 flaw 2). Release on EVERY exit: on success the daemon now holds the real
+    // binding (and the caller persists the ports, which `getInUsePorts` then excludes);
+    // on failure the port was never bound. Keeping it reserved past here would leak the
+    // range across the server's lifetime.
     try {
-      await allocateAndWriteEnv();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return { composeProjectName: name, ports, envFilePath, status: "error", error: message.slice(0, MAX_ERROR_CHARS), updatedAt: new Date().toISOString() };
-    }
-
-    // `up -d --wait` with a bounded port-collision retry. allocateFreePorts frees the
-    // reserved ports before compose binds them, so a parallel create or the host/dind
-    // namespace can steal one → "port is already allocated". On that specific failure we
-    // reallocate, rewrite the env file, and retry (PORT-RETRY). Any partial containers
-    // from the failed attempt are cleared with a best-effort down first.
-    const MAX_UP_ATTEMPTS = 3; // initial + 2 retries
-    let lastStderr = "";
-    for (let attempt = 1; attempt <= MAX_UP_ATTEMPTS; attempt++) {
-      const { ok, stderr } = await runner.up({ composeFile, cwd: composeWorktreePath, projectName: name, envFile: envFilePath, timeoutMs });
-      if (ok) {
-        return { composeProjectName: name, ports, envFilePath, status: "up", updatedAt: new Date().toISOString() };
-      }
-      lastStderr = stderr;
-      const canRetry = attempt < MAX_UP_ATTEMPTS && portNames.length > 0 && isPortInUseError(stderr);
-      if (!canRetry) break;
-      console.warn(`[services] compose up for ${name} hit a port collision (attempt ${attempt}/${MAX_UP_ATTEMPTS}); reallocating ports and retrying`);
-      // Clear anything the failed attempt may have started before rebinding new ports.
-      await runner.down({ projectName: name, cwd: composeWorktreePath }).catch(() => {});
       try {
         await allocateAndWriteEnv();
       } catch (err) {
-        lastStderr = err instanceof Error ? err.message : String(err);
-        break;
+        const message = err instanceof Error ? err.message : String(err);
+        return { composeProjectName: name, ports, envFilePath, status: "error", error: message.slice(0, MAX_ERROR_CHARS), updatedAt: new Date().toISOString() };
       }
+
+      // `up -d --wait` with a bounded port-collision retry. A parallel create or the
+      // host/dind namespace can still steal a port → "port is already allocated"; on that
+      // specific failure we reallocate (drawing a fresh unused number from the range),
+      // rewrite the env file, and retry (PORT-RETRY). Any partial containers from the
+      // failed attempt are cleared with a best-effort down first.
+      const MAX_UP_ATTEMPTS = 3; // initial + 2 retries
+      let lastStderr = "";
+      for (let attempt = 1; attempt <= MAX_UP_ATTEMPTS; attempt++) {
+        const { ok, stderr } = await runner.up({ composeFile, cwd: composeWorktreePath, projectName: name, envFile: envFilePath, timeoutMs });
+        if (ok) {
+          return { composeProjectName: name, ports, envFilePath, status: "up", updatedAt: new Date().toISOString() };
+        }
+        lastStderr = stderr;
+        const canRetry = attempt < MAX_UP_ATTEMPTS && portNames.length > 0 && isPortInUseError(stderr);
+        if (!canRetry) break;
+        console.warn(`[services] compose up for ${name} hit a port collision (attempt ${attempt}/${MAX_UP_ATTEMPTS}); reallocating ports and retrying`);
+        // Clear anything the failed attempt may have started before rebinding new ports.
+        await runner.down({ projectName: name, cwd: composeWorktreePath }).catch(() => {});
+        try {
+          await allocateAndWriteEnv();
+        } catch (err) {
+          lastStderr = err instanceof Error ? err.message : String(err);
+          break;
+        }
+      }
+
+      // F5(a): `up --wait` can start some containers then fail the health gate, leaving
+      // them running. Run a best-effort compensating down so no partial stack lingers
+      // before we return the error state.
+      await runner.down({ projectName: name, cwd: composeWorktreePath }).catch(() => {});
+
+      return { composeProjectName: name, ports, envFilePath, status: "error", error: (lastStderr || "compose up failed").slice(0, MAX_ERROR_CHARS), updatedAt: new Date().toISOString() };
+    } finally {
+      releaseStackPorts(Object.values(ports));
     }
-
-    // F5(a): `up --wait` can start some containers then fail the health gate, leaving
-    // them running. Run a best-effort compensating down so no partial stack lingers
-    // before we return the error state.
-    await runner.down({ projectName: name, cwd: composeWorktreePath }).catch(() => {});
-
-    return { composeProjectName: name, ports, envFilePath, status: "error", error: (lastStderr || "compose up failed").slice(0, MAX_ERROR_CHARS), updatedAt: new Date().toISOString() };
   }
 
   /**

@@ -127,7 +127,10 @@ env file + agent context:
 - **DooD:** `host.docker.internal` — the port is published in the **host** namespace; the board
   service also needs `extra_hosts: ["host.docker.internal:host-gateway"]` to resolve it.
 - **DinD:** `dind` — the port is on the dind container, reached over the shared `dind-net` by the
-  dind **service name** rather than a host-published port.
+  dind **service name**. For the *human/browser* to also reach it, the `dind` service forwards a
+  fixed port block to the host (`ports: ["31000-31099:31000-31099"]`) and the allocator draws stack
+  ports from that same block (`KANBAN_STACK_PORT_RANGE`), so a published stack port is browsable at
+  `localhost:<port>` (#54). Without the range set, DinD stacks stay agent-only (the prior behavior).
 Connection strings use `${KANBAN_SERVICE_HOST:-localhost}:${KANBAN_SVC_<NAME>_PORT}`.
 
 ### ⚠️ Security posture (recorded decision)
@@ -141,13 +144,29 @@ privileged `docker:dind` daemon on `dind-net` (DinD) is a comparable escalation 
 isolated host/network, never a shared/production host, and never expose the board or dind daemon to
 an untrusted network. Documented for operators in deployment.md.
 
-### Cross-namespace port allocation (known limitation)
-Free host ports are probed inside the **board container's** network namespace, but published in the
-**host** (DooD) or **dind** (DinD) namespace — which don't share port tables. So under heavy parallel
-WIP a port seen as free can already be taken on the publishing side, surfacing as a
-`port already allocated` provisioning error. This is **non-fatal** (workspace still created,
-`serviceState.status="error"`, retried), consistent with the graceful-degradation contract. Mitigate
-by widening ranges / lowering WIP; for DinD, prefer the `dind` service name over host-published ports.
+### Cross-namespace port allocation (#51, #54 — largely closed)
+The original allocator probed for a free port with `listen(0)` inside the **board process's own**
+network namespace, but the port is published in the **host** (DooD) or **dind** (DinD) namespace —
+which don't share a port table. So the probe tested the wrong machine, and it also freed the port
+*before* compose bound it (a TOCTOU: a concurrent provision or an outbound socket could steal it in
+the window). Under parallel WIP this surfaced as a `port already allocated` error; the 3× retry
+re-rolled the same wrongly-scoped dice.
+
+**Fix — draw from a dedicated, published range instead of probing (`KANBAN_STACK_PORT_RANGE`).** When
+set (recommended for any containerized/DinD deployment; matches the `dind` service's forwarded block),
+the allocator (`port-allocator.ts`) draws stack host ports from that block, excluding both an
+in-process **reservation registry** (closes the TOCTOU — a port stays reserved until the provisioning
+call releases it, so concurrent provisions never overlap) and the ports of this board's **live `up`
+stacks** read from the DB (`getLiveStackHostPorts`, so a restart that clears the registry can't re-hand
+a live port). Because the range is dedicated to this board's stacks and is the block actually published
+on the publishing side, an unused number from it is bindable there *by construction* — no wrong-namespace
+guess. Unset → legacy `listen(0)` ephemeral ports (correct for a native board that shares the host
+namespace), still registry-guarded for the concurrency case.
+
+Residual: the range bounds concurrent stacks to its size (a *feature* — a natural WIP cap, see #56),
+and a port in the range taken by an unrelated host process is still possible (rare for a dedicated
+block); the `port already allocated` retry — now reallocating a genuinely-different unused number —
+remains the backstop. `serviceState.status="error"` on exhaustion stays non-fatal (graceful degradation).
 
 ### Reference example
 `examples/multi-repo-postgres/` — a 2-repo (frontend + backend) project with a postgres sidecar
