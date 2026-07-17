@@ -13,6 +13,7 @@ import {
 import type { ServiceStackConfig } from "@agentic-kanban/shared";
 import { composeProjectName } from "@agentic-kanban/shared";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
+import { createStackPortAllocator, releaseStackPorts } from "../services/port-allocator.js";
 
 /** A fake ComposeRunner recording calls and returning scripted results. */
 function makeFakeRunner(overrides: Partial<ComposeRunner> = {}): {
@@ -67,6 +68,9 @@ const CONFIG: ServiceStackConfig = {
   readyTimeoutMs: 45000,
   env: { POSTGRES_PASSWORD: "secret" },
 };
+
+/** Single-port variant for the range-reservation-release test (one-port range). */
+const CONFIG_1PORT: ServiceStackConfig = { ...CONFIG, ports: ["db"] };
 
 const WORKSPACE_ID = "550e8400-e29b-41d4-a716-446655440000";
 
@@ -356,6 +360,27 @@ describe("provisionWorkspaceServices", () => {
     // Env file reflects the retried (fresh) ports.
     const written = await readFile(state.envFilePath, "utf-8");
     expect(written).toContain("KANBAN_SVC_DB_PORT='61000'");
+  });
+
+  it("releases the range reservation on success, so ports don't leak across provisions (#51)", async () => {
+    // The REAL ranged allocator (registry-backed), not a fake — proves provision's
+    // finally releases the reservation. Two sequential successful provisions on a
+    // one-port range must BOTH get that port; if the first didn't release, the second
+    // would fail to allocate.
+    const range = { start: 45000, end: 45000 };
+    const allocatePorts = createStackPortAllocator({ range });
+    const { runner } = makeFakeRunner();
+    const { svc } = makeService({ runner, allocatePorts });
+    try {
+      const first = await svc.provisionWorkspaceServices({ config: CONFIG_1PORT, workspaceId: "ws-a", composeWorktreePath: workDir });
+      expect(first.status).toBe("up");
+      expect(first.ports).toEqual({ db: 45000 });
+      const second = await svc.provisionWorkspaceServices({ config: CONFIG_1PORT, workspaceId: "ws-b", composeWorktreePath: workDir });
+      expect(second.status).toBe("up");
+      expect(second.ports).toEqual({ db: 45000 }); // reused → the first was released
+    } finally {
+      releaseStackPorts([45000]);
+    }
   });
 
   it("does NOT retry a non-port failure", async () => {

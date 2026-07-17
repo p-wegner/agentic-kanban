@@ -26,6 +26,15 @@ services:
     environment:
       DOCKER_TLS_CERTDIR: ""     # plain tcp on the internal network only (no public exposure)
     command: ["dockerd", "--host=tcp://0.0.0.0:2375", "--host=unix:///var/run/docker.sock"]
+    # Per-workspace stacks publish their host ports inside THIS container's namespace
+    # (nested daemon), so without a mapping they are agent-reachable (`dind:<port>`) but
+    # NOT reachable from the host browser (#54). Forwarding a fixed block dind→host makes
+    # any stack port in that block browsable at `localhost:<port>`. The board's allocator
+    # MUST draw stack ports from the SAME block — set KANBAN_STACK_PORT_RANGE to match
+    # (see the `kanban` service below). Bounding the block also bounds concurrent stacks
+    # to its size (a natural WIP cap, #56). Widen both sides together if you need more.
+    ports:
+      - "31000-31099:31000-31099"
     networks:
       - dind-net
     volumes:
@@ -45,6 +54,13 @@ services:
       # var (resolveServiceHost) and writes it into each workspace's .kanban/services.env
       # and the agent context, so agents dial `dind:<port>` over the shared dind-net.
       KANBAN_SERVICE_HOST: dind
+      # Draw per-workspace stack host ports ONLY from the block the `dind` service
+      # forwards to the host (above). This both makes stack ports host-browsable (#54) and
+      # sidesteps the cross-namespace port probe (#51): the range is dedicated to this
+      # board's stacks, so an unused number from it is bindable on the publishing side by
+      # construction — no `listen()` guess in the board's own (wrong) namespace. Keep this
+      # in lockstep with the `dind` ports block.
+      KANBAN_STACK_PORT_RANGE: "31000-31099"
     networks:
       - dind-net
     depends_on:

@@ -8,6 +8,7 @@ import {
   markWorkspaceServiceStateDown,
   getWorkspaceLifecycleStatus,
   getOrCreateServiceStackInstanceId,
+  getLiveStackHostPorts,
 } from "../repositories/workspace-service-state.repository.js";
 
 let db: TestDb;
@@ -32,6 +33,41 @@ async function readServiceState(workspaceId: string): Promise<string | null> {
 
 beforeEach(() => {
   ({ db } = createTestDb());
+});
+
+describe("getLiveStackHostPorts (#51)", () => {
+  async function setState(workspaceId: string, state: unknown): Promise<void> {
+    await db.update(workspaces).set({ serviceState: JSON.stringify(state) }).where(eq(workspaces.id, workspaceId));
+  }
+
+  it("returns the de-duplicated ports of live 'up' stacks only", async () => {
+    const a = await seedWorkspace("active");
+    const b = await seedWorkspace("active");
+    await setState(a, { composeProjectName: "ak-i-ws-a", ports: { db: 31000, web: 31001 }, status: "up" });
+    await setState(b, { composeProjectName: "ak-i-ws-b", ports: { db: 31001, cache: 31002 }, status: "up" }); // 31001 shared
+    const ports = (await getLiveStackHostPorts(db)).sort((x, y) => x - y);
+    expect(ports).toEqual([31000, 31001, 31002]);
+  });
+
+  it("ignores down/error stacks and terminal (closed/merged) workspaces", async () => {
+    const down = await seedWorkspace("active");
+    const errored = await seedWorkspace("active");
+    const merged = await seedWorkspace("merged");
+    await setState(down, { composeProjectName: "ak-i-ws-d", ports: { db: 31010 }, status: "down" });
+    await setState(errored, { composeProjectName: "ak-i-ws-e", ports: { db: 31011 }, status: "error" });
+    await setState(merged, { composeProjectName: "ak-i-ws-m", ports: { db: 31012 }, status: "up" });
+    expect(await getLiveStackHostPorts(db)).toEqual([]);
+  });
+
+  it("skips portless states and non-numeric port values", async () => {
+    const good = await seedWorkspace("active");
+    const portless = await seedWorkspace("active");
+    const bogus = await seedWorkspace("active");
+    await setState(good, { composeProjectName: "ak-i-ws-g", ports: { db: 31020 }, status: "up" });
+    await setState(portless, { composeProjectName: "ak-i-ws-p", status: "up" }); // no ports key
+    await setState(bogus, { composeProjectName: "ak-i-ws-x", ports: { db: "nope", web: 0 }, status: "up" });
+    expect(await getLiveStackHostPorts(db)).toEqual([31020]);
+  });
 });
 
 describe("updateWorkspaceServiceState", () => {
