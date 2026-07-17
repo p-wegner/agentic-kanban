@@ -41,9 +41,50 @@ describe("deriveTestScaffold", () => {
     expect(s!.content).toContain("expect(1 + 1).toBe(2)");
   });
 
-  it("defaults a node project with no runner to vitest and .js without TypeScript", () => {
-    const s = deriveTestScaffold(profile({ testRunner: null, testDir: "tests" }), false);
+  it("falls back to vitest (.js without TypeScript) for a node project that declares vitest", () => {
+    const s = deriveTestScaffold(profile({ testRunner: null, testDir: "tests" }), false, false, {
+      declaredDeps: ["vitest"],
+    });
     expect(s!.path).toBe("tests/scaffold.test.js");
+    expect(s!.content).toContain('from "vitest"');
+  });
+
+  it("writes nothing for a node project with no runner and no known test dependency (#39)", () => {
+    // Guessing vitest here breaks the project's own `node --test` command with ERR_MODULE_NOT_FOUND.
+    expect(deriveTestScaffold(profile({ testRunner: null, testDir: "tests" }), false, false, {
+      declaredDeps: ["pg"],
+    })).toBeNull();
+    // No hints at all = the runner cannot be established either.
+    expect(deriveTestScaffold(profile({ testRunner: null, testDir: "tests" }), false)).toBeNull();
+  });
+
+  it("derives node:test from the resolved test command instead of assuming vitest (#39)", () => {
+    const s = deriveTestScaffold(profile({ testRunner: null, testCommand: "npm test", testDir: "tests" }), false, false, {
+      declaredDeps: ["pg"],
+      resolvedTestCommand: "node --test",
+    });
+    expect(s!.path).toBe("tests/scaffold.test.js");
+    expect(s!.content).not.toContain("vitest");
+    expect(s!.content).toContain('from "node:test"');
+    expect(s!.content).toContain('import assert from "node:assert"');
+    expect(s!.content).toContain("assert.strictEqual(1 + 1, 2)");
+  });
+
+  it("derives the runner from the profile's own testCommand when no runner is detected", () => {
+    expect(deriveTestScaffold(profile({ testRunner: null, testCommand: "npx vitest run" }))!.content)
+      .toContain('from "vitest"');
+    expect(deriveTestScaffold(profile({ testRunner: null, testCommand: "npx jest" }))!.content)
+      .toContain('describe("scaffold"');
+    expect(deriveTestScaffold(profile({ testRunner: null, testCommand: "node --test" }))!.content)
+      .toContain('from "node:test"');
+  });
+
+  it("prefers the declared runner over a declared-dep fallback when the command names one", () => {
+    // vitest is installed, but the project runs the built-in runner — the command wins.
+    const s = deriveTestScaffold(profile({ testRunner: null, testCommand: "node --test", testDir: "tests" }), false, false, {
+      declaredDeps: ["vitest"],
+    });
+    expect(s!.content).not.toContain("vitest");
   });
 
   it("scaffolds a pytest test (test_*.py) for python", () => {
@@ -116,6 +157,37 @@ describe("writeTestScaffold", () => {
     expect(written).toBeNull();
     const body = await readFile(join(dir, "tests", "test_scaffold.py"), "utf8");
     expect(body).toBe("# real test\n");
+  });
+
+  it("scaffolds node:test — not vitest — for a `node --test` project (#39)", async () => {
+    // The verified repro: profile says testCommand "npm test", testRunner null, and vitest is in
+    // neither dependencies nor devDependencies. A vitest scaffold made the project's own passing
+    // test command die with ERR_MODULE_NOT_FOUND.
+    await writeFile(
+      join(dir, "package.json"),
+      JSON.stringify({ scripts: { test: "node --test" }, dependencies: { pg: "^8.11.3" } }),
+    );
+    const written = writeTestScaffold(dir, profile({ testCommand: "npm test", testRunner: null, testDir: "tests" }));
+    expect(written).toBe("tests/scaffold.test.js");
+    const body = await readFile(join(dir, "tests", "scaffold.test.js"), "utf8");
+    expect(body).not.toContain("vitest");
+    expect(body).toContain('from "node:test"');
+  });
+
+  it("still scaffolds vitest for a genuine vitest project (#39 no regression)", async () => {
+    await writeFile(
+      join(dir, "package.json"),
+      JSON.stringify({ scripts: { test: "vitest run" }, devDependencies: { vitest: "^2.0.0" } }),
+    );
+    const written = writeTestScaffold(dir, profile({ testCommand: "npm test", testRunner: null, testDir: "tests" }));
+    expect(written).toBe("tests/scaffold.test.js");
+    expect(await readFile(join(dir, "tests", "scaffold.test.js"), "utf8")).toContain('from "vitest"');
+  });
+
+  it("writes nothing for a node project whose runner can't be established (#39)", async () => {
+    await writeFile(join(dir, "package.json"), JSON.stringify({ dependencies: { pg: "^8.11.3" } }));
+    expect(writeTestScaffold(dir, profile({ testCommand: null, testRunner: null, testDir: "tests" }))).toBeNull();
+    expect(await exists(join(dir, "tests"))).toBe(false);
   });
 
   it("is a no-op for an unknown stack (writes nothing)", async () => {
