@@ -168,10 +168,63 @@ and a port in the range taken by an unrelated host process is still possible (ra
 block); the `port already allocated` retry — now reallocating a genuinely-different unused number —
 remains the backstop. `serviceState.status="error"` on exhaustion stays non-fatal (graceful degradation).
 
-### Reference example
-`examples/multi-repo-postgres/` — a 2-repo (frontend + backend) project with a postgres sidecar
-that publishes `${KANBAN_SVC_DB_PORT}:5432` and namespaces everything via
-`COMPOSE_PROJECT_NAME`, plus the registration + `servicesConfig` walkthrough.
+### Reference examples
+- `examples/multi-repo-postgres/` — a 2-repo (frontend + backend) project with a single
+  postgres sidecar that publishes `${KANBAN_SVC_DB_PORT}:5432` and namespaces everything via
+  `COMPOSE_PROJECT_NAME`, plus the registration + `servicesConfig` walkthrough.
+- `examples/multi-repo-fullstack/` — the harder shape: a 2-repo project with a **multi-container**
+  stack (postgres **+** redis). Exercises multiple named ports (`db`, `cache`), multi-service
+  `up --wait` health-gating, two isolated volumes, and the admission cap (2 containers/workspace).
+
+## Hardening (#53, #55, #56)
+
+The three residual gaps from the first slice, all closed together as a hardening pass. Verified
+live against real Docker with the `multi-repo-fullstack` fixture: two parallel postgres+redis
+stacks came up health-gated on isolated ports/volumes, the wide sweep reaped a stranded-instance
+stack (containers + both volumes) while leaving the co-resident stack AND an unrelated co-tenant
+compose project untouched, and no stacks/volumes leaked after teardown.
+
+### Admission cap — bounded concurrency (#56)
+Peak resource use is `WIP × per-stack footprint`, and nothing capped it: `provisionServicesForLaunch`
+provisioned unconditionally, so an over-subscribed host degraded into the leaked-stack feedback loop
+(`up --wait` timing out under memory pressure → the compensating `down` also failing → leaks → more
+pressure). A new global `max_concurrent_stacks` (default empty/0 = unlimited — zero behaviour change)
+is enforced at that single choke point: past the cap the stack is **deferred**, not failed —
+`ServiceStackState.deferred: true` (status stays "error" so every teardown/reaper path is unchanged),
+the agent still launches, and the stack comes up on the next provisioning attempt once capacity frees.
+Deferral is checked AFTER the free shared-worktree ADOPTION path (adopting a co-resident's stack never
+counts against the cap) and BEFORE any side effect. The count is `countLiveStacks()` (DISTINCT live
+"up" compose projects, so adopters count once). In DinD, `KANBAN_STACK_PORT_RANGE` size is a second,
+independent natural cap.
+
+### Wide-sweep GC — reclaiming stranded stacks (#53)
+The periodic reaper only matches THIS instance's names (`isInstanceManagedComposeProject`, exact
+current-id match). If the instance id changes — DB reset/restore, `AGENTIC_KANBAN_DIR` change, or the
+documented home-fallback where a worktree dev server drops to `~/.agentic-kanban` — the old id's
+`ak-<oldId>-ws-*` containers + volumes became unreclaimable by any automatic path. Fix: a deliberate,
+operator-driven CLI sweep `pnpm cli -- services reap` (dry-run by default; `--instance <id>`,
+`--all-instances`, `--yes`, `--json`). It is NOT automatic because two boards sharing one daemon is
+exactly what instance-scoping permits — a naive "down anything not mine" would nuke a co-tenant.
+Safety rests on a PURE planner (`planStackSweep`, `service-ports.ts`): a stack is reaped only when its
+**ws-token matches no LIVE workspace row** in the current DB. ws-token (`serviceStackWsToken` = first 12
+sanitized chars of the workspace id) is the STABLE identity that survives an id rotation — the
+`ak-<inst>-` prefix does not — so a still-live workspace's stack is kept even after its name stopped
+matching the exact reaper filter. Scope bounds the blast radius: `current` (default) touches only this
+id's names; `instance <id>` a named stranded id (the precise home-fallback recovery); `all` every
+managed name (with a loud co-tenant warning — a co-tenant board's live tokens live in a DB this sweep
+cannot see). `parseManagedComposeName` recognizes any instance's names + the legacy shape.
+
+### DooD misconfig preflight — failing loud, not silent (#55)
+DinD works end-to-end; DooD (host `docker.sock` mounted into a containerized board) is the trap — one
+uncommented line from looking configured while broken, every failure silent. A boot preflight
+(`service-stack-preflight.ts`, gated on docker available + any project stack enabled; never blocks
+startup) makes it loud: `classifyDockerDeployment` (pure — native/dood/dind from `DOCKER_HOST` + socket
+presence + the `IS_SANDBOX`/`/.dockerenv` containerized marker) warns when a DooD/DinD deploy leaves
+`KANBAN_SERVICE_HOST` at `localhost` (stacks come up but agents can't dial them), and in DooD it probes
+whether the daemon can actually SEE the data root (a throwaway `busybox ls` of the bind-mount) — an
+empty mount means the named-volume path pitfall silently mounted nothing. This covers the part of the
+"board fs == daemon fs, board netns == publishing netns" assumption that CONFIG can repair by failing
+loud; #51 covered the port-namespace part config can't.
 
 ## Consequences
 - Parallel tickets each get a clean, isolated stack; no shared-service contention.
