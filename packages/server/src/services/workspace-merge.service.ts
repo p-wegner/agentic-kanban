@@ -866,6 +866,7 @@ export function createWorkspaceMergeService(deps: {
         await workspaceServicesService.teardownWorkspaceServices({
           composeProjectName: reconcileComposeName,
           composeWorktreePath: workspace.workingDir,
+          releasedByWorkspaceId: id,
         });
       }
       try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch { /* non-fatal */ }
