@@ -124,7 +124,7 @@ describe("MCP disabled_mcp_tools governance gate", () => {
     }));
     expect(initResp.result.serverInfo.name).toBe("agentic-kanban");
     proc.stdin!.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
-  });
+  }, SPAWN_HOOK_TIMEOUT_MS);
 
   afterAll(async () => {
     // Kill the (single) server process and AWAIT its exit before removing the temp DB —
