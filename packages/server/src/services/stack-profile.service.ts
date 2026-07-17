@@ -13,8 +13,10 @@
 export { detectStackProfile } from "./stack-detector.service.js";
 
 // --- Profile lifecycle: detect → enrich (LLM) → persist / read ---
+export type { StackProfileScaffoldOptions } from "./stack-profile/persistence.js";
 export {
   stackProfilePrefKey,
+  isProfileSparse,
   populateStackProfile,
   saveStackProfile,
   saveManualStackProfile,

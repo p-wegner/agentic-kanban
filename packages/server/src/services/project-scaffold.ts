@@ -133,6 +133,20 @@ function recordScaffoldWrite(repoPath: string, relPath: string): void {
   scaffoldWrittenFiles.set(key, set);
 }
 
+/**
+ * Report a board-written project file (repo-relative, forward slashes) so the NEXT
+ * `commitProjectScaffoldArtifacts` in this process sweeps it into the scaffold commit.
+ *
+ * Exists for the profile-derived scaffolds (#41): `saveStackProfile({scaffold:true})` writes the
+ * starter test scaffold at a path derived from the detected stack (`tests/scaffold.test.js`,
+ * `tests/test_scaffold.py`, …), so it cannot be enumerated in DURABLE_CLAUDE_SCAFFOLD_PATHS the
+ * way the fixed `.claude/*` artifacts are. Same contract as the ensureBuildableFromClean record:
+ * only a file THIS run wrote may be committed, and the record is consumed + cleared by the commit.
+ */
+export function recordScaffoldArtifactWrite(repoPath: string, relPath: string): void {
+  recordScaffoldWrite(repoPath, relPath);
+}
+
 /** Read and clear the record, so a later unrelated commit run never re-sweeps stale paths. */
 function takeScaffoldWrites(repoPath: string): string[] {
   const key = resolve(repoPath);
