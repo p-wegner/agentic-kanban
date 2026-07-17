@@ -7,6 +7,7 @@ import { getProjectActivity } from "../services/project-activity.service.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 import { createHash } from "node:crypto";
+import { isAbsolute } from "node:path";
 import { createWorkspaceSummaryCache } from "../services/workspace-summary-cache.service.js";
 import { createBoardEtagCache } from "../services/board-etag-cache.service.js";
 import { listProjectRepos, insertProjectRepo, deleteProjectRepo, type RepoRow } from "../repositories/repo.repository.js";
@@ -336,6 +337,12 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
     const body = await parseJsonBody<{ path?: string; cloneUrl?: string; name?: string }>(c);
     if (!body.path === !body.cloneUrl) {
       return c.json({ error: "Provide exactly one of path or cloneUrl" }, 400);
+    }
+    // A relative `path` would otherwise be resolved against the SERVER's CWD (packages/server) by
+    // detectRepoInfo, yielding a misleading "not a git repository: <server-dir>/<fragment>" error
+    // for a path the caller never supplied. Require an absolute path and fail clearly (#68).
+    if (body.path && !isAbsolute(body.path)) {
+      return c.json({ error: "repo path must be an absolute path" }, 400);
     }
     const project = await getProjectById(projectId, database);
     if (!project) return c.json({ error: "Project not found" }, 404);
