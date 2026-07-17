@@ -214,18 +214,6 @@ export function parseStoredServiceStackState(serviceStateJson: string | null | u
   }
 }
 
-/**
- * Does this compose project name derive from this workspace id? Matches BOTH shapes
- * the board has ever generated — instance-scoped `ak-<inst8>-ws-<ws12>` and legacy
- * `ak-ws-<ws12>` — by their common `-ws-<first 12 sanitized id chars>` suffix. Used by
- * the teardown guard to recognize the stack's OWNER among live referencing rows when
- * the caller could not identify the releasing workspace (legacy merge call sites).
- */
-function composeNameDerivesFromWorkspace(composeProjectName: string, workspaceId: string): boolean {
-  const token = workspaceId.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12);
-  return token.length > 0 && composeProjectName.endsWith(`-ws-${token}`);
-}
-
 /** Heuristic: does a compose `up` stderr indicate a host/namespace port collision? */
 function isPortInUseError(stderr: string): boolean {
   return /port is already allocated|address already in use|bind for .* failed|ports are not available|failed to bind|Only one usage of each socket address/i.test(stderr);
@@ -400,27 +388,23 @@ export function createWorkspaceServicesService(deps: {
    * (worktree reuse / fork children) ADOPT one shared stack — several live rows can
    * reference the same compose project. The down only runs when the RELEASING
    * workspace is the last live referent; otherwise it is skipped (and the state stays
-   * "up", because the stack IS up). `releasedByWorkspaceId` identifies the releaser
-   * exactly; legacy call sites that don't pass it always tear down on behalf of a
-   * workspace whose own state references the name, so for them the stack's OWNER row
-   * (the one the name derives from) is treated as the releaser instead. Mirrors the
-   * findLiveSiblingSharers guard for sibling worktrees — on a failed sharer check the
-   * down is skipped too (a leaked stack beats downing a live shared one; the startup
-   * reaper reclaims true orphans).
+   * "up", because the stack IS up). `releasedByWorkspaceId` is REQUIRED and is the only
+   * way the releaser is identified — an earlier fallback inferred it from the compose
+   * name's owner token, which inverted the guard exactly for the adoption case it was
+   * meant to protect (an adopter merging would `down -v` the live owner's stack and its
+   * volumes). Mirrors the findLiveSiblingSharers guard for sibling worktrees — on a
+   * failed sharer check the down is skipped too (a leaked stack beats downing a live
+   * shared one; the startup reaper reclaims true orphans).
    */
   async function teardownWorkspaceServices(args: {
     composeProjectName: string;
     composeWorktreePath: string;
     /** The workspace releasing the stack (excluded from the live-sharer count). */
-    releasedByWorkspaceId?: string;
+    releasedByWorkspaceId: string;
   }): Promise<void> {
     try {
       const refs = await findLiveStackReferences(args.composeProjectName);
-      const otherSharers = refs.filter((r) =>
-        args.releasedByWorkspaceId !== undefined
-          ? r.id !== args.releasedByWorkspaceId
-          : !composeNameDerivesFromWorkspace(args.composeProjectName, r.id),
-      );
+      const otherSharers = refs.filter((r) => r.id !== args.releasedByWorkspaceId);
       if (otherSharers.length > 0) {
         console.log(
           `[services] stack ${args.composeProjectName} is still referenced by ${otherSharers.length} other live workspace(s) (${otherSharers.map((r) => r.id).join(", ")}) — skipping the down (last sharer releases it)`,

@@ -5,6 +5,7 @@ import { detectWorkspaceMergeConflicts } from "../services/workspace-merge-confl
 import { runWorkspacePreMergeValidation } from "../services/workspace-merge-prevalidation.service.js";
 import { executeWorkspaceMerge } from "../services/workspace-merge-execution.service.js";
 import { runWorkspacePostMergeCleanup } from "../services/workspace-merge-cleanup.service.js";
+import { workspaceServicesService } from "../services/workspace-services.service.js";
 import { WorkspaceError } from "../services/workspace-internals.js";
 
 vi.mock("@agentic-kanban/shared/lib/openspec", () => ({
@@ -247,5 +248,41 @@ describe("workspace merge cleanup service", () => {
 
     expect(git.removeWorktree).toHaveBeenCalledWith("/repo", "/repo/.worktrees/feature-test");
     expect(git.deleteBranch).toHaveBeenCalledWith("/repo", "feature/test");
+  });
+
+  it("names the releasing workspace when tearing the stack down (#50)", async () => {
+    // Without the id the guard cannot tell an adopter from the stack's owner, and an
+    // adopter merging would `down -v` the live owner's containers and volumes.
+    const teardownSpy = vi
+      .spyOn(workspaceServicesService, "teardownWorkspaceServices")
+      .mockResolvedValue(undefined);
+    const workspaceId = randomUUID();
+
+    await runWorkspacePostMergeCleanup({
+      workspaceId,
+      issueId: randomUUID(),
+      repoPath: "/repo",
+      preMergeHead: "",
+      prefMap: new Map(),
+      projectId: null,
+      workingDir: "/repo/.worktrees/feature-test",
+      branch: "feature/test",
+      mergeResult: "ok",
+      teardownScript: null,
+      setupEnabled: true,
+      isDirect: false,
+      serviceState: JSON.stringify({ composeProjectName: "ak-testinst-ws-owner1234abcd", status: "up" }),
+    }, {
+      database: {} as never,
+      gitService: makeGit() as never,
+      killProcesses: vi.fn(async () => 0),
+    });
+
+    expect(teardownSpy).toHaveBeenCalledWith({
+      composeProjectName: "ak-testinst-ws-owner1234abcd",
+      composeWorktreePath: "/repo/.worktrees/feature-test",
+      releasedByWorkspaceId: workspaceId,
+    });
+    teardownSpy.mockRestore();
   });
 });
