@@ -45,15 +45,24 @@ async function insertSession(db: ReturnType<typeof createTestDb>["db"], workspac
   return id;
 }
 
+// Insert in multi-row batches, not one statement per row. The cap test needs 2010 rows;
+// as 2010 separate awaited INSERTs that is 2010 round-trips, which is slow enough that the
+// test measured machine load rather than the cap (#49 — it was the server package's
+// last load flake). Rows still land in ascending-id order, which capSessionMessages'
+// "delete the oldest" threshold depends on.
+// CHUNK * 4 bound params per statement stays well under SQLite's 999-variable limit.
+const INSERT_CHUNK = 200;
+
 async function insertMessages(db: ReturnType<typeof createTestDb>["db"], sessionId: string, count: number) {
   const now = new Date().toISOString();
-  for (let i = 0; i < count; i++) {
-    await db.insert(sessionMessages).values({
-      sessionId,
-      type: "stdout",
-      data: `line ${i}`,
-      createdAt: now,
-    });
+  const rows = Array.from({ length: count }, (_, i) => ({
+    sessionId,
+    type: "stdout",
+    data: `line ${i}`,
+    createdAt: now,
+  }));
+  for (let i = 0; i < rows.length; i += INSERT_CHUNK) {
+    await db.insert(sessionMessages).values(rows.slice(i, i + INSERT_CHUNK));
   }
 }
 
