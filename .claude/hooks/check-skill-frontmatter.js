@@ -1,15 +1,25 @@
 #!/usr/bin/env node
 // Stop hook: detect a duplicated YAML frontmatter block in .claude/skills/*/SKILL.md.
 //
-// Recurring pattern observed across many agent sessions on this project: a skill's
-// SKILL.md ends up with a second, redundant `---\nname: ...\ndescription: ...\n---`
-// block stacked right after the first. The board's own materialization path
-// (writeAgentSkillFile in agent-skill-files.ts) always overwrites the file cleanly
-// with a single frontmatter block, so this is not a bug in that write path -- it
-// happens mid-session, source unconfirmed. Every occurrence so far was caught
-// manually by code review and reverted as out-of-scope, costing a review round-trip
-// each time. This hook catches it BEFORE the agent stops so it gets fixed in the
-// same session instead.
+// Recurring pattern: a skill's SKILL.md ends up with a second, redundant
+// `---\nname: ...\ndescription: ...\n---` block stacked right after the first.
+//
+// ROOT CAUSE (found and fixed in #61 -- this comment previously asserted the
+// opposite, and that wrong theory is why the bug survived for months). It was NOT
+// mid-session agent behaviour. It was deterministic, at worktree-creation time, in
+// the board's own materialization path: readLocalSkillPrompt's frontmatter regex
+// hardcoded `\n` with no `\r?`, so on a CRLF checkout (Windows, core.autocrlf=true)
+// the strip silently failed and returned the WHOLE FILE as the prompt. Its caller
+// (resolveSkillFile) fed that to writeAgentSkillFile, which prepended a fresh block
+// on top. writeAgentSkillFile was innocent in isolation -- it always overwrites,
+// never appends -- which is exactly what made "not the write path" so convincing and
+// so wrong: the corruption was injected one line earlier, by its caller.
+//
+// The parsers now use `\r?\n` and buildSkillMarkdown strips any frontmatter the
+// prompt already carries (packages/shared/src/lib/agent-skill-files.ts; regression
+// guard in packages/shared/__tests__/agent-skill-files-crlf.test.ts). This hook stays
+// as a cheap backstop against a leaked commit ratcheting the count, since a corrupted
+// file that reaches master is read back on the next materialization.
 //
 // Fires on both Claude (via direct Stop hook wiring) and Codex (via
 // .codex/hooks.json direct Stop entry -- matching the check-conflict-markers
@@ -115,9 +125,11 @@ async function main() {
     ...findings.map((f) => `  ${f}`),
     "",
     "A second '---\\nname: ...\\ndescription: ...\\n---' block is stacked right after",
-    "the first. This is a known recurring corruption pattern, unrelated to your",
-    "ticket's scope -- revert the file to match master (e.g. `git checkout master --",
-    "<file>`) and commit the fix before stopping.",
+    "the first. The generator that caused this was fixed in #61 (CRLF-blind frontmatter",
+    "regex), so this is almost certainly a pre-existing corrupted file rather than",
+    "something you wrote -- and it must not reach master, where it ratchets. Revert the",
+    "file to match master (e.g. `git checkout master -- <file>`); if master itself is",
+    "corrupted, strip the duplicate block by hand. Commit the fix before stopping.",
   ].join("\n");
 
   console.error(reason);

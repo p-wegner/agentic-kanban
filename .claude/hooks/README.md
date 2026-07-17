@@ -89,13 +89,21 @@ opening 14 lines — a legitimate `---` markdown divider used far down in a skil
 falls outside this window and is not flagged). Uses `git ls-tree`/`git show` against
 HEAD, same pattern as `check-conflict-markers.js` — working-tree edits are ignored.
 
-**Why:** recurring pattern across many agent sessions where `board-navigator/SKILL.md`
-(the project's default skill, materialized into nearly every workspace) picks up a
-second, redundant frontmatter block mid-session — source unconfirmed, but not the
-board's own write path (`writeAgentSkillFile` always overwrites cleanly). Every prior
-occurrence was caught manually by code review and reverted as out-of-scope, costing a
-review round-trip each time. This hook catches it before the agent stops so it's fixed
-in the same session instead.
+**Why:** `board-navigator/SKILL.md` (the project's default skill, materialized into
+nearly every workspace) kept picking up a second, redundant frontmatter block. This
+entry used to claim the source was unconfirmed but "not the board's own write path" —
+that was wrong, and it is why the bug survived for months. #61 found it: the board's
+materialization path DID generate it, deterministically, at worktree-creation time.
+`readLocalSkillPrompt`'s frontmatter regex was LF-only, so on a CRLF checkout
+(Windows) the strip failed silently, returned the whole file as the prompt, and
+`writeAgentSkillFile` prepended a fresh block on top. `writeAgentSkillFile` really
+does always overwrite cleanly — the poison arrived in its argument.
+
+Fixed in `packages/shared/src/lib/agent-skill-files.ts` (`\r?\n` in the parsers, plus
+`buildSkillMarkdown` stripping any frontmatter the prompt already carries); guarded by
+`packages/shared/__tests__/agent-skill-files-crlf.test.ts`. The hook stays as a cheap
+backstop: a corrupted file that reaches master is read back on the next
+materialization, so each leaked commit would ratchet one more block.
 
 If a duplicate is found the hook blocks agent exit, lists the affected file(s), and
 asks the agent to revert to master and commit the fix. Wired as a direct Stop hook in
