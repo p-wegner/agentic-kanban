@@ -86,13 +86,23 @@ const SPAWN_FNS = new Set(["exec", "execSync", "execFile", "execFileSync", "spaw
 /** Command values that mean "the git CLI". */
 const GIT_COMMANDS = new Set(["git", "git.exe"]);
 
+/**
+ * Directory names that are never scanned, matched against the path RELATIVE to
+ * REPO_ROOT.
+ *
+ * Relative, not absolute (#58/#64): worktrees live at `<parent>/.worktrees/<branch>/`,
+ * so inside one, REPO_ROOT itself contains `.worktrees` as a path part. Splitting the
+ * ABSOLUTE path therefore matched the root prefix and excluded EVERY file in the tree —
+ * the scan silently asserted nothing (a vacuous pass) in every worktree, which is where
+ * agents actually work. Matching the relative path keeps the exclusion doing its real
+ * job (skipping a worktree nested INSIDE the repo) without the root prefix aliasing it.
+ */
+const EXCLUDED_DIRS = ["node_modules", "dist", ".worktrees", "__tests__"];
+
 function isExcluded(absPath: string): boolean {
-  const parts = absPath.split(sep);
+  const parts = relative(REPO_ROOT, absPath).split(sep);
   return (
-    parts.includes("node_modules") ||
-    parts.includes("dist") ||
-    parts.includes(".worktrees") ||
-    parts.includes("__tests__") ||
+    parts.some((part) => EXCLUDED_DIRS.includes(part)) ||
     /\.(test|spec)\.(ts|js|mjs|cjs)$/.test(absPath)
   );
 }
@@ -350,6 +360,22 @@ describe("git-exec single-spawn gate", () => {
     }
     return files;
   }
+
+  it("the scan is not vacuous — it reaches the real package tree", () => {
+    // The gate's own smoke test. Every assertion below is a `.toEqual([])` over the
+    // scan's output, so a scan that reaches ZERO files passes them ALL while proving
+    // nothing — which is exactly how #58 hid: the exclusion aliased the worktree
+    // REPO_ROOT prefix and dropped all 1000+ files, and the suite stayed green.
+    // Pin the floor here so an over-broad exclusion fails loudly instead of silently
+    // disarming the gate. The count is a floor, not a fixture — it needs no upkeep as
+    // files are added.
+    const files = collectAllPackageSources();
+    expect(files.length, "scan reached no files — the gate is disarmed").toBeGreaterThan(100);
+    expect(
+      files.some((f) => f.endsWith(join("src", "lib", "git-exec.ts"))),
+      "scan did not reach the adapter itself — the gate is disarmed",
+    ).toBe(true);
+  });
 
   it("no package source spawns git outside the git-exec adapter", () => {
     const files = collectAllPackageSources();
