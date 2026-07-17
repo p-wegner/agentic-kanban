@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { gitExecSync } from "@agentic-kanban/shared/lib/git-exec";
-import { getCurrentBranch } from "@agentic-kanban/shared/lib/git-service";
+import { getHeadState } from "@agentic-kanban/shared/lib/git-service";
 import { takeScaffoldWrites } from "./scaffold-writes.js";
 
 const SCAFFOLD_COMMIT_MESSAGE = "chore: scaffold agent guards and onboarding";
@@ -38,13 +38,14 @@ function isScaffoldTrackedPath(pathName: string): boolean {
  * Behavior:
  * - non-fatal on all failures (registration must not block),
  * - no-op on detached HEAD (explicitly skip),
+ * - commits normally on an unborn branch (a repo's first commit is a normal commit),
  * - no-op unless one of the scaffold paths changed in git status,
  * - commits only the scaffold paths by explicit message.
  */
 export async function commitProjectScaffoldArtifacts(repoPath: string): Promise<void> {
   try {
-    const branch = await getCurrentBranch(repoPath);
-    if (branch === "HEAD") return;
+    const head = await getHeadState(repoPath);
+    if (head.kind === "detached") return;
 
     const status = gitExecSync(["status", "--porcelain", "--untracked-files=all"], {
       cwd: repoPath,
