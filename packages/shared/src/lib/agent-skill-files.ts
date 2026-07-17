@@ -8,6 +8,32 @@ export type AgentSkillFile = {
 };
 
 /**
+ * Matches a leading YAML frontmatter block: group 1 = the fields, group 2 = the body.
+ *
+ * `\r?\n` is load-bearing, not defensive noise. This repo is Windows-first and its
+ * checkouts are CRLF (`core.autocrlf=true`), so an LF-only `^---\n` never matched a
+ * real SKILL.md on disk — and because a failed strip is indistinguishable from a file
+ * with no frontmatter, callers silently got the WHOLE FILE back as the prompt. See #61.
+ */
+const FRONTMATTER_RE = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)([\s\S]*)$/;
+
+/**
+ * Remove every leading frontmatter block from `content`, returning the body.
+ *
+ * Loops because the corruption ratchets: a poisoned 2-block file that reaches the
+ * default branch is read back on the next materialization, so one strip is not
+ * enough to converge an already-stacked file. A `---` divider inside the body is
+ * untouched — only blocks at the very top are stripped.
+ */
+function stripLeadingFrontmatter(content: string): string {
+  let body = content;
+  for (let match = body.match(FRONTMATTER_RE); match; match = body.match(FRONTMATTER_RE)) {
+    body = match[2];
+  }
+  return body;
+}
+
+/**
  * A skill name is safe iff it can be used verbatim as a single filesystem
  * directory segment with no path-traversal or escape potential. This is the
  * single source of truth shared by the create-time guard (MCP
@@ -95,9 +121,7 @@ export async function readLocalSkillPrompt(repoPath: string, skillName: string):
   const filePath = localSkillFilePath(repoPath, skillName);
   try {
     const content = await readFile(filePath, "utf-8");
-    // Strip frontmatter (--- ... ---\n)
-    const match = content.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
-    return match ? match[1].trim() : content.trim();
+    return stripLeadingFrontmatter(content).trim();
   } catch {
     return null;
   }
@@ -126,7 +150,7 @@ export type DiskSkillEntry = {
  * Everything after the closing `---` is the prompt.
  */
 function parseDiskSkillMarkdown(content: string, fallbackName: string): DiskSkillEntry {
-  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  const frontmatterMatch = content.match(FRONTMATTER_RE);
   if (!frontmatterMatch) {
     return { name: fallbackName, description: "", model: null, prompt: content.trim() };
   }
@@ -207,6 +231,14 @@ export async function isSkillsDirAbsentOrEmpty(repoPath: string): Promise<boolea
   return true;
 }
 
+/**
+ * Defense in depth: the prompt is stripped of any frontmatter it already carries
+ * before a fresh block is prepended, so a poisoned prompt from ANY caller cannot
+ * round-trip into a stacked second block. `resolveSkillFile` (workspace provisioning)
+ * and `injectNodeSkill` (workflow fork) both hand us `readLocalSkillPrompt`'s output;
+ * when that strip regressed, this function faithfully generated the corruption. The
+ * generated block is authoritative — it comes from the DB row.
+ */
 function buildSkillMarkdown(skill: AgentSkillFile) {
   return [
     "---",
@@ -214,6 +246,6 @@ function buildSkillMarkdown(skill: AgentSkillFile) {
     `description: ${skill.description}`,
     "---",
     "",
-    skill.prompt,
+    stripLeadingFrontmatter(skill.prompt).trim(),
   ].join("\n");
 }
