@@ -126,6 +126,7 @@ async function teardownMergedWorktree(
     await workspaceServicesService.teardownWorkspaceServices({
       composeProjectName: mergeComposeName,
       composeWorktreePath: args.workingDir,
+      releasedByWorkspaceId: args.workspaceId,
     });
   }
   try {
