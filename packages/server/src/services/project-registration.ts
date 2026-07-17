@@ -7,7 +7,7 @@ import { detectRepoInfo } from "./git-info.service.js";
 import { initializeProjectStatuses } from "../repositories/issue.repository.js";
 import { getCurrentBranch } from "./git.service.js";
 import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
-import { populateStackProfile, getStackProfile, populateVerifyScript, verifyScriptPrefKey, populateSetupScript, detectStackProfile } from "./stack-profile.service.js";
+import { populateStackProfile, getStackProfile, populateVerifyScript, verifyScriptPrefKey, populateSetupScript, detectStackProfile, isProfileSparse } from "./stack-profile.service.js";
 import {
   ensureAgentGitignore,
   ensureStarterClaudeMd,
@@ -179,7 +179,7 @@ export async function deduplicateProjects(): Promise<void> {
 // Every registration entry point (REST `POST /api/projects` → project.service.ts,
 // CLI `register` → cli/commands/register.ts, CLI `init` / `dev` auto-register →
 // registerProject below) MUST route its scaffolding and derived-config population
-// through the two functions here. Previously each path hand-rolled its own chain,
+// through `scaffoldAndPopulateProject` here. Previously each path hand-rolled its own chain,
 // so a new registration-time step had to be remembered in three places — which is
 // exactly how #37 happened (#810's setup script and #788's verify script were wired
 // into one path only, and the REST path still had no setup script at all).
@@ -187,27 +187,19 @@ export async function deduplicateProjects(): Promise<void> {
 // Add a new registration-time step HERE, never in a caller.
 
 /**
- * Scaffold a repo's board-authored artifacts (clobber-safe: every `ensure*` is
- * append-/create-if-missing and never overwrites a user's file).
+ * Write a repo's board-authored scaffold FILES (clobber-safe: every `ensure*` is
+ * append-/create-if-missing and never overwrites a user's file). Does NOT commit — that is
+ * `scaffoldAndPopulateProject`'s last step, once the profile-derived scaffolds exist too.
  *
  * `gitignoreTemplate` is the language-template CONTENT seeded only when the repo has
  * no `.gitignore` at all; the per-stack build-output ignores (target/, __pycache__/,
  * *.class, …) are derived from the rule-based stack detection so a non-Node project's
  * build artifacts never make main dirty and block auto-merge (#811).
  *
- * ORDERING IS LOAD-BEARING (#38): `ensureVerifyGateRunner` internally runs
- * `ensureBuildableFromClean`, which records the non-`.claude` project files it rewrote
- * (package.json / pnpm-workspace.yaml) in module-level state keyed by repo path.
- * `commitProjectScaffoldArtifacts` consumes and clears that record. The two MUST stay
- * back-to-back in ONE process, or the board's own package.json edit is left uncommitted
- * and main goes dirty. Do not split, reorder, or defer the commit.
- *
- * Non-fatal by design: scaffolding must never block registration.
+ * Private on purpose: calling this WITHOUT the matching commit is the #38 bug (see
+ * scaffoldAndPopulateProject). Non-fatal by design: scaffolding must never block registration.
  */
-export async function scaffoldProject(
-  repoPath: string,
-  options?: { gitignoreTemplate?: string },
-): Promise<void> {
+function scaffoldProjectFiles(repoPath: string, options?: { gitignoreTemplate?: string }): void {
   try {
     const detectedStack = detectStackProfile(repoPath).stack;
     ensureAgentGitignore(repoPath, options?.gitignoreTemplate, detectedStack);
@@ -215,23 +207,60 @@ export async function scaffoldProject(
     ensureStarterAgentsMd(repoPath);
     ensureHookScaffold(repoPath);
     ensureVerifyGateRunner(repoPath); // → ensureBuildableFromClean (records its rewrites)
-    await commitProjectScaffoldArtifacts(repoPath); // MUST stay in-process, immediately after
   } catch {
     /* non-fatal: scaffolding must never block registration */
   }
 }
 
 /**
- * Mirror of `isProfileSparse` in stack-profile/persistence.ts (not exported there, and that
- * file is owned by another ticket). Only used to decide whether an LLM gap-fill WOULD run,
- * so a caller can report it; `populateStackProfile` re-checks this itself and is the
- * authority. Keep in sync.
+ * THE shared registration step: scaffold the repo, derive its config, and commit everything
+ * the board wrote — in the one order that leaves the user's main checkout clean (#41).
+ *
+ *   ensure* files → populate profile/verify/setup (writing the profile-derived scaffolds) → commit
+ *
+ * Why this order: `.claude/smart-hooks-rules.json` and the starter test scaffold are derived FROM
+ * the stack profile, so they cannot be written before it is computed. Committing first (the old
+ * shape) left them untracked in the freshly-registered project's main checkout forever — where an
+ * agent's end-of-task `git add -A` sweeps them into the project's history.
+ *
+ * ORDERING IS LOAD-BEARING (#38): `ensureVerifyGateRunner` internally runs
+ * `ensureBuildableFromClean`, which records the non-`.claude` project files it rewrote
+ * (package.json / pnpm-workspace.yaml) in module-level state keyed by REPO PATH.
+ * `commitProjectScaffoldArtifacts` consumes and clears that record. Moving the commit later is
+ * safe (the record is keyed by path and survives the population step), but the commit MUST still
+ * happen in the SAME process after `ensureBuildableFromClean` — otherwise the board's own
+ * package.json edit is left uncommitted and main goes dirty. Never drop the commit.
+ *
+ * Non-fatal throughout: neither scaffolding nor detection may block registration.
  */
-function wouldEnrichWithLlm(profile: StackProfile): boolean {
-  return !profile.stack || (!profile.testCommand && !profile.buildCommand);
+export async function scaffoldAndPopulateProject(
+  projectId: string,
+  repoPath: string,
+  database: Database = db,
+  options?: ScaffoldAndPopulateOptions,
+): Promise<DerivedProjectConfig> {
+  scaffoldProjectFiles(repoPath, { gitignoreTemplate: options?.gitignoreTemplate });
+  try {
+    // `scaffold: true` — registration is the ONE path that legitimately materializes the
+    // profile-derived scaffolds, precisely because it commits them below.
+    return await populateDerivedProjectConfig(projectId, repoPath, database, {
+      ...options,
+      scaffold: true,
+    });
+  } finally {
+    await commitProjectScaffoldArtifacts(repoPath);
+  }
 }
 
 export interface DerivedConfigOptions {
+  /**
+   * Materialize the profile-derived scaffolds (`.claude/smart-hooks-rules.json`, the starter
+   * test scaffold) into the repo. Default OFF (#41) — only `scaffoldAndPopulateProject` sets
+   * it, and only for the AWAITED rule-based pass, which runs before the scaffold commit. The
+   * backgrounded LLM enrichment NEVER scaffolds: it settles after registration returned and
+   * after the commit, so a write there would re-dirty main asynchronously.
+   */
+  scaffold?: boolean;
   /** Never invoke the LLM gap-fill at all (tests, offline callers). */
   skipLlm?: boolean;
   /**
@@ -285,14 +314,17 @@ export async function populateDerivedProjectConfig(
 
   try {
     // Rule-based only: fast + offline, so this is safe to await on any path.
-    profile = await populateStackProfile(projectId, repoPath, database, { skipLlm: true });
+    profile = await populateStackProfile(projectId, repoPath, database, {
+      skipLlm: true,
+      scaffold: options?.scaffold,
+    });
     verifyScript = await populateVerifyScript(projectId, repoPath, database, profile);
     setupScript = await populateSetupScript(projectId, repoPath, database, profile);
   } catch {
     return { setupScript: null, verifyScript: null, enrichment: null };
   }
 
-  if (options?.skipLlm || !wouldEnrichWithLlm(profile)) {
+  if (options?.skipLlm || !isProfileSparse(profile)) {
     return { setupScript, verifyScript, enrichment: null };
   }
 
@@ -303,9 +335,17 @@ export async function populateDerivedProjectConfig(
   // Re-runs populateStackProfile WITHOUT skipLlm; it re-checks sparseness itself and is the
   // authority on whether the LLM is actually called. populateVerifyScript/populateSetupScript
   // are idempotent — they return an already-configured value rather than clobbering it.
+  //
+  // Scaffolding here is allowed ONLY when the caller awaits this pass (the short-lived CLI), i.e.
+  // while it is still inside `scaffoldAndPopulateProject` and therefore still BEFORE the scaffold
+  // commit. Backgrounded, it settles after registration returned and after the commit — a write
+  // then would silently re-dirty the user's main checkout, which is the whole point of #41.
+  const enrichmentScaffold = Boolean(options?.scaffold && options?.awaitEnrichment);
   const enrichment = (async () => {
     try {
-      const enriched = await populateStackProfile(projectId, repoPath, database);
+      const enriched = await populateStackProfile(projectId, repoPath, database, {
+        scaffold: enrichmentScaffold,
+      });
       return {
         verifyScript: await populateVerifyScript(projectId, repoPath, database, enriched),
         setupScript: await populateSetupScript(projectId, repoPath, database, enriched),
@@ -327,10 +367,13 @@ export async function populateDerivedProjectConfig(
   };
 }
 
-export interface RegisterProjectOptions extends DerivedConfigOptions {
-  name?: string;
+export interface ScaffoldAndPopulateOptions extends DerivedConfigOptions {
   /** Language-template content seeded only when the repo has no `.gitignore`. */
   gitignoreTemplate?: string;
+}
+
+export interface RegisterProjectOptions extends ScaffoldAndPopulateOptions {
+  name?: string;
 }
 
 export async function registerProject(path: string, options?: RegisterProjectOptions) {
@@ -383,11 +426,10 @@ export async function registerProject(path: string, options?: RegisterProjectOpt
 
   await upsertActiveProjectPreference(projectId, now);
 
-  // The two shared registration steps — see their definitions above. This path used to do
+  // THE shared registration step — see scaffoldAndPopulateProject above. This path used to do
   // NO scaffolding at all (so a project registered via CLI `init` / `dev` auto-register got
   // no agent gitignore, no hooks and no verify-gate runner), and fire-and-forget population.
-  await scaffoldProject(repoInfo.repoPath, { gitignoreTemplate: options?.gitignoreTemplate });
-  const { setupScript, verifyScript } = await populateDerivedProjectConfig(
+  const { setupScript, verifyScript } = await scaffoldAndPopulateProject(
     projectId,
     repoInfo.repoPath,
     db,
@@ -448,6 +490,11 @@ export async function repairProjectRegistration(
 
   // Backfill the stack profile (#786) onto a project registered before profiles existed.
   // Idempotent: only computes when none is persisted yet.
+  //
+  // Deliberately does NOT scaffold (#41). Repair is a DB/preference backfill on a project the
+  // user has long been working in; it has no scaffold commit, so materializing files here would
+  // leave exactly the untracked leftovers this ticket removed. Re-scaffolding an existing repo
+  // is registration's job — re-register (or POST /api/projects on the same path) to get it.
   const existingProfile = await getStackProfile(projectId, db);
   if (!existingProfile) {
     try {

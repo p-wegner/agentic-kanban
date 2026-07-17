@@ -7,9 +7,9 @@
 // exactly how #37 happened: #810's setup script and #788's verify script were wired into
 // one path only, and the REST path never called populateSetupScript AT ALL.
 //
-// The fix routes every entry point through two shared steps — `scaffoldProject` and
-// `populateDerivedProjectConfig`. These tests lock in the ANTI-DIVERGENCE guarantee:
-// both live entry points must produce an equivalent, driveable project.
+// The fix routes every entry point through ONE shared step, `scaffoldAndPopulateProject`
+// (scaffold → `populateDerivedProjectConfig` → commit). These tests lock in the ANTI-DIVERGENCE
+// guarantee: both live entry points must produce an equivalent, driveable project.
 //
 // #42: the deterministic/rule-based population is awaited (fast + offline); the optional
 // ~30s LLM gap-fill is kept OFF the hot path. Asserted here via the skipLlm semantics and
@@ -179,19 +179,21 @@ describe("registration — ONE path for every entry point (#43)", () => {
 
     // #38: ensureBuildableFromClean records the non-.claude project files it rewrote
     // (package.json / pnpm-workspace.yaml) in module-level state keyed by repo path, which
-    // commitProjectScaffoldArtifacts consumes. The two must run back-to-back in ONE process
-    // or the board's own package.json edit is left uncommitted and main goes dirty. Assert
-    // no scaffold-OWNED path survives uncommitted.
+    // commitProjectScaffoldArtifacts consumes. The record survives the population step (it is
+    // keyed by PATH), but the commit must still run in the SAME process after it — or the
+    // board's own package.json edit is left uncommitted and main goes dirty. Assert no
+    // scaffold-OWNED path survives uncommitted.
     for (const owned of [".gitignore", "CLAUDE.md", "AGENTS.md", "package.json"]) {
       expect(dirty, `${owned} must be swept into the scaffold commit`).not.toContain(owned);
     }
 
-    // KNOWN PRE-EXISTING GAP (not introduced by #43, and out of its scope): the scaffold
-    // commit runs BEFORE populateDerivedProjectConfig, but saveStackProfile then writes
-    // `.claude/smart-hooks-rules.json` and a stack test scaffold — so those land AFTER the
-    // commit and leave main dirty. Identical ordering to the pre-#43 CLI path (a036b58e).
-    // Documented rather than silently asserted away; see the report / follow-up ticket.
-    expect(dirty.some((p) => p.startsWith(".claude/smart-hooks-rules.json"))).toBe(true);
+    // #41: the profile-derived scaffolds are written BEFORE the commit now (ensure* → populate
+    // → write → commit), so registration no longer leaves them untracked in the user's main
+    // checkout — where an agent's end-of-task `git add -A` would sweep them into the project's
+    // history. They must EXIST and be COMMITTED, not dangling.
+    expect(existsSync(join(repo, ".claude", "smart-hooks-rules.json"))).toBe(true);
+    expect(existsSync(join(repo, "tests", "scaffold.test.js"))).toBe(true);
+    expect(dirty, "registration must leave the main checkout clean (#41)").toEqual([]);
   });
 
   it("ANTI-DIVERGENCE: the REST path and the register/init path produce an equivalent project", async () => {

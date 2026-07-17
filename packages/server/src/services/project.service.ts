@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { resolve, sep, join } from "node:path";
 import { ensureAgentGitignore, ensureStarterClaudeMd, ensureStarterAgentsMd, ensureHookScaffold, ensureVerifyGateRunner, getDefaultSkillId, commitProjectScaffoldArtifacts } from "./project-scaffold.js";
-import { scaffoldProject, populateDerivedProjectConfig } from "./project-registration.js";
+import { scaffoldAndPopulateProject } from "./project-registration.js";
 import { isSkillsDirAbsentOrEmpty, writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { listAgentSkills } from "../repositories/agent-skill.repository.js";
 import { getPreference } from "../repositories/preferences.repository.js";
@@ -180,8 +180,16 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       defaultSkillId: await getDefaultSkillId(database),
     }, database);
 
-    // Shared registration step (#43) — see scaffoldProject in project-registration.ts.
-    await scaffoldProject(repoInfo.repoPath, {
+    // THE shared registration step (#43) — see scaffoldAndPopulateProject in
+    // project-registration.ts: scaffold → populate the derived config → commit what the board
+    // wrote (#41). The fast rule-based pass is AWAITED, closing this path's race: a caller
+    // creating a workspace immediately after POST /api/projects used to beat the old
+    // fire-and-forget population and get `{"command": null, "state": "skipped"}` setup. The
+    // optional ~30s LLM gap-fill stays backgrounded so the request never blocks on it.
+    //
+    // This path also never called populateSetupScript at all, so REST-registered projects had
+    // setup_script = null forever — the #37 bug, fixed by routing through the shared step (#43).
+    await scaffoldAndPopulateProject(id, repoInfo.repoPath, database, {
       gitignoreTemplate: body.gitignoreTemplate ? GITIGNORE_TEMPLATES[body.gitignoreTemplate] : undefined,
     });
 
@@ -209,16 +217,6 @@ export function createProjectService(deps: { database: Database; workspaceSummar
         }
       }
     }
-
-    // Shared registration step (#43) — see populateDerivedProjectConfig in project-registration.ts.
-    // The fast rule-based pass is AWAITED, closing this path's race: a caller creating a
-    // workspace immediately after POST /api/projects used to beat the old fire-and-forget
-    // population and get `{"command": null, "state": "skipped"}` setup. The optional ~30s LLM
-    // gap-fill stays backgrounded so the request never blocks on it.
-    //
-    // This path also never called populateSetupScript at all, so REST-registered projects had
-    // setup_script = null forever — the #37 bug, still live here (#43).
-    await populateDerivedProjectConfig(id, repoInfo.repoPath, database);
 
     return { ...result, id };
   }

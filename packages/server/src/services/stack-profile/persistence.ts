@@ -10,6 +10,7 @@ import type { Database } from "../../db/index.js";
 import { getPreference, setPreference } from "../../repositories/preferences.repository.js";
 import { invokeClaudePrompt } from "../claude-cli.service.js";
 import { detectStackProfile } from "../stack-detector.service.js";
+import { recordScaffoldArtifactWrite } from "../project-scaffold.js";
 import { writeSmartHooksRules } from "./smart-hooks-rules.js";
 import { writeTestScaffold } from "./test-scaffold.js";
 
@@ -18,9 +19,28 @@ export function stackProfilePrefKey(projectId: string): string {
   return `project_stack_profile_${projectId}`;
 }
 
-/** Fields whose absence makes the LLM fallback worth invoking. */
-function isProfileSparse(profile: StackProfile): boolean {
+/** Fields whose absence makes the LLM fallback worth invoking. Exported so a caller that
+ *  needs to REPORT whether an LLM gap-fill would run (project-registration.ts) reads the
+ *  same predicate populateStackProfile enforces, instead of keeping a hand-synced copy. */
+export function isProfileSparse(profile: StackProfile): boolean {
   return !profile.stack || (!profile.testCommand && !profile.buildCommand);
+}
+
+/**
+ * Whether persisting a profile may also MATERIALIZE the profile-derived scaffolds into the
+ * user's repo (`.claude/smart-hooks-rules.json` + the starter test scaffold).
+ *
+ * Default OFF (#41). Profile detection/persistence is otherwise PURE with respect to the
+ * user's working tree: a read (`GET /api/projects/:id/stack-profile`), enabling Drive, or a
+ * repair backfill must never write files into a repo nobody asked to scaffold — those writes
+ * landed untracked in the main checkout and got swept into the project's history by an
+ * agent's `git add -A`.
+ *
+ * Only registration opts in, and it does so BEFORE its scaffold commit
+ * (`scaffoldAndPopulateProject`), so everything the board writes is also committed.
+ */
+export interface StackProfileScaffoldOptions {
+  scaffold?: boolean;
 }
 
 interface LlmProfileShape {
@@ -44,20 +64,23 @@ interface LlmProfileShape {
  * detected profile is too sparse to be useful (unknown stack, or no test/build command),
  * asks the LLM to fill in the gaps. Always writes the result to
  * `project_stack_profile_<projectId>` so downstream harness pieces read ONE descriptor.
+ *
+ * Pure w.r.t. the user's repo unless `scaffold: true` — see StackProfileScaffoldOptions (#41).
  */
 export async function populateStackProfile(
   projectId: string,
   repoPath: string,
   database: Database,
-  options?: { skipLlm?: boolean },
+  options?: { skipLlm?: boolean } & StackProfileScaffoldOptions,
 ): Promise<StackProfile> {
   const profile = detectStackProfile(repoPath);
+  const scaffoldOptions = { scaffold: options?.scaffold };
 
   if (!options?.skipLlm && isProfileSparse(profile)) {
     try {
       const enriched = await enrichWithLlm(profile, repoPath, database);
       if (enriched) {
-        await saveStackProfile(projectId, enriched, database, repoPath);
+        await saveStackProfile(projectId, enriched, database, repoPath, scaffoldOptions);
         return enriched;
       }
     } catch {
@@ -65,7 +88,7 @@ export async function populateStackProfile(
     }
   }
 
-  await saveStackProfile(projectId, profile, database, repoPath);
+  await saveStackProfile(projectId, profile, database, repoPath, scaffoldOptions);
   return profile;
 }
 
@@ -135,20 +158,30 @@ function parseLlmJson(raw: string): LlmProfileShape | null {
 }
 
 /**
- * Persist a stack profile JSON to the project's preference key. When `repoPath` is given,
- * also (re)generate the project's `.claude/smart-hooks-rules.json` so an edit-time feedback
- * harness stays in sync with the latest profile (#787). Rule generation is non-fatal.
+ * Persist a stack profile JSON to the project's preference key.
+ *
+ * With `{ scaffold: true }` (and a `repoPath`) it ALSO materializes the profile-derived
+ * scaffolds into the repo: `.claude/smart-hooks-rules.json`, so an edit-time feedback harness
+ * stays in sync with the profile (#787), and the starter test scaffold (#793). Both writes are
+ * non-fatal and clobber-safe.
+ *
+ * Default OFF (#41): a bare save — a profile read, Drive enablement, a repair backfill — must
+ * leave the user's working tree untouched. The test scaffold's path is reported to
+ * `recordScaffoldArtifactWrite` so registration's scaffold commit sweeps it in;
+ * `.claude/smart-hooks-rules.json` is already in DURABLE_CLAUDE_SCAFFOLD_PATHS.
  */
 export async function saveStackProfile(
   projectId: string,
   profile: StackProfile,
   database: Database,
   repoPath?: string,
+  options?: StackProfileScaffoldOptions,
 ): Promise<void> {
   await setPreference(stackProfilePrefKey(projectId), JSON.stringify(profile), database);
-  if (repoPath) {
+  if (repoPath && options?.scaffold) {
     writeSmartHooksRules(repoPath, profile);
-    writeTestScaffold(repoPath, profile);
+    const testScaffoldPath = writeTestScaffold(repoPath, profile);
+    if (testScaffoldPath) recordScaffoldArtifactWrite(repoPath, testScaffoldPath);
   }
 }
 
@@ -173,6 +206,7 @@ export async function saveManualStackProfile(
   partial: Partial<StackProfile>,
   database: Database,
   repoPath?: string,
+  options?: StackProfileScaffoldOptions,
 ): Promise<StackProfile> {
   const existing = (await getStackProfile(projectId, database)) ?? emptyManualStackProfile();
   const merged: StackProfile = {
@@ -181,7 +215,7 @@ export async function saveManualStackProfile(
     source: "manual",
     updatedAt: new Date().toISOString(),
   };
-  await saveStackProfile(projectId, merged, database, repoPath);
+  await saveStackProfile(projectId, merged, database, repoPath, options);
   return merged;
 }
 

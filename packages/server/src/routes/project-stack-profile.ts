@@ -25,6 +25,9 @@ export function createProjectStackProfileRoute(database: Database) {
 
     let profile = refresh ? null : await getStackProfile(projectId, database);
     if (!profile) {
+      // Detect + persist ONLY — never `scaffold: true` here (#41). This is a GET; any client
+      // (the UI polling, a monitor, a curious curl) hits it, and it used to write
+      // `.claude/smart-hooks-rules.json` + a test scaffold into the user's main checkout.
       profile = await populateStackProfile(projectId, project.repoPath, database);
     }
     return c.json({ projectId, profile });
@@ -32,6 +35,9 @@ export function createProjectStackProfileRoute(database: Database) {
 
   // PUT /api/projects/:id/stack-profile — override the stack profile from the UI.
   // Marks the saved profile source="manual" so a later auto-detect won't silently clobber it.
+  // Persists the profile ONLY — no scaffold writes (#41): `.claude/smart-hooks-rules.json` is
+  // TRACKED after registration committed it, so regenerating it here would leave a modified
+  // tracked file in the user's main checkout and block auto-merge on `dirty_main`.
   router.put("/:id/stack-profile", async (c) => {
     const projectId = c.req.param("id");
     const project = await getProjectById(projectId, database);
