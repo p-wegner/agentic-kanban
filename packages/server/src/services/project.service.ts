@@ -31,6 +31,45 @@ export class ProjectError extends Error {
   }
 }
 
+const INITIAL_COMMIT_MESSAGE = "chore: initialise repository";
+
+/**
+ * Give a freshly `git init`ed repo its first commit, so HEAD is born (#47).
+ *
+ * Commits whatever the caller has written so far (a README, when requested) and falls back
+ * to an empty commit. `--allow-empty` covers the no-README case; `add -A` runs before the
+ * scaffold, so it can only ever pick up the caller's own file in a directory this service
+ * just created. A machine with no `user.name`/`user.email` configured cannot commit at all,
+ * so an identity is supplied for that case only — a configured identity still wins.
+ *
+ * This bootstrap commit is deliberately insulated from the user's global git config, because
+ * unlike the scaffold commit (which is non-fatal and merely degrades) a failure here aborts
+ * project creation and removes the directory. `commit.gpgsign=true` with no usable key, and a
+ * global `core.hooksPath` pre-commit hook that rejects an empty/near-empty tree, are both
+ * common enough that they would otherwise make createProject refuse to work at all — on a
+ * commit whose only job is to give HEAD a parent.
+ */
+function createInitialCommit(repoPath: string): void {
+  gitExecSync(["add", "-A"], { cwd: repoPath, stdio: "pipe" });
+  const commit = [
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "--no-verify",
+    "--allow-empty",
+    "-m",
+    INITIAL_COMMIT_MESSAGE,
+  ];
+  try {
+    gitExecSync(commit, { cwd: repoPath, stdio: "pipe" });
+  } catch {
+    gitExecSync(
+      ["-c", "user.name=agentic-kanban", "-c", "user.email=agentic-kanban@localhost", ...commit],
+      { cwd: repoPath, stdio: "pipe" },
+    );
+  }
+}
+
 const GITIGNORE_TEMPLATES: Record<string, string> = {
   node: `node_modules/
 dist/
@@ -272,6 +311,28 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       throw new ProjectError(`git init failed: ${stderr ? String(stderr).trim() : String(err)}`, "BAD_REQUEST");
     }
 
+    // `git init` leaves HEAD on an UNBORN branch — a repo with no commits (#47). Everything
+    // downstream assumes a born HEAD: the scaffold commit resolved the current branch and threw
+    // into a non-fatal catch (so the board's own scaffold stayed permanently untracked, and the
+    // first agent's `git add -A` swept it into an unrelated feature commit), and `git worktree
+    // add` cannot branch from a commit that does not exist. Give the repo its first commit here,
+    // BEFORE scaffolding — then registration's shared step behaves exactly as it does for an
+    // imported repo, which always arrives with a commit.
+    //
+    // The README (when requested) is the natural content for it; otherwise commit empty.
+    if (body.generateReadme) {
+      try { writeFileSync(join(targetPath, "README.md"), `# ${name}\n`, "utf8"); } catch { /* non-fatal */ }
+    }
+    try {
+      createInitialCommit(targetPath);
+    } catch (err) {
+      try { rmSync(targetPath, { recursive: true, force: true }); } catch {}
+      throw new ProjectError(
+        `Failed to create the initial commit: ${err instanceof Error ? err.message : String(err)}`,
+        "BAD_REQUEST",
+      );
+    }
+
     const existing = await getProjectByRepoPath(targetPath, database);
     if (existing) {
       throw new ProjectError(`Project "${existing.name}" is already registered at this path`, "CONFLICT");
@@ -319,13 +380,6 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       skipLlm: true,
     });
 
-    if (body.generateReadme) {
-      const readmePath = join(repoInfo.repoPath, "README.md");
-      if (!existsSync(readmePath)) {
-        try { writeFileSync(readmePath, `# ${projectName}
-`, "utf8"); } catch { /* non-fatal */ }
-      }
-    }
     return result;
   }
 
