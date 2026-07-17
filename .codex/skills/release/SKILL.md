@@ -113,19 +113,23 @@ gh release create vX.Y.Z --title "vX.Y.Z" --notes-file /tmp/release-notes-vX.Y.Z
 ```
 The trailing path attaches the SBOM; if 1.9 was skipped, omit it.
 
+`git push origin vX.Y.Z` also triggers the `docker-publish` GitHub Actions workflow (`.github/workflows/docker-publish.yml`), which builds the root `Dockerfile` and pushes `<dockerhub-username>/agentic-kanban:vX.Y.Z` (+ `latest`) to Docker Hub — no separate manual command needed.
+
 ## Stage 7 — Verify
 ```bash
 npm view agentic-kanban version       # should match
 gh release view vX.Y.Z                # should exist
 git ls-remote origin refs/tags/vX.Y.Z # should resolve
+gh run list --workflow=docker-publish.yml --branch vX.Y.Z --limit 1  # should show a completed/success run
 ```
-Print the three ✓ lines (npm published, GitHub release URL, git tag pushed).
+Print the four ✓ lines (npm published, GitHub release URL, git tag pushed, Docker Hub image published).
 
 ## Recovery / abort
 - **Stage 1 / 2 / 3 abort** — nothing changed; fix and re-run.
 - **Stage 4 done, Stage 5 aborts** — local commit + tag remain: `git tag -d vX.Y.Z && git reset --hard HEAD^`.
 - **npm published, git push fails** — `npm deprecate agentic-kanban@X.Y.Z "release aborted, see vX.Y.Z+1"`, then bump and re-run from Stage 1.
 - **npm + git push done, gh release fails** — re-run just `gh release create` (idempotent on `--clobber`).
+- **Everything else done, Docker Hub push fails or didn't trigger** — no need to re-cut the release; re-run just the image build: `gh workflow run docker-publish.yml --ref vX.Y.Z` (uses the existing tag).
 
 ## Recurring traps
 - `npm publish` from the wrong cwd publishes the wrong package — always `cd packages/server`.
