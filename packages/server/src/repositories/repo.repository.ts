@@ -72,6 +72,11 @@ export async function insertWorkspaceRepo(
     branch: string;
     baseBranch: string;
     baseCommitSha?: string | null;
+    // Carried from the project-scoped repo row so provisioning (resolveExtraComposeFiles,
+    // read at stack-up time from THIS workspace row) can join the sibling's own compose
+    // into the workspace stack (#71). Without persisting it here the per-repo stack feature
+    // is inert — the workspace row would always read composeFile=null.
+    composeFile?: string | null;
   },
   database: RepoDb = db,
 ): Promise<void> {
@@ -85,6 +90,7 @@ export async function insertWorkspaceRepo(
     branch: input.branch,
     baseBranch: input.baseBranch,
     baseCommitSha: input.baseCommitSha ?? null,
+    composeFile: input.composeFile ?? null,
   });
 }
 
