@@ -1,60 +1,7 @@
 import type { Command } from "commander";
-import { randomUUID } from "node:crypto";
-import { detectRepoInfo } from "../../services/git-info.service.js";
-import { getCurrentBranch } from "../../services/git.service.js";
 import { DEFAULT_STATUSES } from "../../repositories/issue.repository.js";
-import { getProjectByRepoPath, insertProject } from "../../repositories/project.repository.js";
-import { setPreference } from "../../repositories/preferences.repository.js";
 import { runMigrations, logDefaultBranch } from "../shared.js";
-import { getDefaultSkillId, ensureAgentGitignore, ensureStarterClaudeMd, ensureStarterAgentsMd, ensureHookScaffold, ensureVerifyGateRunner, commitProjectScaffoldArtifacts } from "../../services/project-scaffold.js";
-import { detectStackProfile, populateStackProfile, populateVerifyScript, populateSetupScript } from "../../services/stack-profile.service.js";
-import { db } from "../../db/index.js";
-import type { Database } from "../../db/index.js";
-
-/** Fall back to the repo's checked-out branch when main/master isn't detected, so the project is never left undriveable (#772). */
-async function resolveCliDefaultBranch(repoPath: string, detected: string | null): Promise<string | null> {
-  if (detected) return detected;
-  try {
-    const current = (await getCurrentBranch(repoPath)).trim();
-    if (current && current !== "HEAD") return current;
-  } catch { /* no commits / git unavailable */ }
-  return null;
-}
-
-/**
- * Derive & persist the post-registration config the service path populates (#788, #810):
- * the stack profile, the verify (merge-gate) command, and the setup/install script.
- *
- * Mirrors `registerProject()`'s chain (`project-registration.ts`), with one deliberate
- * difference: this AWAITS. `registerProject()` can fire-and-forget (`void`) because the
- * server is long-lived; the CLI calls `process.exit(0)` immediately after registering, so a
- * detached promise would be lost and `setup_script` / `verify_script_<id>` would stay null
- * forever — which left CLI-registered projects with no dependency install and no merge gate.
- *
- * Non-fatal by design (same as the service path): a detection failure must never fail
- * registration, so the project is still usable and `repairProjectRegistration()` can retry.
- *
- * Returns the derived setup script (or null) so the caller can report it.
- *
- * `skipLlm` forwards to populateStackProfile's rule-based-only mode; the CLI leaves it off to
- * match the service path (a repo whose markers yield no test/build command gets an LLM gap-fill,
- * bounded by that call's own 30s timeout), but tests use it to stay hermetic.
- */
-export async function populateDerivedProjectConfig(
-  projectId: string,
-  repoPath: string,
-  database: Database,
-  options?: { skipLlm?: boolean },
-): Promise<{ setupScript: string | null; verifyScript: string | null }> {
-  try {
-    const profile = await populateStackProfile(projectId, repoPath, database, options);
-    const verifyScript = await populateVerifyScript(projectId, repoPath, database, profile);
-    const setupScript = await populateSetupScript(projectId, repoPath, database, profile);
-    return { setupScript, verifyScript };
-  } catch {
-    return { setupScript: null, verifyScript: null };
-  }
-}
+import { registerProject } from "../../services/project-registration.js";
 
 export function registerRegisterCommand(program: Command) {
   program
@@ -88,53 +35,31 @@ Examples:
           console.log(`Cloned ${options.clone} to ${path}`);
         }
 
-        const repoInfo = await detectRepoInfo(path!);
-        const projectName = options.name || repoInfo.repoName;
+        // ONE registration path (#43): insert + statuses + scaffolding + derived config all
+        // live in registerProject(), so a new registration-time step can never again be wired
+        // into just one entry point (that was #37).
+        //
+        // awaitEnrichment (#42): the optional LLM gap-fill only fires for a marker-sparse repo,
+        // and this process calls process.exit(0) immediately — a backgrounded promise (what the
+        // server does) would be silently dropped and the profile would stay rule-based forever,
+        // since repairProjectRegistration() only backfills a profile that is entirely ABSENT.
+        // So the CLI awaits it, and onProgress explains the pause rather than looking like a hang.
+        const { project, created, setupScript, verifyScript } = await registerProject(path!, {
+          name: options.name,
+          awaitEnrichment: true,
+          onProgress: (message) => console.log(message),
+        });
 
-        const existing = await getProjectByRepoPath(repoInfo.repoPath);
-        if (existing) {
-          console.log(`Project "${existing.name}" already registered at ${repoInfo.repoPath}`);
+        if (!created) {
+          console.log(`Project "${project.name}" already registered at ${project.repoPath}`);
           process.exit(0);
         }
 
-        const projectId = randomUUID();
-        const defaultBranch = await resolveCliDefaultBranch(repoInfo.repoPath, repoInfo.defaultBranch);
-
-        // insertProject also creates the canonical 7-status set (incl. Backlog at -1)
-        // so auto-driven Backlog-pull works (#772).
-        await insertProject(projectId, {
-          name: projectName,
-          repoPath: repoInfo.repoPath,
-          repoName: repoInfo.repoName,
-          defaultBranch,
-          remoteUrl: repoInfo.remoteUrl,
-          defaultSkillId: await getDefaultSkillId(),
-        });
-
-        await setPreference("activeProjectId", projectId);
-
-        // Scaffold (clobber-safe): keep agent scratch out of history + drop a starter CLAUDE.md + hooks + verify-gate runner.
-        // Per-stack build-output ignores (target/, __pycache__/, *.class, …) keep a non-Node toy project's
-        // build artifacts from making main dirty and blocking auto-merge (#811).
-        ensureAgentGitignore(repoInfo.repoPath, undefined, detectStackProfile(repoInfo.repoPath).stack);
-        ensureStarterClaudeMd(repoInfo.repoPath);
-        ensureStarterAgentsMd(repoInfo.repoPath);
-        ensureHookScaffold(repoInfo.repoPath);
-        ensureVerifyGateRunner(repoInfo.repoPath);
-        await commitProjectScaffoldArtifacts(repoInfo.repoPath);
-
-        // MUST be awaited before process.exit(0) — see populateDerivedProjectConfig.
-        const { setupScript, verifyScript } = await populateDerivedProjectConfig(
-          projectId,
-          repoInfo.repoPath,
-          db,
-        );
-
-        console.log(`Registered project "${projectName}"`);
-        console.log(`  Repo: ${repoInfo.repoPath}`);
-        logDefaultBranch(defaultBranch);
-        if (repoInfo.remoteUrl) {
-          console.log(`  Remote: ${repoInfo.remoteUrl}`);
+        console.log(`Registered project "${project.name}"`);
+        console.log(`  Repo: ${project.repoPath}`);
+        logDefaultBranch(project.defaultBranch);
+        if (project.remoteUrl) {
+          console.log(`  Remote: ${project.remoteUrl}`);
         }
         console.log(`  Statuses: ${DEFAULT_STATUSES.map((s) => s.name).join(", ")}`);
         if (setupScript) {

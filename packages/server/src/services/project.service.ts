@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { resolve, sep, join } from "node:path";
 import { ensureAgentGitignore, ensureStarterClaudeMd, ensureStarterAgentsMd, ensureHookScaffold, ensureVerifyGateRunner, getDefaultSkillId, commitProjectScaffoldArtifacts } from "./project-scaffold.js";
+import { scaffoldProject, populateDerivedProjectConfig } from "./project-registration.js";
 import { isSkillsDirAbsentOrEmpty, writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { listAgentSkills } from "../repositories/agent-skill.repository.js";
 import { getPreference } from "../repositories/preferences.repository.js";
@@ -14,7 +15,7 @@ import { buildWorkspaceSummaryMap, buildBlockedMap, buildTagMap, buildGraphEdges
 import { getProjectById, getProjectByRepoPath, getAllProjects, insertProject, deleteProjectCascade, setProjectArchived, getProjectStats, getProjectStatuses, createProjectStatus, deleteProjectStatus, updateProjectStatusSortOrder } from "../repositories/project.repository.js";
 import { getProjectsBasePath, updateProjectFields, clearActiveProjectPreference, getProjectWorkspacesWithIssue, getWorkspaceWorkingDirById, getProjectStatusIdsAndNames, getBoardIssueRows, getProjectStatusesOrdered, getBoardIssues, getPreferenceValue, getGraphIssues, getCrossProjectIssues, getActiveWorkspaceCounts, getBoardSummaryRows } from "../repositories/project-service.repository.js";
 import { generateSetupScript as generateSetupScriptAI, generateTeardownScript as generateTeardownScriptAI, generateVerifyScript as generateVerifyScriptAI } from "./project-setup.service.js";
-import { populateStackProfile, populateVerifyScript, detectStackProfile } from "./stack-profile.service.js";
+import { detectStackProfile } from "./stack-profile.service.js";
 import { cloneRepo } from "./repo-clone.service.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
 import { workspaceServicesService, parseStoredComposeProjectName } from "./workspace-services.service.js";
@@ -179,19 +180,10 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       defaultSkillId: await getDefaultSkillId(database),
     }, database);
 
-    // Scaffold (clobber-safe for imports): ensure the generic agent-artifact ignores are present
-    // (append-if-missing; seeds the chosen language template only when no .gitignore exists), and
-    // drop a starter CLAUDE.md when the repo has none â€” keeps agent scratch out of the project's
-    // history and gives agents a baseline working agreement. The synchronous rule-based stack
-    // detection also feeds per-stack build-output ignores (target/, __pycache__/, *.class, …) so a
-    // non-Node project's build artifacts never make main dirty and block auto-merge (#811).
-    const detectedStack = detectStackProfile(repoInfo.repoPath).stack;
-    ensureAgentGitignore(repoInfo.repoPath, body.gitignoreTemplate ? GITIGNORE_TEMPLATES[body.gitignoreTemplate] : undefined, detectedStack);
-    ensureStarterClaudeMd(repoInfo.repoPath);
-    ensureStarterAgentsMd(repoInfo.repoPath);
-    ensureHookScaffold(repoInfo.repoPath);
-    ensureVerifyGateRunner(repoInfo.repoPath);
-    await commitProjectScaffoldArtifacts(repoInfo.repoPath);
+    // Shared registration step (#43) — see scaffoldProject in project-registration.ts.
+    await scaffoldProject(repoInfo.repoPath, {
+      gitignoreTemplate: body.gitignoreTemplate ? GITIGNORE_TEMPLATES[body.gitignoreTemplate] : undefined,
+    });
 
     if (body.generateReadme) {
       const readmePath = join(repoInfo.repoPath, "README.md");
@@ -218,15 +210,15 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       }
     }
 
-    // Populate the durable stack profile (#786) — ONE descriptor every harness piece
-    // (hooks/verify/dev-server/build-clean) reads instead of re-deriving stack facts.
-    // The rule-based pass is fast; the optional LLM gap-fill is best-effort and must not
-    // block (or fail) registration, so run it fire-and-forget. Once the profile lands,
-    // auto-populate & activate the verify (merge-gate) command (#788) — the keystone
-    // auto-merge gate must be live from ticket #1, derived from the same profile.
-    void populateStackProfile(id, repoInfo.repoPath, database)
-      .then((profile) => populateVerifyScript(id, repoInfo.repoPath, database, profile))
-      .catch(() => { /* non-fatal */ });
+    // Shared registration step (#43) — see populateDerivedProjectConfig in project-registration.ts.
+    // The fast rule-based pass is AWAITED, closing this path's race: a caller creating a
+    // workspace immediately after POST /api/projects used to beat the old fire-and-forget
+    // population and get `{"command": null, "state": "skipped"}` setup. The optional ~30s LLM
+    // gap-fill stays backgrounded so the request never blocks on it.
+    //
+    // This path also never called populateSetupScript at all, so REST-registered projects had
+    // setup_script = null forever — the #37 bug, still live here (#43).
+    await populateDerivedProjectConfig(id, repoInfo.repoPath, database);
 
     return { ...result, id };
   }

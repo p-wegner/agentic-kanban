@@ -1,11 +1,21 @@
 import { db } from "../db/index.js";
+import type { Database } from "../db/index.js";
 import { randomUUID } from "node:crypto";
 import { resolve, basename } from "node:path";
+import type { StackProfile } from "@agentic-kanban/shared";
 import { detectRepoInfo } from "./git-info.service.js";
 import { initializeProjectStatuses } from "../repositories/issue.repository.js";
 import { getCurrentBranch } from "./git.service.js";
 import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
-import { populateStackProfile, getStackProfile, populateVerifyScript, verifyScriptPrefKey, populateSetupScript } from "./stack-profile.service.js";
+import { populateStackProfile, getStackProfile, populateVerifyScript, verifyScriptPrefKey, populateSetupScript, detectStackProfile } from "./stack-profile.service.js";
+import {
+  ensureAgentGitignore,
+  ensureStarterClaudeMd,
+  ensureStarterAgentsMd,
+  ensureHookScaffold,
+  ensureVerifyGateRunner,
+  commitProjectScaffoldArtifacts,
+} from "./project-scaffold.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import {
   getAllProjects,
@@ -162,7 +172,168 @@ export async function deduplicateProjects(): Promise<void> {
   }
 }
 
-export async function registerProject(path: string, options?: { name?: string }) {
+// ---------------------------------------------------------------------------
+// Shared registration steps (#43)
+// ---------------------------------------------------------------------------
+//
+// Every registration entry point (REST `POST /api/projects` → project.service.ts,
+// CLI `register` → cli/commands/register.ts, CLI `init` / `dev` auto-register →
+// registerProject below) MUST route its scaffolding and derived-config population
+// through the two functions here. Previously each path hand-rolled its own chain,
+// so a new registration-time step had to be remembered in three places — which is
+// exactly how #37 happened (#810's setup script and #788's verify script were wired
+// into one path only, and the REST path still had no setup script at all).
+//
+// Add a new registration-time step HERE, never in a caller.
+
+/**
+ * Scaffold a repo's board-authored artifacts (clobber-safe: every `ensure*` is
+ * append-/create-if-missing and never overwrites a user's file).
+ *
+ * `gitignoreTemplate` is the language-template CONTENT seeded only when the repo has
+ * no `.gitignore` at all; the per-stack build-output ignores (target/, __pycache__/,
+ * *.class, …) are derived from the rule-based stack detection so a non-Node project's
+ * build artifacts never make main dirty and block auto-merge (#811).
+ *
+ * ORDERING IS LOAD-BEARING (#38): `ensureVerifyGateRunner` internally runs
+ * `ensureBuildableFromClean`, which records the non-`.claude` project files it rewrote
+ * (package.json / pnpm-workspace.yaml) in module-level state keyed by repo path.
+ * `commitProjectScaffoldArtifacts` consumes and clears that record. The two MUST stay
+ * back-to-back in ONE process, or the board's own package.json edit is left uncommitted
+ * and main goes dirty. Do not split, reorder, or defer the commit.
+ *
+ * Non-fatal by design: scaffolding must never block registration.
+ */
+export async function scaffoldProject(
+  repoPath: string,
+  options?: { gitignoreTemplate?: string },
+): Promise<void> {
+  try {
+    const detectedStack = detectStackProfile(repoPath).stack;
+    ensureAgentGitignore(repoPath, options?.gitignoreTemplate, detectedStack);
+    ensureStarterClaudeMd(repoPath);
+    ensureStarterAgentsMd(repoPath);
+    ensureHookScaffold(repoPath);
+    ensureVerifyGateRunner(repoPath); // → ensureBuildableFromClean (records its rewrites)
+    await commitProjectScaffoldArtifacts(repoPath); // MUST stay in-process, immediately after
+  } catch {
+    /* non-fatal: scaffolding must never block registration */
+  }
+}
+
+/**
+ * Mirror of `isProfileSparse` in stack-profile/persistence.ts (not exported there, and that
+ * file is owned by another ticket). Only used to decide whether an LLM gap-fill WOULD run,
+ * so a caller can report it; `populateStackProfile` re-checks this itself and is the
+ * authority. Keep in sync.
+ */
+function wouldEnrichWithLlm(profile: StackProfile): boolean {
+  return !profile.stack || (!profile.testCommand && !profile.buildCommand);
+}
+
+export interface DerivedConfigOptions {
+  /** Never invoke the LLM gap-fill at all (tests, offline callers). */
+  skipLlm?: boolean;
+  /**
+   * Await the LLM gap-fill instead of backgrounding it. For short-lived processes
+   * (the CLI) a detached promise is lost when the process exits — see register.ts.
+   */
+  awaitEnrichment?: boolean;
+  /** Progress reporter, so an interactive caller's ~30s wait is explained, not a hang. */
+  onProgress?: (message: string) => void;
+}
+
+export interface DerivedProjectConfig {
+  setupScript: string | null;
+  verifyScript: string | null;
+  /**
+   * Resolves when background LLM enrichment settles; null when none was scheduled
+   * (not sparse / skipLlm / already awaited). Exposed so tests can await it
+   * deterministically instead of racing a detached promise.
+   */
+  enrichment: Promise<{ setupScript: string | null; verifyScript: string | null }> | null;
+}
+
+/**
+ * Derive & persist the post-registration config every entry point needs: the durable stack
+ * profile (#786) — the ONE descriptor the feedback harness reads — plus the verify/merge-gate
+ * command (#788) and the monorepo-aware setup/install script (#810) derived from that SAME
+ * profile, so the auto-merge gate is live AND deps are installed before the first build.
+ *
+ * The deterministic/rule-based pass is AWAITED (#42/#43). It is fast and offline (the same
+ * reason drive.service.ts passes `skipLlm`), which closes two bugs at once:
+ *  - the REST path's race — a caller creating a workspace right after registration used to
+ *    beat the fire-and-forget population and get `{"command": null, "state": "skipped"}` setup;
+ *  - the CLI's exit — `process.exit(0)` dropped a detached promise entirely (that was #37).
+ *
+ * The OPTIONAL LLM gap-fill (`enrichWithLlm` → `invokeClaudePrompt`, 30s timeout) only ever
+ * fires for a marker-sparse repo, and is kept OFF the hot path: backgrounded by default so a
+ * server request never blocks ~30s on it. `awaitEnrichment` opts a short-lived CLI in.
+ *
+ * Non-fatal throughout: a detection failure must never fail registration — the project stays
+ * usable and `repairProjectRegistration()` can retry.
+ */
+export async function populateDerivedProjectConfig(
+  projectId: string,
+  repoPath: string,
+  database: Database = db,
+  options?: DerivedConfigOptions,
+): Promise<DerivedProjectConfig> {
+  let profile: StackProfile;
+  let setupScript: string | null = null;
+  let verifyScript: string | null = null;
+
+  try {
+    // Rule-based only: fast + offline, so this is safe to await on any path.
+    profile = await populateStackProfile(projectId, repoPath, database, { skipLlm: true });
+    verifyScript = await populateVerifyScript(projectId, repoPath, database, profile);
+    setupScript = await populateSetupScript(projectId, repoPath, database, profile);
+  } catch {
+    return { setupScript: null, verifyScript: null, enrichment: null };
+  }
+
+  if (options?.skipLlm || !wouldEnrichWithLlm(profile)) {
+    return { setupScript, verifyScript, enrichment: null };
+  }
+
+  options?.onProgress?.(
+    "  Stack markers are sparse — asking the LLM to fill in the gaps (up to 30s)…",
+  );
+
+  // Re-runs populateStackProfile WITHOUT skipLlm; it re-checks sparseness itself and is the
+  // authority on whether the LLM is actually called. populateVerifyScript/populateSetupScript
+  // are idempotent — they return an already-configured value rather than clobbering it.
+  const enrichment = (async () => {
+    try {
+      const enriched = await populateStackProfile(projectId, repoPath, database);
+      return {
+        verifyScript: await populateVerifyScript(projectId, repoPath, database, enriched),
+        setupScript: await populateSetupScript(projectId, repoPath, database, enriched),
+      };
+    } catch {
+      return { setupScript: null, verifyScript: null }; // non-fatal
+    }
+  })();
+
+  if (!options?.awaitEnrichment) {
+    return { setupScript, verifyScript, enrichment };
+  }
+
+  const enrichedResult = await enrichment;
+  return {
+    setupScript: enrichedResult.setupScript ?? setupScript,
+    verifyScript: enrichedResult.verifyScript ?? verifyScript,
+    enrichment: null,
+  };
+}
+
+export interface RegisterProjectOptions extends DerivedConfigOptions {
+  name?: string;
+  /** Language-template content seeded only when the repo has no `.gitignore`. */
+  gitignoreTemplate?: string;
+}
+
+export async function registerProject(path: string, options?: RegisterProjectOptions) {
   const repoInfo = await detectRepoInfo(path);
   const projectName = options?.name || repoInfo.repoName;
 
@@ -179,7 +350,7 @@ export async function registerProject(path: string, options?: { name?: string })
     })());
 
   if (existing) {
-    return { project: existing, created: false };
+    return { project: existing, created: false, setupScript: null, verifyScript: null };
   }
 
   const now = new Date().toISOString();
@@ -212,17 +383,16 @@ export async function registerProject(path: string, options?: { name?: string })
 
   await upsertActiveProjectPreference(projectId, now);
 
-  // Durable stack profile (#786): the ONE descriptor the feedback harness reads.
-  // Best-effort & non-blocking — the optional LLM gap-fill must not slow or fail registration.
-  // Once it lands, auto-populate & activate the verify (merge-gate) command (#788) and the
-  // monorepo-aware setup/install script (#810) from the SAME profile, so the keystone
-  // auto-merge gate is live AND deps are installed before the first build from ticket #1.
-  void populateStackProfile(projectId, repoInfo.repoPath, db)
-    .then(async (profile) => {
-      await populateVerifyScript(projectId, repoInfo.repoPath, db, profile);
-      await populateSetupScript(projectId, repoInfo.repoPath, db, profile);
-    })
-    .catch(() => { /* non-fatal */ });
+  // The two shared registration steps — see their definitions above. This path used to do
+  // NO scaffolding at all (so a project registered via CLI `init` / `dev` auto-register got
+  // no agent gitignore, no hooks and no verify-gate runner), and fire-and-forget population.
+  await scaffoldProject(repoInfo.repoPath, { gitignoreTemplate: options?.gitignoreTemplate });
+  const { setupScript, verifyScript } = await populateDerivedProjectConfig(
+    projectId,
+    repoInfo.repoPath,
+    db,
+    options,
+  );
 
   const project = {
     id: projectId,
@@ -236,7 +406,7 @@ export async function registerProject(path: string, options?: { name?: string })
     updatedAt: now,
   };
 
-  return { project, created: true };
+  return { project, created: true, setupScript, verifyScript };
 }
 
 /**

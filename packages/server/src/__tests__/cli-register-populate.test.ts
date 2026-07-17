@@ -8,7 +8,9 @@ import { eq } from "drizzle-orm";
 import { createTestDb } from "./helpers/test-db.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { verifyScriptPrefKey, getStackProfile } from "../services/stack-profile.service.js";
-import { populateDerivedProjectConfig } from "../cli/commands/register.js";
+// Moved from cli/commands/register.ts into the shared registration service by #43 — the CLI,
+// REST and init paths now all call this ONE implementation.
+import { populateDerivedProjectConfig } from "../services/project-registration.js";
 
 /**
  * Regression for #37: `pnpm cli -- register <path>` used to call insertProject() directly and
