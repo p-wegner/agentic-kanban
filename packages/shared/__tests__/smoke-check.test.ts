@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createServer } from "node:net";
 import { runSmokeCheck, type SmokeCheck } from "../src/lib/smoke-check.js";
 
 const tmpDirs: string[] = [];
@@ -24,21 +25,37 @@ afterEach(() => {
 function serverCommand(port: number, status: number, body: string): { cmd: string; dir: string } {
   const dir = mkdtempSync(join(tmpdir(), "smoke-srv-"));
   tmpDirs.push(dir);
-  const script = `require('http').createServer((q,s)=>{s.writeHead(${status},{'Content-Type':'text/html'});s.end(${JSON.stringify(body)})}).listen(${port});`;
+  const script = `require('http').createServer((q,s)=>{s.writeHead(${status},{'Content-Type':'text/html'});s.end(${JSON.stringify(body)})}).listen(${port},'127.0.0.1');`;
   writeFileSync(join(dir, "server.js"), script, "utf8");
   return { cmd: "node server.js", dir };
 }
 
-// Each test binds a fresh random high port to avoid colliding with anything already
-// listening on this machine (other worktrees, leftover processes).
+// Ask the OS for a free port (bind :0, read the assigned port, release it) instead of
+// GUESSING one in a fixed range (#65). The old `30000 + random(30000)` guess flaked ~30%
+// on this Windows host: large blocks of that range are RESERVED by WinNAT / Hyper-V /
+// Docker Desktop (`netsh int ipv4 show excludedportrange`), so `node listen()` failed with
+// `EACCES: permission denied` — the server process exited before serving and every
+// server-booting test in the file went red at once. An OS-assigned ephemeral port is never
+// in an excluded range (the OS wouldn't hand it out), which eliminates the EACCES class;
+// the dedup set stops two rapid calls reusing the same just-freed number within a run.
 const usedPorts = new Set<number>();
-function port(): number {
-  let p: number;
-  do {
-    p = 30000 + Math.floor(Math.random() * 30000);
-  } while (usedPorts.has(p));
-  usedPorts.add(p);
-  return p;
+async function port(): Promise<number> {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const p = await new Promise<number>((resolve, reject) => {
+      const srv = createServer();
+      srv.once("error", reject);
+      srv.listen(0, "127.0.0.1", () => {
+        const addr = srv.address();
+        const assigned = typeof addr === "object" && addr ? addr.port : 0;
+        srv.close(() => resolve(assigned));
+      });
+    });
+    if (p && !usedPorts.has(p)) {
+      usedPorts.add(p);
+      return p;
+    }
+  }
+  throw new Error("could not obtain a free port after 20 attempts");
 }
 
 // Pass-path probes succeed on the first poll; fail-path probes run to this short timeout.
@@ -52,7 +69,7 @@ describe("runSmokeCheck", () => {
   });
 
   it("passes when the server boots and returns HTTP-200 with the expected render content", async () => {
-    const p = port();
+    const p = await port();
     const { cmd, dir } = serverCommand(p, 200, "<html><body><div id='root'>App</div></body></html>");
     const check: SmokeCheck = { devCommand: cmd, healthUrl: `http://127.0.0.1:${p}`, expectBodyContains: ["<html", "<body"] };
     const result = await runSmokeCheck(dir, check, FAST);
@@ -62,7 +79,7 @@ describe("runSmokeCheck", () => {
   });
 
   it("passes on a 200 alone when there are no body assertions (headless service)", async () => {
-    const p = port();
+    const p = await port();
     const { cmd, dir } = serverCommand(p, 200, '{"ok":true}');
     const check: SmokeCheck = { devCommand: cmd, healthUrl: `http://127.0.0.1:${p}/health`, expectBodyContains: [] };
     const result = await runSmokeCheck(dir, check, FAST);
@@ -70,7 +87,7 @@ describe("runSmokeCheck", () => {
   });
 
   it("fails when the server returns a non-200 status", async () => {
-    const p = port();
+    const p = await port();
     const { cmd, dir } = serverCommand(p, 500, "boom");
     const check: SmokeCheck = { devCommand: cmd, healthUrl: `http://127.0.0.1:${p}`, expectBodyContains: [] };
     const result = await runSmokeCheck(dir, check, FAST);
@@ -80,7 +97,7 @@ describe("runSmokeCheck", () => {
   }, 15000);
 
   it("fails when 200 is returned but the body is missing the expected render content", async () => {
-    const p = port();
+    const p = await port();
     const { cmd, dir } = serverCommand(p, 200, "just plain text, no html shell");
     const check: SmokeCheck = { devCommand: cmd, healthUrl: `http://127.0.0.1:${p}`, expectBodyContains: ["<html", "<body"] };
     const result = await runSmokeCheck(dir, check, FAST);
@@ -91,7 +108,7 @@ describe("runSmokeCheck", () => {
 
   it("fails (does not hang) when the server never becomes reachable", async () => {
     // Bind nothing — poll an unused port until the short timeout elapses.
-    const p = port();
+    const p = await port();
     const check: SmokeCheck = {
       devCommand: process.platform === "win32" ? "cmd /c echo noserver" : "true",
       healthUrl: `http://127.0.0.1:${p}`,
