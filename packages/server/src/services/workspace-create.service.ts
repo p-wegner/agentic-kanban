@@ -13,6 +13,7 @@
 import { randomUUID } from "node:crypto";
 import { isResolvedDependencyStatusView } from "@agentic-kanban/shared/lib/status-view";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
+import { isTerminalWorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import { derivePortsFromBranch } from "./worktree-ports.js";
 import { workspaceServicesService, resolveServiceHost } from "./workspace-services.service.js";
 import { provisionServicesForLaunch } from "./workspace-create-stack.service.js";
@@ -448,7 +449,7 @@ export function createWorkspaceCreateService(deps: {
         //    and is open: it may have been deleted or closed while the (up to 120s)
         //    provisioning ran, and an agent must never launch into a removed workspace.
         const lifecycle = await getWorkspaceLifecycleStatus(workspaceId, database);
-        if (!lifecycle || lifecycle.status === "closed" || lifecycle.status === "merged") {
+        if (!lifecycle || isTerminalWorkspaceStatus(lifecycle.status)) {
           console.warn(`[workspaces] workspace ${workspaceId} is ${lifecycle ? lifecycle.status : "deleted"} — skipping the deferred agent launch`);
           return;
         }
