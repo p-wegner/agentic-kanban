@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gitExecSync } from "@agentic-kanban/shared/lib/git-exec";
 import { getCurrentBranch } from "@agentic-kanban/shared/lib/git-service";
@@ -48,6 +48,24 @@ export const GENERIC_AGENT_GITIGNORE = [
   // .kanban/.gitignore sentinel; this entry covers the main checkout and repos where
   // the sentinel write failed.
   ".kanban/",
+  // Board-materialized agent skills (#40). `workspace-provision.service.ts` writes
+  // `.claude/skills/<name>/SKILL.md` into EVERY worktree at create time from the
+  // `agent_skills` table, and symlinks `.codex/skills` -> `.claude/skills`. They are
+  // per-workspace prompt material, regenerated on every create — not project source.
+  // Unignored, the agent's end-of-task sweep commits them into the DRIVEN project's
+  // history and every review diff (observed: 2 of 4 "changed files" on a real ticket
+  // were board prompts, the same content committed TWICE via the symlink).
+  //
+  // Deliberate tradeoff: a repo that authors its OWN skills here (agentic-kanban does)
+  // keeps them — gitignore does not untrack already-tracked files, so committed skills
+  // are unaffected. The cost is that a NEW hand-authored skill needs `git add -f`.
+  // That one-off friction on the rare authoring repo beats polluting every driven
+  // project's history on every ticket.
+  //
+  // Contrast DURABLE_CLAUDE_SCAFFOLD_PATHS (.claude/settings.json, .claude/hooks/*),
+  // which are durable project config and stay committed (via `git add -f`).
+  ".claude/skills/",
+  ".codex/skills", // no trailing slash: the board creates it as a symlink, not a dir
 ];
 
 const AGENT_GITIGNORE_HEADER = "# AI agent artifacts (written during a workspace session; not project source)";
@@ -96,6 +114,34 @@ export function stackBuildArtifactGitignore(stack: string | null | undefined): s
   return STACK_BUILD_ARTIFACT_GITIGNORE[stack] ?? [];
 }
 
+/**
+ * Non-`.claude` project files the CURRENT scaffold run rewrote (package.json,
+ * pnpm-workspace.yaml), keyed by repo path — consumed by `commitProjectScaffoldArtifacts`.
+ *
+ * Why a record rather than reading git status: those paths are ordinary project source, so
+ * "is it dirty?" cannot distinguish the board's own edit from a change the user already had
+ * in flight. Only a file THIS run wrote may be swept into the scaffold commit (#38). Every
+ * caller (`register.ts`, `project.service.ts`) runs `ensureBuildableFromClean` and
+ * `commitProjectScaffoldArtifacts` back-to-back in one process, so the record is short-lived.
+ */
+const scaffoldWrittenFiles = new Map<string, Set<string>>();
+
+function recordScaffoldWrite(repoPath: string, relPath: string): void {
+  const key = resolve(repoPath);
+  const set = scaffoldWrittenFiles.get(key) ?? new Set<string>();
+  set.add(relPath);
+  scaffoldWrittenFiles.set(key, set);
+}
+
+/** Read and clear the record, so a later unrelated commit run never re-sweeps stale paths. */
+function takeScaffoldWrites(repoPath: string): string[] {
+  const key = resolve(repoPath);
+  const set = scaffoldWrittenFiles.get(key);
+  if (!set) return [];
+  scaffoldWrittenFiles.delete(key);
+  return [...set];
+}
+
 function statusLineToPath(line: string): string {
   const raw = line.slice(3).trim();
   if (!raw) return "";
@@ -140,6 +186,13 @@ export async function commitProjectScaffoldArtifacts(repoPath: string): Promise<
 
     for (const pathName of DURABLE_CLAUDE_SCAFFOLD_PATHS) {
       if (existsSync(join(repoPath, ...pathName.split("/")))) pathsToCommit.add(pathName);
+    }
+
+    // Files ensureBuildableFromClean rewrote this run (package.json / pnpm-workspace.yaml).
+    // Without this the board's own edit is left uncommitted and the main checkout is dirty
+    // from registration onward, which blocks every merge with `dirty_main` (#38).
+    for (const pathName of takeScaffoldWrites(repoPath)) {
+      if (existsSync(join(repoPath, pathName))) pathsToCommit.add(pathName);
     }
 
     if (pathsToCommit.size === 0) return;
@@ -788,8 +841,44 @@ function detectNodePmForApproval(repoPath: string, pkg: Record<string, unknown>)
   if (existsSync(join(repoPath, "yarn.lock"))) return { pm: "yarn", pinnable: true };
   if (existsSync(join(repoPath, "package-lock.json"))) return { pm: "npm", pinnable: true };
   // Bare package.json, no lockfile yet: assume pnpm (the board default) for the build-script
-  // approval, but DON'T pin a manager onto a repo that hasn't chosen one.
+  // approval, but DON'T pin a manager onto a repo that hasn't chosen one. `pinnable: false`
+  // marks the manager as a GUESS — `ensureBuildableFromClean` will only act on it with
+  // evidence that the approval is actually needed (#38).
   return { pm: "pnpm", pinnable: false };
+}
+
+/**
+ * Dependency names a package.json declares directly, across every dependency field.
+ */
+function directDependencyNames(pkg: Record<string, unknown>): Set<string> {
+  const names = new Set<string>();
+  for (const field of ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"]) {
+    const block = pkg[field];
+    if (block && typeof block === "object" && !Array.isArray(block)) {
+      for (const name of Object.keys(block as Record<string, unknown>)) names.add(name);
+    }
+  }
+  return names;
+}
+
+/**
+ * Does this project plausibly pull in a dep whose native build step needs approving?
+ *
+ * Checks the manifest's direct deps first, then falls back to an installed `node_modules`
+ * probe — which catches the common TRANSITIVE case (a project lists `vite`, and esbuild
+ * arrives underneath it). Deliberately no lockfile parsing: too heavy/format-specific for
+ * a registration-time scaffold.
+ *
+ * Only consulted when the package manager itself was GUESSED (`pinnable: false`). For a
+ * project with a real pnpm/bun signal the approval stays unconditional, so the #777/#783
+ * `ERR_PNPM_IGNORED_BUILDS` protection is preserved exactly (a fresh clone of a pnpm repo
+ * has no node_modules, and its manifest may only name `vite`).
+ */
+function needsNativeBuildApproval(repoPath: string, pkg: Record<string, unknown>): boolean {
+  const direct = directDependencyNames(pkg);
+  return NATIVE_BUILD_APPROVED_DEPS.some(
+    (dep) => direct.has(dep) || existsSync(join(repoPath, "node_modules", ...dep.split("/"))),
+  );
 }
 
 /**
@@ -804,6 +893,10 @@ function detectNodePmForApproval(repoPath: string, pkg: Record<string, unknown>)
  *  - **npm / yarn** — pin `packageManager` so the lockfile resolves under the right manager
  *    (npm/classic-yarn already run lifecycle scripts on a clean install, so no extra approval).
  *  - **cargo / go / python / java** — a clean clone builds without any approval gate; no-op.
+ *
+ * When NO manager signal exists (bare package.json, no lockfile) the manager is only a guess,
+ * so nothing is written unless the project demonstrably needs the approval (#38) — otherwise a
+ * plain npm repo ends up with a stray, uncommitted pnpm block that blocks every merge.
  *
  * Returns true if it changed any file (so callers can commit the repair). Clobber-safe,
  * idempotent, non-fatal. Never clobbers a deliberate `packageManager` choice the project
@@ -825,8 +918,17 @@ export function ensureBuildableFromClean(repoPath: string): boolean {
 
       const { pm, pinnable } = detectNodePmForApproval(repoPath, pkg);
 
+      // A guessed manager (bare package.json, no lockfile) is not licence to write that
+      // manager's config into someone's project: registering a plain npm repo that depends on
+      // neither approved dep used to leave a stray `pnpm.onlyBuiltDependencies` block behind,
+      // uncommitted, which made the main checkout dirty from birth and blocked every merge
+      // with `dirty_main` (#38). With no manager signal, only act on real evidence.
+      const approvalAllowed = pinnable || needsNativeBuildApproval(repoPath, pkg);
+
       // 1. Approve native build scripts under the strict managers that block them by default.
-      if (pm === "pnpm") {
+      if (!approvalAllowed) {
+        // Nothing to approve, and no manager to pin — leave the project's package.json alone.
+      } else if (pm === "pnpm") {
         // pnpm: `pnpm.onlyBuiltDependencies` is the canonical approval mechanism.
         const pnpmCfg = (pkg.pnpm ?? {}) as Record<string, unknown>;
         if (mergeApprovedDeps(pnpmCfg, "onlyBuiltDependencies")) {
@@ -851,6 +953,7 @@ export function ensureBuildableFromClean(repoPath: string): boolean {
       if (pkgChanged) {
         const trailingNewline = raw.endsWith("\n") ? "\n" : "";
         writeFileSync(pkgJsonPath, JSON.stringify(pkg, null, 2) + trailingNewline, "utf8");
+        recordScaffoldWrite(repoPath, "package.json");
         changed = true;
       }
     }
@@ -870,6 +973,7 @@ export function ensureBuildableFromClean(repoPath: string): boolean {
         }
         if (repaired !== ws) {
           writeFileSync(wsPath, repaired, "utf8");
+          recordScaffoldWrite(repoPath, "pnpm-workspace.yaml");
           changed = true;
         }
       }
