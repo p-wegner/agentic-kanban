@@ -512,6 +512,31 @@ describe("already-merged reconciliation — multi-repo siblings (#16)", () => {
     expect(result.isAlreadyMerged).toBe(true);
   });
 
+  // #69: a SIBLING-ONLY ticket's leading branch never diverges (0 unique commits). Before
+  // the fix, the leading "no unique commits" early return fired BEFORE the sibling check, so
+  // once the sibling landed the workspace could never be reconciled as Done — it stranded
+  // open forever. After the fix, a clean-ancestor leading repo + a landed sibling = merged.
+  it("checkAlreadyMerged reports merged for a sibling-only ticket once the sibling landed (leading has 0 unique commits) (#69)", async () => {
+    const ids = await seedScenario(db, {}); // baseCommitSha null → no historic-unique fallback
+    await insertSibling(db, ids, { mergedHeadSha: "landed-sha" });
+    const git = {
+      ...makeGitService({
+        getDiff: async () => "",
+        // leading branch tip already equals base (clean ancestor, no unique commits)
+        revParse: async (repoPath: string, ref: string) => (repoPath === SIBLING_PATH ? "sib-sha" : ref === "feature/ak-42-test" ? "same-sha" : "same-sha"),
+        isAncestor: async () => true,
+      }),
+      countUniqueCommits: vi.fn(async () => 0), // leading contributes nothing
+      getCurrentBranch: vi.fn(async () => "master"),
+    };
+
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+    const result = await svc.checkAlreadyMerged(ids.workspaceId);
+
+    expect(result.isAlreadyMerged).toBe(true);
+    expect(result.reason).toBeUndefined();
+  });
+
   it("reconcileAlreadyMerged refuses (throws) while a sibling has unmerged commits", async () => {
     const ids = await seedScenario(db, {});
     await insertSibling(db, ids);
@@ -535,5 +560,48 @@ describe("already-merged reconciliation — multi-repo siblings (#16)", () => {
 
     expect(git.removeWorktree).toHaveBeenCalledWith(SIBLING_PATH, `${SIBLING_PATH}/.worktrees/ws`);
     expect(git.deleteBranch).toHaveBeenCalledWith(SIBLING_PATH, "feature/ak-42-test", { force: true });
+  });
+
+  // #70: per-repo merge status makes a partial multi-repo merge visible.
+  it("getRepoMergeStatus reports a stranded sibling while the leading repo is merged", async () => {
+    const ids = await seedScenario(db, {});
+    await insertSibling(db, ids); // not stamped
+    const git = {
+      ...makeGitService({
+        revParse: async () => "sha",
+        isAncestor: async () => true,
+      }),
+      // leading fully landed (0 ahead), sibling 3 commits ahead of base (stranded)
+      countUniqueCommits: vi.fn(async (repoPath: string) => (repoPath === SIBLING_PATH ? 3 : 0)),
+    };
+
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+    const status = await svc.getRepoMergeStatus(ids.workspaceId);
+
+    expect(status.allMerged).toBe(false);
+    const leading = status.repos.find((r) => r.isLeading)!;
+    const sibling = status.repos.find((r) => !r.isLeading)!;
+    // sibling-only ticket: leading repo did nothing (no work), so it is neither merged nor stranded
+    expect(leading.hasWork).toBe(false);
+    expect(leading.stranded).toBe(false);
+    expect(sibling.stranded).toBe(true);
+    expect(sibling.hasWork).toBe(true);
+    expect(sibling.ahead).toBe(3);
+    expect(sibling.name).toBe("extra");
+  });
+
+  it("getRepoMergeStatus reports allMerged once every repo has landed", async () => {
+    const ids = await seedScenario(db, {});
+    await insertSibling(db, ids, { mergedHeadSha: "landed-sha" });
+    const git = {
+      ...makeGitService({ revParse: async () => "sha", isAncestor: async () => true }),
+      countUniqueCommits: vi.fn(async () => 0),
+    };
+
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+    const status = await svc.getRepoMergeStatus(ids.workspaceId);
+
+    expect(status.allMerged).toBe(true);
+    expect(status.repos.find((r) => !r.isLeading)!.merged).toBe(true);
   });
 });

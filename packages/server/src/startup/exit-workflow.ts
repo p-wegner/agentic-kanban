@@ -26,6 +26,7 @@ import { rotateClaudeSubscription } from "../services/claude-subscription-ring.j
 import { decideRateLimitExit, formatRateLimitBlockedReason } from "./rate-limit-exit-decision.js";
 import { classifySessionExit, resolveSessionRoleFlags } from "./session-exit-classification.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
+import { listWorkspaceRepos, type RepoRow } from "../repositories/repo.repository.js";
 import type { SessionRoleFlags } from "./session-exit-classification.js";
 import { buildLearningStepPrompt } from "../services/merge-helpers.service.js";
 import { isFoundationalBlocker } from "../services/foundational-merge.service.js";
@@ -163,7 +164,7 @@ async function launchLearningStep(database: Database, sessionManager: ReturnType
   }
 }
 
-async function hasCommittedChanges(workspace: WorkspaceRow, defaultBranch: string | null, workspaceId: string) {
+async function hasCommittedChanges(workspace: WorkspaceRow, defaultBranch: string | null, workspaceId: string, database: Database) {
   if (!workspace.workingDir) return false;
   try {
     if (workspace.isDirect) {
@@ -175,8 +176,39 @@ async function hasCommittedChanges(workspace: WorkspaceRow, defaultBranch: strin
       console.warn(`[workflow] workspace ${workspaceId} has no base/default branch; treating as no committed changes`);
       return false;
     }
-    return (await gitExec(["diff", "--quiet", baseBranch], { cwd: workspace.workingDir! })).code !== 0;
+    if ((await gitExec(["diff", "--quiet", baseBranch], { cwd: workspace.workingDir! })).code !== 0) return true;
+    // Multi-repo: the leading repo being clean does NOT mean the workspace did nothing —
+    // a sibling-only ticket commits entirely in a sibling repo (#69). Without this, the
+    // exit workflow reads the sibling work as "no committed changes", never routes it to
+    // review/merge, and force-closes the issue to Done with the sibling commit stranded.
+    return await hasSiblingCommittedChanges(workspaceId, defaultBranch, database);
   } catch { return false; }
+}
+
+/**
+ * True when any sibling repo of the workspace has committed changes against its base
+ * branch. Mirrors the leading-repo `git diff --quiet <base>` probe per sibling worktree,
+ * falling back to a branch-vs-base commit count when the worktree is already gone.
+ * Best-effort: a git error on one sibling reads as "no change" (safe direction).
+ */
+async function hasSiblingCommittedChanges(workspaceId: string, defaultBranch: string | null, database: Database): Promise<boolean> {
+  let repos: RepoRow[];
+  try {
+    repos = await listWorkspaceRepos(workspaceId, database);
+  } catch { return false; }
+  for (const repo of repos) {
+    const base = repo.baseBranch || defaultBranch;
+    if (!base) continue;
+    try {
+      if (repo.worktreePath) {
+        if ((await gitExec(["diff", "--quiet", base], { cwd: repo.worktreePath })).code !== 0) return true;
+      } else if (repo.branch) {
+        const out = (await gitExec(["rev-list", "--count", `${base}..${repo.branch}`], { cwd: repo.path })).stdout.trim();
+        if (Number(out) > 0) return true;
+      }
+    } catch { /* non-fatal: treat this sibling as no-change */ }
+  }
+  return false;
 }
 
 /** Extract the "try again / resets at X" hint persisted on the rate-limited session's stats. */
@@ -671,7 +703,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     // #629 Guard: re-verify the branch still has committed changes ahead of base.
     // A race (e.g. branch reset/rebased to equal base between review start and exit)
     // can leave a 0-commit branch incorrectly marked ready-for-merge.
-    const stillHasChanges = await hasCommittedChanges(workspace, defaultBranch, workspaceId);
+    const stillHasChanges = await hasCommittedChanges(workspace, defaultBranch, workspaceId, db);
     if (!stillHasChanges) {
       console.log(`[workflow] review session ${sessionId} completed but branch has no committed changes — withholding readyForMerge (issue #629)`);
       boardEvents.broadcast(projectId, "issue_updated");
@@ -712,7 +744,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
   async function handleBuilderSessionExit(ctx: ExitContext): Promise<void> {
     const { workspace, projectId, issueId, sessionId, skipAutoReview, now, prefMap, statuses, findStatus, defaultBranch } = ctx;
     const workspaceId = workspace.id;
-    const committedChanges = await hasCommittedChanges(workspace, defaultBranch, workspaceId);
+    const committedChanges = await hasCommittedChanges(workspace, defaultBranch, workspaceId, db);
     if (await isSpecPlanningNode(db, workspace.currentNodeId)) {
       console.log(`[workflow] planning phase session ${sessionId} completed; waiting for explicit user approval before advancing`);
       boardEvents.broadcast(projectId, "issue_updated");

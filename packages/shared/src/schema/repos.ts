@@ -18,6 +18,12 @@ export const repos = sqliteTable("repos", {
   path: text("path").notNull(),
   name: text("name"),
   scripts: text("scripts"),
+  // Per-repo setup/install command (#71). Runs in this repo's worktree at workspace
+  // creation, in addition to the project-level (leading-repo) setup_script. NULL = none.
+  setupScript: text("setup_script"),
+  // Optional compose file (relative to this repo) whose services compose into the
+  // workspace stack alongside the project's configured stack (#71). NULL = none.
+  composeFile: text("compose_file"),
   defaultBranch: text("default_branch"),
   worktreePath: text("worktree_path"),
   branch: text("branch"),
