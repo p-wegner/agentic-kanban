@@ -175,6 +175,32 @@ export async function getLiveStackHostPorts(database: Database = db): Promise<nu
   return [...ports];
 }
 
+/**
+ * How many DISTINCT service stacks this board currently has "up" — the live count the
+ * admission cap (`max_concurrent_stacks`, #56) compares against before provisioning an
+ * (N+1)th. Counts DISTINCT composeProjectName so co-resident workspaces that ADOPTED
+ * one shared stack (worktree reuse / fork children) count once, not per-workspace.
+ * Only non-terminal rows whose state is "up" hold a real running stack.
+ */
+export async function countLiveStacks(database: Database = db): Promise<number> {
+  const rows = await database
+    .select({ composeProjectName: sql<string>`json_extract(${workspaces.serviceState}, '$.composeProjectName')` })
+    .from(workspaces)
+    .where(
+      and(
+        notInArray(workspaces.status, TERMINAL_STATUSES),
+        sql`json_extract(${workspaces.serviceState}, '$.status') = 'up'`,
+      ),
+    );
+  const names = new Set<string>();
+  for (const row of rows) {
+    if (typeof row.composeProjectName === "string" && row.composeProjectName.length > 0) {
+      names.add(row.composeProjectName);
+    }
+  }
+  return names.size;
+}
+
 /** Preference key holding this server instance's persisted service-stack identity. */
 const SERVICE_STACK_INSTANCE_ID_KEY = "service_stack_instance_id";
 

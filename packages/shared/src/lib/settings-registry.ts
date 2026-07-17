@@ -75,6 +75,11 @@ export const SETTINGS_REGISTRY = {
   learning_step_before_merge: { type: "bool", default: "false" },
   auto_monitor: { type: "bool", default: "false" },
   auto_monitor_interval: { type: "number", default: "4" },
+  // Max per-workspace Docker service stacks that may be "up" at once (#56). Empty/0 =
+  // unlimited (default — unchanged behaviour). When >0, provisioning DEFERS rather than
+  // starting an (N+1)th stack, so an over-subscribed host queues instead of thrashing.
+  // In a DinD deployment the KANBAN_STACK_PORT_RANGE size is ALSO a natural cap.
+  max_concurrent_stacks: { type: "number", default: "" },
   nudge_auto_start: { type: "bool", default: "false" },
   nudge_wip_limit: { type: "number", default: "" },
   projects_base_path: { type: "string", default: "" },
