@@ -16,6 +16,7 @@ import { eq } from "drizzle-orm";
 import { issues, projectStatuses, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
+import { insertWorkspaceRepo } from "../repositories/repo.repository.js";
 import { resolveMergeState, WorkspaceError, activeMerges } from "../services/workspace-internals.js";
 import { createMockSessionManager } from "./helpers/mocks.js";
 
@@ -387,6 +388,41 @@ describe("MergeService — updateBase rebase uses preferLocalBase", () => {
       "feature/ak-548-test",
       { preferLocalBase: true },
     );
+  });
+
+  it("rebases the leading worktree AND every sibling worktree onto its own base (#72)", async () => {
+    const { workspaceId, projectId } = await seedWorkspace(db, { status: "idle" });
+    await insertWorkspaceRepo(
+      { workspaceId, projectId, path: "/extra", name: "extra", worktreePath: "/extra/.worktrees/ws", branch: "feature/ak-548-test", baseBranch: "main" },
+      db,
+    );
+    const rebaseOntoBase = vi.fn(async () => ({ success: true }));
+    const git = makeGit({ rebaseOntoBase });
+
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {}, processKiller: async () => 0 });
+    const result = await svc.updateBase(workspaceId, "rebase");
+
+    expect(result.success).toBe(true);
+    expect(rebaseOntoBase).toHaveBeenCalledWith("/repo/.worktrees/feature_ak-548-test", "master", "feature/ak-548-test", { preferLocalBase: true });
+    expect(rebaseOntoBase).toHaveBeenCalledWith("/extra/.worktrees/ws", "main", "feature/ak-548-test", { preferLocalBase: true });
+  });
+
+  it("surfaces a sibling rebase conflict namespaced by repo and fails overall (#72)", async () => {
+    const { workspaceId, projectId } = await seedWorkspace(db, { status: "idle" });
+    await insertWorkspaceRepo(
+      { workspaceId, projectId, path: "/extra", name: "extra", worktreePath: "/extra/.worktrees/ws", branch: "feature/ak-548-test", baseBranch: "main" },
+      db,
+    );
+    const rebaseOntoBase = vi.fn(async (worktree: unknown) =>
+      String(worktree).startsWith("/extra") ? { success: false, conflictingFiles: ["src/server.js"] } : { success: true },
+    );
+    const git = makeGit({ rebaseOntoBase });
+
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {}, processKiller: async () => 0 });
+    const result = await svc.updateBase(workspaceId, "rebase");
+
+    expect(result.success).toBe(false);
+    expect(result.conflictingFiles).toContain("extra::src/server.js");
   });
 
   it("does NOT pass preferLocalBase when using merge mode (different code path)", async () => {
