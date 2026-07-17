@@ -134,6 +134,12 @@ export function createWorkspaceActionsRoute(
     return c.json(await workspaceService.checkAlreadyMerged(id));
   });
 
+  // GET /api/workspaces/:id/repo-merge-status — per-repo (leading + siblings) merge status (#70)
+  router.get("/:id/repo-merge-status", async (c) => {
+    const id = c.req.param("id");
+    return c.json(await workspaceService.getRepoMergeStatus(id));
+  });
+
   // POST /api/workspaces/:id/reconcile-as-done — close a workspace whose branch is already on master
   router.post("/:id/reconcile-as-done", async (c) => {
     const id = c.req.param("id");

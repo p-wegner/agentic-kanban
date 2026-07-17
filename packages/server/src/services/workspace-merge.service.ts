@@ -54,6 +54,7 @@ import { runWorkspacePostMergeCleanup } from "./workspace-merge-cleanup.service.
 import { prevalidateSiblingMerges, executeSiblingMerges, cleanupSiblingWorktrees } from "./workspace-repos.service.js";
 import { listWorkspaceRepos } from "../repositories/repo.repository.js";
 import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
+import { getRepoMergeStatus } from "./repo-merge-status.service.js";
 import { resolveMergeGate, RUN_GATE, type MergeGateToken } from "./pre-merge-gate.service.js";
 
 export function createWorkspaceMergeService(deps: {
@@ -436,11 +437,10 @@ export function createWorkspaceMergeService(deps: {
     const { repoPath, defaultBranch } = await resolveProjectRepo(id, database);
     const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
 
-    // Multi-repo: update-base currently rebases/merges the LEADING repo only (B4 polish).
+    // Multi-repo (#72): a cross-cutting ticket touches every repo, so update-base must
+    // rebase/merge the leading repo AND every sibling worktree — otherwise a trailing
+    // cross-cutting ticket stays behind base in the siblings and strands on merge.
     const siblingRows = await listWorkspaceRepos(id, database);
-    if (siblingRows.length > 0) {
-      console.warn(`[workspace-service] update-base: workspace ${id} has ${siblingRows.length} sibling repo(s) — only the leading repo is updated; rebase siblings manually if needed`);
-    }
 
     // Refuse if main checkout HEAD has drifted off the target branch (consistent with /merge guard).
     const currentHeadBranch = await gitService.getCurrentBranch(repoPath);
@@ -456,17 +456,45 @@ export function createWorkspaceMergeService(deps: {
     // Stop any processes the agent left running in the worktree before we rewrite history.
     await killWorktreeProcesses(workspace.workingDir, `update-base:pre`);
 
-    let result: { success: boolean; conflictingFiles?: string[]; error?: string };
-    if (mode === "merge") {
-      result = await gitService.mergeBaseIntoBranch(workspace.workingDir, baseBranch);
-    } else {
-      result = await gitService.rebaseOntoBase(workspace.workingDir, baseBranch, workspace.branch, { preferLocalBase: true });
-    }
+    const runUpdate = (worktree: string, branch: string | null, base: string) =>
+      mode === "merge"
+        ? gitService.mergeBaseIntoBranch(worktree, base)
+        : gitService.rebaseOntoBase(worktree, base, branch ?? "", { preferLocalBase: true });
+
+    let result: { success: boolean; conflictingFiles?: string[]; error?: string } = await runUpdate(workspace.workingDir, workspace.branch, baseBranch);
 
     // And again after - rebase/merge can spawn helpers (hook scripts, editors) that linger.
     await killWorktreeProcesses(workspace.workingDir, `update-base:post`);
 
-    console.log(`[workspace-service] update-base: workspaceId=${id} mode=${mode} success=${result.success} conflicts=${result.conflictingFiles?.length ?? 0}`);
+    // Rebase/merge each sibling worktree onto its own base. Conflicts are namespaced by
+    // repo and aggregated; overall success requires every repo to succeed. A sibling whose
+    // worktree is gone (already landed/cleaned) is skipped. Best-effort per sibling so one
+    // unreachable repo doesn't abort the others — its failure surfaces in the result.
+    for (const repo of siblingRows) {
+      if (!repo.worktreePath || !repo.branch) continue;
+      const repoBase = requireBaseBranch(repo.baseBranch || baseBranch);
+      const ns = repo.name ?? repo.path;
+      await killWorktreeProcesses(repo.worktreePath, `update-base:sibling-pre:${ns}`);
+      let repoResult: { success: boolean; conflictingFiles?: string[]; error?: string };
+      try {
+        repoResult = await runUpdate(repo.worktreePath, repo.branch, repoBase);
+      } catch (err) {
+        repoResult = { success: false, error: `${ns}: ${err instanceof Error ? err.message : String(err)}` };
+      }
+      await killWorktreeProcesses(repo.worktreePath, `update-base:sibling-post:${ns}`);
+      if (!repoResult.success) {
+        result = {
+          success: false,
+          conflictingFiles: [
+            ...(result.conflictingFiles ?? []),
+            ...(repoResult.conflictingFiles ?? []).map((f) => `${ns}::${f}`),
+          ],
+          error: [result.error, repoResult.error].filter(Boolean).join("; ") || result.error,
+        };
+      }
+    }
+
+    console.log(`[workspace-service] update-base: workspaceId=${id} mode=${mode} repos=${1 + siblingRows.length} success=${result.success} conflicts=${result.conflictingFiles?.length ?? 0}`);
 
     if (result.success) {
       await computeWorkspaceCodeMetrics(id, database).catch(() => null);
@@ -782,20 +810,14 @@ export function createWorkspaceMergeService(deps: {
     const originalUniqueCommits = uniqueCommits === 0 && branchSha !== baseSha && workspace.baseCommitSha
       ? await gitService.countUniqueCommits(repoPath, workspace.baseCommitSha, branchSha).catch(() => 0)
       : 0;
-    if (uniqueCommits === 0 && originalUniqueCommits === 0) {
-      return {
-        isAlreadyMerged: false,
-        branch: workspace.branch,
-        baseBranch,
-        mergeCommitSha: null,
-        issueNumber,
-        reason: "Branch has no unique commits relative to " + baseBranch,
-      };
-    }
+    const leadingHasUnique = uniqueCommits > 0 || originalUniqueCommits > 0;
 
-    // Multi-repo: "fully merged" must hold for EVERY repo of the workspace, not just
-    // the leading one — a sibling repo with unmerged commits means the work has NOT
-    // landed, and reconciling as Done would strand it (and orphan its worktree).
+    // Multi-repo: "fully merged" must hold for EVERY repo of the workspace, not just the
+    // leading one. This sibling check MUST run BEFORE the leading no-unique-commits early
+    // return (#69): a sibling-only ticket's leading branch has 0 unique commits, so
+    // returning here first both reports a misleading "no unique commits" reason AND — once
+    // the sibling work has actually landed — wrongly refuses to reconcile the workspace as
+    // Done, stranding it open forever with its issue never reaching Done.
     const pendingSiblings = await listPendingSiblingMerges(gitService, database, id);
     if (pendingSiblings.length > 0) {
       return {
@@ -807,6 +829,24 @@ export function createWorkspaceMergeService(deps: {
         reason: "Sibling repo(s) still have unmerged commits: " +
           pendingSiblings.map((p) => `${p.repo.name ?? p.repo.path} (${p.uniqueCommits})`).join(", "),
       };
+    }
+
+    if (!leadingHasUnique) {
+      // Leading repo contributed nothing and no sibling is pending. This is "already
+      // merged" ONLY if a sibling actually DID contribute work that has since landed
+      // (mergedHeadSha stamped by the sibling merge pipeline) — otherwise the whole
+      // workspace is genuinely empty (nothing was ever committed anywhere).
+      const anySiblingLanded = (await listWorkspaceRepos(id, database)).some((r) => r.mergedHeadSha);
+      if (!anySiblingLanded) {
+        return {
+          isAlreadyMerged: false,
+          branch: workspace.branch,
+          baseBranch,
+          mergeCommitSha: null,
+          issueNumber,
+          reason: "Branch has no unique commits relative to " + baseBranch,
+        };
+      }
     }
 
     // Find the merge commit: the commit on baseBranch that first introduced this SHA
@@ -928,5 +968,10 @@ export function createWorkspaceMergeService(deps: {
     return tracked;
   }
 
-  return { mergeWorkspace, mergeWorkspaceDeduped, updateBase, abortRebase, resolveConflicts, fixAndMerge, reconcileBatch, checkAlreadyMerged, reconcileAlreadyMerged };
+  return {
+    mergeWorkspace, mergeWorkspaceDeduped, updateBase, abortRebase, resolveConflicts, fixAndMerge,
+    reconcileBatch, checkAlreadyMerged, reconcileAlreadyMerged,
+    // #70: per-repo merge status (extracted to keep this module under the god-module ceiling).
+    getRepoMergeStatus: (id: string) => getRepoMergeStatus(id, { database, gitService }),
+  };
 }

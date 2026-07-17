@@ -715,6 +715,13 @@
       "when": 1780906859000,
       "tag": "0101_service_stacks",
       "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "6",
+      "when": 1780906860000,
+      "tag": "0102_repo_setup_and_compose",
+      "breakpoints": true
     }
   ]
 }
