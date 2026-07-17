@@ -139,6 +139,39 @@ export async function findLiveWorkspacesReferencingComposeProject(
     );
 }
 
+/**
+ * Every host port currently claimed by a live (non-terminal) stack whose state is "up".
+ * The port allocator excludes these so a server RESTART (which clears the in-process
+ * reservation registry) or a stack persisted since the last allocation never has its
+ * ports re-handed to a new workspace (#51). Reads each state's `ports` map from the JSON
+ * blob; a row with no/na ports contributes nothing. De-duplicated across rows.
+ */
+export async function getLiveStackHostPorts(database: Database = db): Promise<number[]> {
+  const rows = await database
+    .select({ serviceState: workspaces.serviceState })
+    .from(workspaces)
+    .where(
+      and(
+        notInArray(workspaces.status, TERMINAL_WORKSPACE_STATUSES),
+        sql`json_extract(${workspaces.serviceState}, '$.status') = 'up'`,
+      ),
+    );
+  const ports = new Set<number>();
+  for (const row of rows) {
+    if (!row.serviceState) continue;
+    try {
+      const parsed = JSON.parse(row.serviceState) as { ports?: Record<string, unknown> };
+      for (const value of Object.values(parsed.ports ?? {})) {
+        const port = typeof value === "number" ? value : Number(value);
+        if (Number.isInteger(port) && port > 0) ports.add(port);
+      }
+    } catch {
+      // A corrupt blob simply contributes no ports — never fail allocation over it.
+    }
+  }
+  return [...ports];
+}
+
 /** Preference key holding this server instance's persisted service-stack identity. */
 const SERVICE_STACK_INSTANCE_ID_KEY = "service_stack_instance_id";
 
