@@ -207,6 +207,7 @@ export function parseStoredServiceStackState(serviceStateJson: string | null | u
       envFilePath: typeof parsed.envFilePath === "string" ? parsed.envFilePath : "",
       status: parsed.status,
       ...(typeof parsed.error === "string" ? { error: parsed.error } : {}),
+      ...(parsed.deferred === true ? { deferred: true } : {}),
       updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date().toISOString(),
     };
   } catch {
