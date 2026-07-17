@@ -61,6 +61,45 @@ export async function getCurrentBranch(repoPath: string): Promise<string> {
   return output.trim();
 }
 
+/**
+ * What HEAD currently points at.
+ *
+ * - `branch`   — attached to a branch that has at least one commit,
+ * - `unborn`   — attached to a branch with no commits yet (a fresh `git init`);
+ *                committable, that is how any repo gets its first commit,
+ * - `detached` — not on a branch at all.
+ */
+export type HeadState =
+  | { kind: "branch"; branch: string }
+  | { kind: "unborn"; branch: string }
+  | { kind: "detached" };
+
+/**
+ * Classify HEAD, distinguishing an unborn branch from a detached one.
+ *
+ * `getCurrentBranch` cannot make that distinction: on an unborn branch
+ * `rev-parse --abbrev-ref HEAD` does not return "HEAD", it FAILS with "ambiguous
+ * argument 'HEAD'". A caller guarding only `branch === "HEAD"` therefore never sees
+ * the empty-repo case as a state at all — it sees a thrown error, which is how the
+ * board's scaffold commit silently never ran on freshly created projects (#47).
+ */
+export async function getHeadState(repoPath: string): Promise<HeadState> {
+  let ref: string;
+  try {
+    ref = (await execGit(["symbolic-ref", "--quiet", "HEAD"], repoPath)).trim();
+  } catch {
+    return { kind: "detached" };
+  }
+
+  const branch = ref.replace(/^refs\/heads\//, "");
+  try {
+    await execGit(["rev-parse", "--verify", "--quiet", "HEAD"], repoPath);
+  } catch {
+    return { kind: "unborn", branch };
+  }
+  return { kind: "branch", branch };
+}
+
 /** Get the current HEAD commit SHA (full 40-character hash). */
 export async function getHeadCommitSha(repoPath: string): Promise<string> {
   const output = await execGit(["rev-parse", "HEAD"], repoPath);
@@ -84,4 +123,4 @@ export async function isAncestor(
   } catch {
     return false;
   }
-}
+}
