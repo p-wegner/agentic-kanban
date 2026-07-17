@@ -8,6 +8,7 @@ import {
   getWorkspaceMergeState,
 } from "../repositories/merge-queue.repository.js";
 import { getProjectsByIds } from "../repositories/project.repository.js";
+import { listWorkspaceRepos } from "../repositories/repo.repository.js";
 import { createWorkspaceMergeService } from "./workspace-merge.service.js";
 import type { BoardEvents } from "./board-events.js";
 import type { SessionManager } from "./session.manager.js";
@@ -249,6 +250,30 @@ export function createMergeQueueService(deps: {
         }
       } catch {
         // best effort
+      }
+
+      // Multi-repo (#72): include each sibling repo's changed files, namespaced by repo so
+      // overlap only matches within the SAME repo. Without this, two cross-cutting tickets
+      // that both edit `src/server.js` in every sibling look non-overlapping (their leading
+      // repos may not collide) and get landed in parallel — the second then strands with a
+      // conflict in every repo. Namespacing surfaces the collision so they are sequenced.
+      if (!ws.isDirect) {
+        try {
+          const siblings = await listWorkspaceRepos(ws.id, database);
+          for (const repo of siblings) {
+            const repoBase = repo.baseBranch || baseBranch;
+            const ns = repo.name ?? repo.path;
+            let siblingChanged: string[] = [];
+            try {
+              if (repo.worktreePath) {
+                siblingChanged = await gitService.getChangedFileNames(repo.worktreePath, repoBase);
+              } else if (repo.branch) {
+                siblingChanged = await gitService.getChangedFilesBetween(repo.path, repoBase, repo.branch);
+              }
+            } catch { /* best effort per repo */ }
+            for (const f of siblingChanged) changedFiles.push(`${ns}::${f}`);
+          }
+        } catch { /* best effort: leading-only overlap if sibling scan fails */ }
       }
 
       result.push({
