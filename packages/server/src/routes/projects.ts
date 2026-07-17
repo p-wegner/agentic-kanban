@@ -10,7 +10,7 @@ import { createHash } from "node:crypto";
 import { isAbsolute } from "node:path";
 import { createWorkspaceSummaryCache } from "../services/workspace-summary-cache.service.js";
 import { createBoardEtagCache } from "../services/board-etag-cache.service.js";
-import { listProjectRepos, insertProjectRepo, deleteProjectRepo, type RepoRow } from "../repositories/repo.repository.js";
+import { listProjectRepos, insertProjectRepo, updateProjectRepo, deleteProjectRepo, type RepoRow } from "../repositories/repo.repository.js";
 import { getProjectById, updateProjectServicesConfig } from "../repositories/project.repository.js";
 import { detectRepoInfo } from "../services/git-info.service.js";
 import { cloneRepo } from "../services/repo-clone.service.js";
@@ -24,6 +24,8 @@ function toProjectRepoResponse(row: RepoRow): ProjectRepoResponse {
     path: row.path,
     name: row.name,
     defaultBranch: row.defaultBranch,
+    setupScript: row.setupScript ?? null,
+    composeFile: row.composeFile ?? null,
     createdAt: row.createdAt,
   };
 }
@@ -334,7 +336,7 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
   // POST /api/projects/:id/repos — add an additional repo (local path or clone URL)
   router.post("/:id/repos", async (c) => {
     const projectId = c.req.param("id");
-    const body = await parseJsonBody<{ path?: string; cloneUrl?: string; name?: string }>(c);
+    const body = await parseJsonBody<{ path?: string; cloneUrl?: string; name?: string; setupScript?: string | null; composeFile?: string | null }>(c);
     if (!body.path === !body.cloneUrl) {
       return c.json({ error: "Provide exactly one of path or cloneUrl" }, 400);
     }
@@ -373,9 +375,33 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
       path: repoInfo.repoPath,
       name: body.name ?? repoInfo.repoName,
       defaultBranch: repoInfo.defaultBranch,
+      setupScript: typeof body.setupScript === "string" ? body.setupScript : null,
+      composeFile: typeof body.composeFile === "string" ? body.composeFile : null,
     }, database);
     options?.boardEvents?.broadcastProjectsChanged(projectId, "project_updated");
     return c.json(toProjectRepoResponse(row), 201);
+  });
+
+  // PATCH /api/projects/:id/repos/:repoId — update a registered repo's per-repo setup/compose config (#71)
+  router.patch("/:id/repos/:repoId", async (c) => {
+    const projectId = c.req.param("id");
+    const repoId = c.req.param("repoId");
+    const body = await parseJsonBody<{ setupScript?: string | null; composeFile?: string | null }>(c);
+    if (body.setupScript !== undefined && body.setupScript !== null && typeof body.setupScript !== "string") {
+      return c.json({ error: "setupScript must be a string or null" }, 400);
+    }
+    if (body.composeFile !== undefined && body.composeFile !== null && typeof body.composeFile !== "string") {
+      return c.json({ error: "composeFile must be a string or null" }, 400);
+    }
+    if (body.composeFile && /[\r\n]/.test(body.composeFile)) {
+      return c.json({ error: "composeFile must not contain newlines" }, 400);
+    }
+    const existing = await listProjectRepos(projectId, database);
+    if (!existing.some((r) => r.id === repoId)) return c.json({ error: "Repo not found" }, 404);
+    const row = await updateProjectRepo(repoId, { setupScript: body.setupScript, composeFile: body.composeFile }, database);
+    if (!row) return c.json({ error: "Repo not found" }, 404);
+    options?.boardEvents?.broadcastProjectsChanged(projectId, "project_updated");
+    return c.json(toProjectRepoResponse(row));
   });
 
   // DELETE /api/projects/:id/repos/:repoId — remove an additional repo from the set

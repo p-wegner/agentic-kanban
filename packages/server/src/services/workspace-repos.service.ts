@@ -7,6 +7,7 @@
  */
 
 import { basename } from "node:path";
+import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import type { Database, TransactionClient } from "../db/index.js";
 import { listProjectRepos, listWorkspaceRepos, insertWorkspaceRepo, setWorkspaceRepoMergedSha, findLiveSiblingSharers, type RepoRow } from "../repositories/repo.repository.js";
 import { WorkspaceError, acquireRepoMergeLock, type GitService } from "./workspace-internals.js";
@@ -20,6 +21,8 @@ export interface SiblingWorktree {
   branch: string;
   baseBranch: string;
   baseCommitSha: string | null;
+  /** Per-repo compose file (relative to the repo), if this repo ships its own stack (#71). */
+  composeFile: string | null;
 }
 
 /**
@@ -57,7 +60,21 @@ export async function provisionSiblingWorktrees(params: {
       const worktreePath = await gitService.createWorktree(repo.path, branch, baseBranch, {
         pathNamespace: basename(repo.path),
       });
-      provisioned.push({ path: repo.path, name: repo.name, worktreePath, branch, baseBranch, baseCommitSha });
+      // Per-repo setup/install (#71): each additional repo may need its own deps ready in
+      // its worktree before the agent runs (`pnpm install`, `cargo fetch`, `uv sync`, …).
+      // Best-effort + non-fatal, mirroring the leading-repo setup script's semantics — a
+      // failed sibling setup must not abort workspace creation.
+      if (repo.setupScript && repo.setupScript.trim()) {
+        try {
+          const res = await runSetupScript(worktreePath, repo.setupScript);
+          if (res.exitCode !== 0) {
+            console.warn(`[workspace-repos] setup script for ${repo.name ?? repo.path} exited ${res.exitCode}: ${res.stderr.slice(0, 300)}`);
+          }
+        } catch (err) {
+          console.warn(`[workspace-repos] setup script for ${repo.name ?? repo.path} failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      provisioned.push({ path: repo.path, name: repo.name, worktreePath, branch, baseBranch, baseCommitSha, composeFile: repo.composeFile ?? null });
     }
   } catch (err) {
     await rollbackSiblingWorktrees(gitService, provisioned);

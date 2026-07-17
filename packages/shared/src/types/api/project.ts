@@ -61,6 +61,10 @@ export interface ProjectRepoResponse {
   path: string;
   name: string | null;
   defaultBranch: string | null;
+  /** Per-repo setup/install command run in this repo's worktree at workspace creation (#71). */
+  setupScript: string | null;
+  /** Per-repo compose file (relative to the repo) whose services join the workspace stack (#71). */
+  composeFile: string | null;
   createdAt: string;
 }
 
@@ -70,6 +74,16 @@ export interface AddProjectRepoRequest {
   /** Git URL to clone into the server's repos root. Exactly one of path/cloneUrl. */
   cloneUrl?: string;
   name?: string;
+  /** Per-repo setup/install command (#71). */
+  setupScript?: string | null;
+  /** Per-repo compose file, relative to the repo root (#71). */
+  composeFile?: string | null;
+}
+
+/** PATCH body for updating a registered repo's per-repo config (#71). */
+export interface UpdateProjectRepoRequest {
+  setupScript?: string | null;
+  composeFile?: string | null;
 }
 
 export interface ProjectStatsResponse {

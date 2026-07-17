@@ -28,7 +28,7 @@ export async function listWorkspaceRepos(workspaceId: string, database: RepoDb =
 }
 
 export async function insertProjectRepo(
-  input: { projectId: string; path: string; name?: string | null; defaultBranch?: string | null },
+  input: { projectId: string; path: string; name?: string | null; defaultBranch?: string | null; setupScript?: string | null; composeFile?: string | null },
   database: RepoDb = db,
 ): Promise<RepoRow> {
   const row = {
@@ -38,10 +38,28 @@ export async function insertProjectRepo(
     path: input.path,
     name: input.name ?? null,
     defaultBranch: input.defaultBranch ?? null,
+    setupScript: input.setupScript ?? null,
+    composeFile: input.composeFile ?? null,
   };
   await database.insert(repos).values(row);
   const inserted = await database.select().from(repos).where(eq(repos.id, row.id)).limit(1);
   return inserted[0];
+}
+
+/** Update a project-scoped repo's per-repo setup/compose config (#71). */
+export async function updateProjectRepo(
+  repoId: string,
+  patch: { setupScript?: string | null; composeFile?: string | null },
+  database: RepoDb = db,
+): Promise<RepoRow | null> {
+  const set: Partial<typeof repos.$inferInsert> = {};
+  if (patch.setupScript !== undefined) set.setupScript = patch.setupScript;
+  if (patch.composeFile !== undefined) set.composeFile = patch.composeFile;
+  if (Object.keys(set).length > 0) {
+    await database.update(repos).set(set).where(eq(repos.id, repoId));
+  }
+  const rows = await database.select().from(repos).where(eq(repos.id, repoId)).limit(1);
+  return rows[0] ?? null;
 }
 
 export async function insertWorkspaceRepo(
