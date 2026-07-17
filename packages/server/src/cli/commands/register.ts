@@ -7,7 +7,9 @@ import { getProjectByRepoPath, insertProject } from "../../repositories/project.
 import { setPreference } from "../../repositories/preferences.repository.js";
 import { runMigrations, logDefaultBranch } from "../shared.js";
 import { getDefaultSkillId, ensureAgentGitignore, ensureStarterClaudeMd, ensureStarterAgentsMd, ensureHookScaffold, ensureVerifyGateRunner, commitProjectScaffoldArtifacts } from "../../services/project-scaffold.js";
-import { detectStackProfile } from "../../services/stack-profile.service.js";
+import { detectStackProfile, populateStackProfile, populateVerifyScript, populateSetupScript } from "../../services/stack-profile.service.js";
+import { db } from "../../db/index.js";
+import type { Database } from "../../db/index.js";
 
 /** Fall back to the repo's checked-out branch when main/master isn't detected, so the project is never left undriveable (#772). */
 async function resolveCliDefaultBranch(repoPath: string, detected: string | null): Promise<string | null> {
@@ -17,6 +19,41 @@ async function resolveCliDefaultBranch(repoPath: string, detected: string | null
     if (current && current !== "HEAD") return current;
   } catch { /* no commits / git unavailable */ }
   return null;
+}
+
+/**
+ * Derive & persist the post-registration config the service path populates (#788, #810):
+ * the stack profile, the verify (merge-gate) command, and the setup/install script.
+ *
+ * Mirrors `registerProject()`'s chain (`project-registration.ts`), with one deliberate
+ * difference: this AWAITS. `registerProject()` can fire-and-forget (`void`) because the
+ * server is long-lived; the CLI calls `process.exit(0)` immediately after registering, so a
+ * detached promise would be lost and `setup_script` / `verify_script_<id>` would stay null
+ * forever — which left CLI-registered projects with no dependency install and no merge gate.
+ *
+ * Non-fatal by design (same as the service path): a detection failure must never fail
+ * registration, so the project is still usable and `repairProjectRegistration()` can retry.
+ *
+ * Returns the derived setup script (or null) so the caller can report it.
+ *
+ * `skipLlm` forwards to populateStackProfile's rule-based-only mode; the CLI leaves it off to
+ * match the service path (a repo whose markers yield no test/build command gets an LLM gap-fill,
+ * bounded by that call's own 30s timeout), but tests use it to stay hermetic.
+ */
+export async function populateDerivedProjectConfig(
+  projectId: string,
+  repoPath: string,
+  database: Database,
+  options?: { skipLlm?: boolean },
+): Promise<{ setupScript: string | null; verifyScript: string | null }> {
+  try {
+    const profile = await populateStackProfile(projectId, repoPath, database, options);
+    const verifyScript = await populateVerifyScript(projectId, repoPath, database, profile);
+    const setupScript = await populateSetupScript(projectId, repoPath, database, profile);
+    return { setupScript, verifyScript };
+  } catch {
+    return { setupScript: null, verifyScript: null };
+  }
 }
 
 export function registerRegisterCommand(program: Command) {
@@ -86,6 +123,13 @@ Examples:
         ensureVerifyGateRunner(repoInfo.repoPath);
         await commitProjectScaffoldArtifacts(repoInfo.repoPath);
 
+        // MUST be awaited before process.exit(0) — see populateDerivedProjectConfig.
+        const { setupScript, verifyScript } = await populateDerivedProjectConfig(
+          projectId,
+          repoInfo.repoPath,
+          db,
+        );
+
         console.log(`Registered project "${projectName}"`);
         console.log(`  Repo: ${repoInfo.repoPath}`);
         logDefaultBranch(defaultBranch);
@@ -93,6 +137,12 @@ Examples:
           console.log(`  Remote: ${repoInfo.remoteUrl}`);
         }
         console.log(`  Statuses: ${DEFAULT_STATUSES.map((s) => s.name).join(", ")}`);
+        if (setupScript) {
+          console.log(`  Setup script: ${setupScript}`);
+        }
+        if (verifyScript) {
+          console.log(`  Verify command: ${verifyScript}`);
+        }
         console.log(`  Set as active project.`);
         process.exit(0);
       } catch (err) {
