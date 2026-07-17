@@ -31,6 +31,30 @@ export type WorkspaceStatus =
   | "awaiting-plan-approval"
   | "error";
 
+/**
+ * Workspace statuses that are TERMINAL — the row no longer owns live resources
+ * (its teardown has run), so "still live?" filters must EXCLUDE it. This is the
+ * SINGLE source of truth shared by every such filter (the service-stack reaper's
+ * open-row query, the service-state repository, the deferred-launch lifecycle
+ * recheck) so two liveness definitions can never silently drift apart (#57).
+ *
+ * "merged" is NOT a member of WorkspaceStatus today — a merged workspace is
+ * `status: "closed"` with `mergedAt` set — so the entry is currently DEAD. It is
+ * retained deliberately: the previous divergence (the reaper filtered on
+ * `status != "closed"` while the repository filtered on `["closed","merged"]`)
+ * agreed only by accident, and would have split the instant someone added a real
+ * "merged" enum member — the reaper would then treat merged workspaces as live and
+ * shield their stacks from reclamation forever. Routing every consumer through this
+ * one constant means that if "merged" ever becomes real, they all treat it as
+ * terminal in lockstep.
+ */
+export const TERMINAL_WORKSPACE_STATUSES = ["closed", "merged"] as const;
+
+/** True if a workspace status is terminal (see {@link TERMINAL_WORKSPACE_STATUSES}). */
+export function isTerminalWorkspaceStatus(status: string | null | undefined): boolean {
+  return status != null && (TERMINAL_WORKSPACE_STATUSES as readonly string[]).includes(status);
+}
+
 export interface SetWorkspaceStatusOpts {
   /** Timestamp for updatedAt (defaults to now). */
   now?: string;
