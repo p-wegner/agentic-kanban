@@ -9,6 +9,7 @@ import { startZombieFixSessionReconciler, stopZombieFixSessionReconciler } from 
 import { startAncestorBranchReconciler, stopAncestorBranchReconciler } from "./ancestor-branch-reconciler.js";
 import { startDoneUnmergedScanner, stopDoneUnmergedScanner } from "./done-unmerged-invariant-scanner.js";
 import { startTerminalWorkspaceReaper, stopTerminalWorkspaceReaper } from "./terminal-workspace-reaper.js";
+import { startServiceStackReaper, stopServiceStackReaper } from "./service-stack-reaper.js";
 import { startMonitorButler, stopMonitorButler } from "../services/monitor-butler.js";
 import { startProjectConductorSupervisor } from "../services/project-conductor.service.js";
 import { startBackupScheduler, stopBackupScheduler } from "./backup-scheduler.js";
@@ -120,6 +121,17 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
     start() {
       startTerminalWorkspaceReaper();
       return stopTerminalWorkspaceReaper;
+    },
+  },
+  {
+    // Periodic orphaned service-stack reaper (#52). The boot reaper (server-start.ts)
+    // runs ONCE; on a long-lived autodrive board a stack leaked by a swallowed down —
+    // or stranded on an open "error" workspace — stayed leaked for the life of the
+    // process. This re-runs the reap on an interval, shielding in-flight creates.
+    name: "service-stack-reaper",
+    start() {
+      startServiceStackReaper();
+      return stopServiceStackReaper;
     },
   },
   {
