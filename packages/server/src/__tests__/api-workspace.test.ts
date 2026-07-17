@@ -278,8 +278,17 @@ describe("Workspaces API", () => {
   });
 
   it("GET /api/issues/:id/workspaces includes the latest setup script status", async () => {
-    const repoPath = mkdtempSync(join(tmpdir(), "kanban-setup-status-"));
+    // Nest the repo one level inside the mkdtemp parent so the worktree the product
+    // code creates (`dirname(repoPath)/.worktrees/<branch>`) lands in the throwaway
+    // parent. Using the mkdtemp dir itself as the repo puts it at the shared
+    // `os.tmpdir()/.worktrees/feature_setup-status`, where a leftover from any earlier
+    // run makes `git worktree add` fail with "already exists" forever.
+    const repoParent = mkdtempSync(join(tmpdir(), "kanban-setup-status-"));
+    const repoPath = join(repoParent, "test-repo");
+    mkdirSync(repoPath);
     execFileSync("git", ["init", "-b", "main"], { cwd: repoPath });
+    execFileSync("git", ["config", "user.email", "test@test.com"], { cwd: repoPath });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: repoPath });
     execFileSync("git", ["commit", "--allow-empty", "-m", "initial"], { cwd: repoPath });
     const setupProjectId = await createProjectDirectly(database, {
       name: "Setup Status Project",

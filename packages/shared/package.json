@@ -54,7 +54,8 @@
     "./lib/sanitize-utf8": { "development": "./src/lib/sanitize-utf8.ts", "types": "./dist/lib/sanitize-utf8.d.ts", "import": "./dist/lib/sanitize-utf8.js", "default": "./src/lib/sanitize-utf8.ts" },
     "./lib/db-path": { "development": "./src/lib/db-path.ts", "types": "./dist/lib/db-path.d.ts", "import": "./dist/lib/db-path.js", "default": "./src/lib/db-path.ts" },
     "./lib/db-client": { "development": "./src/lib/db-client.ts", "types": "./dist/lib/db-client.d.ts", "import": "./dist/lib/db-client.js", "default": "./src/lib/db-client.ts" },
-    "./lib/workspace-status": { "development": "./src/lib/workspace-status.ts", "types": "./dist/lib/workspace-status.d.ts", "import": "./dist/lib/workspace-status.js", "default": "./src/lib/workspace-status.ts" }
+    "./lib/workspace-status": { "development": "./src/lib/workspace-status.ts", "types": "./dist/lib/workspace-status.d.ts", "import": "./dist/lib/workspace-status.js", "default": "./src/lib/workspace-status.ts" },
+    "./lib/status-transitions": { "development": "./src/lib/status-transitions.ts", "types": "./dist/lib/status-transitions.d.ts", "import": "./dist/lib/status-transitions.js", "default": "./src/lib/status-transitions.ts" }
   },
   "scripts": {
     "prepare": "pnpm build",
