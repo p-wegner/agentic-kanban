@@ -16,9 +16,31 @@ import {
   type ServiceStackState,
 } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
-import { findLiveWorkspacesSharingWorkingDir } from "../repositories/workspace-service-state.repository.js";
+import {
+  findLiveWorkspacesSharingWorkingDir,
+  countLiveStacks as countLiveStacksDefault,
+} from "../repositories/workspace-service-state.repository.js";
+import { getPreference } from "../repositories/preferences.repository.js";
 import { workspaceServicesService, parseStoredServiceStackState } from "./workspace-services.service.js";
 import type { SiblingWorktree } from "./workspace-repos.service.js";
+
+/**
+ * Admission-control dependencies for the concurrent-stack cap (#56), injectable so the
+ * gate is unit-testable without a DB/preferences. Defaults read the real preference and
+ * live-stack count.
+ */
+export interface StackAdmissionDeps {
+  /** The configured cap; 0 / NaN = unlimited. Default: reads `max_concurrent_stacks`. */
+  getMaxConcurrentStacks?: (database: Database) => Promise<number>;
+  /** How many distinct stacks are currently "up". Default: countLiveStacks(). */
+  countLiveStacks?: (database: Database) => Promise<number>;
+}
+
+async function defaultGetMaxConcurrentStacks(database: Database): Promise<number> {
+  const raw = await getPreference("max_concurrent_stacks", database);
+  const n = raw == null || raw === "" ? 0 : Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
 
 /** Provisioning outcome: the state to persist + whether it was ADOPTED from a co-resident. */
 export interface ProvisionForLaunchResult {
@@ -62,6 +84,17 @@ function errorState(message: string): ServiceStackState {
     error: message.slice(0, 2000),
     updatedAt: new Date().toISOString(),
   };
+}
+
+/**
+ * A DEFERRED state (#56): the board is at its `max_concurrent_stacks` cap, so this
+ * stack was deliberately NOT started (no compose up, no ports, no orphan). Status stays
+ * "error" so every teardown/reaper path is unchanged, but `deferred: true` marks it as
+ * a capacity refusal — not a failure — so consumers don't cry wolf and a retry can
+ * bring it up once capacity frees. The agent still launches; it just has no stack yet.
+ */
+function deferredState(message: string): ServiceStackState {
+  return { ...errorState(message), deferred: true };
 }
 
 /**
@@ -139,13 +172,36 @@ export async function provisionServicesForLaunch(
     leadingWorktreePath: string;
     siblings: SiblingWorktree[];
   },
+  deps: StackAdmissionDeps = {},
 ): Promise<ProvisionForLaunchResult | null> {
   const config = parseServicesConfig(params.servicesConfigRaw);
   if (!config) return null;
 
-  // Shared-worktree guard BEFORE any provisioning side effect (finding 12).
+  // Shared-worktree guard BEFORE any provisioning side effect (finding 12). An ADOPTED
+  // co-resident stack is free (no new stack), so it is resolved BEFORE the admission cap
+  // — adopting must never be refused for capacity.
   const shared = await resolveSharedWorktreeStack(database, params);
   if (shared) return shared;
+
+  // Admission control (#56): refuse to start an (N+1)th stack past the cap. DEFER (a
+  // clear non-fatal state, agent still launches) rather than thrashing an over-subscribed
+  // host into the leaked-stack feedback loop (#51/#52). Checked AFTER adoption (free) and
+  // BEFORE any provisioning side effect. cap 0 = unlimited (default) → zero behaviour
+  // change for the common case.
+  const getMax = deps.getMaxConcurrentStacks ?? defaultGetMaxConcurrentStacks;
+  const countLive = deps.countLiveStacks ?? countLiveStacksDefault;
+  const cap = await getMax(database);
+  if (cap > 0) {
+    const live = await countLive(database);
+    if (live >= cap) {
+      const message =
+        `service stack deferred: ${live} stack(s) already up, at the max_concurrent_stacks cap of ${cap}. ` +
+        `The stack was NOT started (the agent still launches). It will come up on the next provisioning ` +
+        `attempt once a stack frees up, or raise max_concurrent_stacks / lower WIP.`;
+      console.warn(`[services] ${message} (branch ${params.branch})`);
+      return { adopted: false, state: deferredState(message) };
+    }
+  }
 
   let composeWorktreePath = params.leadingWorktreePath;
   if (config.composeRepo) {

@@ -3,6 +3,9 @@ import {
   composeProjectName,
   isInstanceManagedComposeProject,
   isManagedComposeProject,
+  parseManagedComposeName,
+  serviceStackWsToken,
+  planStackSweep,
 } from "../src/lib/service-ports.js";
 
 const INSTANCE = "a1b2c3d4";
@@ -90,6 +93,71 @@ describe("service-ports helpers", () => {
       expect(isManagedComposeProject("ak-ws-ab")).toBe(false);
       expect(isManagedComposeProject("postgres")).toBe(false);
       expect(isManagedComposeProject("")).toBe(false);
+    });
+  });
+
+  describe("parseManagedComposeName (#53 cross-instance recognizer)", () => {
+    it("decomposes an instance-scoped name into instanceId + wsToken", () => {
+      expect(parseManagedComposeName("ak-a1b2c3d4-ws-550e8400e29b")).toEqual({
+        instanceId: "a1b2c3d4",
+        wsToken: "550e8400e29b",
+      });
+    });
+
+    it("recognizes ANOTHER instance's name (unlike isInstanceManagedComposeProject)", () => {
+      const foreign = composeProjectName("550e8400-e29b-41d4-a716-446655440000", OTHER_INSTANCE);
+      expect(parseManagedComposeName(foreign)).toEqual({ instanceId: OTHER_INSTANCE, wsToken: "550e8400e29b" });
+    });
+
+    it("decomposes the legacy unscoped shape with a null instanceId", () => {
+      expect(parseManagedComposeName("ak-ws-550e8400e29b")).toEqual({ instanceId: null, wsToken: "550e8400e29b" });
+    });
+
+    it("returns null for names the board never generated", () => {
+      expect(parseManagedComposeName("postgres")).toBeNull();
+      expect(parseManagedComposeName("ak-myapp-frontend")).toBeNull();
+      expect(parseManagedComposeName("ak-ws-ab")).toBeNull(); // token too short
+      expect(parseManagedComposeName("")).toBeNull();
+    });
+
+    it("wsToken agrees with what composeProjectName embeds (stable identity)", () => {
+      const ws = "550e8400-e29b-41d4-a716-446655440000";
+      const parsed = parseManagedComposeName(composeProjectName(ws, INSTANCE));
+      expect(parsed!.wsToken).toBe(serviceStackWsToken(ws));
+    });
+  });
+
+  describe("planStackSweep (#53 wide GC planner)", () => {
+    const CURRENT = "a1b2c3d4";
+    const liveWs = "550e8400-e29b-41d4-a716-446655440000";
+    const deadWs = "11111111-2222-3333-4444-555555555555";
+    const liveName = composeProjectName(liveWs, CURRENT); // current instance, live workspace
+    const orphanName = composeProjectName(deadWs, CURRENT); // current instance, no live row
+    const foreignOrphan = composeProjectName(deadWs, OTHER_INSTANCE); // other instance
+    const foreignLiveToken = composeProjectName(liveWs, OTHER_INSTANCE); // other id, live token
+    const liveTokens = new Set([serviceStackWsToken(liveWs)]);
+    const names = [liveName, orphanName, foreignOrphan, foreignLiveToken, "postgres"];
+
+    it("current scope: reaps only this instance's orphans, keeps live + foreign + unmanaged", () => {
+      const plan = planStackSweep({ composeProjectNames: names, currentInstanceId: CURRENT, liveWsTokens: liveTokens, scope: { kind: "current" } });
+      expect(plan.reap.map((c) => c.name)).toEqual([orphanName]);
+      expect(plan.keep.find((k) => k.name === liveName)?.reason).toBe("matches-live-workspace");
+      expect(plan.keep.find((k) => k.name === foreignOrphan)?.reason).toBe("out-of-scope");
+      expect(plan.keep.find((k) => k.name === "postgres")?.reason).toBe("not-board-managed");
+    });
+
+    it("instance scope: reaps a named foreign id's orphans, still guarding live tokens", () => {
+      const plan = planStackSweep({ composeProjectNames: names, currentInstanceId: CURRENT, liveWsTokens: liveTokens, scope: { kind: "instance", id: OTHER_INSTANCE } });
+      expect(plan.reap.map((c) => c.name)).toEqual([foreignOrphan]);
+      // foreignLiveToken shares a LIVE ws-token → never reaped, even though its id is targeted.
+      expect(plan.keep.find((k) => k.name === foreignLiveToken)?.reason).toBe("matches-live-workspace");
+    });
+
+    it("all scope: reaps every managed orphan across instances, live tokens still safe", () => {
+      const plan = planStackSweep({ composeProjectNames: names, currentInstanceId: CURRENT, liveWsTokens: liveTokens, scope: { kind: "all" } });
+      expect(plan.reap.map((c) => c.name).sort()).toEqual([orphanName, foreignOrphan].sort());
+      // both live-token names (current + foreign) are kept by the co-tenant guard.
+      expect(plan.reap.some((c) => c.name === liveName || c.name === foreignLiveToken)).toBe(false);
     });
   });
 });

@@ -34,6 +34,16 @@ export interface ServiceStackState {
   envFilePath: string;
   status: "up" | "error" | "down";
   error?: string;
+  /**
+   * True when the stack was DELIBERATELY not started because the board is at its
+   * `max_concurrent_stacks` admission cap (#56) — NOT a provisioning failure. Carried
+   * as a distinct flag (rather than a 4th `status`) so every existing teardown/reaper
+   * path that switches on "up"/"error"/"down" is unchanged: a deferred stack has status
+   * "error" (nothing came up, nothing to reap), but consumers can tell a capacity
+   * refusal from a real error and avoid crying wolf. The stack starts on the next
+   * provisioning attempt once capacity frees up.
+   */
+  deferred?: boolean;
   updatedAt: string;
 }
 

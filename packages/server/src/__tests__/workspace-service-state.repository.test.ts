@@ -9,6 +9,7 @@ import {
   getWorkspaceLifecycleStatus,
   getOrCreateServiceStackInstanceId,
   getLiveStackHostPorts,
+  countLiveStacks,
 } from "../repositories/workspace-service-state.repository.js";
 
 let db: TestDb;
@@ -67,6 +68,39 @@ describe("getLiveStackHostPorts (#51)", () => {
     await setState(portless, { composeProjectName: "ak-i-ws-p", status: "up" }); // no ports key
     await setState(bogus, { composeProjectName: "ak-i-ws-x", ports: { db: "nope", web: 0 }, status: "up" });
     expect(await getLiveStackHostPorts(db)).toEqual([31020]);
+  });
+});
+
+describe("countLiveStacks (#56 admission cap)", () => {
+  async function setState(workspaceId: string, state: unknown): Promise<void> {
+    await db.update(workspaces).set({ serviceState: JSON.stringify(state) }).where(eq(workspaces.id, workspaceId));
+  }
+
+  it("counts only live 'up' stacks, ignoring down/error/deferred and terminal rows", async () => {
+    const up1 = await seedWorkspace("active");
+    const up2 = await seedWorkspace("active");
+    const down = await seedWorkspace("active");
+    const errored = await seedWorkspace("active");
+    const mergedUp = await seedWorkspace("merged");
+    await setState(up1, { composeProjectName: "ak-i-ws-a", ports: {}, status: "up" });
+    await setState(up2, { composeProjectName: "ak-i-ws-b", ports: {}, status: "up" });
+    await setState(down, { composeProjectName: "ak-i-ws-c", ports: {}, status: "down" });
+    await setState(errored, { composeProjectName: "ak-i-ws-d", ports: {}, status: "error", deferred: true });
+    await setState(mergedUp, { composeProjectName: "ak-i-ws-e", ports: {}, status: "up" });
+    expect(await countLiveStacks(db)).toBe(2);
+  });
+
+  it("counts DISTINCT compose projects — adopted co-residents sharing one stack count once", async () => {
+    const owner = await seedWorkspace("active");
+    const adopter = await seedWorkspace("active");
+    await setState(owner, { composeProjectName: "ak-i-ws-shared", ports: {}, status: "up" });
+    await setState(adopter, { composeProjectName: "ak-i-ws-shared", ports: {}, status: "up" }); // adopted same stack
+    expect(await countLiveStacks(db)).toBe(1);
+  });
+
+  it("is 0 when nothing is provisioned", async () => {
+    await seedWorkspace("active");
+    expect(await countLiveStacks(db)).toBe(0);
   });
 });
 
