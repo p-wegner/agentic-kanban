@@ -227,17 +227,17 @@ describe("createProject — the FOURTH registration path now routes through the 
       "no tracked file may be left modified/staged",
     ).toEqual([]);
 
-    // CHARACTERIZATION — a PRE-EXISTING gap #44 does not change, recorded here so it is not
-    // mistaken for a regression. `git init` leaves HEAD on an UNBORN branch, so
-    // commitProjectScaffoldArtifacts' first call (`getCurrentBranch` → `git rev-parse
-    // --abbrev-ref HEAD`) throws "ambiguous argument 'HEAD'" and its non-fatal catch swallows
-    // it: the scaffold is never committed and stays untracked. The hand-rolled chain called the
-    // very same function on the very same unborn repo, so behaviour here is byte-identical
-    // before and after this fix — but unlike registerProject (which always gets a repo with a
-    // commit), createProject can NEVER reach the commit. Fixing it means giving the fresh repo
-    // an initial commit, which is out of #44's scope. Update this test when that lands.
-    expect(() => git(repoPath, "rev-parse", "HEAD")).toThrow();
-    expect(entries.some((l) => l.startsWith("??"))).toBe(true);
+    // #47 (was a characterization of the unborn-HEAD gap recorded by #44): `git init` leaves
+    // HEAD unborn, so commitProjectScaffoldArtifacts threw into its non-fatal catch and the
+    // scaffold stayed untracked forever. createProject now lands an initial commit first, so
+    // HEAD is born and the scaffold gets its OWN commit — the same shape registerProject
+    // produces — instead of being swept into the first agent's feature commit.
+    expect(() => git(repoPath, "rev-parse", "HEAD")).not.toThrow();
+    const tracked = git(repoPath, "ls-files").split("\n").map((l) => l.trim()).filter(Boolean);
+    for (const path of [".gitignore", "CLAUDE.md", "AGENTS.md", ".claude/hooks/vital-files.json"]) {
+      expect(tracked, `${path} must be committed, not left for the first agent's git add -A`)
+        .toContain(path);
+    }
   });
 
   it("makes NO ~30s LLM call — an empty repo is sparse, which is exactly the gap-fill trigger", async () => {
