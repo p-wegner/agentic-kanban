@@ -56,6 +56,29 @@ describe("readLocalSkillPrompt", () => {
     });
   }
 
+  // The ratchet case: a file that already leaked to master with stacked blocks. The
+  // blocks are separated by a blank line (that's what buildSkillMarkdown emits), so a
+  // strip loop that doesn't consume it exits after the first block and leaves the rest.
+  for (const [label, eol] of [["LF", "\n"], ["CRLF", "\r\n"]] as const) {
+    for (const blocks of [2, 3]) {
+      it(`strips all ${blocks} stacked ${label} frontmatter blocks`, async () => {
+        const dir = join(repoPath, ".claude", "skills", "stacked");
+        await mkdir(dir, { recursive: true });
+        const stacked = [
+          ...Array.from({ length: blocks }, (_, i) => ["---", "name: stacked", `description: block ${i}`, "---", ""]).flat(),
+          SKILL_BODY,
+        ].join("\n");
+        await writeFile(join(dir, "SKILL.md"), stacked.replace(/\n/g, eol), "utf-8");
+
+        const prompt = await readLocalSkillPrompt(repoPath, "stacked");
+
+        expect(prompt!.startsWith("---")).toBe(false);
+        expect(prompt).not.toContain("description:");
+        expect(prompt).toContain("# Board Navigator");
+      });
+    }
+  }
+
   it("returns the whole body for a file with no frontmatter at all", async () => {
     const dir = join(repoPath, ".claude", "skills", "bare");
     await mkdir(dir, { recursive: true });

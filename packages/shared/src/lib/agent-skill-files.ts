@@ -24,11 +24,17 @@ const FRONTMATTER_RE = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)([\s\S
  * default branch is read back on the next materialization, so one strip is not
  * enough to converge an already-stacked file. A `---` divider inside the body is
  * untouched — only blocks at the very top are stripped.
+ *
+ * The blank line between stacked blocks must be consumed on each pass. `buildSkillMarkdown`
+ * emits `---\n…\n---\n\n<prompt>`, but the regex only consumes the single newline that
+ * terminates the closing `---`, so group 2 opens with the leftover newline of that blank
+ * line. Without dropping it, `^---` fails on the second pass and the loop exits after one
+ * block — silently leaving every stacked block in place.
  */
 function stripLeadingFrontmatter(content: string): string {
   let body = content;
   for (let match = body.match(FRONTMATTER_RE); match; match = body.match(FRONTMATTER_RE)) {
-    body = match[2];
+    body = match[2].replace(/^[ \t]*\r?\n/, "");
   }
   return body;
 }
