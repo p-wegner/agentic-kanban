@@ -126,6 +126,28 @@ describe("createProject gives the fresh repo a born HEAD (#47)", () => {
     ).toBe("README.md");
   });
 
+  // The scaffold commit is non-fatal — it degrades. This one is NOT: a failure aborts creation
+  // and removes the directory, so a hostile global git config must not be able to reach it.
+  it("survives a global commit.gpgsign with no usable key, rather than refusing to create", async () => {
+    const configHome = makeBaseDir("gpg-config");
+    const globalConfig = join(configHome, ".gitconfig");
+    writeFileSync(
+      globalConfig,
+      "[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = definitely-not-a-real-gpg\n",
+      "utf8",
+    );
+
+    const previous = process.env.GIT_CONFIG_GLOBAL;
+    process.env.GIT_CONFIG_GLOBAL = globalConfig;
+    try {
+      const { repoPath } = await createFreshProject("gpg-hostile");
+      expect(await getHeadState(repoPath)).toMatchObject({ kind: "branch" });
+    } finally {
+      if (previous === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+      else process.env.GIT_CONFIG_GLOBAL = previous;
+    }
+  });
+
   it("leaves no board-authored file untracked for the first agent's `git add -A` to sweep up", async () => {
     const { repoPath } = await createFreshProject("init-clean", { generateReadme: true });
 
