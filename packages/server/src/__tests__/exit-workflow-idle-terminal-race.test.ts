@@ -44,7 +44,7 @@ vi.mock("node:child_process", async (importOriginal) => {
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { issues, projectStatuses, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createWorkflowEngine } from "../startup/exit-workflow.js";
@@ -186,6 +186,35 @@ describe("exit-workflow: concurrent merge vs idle write (issue #966)", () => {
     const broadcastEvents = boardEvents.broadcast.mock.calls.map((c) => c[1]);
     expect(broadcastEvents).not.toContain("workspace_idle");
     expect(broadcastEvents).toContain("session_completed");
+  });
+
+  // #74: a sibling-only ticket's auto-merge cleans its branch, so a later exit pass sees
+  // no committed changes while the issue is In Review — the "close as Done" path. That path
+  // used setWorkspaceStatus (no mergedAt), leaving a genuinely-merged workspace with
+  // mergedAt=null. It must stamp mergedAt (the work already landed to reach In Review).
+  it("stamps mergedAt when closing an already-landed workspace (In Review, no committed changes) — #74", async () => {
+    const { projectId, issueId, workspaceId, sessionId } = await seedActiveWorkspace(db);
+    const [inReview] = await db.select({ id: projectStatuses.id }).from(projectStatuses)
+      .where(and(eq(projectStatuses.projectId, projectId), eq(projectStatuses.name, "In Review")));
+    await db.update(issues).set({ statusId: inReview.id }).where(eq(issues.id, issueId));
+
+    const boardEvents = makeBoardEvents();
+    const { runWorkflowOnExit } = createWorkflowEngine({
+      sessionManager: makeSessionManager() as never,
+      boardEvents: boardEvents as never,
+      autoMerge: vi.fn(async () => {}),
+      database: db as never,
+    });
+
+    await runWorkflowOnExit(workspaceId, sessionId, 0);
+
+    const [ws] = await db.select({ status: workspaces.status, mergedAt: workspaces.mergedAt })
+      .from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.status).toBe("closed");
+    expect(ws.mergedAt).not.toBeNull(); // was null before the #74 fix
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("Done");
   });
 
   it("control: without a concurrent merge the exit still goes idle normally", async () => {

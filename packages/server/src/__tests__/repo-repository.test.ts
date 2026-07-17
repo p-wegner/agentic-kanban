@@ -82,6 +82,24 @@ describe("repo.repository — project-scoped vs workspace-scoped rows", () => {
     expect(updated.mergedHeadSha).toBe("deadbeef");
   });
 
+  it("insertWorkspaceRepo persists composeFile onto the workspace-scoped row (#73)", async () => {
+    // The per-repo composeFile lives on the project row; it MUST be copied onto the
+    // workspace row, because provisioning (resolveExtraComposeFiles) reads it from there
+    // at stack-up time. Before #73 it was dropped → sibling stacks never joined.
+    await insertWorkspaceRepo({
+      workspaceId,
+      projectId,
+      path: "/repo/extra",
+      name: "extra",
+      worktreePath: "/repo/.worktrees/feature-x",
+      branch: "feature/x",
+      baseBranch: "main",
+      composeFile: "docker-compose.yml",
+    }, db);
+    const [row] = await listWorkspaceRepos(workspaceId, db);
+    expect(row.composeFile).toBe("docker-compose.yml");
+  });
+
   it("persists + updates per-repo setupScript and composeFile (#71)", async () => {
     const row = await insertProjectRepo(
       { projectId, path: "/repo/extra", setupScript: "pnpm install", composeFile: "docker-compose.yml" },

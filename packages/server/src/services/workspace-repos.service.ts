@@ -100,6 +100,7 @@ export async function insertSiblingWorktreeRecords(
       branch: s.branch,
       baseBranch: s.baseBranch,
       baseCommitSha: s.baseCommitSha,
+      composeFile: s.composeFile,
     }, database);
   }
 }
