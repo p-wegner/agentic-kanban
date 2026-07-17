@@ -64,6 +64,7 @@ export function createWorkspaceService(deps: {
     fixAndMerge: merge.fixAndMerge,
     checkAlreadyMerged: merge.checkAlreadyMerged,
     reconcileAlreadyMerged: merge.reconcileAlreadyMerged,
+    getRepoMergeStatus: merge.getRepoMergeStatus,
     // session
     launchSession: session.launchSession,
     sendTurn: session.sendTurn,

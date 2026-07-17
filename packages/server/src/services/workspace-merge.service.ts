@@ -782,20 +782,14 @@ export function createWorkspaceMergeService(deps: {
     const originalUniqueCommits = uniqueCommits === 0 && branchSha !== baseSha && workspace.baseCommitSha
       ? await gitService.countUniqueCommits(repoPath, workspace.baseCommitSha, branchSha).catch(() => 0)
       : 0;
-    if (uniqueCommits === 0 && originalUniqueCommits === 0) {
-      return {
-        isAlreadyMerged: false,
-        branch: workspace.branch,
-        baseBranch,
-        mergeCommitSha: null,
-        issueNumber,
-        reason: "Branch has no unique commits relative to " + baseBranch,
-      };
-    }
+    const leadingHasUnique = uniqueCommits > 0 || originalUniqueCommits > 0;
 
-    // Multi-repo: "fully merged" must hold for EVERY repo of the workspace, not just
-    // the leading one — a sibling repo with unmerged commits means the work has NOT
-    // landed, and reconciling as Done would strand it (and orphan its worktree).
+    // Multi-repo: "fully merged" must hold for EVERY repo of the workspace, not just the
+    // leading one. This sibling check MUST run BEFORE the leading no-unique-commits early
+    // return (#69): a sibling-only ticket's leading branch has 0 unique commits, so
+    // returning here first both reports a misleading "no unique commits" reason AND — once
+    // the sibling work has actually landed — wrongly refuses to reconcile the workspace as
+    // Done, stranding it open forever with its issue never reaching Done.
     const pendingSiblings = await listPendingSiblingMerges(gitService, database, id);
     if (pendingSiblings.length > 0) {
       return {
@@ -807,6 +801,24 @@ export function createWorkspaceMergeService(deps: {
         reason: "Sibling repo(s) still have unmerged commits: " +
           pendingSiblings.map((p) => `${p.repo.name ?? p.repo.path} (${p.uniqueCommits})`).join(", "),
       };
+    }
+
+    if (!leadingHasUnique) {
+      // Leading repo contributed nothing and no sibling is pending. This is "already
+      // merged" ONLY if a sibling actually DID contribute work that has since landed
+      // (mergedHeadSha stamped by the sibling merge pipeline) — otherwise the whole
+      // workspace is genuinely empty (nothing was ever committed anywhere).
+      const anySiblingLanded = (await listWorkspaceRepos(id, database)).some((r) => r.mergedHeadSha);
+      if (!anySiblingLanded) {
+        return {
+          isAlreadyMerged: false,
+          branch: workspace.branch,
+          baseBranch,
+          mergeCommitSha: null,
+          issueNumber,
+          reason: "Branch has no unique commits relative to " + baseBranch,
+        };
+      }
     }
 
     // Find the merge commit: the commit on baseBranch that first introduced this SHA
@@ -928,5 +940,82 @@ export function createWorkspaceMergeService(deps: {
     return tracked;
   }
 
-  return { mergeWorkspace, mergeWorkspaceDeduped, updateBase, abortRebase, resolveConflicts, fixAndMerge, reconcileBatch, checkAlreadyMerged, reconcileAlreadyMerged };
+  /**
+   * Per-repo merge status for a multi-repo workspace (#70): for the leading repo and
+   * every sibling, report whether it has work and whether that work has landed on the
+   * base branch — so a partial multi-repo merge (or a sibling-only ticket) is VISIBLE
+   * instead of hiding behind the workspace's single scalar `mergedAt`.
+   *
+   *  - `hasWork`  — the repo's branch ever diverged from its base (or a sibling merge was
+   *                 already stamped). A repo with no work is neither merged nor stranded.
+   *  - `ahead`    — commits on the branch not yet on base (0 once landed).
+   *  - `merged`   — the work has landed on base.
+   *  - `stranded` — has work, but it is NOT on base (the #69 failure mode made visible).
+   */
+  async function getRepoMergeStatus(id: string): Promise<{
+    branch: string | null;
+    baseBranch: string;
+    allMerged: boolean;
+    repos: Array<{ name: string | null; path: string; isLeading: boolean; hasWork: boolean; ahead: number; merged: boolean; stranded: boolean }>;
+  }> {
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
+    if (workspace.isDirect) throw new WorkspaceError("Not applicable to direct workspaces", "BAD_REQUEST");
+    const { repoPath, defaultBranch } = await resolveProjectRepo(id, database);
+    const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
+
+    const repos: Array<{ name: string | null; path: string; isLeading: boolean; hasWork: boolean; ahead: number; merged: boolean; stranded: boolean }> = [];
+
+    // Leading repo. "had work" = ahead now, or the branch diverged from its original base cut.
+    let leadingAhead = 0;
+    if (workspace.branch) {
+      leadingAhead = await gitService.countUniqueCommits(repoPath, baseBranch, workspace.branch).catch(() => 0);
+    }
+    const leadingHistoric = leadingAhead === 0 && workspace.branch && workspace.baseCommitSha
+      ? await gitService.countUniqueCommits(repoPath, workspace.baseCommitSha, workspace.branch).catch(() => 0)
+      : 0;
+    const leadingHasWork = leadingAhead > 0 || leadingHistoric > 0 || Boolean(workspace.mergedAt);
+    repos.push({
+      name: null,
+      path: repoPath,
+      isLeading: true,
+      hasWork: leadingHasWork,
+      ahead: leadingAhead,
+      merged: leadingHasWork && leadingAhead === 0,
+      stranded: leadingHasWork && leadingAhead > 0,
+    });
+
+    // Sibling repos.
+    for (const repo of await listWorkspaceRepos(id, database)) {
+      if (repo.mergedHeadSha) {
+        repos.push({ name: repo.name, path: repo.path, isLeading: false, hasWork: true, ahead: 0, merged: true, stranded: false });
+        continue;
+      }
+      let ahead = 0;
+      let resolvable = true;
+      if (repo.branch && repo.baseBranch) {
+        try {
+          await gitService.revParse(repo.path, repo.baseBranch);
+          await gitService.revParse(repo.path, repo.branch);
+          ahead = await gitService.countUniqueCommits(repo.path, repo.baseBranch, repo.branch).catch(() => 0);
+        } catch { resolvable = false; }
+      }
+      const hasWork = ahead > 0;
+      repos.push({
+        name: repo.name,
+        path: repo.path,
+        isLeading: false,
+        hasWork,
+        ahead,
+        // branch ref gone + not stamped = cleaned up after landing → treat as merged.
+        merged: !hasWork && !resolvable,
+        stranded: hasWork,
+      });
+    }
+
+    const allMerged = repos.every((r) => !r.hasWork || r.merged);
+    return { branch: workspace.branch, baseBranch, allMerged, repos };
+  }
+
+  return { mergeWorkspace, mergeWorkspaceDeduped, updateBase, abortRebase, resolveConflicts, fixAndMerge, reconcileBatch, checkAlreadyMerged, reconcileAlreadyMerged, getRepoMergeStatus };
 }
