@@ -82,6 +82,9 @@ export const SETTINGS_REGISTRY = {
   max_concurrent_stacks: { type: "number", default: "" },
   nudge_auto_start: { type: "bool", default: "false" },
   nudge_wip_limit: { type: "number", default: "" },
+  // Idle-seconds threshold after which a running/fixing agent that has produced no
+  // activity/stats delta is surfaced with a "stalled" badge on the agent views (#86).
+  agent_stall_threshold_sec: { type: "number", default: "240" },
   projects_base_path: { type: "string", default: "" },
   plan_auto_continue: { type: "bool", default: "true" },
   visual_verification_mode: { type: "string", default: "before_merge" },
