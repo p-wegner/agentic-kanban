@@ -45,15 +45,29 @@ export async function getRepoMergeStatus(
 
   const repos: RepoMergeStatusEntry[] = [];
 
-  // Leading repo. "had work" = ahead now, or the branch diverged from its original base cut.
+  // Leading repo. "had work" = commits ahead of base now, OR (once merged and the feature
+  // branch is cleaned up) commits between the original base cut and the captured merge tip.
+  // The historic tip is the branch ref while it still exists, else `mergedHeadSha`, which is
+  // stamped at merge time and survives the post-merge branch deletion. Deliberately NOT keyed
+  // off the workspace scalar `mergedAt`: it is stamped even for a sibling-only merge (via
+  // closeWorkspace markMerged, #74), and ORing it in falsely attributed the merge to the
+  // LEADING repo when the leading repo had zero commits (#75). For a sibling-only merge the
+  // captured tip equals base → 0 historic commits → leading correctly reads as no-work.
   let leadingAhead = 0;
   if (workspace.branch) {
     leadingAhead = await gitService.countUniqueCommits(repoPath, baseBranch, workspace.branch).catch(() => 0);
   }
-  const leadingHistoric = leadingAhead === 0 && workspace.branch && workspace.baseCommitSha
-    ? await gitService.countUniqueCommits(repoPath, workspace.baseCommitSha, workspace.branch).catch(() => 0)
-    : 0;
-  const leadingHasWork = leadingAhead > 0 || leadingHistoric > 0 || Boolean(workspace.mergedAt);
+  let leadingHistoric = 0;
+  if (leadingAhead === 0 && workspace.baseCommitSha) {
+    let tip: string | null = null;
+    if (workspace.branch && (await gitService.revParse(repoPath, workspace.branch).then(() => true).catch(() => false))) {
+      tip = workspace.branch;
+    } else if (workspace.mergedHeadSha) {
+      tip = workspace.mergedHeadSha;
+    }
+    if (tip) leadingHistoric = await gitService.countUniqueCommits(repoPath, workspace.baseCommitSha, tip).catch(() => 0);
+  }
+  const leadingHasWork = leadingAhead > 0 || leadingHistoric > 0;
   repos.push({
     name: null,
     path: repoPath,
@@ -71,13 +85,12 @@ export async function getRepoMergeStatus(
       continue;
     }
     let ahead = 0;
-    let resolvable = true;
     if (repo.branch && repo.baseBranch) {
       try {
         await gitService.revParse(repo.path, repo.baseBranch);
         await gitService.revParse(repo.path, repo.branch);
         ahead = await gitService.countUniqueCommits(repo.path, repo.baseBranch, repo.branch).catch(() => 0);
-      } catch { resolvable = false; }
+      } catch { /* branch/base ref gone (e.g. cleaned up) → no countable work */ }
     }
     const hasWork = ahead > 0;
     repos.push({
@@ -86,8 +99,12 @@ export async function getRepoMergeStatus(
       isLeading: false,
       hasWork,
       ahead,
-      // branch ref gone + not stamped = cleaned up after landing → treat as merged.
-      merged: !hasWork && !resolvable,
+      // A sibling is "merged" only on positive evidence — a stamped `mergedHeadSha`, handled
+      // above. A gone branch with no stamp is the no-work sibling (cleanup force-deletes EVERY
+      // sibling branch, worked or not — #75), not a silent landing, so it is "no changes", not
+      // merged. Every real sibling merge stamps mergedHeadSha (executeSiblingMerges /
+      // reconcile), so this path never hides genuinely-landed work.
+      merged: false,
       stranded: hasWork,
     });
   }
