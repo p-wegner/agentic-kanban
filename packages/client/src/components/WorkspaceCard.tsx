@@ -7,6 +7,7 @@ import { TerminalView } from "./TerminalView.js";
 import { WorkspacePreviewPanel } from "./WorkspacePreviewPanel.js";
 import { WorkspaceDiagnosticsPanel } from "./WorkspaceDiagnosticsPanel.js";
 import { WorkspaceTimelinePanel } from "./WorkspaceTimelinePanel.js";
+import { WorkspaceLifecycleTimeline } from "./WorkspaceLifecycleTimeline.js";
 import { FailurePatternHint } from "./FailurePatternHint.js";
 import TicketMentionInput from "./TicketMentionInput.js";
 import { SetupStatusPanel } from "./SetupStatusPanel.js";
@@ -813,7 +814,10 @@ export function WorkspaceCard({
           )}
 
           {viewMode === "timeline" && (
-            <WorkspaceTimelinePanel workspaceId={ws.id} />
+            <div className="space-y-2">
+              <WorkspaceLifecycleTimeline workspace={ws} sessions={sessions} />
+              <WorkspaceTimelinePanel workspaceId={ws.id} />
+            </div>
           )}
 
           {viewMode === "context" && ws.contextPrimer && (
