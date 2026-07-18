@@ -286,6 +286,18 @@ export function BoardOverlayPanels({
           leadingRepoPath={leadingRepoPath ?? null}
           columns={columns}
           onClose={onCloseMultiRepoMonitor}
+          onOpenWorkspace={(workspaceId, issueId) => {
+            const issue = columnsRef.current.flatMap((c) => c.issues).find((i) => i.id === issueId);
+            if (issue) {
+              onCloseMultiRepoMonitor();
+              setSelectedIssue(null);
+              setWorkspaceIssue(issue);
+              setWorkspaceOpenCreate(false);
+              setWorkspaceInitial({ workspaceId });
+            } else {
+              showToast("Issue not found on current board — try refreshing", "error");
+            }
+          }}
         />
       )}
       {showTranscriptSearch && activeProjectId && (

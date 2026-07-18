@@ -3,6 +3,7 @@ import type { StatusWithIssues } from "@agentic-kanban/shared";
 import { type MatrixCell } from "../lib/multiRepoMatrix.js";
 import { cellKey } from "../lib/diffMultiRepoMatrix.js";
 import { useLiveMultiRepoMatrix } from "../hooks/useLiveMultiRepoMatrix.js";
+import { MergeReadinessBoard } from "./MergeReadinessBoard.js";
 
 interface MultiRepoMonitorPanelProps {
   activeProjectId: string | null;
@@ -10,7 +11,12 @@ interface MultiRepoMonitorPanelProps {
   leadingRepoPath: string | null;
   columns: StatusWithIssues[];
   onClose: () => void;
+  /** Jump to a workspace (from a merge-readiness row click, #98). */
+  onOpenWorkspace?: (workspaceId: string, issueId: string | null) => void;
 }
+
+/** The two secondary views this panel exposes: the repo × workspace matrix and the fleet triage board. */
+type MonitorView = "matrix" | "readiness";
 
 /** Compact "updated Ns ago" phrasing for the live indicator. */
 function formatAgo(ms: number): string {
@@ -102,9 +108,11 @@ export function MultiRepoMonitorPanel({
   leadingRepoPath,
   columns,
   onClose,
+  onOpenWorkspace,
 }: MultiRepoMonitorPanelProps) {
   const { data, loading, error, changedCells, lastUpdated, paused, setPaused, refresh } =
     useLiveMultiRepoMatrix(activeProjectId, leadingRepoPath, columns);
+  const [view, setView] = useState<MonitorView>("matrix");
 
   // Tick once a second so the "updated Ns ago" label stays current between refreshes.
   const [, setTick] = useState(0);
@@ -142,6 +150,29 @@ export function MultiRepoMonitorPanel({
                 )}
               </span>
             )}
+            {/* Secondary-view toggle: the repo × workspace matrix vs. the fleet triage board (#98). */}
+            <div
+              className="ml-1 inline-flex rounded border border-gray-200 dark:border-gray-700 overflow-hidden text-[11px]"
+              role="tablist"
+              aria-label="Monitor view"
+            >
+              {(["matrix", "readiness"] as MonitorView[]).map((v) => (
+                <button
+                  key={v}
+                  role="tab"
+                  aria-selected={view === v}
+                  onClick={() => setView(v)}
+                  data-testid={`monitor-view-${v}`}
+                  className={`px-2 py-0.5 ${
+                    view === v
+                      ? "bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 font-medium"
+                      : "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+                  }`}
+                >
+                  {v === "matrix" ? "Matrix" : "Readiness"}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="flex items-center gap-2">
             {/* Live status indicator — ticks "updated Ns ago" and shows pause state. */}
@@ -214,14 +245,22 @@ export function MultiRepoMonitorPanel({
             </div>
           )}
 
-          {activeProjectId && data && isMultiRepo && data.workspaces.length === 0 && (
+          {activeProjectId && data && isMultiRepo && data.workspaces.length === 0 && view === "matrix" && (
             <div className="flex flex-col items-center justify-center h-48 text-gray-400 dark:text-gray-500 gap-2 px-6 text-center">
               <p className="text-sm font-medium">No active workspaces</p>
               <p className="text-xs">Start a workspace to see its per-repo merge state here.</p>
             </div>
           )}
 
-          {activeProjectId && data && isMultiRepo && data.workspaces.length > 0 && (
+          {activeProjectId && data && isMultiRepo && view === "readiness" && (
+            <MergeReadinessBoard
+              matrix={data.matrix}
+              workspaces={data.workspaces}
+              onOpenWorkspace={onOpenWorkspace}
+            />
+          )}
+
+          {activeProjectId && data && isMultiRepo && data.workspaces.length > 0 && view === "matrix" && (
             <table className="text-sm border-collapse min-w-full" data-testid="multi-repo-matrix">
               <thead>
                 <tr>

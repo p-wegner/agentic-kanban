@@ -157,6 +157,7 @@ export function useLiveMultiRepoMatrix(
           const issue = issueById.get(w.issueId);
           return {
             id: w.id,
+            issueId: w.issueId,
             issueNumber: issue?.issueNumber ?? null,
             issueTitle: issue?.title ?? null,
             branch: w.branch,
