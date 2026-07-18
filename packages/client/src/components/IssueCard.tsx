@@ -169,6 +169,7 @@ function IssueCardBody({
   liveStats,
   todos,
   isPendingIssue,
+  isPendingWorkspace,
   tags,
   allProjectTags,
   quickUpdate,
@@ -181,6 +182,7 @@ function IssueCardBody({
   liveStats?: LiveSessionStats;
   todos?: TodoItem[];
   isPendingIssue?: boolean;
+  isPendingWorkspace?: boolean;
   tags?: TagBadge[];
   allProjectTags?: ProjectTag[];
   quickUpdate?: QuickUpdateCallbacks;
@@ -202,6 +204,15 @@ function IssueCardBody({
         {isPendingIssue && (
           <Badge tone="brand" dot>
             Creating issue
+          </Badge>
+        )}
+        {isPendingWorkspace && !isPendingIssue && (
+          <Badge
+            tone="brand"
+            dot
+            title="Creating the worktree and running the project setup script (e.g. installing dependencies) before the agent starts"
+          >
+            Setting up workspace…
           </Badge>
         )}
         {issue.isBlocked && (
@@ -649,6 +660,7 @@ function IssueCardImpl({ issue, onClick, onWorkspaceClick, onOpenDiff, onStartWo
         liveStats={liveStats}
         todos={todos}
         isPendingIssue={isPendingIssue}
+        isPendingWorkspace={isPendingWorkspace}
         tags={tags}
         allProjectTags={allProjectTags}
         quickUpdate={quickUpdate}
