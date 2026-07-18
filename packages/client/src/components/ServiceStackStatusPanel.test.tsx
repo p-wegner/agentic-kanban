@@ -62,4 +62,80 @@ describe("ServiceStackStatusPanel", () => {
     expect(html).toContain("Services down");
     expect(html).not.toContain("<pre");
   });
+
+  it("renders NO controls without a workspaceId (read-only)", () => {
+    const html = renderToStaticMarkup(
+      <ServiceStackStatusPanel
+        serviceState={{
+          composeProjectName: "kanban-ws-7-stack",
+          ports: { db: 5000 },
+          envFilePath: "/wt/.kanban-services.env",
+          status: "up",
+          updatedAt: new Date().toISOString(),
+        }}
+      />,
+    );
+    expect(html).not.toContain("service-stack-controls");
+    expect(html).not.toContain(">Stop<");
+  });
+
+  it("shows Stop / Restart / Rebuild / View logs (but not Start / Retry) for an up stack", () => {
+    const html = renderToStaticMarkup(
+      <ServiceStackStatusPanel
+        workspaceId="ws-1"
+        serviceState={{
+          composeProjectName: "kanban-ws-7-stack",
+          ports: { db: 5000 },
+          envFilePath: "/wt/.kanban-services.env",
+          status: "up",
+          updatedAt: new Date().toISOString(),
+        }}
+      />,
+    );
+    expect(html).toContain("service-stack-controls");
+    expect(html).toContain(">Stop<");
+    expect(html).toContain(">Restart<");
+    expect(html).toContain(">Rebuild<");
+    expect(html).toContain(">View logs<");
+    expect(html).not.toContain(">Start<");
+    expect(html).not.toContain(">Retry<");
+  });
+
+  it("shows Start / Rebuild (but not Stop / Restart) for a down stack", () => {
+    const html = renderToStaticMarkup(
+      <ServiceStackStatusPanel
+        workspaceId="ws-1"
+        serviceState={{
+          composeProjectName: "kanban-ws-7-stack",
+          ports: {},
+          envFilePath: "/wt/.kanban-services.env",
+          status: "down",
+          updatedAt: new Date().toISOString(),
+        }}
+      />,
+    );
+    expect(html).toContain(">Start<");
+    expect(html).toContain(">Rebuild<");
+    expect(html).not.toContain(">Stop<");
+    expect(html).not.toContain(">Restart<");
+  });
+
+  it("shows Retry for an errored/deferred stack", () => {
+    const html = renderToStaticMarkup(
+      <ServiceStackStatusPanel
+        workspaceId="ws-1"
+        serviceState={{
+          composeProjectName: "kanban-ws-7-stack",
+          ports: {},
+          envFilePath: "/wt/.kanban-services.env",
+          status: "error",
+          error: "at the max_concurrent_stacks cap",
+          deferred: true,
+          updatedAt: new Date().toISOString(),
+        }}
+      />,
+    );
+    expect(html).toContain(">Retry<");
+    expect(html).toContain("deferred");
+  });
 });

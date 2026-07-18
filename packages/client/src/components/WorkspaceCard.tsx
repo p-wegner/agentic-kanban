@@ -576,7 +576,7 @@ export function WorkspaceCard({
 
       <SetupStatusPanel setup={ws.latestSetup ?? null} />
 
-      <ServiceStackStatusPanel serviceState={ws.serviceState ?? null} />
+      <ServiceStackStatusPanel serviceState={ws.serviceState ?? null} workspaceId={ws.id} />
 
       {!ws.isDirect && (
         <RepoMergeStatusStrip workspaceId={ws.id} refreshKey={ws.mergedAt ?? ws.status} />
