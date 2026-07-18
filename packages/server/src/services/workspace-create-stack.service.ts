@@ -34,6 +34,31 @@ export interface StackAdmissionDeps {
   getMaxConcurrentStacks?: (database: Database) => Promise<number>;
   /** How many distinct stacks are currently "up". Default: countLiveStacks(). */
   countLiveStacks?: (database: Database) => Promise<number>;
+  /**
+   * The actual compose-up call. Injectable so the admission-cap concurrency race can be
+   * exercised deterministically (a test provision that blocks until released). Defaults
+   * to the real `workspaceServicesService.provisionWorkspaceServices`.
+   */
+  provisionWorkspaceServices?: typeof workspaceServicesService.provisionWorkspaceServices;
+}
+
+/**
+ * Workspace ids whose stack provision is IN FLIGHT — past the admission gate but not yet
+ * persisted `status:'up'`. `countLiveStacks` only sees rows already persisted 'up' (written
+ * after `compose up -d --wait` returns, ~15-30s later), so without this set, concurrent
+ * creates would all read `live < cap` before any persisted and ALL bypass the cap (TOCTOU,
+ * #107). The gate reads `live + inFlightStackProvisions.size` and adds this workspace's id
+ * SYNCHRONOUSLY (no `await` between the count read and the mutation), so — because JS runs
+ * each continuation to completion across a resolved `await` — a concurrent (N+1)th gate call
+ * observes the earlier reservations and defers. Released in a `finally` on every post-gate
+ * path (success/throw/early-return). Single-process server → a module-level set is the whole
+ * synchronization primitive needed.
+ */
+const inFlightStackProvisions = new Set<string>();
+
+/** Test-only: current in-flight reservation count (asserting the finally released). */
+export function inFlightStackProvisionCount(): number {
+  return inFlightStackProvisions.size;
 }
 
 async function defaultGetMaxConcurrentStacks(database: Database): Promise<number> {
@@ -190,49 +215,63 @@ export async function provisionServicesForLaunch(
   // change for the common case.
   const getMax = deps.getMaxConcurrentStacks ?? defaultGetMaxConcurrentStacks;
   const countLive = deps.countLiveStacks ?? countLiveStacksDefault;
+  const provision = deps.provisionWorkspaceServices ?? workspaceServicesService.provisionWorkspaceServices;
   const cap = await getMax(database);
+  let reserved = false;
   if (cap > 0) {
     const live = await countLive(database);
-    if (live >= cap) {
+    // Count in-flight provisions (past this gate, not yet persisted 'up') alongside the
+    // persisted-'up' rows so concurrent creates can't all bypass the cap (#107). The
+    // read + the add below straddle NO await, so the reservation is effectively atomic.
+    if (live + inFlightStackProvisions.size >= cap) {
       const message =
-        `service stack deferred: ${live} stack(s) already up, at the max_concurrent_stacks cap of ${cap}. ` +
+        `service stack deferred: ${live} stack(s) up + ${inFlightStackProvisions.size} provisioning, at the max_concurrent_stacks cap of ${cap}. ` +
         `The stack was NOT started (the agent still launches). It will come up on the next provisioning ` +
         `attempt once a stack frees up, or raise max_concurrent_stacks / lower WIP.`;
       console.warn(`[services] ${message} (branch ${params.branch})`);
       return { adopted: false, state: deferredState(message) };
     }
-  }
-
-  let composeWorktreePath = params.leadingWorktreePath;
-  if (config.composeRepo) {
-    const sibling = params.siblings.find((s) => s.name === config.composeRepo);
-    if (!sibling) {
-      // A configured-but-unresolvable composeRepo (typo, or the repo was removed from
-      // the project) must FAIL LOUDLY, never fall back to the leading worktree — the
-      // leading repo's docker-compose.yml can be a completely unrelated (e.g. full
-      // app-deployment) stack that would be brought up per workspace by accident.
-      const message =
-        `servicesConfig.composeRepo '${config.composeRepo}' does not match any of the project's additional repos — the service stack was NOT started. ` +
-        `Set composeRepo to one of the project's additional repo names, or leave it empty to use the leading repo's compose file.`;
-      console.warn(`[services] ${message}`);
-      return { adopted: false, state: errorState(message) };
-    }
-    composeWorktreePath = sibling.worktreePath;
+    inFlightStackProvisions.add(params.workspaceId);
+    reserved = true;
   }
 
   try {
-    const state = await workspaceServicesService.provisionWorkspaceServices({
-      config,
-      workspaceId: params.workspaceId,
-      composeWorktreePath,
-      extraEnv: { KANBAN_WORKTREE_BRANCH: params.branch },
-    });
-    return { adopted: false, state };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[services] provisioning threw (non-fatal) for branch ${params.branch}: ${message}`);
-    // No stack came up, so an empty compose name is safe here: every teardown path
-    // (parseStoredComposeProjectName) treats it as "nothing to down".
-    return { adopted: false, state: errorState(message) };
+    let composeWorktreePath = params.leadingWorktreePath;
+    if (config.composeRepo) {
+      const sibling = params.siblings.find((s) => s.name === config.composeRepo);
+      if (!sibling) {
+        // A configured-but-unresolvable composeRepo (typo, or the repo was removed from
+        // the project) must FAIL LOUDLY, never fall back to the leading worktree — the
+        // leading repo's docker-compose.yml can be a completely unrelated (e.g. full
+        // app-deployment) stack that would be brought up per workspace by accident.
+        const message =
+          `servicesConfig.composeRepo '${config.composeRepo}' does not match any of the project's additional repos — the service stack was NOT started. ` +
+          `Set composeRepo to one of the project's additional repo names, or leave it empty to use the leading repo's compose file.`;
+        console.warn(`[services] ${message}`);
+        return { adopted: false, state: errorState(message) };
+      }
+      composeWorktreePath = sibling.worktreePath;
+    }
+
+    try {
+      const state = await provision({
+        config,
+        workspaceId: params.workspaceId,
+        composeWorktreePath,
+        extraEnv: { KANBAN_WORKTREE_BRANCH: params.branch },
+      });
+      return { adopted: false, state };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[services] provisioning threw (non-fatal) for branch ${params.branch}: ${message}`);
+      // No stack came up, so an empty compose name is safe here: every teardown path
+      // (parseStoredComposeProjectName) treats it as "nothing to down".
+      return { adopted: false, state: errorState(message) };
+    }
+  } finally {
+    // Release the reservation on EVERY post-gate path (success, throw, composeRepo
+    // early-return). The stack is now either persisted-'up'-bound (caller writes the
+    // returned state) or failed — countLiveStacks takes over as the source of truth.
+    if (reserved) inFlightStackProvisions.delete(params.workspaceId);
   }
 }
