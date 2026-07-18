@@ -122,6 +122,7 @@ export function createWorkspacesRoute(
       claudeProfile?: string;
       model?: string;
       skipContextPacker?: boolean;
+      repoScope?: string[];
     }>(c);
     if (!body.issueId) {
       return c.json({ error: "issueId is required" }, 400);
@@ -146,6 +147,7 @@ export function createWorkspacesRoute(
       claudeProfile: body.claudeProfile,
       model: body.model,
       skipContextPacker: body.skipContextPacker === true,
+      repoScope: Array.isArray(body.repoScope) ? body.repoScope : undefined,
     } satisfies CreateWorkspaceInput);
     return c.json(result);
   });
@@ -205,6 +207,7 @@ export function createWorkspacesRoute(
       claudeProfile?: string;
       model?: string;
       skipContextPacker?: boolean;
+      repoScope?: string[];
     }>(c);
     const isDirect = body.isDirect === true;
     if (!body.issueId) {
@@ -230,6 +233,7 @@ export function createWorkspacesRoute(
       claudeProfile: body.claudeProfile,
       model: body.model,
       skipContextPacker: body.skipContextPacker === true,
+      repoScope: Array.isArray(body.repoScope) ? body.repoScope : undefined,
     } satisfies CreateWorkspaceInput);
     return c.json(result, 201);
   });

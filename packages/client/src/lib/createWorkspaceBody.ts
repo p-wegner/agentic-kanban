@@ -55,6 +55,8 @@ export interface CreateWorkspaceBodyInput {
   branchName: string;
   baseBranch: string;
   prefs: Record<string, string>;
+  /** Multi-repo scope (#91): repo ids the workspace spans; undefined = all (single-repo/direct). */
+  repoScope?: string[];
 }
 
 /** Build the workspace-create request body from form state (no side effects). */
@@ -82,6 +84,7 @@ export function buildCreateWorkspaceBody(input: CreateWorkspaceBodyInput): Recor
   if (!input.isDirect) {
     body.branch = input.branchName.trim();
     if (input.baseBranch.trim()) body.baseBranch = input.baseBranch.trim();
+    if (input.repoScope && input.repoScope.length > 0) body.repoScope = input.repoScope;
   }
   return body;
 }
