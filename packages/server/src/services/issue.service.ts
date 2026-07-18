@@ -19,7 +19,10 @@ import {
     setIssueStatus,
     updateIssueTitleDescription,
 } from "../repositories/issue-ai.repository.js";
+import { getProjectRepoNames } from "../repositories/repo.repository.js";
+import { resolveRepoName } from "@agentic-kanban/shared/lib/repo-tags";
 import { isIssueNumberUniqueConstraintError, nextIssueNumber } from "../repositories/issue-number.repository.js";
+import { applyRepoTags } from "./repo-tags.service.js";
 import {
     archiveIssuesByIds,
     closeOpenWorkspacesForIssue,
@@ -163,6 +166,9 @@ export interface CreateIssueInput {
   workflowTemplateId?: string | null;
   externalKey?: string | null;
   externalUrl?: string | null;
+  /** Repos this issue touches (#94). Applied as `repo:<name>` tags after insert (multi-repo
+   *  authoring); omitted/empty for single-repo projects. */
+  reposTouched?: string[];
 }
 
 export type CreateIssueResult = NonNullable<Awaited<ReturnType<typeof getIssueDescription>>>;
@@ -283,6 +289,19 @@ export function createIssueService(deps: {
     // node mapping to that status (null for statuses with no node, e.g. "Todo").
     if (input.workflowTemplateId) {
       await syncCurrentNodeToStatus(database, createdId).catch(() => {});
+    }
+
+    // Repo-aware authoring (#94): mark the repos this issue touches as repo:<name> tags.
+    // Validate against the project's real repo set (canonicalizing + dropping unknowns) so
+    // a stale client can't mint junk tags. Best-effort — a tag failure must not fail create.
+    if (input.reposTouched && input.reposTouched.length > 0) {
+      try {
+        const knownRepos = await getProjectRepoNames(input.projectId, database);
+        const valid = input.reposTouched
+          .map((r) => resolveRepoName(r, knownRepos))
+          .filter((r): r is string => r !== null);
+        if (valid.length > 0) await applyRepoTags(createdId, valid, database);
+      } catch { /* tagging is best-effort */ }
     }
 
     if (input.projectId) boardEvents?.broadcast(input.projectId, "issue_created");
