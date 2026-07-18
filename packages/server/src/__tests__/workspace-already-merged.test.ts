@@ -590,6 +590,76 @@ describe("already-merged reconciliation — multi-repo siblings (#16)", () => {
     expect(sibling.name).toBe("extra");
   });
 
+  // #75: a MERGED sibling-only workspace stamps the workspace scalar `mergedAt`, but the
+  // leading repo contributed no commits. The old code ORed `Boolean(mergedAt)` into the
+  // leading verdict, falsely reporting the leading repo as hasWork+merged.
+  it("getRepoMergeStatus does NOT attribute a sibling-only merge to the leading repo (#75)", async () => {
+    const ids = await seedScenario(db, { baseCommitSha: "base-sha" });
+    // Sibling-only merge landed: mergedAt stamped (closeWorkspace markMerged), but the leading
+    // repo never merged commits, so its mergedHeadSha stays null.
+    await db.update(workspaces).set({ status: "closed", mergedAt: new Date().toISOString() }).where(eq(workspaces.id, ids.workspaceId));
+    await insertSibling(db, ids, { mergedHeadSha: "landed-sha" }); // the sibling that actually landed
+    const git = {
+      ...makeGitService({ revParse: async () => "sha", isAncestor: async () => true }),
+      countUniqueCommits: vi.fn(async () => 0), // leading: 0 ahead AND 0 historic (base..tip)
+    };
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+    const status = await svc.getRepoMergeStatus(ids.workspaceId);
+
+    const leading = status.repos.find((r) => r.isLeading)!;
+    expect(leading.hasWork).toBe(false); // was true before the fix (mergedAt leaked in)
+    expect(leading.merged).toBe(false);
+    expect(leading.stranded).toBe(false);
+    const sibling = status.repos.find((r) => !r.isLeading)!;
+    expect(sibling.merged).toBe(true); // the sibling that actually landed
+    expect(status.allMerged).toBe(true);
+  });
+
+  // #75: a REAL leading-repo merge must still read as merged after its feature branch is
+  // cleaned up — the historic tip falls back to the stamped `mergedHeadSha`, which survives
+  // the branch deletion (the old code relied on the now-removed `mergedAt` term for this).
+  it("getRepoMergeStatus still reports the leading repo merged after its branch is cleaned up, via mergedHeadSha (#75)", async () => {
+    const ids = await seedScenario(db, { baseCommitSha: "base-sha" });
+    await db.update(workspaces).set({ status: "closed", mergedAt: new Date().toISOString(), mergedHeadSha: "merged-tip" }).where(eq(workspaces.id, ids.workspaceId));
+    const git = {
+      ...makeGitService({
+        // Leading feature branch is GONE (cleaned up post-merge): its ref no longer resolves.
+        revParse: async (_repo: string, ref: string) => { if (ref === "feature/ak-42-test") throw new Error("unknown revision"); return "sha"; },
+        isAncestor: async () => true,
+      }),
+      // 0 ahead of base (merged); base..mergedHeadSha = 2 (the leading repo DID have work).
+      countUniqueCommits: vi.fn(async (_repo: string, from: string) => (from === "base-sha" ? 2 : 0)),
+    };
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+    const status = await svc.getRepoMergeStatus(ids.workspaceId);
+
+    const leading = status.repos.find((r) => r.isLeading)!;
+    expect(leading.hasWork).toBe(true);
+    expect(leading.merged).toBe(true);
+    expect(leading.stranded).toBe(false);
+  });
+
+  // #75: a no-work sibling's branch is force-deleted by cleanup just like a worked one, so a
+  // gone unstamped branch must read as "no changes", NOT silently as merged.
+  it("getRepoMergeStatus reports a no-work sibling as no-changes (not merged) after cleanup (#75)", async () => {
+    const ids = await seedScenario(db, {});
+    await insertSibling(db, ids); // no work, not stamped
+    const git = {
+      ...makeGitService({
+        // sibling branch cleaned up → its refs no longer resolve.
+        revParse: async (repo: string) => { if (repo === SIBLING_PATH) throw new Error("gone"); return "sha"; },
+      }),
+      countUniqueCommits: vi.fn(async () => 0),
+    };
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+    const status = await svc.getRepoMergeStatus(ids.workspaceId);
+
+    const sibling = status.repos.find((r) => !r.isLeading)!;
+    expect(sibling.hasWork).toBe(false);
+    expect(sibling.merged).toBe(false); // was true before the fix (branch-gone treated as landed)
+    expect(sibling.stranded).toBe(false);
+  });
+
   it("getRepoMergeStatus reports allMerged once every repo has landed", async () => {
     const ids = await seedScenario(db, {});
     await insertSibling(db, ids, { mergedHeadSha: "landed-sha" });
