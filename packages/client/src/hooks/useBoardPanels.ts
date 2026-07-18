@@ -10,6 +10,7 @@ export interface BoardOverlayPanelProps {
   showLaunchFailures: boolean;
   showCleanupQueue: boolean;
   showFileContention: boolean;
+  showMultiRepoMonitor: boolean;
   showTranscriptSearch: boolean;
   showMergeQueue: boolean;
   showRunQueueForecast: boolean;
@@ -26,6 +27,7 @@ export interface BoardOverlayPanelProps {
   onCloseLaunchFailures: () => void;
   onCloseCleanupQueue: () => void;
   onCloseFileContention: () => void;
+  onCloseMultiRepoMonitor: () => void;
   onCloseTranscriptSearch: () => void;
   onCloseMergeQueue: () => void;
   onCloseRunQueueForecast: () => void;
@@ -50,6 +52,7 @@ export interface BoardPanelState {
   showLaunchFailures: boolean;
   showCleanupQueue: boolean;
   showFileContention: boolean;
+  showMultiRepoMonitor: boolean;
   showTranscriptSearch: boolean;
   showProjectHealth: boolean;
   showTimeReport: boolean;
@@ -68,6 +71,7 @@ export interface BoardPanelState {
   setShowLaunchFailures: Dispatch<SetStateAction<boolean>>;
   setShowCleanupQueue: Dispatch<SetStateAction<boolean>>;
   setShowFileContention: Dispatch<SetStateAction<boolean>>;
+  setShowMultiRepoMonitor: Dispatch<SetStateAction<boolean>>;
   setShowTranscriptSearch: Dispatch<SetStateAction<boolean>>;
   setShowProjectHealth: Dispatch<SetStateAction<boolean>>;
   setShowTimeReport: Dispatch<SetStateAction<boolean>>;
@@ -93,6 +97,7 @@ export function useBoardPanels(): BoardPanelState {
   const [showLaunchFailures, setShowLaunchFailures] = useState(false);
   const [showCleanupQueue, setShowCleanupQueue] = useState(false);
   const [showFileContention, setShowFileContention] = useState(false);
+  const [showMultiRepoMonitor, setShowMultiRepoMonitor] = useState(false);
   const [showTranscriptSearch, setShowTranscriptSearch] = useState(false);
   const [showProjectHealth, setShowProjectHealth] = useState(false);
   const [showTimeReport, setShowTimeReport] = useState(false);
@@ -109,6 +114,7 @@ export function useBoardPanels(): BoardPanelState {
     if (showLaunchFailures) { setShowLaunchFailures(false); return true; }
     if (showCleanupQueue) { setShowCleanupQueue(false); return true; }
     if (showFileContention) { setShowFileContention(false); return true; }
+    if (showMultiRepoMonitor) { setShowMultiRepoMonitor(false); return true; }
     if (showWorktreeOverview) { setShowWorktreeOverview(false); return true; }
     if (showShortcutHelp) { setShowShortcutHelp(false); return true; }
     if (showQuickTasks) { setShowQuickTasks(false); return true; }
@@ -125,6 +131,7 @@ export function useBoardPanels(): BoardPanelState {
     showFileContention,
     showLaunchFailures,
     showLiveActivityTicker,
+    showMultiRepoMonitor,
     showProjectHealth,
     showQuickTasks,
     showRunQueueForecast,
@@ -144,6 +151,7 @@ export function useBoardPanels(): BoardPanelState {
     showLaunchFailures,
     showCleanupQueue,
     showFileContention,
+    showMultiRepoMonitor,
     showTranscriptSearch,
     showMergeQueue,
     showRunQueueForecast,
@@ -160,6 +168,7 @@ export function useBoardPanels(): BoardPanelState {
     onCloseLaunchFailures: () => setShowLaunchFailures(false),
     onCloseCleanupQueue: () => setShowCleanupQueue(false),
     onCloseFileContention: () => setShowFileContention(false),
+    onCloseMultiRepoMonitor: () => setShowMultiRepoMonitor(false),
     onCloseTranscriptSearch: () => setShowTranscriptSearch(false),
     onCloseMergeQueue: () => setShowMergeQueue(false),
     onCloseRunQueueForecast: () => setShowRunQueueForecast(false),
@@ -181,6 +190,7 @@ export function useBoardPanels(): BoardPanelState {
     showFileContention,
     showLaunchFailures,
     showMergeQueue,
+    showMultiRepoMonitor,
     showProjectHealth,
     showQuickTasks,
     showRunQueueForecast,
@@ -203,6 +213,7 @@ export function useBoardPanels(): BoardPanelState {
     showLaunchFailures,
     showCleanupQueue,
     showFileContention,
+    showMultiRepoMonitor,
     showTranscriptSearch,
     showProjectHealth,
     showTimeReport,
@@ -221,6 +232,7 @@ export function useBoardPanels(): BoardPanelState {
     setShowLaunchFailures,
     setShowCleanupQueue,
     setShowFileContention,
+    setShowMultiRepoMonitor,
     setShowTranscriptSearch,
     setShowProjectHealth,
     setShowTimeReport,

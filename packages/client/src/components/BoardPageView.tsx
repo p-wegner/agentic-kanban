@@ -588,6 +588,7 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
           void refetchBoard();
         }}
         activeProjectId={activeProjectId}
+        leadingRepoPath={activeProject?.repoPath ?? null}
         columns={columns}
         nudgeWipLimit={prefs.nudgeWipLimit}
         viewMode={viewMode}
