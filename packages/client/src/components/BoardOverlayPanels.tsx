@@ -11,6 +11,7 @@ import { CleanupQueuePanel } from "./CleanupQueuePanel.js";
 import { FileContentionPanel } from "./FileContentionPanel.js";
 import { MultiRepoMonitorPanel } from "./MultiRepoMonitorPanel.js";
 import { TranscriptSearchPanel } from "./TranscriptSearchPanel.js";
+import { SessionTranscriptPanel } from "./SessionTranscriptPanel.js";
 import { MergeQueuePanel } from "./MergeQueuePanel.js";
 import { RunQueueForecastPanel } from "./RunQueueForecastPanel.js";
 import { AgentStartDryRunModal } from "./AgentStartDryRunModal.js";
@@ -385,6 +386,9 @@ export function BoardOverlayPanels({
       {showShortcutHelp && (
         <ShortcutHelp onClose={onCloseShortcutHelp} currentView={viewMode} />
       )}
+      {/* Full session transcript viewer — self-mounted; opened via the
+          openSessionTranscript() window event from any launch site (#87). */}
+      <SessionTranscriptPanel />
       {expandedCreatePanel && activeProjectId && (
         <CreateIssuePanel
           projectId={activeProjectId}
