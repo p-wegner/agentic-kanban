@@ -178,6 +178,14 @@ export function createWorkspaceActionsRoute(
     return c.json(await workspaceService.abortRebase(id));
   });
 
+  // POST /api/workspaces/:id/repos/:repoName/rebase — per-repo recovery for a stranded sibling (#93):
+  // rebase ONE repo's worktree branch onto its base (REBASE only — never lands a repo in isolation).
+  router.post("/:id/repos/:repoName/rebase", async (c) => {
+    const id = c.req.param("id");
+    const repoName = decodeURIComponent(c.req.param("repoName"));
+    return c.json(await workspaceService.rebaseRepo(id, repoName));
+  });
+
   // POST /api/workspaces/:id/resolve-conflicts
   router.post("/:id/resolve-conflicts", async (c) => {
     const id = c.req.param("id");
