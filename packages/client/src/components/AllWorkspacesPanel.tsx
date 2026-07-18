@@ -3,6 +3,7 @@ import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { apiFetch, apiDelete } from "../lib/api.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { WorkspaceRiskHeatmap } from "./WorkspaceRiskHeatmap.js";
+import { MultirepoHealthPill } from "./MultirepoHealthPill.js";
 import { CollapsibleSection } from "./CollapsibleSection.js";
 import { useStaleWorkspaceManager } from "../hooks/useStaleWorkspaceManager.js";
 import {
@@ -449,6 +450,15 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
                               {main.status === "fixing" ? " (fixing)" : ""}
                             </span>
                           )}
+
+                          {/* Multi-repo health (#83): lazy repo-merge-status fetch on expand */}
+                          <span onClick={(e) => e.stopPropagation()}>
+                            <MultirepoHealthPill
+                              workspaceId={main.id}
+                              hasConflicts={main.conflicts?.hasConflicts}
+                              conflictingFiles={main.conflicts?.conflictingFiles}
+                            />
+                          </span>
 
                           {/* Last session trigger */}
                           {main.lastSessionTriggerType && (() => {

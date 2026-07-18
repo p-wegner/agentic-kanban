@@ -5,6 +5,7 @@ import { formatRelativeTime, formatAbsoluteTime } from "../lib/formatRelativeTim
 import { getLastSessionBadge } from "../lib/sessionBadgeHelpers.js";
 import { CodeMetricsBadges, WorkflowMiniIndicator } from "./IssueBadges.js";
 import { groupConflictsByRepo, formatConflictSummary } from "../lib/groupConflictsByRepo.js";
+import { MultirepoHealthPill } from "./MultirepoHealthPill.js";
 
 function RelativeTime({ timestamp, prefix = "" }: { timestamp: string; prefix?: string }) {
   const [, setTick] = useState(0);
@@ -140,6 +141,16 @@ export function WorkspaceSummarySection(props: {
               </span>
             );
           })()}
+          {/* Multi-repo health pill (#83): lazy — only fetches repo-merge-status when
+              expanded; the collapsed teaser shows only when board-loaded data already
+              hints multi-repo (a sibling-namespaced conflict). */}
+          <span className="order-last shrink-0" onClick={(e) => e.stopPropagation()}>
+            <MultirepoHealthPill
+              workspaceId={ws.main.id}
+              hasConflicts={ws.main.conflicts?.hasConflicts}
+              conflictingFiles={ws.main.conflicts?.conflictingFiles}
+            />
+          </span>
           {ws.main.planMode && (
             <span className="order-last inline-flex items-center px-1.5 py-0.5 rounded bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 text-[10px] font-medium shrink-0">
               Plan Mode
