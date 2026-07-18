@@ -548,3 +548,52 @@ describe("Agent Throughput by Provider (AK-514)", () => {
   });
 });
 
+describe("PATCH /api/projects/:id/repos/:repoId — name editing (#90)", () => {
+  const { app, db: database } = createTestApp();
+  let projectId: string;
+  let repoAId: string;
+  let repoBId: string;
+
+  beforeAll(async () => {
+    projectId = await createProjectDirectly(database);
+    repoAId = randomUUID();
+    repoBId = randomUUID();
+    await database.insert(schema.repos).values({
+      id: repoAId, projectId, path: "/repo/a", name: "web", setupScript: "pnpm install",
+    });
+    await database.insert(schema.repos).values({
+      id: repoBId, projectId, path: "/repo/b", name: "api",
+    });
+  });
+
+  it("updates name (trimmed) without clobbering setupScript", async () => {
+    const res = await app.request(`/api/projects/${projectId}/repos/${repoAId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "  frontend  " }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.name).toBe("frontend");
+    expect(body.setupScript).toBe("pnpm install");
+  });
+
+  it("rejects a whitespace-only name with 400", async () => {
+    const res = await app.request(`/api/projects/${projectId}/repos/${repoAId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "   " }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects a name already used by another repo with 409", async () => {
+    const res = await app.request(`/api/projects/${projectId}/repos/${repoBId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "frontend" }),
+    });
+    expect(res.status).toBe(409);
+  });
+});
+
