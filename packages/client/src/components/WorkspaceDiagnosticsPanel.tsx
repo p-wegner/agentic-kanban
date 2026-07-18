@@ -1,6 +1,8 @@
+import { useEffect, useState } from "react";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
-import { getWorkspaceDevPorts } from "../lib/workspace-preview.js";
-import type { WorkspaceResponse } from "@agentic-kanban/shared";
+import { getWorkspaceDevPorts, describeDevServerPlan } from "../lib/workspace-preview.js";
+import { apiFetch } from "../lib/api.js";
+import type { WorkspaceResponse, WorkspaceDevServerPlanResponse } from "@agentic-kanban/shared";
 import { SetupStatusPanel } from "./SetupStatusPanel.js";
 import { ServiceStackStatusPanel } from "./ServiceStackStatusPanel.js";
 
@@ -64,6 +66,23 @@ function DiagnosticsRow({ label, value, detail }: { label: string; value: string
 }
 
 export function WorkspaceDiagnosticsPanel({ workspace, project }: { workspace: WorkspaceResponse; project: ProjectDiagnostics | null }) {
+  // The dev-server plan is resolved server-side (command / health URL / port + provenance)
+  // so the tab shows honest ports for ANY project — not this app's private worktree math
+  // fabricated for a docker-compose / multi-repo project (ticket #100).
+  const [planResp, setPlanResp] = useState<WorkspaceDevServerPlanResponse | null>(null);
+  const [planLoaded, setPlanLoaded] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    setPlanLoaded(false);
+    apiFetch<WorkspaceDevServerPlanResponse>(`/api/workspaces/${workspace.id}/dev-server-plan`)
+      .then((r) => { if (!cancelled) { setPlanResp(r); setPlanLoaded(true); } })
+      .catch(() => { if (!cancelled) { setPlanResp(null); setPlanLoaded(true); } });
+    return () => { cancelled = true; };
+  }, [workspace.id]);
+
+  // The app's own worktree ports (3001+N/5173+N) are correct ONLY for agentic-kanban itself.
+  const isSelfProject = planResp?.isSelfProject ?? false;
+  const planDisplay = describeDevServerPlan(planResp);
   const ports = getWorkspaceDevPorts(workspace);
   const symlink = workspace.latestSymlink;
   const serviceState = workspace.serviceState;
@@ -97,19 +116,22 @@ export function WorkspaceDiagnosticsPanel({ workspace, project }: { workspace: W
           }
         />
         <DiagnosticsRow
-          label="Dev ports"
-          value={ports.ok ? "ready" : "failed"}
-          detail={ports.ok ? `server ${ports.serverPort}, client ${ports.clientPort}` : ports.reason}
+          label="Dev server"
+          value={planLoaded ? planDisplay.status : "…"}
+          detail={planLoaded ? planDisplay.command : "Resolving dev-server plan…"}
         />
         <DiagnosticsRow
-          label="Dev-server bootstrap"
-          value={workspace.workingDir && ports.ok ? "ready" : "skipped"}
-          detail={
-            workspace.workingDir && ports.ok
-              ? `Agent env: server=${ports.serverPort}, client=${ports.clientPort}`
-              : "No working directory available for dev-server bootstrap"
-          }
+          label="Dev endpoint"
+          value={planLoaded ? (planResp?.plan?.port != null ? "ready" : "unknown") : "…"}
+          detail={planLoaded ? planDisplay.endpoint : "Resolving dev-server plan…"}
         />
+        {isSelfProject && (
+          <DiagnosticsRow
+            label="App worktree ports"
+            value={ports.ok ? "ready" : "failed"}
+            detail={ports.ok ? `server ${ports.serverPort}, client ${ports.clientPort}` : ports.reason}
+          />
+        )}
         <DiagnosticsRow
           label="Service stack"
           value={serviceState?.status ?? "none"}
@@ -144,12 +166,18 @@ export function WorkspaceDiagnosticsPanel({ workspace, project }: { workspace: W
         </div>
       )}
 
-      {ports.ok && (
-        <div className="rounded border border-gray-200 dark:border-gray-700 p-2 text-xs text-gray-600 dark:text-gray-400">
-          <div className="font-semibold text-gray-700 dark:text-gray-300">Preview</div>
-          <div className="mt-1 font-mono break-all">{ports.previewUrl}</div>
-        </div>
-      )}
+      {(() => {
+        // Prefer the app's own worktree client URL for the self project (correct there);
+        // otherwise the resolved plan's origin, when one is actually known.
+        const previewUrl = isSelfProject && ports.ok ? ports.previewUrl : planDisplay.previewUrl;
+        if (!previewUrl) return null;
+        return (
+          <div className="rounded border border-gray-200 dark:border-gray-700 p-2 text-xs text-gray-600 dark:text-gray-400">
+            <div className="font-semibold text-gray-700 dark:text-gray-300">Preview</div>
+            <div className="mt-1 font-mono break-all">{previewUrl}</div>
+          </div>
+        );
+      })()}
 
       {failures.length > 0 && (
         <div className="rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
