@@ -49,10 +49,11 @@ export async function insertProjectRepo(
 /** Update a project-scoped repo's per-repo setup/compose config (#71). */
 export async function updateProjectRepo(
   repoId: string,
-  patch: { setupScript?: string | null; composeFile?: string | null },
+  patch: { name?: string; setupScript?: string | null; composeFile?: string | null },
   database: RepoDb = db,
 ): Promise<RepoRow | null> {
   const set: Partial<typeof repos.$inferInsert> = {};
+  if (patch.name !== undefined) set.name = patch.name;
   if (patch.setupScript !== undefined) set.setupScript = patch.setupScript;
   if (patch.composeFile !== undefined) set.composeFile = patch.composeFile;
   if (Object.keys(set).length > 0) {

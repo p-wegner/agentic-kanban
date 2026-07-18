@@ -80,8 +80,10 @@ export interface AddProjectRepoRequest {
   composeFile?: string | null;
 }
 
-/** PATCH body for updating a registered repo's per-repo config (#71). */
+/** PATCH body for updating a registered repo's per-repo config (#71, name added #90). */
 export interface UpdateProjectRepoRequest {
+  /** Display name (used for compose-repo lookup + diff labels). Non-empty, unique among the project's repos. */
+  name?: string;
   setupScript?: string | null;
   composeFile?: string | null;
 }

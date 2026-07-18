@@ -116,6 +116,12 @@ describe("repo.repository — project-scoped vs workspace-scoped rows", () => {
     const partial = await updateProjectRepo(row.id, { composeFile: "compose.dev.yml" }, db);
     expect(partial?.setupScript).toBe("cargo fetch");
     expect(partial?.composeFile).toBe("compose.dev.yml");
+
+    // name is updatable and leaves other fields untouched (#90).
+    const renamed = await updateProjectRepo(row.id, { name: "renamed" }, db);
+    expect(renamed?.name).toBe("renamed");
+    expect(renamed?.setupScript).toBe("cargo fetch");
+    expect(renamed?.composeFile).toBe("compose.dev.yml");
   });
 
   it("deleteProjectRepo removes only project-scoped rows and reports not-found", async () => {

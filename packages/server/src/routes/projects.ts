@@ -386,7 +386,10 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
   router.patch("/:id/repos/:repoId", async (c) => {
     const projectId = c.req.param("id");
     const repoId = c.req.param("repoId");
-    const body = await parseJsonBody<{ setupScript?: string | null; composeFile?: string | null }>(c);
+    const body = await parseJsonBody<{ name?: string; setupScript?: string | null; composeFile?: string | null }>(c);
+    if (body.name !== undefined && typeof body.name !== "string") {
+      return c.json({ error: "name must be a string" }, 400);
+    }
     if (body.setupScript !== undefined && body.setupScript !== null && typeof body.setupScript !== "string") {
       return c.json({ error: "setupScript must be a string or null" }, 400);
     }
@@ -398,7 +401,17 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
     }
     const existing = await listProjectRepos(projectId, database);
     if (!existing.some((r) => r.id === repoId)) return c.json({ error: "Repo not found" }, 404);
-    const row = await updateProjectRepo(repoId, { setupScript: body.setupScript, composeFile: body.composeFile }, database);
+    // `name` is validated here (route-level) since it must be unique among the project's repos (#90).
+    let nameToSet: string | undefined;
+    if (body.name !== undefined) {
+      const trimmed = body.name.trim();
+      if (!trimmed) return c.json({ error: "name must not be empty" }, 400);
+      if (existing.some((r) => r.id !== repoId && r.name === trimmed)) {
+        return c.json({ error: "name must be unique among the project's repos" }, 409);
+      }
+      nameToSet = trimmed;
+    }
+    const row = await updateProjectRepo(repoId, { name: nameToSet, setupScript: body.setupScript, composeFile: body.composeFile }, database);
     if (!row) return c.json({ error: "Repo not found" }, 404);
     options?.boardEvents?.broadcastProjectsChanged(projectId, "project_updated");
     return c.json(toProjectRepoResponse(row));
