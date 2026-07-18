@@ -16,6 +16,7 @@ import { BoardKanbanView } from "./BoardKanbanView.js";
 import { RecentlyMergedStrip } from "./RecentlyMergedStrip.js";
 import { BoardStats } from "./BoardStats.js";
 import { BoardToolbar } from "./BoardToolbar.js";
+import { FleetTokenMeter } from "./FleetTokenMeter.js";
 import { BoardFilterMenu } from "./BoardFilterMenu.js";
 import { SavedBoardViews } from "./SavedBoardViews.js";
 import { ExportImportMenu } from "./ExportImportMenu.js";
@@ -332,6 +333,13 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
             activeColumns={activeColumns}
             archiveColumns={archiveColumns}
             projectId={activeProjectId}
+          />
+        )}
+        {viewMode !== "butler" && (
+          <FleetTokenMeter
+            liveStats={liveStats}
+            columns={columns}
+            sessionActivity={sessionActivity}
           />
         )}
         <BoardToolbar
