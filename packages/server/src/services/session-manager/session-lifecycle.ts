@@ -481,7 +481,7 @@ export function createSessionLifecycle(
         if (effectiveWorkingDir) {
           try {
             const { writeHandoffFile } = await import("../handoff.service.js");
-            await writeHandoffFile(effectiveWorkingDir, sessionId, db, workspace.baseBranch);
+            await writeHandoffFile(effectiveWorkingDir, sessionId, db, workspace.baseBranch, workspaceId);
             console.log(`[session] HANDOFF.md written: workspaceId=${workspaceId} sessionId=${sessionId}`);
           } catch (err) {
             console.warn(`[session] HANDOFF.md write failed: sessionId=${sessionId}`, err);
