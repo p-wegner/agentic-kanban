@@ -9,7 +9,7 @@
 import { basename } from "node:path";
 import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import type { Database, TransactionClient } from "../db/index.js";
-import { listProjectRepos, listWorkspaceRepos, insertWorkspaceRepo, setWorkspaceRepoMergedSha, findLiveSiblingSharers, type RepoRow } from "../repositories/repo.repository.js";
+import { listProjectRepos, listWorkspaceRepos, insertWorkspaceRepo, setWorkspaceRepoMergedSha, findLiveSiblingSharers, findCrossProjectBranchHolders, type RepoRow } from "../repositories/repo.repository.js";
 import { WorkspaceError, acquireRepoMergeLock, type GitService } from "./workspace-internals.js";
 import { runMergeCore } from "./merge-executor.service.js";
 
@@ -93,6 +93,22 @@ export async function provisionSiblingWorktrees(params: {
       if (!baseBranch) {
         throw new Error(
           `Additional repo ${repo.name ?? repo.path} has no default branch — re-add it or set one.`,
+        );
+      }
+      // Cross-project shared-sibling guard (#110): the same repo can be a sibling of
+      // two projects. Git allows only one worktree per branch, so if a live workspace
+      // in ANOTHER project already holds this branch in this repo, createWorktree would
+      // silently ADOPT it — conflating two projects' work onto one branch. Refuse with a
+      // clear error instead. Same-project reuse is intentional and excluded by projectId.
+      const crossHolders = await findCrossProjectBranchHolders(
+        { repoPath: repo.path, branch, projectId },
+        database,
+      );
+      if (crossHolders.length > 0) {
+        const h = crossHolders[0];
+        throw new WorkspaceError(
+          `Shared repo '${repo.name ?? basename(repo.path)}' cannot be provisioned on branch '${branch}': that branch is already checked out in this repo by a live workspace (${h.workspaceId}) in a different project (${h.projectId}). Git allows only one worktree per branch, so the two projects would silently share one worktree and conflate their work. Use a distinct branch name, or drive this shared repo from a single project.`,
+          "CONFLICT",
         );
       }
       const baseCommitSha = await gitService.revParse(repo.path, baseBranch);

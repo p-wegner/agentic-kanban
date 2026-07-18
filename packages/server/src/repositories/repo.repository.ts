@@ -144,6 +144,49 @@ export async function deleteProjectRepo(repoId: string, projectId: string, datab
  * (workspace-scoped rows, excluding the caller's own workspace, joined against live
  * workspaces) instead of a where-less select + full-table JS filter.
  */
+/**
+ * Cross-project shared-sibling guard (#110): the SAME git repo can be registered as
+ * a sibling under two different projects. Git allows only ONE worktree per branch, so
+ * if both projects drive a workspace whose branch name collides in that shared repo,
+ * `createWorktree`'s reuse-by-branch path would SILENTLY hand the second project the
+ * first's worktree + branch — conflating two unrelated projects' work onto one branch.
+ *
+ * This finds any LIVE (non-closed) workspace in a DIFFERENT project that already holds
+ * `branch` in the repo at `repoPath`. A non-empty result means provisioning would be
+ * a cross-project collision and the caller should refuse with a clear error rather than
+ * adopt. SAME-project reuse (fix-and-merge reconcilers, relaunch) is intentional and is
+ * excluded here by the `projectId` filter, so this never fires for single-project flows.
+ */
+export async function findCrossProjectBranchHolders(
+  params: { repoPath: string; branch: string; projectId: string },
+  database: RepoDb = db,
+): Promise<{ workspaceId: string; projectId: string }[]> {
+  const rows = await database
+    .select({
+      workspaceId: repos.workspaceId,
+      path: repos.path,
+      branch: repos.branch,
+      repoProjectId: repos.projectId,
+    })
+    .from(repos)
+    .innerJoin(workspaces, eq(repos.workspaceId, workspaces.id))
+    .where(
+      and(
+        isNotNull(repos.workspaceId),
+        ne(workspaces.status, "closed"),
+        ne(repos.projectId, params.projectId),
+      ),
+    );
+
+  const holders: { workspaceId: string; projectId: string }[] = [];
+  for (const r of rows) {
+    if (!samePath(r.path, params.repoPath)) continue;
+    if (r.branch === null || r.branch !== params.branch) continue;
+    holders.push({ workspaceId: r.workspaceId as string, projectId: (r.repoProjectId ?? "") as string });
+  }
+  return holders;
+}
+
 export async function findLiveSiblingSharers(
   repo: Pick<RepoRow, "path" | "worktreePath" | "branch">,
   excludeWorkspaceId: string,
