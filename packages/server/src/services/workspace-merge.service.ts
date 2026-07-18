@@ -1,4 +1,5 @@
 import type { projects, workspaces } from "@agentic-kanban/shared/schema";
+import { LEADING_REPO_KEY, type RepoRebaseResponse } from "@agentic-kanban/shared";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { isFailedLaunchSession } from "@agentic-kanban/shared/lib/workspace-activity-state.js";
 import {
@@ -520,6 +521,70 @@ export function createWorkspaceMergeService(deps: {
     return { ok: true };
   }
 
+  /**
+   * Per-repo recovery for a stranded sibling (#93): rebase just ONE repo's worktree branch
+   * onto its own base — the leading repo (`repoName === LEADING_REPO_KEY`) or a single sibling
+   * addressed by name. This is REBASE ONLY: it never lands anything, so the all-or-nothing
+   * coordinated-merge invariant (prevalidateSiblingMerges/executeSiblingMerges) is untouched —
+   * landing is still the whole-workspace merge. On conflict the in-progress rebase is aborted
+   * so the worktree is left clean (there is no per-sibling conflict-resolution flow), and the
+   * conflicting files are reported so the strip can surface them. Spawns git only through the
+   * sanctioned adapter via gitService.rebaseOntoBase/abortRebase.
+   */
+  async function rebaseRepo(id: string, repoName: string): Promise<RepoRebaseResponse> {
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
+    if (!workspace.workingDir || workspace.isDirect) {
+      throw new WorkspaceError("Not supported for direct workspaces", "BAD_REQUEST");
+    }
+    if (workspace.status === "closed") {
+      throw new WorkspaceError("Workspace is closed", "BAD_REQUEST");
+    }
+
+    const { defaultBranch } = await resolveProjectRepo(id, database);
+    const workspaceBase = requireBaseBranch(workspace.baseBranch || defaultBranch);
+
+    let worktree: string;
+    let branch: string;
+    let base: string;
+    let label: string;
+
+    if (repoName === LEADING_REPO_KEY) {
+      if (!workspace.branch) throw new WorkspaceError("Leading repo has no branch to rebase", "BAD_REQUEST");
+      worktree = workspace.workingDir;
+      branch = workspace.branch;
+      base = workspaceBase;
+      label = "leading";
+    } else {
+      const repo = (await listWorkspaceRepos(id, database)).find((r) => r.name === repoName);
+      if (!repo) throw new WorkspaceError(`Repo '${repoName}' is not part of this workspace`, "NOT_FOUND");
+      if (!repo.worktreePath || !repo.branch) {
+        throw new WorkspaceError(`Repo '${repoName}' has no worktree to rebase`, "BAD_REQUEST");
+      }
+      worktree = repo.worktreePath;
+      branch = repo.branch;
+      base = requireBaseBranch(repo.baseBranch || workspaceBase);
+      label = repoName;
+    }
+
+    // Stop leftover agent processes before rewriting history in the worktree.
+    await killWorktreeProcesses(worktree, `rebase-repo:pre:${label}`);
+    // preferLocalBase mirrors update-base: the board merges into the LOCAL base, so rebase onto
+    // it (a stale origin would replay local-only history and conflict spuriously).
+    const result = await gitService.rebaseOntoBase(worktree, base, branch, { preferLocalBase: true });
+    if (!result.success) {
+      // rebaseOntoBase leaves the conflicted rebase in progress; abort so the worktree is clean.
+      await gitService.abortRebase(worktree).catch(() => { /* best effort — nothing to abort */ });
+    }
+    await killWorktreeProcesses(worktree, `rebase-repo:post:${label}`);
+
+    const projectId = await resolveProjectId(id, database);
+    if (projectId) boardEvents?.broadcast(projectId, "board_changed");
+
+    console.log(`[workspace-merge] rebase-repo: workspaceId=${id} repo=${label} success=${result.success} conflicts=${result.conflictingFiles?.length ?? 0}`);
+    return { repo: label, success: result.success, conflictingFiles: result.conflictingFiles, error: result.error };
+  }
+
   async function resolveConflicts(id: string) {
     const workspace = await getWorkspaceById(id, database);
     if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
@@ -969,7 +1034,7 @@ export function createWorkspaceMergeService(deps: {
   }
 
   return {
-    mergeWorkspace, mergeWorkspaceDeduped, updateBase, abortRebase, resolveConflicts, fixAndMerge,
+    mergeWorkspace, mergeWorkspaceDeduped, updateBase, abortRebase, rebaseRepo, resolveConflicts, fixAndMerge,
     reconcileBatch, checkAlreadyMerged, reconcileAlreadyMerged,
     // #70: per-repo merge status (extracted to keep this module under the god-module ceiling).
     getRepoMergeStatus: (id: string) => getRepoMergeStatus(id, { database, gitService }),

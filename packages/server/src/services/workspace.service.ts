@@ -60,6 +60,7 @@ export function createWorkspaceService(deps: {
     mergeWorkspaceDeduped: merge.mergeWorkspaceDeduped,
     updateBase: merge.updateBase,
     abortRebase: merge.abortRebase,
+    rebaseRepo: merge.rebaseRepo,
     resolveConflicts: merge.resolveConflicts,
     fixAndMerge: merge.fixAndMerge,
     checkAlreadyMerged: merge.checkAlreadyMerged,
