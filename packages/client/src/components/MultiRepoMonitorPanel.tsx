@@ -5,6 +5,7 @@ import { cellKey } from "../lib/diffMultiRepoMatrix.js";
 import { useLiveMultiRepoMatrix } from "../hooks/useLiveMultiRepoMatrix.js";
 import { MergeReadinessBoard } from "./MergeReadinessBoard.js";
 import { FleetServiceStackMap } from "./FleetServiceStackMap.js";
+import { CrossRepoImpactHeatmap } from "./CrossRepoImpactHeatmap.js";
 
 interface MultiRepoMonitorPanelProps {
   activeProjectId: string | null;
@@ -16,8 +17,8 @@ interface MultiRepoMonitorPanelProps {
   onOpenWorkspace?: (workspaceId: string, issueId: string | null) => void;
 }
 
-/** The secondary views this panel exposes: the repo × workspace matrix, the fleet triage board (#98), and the fleet service-stack map (#95). */
-type MonitorView = "matrix" | "readiness" | "stacks";
+/** The secondary views this panel exposes: the repo × workspace matrix, the fleet triage board (#98), the fleet service-stack map (#95), and the cross-repo change-impact heatmap (#97). */
+type MonitorView = "matrix" | "readiness" | "stacks" | "impact";
 
 /** Compact "updated Ns ago" phrasing for the live indicator. */
 function formatAgo(ms: number): string {
@@ -152,13 +153,14 @@ export function MultiRepoMonitorPanel({
               </span>
             )}
             {/* Unified secondary-view toggle: the repo × workspace matrix (#84),
-                the fleet triage board (#98), and the fleet service-stack map (#95). */}
+                the fleet triage board (#98), the fleet service-stack map (#95), and
+                the cross-repo change-impact heatmap (#97). */}
             <div
               className="ml-1 inline-flex rounded border border-gray-200 dark:border-gray-700 overflow-hidden text-[11px]"
               role="tablist"
               aria-label="Monitor view"
             >
-              {(["matrix", "readiness", "stacks"] as MonitorView[]).map((v) => (
+              {(["matrix", "readiness", "stacks", "impact"] as MonitorView[]).map((v) => (
                 <button
                   key={v}
                   role="tab"
@@ -171,7 +173,13 @@ export function MultiRepoMonitorPanel({
                       : "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
                   }`}
                 >
-                  {v === "matrix" ? "Matrix" : v === "readiness" ? "Readiness" : "Service Stacks"}
+                  {v === "matrix"
+                    ? "Matrix"
+                    : v === "readiness"
+                      ? "Readiness"
+                      : v === "stacks"
+                        ? "Service Stacks"
+                        : "Impact"}
                 </button>
               ))}
             </div>
@@ -230,6 +238,12 @@ export function MultiRepoMonitorPanel({
         <div className="flex-1 overflow-auto">
           {view === "stacks" ? (
             <FleetServiceStackMap projectId={activeProjectId} columns={columns} />
+          ) : view === "impact" ? (
+            <CrossRepoImpactHeatmap
+              projectId={activeProjectId}
+              leadingRepoPath={leadingRepoPath}
+              columns={columns}
+            />
           ) : (
           <>
           {!activeProjectId && (
@@ -327,7 +341,9 @@ export function MultiRepoMonitorPanel({
         <div className="px-4 py-2 border-t border-gray-100 dark:border-gray-800 text-xs text-gray-400 dark:text-gray-500">
           {view === "stacks"
             ? "All active workspaces' Docker service stacks · read-only"
-            : "Per-repo merge state of active workspaces · read-only"}
+            : view === "impact"
+              ? "Cross-repo change intensity of active workspaces · read-only"
+              : "Per-repo merge state of active workspaces · read-only"}
         </div>
       </div>
     </div>
