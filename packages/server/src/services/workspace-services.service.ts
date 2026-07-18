@@ -323,7 +323,18 @@ export function createDefaultComposeRunner(): ComposeRunner {
       if (!(await dockerAvailable(env))) {
         return { ok: false, stderr: "docker is not available on this host" };
       }
-      const downFlags = removeVolumes === false ? ["down", "--remove-orphans"] : ["down", "-v", "--remove-orphans"];
+      // Full teardown adds `--rmi local`: compose removes images it built itself
+      // (a `build:`-context service with no `image:` field, auto-tagged
+      // `<projectName>-<service>`) while leaving pull-based images (postgres, redis,
+      // …, referenced by their custom `image:` name) untouched. Without it, every
+      // workspace that provisions a build-context stack leaks a uniquely-named image
+      // forever, since each workspace's compose project name is distinct (#106). The
+      // volume-preserving stop path (removeVolumes === false) keeps the image so a
+      // later restart is fast.
+      const downFlags =
+        removeVolumes === false
+          ? ["down", "--remove-orphans"]
+          : ["down", "-v", "--rmi", "local", "--remove-orphans"];
       const res = await dockerExec(["compose", "-p", projectName, ...downFlags], { cwd, env });
       return { ok: res.code === 0, stderr: res.stderr || res.error || "" };
     },
