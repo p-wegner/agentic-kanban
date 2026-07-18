@@ -1,3 +1,11 @@
+/**
+ * Reserved `:repoName` path segment for the LEADING repo in the per-repo rebase route
+ * (POST /api/workspaces/:id/repos/:repoName/rebase, #93). The leading repo has a null
+ * `name` so it can't be addressed by name; this sentinel stands in for it. Shared so the
+ * client and server agree on the wire value (a plain string — client-bundle safe).
+ */
+export const LEADING_REPO_KEY = "__leading__";
+
 export function sanitizeBranchName(input: string): string {
   return input
     .toLowerCase()
