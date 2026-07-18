@@ -88,6 +88,19 @@ function validateServicesConfig(
       return { ok: false, error: "servicesConfig.ports names must be unique case-insensitively (they map to KANBAN_SVC_<UPPER>_PORT)" };
     }
   }
+  if (cfg.profiles !== undefined) {
+    if (!Array.isArray(cfg.profiles) || !cfg.profiles.every((p) => typeof p === "string")) {
+      return { ok: false, error: "servicesConfig.profiles must be an array of strings (compose profile names)" };
+    }
+    // Profile names go into COMPOSE_PROFILES='a,b' in the shell-sourced --env-file, so each
+    // must be shell-safe AND comma-free (comma is the profile separator). Reject at save.
+    const badProfile = (cfg.profiles as string[]).find(
+      (p) => p.trim() === "" || p.includes(",") || NEWLINE_RE.test(p) || p.includes("'"),
+    );
+    if (badProfile !== undefined) {
+      return { ok: false, error: `servicesConfig.profiles entry ${JSON.stringify(badProfile)} is invalid: profile names must be non-empty and contain no comma, CR/LF, or single quote (they are joined into COMPOSE_PROFILES in the shell-sourced --env-file)` };
+    }
+  }
   if (cfg.composeRepo !== undefined && cfg.composeRepo !== null && typeof cfg.composeRepo !== "string") {
     return { ok: false, error: "servicesConfig.composeRepo must be a string or null" };
   }
@@ -132,6 +145,7 @@ function validateServicesConfig(
         : DEFAULT_SERVICE_STACK_CONFIG.composeFile,
     ports: Array.isArray(cfg.ports) ? (cfg.ports as string[]) : [],
   };
+  if (Array.isArray(cfg.profiles)) normalized.profiles = (cfg.profiles as string[]).map((p) => p.trim()).filter((p) => p.length > 0);
   if (cfg.composeRepo !== undefined) normalized.composeRepo = cfg.composeRepo as string | null;
   if (cfg.readyTimeoutMs !== undefined) normalized.readyTimeoutMs = cfg.readyTimeoutMs as number;
   if (cfg.env !== undefined) normalized.env = cfg.env as Record<string, string>;

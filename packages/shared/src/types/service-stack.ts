@@ -20,6 +20,16 @@ export interface ServiceStackConfig {
   composeRepo?: string | null;
   /** named host ports to allocate; injected into the env file as KANBAN_SVC_<UPPER>_PORT. */
   ports?: string[];
+  /**
+   * Compose profiles to ACTIVATE for this stack (services gated behind a `profiles:` key
+   * in the compose file). The board runs `docker compose up` with NO `--profile` flag, so
+   * a profile-gated service is omitted by default; listing its profile here emits
+   * `COMPOSE_PROFILES=<comma-joined>` into the generated `--env-file`, which docker compose
+   * reads to enable exactly those profiles. Empty/absent = default (only unprofiled
+   * services start). Names must be shell-safe (no whitespace, CR/LF, single quotes, or
+   * commas — a comma would be parsed as a profile separator).
+   */
+  profiles?: string[];
   /** ms to wait for `up --wait`; default 120000. */
   readyTimeoutMs?: number;
   /** extra static env vars written into the generated env file verbatim. */
