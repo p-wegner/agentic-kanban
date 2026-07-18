@@ -7,7 +7,7 @@ import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 import {
   GraphView, TableView, AgentGrid, TimelineView, MetricsView, CrimeSceneCityView,
   QualityMetricsView, MilestonesOverview, ButlerView, WorkflowsView,
-  WorkflowAnalyticsDashboard, InsightsPanel, DigestView, ActivityFeedView, FocusView,
+  WorkflowAnalyticsDashboard, InsightsPanel, DigestView, ActivityFeedView, CrossRepoActivityFeed, FocusView,
   StrategyTargetsView, SwimlaneView, FlakyTestsPanel, MonitorCycleHistoryPanel,
   BoardHealthNotificationCenter, RunbooksView, SprintCapacityPlanner, ConstellationView,
   MomentumView, FireworksView, StaleWorkDashboard, ThroughputChart, ProviderMixChart,
@@ -216,6 +216,21 @@ export function BoardSecondaryViews({
         <BoardErrorBoundary columnName="Activity Feed">
           <ActivityFeedView
             projectId={activeProjectId}
+            onIssueClick={(issueId) => {
+              const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
+              if (issue) onIssueClick(issue);
+            }}
+          />
+        </BoardErrorBoundary>
+      )}
+      {viewMode === "cross-repo-activity" && activeProjectId && (
+        <BoardErrorBoundary columnName="Cross-Repo Activity">
+          <CrossRepoActivityFeed
+            projectId={activeProjectId}
+            resolveIssue={(issueId) => {
+              const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
+              return issue ? { issueNumber: issue.issueNumber ?? null } : undefined;
+            }}
             onIssueClick={(issueId) => {
               const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
               if (issue) onIssueClick(issue);
