@@ -26,6 +26,8 @@ export interface BoardKeyboardShortcutState {
   viewMode: ViewMode;
   projects: BoardKeyboardShortcutProject[];
   activeProjectId: string | null;
+  /** True when the active project has >0 additional repos — gates the Multi-Repo Monitor action (#82). */
+  hasAdditionalRepos: boolean;
 }
 
 export interface BoardKeyboardShortcutActions {
@@ -299,6 +301,9 @@ export function useBoardKeyboardShortcuts(
     unregisters.push(registerAction({ id: "view-all-workspaces", label: "All Workspaces", description: "View all workspaces with status, diff stats, and session activity", icon: "⊞", category: "navigation", handler: () => actions.panels.setShowAllWorkspaces(true) }));
     unregisters.push(registerAction({ id: "view-cleanup-queue", label: "Cleanup Queue", description: "View closed workspaces with failed worktree cleanup warnings", icon: "🧹", category: "navigation", handler: () => actions.panels.setShowCleanupQueue(true) }));
     unregisters.push(registerAction({ id: "view-file-contention", label: "File Contention Heatmap", description: "Show which active workspaces touch the same files (merge-risk clusters)", icon: "⚡", category: "navigation", handler: () => actions.panels.setShowFileContention(true) }));
+    if (state.hasAdditionalRepos) {
+      unregisters.push(registerAction({ id: "view-multi-repo-monitor", label: "Multi-Repo Monitor", description: "Repo × workspace matrix: per-repo merge state of active workspaces", icon: "⊞", category: "navigation", handler: () => actions.panels.setShowMultiRepoMonitor(true) }));
+    }
     unregisters.push(registerAction({ id: "search-transcripts", label: "Search Transcripts", description: "Search agent session transcripts across all workspaces", icon: "⏎", category: "navigation", handler: () => actions.panels.setShowTranscriptSearch(true) }));
     unregisters.push(registerAction({ id: "view-worktrees", label: "View Worktrees", description: "Inspect git worktrees and their diff stats", icon: "⎇", category: "navigation", handler: () => actions.panels.setShowWorktreeOverview(true) }));
     unregisters.push(registerAction({ id: "view-project-health", label: "Project Health Overview", description: "See all registered projects with issue counts and warning states", icon: "◎", shortcut: "p", category: "navigation", handler: () => actions.panels.setShowProjectHealth(true) }));
@@ -387,6 +392,7 @@ export function useBoardKeyboardShortcuts(
     state.activeProjectId,
     state.columns,
     state.filteredColumns,
+    state.hasAdditionalRepos,
     state.projects,
   ]);
 }
