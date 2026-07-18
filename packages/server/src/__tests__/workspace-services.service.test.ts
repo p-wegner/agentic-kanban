@@ -20,9 +20,13 @@ function makeFakeRunner(overrides: Partial<ComposeRunner> = {}): {
   runner: ComposeRunner;
   ups: Array<Parameters<ComposeRunner["up"]>[0]>;
   downs: Array<Parameters<ComposeRunner["down"]>[0]>;
+  restarts: Array<Parameters<ComposeRunner["restart"]>[0]>;
+  logsCalls: Array<Parameters<ComposeRunner["logs"]>[0]>;
 } {
   const ups: Array<Parameters<ComposeRunner["up"]>[0]> = [];
   const downs: Array<Parameters<ComposeRunner["down"]>[0]> = [];
+  const restarts: Array<Parameters<ComposeRunner["restart"]>[0]> = [];
+  const logsCalls: Array<Parameters<ComposeRunner["logs"]>[0]> = [];
   const runner: ComposeRunner = {
     up: async (args) => {
       ups.push(args);
@@ -32,10 +36,18 @@ function makeFakeRunner(overrides: Partial<ComposeRunner> = {}): {
       downs.push(args);
       return { ok: true, stderr: "" };
     },
+    restart: async (args) => {
+      restarts.push(args);
+      return { ok: true, stderr: "" };
+    },
+    logs: async (args) => {
+      logsCalls.push(args);
+      return { ok: true, stdout: "db-1  | ready to accept connections\n", stderr: "" };
+    },
     list: async () => [],
     ...overrides,
   };
-  return { runner, ups, downs };
+  return { runner, ups, downs, restarts, logsCalls };
 }
 
 const INSTANCE = "testinst";
@@ -647,6 +659,102 @@ describe("reapOrphanServiceStacks", () => {
     const { reaped } = await svc.reapOrphanServiceStacks({ knownComposeProjectNames: new Set() });
     expect(reaped).toEqual([]);
     expect(downs).toHaveLength(0);
+  });
+});
+
+describe("lifecycle controls (#92) — start / stop / restart / rebuild / logs", () => {
+  // A stored, already-provisioned "up" state — its name/ports/env file are reused verbatim.
+  const STORED = {
+    composeProjectName: composeProjectName(WORKSPACE_ID, INSTANCE),
+    ports: { db: 61000, cache: 61001 },
+    envFilePath: "C:/wt/.kanban/services.env",
+    status: "up" as const,
+    updatedAt: new Date(Date.now() - 60000).toISOString(),
+  };
+  const ctx = (over: Partial<typeof STORED> = {}) => ({
+    state: { ...STORED, ...over },
+    config: CONFIG,
+    composeWorktreePath: "C:/wt",
+    workspaceId: WORKSPACE_ID,
+  });
+
+  it("startWorkspaceServices ups the STORED name + env file (ports preserved, no reallocation)", async () => {
+    const { runner, ups } = makeFakeRunner();
+    const { svc } = makeService({ runner, resolveExtraComposeFiles: async () => [] });
+    const state = await svc.startWorkspaceServices(ctx({ status: "down" }));
+    expect(state.status).toBe("up");
+    expect(state.ports).toEqual(STORED.ports); // unchanged — no allocator ran
+    expect(ups).toHaveLength(1);
+    expect(ups[0].projectName).toBe(STORED.composeProjectName);
+    expect(ups[0].envFile).toBe(STORED.envFilePath);
+    expect(ups[0].cwd).toBe("C:/wt");
+    expect(ups[0].composeFile).toBe("docker-compose.yml");
+    expect(ups[0].forceRecreate).toBeFalsy();
+  });
+
+  it("rebuild passes --force-recreate through to up", async () => {
+    const { runner, ups } = makeFakeRunner();
+    const { svc } = makeService({ runner, resolveExtraComposeFiles: async () => [] });
+    await svc.startWorkspaceServices(ctx(), { forceRecreate: true });
+    expect(ups[0].forceRecreate).toBe(true);
+  });
+
+  it("startWorkspaceServices returns an error state (with stderr) when up fails", async () => {
+    const { runner } = makeFakeRunner({ up: async () => ({ ok: false, stderr: "db unhealthy" }) });
+    const { svc } = makeService({ runner, resolveExtraComposeFiles: async () => [] });
+    const state = await svc.startWorkspaceServices(ctx({ status: "down" }));
+    expect(state.status).toBe("error");
+    expect(state.error).toContain("db unhealthy");
+  });
+
+  it("stopWorkspaceServices downs the STORED name WITHOUT removing volumes and marks it down", async () => {
+    const { runner, downs } = makeFakeRunner();
+    const { svc } = makeService({ runner });
+    const state = await svc.stopWorkspaceServices(ctx());
+    expect(state.status).toBe("down");
+    expect(downs).toHaveLength(1);
+    expect(downs[0].projectName).toBe(STORED.composeProjectName);
+    expect(downs[0].removeVolumes).toBe(false);
+  });
+
+  it("restartWorkspaceServices restarts the STORED name and stays up", async () => {
+    const { runner, restarts } = makeFakeRunner();
+    const { svc } = makeService({ runner, resolveExtraComposeFiles: async () => [] });
+    const state = await svc.restartWorkspaceServices(ctx());
+    expect(state.status).toBe("up");
+    expect(restarts).toHaveLength(1);
+    expect(restarts[0].projectName).toBe(STORED.composeProjectName);
+    expect(restarts[0].envFile).toBe(STORED.envFilePath);
+  });
+
+  it("restartWorkspaceServices returns an error state when restart fails", async () => {
+    const { runner } = makeFakeRunner({ restart: async () => ({ ok: false, stderr: "no such service" }) });
+    const { svc } = makeService({ runner, resolveExtraComposeFiles: async () => [] });
+    const state = await svc.restartWorkspaceServices(ctx());
+    expect(state.status).toBe("error");
+    expect(state.error).toContain("no such service");
+  });
+
+  it("getWorkspaceServiceLogs requests a bounded tail of the STORED name and returns stdout", async () => {
+    const { runner, logsCalls } = makeFakeRunner();
+    const { svc } = makeService({ runner, resolveExtraComposeFiles: async () => [] });
+    const res = await svc.getWorkspaceServiceLogs(ctx(), 50);
+    expect(res.ok).toBe(true);
+    expect(res.logs).toContain("ready to accept connections");
+    expect(logsCalls).toHaveLength(1);
+    expect(logsCalls[0].projectName).toBe(STORED.composeProjectName);
+    expect(logsCalls[0].tail).toBe(50);
+  });
+
+  it("passes sibling extra compose files through to up / restart / logs (#71)", async () => {
+    const { runner, ups, restarts, logsCalls } = makeFakeRunner();
+    const { svc } = makeService({ runner, resolveExtraComposeFiles: async () => ["C:/sib/docker-compose.yml"] });
+    await svc.startWorkspaceServices(ctx({ status: "down" }));
+    await svc.restartWorkspaceServices(ctx());
+    await svc.getWorkspaceServiceLogs(ctx(), 10);
+    expect(ups[0].extraComposeFiles).toEqual(["C:/sib/docker-compose.yml"]);
+    expect(restarts[0].extraComposeFiles).toEqual(["C:/sib/docker-compose.yml"]);
+    expect(logsCalls[0].extraComposeFiles).toEqual(["C:/sib/docker-compose.yml"]);
   });
 });
 
