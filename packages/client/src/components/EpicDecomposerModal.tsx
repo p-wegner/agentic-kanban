@@ -8,6 +8,8 @@ interface ChildProposal {
   title: string;
   description: string;
   priority: "low" | "medium" | "high" | "urgent";
+  /** Repo-aware fan-out (#94): the repo this child targets, editable pre-confirm. */
+  targetRepo?: string | null;
 }
 
 interface DependencyProposal {
@@ -20,6 +22,8 @@ interface DecomposeProposal {
   children: ChildProposal[];
   dependencies: DependencyProposal[];
   alreadyDecomposed: boolean;
+  /** Repos this project spans; empty for single-repo projects (dropdown hidden). */
+  repos: string[];
 }
 
 interface EpicDecomposerModalProps {
@@ -33,6 +37,7 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
   const [proposal, setProposal] = useState<DecomposeProposal | null>(null);
   const [children, setChildren] = useState<ChildProposal[]>([]);
   const [dependencies, setDependencies] = useState<DependencyProposal[]>([]);
+  const [repos, setRepos] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [regenerating, setRegenerating] = useState(false);
 
@@ -44,6 +49,7 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
       setProposal(result);
       setChildren(result.children);
       setDependencies(result.dependencies);
+      setRepos(result.repos ?? []);
       setStage("preview");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate decomposition");
@@ -60,6 +66,7 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
       setProposal(result);
       setChildren(result.children);
       setDependencies(result.dependencies);
+      setRepos(result.repos ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to regenerate decomposition");
     } finally {
@@ -92,6 +99,10 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
 
   function handleTitleChange(tempId: string, newTitle: string) {
     setChildren(prev => prev.map(c => c.tempId === tempId ? { ...c, title: newTitle } : c));
+  }
+
+  function handleRepoChange(tempId: string, repo: string) {
+    setChildren(prev => prev.map(c => c.tempId === tempId ? { ...c, targetRepo: repo || null } : c));
   }
 
   const tempIdToTitle = new Map(children.map(c => [c.tempId, c.title]));
@@ -221,6 +232,25 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
                           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">
                             {child.description}
                           </p>
+                        )}
+                        {repos.length > 0 && (
+                          <div className="mt-1.5 flex items-center gap-1.5">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-sky-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                            </svg>
+                            <select
+                              value={child.targetRepo ?? ""}
+                              onChange={(e) => handleRepoChange(child.tempId, e.target.value)}
+                              disabled={stage === "confirming"}
+                              className="text-[11px] border border-gray-200 dark:border-gray-700 rounded px-1 py-0.5 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-sky-500 disabled:opacity-60"
+                              title="Target repo for this child ticket"
+                            >
+                              <option value="">No repo</option>
+                              {repos.map((r) => (
+                                <option key={r} value={r}>repo:{r}</option>
+                              ))}
+                            </select>
+                          </div>
                         )}
                       </div>
                       <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${

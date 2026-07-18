@@ -55,7 +55,8 @@
     "./lib/db-path": { "development": "./src/lib/db-path.ts", "types": "./dist/lib/db-path.d.ts", "import": "./dist/lib/db-path.js", "default": "./src/lib/db-path.ts" },
     "./lib/db-client": { "development": "./src/lib/db-client.ts", "types": "./dist/lib/db-client.d.ts", "import": "./dist/lib/db-client.js", "default": "./src/lib/db-client.ts" },
     "./lib/workspace-status": { "development": "./src/lib/workspace-status.ts", "types": "./dist/lib/workspace-status.d.ts", "import": "./dist/lib/workspace-status.js", "default": "./src/lib/workspace-status.ts" },
-    "./lib/status-transitions": { "development": "./src/lib/status-transitions.ts", "types": "./dist/lib/status-transitions.d.ts", "import": "./dist/lib/status-transitions.js", "default": "./src/lib/status-transitions.ts" }
+    "./lib/status-transitions": { "development": "./src/lib/status-transitions.ts", "types": "./dist/lib/status-transitions.d.ts", "import": "./dist/lib/status-transitions.js", "default": "./src/lib/status-transitions.ts" },
+    "./lib/repo-tags": { "development": "./src/lib/repo-tags.ts", "types": "./dist/lib/repo-tags.d.ts", "import": "./dist/lib/repo-tags.js", "default": "./src/lib/repo-tags.ts" }
   },
   "scripts": {
     "prepare": "pnpm build",
