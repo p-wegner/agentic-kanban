@@ -3,6 +3,7 @@ import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { getBoardDragData } from "../lib/dragData.js";
 import { openSessionTranscript } from "../lib/sessionTranscriptEvents.js";
+import { AgentStallIndicator, useAgentStallThreshold } from "./AgentStallBadge.js";
 import {
   STARTABLE_STATUS_NAMES,
   MAX_HISTORY,
@@ -32,12 +33,18 @@ function ElapsedTimer({ since }: { since: string }) {
 
 // --- Featured card (active / fixing) ----------------------------------------
 
+/** Epoch ms of the running session's start (idle-baseline seed), or null. */
+function sessionStartMs(ws: { lastSessionAt?: string | null }): number | null {
+  return ws.lastSessionAt ? new Date(ws.lastSessionAt).getTime() : null;
+}
+
 interface FeaturedCardProps {
   issue: IssueWithStatus;
   activityHistory: string[];
   liveStats?: LiveSessionStats;
   todos?: TodoItem[];
   attention?: AttentionKind;
+  stallThresholdSec: number;
   onIssueClick: (issue: IssueWithStatus) => void;
   onWorkspaceClick: (issue: IssueWithStatus, workspaceId?: string) => void;
 }
@@ -145,7 +152,7 @@ function FeaturedFooterStats({
   );
 }
 
-function FeaturedCard({ issue, activityHistory, liveStats, todos, attention, onIssueClick, onWorkspaceClick }: FeaturedCardProps) {
+function FeaturedCard({ issue, activityHistory, liveStats, todos, attention, stallThresholdSec, onIssueClick, onWorkspaceClick }: FeaturedCardProps) {
   const ws = issue.workspaceSummary?.main;
   const feedRef = useRef<HTMLDivElement>(null);
 
@@ -175,6 +182,12 @@ function FeaturedCard({ issue, activityHistory, liveStats, todos, attention, onI
             {ws.profile?.name && (
               <span className="text-xs text-gray-400 dark:text-gray-500 truncate">{ws.profile.name}</span>
             )}
+            <AgentStallIndicator
+              issueId={issue.id}
+              status={ws.status}
+              sessionStartMs={sessionStartMs(ws)}
+              thresholdSec={stallThresholdSec}
+            />
             {ws.lastSessionAt && (
               <span className="ml-auto text-xs tabular-nums text-gray-400 dark:text-gray-500 shrink-0">
                 <ElapsedTimer since={ws.lastSessionAt} />
@@ -239,6 +252,7 @@ interface CompactCardProps {
   currentActivity?: string;
   liveStats?: LiveSessionStats;
   todos?: TodoItem[];
+  stallThresholdSec: number;
   onIssueClick: (issue: IssueWithStatus) => void;
   onWorkspaceClick: (issue: IssueWithStatus, workspaceId?: string) => void;
 }
@@ -279,7 +293,7 @@ function CompactFooterStats({
   );
 }
 
-function CompactCard({ issue, currentActivity, liveStats, todos, onIssueClick, onWorkspaceClick }: CompactCardProps) {
+function CompactCard({ issue, currentActivity, liveStats, todos, stallThresholdSec, onIssueClick, onWorkspaceClick }: CompactCardProps) {
   const ws = issue.workspaceSummary?.main;
   if (!ws) return null;
 
@@ -299,6 +313,12 @@ function CompactCard({ issue, currentActivity, liveStats, todos, onIssueClick, o
             <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot} shrink-0`} />
             <span className="text-xs font-mono text-gray-400 dark:text-gray-500">#{issue.issueNumber}</span>
             <span className="text-xs text-gray-500 dark:text-gray-400 font-medium truncate">{cfg.label}</span>
+            <AgentStallIndicator
+              issueId={issue.id}
+              status={ws.status}
+              sessionStartMs={sessionStartMs(ws)}
+              thresholdSec={stallThresholdSec}
+            />
             {ws.lastSessionAt && (
               <span className="ml-auto text-xs tabular-nums text-gray-400 dark:text-gray-500 shrink-0">
                 <ElapsedTimer since={ws.lastSessionAt} />
@@ -497,6 +517,7 @@ function EmptyState({ onGoToBoard }: { onGoToBoard?: () => void }) {
 export function AgentGrid({ columns, liveActivity, liveStats, sessionTodos, onIssueClick, onWorkspaceClick, onGoToBoard, activeAgentsTarget, onDropIssue }: AgentGridProps) {
   const historyRef = useRef<Map<string, string[]>>(new Map());
   const [, setHistoryTick] = useState(0);
+  const stallThresholdSec = useAgentStallThreshold();
 
   useEffect(() => {
     let changed = false;
@@ -547,6 +568,7 @@ export function AgentGrid({ columns, liveActivity, liveStats, sessionTodos, onIs
                   liveStats={liveStats[issue.id]}
                   todos={sessionTodos[issue.id]}
                   attention={issue.workspaceSummary?.main?.conflicts?.hasConflicts ? "conflict" : "merge"}
+                  stallThresholdSec={stallThresholdSec}
                   onIssueClick={onIssueClick}
                   onWorkspaceClick={onWorkspaceClick}
                 />
@@ -572,6 +594,7 @@ export function AgentGrid({ columns, liveActivity, liveStats, sessionTodos, onIs
                   activityHistory={historyRef.current.get(issue.id) ?? []}
                   liveStats={liveStats[issue.id]}
                   todos={sessionTodos[issue.id]}
+                  stallThresholdSec={stallThresholdSec}
                   onIssueClick={onIssueClick}
                   onWorkspaceClick={onWorkspaceClick}
                 />
@@ -600,6 +623,7 @@ export function AgentGrid({ columns, liveActivity, liveStats, sessionTodos, onIs
                   currentActivity={liveActivity[issue.id]}
                   liveStats={liveStats[issue.id]}
                   todos={sessionTodos[issue.id]}
+                  stallThresholdSec={stallThresholdSec}
                   onIssueClick={onIssueClick}
                   onWorkspaceClick={onWorkspaceClick}
                 />
