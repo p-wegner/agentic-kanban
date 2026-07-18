@@ -52,8 +52,41 @@ export interface ComposeRunner {
     envFile: string;
     timeoutMs: number;
     env?: NodeJS.ProcessEnv;
+    /** Add `--force-recreate` so existing containers are recreated (the "rebuild" control, #92). */
+    forceRecreate?: boolean;
   }): Promise<{ ok: boolean; stderr: string }>;
-  down(args: { projectName: string; cwd: string; env?: NodeJS.ProcessEnv }): Promise<{ ok: boolean; stderr: string }>;
+  down(args: {
+    projectName: string;
+    cwd: string;
+    env?: NodeJS.ProcessEnv;
+    /**
+     * Remove named volumes too (`-v`). Defaults to true — the teardown/reaper paths pass
+     * nothing and keep the original destructive down. The user-initiated STOP control (#92)
+     * passes `false` so a subsequent START finds its data intact.
+     */
+    removeVolumes?: boolean;
+  }): Promise<{ ok: boolean; stderr: string }>;
+  /** `docker compose restart` — bounce the running containers, reusing the same ports (#92). */
+  restart(args: {
+    composeFile: string;
+    extraComposeFiles?: string[];
+    projectName: string;
+    cwd: string;
+    envFile: string;
+    env?: NodeJS.ProcessEnv;
+    timeoutMs?: number;
+  }): Promise<{ ok: boolean; stderr: string }>;
+  /** `docker compose logs --tail N` — a BOUNDED, non-following tail (never hangs, #92). */
+  logs(args: {
+    composeFile: string;
+    extraComposeFiles?: string[];
+    projectName: string;
+    cwd: string;
+    envFile: string;
+    tail: number;
+    env?: NodeJS.ProcessEnv;
+    timeoutMs?: number;
+  }): Promise<{ ok: boolean; stdout: string; stderr: string }>;
   /** Compose project names currently known to the daemon (running or stopped). */
   list(env?: NodeJS.ProcessEnv): Promise<string[]>;
 }
@@ -257,23 +290,50 @@ function isPortInUseError(stderr: string): boolean {
  */
 export function createDefaultComposeRunner(): ComposeRunner {
   return {
-    async up({ composeFile, extraComposeFiles, cwd, projectName, envFile, timeoutMs, env }) {
+    async up({ composeFile, extraComposeFiles, cwd, projectName, envFile, timeoutMs, env, forceRecreate }) {
       if (!(await dockerAvailable(env))) {
         return { ok: false, stderr: "docker is not available on this host (service stack skipped)" };
       }
       const fileArgs = ["-f", composeFile, ...(extraComposeFiles ?? []).flatMap((f) => ["-f", f])];
+      const upFlags = forceRecreate ? ["up", "-d", "--wait", "--force-recreate"] : ["up", "-d", "--wait"];
       const res = await dockerExec(
-        ["compose", "-p", projectName, ...fileArgs, "--env-file", envFile, "up", "-d", "--wait"],
+        ["compose", "-p", projectName, ...fileArgs, "--env-file", envFile, ...upFlags],
         { cwd, env, timeoutMs },
       );
       return { ok: res.code === 0, stderr: res.stderr || res.error || "" };
     },
-    async down({ projectName, cwd, env }) {
+    async down({ projectName, cwd, env, removeVolumes }) {
       if (!(await dockerAvailable(env))) {
         return { ok: false, stderr: "docker is not available on this host" };
       }
-      const res = await dockerExec(["compose", "-p", projectName, "down", "-v", "--remove-orphans"], { cwd, env });
+      const downFlags = removeVolumes === false ? ["down", "--remove-orphans"] : ["down", "-v", "--remove-orphans"];
+      const res = await dockerExec(["compose", "-p", projectName, ...downFlags], { cwd, env });
       return { ok: res.code === 0, stderr: res.stderr || res.error || "" };
+    },
+    async restart({ composeFile, extraComposeFiles, projectName, cwd, envFile, env, timeoutMs }) {
+      if (!(await dockerAvailable(env))) {
+        return { ok: false, stderr: "docker is not available on this host" };
+      }
+      const fileArgs = ["-f", composeFile, ...(extraComposeFiles ?? []).flatMap((f) => ["-f", f])];
+      const res = await dockerExec(
+        ["compose", "-p", projectName, ...fileArgs, "--env-file", envFile, "restart"],
+        { cwd, env, timeoutMs: timeoutMs ?? 120000 },
+      );
+      return { ok: res.code === 0, stderr: res.stderr || res.error || "" };
+    },
+    async logs({ composeFile, extraComposeFiles, projectName, cwd, envFile, tail, env, timeoutMs }) {
+      if (!(await dockerAvailable(env))) {
+        return { ok: false, stdout: "", stderr: "docker is not available on this host" };
+      }
+      const safeTail = Number.isFinite(tail) && tail > 0 ? Math.floor(tail) : 200;
+      const fileArgs = ["-f", composeFile, ...(extraComposeFiles ?? []).flatMap((f) => ["-f", f])];
+      // No `-f`/`--follow`: a bounded `--tail` returns immediately instead of streaming
+      // forever (the acceptance criterion "returns a recent tail without hanging", #92).
+      const res = await dockerExec(
+        ["compose", "-p", projectName, ...fileArgs, "--env-file", envFile, "logs", "--no-color", "--tail", String(safeTail)],
+        { cwd, env, timeoutMs: timeoutMs ?? 20000 },
+      );
+      return { ok: res.code === 0, stdout: res.stdout, stderr: res.stderr || res.error || "" };
     },
     async list(env) {
       if (!(await dockerAvailable(env))) return [];
@@ -568,8 +628,116 @@ export function createWorkspaceServicesService(deps: {
     return { reaped };
   }
 
-  return { provisionWorkspaceServices, teardownWorkspaceServices, reapOrphanServiceStacks };
+  /**
+   * Shared invocation context for the user-initiated lifecycle controls (#92) over an
+   * ALREADY-provisioned stack. The stored state's `composeProjectName`, `ports` and
+   * `envFilePath` are reused VERBATIM — no port is reallocated — so a stop→start or a
+   * restart keeps the workspace on the host ports the agent was told about.
+   */
+  interface StackControlContext {
+    state: ServiceStackState;
+    config: ServiceStackConfig;
+    composeWorktreePath: string;
+    workspaceId: string;
+  }
+
+  async function resolveComposeInvocation(ctx: StackControlContext): Promise<{
+    composeFile: string;
+    extraComposeFiles: string[];
+    timeoutMs: number;
+  }> {
+    const composeFile = ctx.config.composeFile || "docker-compose.yml";
+    const extraComposeFiles = await resolveExtraComposeFiles(ctx.workspaceId).catch(() => [] as string[]);
+    const timeoutMs = ctx.config.readyTimeoutMs ?? 120000;
+    return { composeFile, extraComposeFiles, timeoutMs };
+  }
+
+  /** Fresh state carrying the SAME name/ports/env file as the stored one, minus stale flags. */
+  function reusedState(ctx: StackControlContext, status: ServiceStackState["status"], error?: string): ServiceStackState {
+    return {
+      composeProjectName: ctx.state.composeProjectName,
+      ports: ctx.state.ports,
+      envFilePath: ctx.state.envFilePath,
+      status,
+      ...(error ? { error: error.slice(0, MAX_ERROR_CHARS) } : {}),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Bring an already-provisioned stack up again reusing the STORED env file (so the ports
+   * are preserved — #92 "no reallocation on restart/start"). `forceRecreate` recreates the
+   * containers (the "rebuild" control). Returns "up" on success, "error" (with the compose
+   * stderr) on failure — the caller persists it.
+   */
+  async function startWorkspaceServices(ctx: StackControlContext, opts: { forceRecreate?: boolean } = {}): Promise<ServiceStackState> {
+    const { composeFile, extraComposeFiles, timeoutMs } = await resolveComposeInvocation(ctx);
+    const { ok, stderr } = await runner.up({
+      composeFile,
+      extraComposeFiles,
+      cwd: ctx.composeWorktreePath,
+      projectName: ctx.state.composeProjectName,
+      envFile: ctx.state.envFilePath,
+      timeoutMs,
+      forceRecreate: opts.forceRecreate,
+    });
+    return reusedState(ctx, ok ? "up" : "error", ok ? undefined : stderr || "compose up failed");
+  }
+
+  /**
+   * Stop a stack (`docker compose down` WITHOUT `-v`): remove the containers but keep the
+   * named volumes, so a later START finds its data intact. Returns "down" on success.
+   */
+  async function stopWorkspaceServices(ctx: StackControlContext): Promise<ServiceStackState> {
+    const { ok, stderr } = await runner.down({
+      projectName: ctx.state.composeProjectName,
+      cwd: ctx.composeWorktreePath,
+      removeVolumes: false,
+    });
+    return reusedState(ctx, ok ? "down" : "error", ok ? undefined : stderr || "compose down failed");
+  }
+
+  /** Restart a running stack (`docker compose restart`) — same containers, same ports. */
+  async function restartWorkspaceServices(ctx: StackControlContext): Promise<ServiceStackState> {
+    const { composeFile, extraComposeFiles, timeoutMs } = await resolveComposeInvocation(ctx);
+    const { ok, stderr } = await runner.restart({
+      composeFile,
+      extraComposeFiles,
+      projectName: ctx.state.composeProjectName,
+      cwd: ctx.composeWorktreePath,
+      envFile: ctx.state.envFilePath,
+      timeoutMs,
+    });
+    return reusedState(ctx, ok ? "up" : "error", ok ? undefined : stderr || "compose restart failed");
+  }
+
+  /** A bounded `docker compose logs --tail N` (never follows, so it never hangs — #92). */
+  async function getWorkspaceServiceLogs(ctx: StackControlContext, tail: number): Promise<{ ok: boolean; logs: string }> {
+    const { composeFile, extraComposeFiles } = await resolveComposeInvocation(ctx);
+    const { ok, stdout, stderr } = await runner.logs({
+      composeFile,
+      extraComposeFiles,
+      projectName: ctx.state.composeProjectName,
+      cwd: ctx.composeWorktreePath,
+      envFile: ctx.state.envFilePath,
+      tail,
+    });
+    return { ok, logs: ok ? stdout || stderr : stderr || stdout };
+  }
+
+  return {
+    provisionWorkspaceServices,
+    teardownWorkspaceServices,
+    reapOrphanServiceStacks,
+    startWorkspaceServices,
+    stopWorkspaceServices,
+    restartWorkspaceServices,
+    getWorkspaceServiceLogs,
+  };
 }
+
+/** The lifecycle-control context type + a handle on the engine's control methods (#92). */
+export type WorkspaceServicesEngine = ReturnType<typeof createWorkspaceServicesService>;
 
 /**
  * Process-wide default instance (real docker driver), used by the create/teardown/
