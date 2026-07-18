@@ -159,6 +159,23 @@ async function discoverComposePortNames(composeFiles: string[], existingNames: s
  * lives elsewhere: DooD → `host.docker.internal`; DinD → the `dind` sidecar service
  * name. The deployment sets `KANBAN_SERVICE_HOST` accordingly. (F2)
  */
+/**
+ * Shared invocation context for the user-initiated lifecycle controls (#92) over an
+ * ALREADY-provisioned stack. The stored state's `composeProjectName`, `ports` and
+ * `envFilePath` are reused VERBATIM — no port is reallocated — so a stop→start or a
+ * restart keeps the workspace on the host ports the agent was told about.
+ *
+ * Exported at module scope so the exported factory's inferred return type does not
+ * leak a private name (TS4060/TS4025); hoisted from inside the factory in a
+ * post-merge fix (#92).
+ */
+export interface StackControlContext {
+  state: ServiceStackState;
+  config: ServiceStackConfig;
+  composeWorktreePath: string;
+  workspaceId: string;
+}
+
 export function resolveServiceHost(env: NodeJS.ProcessEnv = process.env): string {
   const v = env.KANBAN_SERVICE_HOST?.trim();
   return v && v.length > 0 ? v : "localhost";
@@ -626,19 +643,6 @@ export function createWorkspaceServicesService(deps: {
       }
     }
     return { reaped };
-  }
-
-  /**
-   * Shared invocation context for the user-initiated lifecycle controls (#92) over an
-   * ALREADY-provisioned stack. The stored state's `composeProjectName`, `ports` and
-   * `envFilePath` are reused VERBATIM — no port is reallocated — so a stop→start or a
-   * restart keeps the workspace on the host ports the agent was told about.
-   */
-  interface StackControlContext {
-    state: ServiceStackState;
-    config: ServiceStackConfig;
-    composeWorktreePath: string;
-    workspaceId: string;
   }
 
   async function resolveComposeInvocation(ctx: StackControlContext): Promise<{
