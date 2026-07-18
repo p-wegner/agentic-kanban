@@ -24,6 +24,9 @@ import { createWorkspaceCleanupService } from "./workspace-cleanup.service.js";
 import { cleanupSiblingWorktrees } from "./workspace-repos.service.js";
 import { createWorkspaceCreateService } from "./workspace-create.service.js";
 import { workspaceServicesService, parseStoredComposeProjectName } from "./workspace-services.service.js";
+import { resolveProjectDevServerPlan } from "./dev-server.service.js";
+import { isSelfProjectRepo } from "./self-project.js";
+import type { WorkspaceDevServerPlanResponse } from "@agentic-kanban/shared";
 
 export function createWorkspaceCrudService(deps: {
   database: Database;
@@ -232,6 +235,32 @@ export function createWorkspaceCrudService(deps: {
     return getWorkspaceDetails(id, database);
   }
 
+  /**
+   * Resolve the honest dev-server plan for a workspace — the command/health-URL/port
+   * the board would actually boot for THIS project, with provenance. Powers the
+   * diagnostics tab so it never shows this app's private 3001/5173 worktree ports for a
+   * project that doesn't use them (ticket #100). The worktree-port fallback is applied
+   * only when the workspace belongs to the board's own checkout (isSelfProject).
+   */
+  async function getWorkspaceDevServerPlan(id: string): Promise<WorkspaceDevServerPlanResponse | null> {
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) return null;
+
+    const projectId = await resolveProjectId(id, database);
+    if (!projectId) return { workspaceId: id, isSelfProject: false, plan: null };
+
+    const repoPath = await resolveProjectRepo(id, database)
+      .then((r) => r.repoPath)
+      .catch(() => null);
+    const isSelfProject = isSelfProjectRepo(repoPath);
+
+    const plan = await resolveProjectDevServerPlan(projectId, database, {
+      workingDir: workspace.workingDir,
+      isSelfProject,
+    });
+    return { workspaceId: id, isSelfProject, plan };
+  }
+
   return {
     createWorkspace: create.createWorkspace,
     deleteWorkspace,
@@ -240,6 +269,7 @@ export function createWorkspaceCrudService(deps: {
     setupWorkspace,
     updateWorkspace,
     getWorkspace,
+    getWorkspaceDevServerPlan,
     listStaleWorktrees: cleanup.listStaleWorktrees,
     removeStaleWorktree: cleanup.removeStaleWorktree,
     listCleanupWarnings: cleanup.listCleanupWarnings,
