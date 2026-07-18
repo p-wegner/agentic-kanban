@@ -1,41 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
-import type { ProjectRepoResponse, StatusWithIssues } from "@agentic-kanban/shared";
-import { apiFetch } from "../lib/api.js";
-import {
-  buildMultiRepoMatrix,
-  type MatrixCell,
-  type MatrixWorkspaceInput,
-  type MultiRepoMatrix,
-  type RepoMergeStatusResponse,
-} from "../lib/multiRepoMatrix.js";
-
-/** Slim projection of GET /api/workspaces?projectId= (see listWorkspacesSlim). */
-interface SlimWorkspace {
-  id: string;
-  issueId: string;
-  branch: string | null;
-  status: string;
-  mergedAt: string | null;
-  isDirect: boolean;
-}
-
-/**
- * Every non-terminal workspace status (terminal = closed/merged). The matrix shows
- * "active (non-closed) workspaces" per the spec — an allowlist of only the running
- * states would silently drop `ready_for_merge`/`blocked`/`error` workspaces, and a
- * ready-for-merge workspace with stranded siblings is exactly the case (#69) this
- * monitor exists to surface. Kept in sync with WorkspaceStatus (workspace-status.ts).
- */
-const NON_CLOSED_WORKSPACE_STATUSES = [
-  "active",
-  "idle",
-  "blocked",
-  "reviewing",
-  "fixing",
-  "ready_for_merge",
-  "awaiting-plan-approval",
-  "error",
-].join(",");
+import { useState, useEffect } from "react";
+import type { StatusWithIssues } from "@agentic-kanban/shared";
+import { type MatrixCell } from "../lib/multiRepoMatrix.js";
+import { cellKey } from "../lib/diffMultiRepoMatrix.js";
+import { useLiveMultiRepoMatrix } from "../hooks/useLiveMultiRepoMatrix.js";
 
 interface MultiRepoMonitorPanelProps {
   activeProjectId: string | null;
@@ -45,10 +12,14 @@ interface MultiRepoMonitorPanelProps {
   onClose: () => void;
 }
 
-interface MonitorData {
-  additionalRepos: ProjectRepoResponse[];
-  workspaces: MatrixWorkspaceInput[];
-  matrix: MultiRepoMatrix;
+/** Compact "updated Ns ago" phrasing for the live indicator. */
+function formatAgo(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  if (s < 2) return "just now";
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  return `${Math.floor(m / 60)}h ago`;
 }
 
 const CELL_STYLES: Record<string, { label: (ahead: number) => string; className: string; title: string }> = {
@@ -84,16 +55,25 @@ const CELL_STYLES: Record<string, { label: (ahead: number) => string; className:
   },
 };
 
-function MatrixCellBadge({ cell }: { cell: MatrixCell | null }) {
+function MatrixCellBadge({ cell, flash }: { cell: MatrixCell | null; flash: boolean }) {
+  const flashClass = flash ? " cell-flash" : "";
   if (!cell) {
-    return <span className="text-gray-300 dark:text-gray-700" title="Repo not part of this workspace">—</span>;
+    return (
+      <span
+        className={`inline-block${flashClass}`}
+        data-flash={flash ? "true" : undefined}
+      >
+        <span className="text-gray-300 dark:text-gray-700" title="Repo not part of this workspace">—</span>
+      </span>
+    );
   }
   const style = CELL_STYLES[cell.state] ?? CELL_STYLES.unknown;
   return (
     <span
-      className={`inline-block text-[11px] font-medium px-1.5 py-0.5 rounded ${style.className}`}
+      className={`inline-block text-[11px] font-medium px-1.5 py-0.5 rounded ${style.className}${flashClass}`}
       title={style.title}
       data-cell-state={cell.state}
+      data-flash={flash ? "true" : undefined}
     >
       {style.label(cell.ahead)}
     </span>
@@ -123,85 +103,19 @@ export function MultiRepoMonitorPanel({
   columns,
   onClose,
 }: MultiRepoMonitorPanelProps) {
-  const [data, setData] = useState<MonitorData | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { data, loading, error, changedCells, lastUpdated, paused, setPaused, refresh } =
+    useLiveMultiRepoMatrix(activeProjectId, leadingRepoPath, columns);
 
-  const load = useCallback(() => {
-    if (!activeProjectId) return;
-    setLoading(true);
-    setError(null);
-    void (async () => {
-      try {
-        const [additionalRepos, allWorkspaces] = await Promise.all([
-          apiFetch<ProjectRepoResponse[]>(`/api/projects/${activeProjectId}/repos`),
-          apiFetch<SlimWorkspace[]>(
-            `/api/workspaces?projectId=${activeProjectId}&status=${NON_CLOSED_WORKSPACE_STATUSES}`,
-          ),
-        ]);
-        // repo-merge-status is not applicable to direct workspaces (400).
-        const active = allWorkspaces.filter((w) => !w.isDirect);
-
-        const statuses = await Promise.all(
-          active.map((w) =>
-            apiFetch<RepoMergeStatusResponse>(`/api/workspaces/${w.id}/repo-merge-status`)
-              .catch(() => null),
-          ),
-        );
-        // The conflict check runs real git merge-trees per repo — only pay for it on
-        // workspaces that actually have unlanded work.
-        const conflicts = await Promise.all(
-          active.map((w, i) => {
-            const st = statuses[i];
-            if (!st?.repos.some((r) => r.hasWork && !r.merged)) return Promise.resolve(null);
-            return apiFetch<{ hasConflicts: boolean }>(`/api/workspaces/${w.id}/conflicts`)
-              .catch(() => null);
-          }),
-        );
-
-        const issueById = new Map(
-          columns.flatMap((c) => c.issues).map((i) => [i.id, i]),
-        );
-        const workspaces: MatrixWorkspaceInput[] = active.map((w, i) => {
-          const issue = issueById.get(w.issueId);
-          return {
-            id: w.id,
-            issueNumber: issue?.issueNumber ?? null,
-            issueTitle: issue?.title ?? null,
-            branch: w.branch,
-            status: w.status,
-            mergedAt: w.mergedAt,
-            repoStatus: statuses[i],
-            hasConflicts: conflicts[i]?.hasConflicts ?? false,
-          };
-        });
-
-        const repoInputs = [
-          ...(leadingRepoPath ? [{ name: null, path: leadingRepoPath, isLeading: true }] : []),
-          ...additionalRepos.map((r) => ({ name: r.name, path: r.path, isLeading: false })),
-        ];
-        setData({
-          additionalRepos,
-          workspaces,
-          matrix: buildMultiRepoMatrix(repoInputs, workspaces),
-        });
-        setLoading(false);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-        setLoading(false);
-      }
-    })();
-  }, [activeProjectId, leadingRepoPath, columns]);
-
+  // Tick once a second so the "updated Ns ago" label stays current between refreshes.
+  const [, setTick] = useState(0);
   useEffect(() => {
-    load();
-    // Intentionally load once per open — `load`'s deps churn with board refreshes
-    // and each run fans out git work server-side; refresh is manual (↻).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeProjectId]);
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   const summary = data?.matrix.summary ?? null;
   const isMultiRepo = (data?.additionalRepos.length ?? 0) > 0;
+  const agoLabel = lastUpdated !== null ? formatAgo(Date.now() - lastUpdated) : null;
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -212,8 +126,8 @@ export function MultiRepoMonitorPanel({
           <div className="flex items-center gap-2">
             <GridIcon />
             <h2 className="text-lg font-semibold text-ink dark:text-stone-100 heading-serif">Multi-Repo Monitor</h2>
-            {loading && <span className="text-sm text-gray-400 dark:text-gray-500">Loading…</span>}
-            {!loading && summary && isMultiRepo && (
+            {loading && !data && <span className="text-sm text-gray-400 dark:text-gray-500">Loading…</span>}
+            {summary && isMultiRepo && (
               <span className="text-sm text-gray-500 dark:text-gray-400">
                 {summary.repoCount} repos · {summary.workspaceCount} active workspace{summary.workspaceCount === 1 ? "" : "s"}
                 {summary.strandedWorkspaceCount > 0 && (
@@ -230,10 +144,37 @@ export function MultiRepoMonitorPanel({
             )}
           </div>
           <div className="flex items-center gap-2">
+            {/* Live status indicator — ticks "updated Ns ago" and shows pause state. */}
+            {activeProjectId && (
+              <span
+                className="flex items-center gap-1 text-[11px] text-gray-400 dark:text-gray-500 whitespace-nowrap"
+                data-testid="multi-repo-live-indicator"
+                data-live={paused ? "paused" : "live"}
+                title={paused ? "Live updates paused — press ▶ to resume" : "Live: the matrix updates as the board changes"}
+              >
+                <span
+                  className={`inline-block h-1.5 w-1.5 rounded-full ${
+                    paused
+                      ? "bg-gray-400 dark:bg-gray-600"
+                      : "bg-green-500 graph-active-dot"
+                  }`}
+                />
+                {paused ? "paused" : "live"}
+                {agoLabel && <span className="text-gray-300 dark:text-gray-600">· updated {agoLabel}</span>}
+              </span>
+            )}
             <button
-              onClick={load}
+              onClick={() => setPaused(!paused)}
+              title={paused ? "Resume live updates" : "Pause live updates"}
+              aria-pressed={paused}
+              className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 text-sm px-1.5 py-0.5 rounded"
+            >
+              {paused ? "▶" : "❚❚"}
+            </button>
+            <button
+              onClick={refresh}
               disabled={loading}
-              title="Refresh"
+              title="Refresh now"
               className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 disabled:opacity-40 text-sm px-1.5 py-0.5 rounded"
             >
               ↻
@@ -255,30 +196,32 @@ export function MultiRepoMonitorPanel({
             </div>
           )}
 
-          {activeProjectId && error && (
+          {/* Full-height error only before we ever loaded data; a failed *background*
+              refresh keeps the last good matrix visible (the live indicator still ticks). */}
+          {activeProjectId && error && !data && (
             <div className="flex flex-col items-center justify-center h-48 text-red-500 dark:text-red-400 gap-2 px-6 text-center">
               <span className="text-sm">{error}</span>
-              <button onClick={load} className="text-xs underline text-red-400 hover:text-red-600">
+              <button onClick={refresh} className="text-xs underline text-red-400 hover:text-red-600">
                 Retry
               </button>
             </div>
           )}
 
-          {activeProjectId && !loading && !error && data && !isMultiRepo && (
+          {activeProjectId && data && !isMultiRepo && (
             <div className="flex flex-col items-center justify-center h-48 text-gray-400 dark:text-gray-500 gap-2 px-6 text-center">
               <p className="text-sm font-medium">Not a multi-repo project</p>
               <p className="text-xs">Add additional repos in Settings → Project → Repos to monitor them here.</p>
             </div>
           )}
 
-          {activeProjectId && !loading && !error && data && isMultiRepo && data.workspaces.length === 0 && (
+          {activeProjectId && data && isMultiRepo && data.workspaces.length === 0 && (
             <div className="flex flex-col items-center justify-center h-48 text-gray-400 dark:text-gray-500 gap-2 px-6 text-center">
               <p className="text-sm font-medium">No active workspaces</p>
               <p className="text-xs">Start a workspace to see its per-repo merge state here.</p>
             </div>
           )}
 
-          {activeProjectId && !loading && !error && data && isMultiRepo && data.workspaces.length > 0 && (
+          {activeProjectId && data && isMultiRepo && data.workspaces.length > 0 && (
             <table className="text-sm border-collapse min-w-full" data-testid="multi-repo-matrix">
               <thead>
                 <tr>
@@ -318,7 +261,7 @@ export function MultiRepoMonitorPanel({
                     </td>
                     {row.cells.map((cell, i) => (
                       <td key={data.workspaces[i].id} className="px-3 py-2 border-b border-gray-100 dark:border-gray-800">
-                        <MatrixCellBadge cell={cell} />
+                        <MatrixCellBadge cell={cell} flash={changedCells.has(cellKey(row.key, data.workspaces[i].id))} />
                       </td>
                     ))}
                   </tr>

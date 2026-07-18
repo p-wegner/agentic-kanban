@@ -225,6 +225,19 @@ body {
   animation: count-pop 0.3s ease-out;
 }
 
+/* Multi-Repo Monitor (#84): brief highlight on a cell whose merge-state changed
+   during a live refresh. A ring + subtle scale draws the eye without shifting layout. */
+@keyframes cell-flash {
+  0%   { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); transform: scale(1); }
+  25%  { box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.55); transform: scale(1.08); }
+  100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); transform: scale(1); }
+}
+
+.cell-flash {
+  animation: cell-flash 1.2s ease-out;
+  border-radius: 0.25rem;
+}
+
 /* Graph view: "actively worked on" progress indication.
    The pulsing halo + bar mark issues with a live agent workspace; the marching
    dash overlay animates the unblock-flow edges from an active ticket to the
@@ -266,7 +279,8 @@ body {
   .graph-active-halo,
   .graph-active-bar,
   .graph-active-dot,
-  .graph-unblock-flow {
+  .graph-unblock-flow,
+  .cell-flash {
     animation: none;
   }
 }
