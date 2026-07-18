@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { readFile, appendFile, writeFile } from "node:fs/promises";
+import { readFile, appendFile, writeFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { getLatestCommit, getDiffShortstat, getChangedFileNames } from "./git.service.js";
 import { parseSessionSummary } from "@agentic-kanban/shared";
@@ -220,5 +220,32 @@ export async function readHandoffFile(workingDir: string): Promise<string | null
     return await readFile(handoffPath, "utf8");
   } catch {
     return null;
+  }
+}
+
+const MAX_EXCERPT_CHARS = 500;
+
+/** Lightweight HANDOFF.md metadata (mtime + truncated content) for the cross-repo feed (#89). */
+export interface HandoffMeta {
+  exists: boolean;
+  /** ISO mtime — the client's poll+delta key. */
+  updatedAt: string | null;
+  excerpt: string | null;
+}
+
+/**
+ * Read-only HANDOFF.md metadata for one worktree: whether it exists, its mtime, and a
+ * truncated excerpt of the content — the poll+delta feed source (#89). Best-effort:
+ * any fs error (missing worktree, unreadable file) resolves to the absent shape.
+ */
+export async function readHandoffMeta(workingDir: string, maxChars = MAX_EXCERPT_CHARS): Promise<HandoffMeta> {
+  const handoffPath = join(workingDir, HANDOFF_FILENAME);
+  try {
+    if (!existsSync(handoffPath)) return { exists: false, updatedAt: null, excerpt: null };
+    const [info, content] = await Promise.all([stat(handoffPath), readFile(handoffPath, "utf8")]);
+    const excerpt = content.length > maxChars ? content.slice(0, maxChars) + "..." : content;
+    return { exists: true, updatedAt: info.mtime.toISOString(), excerpt };
+  } catch {
+    return { exists: false, updatedAt: null, excerpt: null };
   }
 }

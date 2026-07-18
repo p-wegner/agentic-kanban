@@ -16,7 +16,8 @@ export type CrossRepoActivityKind =
   | "repo_stranded"
   | "repo_ahead"
   | "conflict_appeared"
-  | "conflict_cleared";
+  | "conflict_cleared"
+  | "handoff_updated";
 
 export interface CrossRepoActivityEntry {
   /** Stable dedupe key: `${workspaceId}:${repo}:${kind}`. Repeated identical deltas collapse. */
@@ -125,6 +126,47 @@ export function reduceConflictsDelta(
     }
   }
   return out;
+}
+
+/** Minimal HANDOFF.md metadata the handoff reducer diffs (subset of WorkspaceHandoffRepoEntry). */
+export interface HandoffRepoState {
+  exists: boolean;
+  updatedAt: string | null;
+}
+
+/**
+ * Diff a repo's HANDOFF.md mtime against the last-observed one, emitting a single
+ * `handoff_updated` entry when a handoff first appears or its mtime advances.
+ *
+ * `prevUpdatedAt` distinguishes three states:
+ *  - `undefined` — this repo's handoff was never observed (first snapshot). Treated as a
+ *    baseline so opening the feed doesn't replay a pre-existing HANDOFF.md as "new".
+ *  - `null` — observed before, but no handoff existed then. A handoff appearing now emits.
+ *  - a string — the last-seen ISO mtime. Only a strictly newer mtime emits.
+ *
+ * The emitted id embeds the mtime (`…:handoff_updated:<mtime>`) so repeated polls at the
+ * same mtime dedupe in {@link appendActivityEntries}, while each real update is distinct.
+ */
+export function reduceHandoffDelta(
+  prevUpdatedAt: string | null | undefined,
+  next: HandoffRepoState,
+  repo: string,
+  ctx: CrossRepoActivityContext,
+): CrossRepoActivityEntry[] {
+  if (prevUpdatedAt === undefined) return []; // never observed → baseline, no replay
+  if (!next.exists || !next.updatedAt) return []; // no handoff to report
+  // Emit on first appearance (prev null) or a strictly newer mtime.
+  if (prevUpdatedAt !== null && !(next.updatedAt > prevUpdatedAt)) return [];
+  return [{
+    id: `${ctx.workspaceId}:${repo}:handoff_updated:${next.updatedAt}`,
+    timestamp: ctx.timestamp,
+    repo,
+    kind: "handoff_updated",
+    summary: `${issuePrefix(ctx)}${repo} handoff updated`,
+    workspaceId: ctx.workspaceId,
+    issueId: ctx.issueId,
+    issueNumber: ctx.issueNumber,
+  }];
 }
 
 function entry(

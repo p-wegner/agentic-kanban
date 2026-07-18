@@ -55,6 +55,7 @@ export function createWorkspaceService(deps: {
     getWorkspaceDiff: diff.getWorkspaceDiff,
     getConflicts: diff.getConflicts,
     getLatestCommit: diff.getLatestCommit,
+    getHandoff: diff.getHandoff,
     // merge
     mergeWorkspace: merge.mergeWorkspace,
     mergeWorkspaceDeduped: merge.mergeWorkspaceDeduped,
