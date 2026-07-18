@@ -252,6 +252,32 @@ describe("agent.service", () => {
       expect(isStdinOpen("sess-9")).toBe(true);
     });
 
+    // Regression (#104): a keepAlive=true launch for REAL claude must still CLOSE stdin.
+    // claude launches with `-p` and reads its prompt from stdin until EOF; leaving stdin
+    // open (the old bug — writeInitialStdin used the caller's raw keepAlive instead of the
+    // provider's keepStdinOpen) made claude.exe wait on stdin forever and emit ZERO output,
+    // hanging every fix-and-merge / resolve-conflicts / reconcile session. The claude
+    // provider returns keepStdinOpen=false for the real CLI, so stdin must be ended.
+    it.skipIf(process.platform !== "win32")(
+      "closes stdin for a keepAlive real-claude launch (no zero-output hang)",
+      () => {
+        delete process.env.AGENT_COMMAND;
+        const mockProc = createMockProc();
+        (spawnMock as any).mockReturnValue(mockProc);
+
+        // provider=claude (12th arg), keepAlive=true (9th arg), agentCommand="claude"
+        // keeps it on the shell/attached path so no detached file descriptors are needed.
+        launch(
+          "/tmp/wt", "sess-fam", "resolve the conflict", undefined, vi.fn(),
+          undefined, "claude", undefined, true, undefined, false, "claude",
+        );
+
+        expect(mockProc.stdin.end).toHaveBeenCalledWith("resolve the conflict\n");
+        expect(mockProc.stdin.write).not.toHaveBeenCalled();
+        expect(isStdinOpen("sess-fam")).toBe(false);
+      },
+    );
+
     it("emits error event on process spawn failure", () => {
       const mockProc = createMockProc();
       (spawnMock as any).mockReturnValue(mockProc);

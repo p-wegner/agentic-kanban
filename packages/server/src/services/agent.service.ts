@@ -457,7 +457,7 @@ export function launch(
     piSkillPaths: provider === "pi" ? materializedSkillFiles(worktreePath) : undefined,
     skipPermissions,
   });
-  const { command, args, useShell, env: spawnEnv, promptPrefix, suppressStdinPrompt, isMockAgent } = launchConfig;
+  const { command, args, useShell, env: spawnEnv, promptPrefix, suppressStdinPrompt, keepStdinOpen, isMockAgent } = launchConfig;
   const stdinPrompt = promptPrefix ? `${promptPrefix}\n\n${effectivePrompt}` : effectivePrompt;
   const ports = resolveLaunchPorts(process.env, resolveWorktreeDevPorts(worktreePath));
 
@@ -550,9 +550,16 @@ export function launch(
 
   console.log(`[agent] spawned: sessionId=${sessionId} pid=${proc.pid} command=${command} shell=${useShell} detached=${shouldDetach}`);
 
-  // In keepAlive (multi-turn) mode, keep stdin open so follow-ups can be sent via sendInput.
-  // Otherwise close stdin immediately — on Windows, claude.exe buffers stdout until stdin closes.
-  writeInitialStdin(proc, sessionId, suppressStdinPrompt, keepAlive, stdinPrompt);
+  // Keep stdin open ONLY when the PROVIDER says it can do multi-turn over an open stdin
+  // (launchConfig.keepStdinOpen) — never on the caller's raw keepAlive intent. Real claude
+  // launches with `-p` and reads its prompt from stdin until EOF, so a keepAlive=true
+  // reconciler launch (fix-and-merge/resolve-conflicts/reconcile) that left stdin OPEN made
+  // claude.exe wait on stdin forever and emit ZERO output — the recurring reconciler hang
+  // (#104). The provider returns keepStdinOpen=false for real claude and true only for the
+  // mock multi-turn agent, so honoring it closes stdin for claude (write-and-close → EOF →
+  // it streams) while preserving mock multi-turn. Matches server CLAUDE.md "Re-chat and
+  // agent stdout": always stdin.end(prompt) for real claude, never write-and-leave-open.
+  writeInitialStdin(proc, sessionId, suppressStdinPrompt, keepStdinOpen, stdinPrompt);
 
   agentState.activeProcesses.set(sessionId, proc);
   if (proc.pid) {
