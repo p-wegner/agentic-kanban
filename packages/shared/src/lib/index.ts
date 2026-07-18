@@ -14,6 +14,9 @@ export * from "./settings-registry.js";
 export * from "./sanitize-utf8.js";
 // Pure string helpers (no Node builtins) — safe as value exports for the client bundle.
 export * from "./service-ports.js";
+// Pure text linter for sibling compose relative-path resolution (dev #109) — no Node
+// builtins, safe as a value export for the client bundle.
+export * from "./service-compose-lint.js";
 // Type-only: smoke-check.ts imports node:child_process (runSmokeCheck), which crashes
 // the browser bundle if pulled into the client via this barrel. The sole runtime consumer
 // (server exit-workflow) imports runSmokeCheck from the deep path; only the SmokeCheck type
