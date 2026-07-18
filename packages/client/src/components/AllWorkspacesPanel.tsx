@@ -6,6 +6,7 @@ import { WorkspaceRiskHeatmap } from "./WorkspaceRiskHeatmap.js";
 import { MultirepoHealthPill } from "./MultirepoHealthPill.js";
 import { CollapsibleSection } from "./CollapsibleSection.js";
 import { openSessionTranscript } from "../lib/sessionTranscriptEvents.js";
+import { AgentStallIndicator, useAgentStallThreshold } from "./AgentStallBadge.js";
 import { useStaleWorkspaceManager } from "../hooks/useStaleWorkspaceManager.js";
 import {
   type CrossProjectGroup,
@@ -61,6 +62,7 @@ const ISSUE_STATUS_COLORS: Record<string, string> = {
 };
 
 export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueClick, onProjectSwitch, onRefresh }: AllWorkspacesPanelProps) {
+  const stallThresholdSec = useAgentStallThreshold();
   const [viewMode, setViewMode] = useState<ViewMode>("workspaces");
   const [statusFilter, setStatusFilter] = useState<WsStatusFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -426,6 +428,21 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
                           >
                             {workspaceRowStatusLabel(main)}
                           </span>
+
+                          {/* Stalled / looping agent badge (#86). Seed the idle baseline
+                              from the session start only for active-project rows — a
+                              cross-project agent's live stream isn't on this tab, so we
+                              avoid a false "stalled" on a healthy remote agent. */}
+                          <AgentStallIndicator
+                            issueId={issue.id}
+                            status={main.status}
+                            sessionStartMs={
+                              issue.projectId === activeProjectId && main.lastSessionAt
+                                ? new Date(main.lastSessionAt).getTime()
+                                : null
+                            }
+                            thresholdSec={stallThresholdSec}
+                          />
 
                           {/* Ready to merge */}
                           {main.readyForMerge && main.status !== "closed" && (
