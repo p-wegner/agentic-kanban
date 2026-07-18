@@ -161,6 +161,30 @@ export interface WorkspaceResponse {
   serviceState?: ServiceStackState | null;
 }
 
+/** One repo's entry in GET /api/workspaces/:id/repo-merge-status (#70/#75). */
+export interface RepoMergeStatusRepoEntry {
+  /** Sibling repo name; null for the leading repo. */
+  name: string | null;
+  path: string;
+  isLeading: boolean;
+  /** The repo's branch ever diverged from base (or a sibling merge was stamped). */
+  hasWork: boolean;
+  /** Commits on the branch not yet on base (0 once landed). */
+  ahead: number;
+  /** The work has landed on base. */
+  merged: boolean;
+  /** Has work, but it is NOT on base — the #69 failure mode, made visible. */
+  stranded: boolean;
+}
+
+/** Response of GET /api/workspaces/:id/repo-merge-status (multi-repo, non-direct workspaces). */
+export interface RepoMergeStatusResponse {
+  branch: string | null;
+  baseBranch: string;
+  allMerged: boolean;
+  repos: RepoMergeStatusRepoEntry[];
+}
+
 export interface ShowdownContestant {
   skillId?: string;
   skillName?: string;

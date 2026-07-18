@@ -1,29 +1,13 @@
+import type { RepoMergeStatusResponse, RepoMergeStatusRepoEntry } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
 import { resolveProjectRepo, getWorkspaceById } from "../repositories/workspace.repository.js";
 import { listWorkspaceRepos } from "../repositories/repo.repository.js";
 import { WorkspaceError, requireBaseBranch, type GitService } from "./workspace-internals.js";
 
-/** Per-repo merge status for one repo of a multi-repo workspace (#70). */
-export interface RepoMergeStatusEntry {
-  name: string | null;
-  path: string;
-  isLeading: boolean;
-  /** The repo's branch ever diverged from base (or a sibling merge was stamped). */
-  hasWork: boolean;
-  /** Commits on the branch not yet on base (0 once landed). */
-  ahead: number;
-  /** The work has landed on base. */
-  merged: boolean;
-  /** Has work, but it is NOT on base — the #69 failure mode, made visible. */
-  stranded: boolean;
-}
-
-export interface RepoMergeStatus {
-  branch: string | null;
-  baseBranch: string;
-  allMerged: boolean;
-  repos: RepoMergeStatusEntry[];
-}
+// The wire contract lives in @agentic-kanban/shared (types/api/workspace.ts) so the
+// client consumes the same shape (#79); these aliases keep existing importers working.
+export type RepoMergeStatusEntry = RepoMergeStatusRepoEntry;
+export type RepoMergeStatus = RepoMergeStatusResponse;
 
 /**
  * Per-repo merge status for a multi-repo workspace (#70): for the leading repo and every
