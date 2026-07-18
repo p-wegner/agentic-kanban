@@ -24,7 +24,10 @@ Each task card on the board is backed by a git worktree and a live Claude Code s
 - **MCP server** — 35 tools for AI agent integration (board status, issues, workspaces, review/merge, dependencies, skills, etc.)
 - **Real-time board updates** — WebSocket push + polling fallback for cross-tab and MCP-driven changes
 - **Command palette** — Ctrl+K action search with keyboard navigation
-- **Multi-project** — register multiple git repos and switch between them
+- **Multi-project** — register multiple independent projects and switch between them
+- **Multi-repo projects** — a single project can span multiple git repos (a leading repo plus siblings). Each workspace fans out a matching worktree across every repo on the same branch, with per-repo diffs, per-repo merge status (merged / ahead / stranded), sibling-aware conflict detection, an all-or-nothing coordinated merge, a cross-repo `HANDOFF.md` bundle, and file-contention detection
+- **Service stacks (Docker Compose)** — bring up a per-workspace dependency stack (databases, queues, sibling services) from a Compose file, with automatic per-workspace port allocation and health checks, so agents build and test against real dependencies. Runs under **Docker-in-Docker (DinD)** so a containerized agent can drive its own Compose stack
+- **Multi-repo monitoring** — a live repo × workspace merge-state matrix, per-workspace health pill, cross-repo activity feed, fleet token/cost meter, stalled/looping-agent detection, and a full turn-by-turn agent transcript viewer
 - **Session history** — browse past agent sessions per workspace without leaving context
 - **Worktree overview** — see all git worktrees across workspaces with diff stats and status badges
 - **Butler assistant** — a warm, persistent Claude (Agent SDK) per project (press `i`): chat for board/codebase guidance, per-project model & profile pickers, slash-command autocomplete, a Stop button, and it can orchestrate board work for you
@@ -35,8 +38,9 @@ Each task card on the board is backed by a git worktree and a live Claude Code s
 |-------|-----------|
 | Backend | Hono (Node.js), Drizzle ORM, SQLite |
 | Frontend | React, TypeScript, Tailwind CSS, Vite |
-| Agent | Claude Code — per-task CLI subprocess, plus a warm in-process Butler (Agent SDK) |
+| Agent | Claude Code, Codex, Copilot, and Pi — per-task CLI subprocess, plus a warm in-process Butler (Agent SDK) |
 | Integration | MCP SDK (stdio JSON-RPC) |
+| Service stacks | Docker Compose (per-workspace), Docker-in-Docker supported |
 | Testing | Vitest (unit), Playwright (E2E) |
 | Monorepo | pnpm workspaces |
 
@@ -68,6 +72,23 @@ pnpm cli -- cleanup             # show stale worktrees for closed workspaces
 3. **Start workspace** — click "New Workspace" on an issue card (creates branch + worktree + launches Claude Code with the issue as prompt)
 4. **Review changes** — view the diff in the workspace panel, add inline comments
 5. **Merge** — merge the branch into the project's default branch and close the workspace
+
+> For a **multi-repo** project, steps 3–5 apply across every registered repo at once: one workspace creates a worktree on the same branch in each repo, the diff and merge status are shown per repo, and the merge is coordinated all-or-nothing.
+
+## Multi-Repo Projects & Service Stacks
+
+**Multi-repo.** A project isn't limited to one repository. Register additional repos (by local path or clone-from-URL) alongside the leading repo, and every workspace you create gets a matching git worktree on the same branch in *each* repo. The board then treats the change set as one coordinated unit:
+
+- **Per-repo diffs** — the diff panel groups changes by repo, with jump-nav and per-repo stats.
+- **Per-repo merge status** — each repo shows merged / N-ahead (stranded) / no-changes against its base.
+- **Sibling-aware conflict detection** — read-only `git merge-tree` per repo; conflicts (namespaced `repo::file`) are surfaced on the board card *before* you merge.
+- **Coordinated merge** — sibling merges are pre-validated and executed all-or-nothing, so you never land half a cross-repo change.
+- **Cross-repo `HANDOFF.md`** — a generated bundle folds every repo's diff into one hand-off artifact for the next agent.
+- **Multi-Repo Monitor** — a live repo × workspace merge-state matrix, per-workspace health pill, file-contention heatmap, and a cross-repo activity feed.
+
+Add and manage repos under **Settings → Repos** (or `POST /api/projects/:id/repos`).
+
+**Service stacks (Docker Compose).** A workspace can bring up a real dependency stack from a Docker Compose file — databases, queues, sibling services — so agents build and test against the real thing instead of mocks. Ports are allocated per workspace (no collisions between parallel worktrees) and the board health-checks the stack before handing off to the agent. It runs under **Docker-in-Docker (DinD)** too, so a containerized agent can drive its own Compose stack. Configure it per project under **Settings → Service stack**. See [docs/decisions/011-per-workspace-service-stacks.md](docs/decisions/011-per-workspace-service-stacks.md).
 
 ## MCP Server
 
