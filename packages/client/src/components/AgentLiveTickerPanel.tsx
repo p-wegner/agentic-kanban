@@ -99,7 +99,7 @@ export function AgentLiveTickerPanel({
                       <button
                         onClick={() =>
                           openSessionTranscript({
-                            sessionId: entry.sessionId,
+                            sessionId: entry.sessionId ?? undefined,
                             workspaceId: entry.workspaceId,
                             title: `#${entry.issueNumber ?? ""} ${entry.issueTitle}`,
                           })
