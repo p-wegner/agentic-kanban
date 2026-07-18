@@ -19,6 +19,24 @@ interface SlimWorkspace {
   isDirect: boolean;
 }
 
+/**
+ * Every non-terminal workspace status (terminal = closed/merged). The matrix shows
+ * "active (non-closed) workspaces" per the spec — an allowlist of only the running
+ * states would silently drop `ready_for_merge`/`blocked`/`error` workspaces, and a
+ * ready-for-merge workspace with stranded siblings is exactly the case (#69) this
+ * monitor exists to surface. Kept in sync with WorkspaceStatus (workspace-status.ts).
+ */
+const NON_CLOSED_WORKSPACE_STATUSES = [
+  "active",
+  "idle",
+  "blocked",
+  "reviewing",
+  "fixing",
+  "ready_for_merge",
+  "awaiting-plan-approval",
+  "error",
+].join(",");
+
 interface MultiRepoMonitorPanelProps {
   activeProjectId: string | null;
   /** The project's leading repo path (ProjectResponse.repoPath). */
@@ -118,7 +136,7 @@ export function MultiRepoMonitorPanel({
         const [additionalRepos, allWorkspaces] = await Promise.all([
           apiFetch<ProjectRepoResponse[]>(`/api/projects/${activeProjectId}/repos`),
           apiFetch<SlimWorkspace[]>(
-            `/api/workspaces?projectId=${activeProjectId}&status=active,idle,reviewing,fixing`,
+            `/api/workspaces?projectId=${activeProjectId}&status=${NON_CLOSED_WORKSPACE_STATUSES}`,
           ),
         ]);
         // repo-merge-status is not applicable to direct workspaces (400).
