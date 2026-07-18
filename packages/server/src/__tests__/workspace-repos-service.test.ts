@@ -23,8 +23,14 @@ import {
   provisionSiblingWorktrees,
   insertSiblingWorktreeRecords,
   cleanupSiblingWorktrees,
+  resolveScopedSiblingRepos,
 } from "../services/workspace-repos.service.js";
+import type { RepoRow } from "../repositories/repo.repository.js";
 import type { Database } from "../db/index.js";
+
+function repo(partial: Partial<RepoRow> & { id: string; path: string }): RepoRow {
+  return { name: null, ...partial } as unknown as RepoRow;
+}
 
 function exec(cmd: string, args: string[], cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -99,6 +105,39 @@ afterAll(async () => {
   }
 });
 
+describe("resolveScopedSiblingRepos (per-repo scope, #91)", () => {
+  const repos: RepoRow[] = [
+    repo({ id: "id-a", name: "alpha", path: "/repos/alpha" }),
+    repo({ id: "id-b", name: "beta", path: "/repos/beta" }),
+    repo({ id: "id-c", name: null, path: "/repos/gamma" }),
+  ];
+
+  it("returns ALL repos when scope is omitted (undefined)", () => {
+    expect(resolveScopedSiblingRepos(repos, undefined)).toEqual(repos);
+  });
+
+  it("returns ALL repos when scope is empty (safety default)", () => {
+    expect(resolveScopedSiblingRepos(repos, [])).toEqual(repos);
+  });
+
+  it("narrows to the selected subset by id", () => {
+    const out = resolveScopedSiblingRepos(repos, ["id-a", "id-c"]);
+    expect(out.map((r) => r.id)).toEqual(["id-a", "id-c"]);
+  });
+
+  it("matches by name and by path basename too", () => {
+    expect(resolveScopedSiblingRepos(repos, ["beta"]).map((r) => r.id)).toEqual(["id-b"]);
+    expect(resolveScopedSiblingRepos(repos, ["gamma"]).map((r) => r.id)).toEqual(["id-c"]);
+  });
+
+  it("is case-insensitive and ignores the leading sentinel", () => {
+    // A deselect-all-siblings choice arrives as just the leading sentinel — NON-empty,
+    // so it is NOT the empty="all" default: it must yield the empty set (leading-only).
+    expect(resolveScopedSiblingRepos(repos, ["__leading__"])).toEqual([]);
+    expect(resolveScopedSiblingRepos(repos, ["__leading__", "ALPHA"]).map((r) => r.id)).toEqual(["id-a"]);
+  });
+});
+
 describe("multi-repo sibling worktrees", () => {
   it("provisions a worktree on the same branch in every additional repo, records it, and cleans it up incl. the branch", async () => {
     const siblings = await provisionSiblingWorktrees({
@@ -157,6 +196,36 @@ describe("multi-repo sibling worktrees", () => {
         try { await rm(join(dir, ".."), { recursive: true, force: true }); } catch { /* best effort */ }
       }
     }
+  }, 60000);
+
+  it("honors repoScope: a deselected sibling gets NO worktree; a selected one does (#91)", async () => {
+    // Deselect the only sibling (scope = leading sentinel only) → nothing provisioned.
+    const none = await provisionSiblingWorktrees({
+      gitService,
+      database: db as unknown as Database,
+      projectId,
+      branch: "feature/scope-none",
+      repoScope: ["__leading__"],
+    });
+    expect(none).toEqual([]);
+    // No branch was created in the sibling repo.
+    expect((await exec("git", ["branch", "--list", "feature/scope-none"], extraRepo)).trim()).toBe("");
+
+    // Select the sibling by name → it IS provisioned.
+    const some = await provisionSiblingWorktrees({
+      gitService,
+      database: db as unknown as Database,
+      projectId,
+      branch: "feature/scope-some",
+      repoScope: ["__leading__", "extra"],
+    });
+    expect(some).toHaveLength(1);
+    expect(some[0].path).toBe(extraRepo);
+    expect(existsSync(join(some[0].worktreePath, "README.md"))).toBe(true);
+
+    // Cleanup the provisioned worktree + branch directly (no DB rows written for it).
+    await gitService.removeWorktree(extraRepo, some[0].worktreePath);
+    await gitService.deleteBranch(extraRepo, "feature/scope-some", { force: true });
   }, 60000);
 
   it("is a no-op for a project with no additional repos", async () => {

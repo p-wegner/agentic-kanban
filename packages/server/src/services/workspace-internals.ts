@@ -127,6 +127,12 @@ export interface CreateWorkspaceInput {
   model?: string;
   /** Skip the context-packer for lightweight tickets that don't need auto-context. */
   skipContextPacker?: boolean;
+  /**
+   * Multi-repo scope (#91): the repo identifiers (id/name/path) this workspace spans,
+   * including the leading repo. Only in-scope siblings get a worktree provisioned.
+   * Omitted/empty = all repos (zero-regression default).
+   */
+  repoScope?: string[];
 }
 
 export interface CreateWorkspaceResult {
