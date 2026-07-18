@@ -9,6 +9,7 @@ import {
   pruneRecordKeys,
 } from "../lib/boardDataReconcile.js";
 import { boardBulkSelectionActions } from "../stores/boardBulkSelectionStore.js";
+import { agentActivityActions } from "../stores/agentActivityStore.js";
 import type { ApprovalRequest, LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 
 type NotificationIssue = { id: string; issueNumber?: number; title?: string; workspaceId?: string };
@@ -64,6 +65,7 @@ export function useBoardRealtimeController({
     if (inactiveIssueIds.size > 0) {
       setLiveStats((prev) => pruneRecordKeys(prev, inactiveIssueIds));
       setSessionActivityRaw((prev) => pruneRecordKeys(prev, inactiveIssueIds));
+      agentActivityActions.prune((id) => !inactiveIssueIds.has(id));
     }
   }, [columns]);
 

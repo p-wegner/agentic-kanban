@@ -538,6 +538,22 @@ export function WorkflowBoardMonitorSection({
             In Progress cards older than this threshold get a warning badge. Age badges appear on all cards.
           </p>
         </div>
+        <div className="mt-3 pl-5">
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-600 dark:text-gray-400">Stalled agent threshold</label>
+            <input
+              type="number"
+              min="30"
+              value={settings.agent_stall_threshold_sec || "240"}
+              onChange={(e) => set("agent_stall_threshold_sec")(e.target.value)}
+              className="w-16 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
+            <span className="text-xs text-gray-500 dark:text-gray-400">sec</span>
+          </div>
+          <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500 leading-snug">
+            A running agent with no activity for this long is flagged with a "stalled" badge on the agent views. Repeated identical tool calls show a "looping" badge.
+          </p>
+        </div>
         {getBool(settings, "auto_monitor") && (
           <div className="mt-3 pl-5">
             <div className="flex items-center gap-2">

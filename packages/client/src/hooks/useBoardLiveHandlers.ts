@@ -3,6 +3,7 @@ import type { StatusWithIssues } from "@agentic-kanban/shared";
 import { useBoardEvents, type LiveSessionStats, type TodoItem, type ApprovalRequest } from "../lib/useBoardEvents.js";
 import { sendDesktopNotification } from "../lib/desktop.js";
 import { showToast } from "../lib/toast.js";
+import { agentActivityActions } from "../stores/agentActivityStore.js";
 
 type NotificationIssue = { id: string; issueNumber?: number; title?: string; workspaceId?: string };
 
@@ -135,6 +136,10 @@ export function useBoardLiveHandlers(deps: UseBoardLiveHandlersDeps) {
       });
       return;
     }
+    // Feed the raw (un-deduped) activity stream into the stall/loop tracker BEFORE the
+    // dedup below collapses consecutive identical strings — loop detection needs the
+    // repeats (#86). Empty activity is a clear signal, not a tool call, so skip it.
+    if (activity) agentActivityActions.recordActivity(issueId, activity, Date.now());
     setSessionActivityRaw((prev) => {
       const sessions = { ...(prev[issueId] ?? {}) };
       if (!activity) {
@@ -164,6 +169,8 @@ export function useBoardLiveHandlers(deps: UseBoardLiveHandlersDeps) {
       col.issues.some(iss => iss.id === issueId && (iss.workspaceSummary?.main?.status === "active" || iss.workspaceSummary?.main?.status === "fixing"))
     );
     if (!isActive) return;
+    // A stats delta (token/tool-use update) also counts as "not idle" (#86).
+    agentActivityActions.recordStats(issueId, Date.now());
     setLiveStats((prev) => {
       if (prev[issueId]?.model === stats.model && prev[issueId]?.contextTokens === stats.contextTokens && prev[issueId]?.toolUses === stats.toolUses && prev[issueId]?.subagentCount === stats.subagentCount) return prev;
       return { ...prev, [issueId]: stats };
