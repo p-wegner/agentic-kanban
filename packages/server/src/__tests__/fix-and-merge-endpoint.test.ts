@@ -196,6 +196,35 @@ describe("POST /api/workspaces/:id/fix-and-merge — endpoint drives status→fi
     expect(issue.statusId).toBe(inReviewStatusId);
   });
 
+  it("preflight rebase CONFLICT: aborts the rebase (worktree left attached, not detached mid-rebase) then still launches the agent", async () => {
+    // Regression for the fix-and-merge stranding defect: when the preflight rebase conflicts,
+    // the worktree must NOT be left in a detached mid-rebase state — otherwise the reconciler
+    // agent launches into a worktree the stale-safety guard rejects, produces zero output, and
+    // /resolve-conflicts refuses to recover it (STALE_SAFETY_POLICY catch-22). The fix aborts
+    // the conflicted rebase so the worktree returns to its attached branch HEAD.
+    const { workspaceId } = await seedWorkspace(db);
+    gitHolder.current = makeGitH({
+      rebaseOntoBase: vi.fn(async () => ({ success: false, conflictingFiles: ["src/server.js"] })),
+    });
+    const startSession = vi.fn(async () => "fix-session-conflict");
+    const fixAndMergeSessionIds = new Set<string>();
+    const app = mountRoute(db, startSession, fixAndMergeSessionIds);
+
+    const res = await app.request(`/api/workspaces/${workspaceId}/fix-and-merge`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mergeError: "CONFLICT (content): Merge conflict in src/server.js" }),
+    });
+
+    expect(res.status).toBe(201);
+    // THE FIX: the conflicted preflight rebase is aborted so the worktree is left attached.
+    expect(gitHolder.current.abortRebase).toHaveBeenCalled();
+    // The agent is still launched and the workspace still enters `fixing` (recovery in progress).
+    expect(startSession).toHaveBeenCalledTimes(1);
+    const [ws] = await db.select({ status: workspaces.status }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.status).toBe("fixing");
+  });
+
   it("a SECOND fix-and-merge while one is already running is rejected as a conflict (no duplicate launch)", async () => {
     const { workspaceId } = await seedWorkspace(db, { status: "fixing" });
     // A running fix-and-merge session younger than the zero-output recovery window,
