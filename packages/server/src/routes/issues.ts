@@ -279,6 +279,7 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
       workflowTemplateId?: string | null;
       externalKey?: string | null;
       externalUrl?: string | null;
+      reposTouched?: string[];
     }>(c);
     if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
     if (!body.title?.trim()) return c.json({ error: "title is required" }, 400);
@@ -297,6 +298,7 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
         workflowTemplateId: body.workflowTemplateId,
         externalKey: body.externalKey,
         externalUrl: body.externalUrl,
+        reposTouched: Array.isArray(body.reposTouched) ? body.reposTouched : undefined,
       });
       return c.json(result, 201);
     } catch (err: unknown) {
