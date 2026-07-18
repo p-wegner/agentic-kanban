@@ -28,8 +28,14 @@
 
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { basename, dirname } from "node:path";
 import type { ServiceStackConfig, ServiceStackState } from "@agentic-kanban/shared";
-import { composeProjectName, isInstanceManagedComposeProject } from "@agentic-kanban/shared";
+import {
+  composeProjectName,
+  isInstanceManagedComposeProject,
+  findSiblingComposeRelativePaths,
+  siblingComposeRelativePathWarning,
+} from "@agentic-kanban/shared";
 import { dockerExec, dockerAvailable } from "@agentic-kanban/shared/lib/docker-exec";
 import { createStackPortAllocator, releaseStackPorts, type StackPortAllocator } from "./port-allocator.js";
 
@@ -267,6 +273,33 @@ export function buildServicesEnvFile(args: {
 }
 
 /**
+ * Best-effort diagnostic for merged SIBLING compose files (dev #109): read each extra
+ * `-f` compose file and warn if it declares a relative env_file/build-context/secret-or-
+ * config file path, because `docker compose -f <leading> -f <sibling>` resolves those
+ * against the LEADING worktree (project directory = first `-f`), not the sibling's own
+ * dir — a cryptic "file not found under <leading>" `up` failure. Never throws; silent
+ * when siblings use absolute or `${VAR}` paths (the common, working case).
+ */
+async function warnSiblingComposeRelativePaths(leadingWorktreePath: string, extraComposeFiles: string[]): Promise<void> {
+  for (const abs of extraComposeFiles) {
+    let text: string;
+    try {
+      text = await readFile(abs, "utf-8");
+    } catch {
+      continue;
+    }
+    const issues = findSiblingComposeRelativePaths(text);
+    const warning = siblingComposeRelativePathWarning({
+      siblingName: basename(dirname(abs)),
+      siblingComposeAbsPath: abs,
+      leadingWorktreePath,
+      issues,
+    });
+    if (warning) console.warn(warning);
+  }
+}
+
+/**
  * Extract the stored compose project name from a persisted ServiceStackState JSON blob
  * (`workspaces.service_state`). Teardown + the reaper MUST use this stored name, never a
  * recomputed one, so the name can never drift from what provisioning actually created
@@ -484,6 +517,13 @@ export function createWorkspaceServicesService(deps: {
     // join THIS workspace's compose project + env file and are torn down together by the
     // project-name `down`. Best-effort.
     const extraComposeFiles = await resolveExtraComposeFiles(workspaceId).catch(() => [] as string[]);
+    // Sibling relative-path diagnostic (dev #109): a merged sibling compose (`-f`) that
+    // uses a relative env_file/build-context/secret+config file path will have compose
+    // resolve it against the LEADING worktree (composeWorktreePath), not the sibling — a
+    // failure whose "file not found under <leading>" message is otherwise undiagnosable.
+    // Warn loudly up front. Best-effort, off the success path (silent when siblings use no
+    // relative paths, e.g. absolute or ${VAR} interpolated).
+    await warnSiblingComposeRelativePaths(composeWorktreePath, extraComposeFiles).catch(() => {});
     // Union port allocation (#71): a sibling (or the primary) compose may publish ports the
     // project never declared in `servicesConfig.ports`. Discover every `${KANBAN_SVC_*_PORT}`
     // referenced across all compose files and allocate the union, so those services get a
