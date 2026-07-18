@@ -42,6 +42,7 @@ export type ViewMode =
   | "fireworks"
   | "activity"
   | "cross-repo-activity"
+  | "agent-flight-recorder"
   | "stale-work"
   | "throughput"
   | "provider-mix"
@@ -264,6 +265,11 @@ const ICON = {
       <circle cx="6" cy="18" r="2" />
       <circle cx="18" cy="12" r="2" />
       <path strokeLinecap="round" strokeLinejoin="round" d="M6 8v8M8 6h5a3 3 0 013 3v1M8 18h5a3 3 0 003-3v-1" />
+    </svg>
+  ),
+  "agent-flight-recorder": (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h3l2 5 4-14 2 9 2-3h5" />
     </svg>
   ),
   "stale-work": (
@@ -657,6 +663,17 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     icon: ICON["cross-repo-activity"],
     paletteIcon: "CR",
     paletteDescription: "Live, repo-labeled timeline of what is landing across a multi-repo project (merges, commits, conflicts)",
+    activeClass: "bg-indigo-600 text-white",
+    group: "secondary",
+  },
+  {
+    id: "agent-flight-recorder",
+    toolbarLabel: "Flight Rec",
+    label: "Agent Flight Recorder",
+    tooltip: "Agent Flight Recorder — one live, filterable stream of high-signal agent-runtime events (tool errors, questions, stalls, status changes, merges) across all active workspaces",
+    icon: ICON["agent-flight-recorder"],
+    paletteIcon: "FR",
+    paletteDescription: "Unified live runtime-event stream across the fleet — filter by workspace, repo, or severity; jump to any transcript",
     activeClass: "bg-indigo-600 text-white",
     group: "secondary",
   },
