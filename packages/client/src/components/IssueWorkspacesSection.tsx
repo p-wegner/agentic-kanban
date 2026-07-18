@@ -4,6 +4,7 @@
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import { WorkflowProgress } from "./WorkflowProgress.js";
 import { isSpecPlanningPhase, SpecPhasePanel } from "./SpecPhasePanel.js";
+import { groupConflictsByRepo, formatConflictSummary } from "../lib/groupConflictsByRepo.js";
 
 /** The non-null main workspace summary carried on an issue. */
 type MainWorkspace = NonNullable<NonNullable<IssueWithStatus["workspaceSummary"]>["main"]>;
@@ -82,11 +83,21 @@ export function IssueWorkspacesSection({
               <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${workspaceStatusBadgeClass(main)}`}>
                 {workspaceStatusLabel(main)}
               </span>
-              {main.conflicts?.hasConflicts && main.status !== "fixing" && (
-                <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-red-100 text-red-700 text-[10px] font-medium shrink-0">
-                  {main.conflicts.conflictingFiles.length} file{main.conflicts.conflictingFiles.length !== 1 ? "s" : ""}
-                </span>
-              )}
+              {main.conflicts?.hasConflicts && main.status !== "fixing" && (() => {
+                const grouped = groupConflictsByRepo(main.conflicts.conflictingFiles);
+                const summary = formatConflictSummary(grouped);
+                const multiRepo = grouped.groups.length > 1;
+                return (
+                  <span
+                    className="inline-flex items-center px-1.5 py-0.5 rounded bg-red-100 text-red-700 text-[10px] font-medium shrink-0 max-w-full truncate"
+                    title={`Conflicts: ${summary}`}
+                  >
+                    {multiRepo
+                      ? summary
+                      : `${grouped.total} file${grouped.total !== 1 ? "s" : ""}`}
+                  </span>
+                );
+              })()}
               {issue.workspaceSummary!.total > 1 && (
                 <button
                   type="button"
