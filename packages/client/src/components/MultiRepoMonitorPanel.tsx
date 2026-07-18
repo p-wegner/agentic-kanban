@@ -4,6 +4,7 @@ import { type MatrixCell } from "../lib/multiRepoMatrix.js";
 import { cellKey } from "../lib/diffMultiRepoMatrix.js";
 import { useLiveMultiRepoMatrix } from "../hooks/useLiveMultiRepoMatrix.js";
 import { MergeReadinessBoard } from "./MergeReadinessBoard.js";
+import { FleetServiceStackMap } from "./FleetServiceStackMap.js";
 
 interface MultiRepoMonitorPanelProps {
   activeProjectId: string | null;
@@ -15,8 +16,8 @@ interface MultiRepoMonitorPanelProps {
   onOpenWorkspace?: (workspaceId: string, issueId: string | null) => void;
 }
 
-/** The two secondary views this panel exposes: the repo × workspace matrix and the fleet triage board. */
-type MonitorView = "matrix" | "readiness";
+/** The secondary views this panel exposes: the repo × workspace matrix, the fleet triage board (#98), and the fleet service-stack map (#95). */
+type MonitorView = "matrix" | "readiness" | "stacks";
 
 /** Compact "updated Ns ago" phrasing for the live indicator. */
 function formatAgo(ms: number): string {
@@ -134,8 +135,8 @@ export function MultiRepoMonitorPanel({
           <div className="flex items-center gap-2">
             <GridIcon />
             <h2 className="text-lg font-semibold text-ink dark:text-stone-100 heading-serif">Multi-Repo Monitor</h2>
-            {loading && !data && <span className="text-sm text-gray-400 dark:text-gray-500">Loading…</span>}
-            {summary && isMultiRepo && (
+            {view === "matrix" && loading && !data && <span className="text-sm text-gray-400 dark:text-gray-500">Loading…</span>}
+            {view === "matrix" && summary && isMultiRepo && (
               <span className="text-sm text-gray-500 dark:text-gray-400">
                 {summary.repoCount} repos · {summary.workspaceCount} active workspace{summary.workspaceCount === 1 ? "" : "s"}
                 {summary.strandedWorkspaceCount > 0 && (
@@ -150,13 +151,14 @@ export function MultiRepoMonitorPanel({
                 )}
               </span>
             )}
-            {/* Secondary-view toggle: the repo × workspace matrix vs. the fleet triage board (#98). */}
+            {/* Unified secondary-view toggle: the repo × workspace matrix (#84),
+                the fleet triage board (#98), and the fleet service-stack map (#95). */}
             <div
               className="ml-1 inline-flex rounded border border-gray-200 dark:border-gray-700 overflow-hidden text-[11px]"
               role="tablist"
               aria-label="Monitor view"
             >
-              {(["matrix", "readiness"] as MonitorView[]).map((v) => (
+              {(["matrix", "readiness", "stacks"] as MonitorView[]).map((v) => (
                 <button
                   key={v}
                   role="tab"
@@ -169,14 +171,15 @@ export function MultiRepoMonitorPanel({
                       : "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
                   }`}
                 >
-                  {v === "matrix" ? "Matrix" : "Readiness"}
+                  {v === "matrix" ? "Matrix" : v === "readiness" ? "Readiness" : "Service Stacks"}
                 </button>
               ))}
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {/* Live status indicator — ticks "updated Ns ago" and shows pause state. */}
-            {activeProjectId && (
+            {/* Live status indicator + matrix refresh controls (matrix view only —
+                the service-stack map owns its own refresh). */}
+            {view === "matrix" && activeProjectId && (
               <span
                 className="flex items-center gap-1 text-[11px] text-gray-400 dark:text-gray-500 whitespace-nowrap"
                 data-testid="multi-repo-live-indicator"
@@ -194,22 +197,26 @@ export function MultiRepoMonitorPanel({
                 {agoLabel && <span className="text-gray-300 dark:text-gray-600">· updated {agoLabel}</span>}
               </span>
             )}
-            <button
-              onClick={() => setPaused(!paused)}
-              title={paused ? "Resume live updates" : "Pause live updates"}
-              aria-pressed={paused}
-              className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 text-sm px-1.5 py-0.5 rounded"
-            >
-              {paused ? "▶" : "❚❚"}
-            </button>
-            <button
-              onClick={refresh}
-              disabled={loading}
-              title="Refresh now"
-              className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 disabled:opacity-40 text-sm px-1.5 py-0.5 rounded"
-            >
-              ↻
-            </button>
+            {view === "matrix" && (
+              <button
+                onClick={() => setPaused(!paused)}
+                title={paused ? "Resume live updates" : "Pause live updates"}
+                aria-pressed={paused}
+                className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 text-sm px-1.5 py-0.5 rounded"
+              >
+                {paused ? "▶" : "❚❚"}
+              </button>
+            )}
+            {view === "matrix" && (
+              <button
+                onClick={refresh}
+                disabled={loading}
+                title="Refresh now"
+                className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 disabled:opacity-40 text-sm px-1.5 py-0.5 rounded"
+              >
+                ↻
+              </button>
+            )}
             <button
               onClick={onClose}
               className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 text-lg leading-none"
@@ -221,6 +228,10 @@ export function MultiRepoMonitorPanel({
 
         {/* Body */}
         <div className="flex-1 overflow-auto">
+          {view === "stacks" ? (
+            <FleetServiceStackMap projectId={activeProjectId} columns={columns} />
+          ) : (
+          <>
           {!activeProjectId && (
             <div className="flex items-center justify-center h-48 text-gray-400 dark:text-gray-500">
               <span className="text-sm">No active project selected.</span>
@@ -308,11 +319,15 @@ export function MultiRepoMonitorPanel({
               </tbody>
             </table>
           )}
+          </>
+          )}
         </div>
 
         {/* Footer */}
         <div className="px-4 py-2 border-t border-gray-100 dark:border-gray-800 text-xs text-gray-400 dark:text-gray-500">
-          Per-repo merge state of active workspaces · read-only
+          {view === "stacks"
+            ? "All active workspaces' Docker service stacks · read-only"
+            : "Per-repo merge state of active workspaces · read-only"}
         </div>
       </div>
     </div>
