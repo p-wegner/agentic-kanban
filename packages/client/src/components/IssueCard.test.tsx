@@ -22,12 +22,14 @@ function issue(overrides: Partial<IssueWithStatus> = {}): IssueWithStatus {
   };
 }
 
-function render(i: IssueWithStatus): string {
+function render(i: IssueWithStatus, props: { isPendingIssue?: boolean; isPendingWorkspace?: boolean } = {}): string {
   return renderToStaticMarkup(
     <IssueCard
       issue={i}
       onClick={() => {}}
       onDragStart={() => {}}
+      isPendingIssue={props.isPendingIssue}
+      isPendingWorkspace={props.isPendingWorkspace}
     />,
   );
 }
@@ -90,5 +92,23 @@ describe("IssueCard active-agent indicator", () => {
   it("shows no active-agent badge when there is no workspace", () => {
     const html = render(issue());
     expect(html).not.toContain("Agent working");
+  });
+});
+
+describe("IssueCard setup/pending feedback", () => {
+  it("shows a 'Setting up workspace…' label while the workspace is being created", () => {
+    const html = render(issue({ statusName: "In Progress" }), { isPendingWorkspace: true });
+    expect(html).toContain("Setting up workspace");
+  });
+
+  it("does not show the setup label when the workspace is not pending", () => {
+    const html = render(issue());
+    expect(html).not.toContain("Setting up workspace");
+  });
+
+  it("prefers the 'Creating issue' label over the setup label while the issue itself is pending", () => {
+    const html = render(issue(), { isPendingIssue: true, isPendingWorkspace: true });
+    expect(html).toContain("Creating issue");
+    expect(html).not.toContain("Setting up workspace");
   });
 });
