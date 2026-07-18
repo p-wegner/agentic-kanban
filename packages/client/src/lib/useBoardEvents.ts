@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback } from "react";
+import { SESSION_ACTIVITY_WS_EVENT, type SessionActivityEventDetail } from "./sessionTranscriptEvents.js";
 
 /**
  * Low-frequency safety poll backing the board WebSocket. The WS is the single
@@ -158,6 +159,11 @@ export function useBoardEvents(
           onBoardChangeRef.current(msg.reason);
         } else if (msg.type === "session_activity") {
           onSessionActivityRef.current?.(msg.issueId, msg.sessionId, msg.activity);
+          window.dispatchEvent(
+            new CustomEvent<SessionActivityEventDetail>(SESSION_ACTIVITY_WS_EVENT, {
+              detail: { projectId: msg.projectId, issueId: msg.issueId, sessionId: msg.sessionId, activity: msg.activity },
+            }),
+          );
         } else if (msg.type === "session_stats") {
           onSessionStatsRef.current?.(msg.issueId, { model: msg.model, contextTokens: msg.contextTokens, toolUses: msg.toolUses ?? 0, subagentCount: msg.subagentCount ?? 0 });
         } else if (msg.type === "session_todos") {
