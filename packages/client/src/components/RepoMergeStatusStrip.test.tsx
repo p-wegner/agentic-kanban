@@ -76,4 +76,87 @@ describe("RepoMergeStatusStripView", () => {
     expect(html).not.toContain("unmerged");
     expect(html).not.toContain("ahead");
   });
+
+  it("stays read-only (no action buttons) when no callbacks are supplied", () => {
+    const html = renderToStaticMarkup(
+      <RepoMergeStatusStripView
+        status={status({ repos: [repo({ hasWork: true, ahead: 2, stranded: true }), repo({ name: "svc", path: "/repo/svc", isLeading: false, hasWork: true, ahead: 1, stranded: true })] })}
+      />,
+    );
+    expect(html).not.toContain("repo-rebase-button");
+    expect(html).not.toContain("retry-merge-button");
+  });
+
+  it("shows a per-repo rebase button on stranded repos and a workspace retry-merge button when callbacks are supplied", () => {
+    const html = renderToStaticMarkup(
+      <RepoMergeStatusStripView
+        status={status({
+          repos: [
+            repo({ hasWork: false }),
+            repo({ name: "svc", path: "/repo/svc", isLeading: false, hasWork: true, ahead: 2, stranded: true }),
+          ],
+        })}
+        onRebaseRepo={() => {}}
+        onRetryMerge={() => {}}
+      />,
+    );
+    // Rebase button only on the stranded sibling, not the no-changes leading row.
+    expect(html.match(/repo-rebase-button/g) ?? []).toHaveLength(1);
+    expect(html).toContain("Rebase onto base");
+    expect(html).toContain("retry-merge-button");
+    expect(html).toContain("Retry merge");
+  });
+
+  it("hides the retry-merge button once all repos are merged", () => {
+    const html = renderToStaticMarkup(
+      <RepoMergeStatusStripView
+        status={status({ allMerged: true, repos: [repo({ hasWork: true, ahead: 0, merged: true }), repo({ name: "svc", path: "/repo/svc", isLeading: false, hasWork: true, ahead: 0, merged: true })] })}
+        onRebaseRepo={() => {}}
+        onRetryMerge={() => {}}
+      />,
+    );
+    expect(html).not.toContain("retry-merge-button");
+    expect(html).not.toContain("repo-rebase-button");
+  });
+
+  it("surfaces per-repo rebase progress and conflict results", () => {
+    const running = renderToStaticMarkup(
+      <RepoMergeStatusStripView
+        status={status({ repos: [repo({ hasWork: false }), repo({ name: "svc", path: "/repo/svc", isLeading: false, hasWork: true, ahead: 2, stranded: true })] })}
+        onRebaseRepo={() => {}}
+        actionState={{ svc: { phase: "running" } }}
+      />,
+    );
+    expect(running).toContain("rebasing…");
+
+    const conflicted = renderToStaticMarkup(
+      <RepoMergeStatusStripView
+        status={status({ repos: [repo({ hasWork: false }), repo({ name: "svc", path: "/repo/svc", isLeading: false, hasWork: true, ahead: 2, stranded: true })] })}
+        onRebaseRepo={() => {}}
+        actionState={{ svc: { phase: "done", result: { repo: "svc", success: false, conflictingFiles: ["src/a.ts", "src/b.ts"] } } }}
+      />,
+    );
+    expect(conflicted).toContain("conflicts: src/a.ts, src/b.ts");
+
+    const clean = renderToStaticMarkup(
+      <RepoMergeStatusStripView
+        status={status({ repos: [repo({ hasWork: false }), repo({ name: "svc", path: "/repo/svc", isLeading: false, hasWork: true, ahead: 2, stranded: true })] })}
+        onRebaseRepo={() => {}}
+        actionState={{ svc: { phase: "done", result: { repo: "svc", success: true } } }}
+      />,
+    );
+    expect(clean).toContain("rebased ✓");
+  });
+
+  it("surfaces a retry-merge error", () => {
+    const html = renderToStaticMarkup(
+      <RepoMergeStatusStripView
+        status={status({ repos: [repo({ hasWork: false }), repo({ name: "svc", path: "/repo/svc", isLeading: false, hasWork: true, ahead: 1, stranded: true })] })}
+        onRetryMerge={() => {}}
+        retryState={{ phase: "done", error: "Multi-repo merge blocked — nothing was merged." }}
+      />,
+    );
+    expect(html).toContain("retry-merge-error");
+    expect(html).toContain("Multi-repo merge blocked");
+  });
 });
