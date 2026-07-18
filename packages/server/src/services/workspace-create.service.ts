@@ -54,8 +54,11 @@ import {
   provisionSiblingWorktrees,
   insertSiblingWorktreeRecords,
   rollbackSiblingWorktrees,
+  resolveScopedSiblingRepos,
   type SiblingWorktree,
 } from "./workspace-repos.service.js";
+import { listProjectRepos } from "../repositories/repo.repository.js";
+import { basename } from "node:path";
 
 export function createWorkspaceCreateService(deps: {
   database: Database;
@@ -541,7 +544,7 @@ export function createWorkspaceCreateService(deps: {
       // throws so the catch-block rollback removes leading + sibling worktrees.
       if (!isDirect) {
         t = Date.now();
-        siblingWorktrees = await provisionSiblingWorktrees({ gitService, database, projectId: issue.projectId, branch });
+        siblingWorktrees = await provisionSiblingWorktrees({ gitService, database, projectId: issue.projectId, branch, repoScope: input.repoScope });
         if (siblingWorktrees.length > 0) timing("sibling-worktrees", t);
       }
 
@@ -710,6 +713,10 @@ export function createWorkspaceCreateService(deps: {
     budgetEstimate: BudgetEstimate;
     ports: { serverPort: number; clientPort: number } | null;
     blockedBy: { issueNumber: number; title: string }[];
+    multiRepo: {
+      leadingRepoName: string;
+      worktrees: { id: string; name: string; leading: boolean; selected: boolean; hasServiceStack: boolean }[];
+    } | null;
   }> {
     const isDirect = input.isDirect === true;
     const warnings: string[] = [];
@@ -835,6 +842,43 @@ export function createWorkspaceCreateService(deps: {
       }),
     );
 
+    // 14. Multi-repo fan-out preview (#91): for a multi-repo project, list the leading
+    //     worktree plus each additional-repo worktree, marking which the selected
+    //     `repoScope` will actually provision. null for single-repo projects and direct
+    //     workspaces (no worktree fan-out) so the selector/preview stays hidden there.
+    let multiRepo: {
+      leadingRepoName: string;
+      worktrees: { id: string; name: string; leading: boolean; selected: boolean; hasServiceStack: boolean }[];
+    } | null = null;
+    if (!isDirect) {
+      const projectRepos = await listProjectRepos(issue.projectId, database).catch(() => []);
+      if (projectRepos.length > 0) {
+        const scopedIds = new Set(resolveScopedSiblingRepos(projectRepos, input.repoScope).map((r) => r.id));
+        const leadingRepoName = basename(project.repoPath) || project.repoPath;
+        multiRepo = {
+          leadingRepoName,
+          worktrees: [
+            // The leading repo is always provisioned; a project-level service stack
+            // (servicesConfig) rides its worktree.
+            {
+              id: "__leading__",
+              name: leadingRepoName,
+              leading: true,
+              selected: true,
+              hasServiceStack: Boolean(project.servicesConfig && project.servicesConfig.trim()),
+            },
+            ...projectRepos.map((r) => ({
+              id: r.id,
+              name: r.name ?? basename(r.path),
+              leading: false,
+              selected: scopedIds.has(r.id),
+              hasServiceStack: Boolean(r.composeFile && r.composeFile.trim()),
+            })),
+          ],
+        };
+      }
+    }
+
     return {
       branch,
       baseBranch,
@@ -851,6 +895,7 @@ export function createWorkspaceCreateService(deps: {
       budgetEstimate,
       ports,
       blockedBy,
+      multiRepo,
     };
   }
 

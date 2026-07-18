@@ -3,7 +3,7 @@ import { apiFetch, apiPost } from "../lib/api.js";
 import { getSettings, setSettings } from "../lib/settingsStore.js";
 import { suggestBranchName, sanitizeBranchName } from "@agentic-kanban/shared/lib/branch";
 import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
-import type { IssueWithStatus, ProfileSelection, WorkspaceResponse } from "@agentic-kanban/shared";
+import type { IssueWithStatus, ProfileSelection, ProjectRepoResponse, WorkspaceResponse } from "@agentic-kanban/shared";
 import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import { PreflightModal } from "./PreflightModal.js";
 import type { PreflightResult, PreflightClarification } from "./PreflightModal.js";
@@ -90,6 +90,10 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
   const [skipSetup, setSkipSetup] = useState(false);
   const [skipContextPacker, setSkipContextPacker] = useState(false);
   const [branches, setBranches] = useState<{ local: string[]; remote: string[] } | null>(null);
+  // Multi-repo scope (#91): the project's additional repos + which the workspace spans.
+  // Empty list = single-repo project (selector hidden, behavior unchanged).
+  const [projectRepos, setProjectRepos] = useState<ProjectRepoResponse[]>([]);
+  const [selectedRepoIds, setSelectedRepoIds] = useState<Set<string>>(new Set());
   const [availableSkills, setAvailableSkills] = useState<{ id: string; name: string; description: string }[]>([]);
   const [selectedSkillId, setSelectedSkillId] = useState<string>("");
   const [claudeProfiles, setClaudeProfiles] = useState<string[]>([]);
@@ -122,6 +126,14 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
       apiFetch<{ local: string[]; remote: string[] }>(`/api/projects/${project.id}/branches`)
         .then((data) => setBranches(data))
         .catch(() => setBranches(null));
+      // Additional repos (multi-repo project). All checked by default so the
+      // default behavior fans out to every repo exactly like before (#91).
+      apiFetch<ProjectRepoResponse[]>(`/api/projects/${project.id}/repos`)
+        .then((rows) => {
+          setProjectRepos(rows);
+          setSelectedRepoIds(new Set(rows.map((r) => r.id)));
+        })
+        .catch(() => {});
     }
     void Promise.all([
       apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles").catch(() => ({ profiles: [] as string[] })),
@@ -198,6 +210,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
       selectedModel,
       modelApplies: isClaudeSelected || isCodexSelected,
       branchName, baseBranch, prefs,
+      repoScope,
     });
 
     // Skip preflight if opted out for this launch (defaults to the inherited setting)
@@ -328,6 +341,26 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
   const defaultBranchLabel = project?.defaultBranch || "unset";
   const cannotCreateWorktree = !isDirect && !baseBranch.trim() && !project?.defaultBranch;
 
+  // Multi-repo scope (#91): show the selector only for multi-repo projects on a
+  // worktree launch. The leading repo is always spanned; only additional repos are
+  // selectable. `repoScope` carries a `__leading__` sentinel so a deselect-all-siblings
+  // choice arrives as a NON-empty scope (leading-only) instead of the empty="all"
+  // default. Undefined for single-repo/direct → server keeps today's behavior.
+  const isMultiRepo = projectRepos.length > 0;
+  const showRepoSelector = isMultiRepo && !isDirect;
+  const repoScope = showRepoSelector
+    ? ["__leading__", ...projectRepos.filter((r) => selectedRepoIds.has(r.id)).map((r) => r.id)]
+    : undefined;
+
+  function toggleRepo(id: string) {
+    setSelectedRepoIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   return (
     <>
     <div className="border border-gray-200 dark:border-gray-700 rounded p-3 space-y-2">
@@ -451,6 +484,38 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
             </p>
           )}
         </>
+      )}
+      {showRepoSelector && (
+        <div className="border border-gray-200 dark:border-gray-700 rounded p-2 space-y-1" data-testid="repo-scope-selector">
+          <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block">
+            Repositories ({selectedRepoIds.size + 1}/{projectRepos.length + 1})
+          </label>
+          <p className="text-[10px] text-gray-400 dark:text-gray-500">
+            Choose which repos this workspace spans. A worktree (and setup) is created only for
+            the checked repos; the leading repo is always included.
+          </p>
+          <label className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+            <input type="checkbox" checked disabled className="rounded border-gray-300 opacity-60" />
+            <span className="font-mono truncate">{project?.repoName || "leading repo"}</span>
+            <span className="text-[9px] uppercase tracking-wide text-brand-600 dark:text-brand-400">lead</span>
+          </label>
+          {projectRepos.map((repo) => (
+            <label key={repo.id} className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+              <input
+                type="checkbox"
+                checked={selectedRepoIds.has(repo.id)}
+                onChange={() => toggleRepo(repo.id)}
+                className="rounded border-gray-300"
+              />
+              <span className="font-mono truncate">{repo.name ?? repo.path}</span>
+              {repo.composeFile && (
+                <span className="inline-flex items-center px-1 py-0 rounded text-[9px] font-medium bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
+                  stack
+                </span>
+              )}
+            </label>
+          ))}
+        </div>
       )}
       <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
         <input
@@ -632,6 +697,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
         skillId={selectedSkillId}
         selectedProfile={selectedProfile}
         selectedModel={selectedModel}
+        repoScope={repoScope}
         disabled={isLoading || (!isDirect && !branchName.trim()) || cannotCreateWorktree}
       />
       <div className="flex gap-2">

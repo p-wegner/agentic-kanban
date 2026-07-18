@@ -13,6 +13,36 @@ import { listProjectRepos, listWorkspaceRepos, insertWorkspaceRepo, setWorkspace
 import { WorkspaceError, acquireRepoMergeLock, type GitService } from "./workspace-internals.js";
 import { runMergeCore } from "./merge-executor.service.js";
 
+/**
+ * Resolve the subset of a project's ADDITIONAL repos that a workspace should span,
+ * honoring an optional per-repo `repoScope` chosen at creation time (#91).
+ *
+ * `repoScope` is the set of repo identifiers (id, name, absolute path, or the repo
+ * directory's basename — any of which the UI/API may send) that the workspace spans,
+ * INCLUDING the leading repo. The leading repo is provisioned unconditionally by the
+ * caller and never appears in `projectRepos`, so filtering here only ever narrows the
+ * siblings.
+ *
+ * Zero-regression default: an OMITTED (`undefined`) or EMPTY scope means "all repos"
+ * — the exact pre-#91 behavior. A deselect-all-siblings choice from the UI still
+ * carries the always-included leading repo, so it arrives as a NON-empty scope that
+ * simply matches no sibling → empty result (leading-only), distinct from the
+ * omitted/empty "all" default.
+ */
+export function resolveScopedSiblingRepos(
+  projectRepos: RepoRow[],
+  repoScope: string[] | undefined,
+): RepoRow[] {
+  if (!repoScope || repoScope.length === 0) return projectRepos;
+  const scope = new Set(repoScope.map((s) => s.trim().toLowerCase()).filter(Boolean));
+  return projectRepos.filter((repo) => {
+    const identifiers = [repo.id, repo.name ?? "", repo.path, basename(repo.path)]
+      .filter(Boolean)
+      .map((s) => s.toLowerCase());
+    return identifiers.some((id) => scope.has(id));
+  });
+}
+
 /** A sibling worktree provisioned for one additional repo of the project. */
 export interface SiblingWorktree {
   path: string;
@@ -42,9 +72,18 @@ export async function provisionSiblingWorktrees(params: {
   database: Database;
   projectId: string;
   branch: string;
+  /**
+   * Optional per-repo scope (#91): the identifiers of the repos this workspace
+   * spans (leading + selected siblings). Only siblings in scope get a worktree.
+   * Omitted/empty = all siblings (zero-regression default). See
+   * {@link resolveScopedSiblingRepos}.
+   */
+  repoScope?: string[];
 }): Promise<SiblingWorktree[]> {
   const { gitService, database, projectId, branch } = params;
-  const projectRepos = await listProjectRepos(projectId, database);
+  const allProjectRepos = await listProjectRepos(projectId, database);
+  if (allProjectRepos.length === 0) return [];
+  const projectRepos = resolveScopedSiblingRepos(allProjectRepos, params.repoScope);
   if (projectRepos.length === 0) return [];
 
   const provisioned: SiblingWorktree[] = [];
