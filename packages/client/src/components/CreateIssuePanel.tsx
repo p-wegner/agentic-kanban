@@ -8,6 +8,8 @@ import { getSettings } from "../lib/settingsStore.js";
 import { showToast } from "./Toast.js";
 import { MarkdownToolbar } from "./MarkdownToolbar.js";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
+import { useProjectRepos } from "../hooks/useProjectRepos.js";
+import { ReposTouchedField } from "./ReposTouchedField.js";
 import { buildCreateIssuePayload } from "../lib/createIssuePayload.js";
 import { handleImagePaste, mergeDescriptionWithImages } from "../lib/pastedImages.js";
 import {
@@ -60,6 +62,8 @@ export function CreateIssuePanel({
   const [pastedImages, setPastedImages] = useState<string[]>(initialState?.pastedImages ?? []);
   const [issueType, setIssueType] = useState<CreateIssueRequest["issueType"]>(initialState?.issueType ?? "task");
   const [estimate, setEstimate] = useState<IssueEstimate | "">(initialState?.estimate ?? "");
+  const [reposTouched, setReposTouched] = useState<string[]>([]);
+  const { repos: projectRepos, isMultiRepo } = useProjectRepos(projectId);
   const [startWorkspace, setStartWorkspace] = useState(initialState?.startWorkspace ?? false);
   const [planMode, setPlanMode] = useState(initialState?.planMode ?? false);
   const [skipAutoReview, setSkipAutoReview] = useState(initialState?.skipAutoReview ?? false);
@@ -152,6 +156,7 @@ export function CreateIssuePanel({
         selectedProfile, selectedModel, skillId,
         modelApplies: isClaudeSelected || isCodexSelected,
         settings,
+        reposTouched: isMultiRepo ? reposTouched : undefined,
       }));
     } finally {
       setSubmitting(false);
@@ -311,6 +316,10 @@ export function CreateIssuePanel({
               </select>
             </div>
           </div>
+
+          {isMultiRepo && (
+            <ReposTouchedField repos={projectRepos} selected={reposTouched} onChange={setReposTouched} />
+          )}
 
           {availableStatuses && availableStatuses.length > 1 && (
             <div className="flex flex-col gap-1.5">

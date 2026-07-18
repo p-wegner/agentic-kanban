@@ -4,6 +4,7 @@ import { repos, workspaces } from "@agentic-kanban/shared/schema";
 import { and, eq, isNotNull, isNull, ne } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database, TransactionClient } from "../db/index.js";
+import { getProjectById } from "./project.repository.js";
 
 export type RepoDb = Database | TransactionClient;
 
@@ -25,6 +26,27 @@ export async function listProjectRepos(projectId: string, database: RepoDb = db)
 /** Workspace-scoped rows: the per-workspace worktree records for the additional repos. */
 export async function listWorkspaceRepos(workspaceId: string, database: RepoDb = db): Promise<RepoRow[]> {
   return database.select().from(repos).where(eq(repos.workspaceId, workspaceId));
+}
+
+/**
+ * The names of every repo a project touches: the leading repo (projects.repoName)
+ * first, then the additional/sibling repos. A single-repo project returns a one-element
+ * list — repo-aware authoring/decomposition (#94) keys off `length >= 2`. Names are
+ * de-duped case-insensitively, preserving order and canonical spelling.
+ */
+export async function getProjectRepoNames(projectId: string, database: Database = db): Promise<string[]> {
+  const project = await getProjectById(projectId, database);
+  if (!project) return [];
+  const siblings = await listProjectRepos(projectId, database);
+  const baseName = (p: string) => p.split(/[/\\]/).filter(Boolean).pop() ?? p;
+  const names = [project.repoName, ...siblings.map((r) => r.name ?? baseName(r.path))];
+  const seen = new Set<string>();
+  return names.filter((n) => {
+    const key = n.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export async function insertProjectRepo(
