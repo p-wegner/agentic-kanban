@@ -32,6 +32,8 @@ export interface MatrixRepoInput {
 
 export interface MatrixWorkspaceInput {
   id: string;
+  /** Issue id backing this workspace — used to jump to the workspace (#98). */
+  issueId?: string;
   issueNumber: number | null;
   issueTitle: string | null;
   branch: string | null;
