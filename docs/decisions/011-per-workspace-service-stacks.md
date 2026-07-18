@@ -52,6 +52,23 @@ Isolation rests on two pillars:
 Config is per-project (`projects.services_config`, a JSON `ServiceStackConfig`); the provisioned
 result is per-workspace (`workspaces.service_state`, a JSON `ServiceStackState`).
 
+- **Compose profiles** (`ServiceStackConfig.profiles: string[]`) — services gated behind a
+  compose `profiles:` key are OMITTED from a workspace stack by default (the board runs
+  `docker compose up` with no `--profile`). List a profile name here to activate it: the generated
+  `--env-file` gets `COMPOSE_PROFILES=<comma-joined>`, which docker compose reads to enable exactly
+  those profiles (no service-name args needed). Absent/empty = default (only unprofiled services
+  start), so an existing stack's env file is byte-identical to before. Names must be shell-safe and
+  comma-free (a comma is the profile separator) — the PATCH validator and the env-writer both reject
+  an unsafe name rather than silently mis-split it. **Health-ordering** (`depends_on:` with
+  `condition: service_healthy`) is honored natively by the board's `up -d --wait`: a dependent only
+  starts once its deps report healthy, and a dep that never becomes healthy fails the whole `up` →
+  the workspace records `status:"error"` (non-fatal) and the compensating `down` clears the half-up
+  stack (never a silent partial). **Networks** declared in the compose file are namespaced per
+  workspace by compose's project-name prefix (`<compose-project>_<network>`), so parallel workspaces
+  never collide, and the teardown `down -v --remove-orphans` removes them (zero network leaks). A
+  sibling repo's own compose (`-f`-merged, #71) that declares no `networks:` lands on the merged
+  project's `default` network, isolated from the leading compose's custom networks.
+
 ### Two-tier deployment model
 - **Windows-native (the local single-user case): NO DinD.** Docker Desktop on the host; the
   board shells out to `docker compose` directly. No nesting, no socket gymnastics.

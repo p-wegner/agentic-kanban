@@ -178,6 +178,31 @@ describe("buildServicesEnvFile", () => {
     expect(body).not.toContain("BAD-KEY");
     expect(body).not.toContain("1LEADING");
   });
+
+  it("emits COMPOSE_PROFILES from config.profiles (comma-joined) to enable profile-gated services", () => {
+    const body = buildServicesEnvFile({
+      composeProjectName: "ak-testinst-ws-abc123",
+      ports: {},
+      config: { ...CONFIG, env: {}, profiles: ["debug", "seed"] },
+    });
+    expect(body).toContain("COMPOSE_PROFILES='debug,seed'");
+  });
+
+  it("omits COMPOSE_PROFILES entirely when no profiles are declared (byte-identical to before)", () => {
+    const withEmpty = buildServicesEnvFile({ composeProjectName: "ak-testinst-ws-abc123", ports: {}, config: { ...CONFIG, env: {}, profiles: [] } });
+    const withUndef = buildServicesEnvFile({ composeProjectName: "ak-testinst-ws-abc123", ports: {}, config: { ...CONFIG, env: {} } });
+    expect(withEmpty).not.toContain("COMPOSE_PROFILES");
+    expect(withUndef).not.toContain("COMPOSE_PROFILES");
+  });
+
+  it("drops COMPOSE_PROFILES if a profile name embeds a comma (the profile separator) or is otherwise unsafe", () => {
+    const body = buildServicesEnvFile({
+      composeProjectName: "ak-testinst-ws-abc123",
+      ports: {},
+      config: { ...CONFIG, env: {}, profiles: ["ok", "a,b"] },
+    });
+    expect(body).not.toContain("COMPOSE_PROFILES");
+  });
 });
 
 describe("parseStoredComposeProjectName", () => {

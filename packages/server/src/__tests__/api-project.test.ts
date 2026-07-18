@@ -233,6 +233,23 @@ describe("Projects API", () => {
     });
     expect(newlineEnv.status).toBe(422);
 
+    // profiles: valid array persists and round-trips
+    const okProfiles = await app.request(`/api/projects/${svcProjectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ servicesConfig: { enabled: true, composeFile: "docker-compose.yml", profiles: ["debug", "seed"] } }),
+    });
+    expect(okProfiles.status).toBe(200);
+    expect((await okProfiles.json() as { servicesConfig: { profiles?: string[] } }).servicesConfig.profiles).toEqual(["debug", "seed"]);
+
+    // profiles: a comma in a name (the COMPOSE_PROFILES separator) → 422
+    const commaProfile = await app.request(`/api/projects/${svcProjectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ servicesConfig: { enabled: true, composeFile: "docker-compose.yml", profiles: ["a,b"] } }),
+    });
+    expect(commaProfile.status).toBe(422);
+
     // null clears it back to none
     const cleared = await app.request(`/api/projects/${svcProjectId}`, {
       method: "PATCH",

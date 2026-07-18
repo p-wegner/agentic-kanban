@@ -237,6 +237,23 @@ export function buildServicesEnvFile(args: {
   if (isEnvLineSafe("KANBAN_SERVICE_HOST", serviceHost)) {
     lines.push(envLine("KANBAN_SERVICE_HOST", serviceHost));
   }
+  // Activate declared compose profiles (services behind a `profiles:` key). `up` runs with
+  // NO `--profile` flag, so docker compose reads COMPOSE_PROFILES from this --env-file to
+  // decide which profiles to enable. A profile name is dropped (with a warning) if it is not
+  // a shell-safe env value; a comma is rejected here because it is the profile SEPARATOR
+  // (an embedded comma would silently split into extra profiles). Absent/empty => default
+  // (only unprofiled services start), so existing stacks are byte-identical to before.
+  const profileNames = (args.config.profiles ?? [])
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+  if (profileNames.length > 0) {
+    const bad = profileNames.find((p) => p.includes(",") || !isEnvLineSafe("COMPOSE_PROFILES", p));
+    if (bad !== undefined) {
+      console.warn(`[services] dropping COMPOSE_PROFILES — profile name is not shell/comma-safe: ${JSON.stringify(bad)}`);
+    } else {
+      lines.push(envLine("COMPOSE_PROFILES", profileNames.join(",")));
+    }
+  }
   for (const [name, port] of Object.entries(args.ports)) {
     lines.push(envLine(portEnvVar(name), String(port)));
   }
