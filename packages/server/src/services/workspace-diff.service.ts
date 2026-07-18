@@ -1,10 +1,12 @@
 import type { Database } from "../db/index.js";
+import type { WorkspaceHandoffResponse, WorkspaceHandoffRepoEntry } from "@agentic-kanban/shared";
 import * as realGitService from "./git.service.js";
 import { getWorkspaceById, resolveProjectRepo } from "../repositories/workspace.repository.js";
 import { getDiffComments } from "../repositories/session.repository.js";
 import { parseDiffStats } from "./board-aggregation.service.js";
 import { WorkspaceError, requireBaseBranch, type GitService } from "./workspace-internals.js";
 import { listWorkspaceRepos } from "../repositories/repo.repository.js";
+import { readHandoffMeta, type HandoffMeta } from "./handoff.service.js";
 
 export function createWorkspaceDiffService(deps: {
   database: Database;
@@ -133,5 +135,32 @@ export function createWorkspaceDiffService(deps: {
     return commit ?? { sha: null, message: null };
   }
 
-  return { getWorkspaceDiff, getConflicts, getLatestCommit };
+  /**
+   * HANDOFF.md metadata for the cross-repo activity feed (#89). Read-only: reports the
+   * leading repo's HANDOFF.md (which #78 already folds sibling diffs into) plus a per-repo
+   * `repos` array covering the leading worktree and every sibling worktree — so a sibling
+   * that carries its own HANDOFF.md is surfaced too. Absent files/worktrees resolve to the
+   * "no handoff" shape rather than erroring.
+   */
+  async function getHandoff(id: string): Promise<WorkspaceHandoffResponse> {
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
+
+    const absent: HandoffMeta = { exists: false, updatedAt: null, excerpt: null };
+    const repos: WorkspaceHandoffRepoEntry[] = [];
+
+    const leading = workspace.workingDir ? await readHandoffMeta(workspace.workingDir) : absent;
+    repos.push({ name: null, ...leading });
+
+    if (!workspace.isDirect) {
+      for (const repo of await listWorkspaceRepos(id, database)) {
+        const meta = repo.worktreePath ? await readHandoffMeta(repo.worktreePath) : absent;
+        repos.push({ name: repo.name, ...meta });
+      }
+    }
+
+    return { exists: leading.exists, updatedAt: leading.updatedAt, excerpt: leading.excerpt, repos };
+  }
+
+  return { getWorkspaceDiff, getConflicts, getLatestCommit, getHandoff };
 }

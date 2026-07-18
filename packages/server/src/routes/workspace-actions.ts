@@ -206,6 +206,12 @@ export function createWorkspaceActionsRoute(
     return c.json(await workspaceService.getConflicts(id));
   });
 
+  // GET /api/workspaces/:id/handoff — HANDOFF.md metadata (mtime + excerpt) per repo (#89)
+  router.get("/:id/handoff", async (c) => {
+    const id = c.req.param("id");
+    return c.json(await workspaceService.getHandoff(id));
+  });
+
   // POST /api/workspaces/:id/update-base
   router.post("/:id/update-base", async (c) => {
     const id = c.req.param("id");

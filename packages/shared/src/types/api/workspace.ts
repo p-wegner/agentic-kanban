@@ -200,6 +200,30 @@ export interface RepoRebaseResponse {
   error?: string;
 }
 
+/** One repo's HANDOFF.md metadata in GET /api/workspaces/:id/handoff (#89). */
+export interface WorkspaceHandoffRepoEntry {
+  /** Sibling repo name; null for the leading repo. */
+  name: string | null;
+  /** A HANDOFF.md exists in this repo's worktree. */
+  exists: boolean;
+  /** ISO mtime of the file (null when absent) — the client's poll+delta key. */
+  updatedAt: string | null;
+  /** Leading, truncated slice of the file content (null when absent). */
+  excerpt: string | null;
+}
+
+/**
+ * Response of GET /api/workspaces/:id/handoff (#89): the leading repo's HANDOFF.md
+ * metadata at the top level (the common single-repo shape), plus a per-repo `repos`
+ * array covering the leading repo and every sibling worktree.
+ */
+export interface WorkspaceHandoffResponse {
+  exists: boolean;
+  updatedAt: string | null;
+  excerpt: string | null;
+  repos: WorkspaceHandoffRepoEntry[];
+}
+
 export interface ShowdownContestant {
   skillId?: string;
   skillName?: string;
