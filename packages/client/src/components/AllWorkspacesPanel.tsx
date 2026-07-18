@@ -5,6 +5,7 @@ import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { WorkspaceRiskHeatmap } from "./WorkspaceRiskHeatmap.js";
 import { MultirepoHealthPill } from "./MultirepoHealthPill.js";
 import { CollapsibleSection } from "./CollapsibleSection.js";
+import { openSessionTranscript } from "../lib/sessionTranscriptEvents.js";
 import { useStaleWorkspaceManager } from "../hooks/useStaleWorkspaceManager.js";
 import {
   type CrossProjectGroup,
@@ -459,6 +460,20 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
                               conflictingFiles={main.conflicts?.conflictingFiles}
                             />
                           </span>
+
+                          {/* Full transcript viewer (#87) */}
+                          {main.lastSessionAt && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openSessionTranscript({ workspaceId: main.id, title: `#${issue.issueNumber} ${issue.title}` });
+                              }}
+                              className="text-[10px] px-1.5 py-0.5 rounded text-gray-500 dark:text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/40 transition-colors"
+                              title="Open full transcript"
+                            >
+                              📜 Transcript
+                            </button>
+                          )}
 
                           {/* Last session trigger */}
                           {main.lastSessionTriggerType && (() => {

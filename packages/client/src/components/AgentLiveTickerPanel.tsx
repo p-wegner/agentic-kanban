@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { TickerEntry } from "../hooks/useAgentLiveTicker.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
+import { openSessionTranscript } from "../lib/sessionTranscriptEvents.js";
 
 interface AgentLiveTickerPanelProps {
   entries: TickerEntry[];
@@ -93,7 +94,22 @@ export function AgentLiveTickerPanel({
               {activeEntries.map((entry) => {
                 const issue = findIssue(entry.issueId);
                 return (
-                  <li key={entry.workspaceId}>
+                  <li key={entry.workspaceId} className="relative group/entry">
+                    {entry.sessionId && (
+                      <button
+                        onClick={() =>
+                          openSessionTranscript({
+                            sessionId: entry.sessionId,
+                            workspaceId: entry.workspaceId,
+                            title: `#${entry.issueNumber ?? ""} ${entry.issueTitle}`,
+                          })
+                        }
+                        className="absolute top-1.5 right-2 z-10 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-ink-soft dark:text-gray-400 bg-surface-raised dark:bg-gray-800 border border-black/[0.06] dark:border-white/10 opacity-0 group-hover/entry:opacity-100 hover:text-brand-600 dark:hover:text-brand-400 transition-opacity"
+                        title="Open full transcript"
+                      >
+                        📜 Transcript
+                      </button>
+                    )}
                     <button
                       className="w-full text-left px-3 py-2 hover:bg-surface-sunken dark:hover:bg-gray-800/60 transition-colors group"
                       onClick={() => {
