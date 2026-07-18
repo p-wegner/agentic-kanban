@@ -183,6 +183,12 @@ export function createWorkspaceMergeService(deps: {
         err instanceof Error ? err.message : String(err),
       );
     }
+    // A stranded fix-and-merge may have left the worktree detached mid-rebase; un-wedge it so a
+    // retry launches into an attached, non-rebasing worktree instead of re-stranding.
+    if (workspace.workingDir && !workspace.isDirect && workspace.branch) {
+      await gitService.abortRebase(workspace.workingDir).catch(() => { /* nothing to abort */ });
+      await gitService.ensureOnBranch(workspace.workingDir, workspace.branch).catch(() => { /* best effort */ });
+    }
     await updateWorkspaceStatus(workspace.id, "idle", {}, database);
   }
 
@@ -708,10 +714,18 @@ export function createWorkspaceMergeService(deps: {
       return `Before launching this fix-and-merge agent, the app rebased the workspace branch onto '${baseBranch}' successfully.`;
     }
 
+    // Rebase conflicted: ABORT it so the worktree returns to its attached branch HEAD. A
+    // detached mid-rebase (UU) worktree strands the reconciler agent — the stale-safety guard
+    // rejects a detached+dirty worktree (STALE_SAFETY_POLICY), the agent emits zero output, and
+    // /resolve-conflicts then refuses to recover the very state this preflight created. Attached,
+    // the agent reconciles via `git merge <base>` and lands through the board's own primitives.
     const conflictingFiles = rebaseResult.conflictingFiles ?? [];
+    await gitService.abortRebase(workspace.workingDir).catch(() => { /* best effort */ });
     return `Before launching this fix-and-merge agent, the app tried to rebase the workspace branch onto '${baseBranch}' ` +
-      "and left the rebase in progress for you to resolve." +
-      (conflictingFiles.length > 0 ? ` Conflicting files: ${conflictingFiles.join(", ")}.` : "") +
+      "but it conflicted, so the app ABORTED the rebase — the worktree is back on its branch, clean and attached. " +
+      `Reconcile by merging '${baseBranch}' into this branch ('git merge ${baseBranch}'), resolve to keep BOTH sides' ` +
+      "intent, then land via the board's merge — do NOT continue a rebase." +
+      (conflictingFiles.length > 0 ? ` Files that conflicted on rebase: ${conflictingFiles.join(", ")}.` : "") +
       (rebaseResult.error ? ` Rebase error: ${rebaseResult.error}` : "");
   }
 
