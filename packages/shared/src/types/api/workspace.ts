@@ -185,6 +185,21 @@ export interface RepoMergeStatusResponse {
   repos: RepoMergeStatusRepoEntry[];
 }
 
+/**
+ * Response of POST /api/workspaces/:id/repos/:repoName/rebase (per-repo rebase, #93).
+ * The reserved `:repoName` for the leading repo is `LEADING_REPO_KEY` (a runtime value,
+ * so it lives in lib/branch.ts, re-exported through the barrel).
+ */
+export interface RepoRebaseResponse {
+  /** Which repo was rebased — a sibling name, or "leading" for the leading repo. */
+  repo: string;
+  /** The rebase completed cleanly onto the latest base. */
+  success: boolean;
+  /** Files with conflicts when the rebase could not complete (the rebase was aborted, tree left clean). */
+  conflictingFiles?: string[];
+  error?: string;
+}
+
 export interface ShowdownContestant {
   skillId?: string;
   skillName?: string;
