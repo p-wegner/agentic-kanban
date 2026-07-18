@@ -248,6 +248,19 @@ export function createWorkspacesRoute(
     return c.json(details);
   });
 
+  // GET /api/workspaces/:id/dev-server-plan — the honest dev-server plan (command / health
+  // URL / port + provenance) the board would boot for this workspace's project. The
+  // diagnostics tab renders this instead of assuming the app's own 3001/5173 worktree
+  // ports, which are wrong for any other project (docker-compose / multi-repo, #100).
+  router.get("/:id/dev-server-plan", async (c) => {
+    const id = c.req.param("id");
+    const result = await workspaceService.getWorkspaceDevServerPlan(id);
+    if (!result) {
+      return c.json({ error: "Workspace not found" }, 404);
+    }
+    return c.json(result);
+  });
+
   // PATCH /api/workspaces/:id
   router.patch("/:id", async (c) => {
     const id = c.req.param("id");

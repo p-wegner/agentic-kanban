@@ -178,6 +178,42 @@ export interface StackProfileResponse {
   profile: StackProfile | null;
 }
 
+/** Where each field of a resolved {@link DevServerPlan} came from, for honest UI provenance. */
+export interface DevServerPlanSource {
+  command: "pref" | "profile" | "none";
+  healthUrl: "pref" | "profile" | "worktree-port" | "none";
+  port: "pref" | "profile" | "worktree-port" | "none";
+}
+
+/**
+ * A fully-resolved plan for booting + health-checking a project's dev server, derived
+ * (in precedence order) from per-project `dev_command`/`health_url` overrides, the
+ * persisted stack profile, and — ONLY for the board's own checkout — this app's
+ * worktree-port convention (3001+N/5173+N). The `source` fields tell the UI how
+ * trustworthy each value is, so the diagnostics tab never presents a fabricated port
+ * for a project (e.g. a docker-compose / multi-repo app) whose real ports it can't know.
+ */
+export interface DevServerPlan {
+  /** Shell command that starts the dev server (e.g. "pnpm dev", "uvicorn app:app"). */
+  command: string;
+  /** URL to poll to confirm the server is up, or null when it isn't a web project / is unknown. */
+  healthUrl: string | null;
+  /** TCP port the server binds, or null when it can't be known for this project. */
+  port: number | null;
+  /** Whether this project serves an HTTP endpoint at all. */
+  isWeb: boolean;
+  /** Provenance of each field. */
+  source: DevServerPlanSource;
+}
+
+export interface WorkspaceDevServerPlanResponse {
+  workspaceId: string;
+  /** True when this workspace belongs to the board's own checkout (agentic-kanban). */
+  isSelfProject: boolean;
+  /** Null when the project has no bootable dev-server command configured/detected. */
+  plan: DevServerPlan | null;
+}
+
 export type ProjectScriptLastRunStatus = "running" | "success" | "failed" | "error";
 export type ProjectScriptCwdMode = "project" | "custom";
 
