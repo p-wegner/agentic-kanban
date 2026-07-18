@@ -45,6 +45,9 @@ function shouldRefetch(reason: string): boolean {
 interface Snapshot {
   mergeStatus: RepoMergeStatusResponse | null;
   conflictFiles: string[] | null;
+  /** Issue this workspace belongs to — retained so a workspace that MERGES (and thus
+   *  leaves the non-closed set) can still be resolved for its terminal merge entry. */
+  issueId: string;
 }
 
 export interface UseCrossRepoActivityResult {
@@ -104,7 +107,7 @@ export function useCrossRepoActivity(
               ).then((c) => c.conflictingFiles ?? []).catch(() => null)
             : [];
 
-          const prev = snapshotsRef.current.get(w.id) ?? { mergeStatus: null, conflictFiles: null };
+          const prev = snapshotsRef.current.get(w.id) ?? { mergeStatus: null, conflictFiles: null, issueId: w.issueId };
           const issue = resolveIssueRef.current?.(w.issueId);
           const ctx = {
             workspaceId: w.id,
@@ -120,7 +123,40 @@ export function useCrossRepoActivity(
           snapshotsRef.current.set(w.id, {
             mergeStatus,
             conflictFiles: conflictFiles ?? prev.conflictFiles,
+            issueId: w.issueId,
           });
+        }),
+      );
+
+      // A workspace that just MERGED leaves the non-closed set entirely, so its repos
+      // never flip to "merged" while it is in `active` — the headline "repo merged"
+      // entry (acceptance #1) would never fire. Catch it: any workspace we were tracking
+      // that is now gone from the active set AND last showed unlanded work gets ONE final
+      // repo-merge-status fetch (the endpoint resolves closed workspaces too) so the
+      // ahead/stranded → merged transition is emitted, then is dropped from tracking —
+      // bounding this to at most one extra fetch per merge.
+      const activeIds = new Set(active.map((w) => w.id));
+      const vanished = [...snapshotsRef.current.entries()].filter(
+        ([wsId, snap]) =>
+          !activeIds.has(wsId) && (snap.mergeStatus?.repos.some((r) => r.hasWork && !r.merged) ?? false),
+      );
+      await Promise.all(
+        vanished.map(async ([wsId, snap]) => {
+          const finalStatus = await apiFetch<RepoMergeStatusResponse>(
+            `/api/workspaces/${wsId}/repo-merge-status`,
+          ).catch(() => null);
+          snapshotsRef.current.delete(wsId); // one-shot — a departed workspace is not rescanned
+          if (!finalStatus) return;
+          const issue = resolveIssueRef.current?.(snap.issueId);
+          newEntries.push(
+            ...reduceRepoMergeStatusDelta(snap.mergeStatus, finalStatus, {
+              workspaceId: wsId,
+              issueId: snap.issueId,
+              issueNumber: issue?.issueNumber ?? null,
+              timestamp,
+              baseBranch: finalStatus.baseBranch,
+            }),
+          );
         }),
       );
 
