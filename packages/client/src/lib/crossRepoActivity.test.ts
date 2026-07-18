@@ -3,6 +3,7 @@ import type { RepoMergeStatusResponse, RepoMergeStatusRepoEntry } from "@agentic
 import {
   reduceRepoMergeStatusDelta,
   reduceConflictsDelta,
+  reduceHandoffDelta,
   appendActivityEntries,
   type CrossRepoActivityContext,
   type CrossRepoActivityEntry,
@@ -125,6 +126,59 @@ describe("reduceConflictsDelta", () => {
   it("labels the leading repo's un-prefixed conflicts with the leading sentinel", () => {
     const entries = reduceConflictsDelta([], ["pkg.json"], ctx);
     expect(entries[0].repo).toBe("leading");
+  });
+});
+
+describe("reduceHandoffDelta", () => {
+  const t0 = "2026-07-18T10:00:00.000Z";
+  const t1 = "2026-07-18T10:05:00.000Z";
+
+  it("emits nothing when the handoff was never observed (undefined baseline)", () => {
+    expect(reduceHandoffDelta(undefined, { exists: true, updatedAt: t1 }, "leading", ctx)).toEqual([]);
+  });
+
+  it("emits a single repo-labeled entry when a handoff first appears (prev null)", () => {
+    const entries = reduceHandoffDelta(null, { exists: true, updatedAt: t1 }, "leading", ctx);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      id: `ws1:leading:handoff_updated:${t1}`,
+      repo: "leading",
+      kind: "handoff_updated",
+      workspaceId: "ws1",
+      issueNumber: 88,
+    });
+    expect(entries[0].summary).toBe("#88 leading handoff updated");
+  });
+
+  it("emits one entry when the mtime advances", () => {
+    const entries = reduceHandoffDelta(t0, { exists: true, updatedAt: t1 }, "auth-svc", ctx);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].id).toBe(`ws1:auth-svc:handoff_updated:${t1}`);
+    expect(entries[0].repo).toBe("auth-svc");
+  });
+
+  it("emits nothing when the mtime is unchanged (dedupe of repeated events)", () => {
+    expect(reduceHandoffDelta(t1, { exists: true, updatedAt: t1 }, "leading", ctx)).toEqual([]);
+  });
+
+  it("emits nothing when the mtime goes backwards (stale poll)", () => {
+    expect(reduceHandoffDelta(t1, { exists: true, updatedAt: t0 }, "leading", ctx)).toEqual([]);
+  });
+
+  it("emits nothing when there is no handoff file", () => {
+    expect(reduceHandoffDelta(null, { exists: false, updatedAt: null }, "leading", ctx)).toEqual([]);
+    expect(reduceHandoffDelta(t0, { exists: false, updatedAt: null }, "leading", ctx)).toEqual([]);
+  });
+
+  it("distinct mtimes yield distinct ids so consecutive updates both survive appendActivityEntries", () => {
+    const first = reduceHandoffDelta(t0, { exists: true, updatedAt: t1 }, "leading", ctx);
+    const t2 = "2026-07-18T10:10:00.000Z";
+    const second = reduceHandoffDelta(t1, { exists: true, updatedAt: t2 }, "leading", ctx);
+    const merged = appendActivityEntries(first, second);
+    expect(merged).toHaveLength(2);
+    // A repeated identical delta (same mtime) collapses to one.
+    const repeat = appendActivityEntries(merged, second);
+    expect(repeat).toHaveLength(2);
   });
 });
 

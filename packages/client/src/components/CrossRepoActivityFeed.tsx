@@ -17,6 +17,7 @@ const KIND_META: Record<CrossRepoActivityKind, { label: string; dot: string }> =
   repo_stranded: { label: "stranded", dot: "bg-amber-500" },
   conflict_appeared: { label: "conflict", dot: "bg-red-500" },
   conflict_cleared: { label: "conflict cleared", dot: "bg-emerald-500" },
+  handoff_updated: { label: "handoff", dot: "bg-violet-500" },
 };
 
 /** Repo chip: distinguishes the leading repo from a sibling by name (#88). */
@@ -77,7 +78,7 @@ export function CrossRepoActivityFeed({ projectId, resolveIssue, onIssueClick }:
           </p>
           <p className="text-xs text-gray-300 dark:text-gray-600">
             {multiRepo
-              ? "Merges, commits, and conflicts across repos will appear here live."
+              ? "Merges, commits, conflicts, and handoffs across repos will appear here live."
               : "This view lights up when a project has additional repos with active workspaces."}
           </p>
         </div>

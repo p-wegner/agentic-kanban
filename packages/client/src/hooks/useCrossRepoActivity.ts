@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { RepoMergeStatusResponse } from "@agentic-kanban/shared";
+import type { RepoMergeStatusResponse, WorkspaceHandoffResponse } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { BOARD_WS_EVENT, type BoardWsEventDetail } from "../lib/useBoardEvents.js";
 import {
   reduceRepoMergeStatusDelta,
   reduceConflictsDelta,
+  reduceHandoffDelta,
   appendActivityEntries,
   type CrossRepoActivityEntry,
 } from "../lib/crossRepoActivity.js";
+import { LEADING_REPO_LABEL } from "../lib/groupConflictsByRepo.js";
 
 /** Slim projection of GET /api/workspaces?projectId= (see listWorkspacesSlim). */
 interface SlimWorkspace {
@@ -45,6 +47,8 @@ function shouldRefetch(reason: string): boolean {
 interface Snapshot {
   mergeStatus: RepoMergeStatusResponse | null;
   conflictFiles: string[] | null;
+  /** Last-observed HANDOFF.md snapshot (null = never observed → handoff baseline). */
+  handoff: WorkspaceHandoffResponse | null;
   /** Issue this workspace belongs to — retained so a workspace that MERGES (and thus
    *  leaves the non-closed set) can still be resolved for its terminal merge entry. */
   issueId: string;
@@ -107,7 +111,13 @@ export function useCrossRepoActivity(
               ).then((c) => c.conflictingFiles ?? []).catch(() => null)
             : [];
 
-          const prev = snapshotsRef.current.get(w.id) ?? { mergeStatus: null, conflictFiles: null, issueId: w.issueId };
+          // HANDOFF.md poll+delta (#89): the endpoint reports mtime per repo (leading +
+          // siblings). A failed fetch (older server, transient) contributes nothing.
+          const handoff = await apiFetch<WorkspaceHandoffResponse>(
+            `/api/workspaces/${w.id}/handoff`,
+          ).catch(() => null);
+
+          const prev = snapshotsRef.current.get(w.id) ?? { mergeStatus: null, conflictFiles: null, handoff: null, issueId: w.issueId };
           const issue = resolveIssueRef.current?.(w.issueId);
           const ctx = {
             workspaceId: w.id,
@@ -120,9 +130,20 @@ export function useCrossRepoActivity(
           if (conflictFiles !== null) {
             newEntries.push(...reduceConflictsDelta(prev.conflictFiles, conflictFiles, ctx));
           }
+          if (handoff) {
+            // `prev.handoff === null` (workspace never handoff-observed) → pass `undefined`
+            // so the first snapshot is a baseline, not a replay of an existing HANDOFF.md.
+            const prevByRepo = new Map((prev.handoff?.repos ?? []).map((r) => [r.name, r.updatedAt] as const));
+            for (const repoEntry of handoff.repos) {
+              const label = repoEntry.name ?? LEADING_REPO_LABEL;
+              const prevMtime = prev.handoff === null ? undefined : (prevByRepo.get(repoEntry.name) ?? null);
+              newEntries.push(...reduceHandoffDelta(prevMtime, repoEntry, label, ctx));
+            }
+          }
           snapshotsRef.current.set(w.id, {
             mergeStatus,
             conflictFiles: conflictFiles ?? prev.conflictFiles,
+            handoff: handoff ?? prev.handoff,
             issueId: w.issueId,
           });
         }),
