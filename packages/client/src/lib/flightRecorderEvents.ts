@@ -81,6 +81,7 @@ const CROSS_REPO_MAP: Record<
   repo_stranded: { kind: "merge_failure", severity: "warn" },
   conflict_appeared: { kind: "conflict", severity: "error" },
   conflict_cleared: { kind: "conflict", severity: "info" },
+  handoff_updated: { kind: "status_transition", severity: "info" },
 };
 
 /**
