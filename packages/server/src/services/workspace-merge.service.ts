@@ -693,6 +693,33 @@ export function createWorkspaceMergeService(deps: {
     }
   }
 
+  /**
+   * Rebase ONE worktree onto its base for the fix-and-merge preflight. On success the
+   * worktree is left rebased+clean; on conflict the rebase is ABORTED so the worktree
+   * returns to its attached branch HEAD (a detached mid-rebase strands the reconciler
+   * agent — see the block comment below). Returns the per-worktree reconcile state.
+   */
+  async function rebaseOneWorktreeForFixAndMerge(
+    worktree: string,
+    branch: string | null,
+    base: string,
+    label: string,
+    ns?: string,
+  ): Promise<{ label: string; worktree: string; branch: string; base: string; status: "clean" | "needs-merge"; conflictingFiles: string[] }> {
+    const rebaseResult = await gitService.rebaseOntoBase(worktree, base, branch ?? "", { preferLocalBase: true });
+    if (rebaseResult.success) {
+      return { label, worktree, branch: branch ?? "", base, status: "clean", conflictingFiles: [] };
+    }
+    // Rebase conflicted: ABORT it so the worktree returns to its attached branch HEAD. A
+    // detached mid-rebase (UU) worktree strands the reconciler agent — the stale-safety guard
+    // rejects a detached+dirty worktree (STALE_SAFETY_POLICY), the agent emits zero output, and
+    // /resolve-conflicts then refuses to recover the very state this preflight created. Attached,
+    // the agent reconciles via `git merge <base>` and lands through the board's own primitives.
+    const conflictingFiles = (rebaseResult.conflictingFiles ?? []).map((f) => (ns ? `${ns}::${f}` : f));
+    await gitService.abortRebase(worktree).catch(() => { /* best effort */ });
+    return { label, worktree, branch: branch ?? "", base, status: "needs-merge", conflictingFiles };
+  }
+
   async function rebaseWorkspaceForFixAndMerge(
     id: string,
     workspace: typeof workspaces.$inferSelect,
@@ -703,27 +730,55 @@ export function createWorkspaceMergeService(deps: {
     if (synced) {
       console.log(`[workspace-merge] fix-and-merge synced branch ${workspace.branch} to worktree HEAD`);
     }
-    const rebaseResult = await gitService.rebaseOntoBase(workspace.workingDir, baseBranch, workspace.branch, {
-      preferLocalBase: true,
-    });
-    if (rebaseResult.success) {
-      await computeWorkspaceCodeMetrics(id, database).catch(() => null);
-      return `Before launching this fix-and-merge agent, the app rebased the workspace branch onto '${baseBranch}' successfully.`;
+
+    // Multi-repo (#105): fix-and-merge was leading-repo-blind — it rebased ONLY the leading
+    // worktree and the prompt named ONLY "this branch", so for a cross-cutting overlapping
+    // ticket the reconciler resolved the leading repo and reported "ready to land" while every
+    // sibling worktree stayed conflicted against its advanced main → the atomic merge stays
+    // blocked by prevalidateSiblingMerges forever. Rebase the leading worktree AND every sibling
+    // worktree onto its own base (mirroring updateBase's sibling loop), then hand the agent an
+    // explicit per-worktree reconcile checklist.
+    const states = [await rebaseOneWorktreeForFixAndMerge(workspace.workingDir, workspace.branch, baseBranch, "leading repo")];
+    const siblingRows = await listWorkspaceRepos(id, database);
+    for (const repo of siblingRows) {
+      if (!repo.worktreePath || !repo.branch) continue;
+      const ns = repo.name ?? repo.path;
+      const repoBase = requireBaseBranch(repo.baseBranch || baseBranch);
+      await killWorktreeProcesses(repo.worktreePath, `fix-and-merge:sibling-pre:${ns}`);
+      states.push(await rebaseOneWorktreeForFixAndMerge(repo.worktreePath, repo.branch, repoBase, `sibling repo '${ns}'`, ns));
+      await killWorktreeProcesses(repo.worktreePath, `fix-and-merge:sibling-post:${ns}`);
     }
 
-    // Rebase conflicted: ABORT it so the worktree returns to its attached branch HEAD. A
-    // detached mid-rebase (UU) worktree strands the reconciler agent — the stale-safety guard
-    // rejects a detached+dirty worktree (STALE_SAFETY_POLICY), the agent emits zero output, and
-    // /resolve-conflicts then refuses to recover the very state this preflight created. Attached,
-    // the agent reconciles via `git merge <base>` and lands through the board's own primitives.
-    const conflictingFiles = rebaseResult.conflictingFiles ?? [];
-    await gitService.abortRebase(workspace.workingDir).catch(() => { /* best effort */ });
-    return `Before launching this fix-and-merge agent, the app tried to rebase the workspace branch onto '${baseBranch}' ` +
-      "but it conflicted, so the app ABORTED the rebase — the worktree is back on its branch, clean and attached. " +
-      `Reconcile by merging '${baseBranch}' into this branch ('git merge ${baseBranch}'), resolve to keep BOTH sides' ` +
-      "intent, then land via the board's merge — do NOT continue a rebase." +
-      (conflictingFiles.length > 0 ? ` Files that conflicted on rebase: ${conflictingFiles.join(", ")}.` : "") +
-      (rebaseResult.error ? ` Rebase error: ${rebaseResult.error}` : "");
+    await computeWorkspaceCodeMetrics(id, database).catch(() => null);
+
+    const needing = states.filter((s) => s.status === "needs-merge");
+    if (needing.length === 0) {
+      const scope = states.length > 1 ? `the workspace branch and all ${states.length - 1} sibling repo(s)` : "the workspace branch";
+      return `Before launching this fix-and-merge agent, the app rebased ${scope} onto '${baseBranch}' successfully — no conflicts. The worktree(s) are clean and attached, ready for the board's merge.`;
+    }
+
+    if (states.length === 1) {
+      // Single-repo project: keep the original focused instruction.
+      const only = needing[0];
+      return `Before launching this fix-and-merge agent, the app tried to rebase the workspace branch onto '${baseBranch}' ` +
+        "but it conflicted, so the app ABORTED the rebase — the worktree is back on its branch, clean and attached. " +
+        `Reconcile by merging '${baseBranch}' into this branch ('git merge ${baseBranch}'), resolve to keep BOTH sides' ` +
+        "intent, then land via the board's merge — do NOT continue a rebase." +
+        (only.conflictingFiles.length > 0 ? ` Files that conflicted on rebase: ${only.conflictingFiles.join(", ")}.` : "");
+    }
+
+    // Multi-repo: enumerate EVERY worktree that still needs reconciling so the agent cannot
+    // stop after the leading repo.
+    const lines = needing.map((s) => {
+      const files = s.conflictingFiles.length > 0 ? ` — files that conflicted on rebase: ${s.conflictingFiles.join(", ")}` : "";
+      return `  - ${s.label}: cd "${s.worktree}", run 'git merge ${s.base}', resolve conflicts, remove all conflict markers, verify syntax, commit${files}`;
+    });
+    return `Before launching this fix-and-merge agent, the app tried to rebase each repo's worktree onto its base, ` +
+      `but ${needing.length} of ${states.length} repo worktree(s) CONFLICTED. Those rebases were ABORTED, so every worktree is ` +
+      "back on its branch, clean and ATTACHED. THIS IS A MULTI-REPO WORKSPACE: you MUST reconcile EACH worktree listed below " +
+      "SEPARATELY — do NOT stop after the first repo and do NOT continue a rebase. In each one, merge its base into its branch, " +
+      "resolve to keep BOTH sides' intent, and commit. The board's atomic multi-repo merge stays BLOCKED until every listed " +
+      `worktree is reconciled.\n\nWorktrees needing reconciliation:\n${lines.join("\n")}`;
   }
 
   /**
