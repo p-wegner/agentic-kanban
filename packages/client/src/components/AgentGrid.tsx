@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { getBoardDragData } from "../lib/dragData.js";
+import { openSessionTranscript } from "../lib/sessionTranscriptEvents.js";
 import {
   STARTABLE_STATUS_NAMES,
   MAX_HISTORY,
@@ -188,6 +189,15 @@ function FeaturedCard({ issue, activityHistory, liveStats, todos, attention, onI
           </button>
         </div>
         <button
+          onClick={() => openSessionTranscript({ workspaceId: ws.id, title: `#${issue.issueNumber} ${issue.title}` })}
+          className="shrink-0 p-1 rounded text-gray-400 dark:text-gray-500 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-950 transition-colors"
+          title="Open full transcript"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path d="M4 6h16M4 12h16M4 18h10" />
+          </svg>
+        </button>
+        <button
           onClick={() => onWorkspaceClick(issue, ws.id)}
           className="shrink-0 p-1 rounded text-gray-400 dark:text-gray-500 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-950 transition-colors"
           title="Open workspace"
@@ -297,6 +307,15 @@ function CompactCard({ issue, currentActivity, liveStats, todos, onIssueClick, o
           </div>
           <p className="text-xs font-semibold text-gray-800 dark:text-gray-200 line-clamp-1 leading-snug">{issue.title}</p>
         </div>
+        <button
+          onClick={(e) => { e.stopPropagation(); openSessionTranscript({ workspaceId: ws.id, title: `#${issue.issueNumber} ${issue.title}` }); }}
+          className="shrink-0 p-0.5 rounded text-gray-300 dark:text-gray-600 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-950 transition-colors"
+          title="Open full transcript"
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path d="M4 6h16M4 12h16M4 18h10" />
+          </svg>
+        </button>
         <button
           onClick={(e) => { e.stopPropagation(); onWorkspaceClick(issue, ws.id); }}
           className="shrink-0 p-0.5 rounded text-gray-300 dark:text-gray-600 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-950 transition-colors"
