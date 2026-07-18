@@ -2,6 +2,7 @@ import type { Database } from "../db/index.js";
 import { NotFoundError } from "../errors/index.js";
 import { getChangedFileNames } from "./git.service.js";
 import { getProjectDefaultBranch, getActiveContentionWorkspaces } from "../repositories/file-contention.repository.js";
+import { listWorkspaceRepos } from "../repositories/repo.repository.js";
 
 export interface ContentionWorkspace {
   workspaceId: string;
@@ -56,6 +57,27 @@ export async function getFileContention(
       files = await getChangedFileNames(row.workingDir, diffRef);
     } catch {
       return;
+    }
+
+    // Multi-repo (#77): also count each SIBLING repo's changed files, namespaced `name::file`
+    // so overlap only matches within the SAME repo — mirrors merge-queue's #72 scan. Without
+    // this, two workspaces that both edit the same file in a sibling repo look non-contending
+    // (their leading worktrees may not collide) and the collision only surfaces at merge time.
+    // Best-effort per repo: a sibling that can't be scanned just contributes no files.
+    if (!row.isDirect) {
+      try {
+        const siblings = await listWorkspaceRepos(row.workspaceId, database);
+        for (const repo of siblings) {
+          if (!repo.worktreePath) continue;
+          const repoBase = repo.baseBranch || baseBranch;
+          if (!repoBase) continue;
+          const ns = repo.name ?? repo.path;
+          try {
+            const siblingFiles = await getChangedFileNames(repo.worktreePath, repoBase);
+            for (const f of siblingFiles) files.push(`${ns}::${f}`);
+          } catch { /* best effort per repo */ }
+        }
+      } catch { /* leading-only if the sibling scan fails */ }
     }
 
     const ws: ContentionWorkspace = {
