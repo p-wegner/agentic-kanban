@@ -24,6 +24,10 @@ interface DecomposeProposal {
   alreadyDecomposed: boolean;
   /** Repos this project spans; empty for single-repo projects (dropdown hidden). */
   repos: string[];
+  /** #116: the epic is already single-session-sized and shouldn't be split. */
+  tooSmallToDecompose?: boolean;
+  /** #116: tempIds of test-only children folded back into their implementation sibling. */
+  coalescedTestOnly?: string[];
 }
 
 interface EpicDecomposerModalProps {
@@ -173,6 +177,18 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
 
           {(stage === "preview" || stage === "confirming") && (
             <>
+              {proposal?.tooSmallToDecompose && (
+                <div className="bg-sky-50 border border-sky-200 rounded-md px-3 py-2 text-xs text-sky-800">
+                  ✓ This ticket already looks right-sized for a single agent session — splitting it would add
+                  worktree/orientation overhead for little benefit. You can proceed if you disagree, but consider leaving it as one ticket.
+                </div>
+              )}
+              {proposal?.coalescedTestOnly && proposal.coalescedTestOnly.length > 0 && (
+                <div className="bg-sky-50 border border-sky-200 rounded-md px-3 py-2 text-xs text-sky-800">
+                  Merged {proposal.coalescedTestOnly.length} test-only sub-task{proposal.coalescedTestOnly.length > 1 ? "s" : ""} back
+                  into the implementation ticket{proposal.coalescedTestOnly.length > 1 ? "s" : ""} — tests ship in the same vertical slice as their code.
+                </div>
+              )}
               {proposal?.alreadyDecomposed && (
                 <div className="bg-amber-50 border border-amber-200 rounded-md px-3 py-2 text-xs text-amber-800">
                   ⚠ This epic was previously decomposed. These will be additional children.
