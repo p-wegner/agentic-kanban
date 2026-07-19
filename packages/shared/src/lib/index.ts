@@ -14,6 +14,8 @@ export * from "./settings-registry.js";
 export * from "./sanitize-utf8.js";
 // Pure string helpers (no Node builtins) — safe as value exports for the client bundle.
 export * from "./service-ports.js";
+// Canonical per-stack verify command (#124) — pure string logic, no Node builtins.
+export * from "./verify-command.js";
 // Pure text linter for sibling compose relative-path resolution (dev #109) — no Node
 // builtins, safe as a value export for the client bundle.
 export * from "./service-compose-lint.js";

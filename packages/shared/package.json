@@ -41,6 +41,7 @@
     "./lib/workspace-activity-state.js": { "development": "./src/lib/workspace-activity-state.ts", "types": "./dist/lib/workspace-activity-state.d.ts", "import": "./dist/lib/workspace-activity-state.js", "default": "./src/lib/workspace-activity-state.ts" },
     "./lib/setup-script": { "development": "./src/lib/setup-script.ts", "types": "./dist/lib/setup-script.d.ts", "import": "./dist/lib/setup-script.js", "default": "./src/lib/setup-script.ts" },
     "./lib/ticket-context": { "development": "./src/lib/ticket-context.ts", "types": "./dist/lib/ticket-context.d.ts", "import": "./dist/lib/ticket-context.js", "default": "./src/lib/ticket-context.ts" },
+    "./lib/verify-command": { "development": "./src/lib/verify-command.ts", "types": "./dist/lib/verify-command.d.ts", "import": "./dist/lib/verify-command.js", "default": "./src/lib/verify-command.ts" },
     "./lib/cron-utils": { "development": "./src/lib/cron-utils.ts", "types": "./dist/lib/cron-utils.d.ts", "import": "./dist/lib/cron-utils.js", "default": "./src/lib/cron-utils.ts" },
     "./lib/worktree-symlink-bootstrap": { "development": "./src/lib/worktree-symlink-bootstrap.ts", "types": "./dist/lib/worktree-symlink-bootstrap.d.ts", "import": "./dist/lib/worktree-symlink-bootstrap.js", "default": "./src/lib/worktree-symlink-bootstrap.ts" },
     "./lib/workflow-engine": { "development": "./src/lib/workflow-engine.ts", "types": "./dist/lib/workflow-engine.d.ts", "import": "./dist/lib/workflow-engine.js", "default": "./src/lib/workflow-engine.ts" },
