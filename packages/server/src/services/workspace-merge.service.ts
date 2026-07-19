@@ -27,6 +27,7 @@ import {
   buildFixAndMergePrompt,
 } from "./merge-helpers.service.js";
 import { toExecutorProvider } from "./agent-settings.service.js";
+import { buildConflictContext } from "./phase-context.service.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 import {
@@ -606,7 +607,8 @@ export function createWorkspaceMergeService(deps: {
     const conflictingFiles = await getConflictingFiles(refreshedWorkspace.workingDir);
     const { defaultBranch } = await resolveProjectRepo(id, database);
     const baseBranch = requireBaseBranch(refreshedWorkspace.baseBranch || defaultBranch);
-    const prompt = buildConflictResolutionPrompt(conflictingFiles, baseBranch);
+    const conflictContext = await buildConflictContext(refreshedWorkspace.workingDir, conflictingFiles);
+    const prompt = buildConflictResolutionPrompt(conflictingFiles, baseBranch, conflictContext);
 
     const resolverProjectId = await resolveProjectId(id, database);
     const { agentCommand, agentArgs, claudeProfile, profile, provider } =
