@@ -1,6 +1,7 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { StackProfile } from "../types/api.js";
+import { deriveVerifyCommandPlan } from "./verify-command.js";
 
 export type TicketContext = {
   issueNumber?: number | null;
@@ -82,6 +83,33 @@ export function buildStackProfileSection(profile: StackProfile | null | undefine
   }
   if (profile.isWeb && profile.devHealthUrl) {
     lines.push(`- **Dev health URL:** ${profile.devHealthUrl}`);
+  }
+
+  // The canonical verify command + its running rules (#124). This is the command the merge
+  // gate will run against this branch, so the builder must be told it verbatim — and told
+  // how to run it, since the stack-specific traps (PowerShell native-stderr, raw XML reports)
+  // are what turned the jvm-gradle cohort into the fleet's re-run outlier.
+  const verify = deriveVerifyCommandPlan(profile);
+  if (verify) {
+    lines.push(
+      "",
+      "### Verify (the merge gate)",
+      "",
+      "Before you finish, run this EXACT command. It is the same command the board runs as",
+      "the merge gate, so a green run here is what lets your work merge. Use it as-is —",
+      "do not hand-roll your own build/test invocation, and do not add flags or pipes.",
+      "",
+      "```",
+      verify.command,
+      "```",
+      "",
+    );
+    for (const rule of verify.rules) {
+      lines.push(`- ${rule}`);
+    }
+    if (verify.onFailure) {
+      lines.push(`- **When it fails:** ${verify.onFailure}`);
+    }
   }
   return lines.join("\n");
 }
