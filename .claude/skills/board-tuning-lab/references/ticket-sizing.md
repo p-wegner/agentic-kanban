@@ -71,3 +71,33 @@ better re-measured exploration ratio on the re-sized backlog.
 This is the most *empirical* dimension — the "sweet spot" is a measured curve, not
 a rule. Record the actual numbers per carving in the round's memory note so the
 next round refines the curve instead of re-running the A/B/C from scratch.
+
+## Round-1 gotchas (2026-07-19 — see [[ticket-sizing-lab-round1]])
+
+- **Parallel carvings = separate PROJECTS.** Clone ONE fixture into 3 sibling projects
+  (`tsz-coarse/medium/fine`), each with its own repos, so the carvings drive
+  concurrently without worktree/branch collision. Drove all three, sonnet builders.
+- **The splitter is `decomposeEpic`, not just the enhancer.** `POST /api/issues/:id/
+  decompose` returns a PROPOSAL (children + deps + a multi-repo `repos` field) without
+  mutating — safe to probe on live tickets. `enhanceIssue` only polishes (fine on
+  atomic tickets); the gap was decompose over-fragmenting. Fix locus was the decompose
+  prompt + a new pure guard `decompose-sizing.ts`.
+- **The cheap probe finds the gap before the expensive drive.** Decomposing the atomic
+  negative control (route → "add route" + "add test for route") surfaced the whole
+  finding for ~2 AI calls; the A/B/C drive only *quantified* why it matters (fine ≈
+  3-5x tokens). Do the enhancer/splitter probe FIRST, then drive.
+- **Measure from raw transcripts, not the board.** The sessions/search API needs message
+  content (returns 0 by name); `GET /api/sessions/:id/summary` needs session ids you
+  can't easily enumerate. Ground truth = `~/.claude/projects/<encoded-worktree-path>/
+  *.jsonl` (glob with a REAL `C:/Users/...` path — the bash `/c/...` form fails Python
+  glob). Classify tool_use: Read/Grep/Glob = explore, Edit/Write + test/commit Bash =
+  impl; sum `usage` for tokens. Output tokens (billed, no cache inflation) is the honest
+  metric; total incl. `cache_read_input_tokens` balloons but is consistent across
+  carvings so the RATIO holds.
+- **Never burst-launch workspaces.** ~10 concurrent multirepo `POST /api/workspaces`
+  crashed the whole `pnpm dev` stack twice (vite ws-proxy → client exit → recursive-run
+  fail → backend down; filed dev #117). Launch in batches of ~3, health-check between.
+- **The DB safety guard blocks ANY command naming `kanban.db`** — even a read-only
+  `better-sqlite3` open. Use the REST API for session/board data, never direct DB reads.
+- **Don't tag `no-auto-start` for the negative control** — issue tags need a pre-existing
+  `tagId`, and with `auto_monitor` off nothing auto-starts anyway; just don't drive it.
