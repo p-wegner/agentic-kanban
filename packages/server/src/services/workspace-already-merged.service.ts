@@ -8,7 +8,7 @@ import {
 import { getIssueNumberById } from "../repositories/workspace-merge.repository.js";
 import { listWorkspaceRepos } from "../repositories/repo.repository.js";
 import { workspaceServicesService, parseStoredComposeProjectName } from "./workspace-services.service.js";
-import { cleanupSiblingWorktrees, stampReconciledSiblingMerges } from "./workspace-repos.service.js";
+import { cleanupSiblingWorktrees, stampReconciledSiblingMerges, stampReconciledLeadingMerge } from "./workspace-repos.service.js";
 import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
 import {
   WorkspaceError,
@@ -240,6 +240,20 @@ export async function reconcileAlreadyMerged(
     }
   } catch (err) {
     console.warn(`[workspace-merge] reconcile-as-done: sibling stamp failed (non-fatal) for workspace ${id}:`, err instanceof Error ? err.message : String(err));
+  }
+
+  // Multi-repo (#115): the mirror of the sibling stamp above. The reconciler agent hand-merged the
+  // LEADING branch into base too, and closeWorkspace stamped `mergedAt` but never `mergedHeadSha`.
+  // Record the landed leading tip NOW — before the branch is cleaned up — so getRepoMergeStatus (#75)
+  // reads the leading repo as merged instead of falsely `hasWork:false / merged:false`. No-op for a
+  // sibling-only ticket (0 leading historic commits) and for the clean auto-merge path (already stamped).
+  try {
+    const stampedLeading = await stampReconciledLeadingMerge({ gitService, database, workspaceId: id, now });
+    if (stampedLeading) {
+      console.log(`[workspace-merge] reconcile-as-done: stamped leading repo mergedHeadSha for workspace ${id}`);
+    }
+  } catch (err) {
+    console.warn(`[workspace-merge] reconcile-as-done: leading stamp failed (non-fatal) for workspace ${id}:`, err instanceof Error ? err.message : String(err));
   }
 
   // Multi-repo: drop the sibling worktrees + branches too (no-op single-repo) —
