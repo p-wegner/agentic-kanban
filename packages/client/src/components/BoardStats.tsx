@@ -8,6 +8,7 @@ interface BoardStatsProps {
   activeColumns: StatusWithIssues[];
   archiveColumns: StatusWithIssues[];
   projectId?: string;
+  backlogColumn?: StatusWithIssues;
 }
 
 const STATUS_CONFIG: Record<string, { bar: string; dot: string; text: string; bg: string }> = {
@@ -33,6 +34,7 @@ export function BoardStats({
   activeColumns,
   archiveColumns,
   projectId,
+  backlogColumn,
 }: BoardStatsProps) {
   // Filter slice (#958): subscribe to the store instead of a threaded prop.
   const isFiltered = useBoardFilterStore((s) => !!s.searchQuery);
@@ -242,6 +244,20 @@ export function BoardStats({
           </div>
         )}
       </div>
+
+      {/* Backlog count — always-visible at-a-glance count, same pill shape as
+          the "active" agents indicator below (#118). */}
+      {backlogColumn && (
+        <div
+          data-testid="backlog-count-badge"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+          title={`${backlogColumn.count} in Backlog`}
+        >
+          <span className="w-2 h-2 rounded-full bg-slate-400 dark:bg-slate-500" />
+          <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">{backlogColumn.count}</span>
+          <span className="text-xs text-slate-600 dark:text-slate-400">Backlog</span>
+        </div>
+      )}
 
       {/* Active agents — live, changing signal stays on the pulse line */}
       {activeWorkspaces > 0 && (
