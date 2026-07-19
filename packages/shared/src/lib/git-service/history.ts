@@ -72,6 +72,34 @@ export async function getCommitSummariesBetween(
   }
 }
 
+/**
+ * List the subject line of each MERGE commit reachable from `ref`, newest first
+ * (`git log --merges --format=%s`). Used by the hand-merged-branch reconciler (#113)
+ * to recover which `feature/ak-<N>` branches were landed by a manual `--no-ff` merge
+ * (no board workspace), so the linked issue can be auto-transitioned to Done.
+ *
+ * Bounded by `maxCount` (default 1000) so an ancient repo doesn't scan unboundedly.
+ * Returns [] on any git error (unknown ref, not a repo) so callers degrade gracefully.
+ */
+export async function getMergeCommitSubjects(
+  repoPath: string,
+  ref: string,
+  maxCount = 1000,
+): Promise<string[]> {
+  try {
+    const output = await execGit(
+      ["log", "--merges", "--format=%s", `--max-count=${maxCount}`, ref],
+      repoPath,
+    );
+    return output
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 /** A single commit's metadata as surfaced for a merged issue. */
 export interface CommitInfo {
   /** Full 40-char SHA. */
@@ -212,4 +240,4 @@ export async function countUniqueCommits(repoPath: string, baseSha: string, bran
 export async function countBehindCommits(repoPath: string, featureBranch: string, baseBranch: string): Promise<number> {
   const out = await execGit(["rev-list", "--count", `${featureBranch}..${baseBranch}`], repoPath);
   return parseInt(out.trim(), 10) || 0;
-}
+}
