@@ -11,6 +11,7 @@ import type { Database } from "../db/index.js";
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { reconcileAncestorBranchWorkspaces } from "./ancestor-branch-reconciler.js";
+import { reconcileHandMergedBranches } from "./hand-merged-branch-reconciler.js";
 import { scanDoneUnmergedWorkspaces } from "./done-unmerged-invariant-scanner.js";
 import { reapTerminalWorkspaces } from "./terminal-workspace-reaper.js";
 import { finalizeMergeCleanup, reconcileMergedIssue } from "../services/merge-cleanup.service.js";
@@ -536,6 +537,15 @@ export async function runStartupTasks(sessionManager: SessionManager, _deps?: { 
     await reconcileAncestorBranchWorkspaces();
   } catch (err) {
     console.warn("[startup] reconcileAncestorBranchWorkspaces failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
+  try {
+    // #113: hand-merged `feature/ak-<N>` branches (dev fixes landed WITHOUT a board
+    // workspace) have no workspace row to key off, so the linked issue #N never
+    // auto-transitions. Scan each project's default-branch merge history and converge
+    // still-open matching issues to Done. Idempotent; skips Backlog/terminal issues.
+    await reconcileHandMergedBranches();
+  } catch (err) {
+    console.warn("[startup] reconcileHandMergedBranches failed (non-fatal):", err instanceof Error ? err.message : String(err));
   }
   try {
     await scanDoneUnmergedWorkspaces({ reopenToInReview: false });
