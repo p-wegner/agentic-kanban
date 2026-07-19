@@ -10,12 +10,18 @@ export function runSetupScript(worktreePath: string, script: string): Promise<Se
   return new Promise((resolve, reject) => {
     const isWindows = process.platform === "win32";
     const shell = isWindows ? "cmd.exe" : "/bin/sh";
-    const shellArgs = isWindows ? ["/c", script] : ["-c", script];
+    // On Windows, pass the command to cmd.exe VERBATIM. With the default
+    // windowsVerbatimArguments:false, Node re-quotes/escapes the single `script`
+    // arg and corrupts embedded double-quotes before cmd.exe sees them, so a
+    // legitimately-quoted setupScript (e.g. `node -e "..."`) silently no-ops (#111).
+    // The `/d /s /c` + verbatim form matches process-exec.ts `shellCommandSpec`.
+    const shellArgs = isWindows ? ["/d", "/s", "/c", script] : ["-c", script];
 
     const proc = spawn(shell, shellArgs, {
       cwd: worktreePath,
       env: { ...process.env },
       windowsHide: true,
+      windowsVerbatimArguments: isWindows,
       stdio: ["pipe", "pipe", "pipe"],
     });
 
