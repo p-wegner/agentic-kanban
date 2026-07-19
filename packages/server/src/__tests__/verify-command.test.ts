@@ -128,6 +128,35 @@ describe("deriveVerifyCommandPlan (#124)", () => {
     expect(plan.command).toBe("./gradlew test --console=plain && ./sub/gradlew build --console=plain");
   });
 
+  it("never merges a build that SKIPS tests — the merged run would verify nothing", () => {
+    // `-DskipTests` / `-x test` are run-global, not goal-scoped: merged into the test
+    // invocation they disable the very tests the gate exists to run, and it still exits 0.
+    const maven = deriveVerifyCommandPlan(
+      makeProfile({ stack: "java", packageManager: "maven", testRunner: "maven", testCommand: "mvn test", buildCommand: "mvn package -DskipTests" }),
+    )!;
+    expect(maven.command).toBe("mvn test -B && mvn package -DskipTests -B");
+
+    const gradle = deriveVerifyCommandPlan(
+      makeProfile({ stack: "java", packageManager: "gradle", testRunner: "gradle", testCommand: "./gradlew test", buildCommand: "./gradlew build -x test" }),
+    )!;
+    expect(gradle.command).toBe("./gradlew test --console=plain && ./gradlew build -x test --console=plain");
+  });
+
+  it("never merges option flags that carry a value — dedup would strand one of them", () => {
+    const plan = deriveVerifyCommandPlan(
+      makeProfile({ stack: "java", packageManager: "maven", testRunner: "maven", testCommand: "mvn test -pl core", buildCommand: "mvn package -pl web" }),
+    )!;
+    // Merging would yield `mvn test package -pl core web` — a malformed invocation.
+    expect(plan.command).toBe("mvn test -pl core -B && mvn package -pl web -B");
+  });
+
+  it("still merges when both invocations are bare task lists", () => {
+    const plan = deriveVerifyCommandPlan(
+      makeProfile({ stack: "java", packageManager: "gradle", testRunner: "gradle", testCommand: "./gradlew allTests", buildCommand: "./gradlew build" }),
+    )!;
+    expect(plan.command).toBe("./gradlew allTests build --console=plain");
+  });
+
   it("joins different runners with && rather than merging their args", () => {
     const plan = deriveVerifyCommandPlan(
       makeProfile({ stack: "other", packageManager: "make", testRunner: null, testCommand: "make test", buildCommand: "cmake --build ." }),

@@ -91,6 +91,21 @@ function mergeTaskRunner(test: string | null, build: string | null): string | nu
   const testParts = test.trim().split(/\s+/);
   const buildParts = build.trim().split(/\s+/);
   if (testParts[0] !== buildParts[0]) return `${test} && ${build}`;
+  // Merging is a SET union — it drops duplicates and loses each token's original ordering
+  // relative to its own invocation. That is only sound for BARE task/goal names. An option
+  // token makes it unsound in two ways, both of which silently corrupt the merge gate:
+  //   - it is run-global, not task-scoped, so `mvn package -DskipTests` merged with `mvn test`
+  //     yields `mvn test package -DskipTests` — the gate runs ZERO tests and still exits 0.
+  //     Same for gradle's `build -x test`. A green gate that verified nothing is worse than
+  //     two invocations. (Detection can emit these: buildCommand may come from the LLM
+  //     fallback in stack-profile/persistence.ts or from a hand-edit in Project Settings.)
+  //   - an option that takes a separate value (`-pl core` vs `-pl web`, `-p api` vs `-p web`)
+  //     de-dupes its flag and strands both values — a malformed command.
+  // So: merge only when every token after argv[0] is a bare task name; otherwise chain.
+  const isBareTask = (token: string) => !token.startsWith("-");
+  if (![...testParts.slice(1), ...buildParts.slice(1)].every(isBareTask)) {
+    return `${test} && ${build}`;
+  }
   const tasks = [...testParts.slice(1), ...buildParts.slice(1)].filter(
     (task, i, all) => all.indexOf(task) === i,
   );
