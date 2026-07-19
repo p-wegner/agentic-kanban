@@ -333,6 +333,7 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
             activeColumns={activeColumns}
             archiveColumns={archiveColumns}
             projectId={activeProjectId}
+            backlogColumn={backlogColumn}
           />
         )}
         {viewMode !== "butler" && (
