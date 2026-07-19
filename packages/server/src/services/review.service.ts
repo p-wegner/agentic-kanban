@@ -20,14 +20,14 @@ import type { SessionManager } from "./session.manager.js";
 import * as gitService from "./git.service.js";
 import { MOCK_AGENT_COMMAND, isMockProfile, toExecutorProvider } from "./agent-settings.service.js";
 import { loadProjectRuntimeConfig } from "./project-runtime-config.service.js";
+import { buildReviewContext } from "./phase-context.service.js";
 
 export const DEFAULT_MONITOR_NUDGE_PROMPT =
   "Please continue with the task. If you are waiting for input or unsure how to proceed, use your best judgment and keep moving forward. Check the issue description and any open questions, then take the next logical step.";
 
 export const DEFAULT_REVIEW_PROMPT = `You are an AI code reviewer. Review the changes on branch '{{branch}}'.
 
-First, run 'git diff --stat {{baseBranch}}' to see an overview of changed files.
-Then review each file individually with 'git diff {{baseBranch}} -- <filepath>' — do NOT dump the entire diff at once.
+{{precomputedContext}}
 
 Review for: correctness bugs, security vulnerabilities, logic errors, and missing error handling.
 Classify each issue as CRITICAL (must fix — bugs, security, data loss), MAJOR (should fix — broken edge cases, poor error handling), or MINOR (nice to have — style, naming).
@@ -38,6 +38,14 @@ Do NOT move the issue to 'AI Reviewed' yourself — the system handles that on m
 
 Issue ID: {{issueId}}
 Workspace ID: {{workspaceId}}`;
+
+/**
+ * What `{{precomputedContext}}` collapses to when the board could NOT pre-compute a
+ * diff (no worktree, git failure, direct workspace with no base). The agent then
+ * discovers the change itself — the pre-#128 behaviour.
+ */
+export const REVIEW_CONTEXT_FALLBACK = `First, run 'git diff --stat {{baseBranch}}' to see an overview of changed files.
+Then review each file individually with 'git diff {{baseBranch}} -- <filepath>' — do NOT dump the entire diff at once.`;
 
 export function buildReviewArgs(prefMap: Map<string, string>, provider: ProviderName): string | undefined {
   const skipPerms = getBool(prefMap, "skip_permissions") && provider === "claude";
@@ -91,6 +99,7 @@ export async function buildReviewPrompt(
   workspaceId?: string,
   skillName = "code-review",
   verifyAgent?: string,
+  precomputedContext?: string | null,
 ): Promise<{ prompt: string; model: string | null }> {
   let template: string | null = null;
   let skillModel: string | null = null;
@@ -176,7 +185,19 @@ Steps to resolve:
     ? `\`workspaceId: "${workspaceId}"\``
     : `\`issueId: "${issueId}"\``;
 
-  let prompt = conflictPreamble + template
+  // A project-scoped skill may not carry the {{precomputedContext}} placeholder. Rather
+  // than force every custom template to be rewritten, prepend the block in that case so
+  // the reviewer still gets the diff instead of cold-rebuilding it (#128).
+  const contextBlock = precomputedContext?.trim() || REVIEW_CONTEXT_FALLBACK;
+  const hasContextPlaceholder = /\{\{precomputedContext}}/.test(template);
+  const contextPrefix = hasContextPlaceholder || !precomputedContext?.trim()
+    ? ""
+    : `${precomputedContext.trim()}\n\n---\n\n`;
+
+  // The context block is substituted LAST and its own text is never re-scanned:
+  // a diff can legitimately contain literal `{{baseBranch}}`-style text (this file
+  // does), and expanding placeholders inside reviewed source would corrupt it.
+  const rendered = template
     .replace(/\{\{branch}}/g, branch)
     .replace(/\{\{baseBranch}}/g, baseBranch ?? "HEAD")
     .replace(/\{\{issueId}}/g, issueId)
@@ -184,6 +205,13 @@ Steps to resolve:
     .replace(/\{\{serverPort}}/g, serverPort)
     .replace(/\{\{clientPort}}/g, clientPort)
     .replace(/\{\{autoFixInstructions}}/g, autoFixInstructions);
+  // Only the fallback text carries a placeholder; a real diff must be passed through verbatim.
+  const renderedContext = precomputedContext?.trim()
+    ? contextBlock
+    : contextBlock.replace(/\{\{baseBranch}}/g, baseBranch ?? "HEAD");
+
+  let prompt = conflictPreamble + contextPrefix + rendered
+    .replace(/\{\{precomputedContext}}/g, () => renderedContext);
 
   if (verifyAgent === "reviewer") {
     prompt += `
@@ -423,9 +451,14 @@ export async function startManualReview(
 
     const manualSkillName = thoroughReview ? "code-review-thorough" : "code-review";
     const verifyAgent = prefMap.get("after_merge_verify_agent") || "none";
+    // Same pre-computed context the auto-review path gets (#128) — a manual review is
+    // just as cold a start. Reaching here means the rebase preflight succeeded.
+    const manualContext = workspace.workingDir && diffRef
+      ? await buildReviewContext({ workingDir: workspace.workingDir, baseRef: diffRef })
+      : null;
     const { prompt: reviewPromptText, model: reviewModel } = await buildReviewPrompt(
       database, workspace.branch, diffRef, issueId, autoFix, projectId,
-      undefined, undefined, workspaceId, manualSkillName, verifyAgent,
+      undefined, undefined, workspaceId, manualSkillName, verifyAgent, manualContext,
     );
     const runtimeModel = runtime?.provider.model;
     const reviewArgsWithModel = reviewModel && provider === "claude" ? `${reviewArgs ?? ""} --model ${reviewModel}`.trim() : reviewArgs;

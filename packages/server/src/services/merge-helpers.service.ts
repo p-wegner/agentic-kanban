@@ -86,11 +86,18 @@ Steps:
 Base branch: ${baseBranch}`;
 }
 
-export function buildConflictResolutionPrompt(conflictingFiles: string[], baseBranch: string): string {
+export function buildConflictResolutionPrompt(
+  conflictingFiles: string[],
+  baseBranch: string,
+  /** Pre-extracted conflict hunks (#128) — saves the reconciler a cold hunt through the tree. */
+  conflictContext?: string | null,
+): string {
+  const contextBlock = conflictContext?.trim() ? `\n${conflictContext.trim()}\n` : "";
   return `Resolve the merge/rebase conflicts in this workspace.
 
 Conflicting files:
 ${conflictingFiles.map(f => `- ${f}`).join("\n")}
+${contextBlock}
 
 For each conflicting file:
 1. Read the file and examine the conflict markers (<<<<<<<, =======, >>>>>>>)

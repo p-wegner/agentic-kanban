@@ -28,8 +28,9 @@ export async function buildReviewPrompt(
   workspaceId?: string,
   skillName = "code-review",
   verifyAgent?: string,
+  precomputedContext?: string | null,
 ): Promise<{ prompt: string; model: string | null }> {
-  return _buildReviewPrompt(db, branch, baseBranch, issueId, autoFix, projectId, conflictingFiles, uncommittedChanges, workspaceId, skillName, verifyAgent);
+  return _buildReviewPrompt(db, branch, baseBranch, issueId, autoFix, projectId, conflictingFiles, uncommittedChanges, workspaceId, skillName, verifyAgent, precomputedContext);
 }
 
 export async function buildMonitorNudgePrompt(projectId: string): Promise<string> {
