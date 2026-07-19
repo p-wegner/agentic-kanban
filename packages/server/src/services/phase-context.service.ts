@@ -34,6 +34,14 @@ export interface ReviewContextInput {
   workingDir: string;
   /** Ref the diff is taken against (branch name for worktrees, base sha for direct workspaces). */
   baseRef: string;
+  /**
+   * Direct workspaces have no worktree and no feature branch — their change is the
+   * UNCOMMITTED working tree. A three-dot `<base>...HEAD` diff there is empty (HEAD is
+   * the base), so the whole change would be silently invisible. Follow the convention
+   * the rest of the server uses (`workspace-diff.service.ts`, `workspace-scorecard.service.ts`)
+   * and compare against HEAD instead.
+   */
+  isDirect?: boolean | null;
   maxDiffChars?: number;
 }
 
@@ -80,15 +88,19 @@ function formatFileLine(file: string, stat: FileStat | undefined): string {
  * emits the legacy prompt that tells the agent to run the diffs itself.
  */
 export async function buildReviewContext(input: ReviewContextInput): Promise<string | null> {
-  const { workingDir, baseRef } = input;
+  const { workingDir, baseRef, isDirect } = input;
   const maxDiffChars = input.maxDiffChars ?? MAX_REVIEW_DIFF_CHARS;
   if (!workingDir || !baseRef) return null;
 
+  // Direct workspaces diff the working tree against HEAD; everything else is a
+  // committed feature branch diffed three-dot against its base.
+  const diffRef = isDirect ? "HEAD" : baseRef;
+
   try {
-    const changedFiles = await gitService.getChangedFileNames(workingDir, baseRef);
+    const changedFiles = await gitService.getChangedFileNames(workingDir, diffRef);
     if (changedFiles.length === 0) return null;
 
-    const stats = await getNumstat(workingDir, baseRef);
+    const stats = await getNumstat(workingDir, diffRef);
     let totalAdded = 0;
     let totalDeleted = 0;
     for (const s of stats.values()) {
@@ -102,21 +114,23 @@ export async function buildReviewContext(input: ReviewContextInput): Promise<str
     );
     lines.push("");
     lines.push(
-      `Changed files vs ${baseRef} (${changedFiles.length} file${changedFiles.length === 1 ? "" : "s"}, +${totalAdded}/-${totalDeleted}):`,
+      `Changed files vs ${diffRef} (${changedFiles.length} file${changedFiles.length === 1 ? "" : "s"}, +${totalAdded}/-${totalDeleted}):`,
     );
     for (const f of changedFiles.slice().sort()) lines.push(formatFileLine(f, stats.get(f)));
     lines.push("");
 
-    const diff = await gitService.getDiff(workingDir, baseRef);
+    const diff = isDirect
+      ? await gitService.getWorkingTreeDiff(workingDir)
+      : await gitService.getDiff(workingDir, diffRef);
     if (!diff.trim()) {
       // File list without a diff body is still worth passing (e.g. mode-only changes).
-      lines.push(`(git produced no diff body for these files — inspect them with \`git diff ${baseRef} -- <file>\`.)`);
+      lines.push(`(git produced no diff body for these files — inspect them with \`git diff ${diffRef} -- <file>\`.)`);
     } else if (diff.length > maxDiffChars) {
       lines.push(
-        `Full diff omitted: ${diff.length} chars exceeds the ${maxDiffChars}-char inline budget. Review file-by-file with \`git diff ${baseRef} -- <filepath>\` using the list above — do NOT dump the whole diff at once.`,
+        `Full diff omitted: ${diff.length} chars exceeds the ${maxDiffChars}-char inline budget. Review file-by-file with \`git diff ${diffRef} -- <filepath>\` using the list above — do NOT dump the whole diff at once.`,
       );
     } else {
-      lines.push(`Full diff vs ${baseRef}:`);
+      lines.push(`Full diff vs ${diffRef}:`);
       lines.push("```diff");
       lines.push(diff.trimEnd());
       lines.push("```");
