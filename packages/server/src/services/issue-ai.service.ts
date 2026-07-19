@@ -3,6 +3,11 @@ import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { isTerminalStatusIdView, TERMINAL_STATUS_NAMES } from "@agentic-kanban/shared";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
+import {
+  coalesceTestOnlyChildren,
+  type DecomposeChildProposal,
+  type DecomposeDependencyProposal,
+} from "./decompose-sizing.js";
 import type { IssueEstimate } from "@agentic-kanban/shared";
 import {
   computeCouplingCandidates,
@@ -464,22 +469,11 @@ ${description ? `Description:\n${description}` : ""}`;
   return { estimate, reasoning: parsed.reasoning?.trim() ?? "" };
 }
 
-export interface DecomposeChildProposal {
-  tempId: string;
-  title: string;
-  description: string;
-  priority: "low" | "medium" | "high" | "urgent";
-  /** Repo-aware decomposition (#94): the repo this child should target in a multi-repo
-   *  project, carried onto the child as a `repo:<name>` tag on confirm. Omitted/undefined
-   *  for single-repo projects and children the AI didn't scope. Editable pre-confirm. */
-  targetRepo?: string | null;
-}
-
-export interface DecomposeDependencyProposal {
-  fromTempId: string;
-  toTempId: string;
-  type: DependencyType;
-}
+// Ticket-sizing types + the pure over-split guard live in decompose-sizing.ts (#116;
+// extracted to keep this file under the god-module ceiling). Re-exported so existing
+// importers (routes/issues.ts, the regression test) keep resolving them from here.
+export { isTestOnlyChild, coalesceTestOnlyChildren } from "./decompose-sizing.js";
+export type { DecomposeChildProposal, DecomposeDependencyProposal } from "./decompose-sizing.js";
 
 export interface DecomposeEpicResult {
   children: DecomposeChildProposal[];
@@ -489,6 +483,17 @@ export interface DecomposeEpicResult {
    *  projects so the modal can offer an editable target-repo dropdown per child; empty
    *  for single-repo projects (repo routing disabled — no behaviour change). */
   repos: string[];
+  /** Ticket-sizing floor (#116): true when the epic is already single-session-sized and
+   *  should NOT be split — after coalescing test-only children the proposal collapsed to
+   *  <=1 real child. The board surfaces this so a human is TOLD "already right-sized"
+   *  instead of the splitter silently over-fragmenting a one-line ticket into N workspaces
+   *  (each re-paying the fixed bootstrap/orientation/test/commit cost — measured ~3-5x more
+   *  tokens for the same delivered feature). */
+  tooSmallToDecompose: boolean;
+  /** tempIds of test-only children that `coalesceTestOnlyChildren` folded back into the
+   *  implementation sibling they depended on (a test belongs in the same vertical slice as
+   *  the code it covers, never its own ticket). Empty when nothing was coalesced. */
+  coalescedTestOnly: string[];
 }
 
 export async function decomposeEpic(
@@ -538,8 +543,13 @@ ${targetIssue.description || "(no description)"}
 ${recentContext}
 ${repoContext}
 
+Right-sizing (READ FIRST):
+- If the epic is ALREADY completable in a single agent session — a single function, a single route/endpoint, a single file, or a change under ~50 lines — DO NOT invent sub-tasks. Return an EMPTY "children" array. Over-splitting is expensive: every child ticket re-pays a fixed cost (a fresh worktree, the agent re-orienting in the repo, re-running tests, a separate commit), so fragmenting small work multiplies cost for no benefit.
+- Split ONLY along real seams (a distinct module/layer/repo, or genuinely independent slices). Prefer FEWER, larger children over many tiny ones.
+- Each child MUST be a VERTICAL SLICE that includes its OWN tests. NEVER emit a child whose only job is to add tests for another child's code — a test belongs in the same ticket as the code it covers.
+
 Rules:
-- Generate 3-8 child tickets that together implement the full epic
+- Generate 0 (already right-sized) or 2-8 child tickets that together implement the full epic
 - Each child ticket must be independently workable (no ambiguity)
 - Titles should be actionable and specific (verb phrase, under 80 chars)
 - Descriptions should be 2-4 sentences with clear acceptance criteria
@@ -600,7 +610,19 @@ Respond ONLY with valid JSON, no markdown, no explanation:
       type: d.type as DependencyType,
     }));
 
-  return { children, dependencies, alreadyDecomposed, repos: isMultiRepo ? projectRepos : [] };
+  // Ticket-sizing floor (#116): keep tests with their implementation and detect an
+  // over-split the LLM shouldn't have produced. Deterministic post-process — the prompt
+  // asks for the same behaviour, this guarantees it when the model ignores the ask.
+  const floored = coalesceTestOnlyChildren(children, dependencies);
+
+  return {
+    children: floored.children,
+    dependencies: floored.dependencies,
+    alreadyDecomposed,
+    repos: isMultiRepo ? projectRepos : [],
+    tooSmallToDecompose: floored.tooSmallToDecompose,
+    coalescedTestOnly: floored.coalescedTestOnly,
+  };
 }
 
 export interface ConfirmDecomposeInput {
