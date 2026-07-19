@@ -839,7 +839,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     // Skipped when the rebase failed — the tree is mid-conflict, so a diff taken now
     // would describe a state the reviewer is about to change.
     const precomputedContext = workspace.workingDir && diffRef && !conflictingFiles && !uncommittedChanges
-      ? await buildReviewContext({ workingDir: workspace.workingDir, baseRef: diffRef })
+      ? await buildReviewContext({ workingDir: workspace.workingDir, baseRef: diffRef, isDirect: workspace.isDirect })
       : null;
     const { prompt, model } = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles, uncommittedChanges, workspaceId, reviewSkillName, verifyAgent, precomputedContext);
     const reviewArgsWithModel = model && reviewProvider === "claude" ? `${reviewArgs ?? ""} --model ${model}`.trim() : reviewArgs;
