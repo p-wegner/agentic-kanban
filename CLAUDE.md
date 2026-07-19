@@ -120,7 +120,7 @@ Prompt templates in the `agent_skills` table, written to `.claude/skills/<name>/
 | Clean up stale worktrees/sessions/artifacts | `cleanup` |
 | Publish/release npm package | `publish`, `release` |
 | Change directly on master | `direct-master` |
-| Dogfood board multi-repo/docker-compose support (build fixture → drive → file gaps → fix) | `multirepo-lab` |
+| Tune the board along a dimension (docker/multi-repo, observability, token-efficiency, ticket-sizing) — build fixture → drive → measure → file gaps → fix | `board-tuning-lab` |
 
 ## Clean-clone / first-start blockers (Windows)
 Full symptom→cause→fix in `docs/install.md` (“Clean-clone / first-start gotchas”). The `dev-server` skill Step 0 handles bootstrap automatically (no DB → `pnpm db:setup`; 0 projects → register). Key facts for triage:
