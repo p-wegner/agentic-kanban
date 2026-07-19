@@ -305,6 +305,82 @@ export async function executeSiblingMerges(params: {
 }
 
 /**
+ * Stamp `mergedHeadSha` on each sibling repo that has ALREADY landed its work but was
+ * never recorded — the fix-and-merge / reconcile-as-done path (#114).
+ *
+ * `executeSiblingMerges` is the only place that stamps `mergedHeadSha`, and it only runs
+ * when the board itself performs the sibling git merge. The reconcile-as-done path
+ * (`reconcileAlreadyMerged`) instead accepts sibling work the RECONCILER AGENT already
+ * merged into each sibling main by hand, so nothing ever stamps those rows. Without the
+ * stamp, `getRepoMergeStatus` (#75) reads every cleaned-up sibling as unmerged after the
+ * reconcile close — a false negative on a fully-landed multi-repo merge (observed as
+ * "1/10 merged" though all mains are correct).
+ *
+ * This closes that gap by recording positive evidence from git ground truth: for each
+ * unstamped sibling whose branch tip still resolves and which introduced real commits
+ * relative to its cut point (`baseCommitSha`), stamp the branch tip as `mergedHeadSha`.
+ * MUST be called BEFORE `cleanupSiblingWorktrees` force-deletes the sibling branches, so
+ * the landed tip is captured while the ref still exists (it then survives cleanup).
+ *
+ * Safety / idempotency:
+ * - Skips rows already stamped (`mergedHeadSha` set) — never overwrites executeSiblingMerges.
+ * - Skips rows whose branch ref is gone (can't capture a landed tip) and rows with no
+ *   historic commits (an empty sibling has no merged work; `mergedHeadSha` means "had
+ *   work AND landed"), so it can never falsely mark an empty sibling merged.
+ * - Callers gate on the workspace being genuinely already-merged (`checkAlreadyMerged`
+ *   verified no sibling has PENDING unmerged commits), so a branch that is 0-ahead of
+ *   base but >0 vs its cut point has demonstrably landed.
+ *
+ * Returns the number of rows stamped. No-op ([] → 0) for single-repo workspaces.
+ */
+export async function stampReconciledSiblingMerges(params: {
+  gitService: GitService;
+  database: Database;
+  workspaceId: string;
+}): Promise<number> {
+  const { gitService, database, workspaceId } = params;
+  let rows: RepoRow[];
+  try {
+    rows = await listWorkspaceRepos(workspaceId, database);
+  } catch (err) {
+    console.warn(`[workspace-merge] reconcile stamp: failed to list repos for ${workspaceId}: ${err instanceof Error ? err.message : String(err)}`);
+    return 0;
+  }
+  let stamped = 0;
+  for (const repo of rows) {
+    if (repo.mergedHeadSha) continue; // already recorded by executeSiblingMerges
+    if (!repo.branch) continue;
+    // The commit that the (agent-performed) sibling merge landed. Captured from the
+    // branch ref while it still exists — this is what survives the upcoming cleanup.
+    let branchTip: string;
+    try {
+      branchTip = (await gitService.revParse(repo.path, repo.branch)).trim();
+    } catch {
+      continue; // branch ref gone → nothing to capture
+    }
+    if (!branchTip) continue;
+    // Only stamp repos that genuinely contributed commits. Post-landing the branch is an
+    // ancestor of base (0 commits AHEAD of base), so measure against the ORIGINAL cut
+    // point instead. countUniqueCommits never throws (0 on git error); resolve the base
+    // ref first so an unresolvable cut point does not read as "no work".
+    const base = repo.baseCommitSha ?? repo.baseBranch;
+    if (!base) continue;
+    let historic = 0;
+    try {
+      await gitService.revParse(repo.path, base);
+      historic = await gitService.countUniqueCommits(repo.path, base, branchTip);
+    } catch {
+      historic = 0;
+    }
+    if (historic === 0) continue;
+    await setWorkspaceRepoMergedSha(repo.id, branchTip, database);
+    stamped++;
+    console.log(`[workspace-merge] reconcile stamp: sibling ${repo.name ?? repo.path} mergedHeadSha=${branchTip} (${historic} commit(s) landed)`);
+  }
+  return stamped;
+}
+
+/**
  * Remove the workspace's sibling worktrees AND their branches. Branch deletion is
  * mandatory (force): a stale branch left in a sibling repo would be silently reused
  * by the next workspace on the same branch name, basing it on an old commit.

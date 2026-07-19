@@ -8,7 +8,7 @@ import {
 import { getIssueNumberById } from "../repositories/workspace-merge.repository.js";
 import { listWorkspaceRepos } from "../repositories/repo.repository.js";
 import { workspaceServicesService, parseStoredComposeProjectName } from "./workspace-services.service.js";
-import { cleanupSiblingWorktrees } from "./workspace-repos.service.js";
+import { cleanupSiblingWorktrees, stampReconciledSiblingMerges } from "./workspace-repos.service.js";
 import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
 import {
   WorkspaceError,
@@ -226,6 +226,20 @@ export async function reconcileAlreadyMerged(
       });
     }
     try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch { /* non-fatal */ }
+  }
+
+  // Multi-repo (#114): the reconciler agent already merged each sibling's work into its
+  // main by hand, so nothing stamped `mergedHeadSha` on those rows (unlike the
+  // executeSiblingMerges pipeline). Record that positive evidence NOW — before the
+  // cleanup below force-deletes the sibling branches — so getRepoMergeStatus (#75) reports
+  // the fully-landed siblings as merged instead of falsely reading them as unmerged.
+  try {
+    const stampedSiblings = await stampReconciledSiblingMerges({ gitService, database, workspaceId: id });
+    if (stampedSiblings > 0) {
+      console.log(`[workspace-merge] reconcile-as-done: stamped ${stampedSiblings} landed sibling repo(s) for workspace ${id}`);
+    }
+  } catch (err) {
+    console.warn(`[workspace-merge] reconcile-as-done: sibling stamp failed (non-fatal) for workspace ${id}:`, err instanceof Error ? err.message : String(err));
   }
 
   // Multi-repo: drop the sibling worktrees + branches too (no-op single-repo) —
