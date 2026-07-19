@@ -80,6 +80,33 @@ describe("buildReviewContext", () => {
     }
   });
 
+  it("shows a direct workspace's UNCOMMITTED changes (not an empty three-dot diff)", async () => {
+    // A direct workspace has no feature branch: HEAD *is* the base, so diffing
+    // `<baseSha>...HEAD` yields nothing and the reviewer would be handed a prompt
+    // claiming the change was pre-computed while showing none of it.
+    const direct = mkdtempSync(join(tmpdir(), "ak-phase-ctx-direct-"));
+    try {
+      const git = (...args: string[]) => gitExecSync(args, { cwd: direct, stdio: "pipe" });
+      git("init", "-b", "master");
+      git("config", "user.email", "test@example.com");
+      git("config", "user.name", "Test");
+      writeFileSync(join(direct, "tracked.ts"), "export const a = 1;\n");
+      git("add", "-A");
+      git("commit", "-m", "base");
+      const baseSha = gitExecSync(["rev-parse", "HEAD"], { cwd: direct, stdio: "pipe" }).trim();
+      // The change lives in the working tree — never committed, never on a branch.
+      writeFileSync(join(direct, "tracked.ts"), "export const a = 999;\n");
+
+      const ctx = await buildReviewContext({ workingDir: direct, baseRef: baseSha, isDirect: true });
+      expect(ctx).not.toBeNull();
+      expect(ctx).toContain("tracked.ts");
+      expect(ctx).toContain("export const a = 999;");
+      expect(ctx).toContain("```diff");
+    } finally {
+      rmSync(direct, { recursive: true, force: true });
+    }
+  });
+
   it("returns null instead of throwing when the directory is not a git repo", async () => {
     const empty = mkdtempSync(join(tmpdir(), "ak-phase-ctx-empty-"));
     try {
