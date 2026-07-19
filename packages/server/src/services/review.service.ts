@@ -454,7 +454,7 @@ export async function startManualReview(
     // Same pre-computed context the auto-review path gets (#128) — a manual review is
     // just as cold a start. Reaching here means the rebase preflight succeeded.
     const manualContext = workspace.workingDir && diffRef
-      ? await buildReviewContext({ workingDir: workspace.workingDir, baseRef: diffRef })
+      ? await buildReviewContext({ workingDir: workspace.workingDir, baseRef: diffRef, isDirect: workspace.isDirect })
       : null;
     const { prompt: reviewPromptText, model: reviewModel } = await buildReviewPrompt(
       database, workspace.branch, diffRef, issueId, autoFix, projectId,
