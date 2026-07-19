@@ -16,6 +16,7 @@ import { ensureBuildableFromClean } from "../services/project-scaffold.js";
 import * as gitService from "../services/git.service.js";
 import { createSessionManager } from "../services/session.manager.js";
 import { applyWorkspaceProfileToPrefs, buildReviewArgs, buildReviewPrompt, getEffectiveProfile, parseProviderPref } from "./review-helpers.js";
+import { buildReviewContext } from "../services/phase-context.service.js";
 import type { MergeWorkspace } from "./merge-workflow.js";
 import { isAutomaticMergeEnabled } from "./merge-strategy.js";
 import type { Database } from "../db/index.js";
@@ -834,7 +835,13 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     }
     const reviewSkillName = workspace.thoroughReview ? "code-review-thorough" : "code-review";
     const verifyAgent = prefMap.get("after_merge_verify_agent") || "none";
-    const { prompt, model } = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles, uncommittedChanges, workspaceId, reviewSkillName, verifyAgent);
+    // Hand the reviewer the diff instead of making a cold agent rediscover it (#128).
+    // Skipped when the rebase failed — the tree is mid-conflict, so a diff taken now
+    // would describe a state the reviewer is about to change.
+    const precomputedContext = workspace.workingDir && diffRef && !conflictingFiles && !uncommittedChanges
+      ? await buildReviewContext({ workingDir: workspace.workingDir, baseRef: diffRef })
+      : null;
+    const { prompt, model } = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles, uncommittedChanges, workspaceId, reviewSkillName, verifyAgent, precomputedContext);
     const reviewArgsWithModel = model && reviewProvider === "claude" ? `${reviewArgs ?? ""} --model ${model}`.trim() : reviewArgs;
     try {
       await setWorkspaceStatus(db, workspaceId, "reviewing", { now });
