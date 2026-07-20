@@ -82,7 +82,7 @@ import { Hono } from "hono";
 import { describe, it, expect, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { issues, projectStatuses, projects, repos, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, projects, repos, workspaces, preferences } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceActionsRoute } from "../routes/workspace-actions.js";
 import { activeMerges } from "../services/workspace-internals.js";
@@ -264,6 +264,24 @@ describe("POST /api/workspaces/:id/fix-and-merge — endpoint drives status→fi
     expect(prompt).toContain(siblingWorktree);
     expect(prompt).toContain("sibling repo 'sibling-svc'");
     expect(prompt).toContain("leading repo");
+  });
+
+  it("#143: forwards the board's default_model_claude to the relaunched fix-and-merge session", async () => {
+    const { workspaceId } = await seedWorkspace(db);
+    await db.insert(preferences).values({ key: "default_model_claude", value: "claude-opus-4-8" });
+    const startSession = vi.fn(async () => "fix-session-model");
+    const app = mountRoute(db, startSession, new Set<string>());
+
+    const res = await app.request(`/api/workspaces/${workspaceId}/fix-and-merge`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mergeError: "CONFLICT (content): Merge conflict in src/foo.ts" }),
+    });
+
+    expect(res.status).toBe(201);
+    expect(startSession).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "claude-opus-4-8" }),
+    );
   });
 
   it("a SECOND fix-and-merge while one is already running is rejected as a conflict (no duplicate launch)", async () => {
