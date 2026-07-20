@@ -11,6 +11,7 @@
     "./types": { "development": "./src/types/index.ts", "types": "./dist/types/index.d.ts", "import": "./dist/types/index.js", "default": "./src/types/index.ts" },
     "./lib": { "development": "./src/lib/index.ts", "types": "./dist/lib/index.d.ts", "import": "./dist/lib/index.js", "default": "./src/lib/index.ts" },
     "./lib/agent-skill-files": { "development": "./src/lib/agent-skill-files.ts", "types": "./dist/lib/agent-skill-files.d.ts", "import": "./dist/lib/agent-skill-files.js", "default": "./src/lib/agent-skill-files.ts" },
+    "./lib/builder-skill-policy": { "development": "./src/lib/builder-skill-policy.ts", "types": "./dist/lib/builder-skill-policy.d.ts", "import": "./dist/lib/builder-skill-policy.js", "default": "./src/lib/builder-skill-policy.ts" },
     "./lib/agent-stream-parser": { "development": "./src/lib/agent-stream-parser.ts", "types": "./dist/lib/agent-stream-parser.d.ts", "import": "./dist/lib/agent-stream-parser.js", "default": "./src/lib/agent-stream-parser.ts" },
     "./lib/branch": { "development": "./src/lib/branch.ts", "types": "./dist/lib/branch.d.ts", "import": "./dist/lib/branch.js", "default": "./src/lib/branch.ts" },
     "./lib/cascade-delete": { "development": "./src/lib/cascade-delete.ts", "types": "./dist/lib/cascade-delete.d.ts", "import": "./dist/lib/cascade-delete.js", "default": "./src/lib/cascade-delete.ts" },
