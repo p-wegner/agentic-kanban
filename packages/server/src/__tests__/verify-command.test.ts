@@ -95,6 +95,25 @@ describe("deriveVerifyCommandPlan (#124)", () => {
     expect(plan.command).toContain("--tb=short");
   });
 
+  // #120: the uv profile must produce a gate that runs pytest inside the project venv,
+  // and its failure hint must not point back at the global `python -m pytest`.
+  it("routes a uv project to the pytest plan and keeps `uv run` in the failure hint", () => {
+    const plan = deriveVerifyCommandPlan(
+      makeProfile({ stack: "python", packageManager: "uv", testRunner: "pytest", testCommand: "uv run pytest", buildCommand: null }),
+    )!;
+    expect(plan.stackKey).toBe("pytest");
+    expect(plan.command).toBe("uv run pytest -q --no-header --tb=short");
+    expect(plan.onFailure).toContain("uv run pytest '<path>::<test_name>'");
+    expect(plan.onFailure).not.toContain("python -m pytest");
+  });
+
+  it("keeps the poetry runner in the pytest failure hint", () => {
+    const plan = deriveVerifyCommandPlan(
+      makeProfile({ stack: "python", packageManager: "poetry", testRunner: "pytest", testCommand: "poetry run python -m pytest", buildCommand: null }),
+    )!;
+    expect(plan.onFailure).toContain("poetry run python -m pytest '<path>::<test_name>'");
+  });
+
   it("applies maven batch mode", () => {
     const plan = deriveVerifyCommandPlan(
       makeProfile({ stack: "java", packageManager: "maven", testRunner: "maven", testCommand: "mvn test", buildCommand: "mvn package" }),
