@@ -18,6 +18,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   classifyProcessExit,
+  HEALTHY_UPTIME_MS,
   createDependencyRecoveryState,
   createSharedDistRecoveryState,
   dependencyManifestsChanged,
@@ -164,6 +165,10 @@ async function freePort(port, label) {
 
 const MAX_RESTARTS = 5;
 const RESTART_DELAY_MS = 1000;
+// Uptime after which a child counts as having run stably, so its crash starts a
+// fresh restart budget rather than eating into the existing one. Much higher
+// than HEALTHY_UPTIME_MS on purpose — see the reset site in spawnProcess.
+const STABLE_UPTIME_MS = 5 * 60_000;
 const dependencyRecovery = createDependencyRecoveryState(snapshotDependencyManifests(process.cwd()));
 const sharedDistRecovery = createSharedDistRecoveryState();
 
@@ -248,6 +253,7 @@ function spawnProcess(label, cmd, args, opts) {
     const proc = spawn(cmd, args, { ...opts, stdio: ["inherit", "inherit", "pipe"], env: process.env });
     currentProc = proc;
     observedDependencyRecoveryGeneration = dependencyRecovery.generation;
+    const startedAt = Date.now();
 
     let stderrBuffer = "";
     proc.stderr.on("data", (chunk) => {
@@ -257,8 +263,15 @@ function spawnProcess(label, cmd, args, opts) {
     });
 
     proc.on("exit", (code, signal) => {
-      const exitType = classifyProcessExit(code, signal);
+      const uptimeMs = Date.now() - startedAt;
+      const exitType = classifyProcessExit(code, signal, { uptimeMs });
       if (exitType === "clean") return;
+      // A child that ran for a long stretch before crashing gets a fresh restart
+      // budget, so a multi-hour dev session is not capped by crashes from hours
+      // ago. Deliberately a much higher bar than HEALTHY_UPTIME_MS: resetting at
+      // the 10s "started successfully" mark would let a child that crashes every
+      // ~11s restart forever, since MAX_RESTARTS could never be reached.
+      if (uptimeMs >= STABLE_UPTIME_MS) restarts = 0;
       if (exitType === "fatal") {
         // Stale shared dist takes priority: rebuild once (up to MAX_SHARED_DIST_REBUILDS)
         // before falling back to the generic dependency-manifest recovery path.
