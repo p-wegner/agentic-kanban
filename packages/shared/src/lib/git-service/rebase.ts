@@ -142,11 +142,15 @@ export async function abortRebase(worktreePath: string): Promise<void> {
 /** Check if a rebase is in progress in the worktree. */
 export async function isRebaseInProgress(worktreePath: string): Promise<boolean> {
   try {
-    const dir = (await execGit(["rev-parse", "--git-dir"], worktreePath)).trim();
+    // Must use --absolute-git-dir, not --git-dir: in a linked worktree --git-dir returns an
+    // ABSOLUTE path (e.g. .../.git/worktrees/<name>), and path.join does not reset on an
+    // absolute segment (that's path.resolve), so joining it onto worktreePath produced a
+    // nonexistent path and this always returned false (#147).
+    const dir = (await execGit(["rev-parse", "--absolute-git-dir"], worktreePath)).trim();
     const { existsSync } = await import("node:fs");
     const { join: pathJoin } = await import("node:path");
-    return existsSync(pathJoin(worktreePath, dir, "rebase-merge")) || existsSync(pathJoin(worktreePath, dir, "rebase-apply"));
+    return existsSync(pathJoin(dir, "rebase-merge")) || existsSync(pathJoin(dir, "rebase-apply"));
   } catch {
     return false;
   }
-}
+}
