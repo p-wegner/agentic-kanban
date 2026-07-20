@@ -836,12 +836,12 @@ export function createWorkspaceMergeService(deps: {
       strandedBatch: opts.strandedBatchJson,
     });
 
-    const { agentCommand, agentArgs, claudeProfile, profile, provider } =
+    const { agentCommand, agentArgs, claudeProfile, profile, provider, model } =
       await resolveRelaunchAgentSelection(database, projectId, workspace);
     const executorProvider = toExecutorProvider(provider);
 
     const sessionId = await getSessionManager().startSession({
-      workspaceId: integrationWorkspaceId, prompt, agentCommand, agentArgs, claudeProfile, profile,
+      workspaceId: integrationWorkspaceId, prompt, agentCommand, agentArgs, claudeProfile, profile, model,
       provider: executorProvider, multiTurn: executorProvider === "codex" ? false : true, triggerType: "reconcile",
       skipLaunchPreflight: true, extraEnv: { KANBAN_SESSION_TYPE: "reconcile" },
     });
