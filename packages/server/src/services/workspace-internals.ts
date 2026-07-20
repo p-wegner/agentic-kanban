@@ -86,6 +86,7 @@ export async function resolveRelaunchAgentSelection(
     provider: runtime.provider.provider,
     resumeWithNewModel: runtime.provider.resumeWithNewModel,
     permissionPromptTool: runtime.provider.permissionPromptTool,
+    model: runtime.provider.model,
   };
 }
 
