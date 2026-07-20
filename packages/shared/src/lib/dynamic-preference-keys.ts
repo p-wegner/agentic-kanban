@@ -40,6 +40,11 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   "project_stack_profile",
   "auto_merge_disabled",
   "auto_contract_coupled",
+  // Compounding "setup once" pass (#127): `compounding_setup_<id>` is the per-project
+  // gate (`off` | `auto` | a numeric merge threshold); `compounding_setup_state_<id>`
+  // holds the JSON record of the pass that already ran, so it runs once, not per ticket.
+  "compounding_setup",
+  "compounding_setup_state",
 ] as const;
 
 /**

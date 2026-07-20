@@ -17,6 +17,9 @@ const DURABLE_CLAUDE_SCAFFOLD_PATHS = [
   ".claude/hooks/verify-gate-runner.js",
   ".claude/hooks/verify-gate.config.json",
   ".claude/smart-hooks-rules.json",
+  // Written by the compounding "setup once" pass (#127). Committed for the same reason as
+  // the rest: a builder only inherits it if it is on the branch its worktree forks from.
+  ".claude/domain-map.md",
 ];
 
 function statusLineToPath(line: string): string {

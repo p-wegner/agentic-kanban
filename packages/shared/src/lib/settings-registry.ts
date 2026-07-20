@@ -82,6 +82,11 @@ export const SETTINGS_REGISTRY = {
   learning_step_before_merge: { type: "bool", default: "false" },
   auto_monitor: { type: "bool", default: "false" },
   auto_monitor_interval: { type: "number", default: "4" },
+  // Merged-workspace count after which the compounding "setup once" pass runs for a
+  // project (#127). The pass scaffolds hooks, lint/test config, the project's agent
+  // skills and a domain map ONCE, between tickets, so later builders inherit an already
+  // set-up environment instead of re-discovering it. 0 disables it board-wide.
+  compounding_setup_min_merges: { type: "number", default: "5" },
   // Max per-workspace Docker service stacks that may be "up" at once (#56). Empty/0 =
   // unlimited (default — unchanged behaviour). When >0, provisioning DEFERS rather than
   // starting an (N+1)th stack, so an over-subscribed host queues instead of thrashing.

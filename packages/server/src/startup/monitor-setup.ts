@@ -7,6 +7,7 @@ import { createBoardEvents } from "../services/board-events.js";
 import { createSessionManager } from "../services/session.manager.js";
 import { runAutoStart } from "./monitor-auto-start.js";
 import { runAutoContract } from "./monitor-contract.js";
+import { runCompoundingSetup } from "./monitor-compounding-setup.js";
 import { runBacklogEmptyStrategy } from "./monitor-backlog.js";
 import { getRecentAgentExcerpts, logMonitorAction, shouldSkipNudge, type MonitorAction } from "./monitor-helpers.js";
 import { processWorkspaceCandidates } from "./monitor-cycle.js";
@@ -302,6 +303,11 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       // default — only projects with `auto_contract_coupled_<id>` set act, and only those the
       // monitor would otherwise auto-start work for (same gate as runAutoStart below).
       await runAutoContract(prefMap, { boardEvents, allowProject: shouldAutoStartProject, logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
+      // Compounding "setup once" pass (#127): a project that has accumulated enough merged
+      // work gets its harness scaffolded ONCE, between tickets, so every later builder
+      // inherits it instead of re-discovering the environment. Runs BEFORE the fan-out so a
+      // workspace started this cycle already forks from the branch the pass committed to.
+      await runCompoundingSetup(prefMap, { allowProject: shouldAutoStartProject });
       await runAutoStart(prefMap, { serverPort, boardEvents, allowProject: shouldAutoStartProject, isAutoDrivenProject: (projectId) => resolveStartPolicy(prefMap, projectId).mode !== "manual", logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
       await runBacklogEmptyStrategy(prefMap, { serverPort, boardEvents, allowProject: allowBacklogRefill, logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
     } catch (err) {
