@@ -11,6 +11,7 @@ import { resolveDevPorts } from "../../../../scripts/dev-port-plan.mjs";
 import { buildBackendEnv, createStableDevProxy, listen, preferredInternalPort, resolvePublicServerPort } from "../../../../scripts/server-dev-proxy.mjs";
 import {
   classifyProcessExit,
+  HEALTHY_UPTIME_MS,
   createDependencyRecoveryState,
   createSharedDistRecoveryState,
   dependencyManifestsChanged,
@@ -62,6 +63,20 @@ describe("dev launcher exit classification", () => {
 
   it("keeps code 1 fatal because tsx watch handles hot reload internally", () => {
     expect(classifyProcessExit(1, null)).toBe("fatal");
+  });
+
+  it("keeps an early code 1 fatal so deterministic startup failures do not loop", () => {
+    // EADDRINUSE / migration failure / syntax error all reproduce on every retry.
+    expect(classifyProcessExit(1, null, { uptimeMs: 0 })).toBe("fatal");
+    expect(classifyProcessExit(1, null, { uptimeMs: HEALTHY_UPTIME_MS - 1 })).toBe("fatal");
+  });
+
+  it("retries a code 1 exit from a child that had been running healthily", () => {
+    // Repro for #117: vite crashed with `write ECONNABORTED` under a burst of
+    // board-event WS traffic after serving fine for minutes. Treating that as
+    // fatal left the client permanently dead instead of restarting it.
+    expect(classifyProcessExit(1, null, { uptimeMs: HEALTHY_UPTIME_MS })).toBe("retry");
+    expect(classifyProcessExit(1, null, { uptimeMs: 5 * 60_000 })).toBe("retry");
   });
 
   it("retries unexpected nonfatal exit codes", () => {
@@ -148,6 +163,119 @@ describe("server dev proxy", () => {
       if (proxy) await closeServer(proxy).catch(() => {});
       if (backend.listening) await closeServer(backend).catch(() => {});
       if (restartedBackend?.listening) await closeServer(restartedBackend).catch(() => {});
+    }
+  });
+
+  it("survives clients aborting mid-response instead of crashing the whole dev stack", async () => {
+    // Repro for #117. A burst of workspace creations makes the client abort
+    // in-flight API responses (page reloads, vite restarting its ws-proxy).
+    // The proxy piped backendRes -> res with no 'error' listener on `res`, so
+    // the resulting ECONNABORTED/EPIPE write error surfaced as an uncaught
+    // exception, killing the dev-proxy process — which kills the tsx backend
+    // it supervises. One client-side hiccup took down the backend.
+    const uncaught = [];
+    const captureUncaught = (err) => uncaught.push(err);
+    process.on("uncaughtException", captureUncaught);
+
+    const timers = new Set();
+    const backend = createHttpServer((_req, res) => {
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.write("x".repeat(1024));
+      // Keep writing so the proxy is guaranteed to write to a client socket
+      // that has already gone away.
+      const timer = setInterval(() => {
+        try {
+          res.write("x".repeat(1024));
+        } catch {
+          // response already torn down
+        }
+      }, 5);
+      timers.add(timer);
+      res.on("close", () => {
+        clearInterval(timer);
+        timers.delete(timer);
+      });
+    });
+
+    let proxy = null;
+    try {
+      await listen(backend, 0);
+      proxy = createStableDevProxy({
+        publicPort: 0,
+        backendPort: serverPort(backend),
+        retryTimeoutMs: 2000,
+        retryDelayMs: 25,
+      });
+      await listen(proxy, 0);
+      const publicPort = serverPort(proxy);
+
+      // A burst of clients that all hang up as soon as bytes start flowing.
+      await Promise.all(
+        Array.from({ length: 8 }, () =>
+          new Promise((resolveAbort) => {
+            const req = httpRequest({ hostname: "127.0.0.1", port: publicPort, path: "/api/board" }, (res) => {
+              res.once("data", () => {
+                req.destroy();
+                resolveAbort();
+              });
+            });
+            req.on("error", () => resolveAbort());
+            req.end();
+          }),
+        ),
+      );
+
+      // Give the doomed writes time to surface.
+      await new Promise((r) => setTimeout(r, 300));
+
+      expect(uncaught.map((e) => e?.code ?? e?.message)).toEqual([]);
+      expect(proxy.listening).toBe(true);
+    } finally {
+      process.off("uncaughtException", captureUncaught);
+      for (const timer of timers) clearInterval(timer);
+      if (proxy) await closeServer(proxy).catch(() => {});
+      if (backend.listening) await closeServer(backend).catch(() => {});
+    }
+  });
+
+  it("does not accumulate response listeners while retrying a down backend", async () => {
+    // proxyWithRetry calls proxyOnce once per retry (~retryTimeoutMs/retryDelayMs
+    // times). Registering the client-abort listeners per attempt leaked two
+    // handlers per retry onto the same `res`, tripping Node's max-listeners
+    // warning on every request that hit a backend restart window.
+    const deadBackend = createHttpServer(() => {});
+    await listen(deadBackend, 0);
+    const deadPort = serverPort(deadBackend);
+    await closeServer(deadBackend); // nothing is listening on deadPort now
+
+    let proxy = null;
+    let peakListeners = 0;
+    try {
+      proxy = createStableDevProxy({
+        publicPort: 0,
+        backendPort: deadPort,
+        retryTimeoutMs: 600,
+        retryDelayMs: 10,
+      });
+      proxy.on("request", (_req, res) => {
+        const sample = setInterval(() => {
+          peakListeners = Math.max(peakListeners, res.listenerCount("close") + res.listenerCount("error"));
+        }, 20);
+        res.on("close", () => clearInterval(sample));
+      });
+      await listen(proxy, 0);
+      const publicPort = serverPort(proxy);
+
+      const { status } = await requestText(publicPort);
+      expect(status).toBe(503);
+      // Guard against a vacuous pass: the sampler must actually have observed
+      // the in-flight response, otherwise the bound below proves nothing.
+      expect(peakListeners).toBeGreaterThan(0);
+      // One 'error' + one 'close' from watchClient, plus whatever Node itself
+      // attaches. Per-attempt registration would have pushed this past 60.
+      expect(peakListeners).toBeLessThan(10);
+    } finally {
+      if (proxy) await closeServer(proxy).catch(() => {});
     }
   });
 
