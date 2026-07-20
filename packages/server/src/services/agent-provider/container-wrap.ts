@@ -34,6 +34,37 @@ export interface ContainerWrapOptions {
    * `CLAUDE_CONFIG_DIR` for the narrow profile mount (#133/#134).
    */
   containerEnv?: Record<string, string>;
+  /**
+   * HOST path of the container's own MCP config (#136), substituted for whatever
+   * the provider chose.
+   *
+   * The provider builds its launch config BEFORE containerization is known, so it
+   * always emits the host STDIO config — which names a command that does not exist
+   * in the container. Rewriting it here keeps every provider container-agnostic
+   * instead of threading container state back into launch-config assembly. The
+   * value is a host path because it still goes through the normal path
+   * translation below (it lives in the mounted host temp dir).
+   */
+  containerMcpConfigPath?: string;
+}
+
+/**
+ * Flags whose VALUE is the next argument and which name an MCP config file.
+ * Claude takes `--mcp-config <path>`; Copilot takes `--additional-mcp-config @<path>`.
+ */
+const MCP_CONFIG_FLAGS = new Set(["--mcp-config", "--additional-mcp-config"]);
+
+/**
+ * Replace the MCP config path with the container's own, preserving Copilot's `@`
+ * prefix convention. Returns the args unchanged when no substitute was supplied.
+ */
+export function substituteMcpConfigArg(args: string[], containerMcpConfigPath?: string): string[] {
+  if (!containerMcpConfigPath) return args;
+  return args.map((arg, index) => {
+    const flag = args[index - 1];
+    if (!flag || !MCP_CONFIG_FLAGS.has(flag)) return arg;
+    return arg.startsWith("@") ? `@${containerMcpConfigPath}` : containerMcpConfigPath;
+  });
 }
 
 /** Case-insensitive, separator-insensitive comparison key for a Windows-or-POSIX path. */
@@ -171,8 +202,12 @@ export function wrapLaunchConfigForContainer(
   config: AgentLaunchConfig,
   options: ContainerWrapOptions,
 ): AgentLaunchConfig {
-  const { handle, pathMappings, containerEnv } = options;
-  const translatedArgs = config.args.map((arg) => translateHostPathsInArg(arg, pathMappings));
+  const { handle, pathMappings, containerEnv, containerMcpConfigPath } = options;
+  // Substitute BEFORE translating: the container config lives in the mounted host
+  // temp dir, so the substituted path still needs its host prefix rewritten.
+  const translatedArgs = substituteMcpConfigArg(config.args, containerMcpConfigPath).map((arg) =>
+    translateHostPathsInArg(arg, pathMappings),
+  );
   const translatedCommand = containerCommandFor(config.command);
 
   const dockerArgs = [

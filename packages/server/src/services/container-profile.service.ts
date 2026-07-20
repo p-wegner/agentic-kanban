@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -127,6 +127,48 @@ export function provisionContainerProfile(opts: {
 function sanitizeProfileKey(profileKey: string): string {
   const slug = profileKey.replace(/[^a-zA-Z0-9_.-]+/g, "-").replace(/^[-.]+|-+$/g, "");
   return slug.length > 0 ? slug : "default";
+}
+
+/**
+ * The hostname a container uses to reach a service on the host. Docker Desktop
+ * provides this on Windows and macOS; on Linux the board adds it explicitly via
+ * `--add-host` (see `provisionContainerForWorkspace`).
+ */
+export const HOST_GATEWAY_HOSTNAME = "host.docker.internal";
+
+/**
+ * Write the MCP config a CONTAINERIZED builder should use (#136), and return its
+ * HOST path.
+ *
+ * The normal config describes a stdio server launched from the board's host
+ * checkout — paths that do not exist inside the container, and a database opened
+ * through a natively-compiled Windows better-sqlite3 binding that cannot load under
+ * Linux. So a containerized builder gets an HTTP transport pointed at the board's
+ * listener on the host gateway instead, with the bearer token that endpoint requires.
+ *
+ * The file is written into the host temp directory, which is already bind-mounted,
+ * so the container can read it at the mapped path without a new mount.
+ */
+export function writeContainerMcpConfig(opts: {
+  hostTmp: string;
+  workspaceId: string;
+  port: number;
+  token: string;
+}): string {
+  const { hostTmp, workspaceId, port, token } = opts;
+  // Per workspace, so concurrent containerized builders never race on one file.
+  const path = join(hostTmp, `agentic-kanban-mcp-config.container.${workspaceId}.json`);
+  const config = {
+    mcpServers: {
+      "agentic-kanban": {
+        type: "http",
+        url: `http://${HOST_GATEWAY_HOSTNAME}:${port}/mcp`,
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    },
+  };
+  writeFileSync(path, JSON.stringify(config, null, 2), "utf-8");
+  return path;
 }
 
 /**
