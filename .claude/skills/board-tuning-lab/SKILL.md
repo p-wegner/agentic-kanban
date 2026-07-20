@@ -65,6 +65,7 @@ are constant.
   | **observability** | monitor/board UI that surfaces multi-workspace + multi-repo health at a glance | `references/observability.md` |
   | **token-efficiency** | agent context/token cost per ticket — prompts, skill materialization, tool-result bloat | `references/token-efficiency.md` |
   | **ticket-sizing** | the enhancer/splitter sweet spot — too-small wastes exploration, too-large stalls | `references/ticket-sizing.md` |
+  | **devcontainer** | builders running INSIDE a container (not host processes) — auth, mounts, path/env translation, host↔container parity | `references/devcontainer.md` |
 
   Adding a dimension later = a new `references/<dim>.md` + a row here. Keep this
   table and the loop stable; put all depth in the reference.
