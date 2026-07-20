@@ -238,6 +238,47 @@ describe("server dev proxy", () => {
     }
   });
 
+  it("does not accumulate response listeners while retrying a down backend", async () => {
+    // proxyWithRetry calls proxyOnce once per retry (~retryTimeoutMs/retryDelayMs
+    // times). Registering the client-abort listeners per attempt leaked two
+    // handlers per retry onto the same `res`, tripping Node's max-listeners
+    // warning on every request that hit a backend restart window.
+    const deadBackend = createHttpServer(() => {});
+    await listen(deadBackend, 0);
+    const deadPort = serverPort(deadBackend);
+    await closeServer(deadBackend); // nothing is listening on deadPort now
+
+    let proxy = null;
+    let peakListeners = 0;
+    try {
+      proxy = createStableDevProxy({
+        publicPort: 0,
+        backendPort: deadPort,
+        retryTimeoutMs: 600,
+        retryDelayMs: 10,
+      });
+      proxy.on("request", (_req, res) => {
+        const sample = setInterval(() => {
+          peakListeners = Math.max(peakListeners, res.listenerCount("close") + res.listenerCount("error"));
+        }, 20);
+        res.on("close", () => clearInterval(sample));
+      });
+      await listen(proxy, 0);
+      const publicPort = serverPort(proxy);
+
+      const { status } = await requestText(publicPort);
+      expect(status).toBe(503);
+      // Guard against a vacuous pass: the sampler must actually have observed
+      // the in-flight response, otherwise the bound below proves nothing.
+      expect(peakListeners).toBeGreaterThan(0);
+      // One 'error' + one 'close' from watchClient, plus whatever Node itself
+      // attaches. Per-attempt registration would have pushed this past 60.
+      expect(peakListeners).toBeLessThan(10);
+    } finally {
+      if (proxy) await closeServer(proxy).catch(() => {});
+    }
+  });
+
   it("runs the watched server behind the stable proxy in package dev mode", () => {
     const serverPackageJson = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
     expect(serverPackageJson.scripts.dev).toBe("node ../../scripts/server-dev-proxy.mjs");

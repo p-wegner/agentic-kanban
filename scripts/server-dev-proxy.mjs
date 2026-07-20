@@ -64,14 +64,55 @@ async function readRequestBody(req) {
 // failure, so proxyWithRetry knows not to retry or write an error response.
 const CLIENT_GONE = Symbol("client-gone");
 
-function proxyOnce(req, res, body, opts) {
+// One 'error'/'close' pair per RESPONSE, not per proxy attempt. proxyWithRetry
+// can call proxyOnce ~retryTimeoutMs/retryDelayMs times (≈100 with the defaults)
+// while the backend is restarting, so registering these inside proxyOnce leaked
+// two listeners per attempt onto the same `res` — MaxListenersExceededWarning
+// plus retained handles on every request that hit a backend restart window.
+// Keeping them here also means `res` is never momentarily without an 'error'
+// listener, which is the exact gap that crashed this process (#117).
+function watchClient(res) {
+  const state = { gone: false, onGone: null };
+  const markGone = () => {
+    if (state.gone) return;
+    state.gone = true;
+    const handler = state.onGone;
+    state.onGone = null;
+    handler?.();
+  };
+  res.on("error", markGone);
+  res.on("close", () => {
+    if (res.writableFinished) return;
+    markGone();
+  });
+  return state;
+}
+
+function proxyOnce(req, res, body, opts, client) {
   return new Promise((resolveProxy, rejectProxy) => {
     let settled = false;
     const finish = (fn, value) => {
       if (settled) return;
       settled = true;
+      if (client.onGone === onClientGone) client.onGone = null;
       fn(value);
     };
+
+    // The client aborting mid-response is routine under load (page reloads, a
+    // vite restart, a burst of board events). Writing to that dead socket fails
+    // with ECONNABORTED/EPIPE; unhandled, it crashes the dev proxy and takes the
+    // backend it supervises down with it (#117). Stop the backend leg too, so a
+    // burst of aborts cannot leak sockets or hang this promise forever.
+    function onClientGone() {
+      backendReq.destroy();
+      finish(rejectProxy, CLIENT_GONE);
+    }
+
+    if (client.gone) {
+      finish(rejectProxy, CLIENT_GONE);
+      return;
+    }
+    client.onGone = onClientGone;
 
     const headers = { ...req.headers, host: `${opts.backendHost}:${opts.backendPort}`, connection: "close" };
     const backendReq = httpRequest(
@@ -95,33 +136,18 @@ function proxyOnce(req, res, body, opts) {
       },
     );
 
-    // The client aborting mid-response is routine under load (page reloads, a
-    // vite restart, a burst of board events). Writing to that dead socket fails
-    // with ECONNABORTED/EPIPE; unhandled, it crashes the dev proxy and takes the
-    // backend it supervises down with it (#117). Stop the backend leg too, so a
-    // burst of aborts cannot leak sockets or hang this promise forever.
-    res.on("error", () => {
-      backendReq.destroy();
-      finish(rejectProxy, CLIENT_GONE);
-    });
-    res.on("close", () => {
-      if (res.writableFinished) return;
-      backendReq.destroy();
-      finish(rejectProxy, CLIENT_GONE);
-    });
-
     backendReq.on("error", (err) => finish(rejectProxy, err));
     backendReq.end(body);
   });
 }
 
-async function proxyWithRetry(req, res, body, opts) {
+async function proxyWithRetry(req, res, body, opts, client) {
   const deadline = Date.now() + opts.retryTimeoutMs;
   let lastError = null;
 
   while (Date.now() <= deadline) {
     try {
-      await proxyOnce(req, res, body, opts);
+      await proxyOnce(req, res, body, opts, client);
       return;
     } catch (err) {
       // Nobody is waiting for this response any more — retrying would only burn
@@ -190,11 +216,14 @@ export function createStableDevProxy(options) {
   };
 
   const server = createHttpServer(async (req, res) => {
+    // Install before reading the body: a client that aborts mid-upload must not
+    // leave `res` without an 'error' listener either.
+    const client = watchClient(res);
     try {
       const body = await readRequestBody(req);
-      await proxyWithRetry(req, res, body, opts);
+      await proxyWithRetry(req, res, body, opts, client);
     } catch (err) {
-      if (res.destroyed || res.writableEnded) return;
+      if (client.gone || res.destroyed || res.writableEnded) return;
       if (!res.headersSent) {
         res.writeHead(500, { "content-type": "application/json" });
       }
