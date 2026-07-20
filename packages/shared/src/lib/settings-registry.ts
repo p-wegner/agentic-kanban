@@ -54,6 +54,13 @@ export const SETTINGS_REGISTRY = {
   mock_agent_profile: { type: "string", default: "" },
   mock_agent_delay_ms: { type: "number", default: "" },
   permission_prompt_tool: { type: "bool", default: "false" },
+  /**
+   * Run builder agents INSIDE the worktree's devcontainer instead of as host
+   * processes. Off by default: it requires Docker + the @devcontainers/cli, and
+   * only takes effect for worktrees that actually declare a devcontainer — any
+   * missing prerequisite falls back to host execution rather than failing.
+   */
+  devcontainer_builders: { type: "bool", default: "false" },
   auto_review: { type: "bool", default: "true" },
   auto_merge: { type: "bool", default: "true" },
   auto_merge_in_review: { type: "bool", default: "false" },
