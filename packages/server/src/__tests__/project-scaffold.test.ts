@@ -141,6 +141,21 @@ describe("project-scaffold", () => {
         await rm(dir, { recursive: true, force: true });
       }
     });
+
+    // #122: a builder committed `.kotlin/sessions/*.salive` (Kotlin daemon markers). They are
+    // rewritten on every gradle build, so the main checkout kept flipping to `dirty_main` and
+    // blocked ALL merges. Kotlin/Gradle detects as the "java" family, so scaffolding must ship
+    // `.kotlin/` alongside `.gradle/` and `build/` from the very first commit.
+    it("ignores the Kotlin daemon-marker dir for a gradle/kotlin project (#122)", async () => {
+      const dir = await tmp();
+      try {
+        ensureAgentGitignore(dir, undefined, "java");
+        const gi = await readFile(join(dir, ".gitignore"), "utf8");
+        for (const line of [".kotlin/", ".gradle/", "build/"]) expect(gi).toContain(line);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
   });
 
   it("writes a starter CLAUDE.md only when absent (never clobbers an existing one)", async () => {
