@@ -3,6 +3,7 @@ import type { DevcontainerHandle } from "@agentic-kanban/shared/lib/devcontainer
 import {
   containerCommandFor,
   translateHostPathsInArg,
+  substituteMcpConfigArg,
   wrapLaunchConfigForContainer,
 } from "../services/agent-provider/container-wrap.js";
 import type { AgentLaunchConfig } from "../services/agent-provider/types.js";
@@ -215,6 +216,44 @@ describe("wrapLaunchConfigForContainer", () => {
     expect(wrapped.suppressStdinPrompt).toBe(true);
     expect(wrapped.keepStdinOpen).toBe(true);
     expect(wrapped.promptPrefix).toBe("PREFIX");
+  });
+});
+
+describe("MCP config substitution (#136)", () => {
+  it("swaps the --mcp-config value for the container's own", () => {
+    // The provider builds its config BEFORE containerization is known, so it always
+    // emits the host stdio config — a command that does not exist in the container.
+    const wrapped = wrapLaunchConfigForContainer(
+      baseConfig({ args: ["--mcp-config", "C:\\Users\\dev\\AppData\\Local\\Temp\\host.json", "-p"] }),
+      {
+        handle: HANDLE,
+        pathMappings: [
+          ...MAPPINGS,
+          { hostPrefix: "C:\\Users\\dev\\AppData\\Local\\Temp", containerPrefix: "/kanban-host-tmp" },
+        ],
+        containerMcpConfigPath: "C:\\Users\\dev\\AppData\\Local\\Temp\\container.json",
+      },
+    );
+    expect(wrapped.args).toContain("/kanban-host-tmp/container.json");
+    expect(wrapped.args.some((a) => a.includes("host.json"))).toBe(false);
+  });
+
+  it("preserves Copilot's @-prefix convention", () => {
+    expect(
+      substituteMcpConfigArg(["--additional-mcp-config", "@/tmp/host.json"], "/tmp/container.json"),
+    ).toEqual(["--additional-mcp-config", "@/tmp/container.json"]);
+  });
+
+  it("leaves args untouched when no container config was supplied", () => {
+    const args = ["--mcp-config", "/tmp/host.json", "-p"];
+    expect(substituteMcpConfigArg(args, undefined)).toEqual(args);
+  });
+
+  it("only rewrites the value that FOLLOWS an mcp-config flag", () => {
+    // A path that merely looks like a config path elsewhere in argv must survive.
+    expect(
+      substituteMcpConfigArg(["--settings", "/tmp/host.json", "--mcp-config", "/tmp/host.json"], "/tmp/c.json"),
+    ).toEqual(["--settings", "/tmp/host.json", "--mcp-config", "/tmp/c.json"]);
   });
 });
 
