@@ -129,6 +129,8 @@ export function createWorkspaceProvisionService(deps: {
             await getPreference("devcontainer_builders", database),
           ),
           worktreePath,
+          workspaceId,
+          symlinkDirs: symlinkConfig.dirs,
         });
         setupContainer = provision?.handle;
       } catch (err) {
