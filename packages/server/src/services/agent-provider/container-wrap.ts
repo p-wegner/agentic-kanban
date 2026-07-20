@@ -29,6 +29,11 @@ export interface ContainerWrapOptions {
    * directory is added when credentials are mounted.
    */
   pathMappings: ContainerPathMapping[];
+  /**
+   * Env the CONTAINER needs, merged OVER the forwarded host env. Carries
+   * `CLAUDE_CONFIG_DIR` for the narrow profile mount (#133/#134).
+   */
+  containerEnv?: Record<string, string>;
 }
 
 /** Case-insensitive, separator-insensitive comparison key for a Windows-or-POSIX path. */
@@ -131,10 +136,23 @@ export function shouldForwardEnvToContainer(key: string): boolean {
  * environment, so anything describing the host is wrong by default, and a new
  * host var can't silently start leaking in.
  */
-function buildEnvFlags(env: Record<string, string>): string[] {
+function buildEnvFlags(
+  env: Record<string, string>,
+  pathMappings: ContainerPathMapping[],
+  containerEnv: Record<string, string> = {},
+): string[] {
   const flags: string[] = [];
   for (const [key, value] of Object.entries(env)) {
     if (!shouldForwardEnvToContainer(key)) continue;
+    if (key in containerEnv) continue; // the container's own value wins
+    // Forwarded env VALUES get the same host->container path translation as args.
+    // Without it a var naming a host location (CLAUDE_CONFIG_DIR pointing at a
+    // profile dir, KANBAN_* paths) crosses the boundary verbatim and names a path
+    // that does not exist inside — the same class of failure as the `-e PATH=C:\…`
+    // exit-127 incident above, but silent instead of fatal.
+    flags.push("-e", `${key}=${translateHostPathsInArg(value, pathMappings)}`);
+  }
+  for (const [key, value] of Object.entries(containerEnv)) {
     flags.push("-e", `${key}=${value}`);
   }
   return flags;
@@ -153,7 +171,7 @@ export function wrapLaunchConfigForContainer(
   config: AgentLaunchConfig,
   options: ContainerWrapOptions,
 ): AgentLaunchConfig {
-  const { handle, pathMappings } = options;
+  const { handle, pathMappings, containerEnv } = options;
   const translatedArgs = config.args.map((arg) => translateHostPathsInArg(arg, pathMappings));
   const translatedCommand = containerCommandFor(config.command);
 
@@ -164,7 +182,7 @@ export function wrapLaunchConfigForContainer(
     handle.remoteUser,
     "-w",
     handle.remoteWorkspaceFolder,
-    ...buildEnvFlags(config.env),
+    ...buildEnvFlags(config.env, pathMappings, containerEnv),
     handle.containerId,
     translatedCommand,
     ...translatedArgs,
