@@ -45,6 +45,7 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // holds the JSON record of the pass that already ran, so it runs once, not per ticket.
   "compounding_setup",
   "compounding_setup_state",
+  "file_contention",
 ] as const;
 
 /**
