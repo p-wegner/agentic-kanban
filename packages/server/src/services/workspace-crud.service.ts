@@ -24,6 +24,7 @@ import { createWorkspaceCleanupService } from "./workspace-cleanup.service.js";
 import { cleanupSiblingWorktrees } from "./workspace-repos.service.js";
 import { createWorkspaceCreateService } from "./workspace-create.service.js";
 import { workspaceServicesService, parseStoredComposeProjectName } from "./workspace-services.service.js";
+import { reapWorkspaceContainer } from "./devcontainer-workspace.service.js";
 import { resolveProjectDevServerPlan } from "./dev-server.service.js";
 import { isSelfProjectRepo } from "./self-project.js";
 import type { WorkspaceDevServerPlanResponse } from "@agentic-kanban/shared";
@@ -99,6 +100,7 @@ export function createWorkspaceCrudService(deps: {
         branch: wsRow[0]?.branch,
         teardownScript: wsRow[0]?.teardownScript,
         setupEnabled: wsRow[0]?.setupEnabled,
+        workspaceId,
       });
     }
 
@@ -144,6 +146,12 @@ export function createWorkspaceCrudService(deps: {
           releasedByWorkspaceId: workspaceId,
         });
       }
+      // Devcontainer builder teardown (#138), also before the worktree goes away:
+      // the container bind-mounts this directory, and its dependency volumes
+      // cannot be removed while it still holds them. No-op when the workspace was
+      // never containerized (nothing matches the label / name prefix).
+      await reapWorkspaceContainer({ worktreePath: workspace.workingDir, workspaceId });
+
       const { repoPath } = await resolveProjectRepo(workspaceId, database).catch(() => ({ repoPath: null as string | null }));
       if (repoPath) {
         try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch { /* best effort */ }

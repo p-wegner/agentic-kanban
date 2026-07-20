@@ -624,13 +624,21 @@ export function createSessionLifecycle(
     // undefined and the agent launches on the host as before.
     let containerProvision: ContainerProvision | undefined;
     try {
-      containerProvision = await provisionContainerForWorkspace({
-        enabled: parseBoolSetting(
-          "devcontainer_builders",
-          await lifecycleRepo.getPreferenceValue("devcontainer_builders", db),
-        ),
-        worktreePath: effectiveWorkingDir,
-      });
+      const devcontainerEnabled = parseBoolSetting(
+        "devcontainer_builders",
+        await lifecycleRepo.getPreferenceValue("devcontainer_builders", db),
+      );
+      if (devcontainerEnabled) {
+        // Only read the project when the feature is on — this is the default-off
+        // path for every launch, and it should not pay for a lookup it won't use.
+        const projectInfo = projectId ? await lifecycleRepo.getProjectPreflightInfo(projectId, db) : null;
+        containerProvision = await provisionContainerForWorkspace({
+          enabled: true,
+          worktreePath: effectiveWorkingDir,
+          workspaceId,
+          symlinkDirs: projectInfo?.symlinkEnabled ? projectInfo.symlinkDirs : null,
+        });
+      }
     } catch (err) {
       console.warn(`[devcontainer] provisioning threw for sessionId=${sessionId} — running on host`, err);
     }

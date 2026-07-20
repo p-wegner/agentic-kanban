@@ -34,3 +34,6 @@ export type * from "./docker-exec.js";
 // imported from the deep path (@agentic-kanban/shared/lib/devcontainer-exec)
 // server-side; only the types are needed through the barrel. (#791 client white-screen.)
 export type * from "./devcontainer-exec.js";
+// Type-only: container-dep-volumes.ts imports node:fs. Same #791 rule — runtime via
+// the deep path (@agentic-kanban/shared/lib/container-dep-volumes) server-side.
+export type * from "./container-dep-volumes.js";
