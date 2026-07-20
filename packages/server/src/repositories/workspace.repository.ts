@@ -52,6 +52,27 @@ export async function getProviderMixRows(projectId: string, cutoffDay: string, d
     .where(and(eq(issues.projectId, projectId), gte(workspaces.createdAt, cutoffDay)));
 }
 
+/**
+ * How many of a project's workspaces have actually landed on the default branch.
+ *
+ * `mergedAt` — not issue status, not `status = 'closed'` — is the authoritative merge
+ * marker (a closed workspace may have been abandoned, and a Done issue may have been
+ * hand-merged). Workspaces carry no `projectId`, so the scope goes through `issues`.
+ * Used by the compounding "setup once" pass (#127) to decide a project has accumulated
+ * enough code to be worth setting up once.
+ */
+export async function countMergedWorkspacesForProject(
+  projectId: string,
+  database: Database = db,
+): Promise<number> {
+  const rows = await database
+    .select({ id: workspaces.id })
+    .from(workspaces)
+    .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    .where(and(eq(issues.projectId, projectId), isNotNull(workspaces.mergedAt)));
+  return rows.length;
+}
+
 /** Sessions started since `cutoffIso` for a project, with the workspace provider + stats blob (cost-over-time chart). */
 export async function getCostOverTimeRows(projectId: string, cutoffIso: string, database: Database = db) {
   return database
