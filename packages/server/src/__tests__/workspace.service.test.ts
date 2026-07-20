@@ -1321,7 +1321,12 @@ describe("workspace.service", () => {
       }));
     });
 
-    it("launches fix-and-merge with rebase conflict context instead of aborting the rebuild", async () => {
+    it("aborts a conflicted preflight rebase and launches fix-and-merge with attached-HEAD merge context", async () => {
+      // A conflicted preflight rebase must NOT be left in progress: a detached mid-rebase (UU)
+      // worktree is rejected by the stale-safety guard, so the reconciler agent emits zero output
+      // and /resolve-conflicts then refuses to recover the very state the preflight created
+      // (STALE_SAFETY_POLICY catch-22, see f00255e9). Abort instead, leaving the worktree attached,
+      // and tell the agent to reconcile via `git merge <base>` rather than continuing a rebase.
       const { projectId, issueId } = await seedProjectAndIssue(db);
       const wsId = await seedWorkspaceForFix(projectId, issueId);
       const gitService = createFakeGitService({
@@ -1332,10 +1337,11 @@ describe("workspace.service", () => {
       const service = createWorkspaceService({ database: db, gitService, getSessionManager: () => sessionManager });
       await service.fixAndMerge(wsId, "Merge conflicts detected");
 
-      expect(gitService.abortRebase).not.toHaveBeenCalled();
+      expect(gitService.abortRebase).toHaveBeenCalledWith("/tmp/test-repo/.worktrees/feature-1");
       expect(sessionManager.startSession).toHaveBeenCalledOnce();
       const startArgs = (sessionManager.startSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
-      expect(startArgs.prompt).toContain("left the rebase in progress");
+      expect(startArgs.prompt).toContain("ABORTED the rebase");
+      expect(startArgs.prompt).toContain("git merge main");
       expect(startArgs.prompt).toContain("src/foo.ts");
       expect(startArgs.skipLaunchPreflight).toBe(true);
     });
