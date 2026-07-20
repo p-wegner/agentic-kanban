@@ -6,7 +6,16 @@ import {
   devcontainerUp,
   hasDevcontainerConfig,
   type DevcontainerHandle,
+  type DevcontainerMount,
 } from "@agentic-kanban/shared/lib/devcontainer-exec";
+import {
+  buildDependencyVolumes,
+  deriveDependencyDirs,
+  predictRemoteWorkspaceFolder,
+  sameHostPath,
+  workspaceVolumePrefix,
+  type DependencyVolume,
+} from "@agentic-kanban/shared/lib/container-dep-volumes";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import type { ContainerPathMapping } from "./agent-provider/container-wrap.js";
 
@@ -22,12 +31,21 @@ import type { ContainerPathMapping } from "./agent-provider/container-wrap.js";
 export interface ContainerProvision {
   handle: DevcontainerHandle;
   pathMappings: ContainerPathMapping[];
+  /** Dependency directories relocated onto named volumes (#138). */
+  dependencyVolumes: DependencyVolume[];
 }
 
 export interface ProvisionOptions {
   /** The `devcontainer_builders` setting. */
   enabled: boolean;
   worktreePath: string;
+  /**
+   * Scopes the dependency volumes (#138). Omit to skip them entirely — the
+   * container still comes up, with dependencies on the bind mount as before.
+   */
+  workspaceId?: string;
+  /** The project's `symlink_dirs` (raw column or parsed), naming dependency directories. */
+  symlinkDirs?: string | string[] | null;
   /** Overridable for tests; defaults to the host user's home. */
   hostHome?: string;
   /** Overridable for tests; defaults to the host temp directory. */
@@ -133,7 +151,14 @@ export async function configureContainerGit(
 export async function provisionContainerForWorkspace(
   options: ProvisionOptions,
 ): Promise<ContainerProvision | undefined> {
-  const { enabled, worktreePath, hostHome = homedir(), hostTmp = tmpdir() } = options;
+  const {
+    enabled,
+    worktreePath,
+    workspaceId,
+    symlinkDirs,
+    hostHome = homedir(),
+    hostTmp = tmpdir(),
+  } = options;
   if (!enabled) return undefined;
 
   if (!hasDevcontainerConfig(worktreePath)) {
@@ -150,14 +175,34 @@ export async function provisionContainerForWorkspace(
     return undefined;
   }
 
+  // Dependency volumes must be passed INTO `up`, but the real
+  // remoteWorkspaceFolder is only reported afterwards — so predict it, then
+  // verify against the handle below.
+  const predictedFolder = predictRemoteWorkspaceFolder(worktreePath);
+  const dependencyVolumes = workspaceId
+    ? buildDependencyVolumes(
+        workspaceId,
+        deriveDependencyDirs({ worktreePath, symlinkDirs }),
+        predictedFolder,
+      )
+    : [];
+
   // remoteUser is only known AFTER `up` resolves the config, but the profile
   // mount must be passed IN. "node" covers the devcontainer images in practice;
   // a mismatch surfaces as an unauthenticated agent rather than a crash, and the
   // mapping below is rebuilt from the real remoteUser the CLI reports.
   const provisionalMount = profileMount(hostHome, "node");
-  const handle = await devcontainerUp(worktreePath, {
-    mounts: [provisionalMount, hostTmpMount(hostTmp)],
-  });
+  const mounts: DevcontainerMount[] = [
+    provisionalMount,
+    hostTmpMount(hostTmp),
+    ...dependencyVolumes.map((volume) => ({
+      type: "volume" as const,
+      source: volume.name,
+      target: volume.containerPath,
+    })),
+  ];
+
+  const handle = await devcontainerUp(worktreePath, { mounts });
   if (!handle) {
     console.warn(
       `[devcontainer] provisioning failed for ${worktreePath} — falling back to host execution.`,
@@ -165,13 +210,63 @@ export async function provisionContainerForWorkspace(
     return undefined;
   }
 
+  // A config with a custom `workspaceFolder` we failed to read would have mounted
+  // the volumes outside the worktree: harmless, but the deps would silently stay
+  // on the bind mount and #138's symptoms would persist. Say so rather than
+  // reporting success.
+  if (dependencyVolumes.length > 0 && handle.remoteWorkspaceFolder !== predictedFolder) {
+    console.warn(
+      `[devcontainer] predicted workspace folder ${predictedFolder} but the CLI reported ` +
+        `${handle.remoteWorkspaceFolder} — dependency volumes are mounted at the predicted ` +
+        "path and will NOT back the worktree's dependency directories.",
+    );
+  }
+
   await configureContainerGit(handle, await resolveHostAutocrlf(worktreePath));
+  await chownDependencyVolumes(handle, dependencyVolumes);
 
   console.log(
-    `[devcontainer] builder containerized: worktree=${worktreePath} container=${handle.containerId.slice(0, 12)} user=${handle.remoteUser} cwd=${handle.remoteWorkspaceFolder}`,
+    `[devcontainer] builder containerized: worktree=${worktreePath} container=${handle.containerId.slice(0, 12)} user=${handle.remoteUser} cwd=${handle.remoteWorkspaceFolder}` +
+      (dependencyVolumes.length > 0
+        ? ` depVolumes=${dependencyVolumes.map((v) => v.relPath).join(",")}`
+        : ""),
   );
 
-  return { handle, pathMappings: buildPathMappings(worktreePath, handle, hostHome, hostTmp) };
+  return {
+    handle,
+    pathMappings: buildPathMappings(worktreePath, handle, hostHome, hostTmp),
+    dependencyVolumes,
+  };
+}
+
+/**
+ * A freshly-created named volume is owned by root, but the agent runs as
+ * `remoteUser` — so without this the install fails with EACCES on mkdir, which
+ * would be a fresh instance of the very error #138 exists to remove.
+ *
+ * Best-effort, like the git config: a failure degrades the container rather than
+ * failing the workspace.
+ */
+export async function chownDependencyVolumes(
+  handle: DevcontainerHandle,
+  volumes: DependencyVolume[],
+): Promise<void> {
+  if (volumes.length === 0 || handle.remoteUser === "root") return;
+  const result = await dockerExec([
+    "exec",
+    "-u",
+    "root",
+    handle.containerId,
+    "chown",
+    handle.remoteUser,
+    ...volumes.map((v) => v.containerPath),
+  ]);
+  if (result.code !== 0) {
+    console.warn(
+      `[devcontainer] could not chown dependency volumes to ${handle.remoteUser}: ` +
+        `${result.stderr.trim() || result.error} — the install may fail with EACCES.`,
+    );
+  }
 }
 
 /**
@@ -193,4 +288,115 @@ export function buildPathMappings(
     { hostPrefix: join(hostHome, ".claude"), containerPrefix: mount.target },
     { hostPrefix: hostTmp, containerPrefix: HOST_TMP_CONTAINER_PATH },
   ];
+}
+
+/**
+ * Tear down a workspace's container and its dependency volumes (#138).
+ *
+ * Both halves are required and ordered: a volume still attached to a container
+ * cannot be removed, so reaping the volumes without first removing the container
+ * would silently leak every one of them — the failure mode the compose service
+ * stacks already had.
+ *
+ * SCOPING — this runs on a machine that also hosts unrelated containers, so
+ * matching must never be broad:
+ *  - containers are matched by the devcontainer CLI's own
+ *    `devcontainer.local_folder` label, set to the host worktree path;
+ *  - volumes are matched by the board-owned `agentic-kanban-deps-<workspaceId>-`
+ *    name prefix.
+ * Neither can match a co-tenant's resources.
+ *
+ * Best-effort throughout: teardown failures are logged, never thrown. Losing a
+ * worktree because a container would not stop is a worse outcome than a leak.
+ */
+export async function reapWorkspaceContainer(opts: {
+  worktreePath: string;
+  workspaceId?: string;
+}): Promise<{ containersRemoved: number; volumesRemoved: number }> {
+  const { worktreePath, workspaceId } = opts;
+  let containersRemoved = 0;
+  let volumesRemoved = 0;
+
+  // Gate on the same cheap signal that gates PROVISIONING. Close and merge are hot
+  // paths that run for every workspace on every board, while containerized builders
+  // are opt-in and off by default — so an unconditional reap would charge every
+  // merge two docker CLI round-trips for a container that cannot exist. A worktree
+  // that declares no devcontainer was never containerized, and this costs one stat.
+  //
+  // Edge case: a worktree directory already deleted by an earlier partial cleanup
+  // reads as "no devcontainer" and is skipped. Accepted deliberately — the
+  // alternative taxes every merge on every project to catch a rare double-cleanup.
+  if (!hasDevcontainerConfig(worktreePath)) return { containersRemoved, volumesRemoved };
+
+  try {
+    const containers = await findWorkspaceContainers(worktreePath);
+    for (const containerId of containers) {
+      const removed = await dockerExec(["rm", "-f", containerId]);
+      if (removed.code === 0) containersRemoved++;
+      else
+        console.warn(
+          `[devcontainer] could not remove container ${containerId.slice(0, 12)}: ${removed.stderr.trim() || removed.error}`,
+        );
+    }
+
+    if (workspaceId) {
+      for (const volume of await findWorkspaceVolumes(workspaceId)) {
+        const removed = await dockerExec(["volume", "rm", volume]);
+        if (removed.code === 0) volumesRemoved++;
+        else
+          console.warn(
+            `[devcontainer] could not remove volume ${volume}: ${removed.stderr.trim() || removed.error}`,
+          );
+      }
+    }
+
+    if (containersRemoved > 0 || volumesRemoved > 0) {
+      console.log(
+        `[devcontainer] reaped ${containersRemoved} container(s) and ${volumesRemoved} dependency volume(s) for ${worktreePath}`,
+      );
+    }
+  } catch (error) {
+    console.warn(`[devcontainer] teardown failed for ${worktreePath}:`, error);
+  }
+
+  return { containersRemoved, volumesRemoved };
+}
+
+/**
+ * Containers the devcontainer CLI created for this worktree, found via the label
+ * it stamps on every container it brings up.
+ *
+ * Lists all labelled containers and compares in JS rather than passing the path to
+ * `--filter`, because that filter is an exact string match against a path the CLI
+ * has already normalized — see `sameHostPath`.
+ */
+export async function findWorkspaceContainers(worktreePath: string): Promise<string[]> {
+  const result = await dockerExec([
+    "ps",
+    "-a",
+    "--filter",
+    "label=devcontainer.local_folder",
+    "--format",
+    '{{.ID}}\t{{.Label "devcontainer.local_folder"}}',
+  ]);
+  if (result.code !== 0) return [];
+  return result.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.split("\t"))
+    .filter(([, folder]) => folder && sameHostPath(folder, worktreePath))
+    .map(([id]) => id!);
+}
+
+export async function findWorkspaceVolumes(workspaceId: string): Promise<string[]> {
+  const prefix = workspaceVolumePrefix(workspaceId);
+  const result = await dockerExec(["volume", "ls", "--format", "{{.Name}}"]);
+  if (result.code !== 0) return [];
+  return result.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    // Prefix match, NOT the `--filter name=` substring match, which would also
+    // match a volume whose name merely contains the prefix.
+    .filter((name) => name.startsWith(prefix));
 }

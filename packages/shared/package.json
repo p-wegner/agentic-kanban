@@ -22,6 +22,7 @@
     "./lib/git-exec": { "development": "./src/lib/git-exec.ts", "types": "./dist/lib/git-exec.d.ts", "import": "./dist/lib/git-exec.js", "default": "./src/lib/git-exec.ts" },
     "./lib/docker-exec": { "development": "./src/lib/docker-exec.ts", "types": "./dist/lib/docker-exec.d.ts", "import": "./dist/lib/docker-exec.js", "default": "./src/lib/docker-exec.ts" },
     "./lib/devcontainer-exec": { "development": "./src/lib/devcontainer-exec.ts", "types": "./dist/lib/devcontainer-exec.d.ts", "import": "./dist/lib/devcontainer-exec.js", "default": "./src/lib/devcontainer-exec.ts" },
+    "./lib/container-dep-volumes": { "development": "./src/lib/container-dep-volumes.ts", "types": "./dist/lib/container-dep-volumes.d.ts", "import": "./dist/lib/container-dep-volumes.js", "default": "./src/lib/container-dep-volumes.ts" },
     "./lib/repo-lock": { "development": "./src/lib/repo-lock.ts", "types": "./dist/lib/repo-lock.d.ts", "import": "./dist/lib/repo-lock.js", "default": "./src/lib/repo-lock.ts" },
     "./lib/dependency-graph": { "development": "./src/lib/dependency-graph.ts", "types": "./dist/lib/dependency-graph.d.ts", "import": "./dist/lib/dependency-graph.js", "default": "./src/lib/dependency-graph.ts" },
     "./lib/dependency-graph.js": { "development": "./src/lib/dependency-graph.ts", "types": "./dist/lib/dependency-graph.d.ts", "import": "./dist/lib/dependency-graph.js", "default": "./src/lib/dependency-graph.ts" },

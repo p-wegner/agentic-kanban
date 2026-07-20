@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  formatBindMount,
+  formatMount,
   parseDevcontainerUpResult,
 } from "../src/lib/devcontainer-exec.js";
 
@@ -70,10 +70,20 @@ describe("parseDevcontainerUpResult", () => {
   });
 });
 
-describe("formatBindMount", () => {
-  it("emits a docker-style bind descriptor", () => {
+describe("formatMount", () => {
+  it("defaults to a bind descriptor", () => {
     expect(
-      formatBindMount({ source: "C:/Users/dev/.claude-agent", target: "/home/node/.claude" }),
+      formatMount({ source: "C:/Users/dev/.claude-agent", target: "/home/node/.claude" }),
     ).toBe("type=bind,source=C:/Users/dev/.claude-agent,target=/home/node/.claude");
+  });
+
+  it("emits a volume descriptor when the type says so (#138)", () => {
+    expect(
+      formatMount({
+        type: "volume",
+        source: "agentic-kanban-deps-ws1-node_modules",
+        target: "/workspaces/app/node_modules",
+      }),
+    ).toBe("type=volume,source=agentic-kanban-deps-ws1-node_modules,target=/workspaces/app/node_modules");
   });
 });

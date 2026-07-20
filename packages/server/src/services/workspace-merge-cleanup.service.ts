@@ -16,6 +16,7 @@ import { autoStartUnblockedDependencyIssue } from "./dependency-auto-chain.servi
 import { rebuildSharedIfChanged, runLearningStep } from "./merge-helpers.service.js";
 import { cleanupMergedWorktreeAndBranch } from "./merge-executor.service.js";
 import { cleanupSiblingWorktrees } from "./workspace-repos.service.js";
+import { reapWorkspaceContainer } from "./devcontainer-workspace.service.js";
 import type { MergeWarning } from "./workspace-merge-prevalidation.service.js";
 import { applyDeferredWorkingTreeSync } from "@agentic-kanban/shared/lib/git-service";
 
@@ -186,6 +187,13 @@ async function removeWorktreeAndBranch(
   deps: { database: Database; gitService: GitService },
   warnings: MergeWarning[],
 ): Promise<void> {
+  // Devcontainer builder + dependency volumes (#138), before the worktree goes:
+  // the container bind-mounts it and holds the volumes open. No-op when the
+  // workspace was never containerized.
+  if (args.workingDir) {
+    await reapWorkspaceContainer({ worktreePath: args.workingDir, workspaceId: args.workspaceId });
+  }
+
   await cleanupMergedWorktreeAndBranch({
     repoPath: args.repoPath,
     workingDir: args.workingDir,
