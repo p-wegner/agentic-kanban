@@ -6,11 +6,12 @@
 // grandfathered workspace repositories past their god-module baselines.
 
 import { randomUUID } from "node:crypto";
-import { and, eq, ne, notInArray, isNotNull, sql } from "drizzle-orm";
-import { workspaces, preferences, projects } from "@agentic-kanban/shared/schema";
+import { and, eq, ne, notInArray, sql } from "drizzle-orm";
+import { workspaces, preferences } from "@agentic-kanban/shared/schema";
 import { TERMINAL_WORKSPACE_STATUSES } from "@agentic-kanban/shared/lib/workspace-status";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { getProjectsWithServicesConfig } from "./project.repository.js";
 
 /**
  * Workspace statuses that no longer OWN a service stack: their teardown already ran
@@ -221,10 +222,7 @@ export async function getNonTerminalWorkspaceIds(database: Database = db): Promi
  * defensively; a malformed blob simply doesn't count.
  */
 export async function anyProjectHasEnabledServiceStack(database: Database = db): Promise<boolean> {
-  const rows = await database
-    .select({ servicesConfig: projects.servicesConfig })
-    .from(projects)
-    .where(isNotNull(projects.servicesConfig));
+  const rows = await getProjectsWithServicesConfig(database);
   return rows.some((r) => {
     try {
       const parsed = JSON.parse(r.servicesConfig ?? "null") as { enabled?: unknown } | null;

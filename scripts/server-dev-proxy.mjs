@@ -165,44 +165,103 @@ async function proxyWithRetry(req, res, body, opts, client) {
   res.end(JSON.stringify({ error: "dev_server_backend_unavailable", message }));
 }
 
-function proxyUpgrade(req, socket, head, opts) {
-  const backendSocket = netConnect(opts.backendPort, opts.backendHost);
+// Mirrors watchClient() for a raw upgrade socket: one 'error'/'close' pair for
+// the lifetime of the client connection, not one per retry attempt (retrying
+// would otherwise leak a listener pair onto `socket` per attempt, same trap as
+// #117 fixed for the HTTP leg above).
+function watchSocket(socket) {
+  const state = { gone: false, onGone: null };
+  const markGone = () => {
+    if (state.gone) return;
+    state.gone = true;
+    const handler = state.onGone;
+    state.onGone = null;
+    handler?.();
+  };
+  socket.on("error", markGone);
+  socket.on("close", markGone);
+  return state;
+}
 
-  // Both legs of this pipe are raw net.Sockets with no other 'error' listener.
-  // A WS client disconnecting abruptly (ECONNRESET) or the backend socket erroring
-  // fires an 'error' event that, left unhandled, is a Node uncaught exception —
-  // it crashes this whole dev-proxy process (and takes the backend down with it,
-  // since scripts/dev.mjs treats that as a fatal, non-retried exit).
-  socket.on("error", () => {
-    backendSocket.destroy();
-  });
+function proxyUpgradeOnce(req, socket, head, opts, client) {
+  return new Promise((resolveUpgrade, rejectUpgrade) => {
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      if (client.onGone === onClientGone) client.onGone = null;
+      fn(value);
+    };
 
-  backendSocket.on("connect", () => {
-    backendSocket.write(`${req.method} ${req.url} HTTP/${req.httpVersion}\r\n`);
-    for (let i = 0; i < req.rawHeaders.length; i += 2) {
-      const name = req.rawHeaders[i];
-      const value = req.rawHeaders[i + 1];
-      if (name.toLowerCase() === "host") {
-        backendSocket.write(`Host: ${opts.backendHost}:${opts.backendPort}\r\n`);
-      } else {
-        backendSocket.write(`${name}: ${value}\r\n`);
-      }
+    function onClientGone() {
+      backendSocket.destroy();
+      finish(rejectUpgrade, CLIENT_GONE);
     }
-    backendSocket.write("\r\n");
-    if (head.length > 0) backendSocket.write(head);
-    socket.pipe(backendSocket);
-    backendSocket.pipe(socket);
-  });
-  backendSocket.on("error", () => {
-    if (!socket.destroyed) {
-      try {
-        socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
-      } catch {
-        // client socket already gone — nothing to respond to
-      }
+
+    if (client.gone) {
+      finish(rejectUpgrade, CLIENT_GONE);
+      return;
     }
-    socket.destroy();
+    client.onGone = onClientGone;
+
+    const backendSocket = netConnect(opts.backendPort, opts.backendHost);
+
+    backendSocket.on("connect", () => {
+      backendSocket.write(`${req.method} ${req.url} HTTP/${req.httpVersion}\r\n`);
+      for (let i = 0; i < req.rawHeaders.length; i += 2) {
+        const name = req.rawHeaders[i];
+        const value = req.rawHeaders[i + 1];
+        if (name.toLowerCase() === "host") {
+          backendSocket.write(`Host: ${opts.backendHost}:${opts.backendPort}\r\n`);
+        } else {
+          backendSocket.write(`${name}: ${value}\r\n`);
+        }
+      }
+      backendSocket.write("\r\n");
+      if (head.length > 0) backendSocket.write(head);
+      socket.pipe(backendSocket);
+      backendSocket.pipe(socket);
+      // Once the pipe is up, `finish` above is a one-shot settled promise and
+      // stops reacting to further events — without these, a backend restart or
+      // client disconnect mid-session (not just mid-upgrade) leaked the other
+      // side of the pipe forever instead of tearing it down.
+      socket.on("error", () => backendSocket.destroy());
+      backendSocket.on("error", () => socket.destroy());
+      finish(resolveUpgrade);
+    });
+    backendSocket.on("error", (err) => finish(rejectUpgrade, err));
   });
+}
+
+// A WS upgrade caught mid tsx-watch restart (e.g. a self-hosted auto-merge that
+// touches watched server/shared source — #144) used to fail instantly with a 503
+// instead of riding out the restart window like the HTTP leg does. Retrying here
+// the same way proxyWithRetry does for HTTP means a board-event/session-stream
+// socket opened during the ~restart window waits for the backend to come back
+// instead of dying immediately and flooding reconnect/error noise.
+async function proxyUpgradeWithRetry(req, socket, head, opts, client) {
+  const deadline = Date.now() + opts.retryTimeoutMs;
+  let lastError = null;
+
+  while (Date.now() <= deadline) {
+    try {
+      await proxyUpgradeOnce(req, socket, head, opts, client);
+      return;
+    } catch (err) {
+      if (err === CLIENT_GONE) return;
+      lastError = err;
+      if (socket.destroyed) return;
+      await wait(opts.retryDelayMs);
+    }
+  }
+
+  if (socket.destroyed) return;
+  try {
+    socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+  } catch {
+    // client socket already gone — nothing to respond to
+  }
+  socket.destroy();
 }
 
 export function createStableDevProxy(options) {
@@ -230,7 +289,12 @@ export function createStableDevProxy(options) {
       res.end(JSON.stringify({ error: "dev_server_proxy_error", message: err instanceof Error ? err.message : String(err) }));
     }
   });
-  server.on("upgrade", (req, socket, head) => proxyUpgrade(req, socket, head, opts));
+  server.on("upgrade", (req, socket, head) => {
+    const client = watchSocket(socket);
+    proxyUpgradeWithRetry(req, socket, head, opts, client).catch(() => {
+      if (!socket.destroyed) socket.destroy();
+    });
+  });
   // Malformed/aborted requests must not become uncaught errors on the server.
   server.on("clientError", (_err, socket) => {
     if (!socket.destroyed) socket.destroy();

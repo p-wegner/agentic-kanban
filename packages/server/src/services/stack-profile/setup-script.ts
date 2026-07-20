@@ -8,7 +8,7 @@ import { join } from "node:path";
 import type { StackProfile } from "@agentic-kanban/shared";
 import type { Database } from "../../db/index.js";
 import { getProjectSetupScript, setProjectSetupScript } from "../../repositories/stack-profile.repository.js";
-import { detectProjectMarkers } from "../project-setup.service.js";
+import { detectProjectMarkers, isUvProject } from "../project-setup.service.js";
 import { gradleWrapper } from "../gradle-detect.service.js";
 import { readJson, nodeInstallCommand, readFileSafe, type NodePkgJson } from "../stack-detector.service.js";
 import { getStackProfile } from "./persistence.js";
@@ -38,6 +38,9 @@ function deriveInstallFromMarkers(repoPath: string): string {
     return isMultiModule ? `${wrapper} assemble` : `${wrapper} dependencies`;
   }
   if (markers.has("pom.xml")) return "mvn install -DskipTests";
+  // uv before poetry/pip: `uv sync` is the only install that populates the project-local
+  // .venv the rest of the toolchain (`uv run pytest`) needs (#120).
+  if (isUvProject(repoPath, markers)) return "uv sync";
   if (markers.has("pyproject.toml")) {
     return /\[tool\.poetry\]/.test(readFileSafe(join(repoPath, "pyproject.toml"))) ? "poetry install" : "pip install -e .";
   }

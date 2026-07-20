@@ -5,6 +5,7 @@ import { resolve, sep, join } from "node:path";
 import { getDefaultSkillId } from "./project-scaffold.js";
 import { scaffoldAndPopulateProject } from "./project-registration.js";
 import { isSkillsDirAbsentOrEmpty, writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
+import { isBuilderRelevantSkill } from "@agentic-kanban/shared/lib/builder-skill-policy";
 import { listAgentSkills } from "../repositories/agent-skill.repository.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import type { Database } from "../db/index.js";
@@ -99,6 +100,7 @@ venv/
 *.war
 *.ear
 .gradle/
+.kotlin/
 build/
 .env
 *.log
@@ -246,6 +248,12 @@ export function createProjectService(deps: { database: Database; workspaceSummar
         try {
           const builtinSkills = await listAgentSkills(undefined, false, database);
           for (const skill of builtinSkills) {
+            // #129: only export the skills a worktree agent actually fires. Every
+            // exported skill rides into every worktree and pays an always-on
+            // name+description context tax per turn; board-side skills (monitor,
+            // conductor, enhancer) run from their DB prompt against the main
+            // checkout and would be pure tax here.
+            if (!isBuilderRelevantSkill(skill.name)) continue;
             if (skill.isBuiltin && !/[/\\]|\.\./.test(skill.name)) {
               await writeAgentSkillFile(repoInfo.repoPath, skill);
             }

@@ -7,7 +7,7 @@ import { getProjectById } from "../repositories/project.repository.js";
 
 const PROJECT_MARKER_FILES = [
   "package.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock",
-  "Cargo.toml", "go.mod", "requirements.txt", "Pipfile", "pyproject.toml",
+  "Cargo.toml", "go.mod", "requirements.txt", "Pipfile", "pyproject.toml", "uv.lock",
   "pom.xml", "build.gradle", "build.gradle.kts", "Gemfile", "mix.exs",
   "Makefile", "justfile", "Taskfile.yml",
 ];
@@ -86,6 +86,28 @@ ${contextParts.join("\n")}`;
   return (await invokeClaudePrompt(prompt, { timeout: 30000, database })).trim();
 }
 
+/**
+ * Is this Python repo managed by `uv`? (#120)
+ *
+ * uv installs into a project-local `.venv`, so pytest is NOT importable from the global
+ * interpreter — a bare `python -m pytest` merge gate fails with "No module named pytest"
+ * and blocks every merge. Detected from the `uv.lock` lockfile or a `[tool.uv]` section
+ * in `pyproject.toml`; everything for a uv project must be prefixed with `uv run`.
+ *
+ * Lives here (not stack-detector) because stack-detector imports THIS module — putting it
+ * the other way round would make the cycle.
+ */
+export function isUvProject(repoPath: string, markers: Set<string> | string[]): boolean {
+  const set = markers instanceof Set ? markers : new Set(markers);
+  if (set.has("uv.lock")) return true;
+  if (!set.has("pyproject.toml")) return false;
+  try {
+    return /^\s*\[tool\.uv[.\]]/m.test(readFileSync(join(repoPath, "pyproject.toml"), "utf8"));
+  } catch {
+    return false;
+  }
+}
+
 /** Rule-based heuristic: derive a verify command from detected marker files. */
 export function deriveVerifyScript(repoPath: string, detected: string[]): string {
   const detectedSet = new Set(detected);
@@ -122,7 +144,7 @@ export function deriveVerifyScript(repoPath: string, detected: string[]): string
     }
   }
   if (detectedSet.has("Pipfile") || detectedSet.has("pyproject.toml") || detectedSet.has("requirements.txt")) {
-    return "python -m pytest";
+    return isUvProject(repoPath, detectedSet) ? "uv run pytest" : "python -m pytest";
   }
   if (detectedSet.has("Gemfile")) return "bundle exec rake test";
   if (detectedSet.has("mix.exs")) return "mix test";

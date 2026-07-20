@@ -6,7 +6,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { StackProfile } from "@agentic-kanban/shared";
-import { detectProjectMarkers } from "./project-setup.service.js";
+import { detectProjectMarkers, isUvProject } from "./project-setup.service.js";
 import {
   gradleWrapper,
   isKotlinGradle,
@@ -242,15 +242,24 @@ function detectOtherProfile(repoPath: string, markers: Set<string>): Partial<Sta
     };
   }
   if (markers.has("pyproject.toml") || markers.has("Pipfile") || markers.has("requirements.txt")) {
-    const poetry = markers.has("pyproject.toml") && /\[tool\.poetry\]/.test(readFileSafe(join(repoPath, "pyproject.toml")));
-    const pm = poetry ? "poetry" : markers.has("Pipfile") ? "pipenv" : "pip";
-    const install = poetry ? "poetry install" : markers.has("Pipfile") ? "pipenv install --dev" : "pip install -r requirements.txt";
+    // uv first: a uv project installs into a project-local .venv, so the global interpreter
+    // has no pytest and a bare `python -m pytest` merge gate always fails (#120). Its
+    // pyproject.toml may also carry a [tool.poetry] block, so uv must win the tie.
+    const uv = isUvProject(repoPath, markers);
+    const poetry = !uv && markers.has("pyproject.toml") && /\[tool\.poetry\]/.test(readFileSafe(join(repoPath, "pyproject.toml")));
+    const pm = uv ? "uv" : poetry ? "poetry" : markers.has("Pipfile") ? "pipenv" : "pip";
+    const install = uv
+      ? "uv sync"
+      : poetry ? "poetry install" : markers.has("Pipfile") ? "pipenv install --dev" : "pip install -r requirements.txt";
+    // uv's runner invokes the tool directly (`uv run pytest`), not via `python -m`.
     const run = (cmd: string) => (poetry ? `poetry run ${cmd}` : markers.has("Pipfile") ? `pipenv run ${cmd}` : cmd);
+    const runTool = (tool: string) => (uv ? `uv run ${tool}` : run(tool));
     return {
       stack: "python", packageManager: pm, isMonorepo: false, workspaces: [],
       installCommand: install, buildCommand: null,
-      testCommand: run("python -m pytest"), quickTestCommand: run("python -m pytest -x"),
-      lintCommand: run("ruff check ."), typecheckCommand: run("mypy ."), devCommand: null, isWeb: false,
+      testCommand: uv ? "uv run pytest" : run("python -m pytest"),
+      quickTestCommand: uv ? "uv run pytest -x" : run("python -m pytest -x"),
+      lintCommand: runTool("ruff check ."), typecheckCommand: runTool("mypy ."), devCommand: null, isWeb: false,
       devHealthUrl: null, devPort: null, testDir: firstExistingDir(repoPath, ["tests", "test"]), testRunner: "pytest",
     };
   }
