@@ -18,6 +18,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   classifyProcessExit,
+  HEALTHY_UPTIME_MS,
   createDependencyRecoveryState,
   createSharedDistRecoveryState,
   dependencyManifestsChanged,
@@ -248,6 +249,7 @@ function spawnProcess(label, cmd, args, opts) {
     const proc = spawn(cmd, args, { ...opts, stdio: ["inherit", "inherit", "pipe"], env: process.env });
     currentProc = proc;
     observedDependencyRecoveryGeneration = dependencyRecovery.generation;
+    const startedAt = Date.now();
 
     let stderrBuffer = "";
     proc.stderr.on("data", (chunk) => {
@@ -257,8 +259,12 @@ function spawnProcess(label, cmd, args, opts) {
     });
 
     proc.on("exit", (code, signal) => {
-      const exitType = classifyProcessExit(code, signal);
+      const uptimeMs = Date.now() - startedAt;
+      const exitType = classifyProcessExit(code, signal, { uptimeMs });
       if (exitType === "clean") return;
+      // A child that ran healthily before crashing gets a fresh restart budget,
+      // so a long dev session is not capped by crashes that happened hours ago.
+      if (uptimeMs >= HEALTHY_UPTIME_MS) restarts = 0;
       if (exitType === "fatal") {
         // Stale shared dist takes priority: rebuild once (up to MAX_SHARED_DIST_REBUILDS)
         // before falling back to the generic dependency-manifest recovery path.
