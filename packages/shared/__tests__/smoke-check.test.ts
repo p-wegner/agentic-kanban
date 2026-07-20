@@ -86,6 +86,46 @@ describe("runSmokeCheck", () => {
     expect(result.passed).toBe(true);
   });
 
+  // #121: the pre-merge gate hit `/` on a JSON-only API (shopcart/Ktor), got 404, and failed the
+  // gate even though the server was healthy. Under `acceptNon5xx` the 404 proves the port bound
+  // and the router replied — which is all a GUESSED root-URL probe can honestly assert.
+  it("passes on a 404 when acceptNon5xx is set (JSON API with no root route)", async () => {
+    const p = await port();
+    const { cmd, dir } = serverCommand(p, 404, '{"error":"not found"}');
+    const check: SmokeCheck = {
+      devCommand: cmd,
+      healthUrl: `http://127.0.0.1:${p}`,
+      expectBodyContains: [],
+      acceptNon5xx: true,
+    };
+    const result = await runSmokeCheck(dir, check, FAST);
+    expect(result.passed).toBe(true);
+    expect(result.status).toBe(404);
+  }, 15000);
+
+  it("still fails on a 404 without acceptNon5xx (explicit health route must answer 200)", async () => {
+    const p = await port();
+    const { cmd, dir } = serverCommand(p, 404, '{"error":"not found"}');
+    const check: SmokeCheck = { devCommand: cmd, healthUrl: `http://127.0.0.1:${p}/health`, expectBodyContains: [] };
+    const result = await runSmokeCheck(dir, check, FAST);
+    expect(result.passed).toBe(false);
+    expect(result.status).toBe(404);
+  }, 15000);
+
+  it("still fails on a 5xx even with acceptNon5xx (a broken server is not 'up')", async () => {
+    const p = await port();
+    const { cmd, dir } = serverCommand(p, 503, "boom");
+    const check: SmokeCheck = {
+      devCommand: cmd,
+      healthUrl: `http://127.0.0.1:${p}`,
+      expectBodyContains: [],
+      acceptNon5xx: true,
+    };
+    const result = await runSmokeCheck(dir, check, FAST);
+    expect(result.passed).toBe(false);
+    expect(result.status).toBe(503);
+  }, 15000);
+
   it("fails when the server returns a non-200 status", async () => {
     const p = await port();
     const { cmd, dir } = serverCommand(p, 500, "boom");
