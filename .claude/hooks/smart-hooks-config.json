@@ -7,7 +7,7 @@
         "command": "node .claude/hooks/validate-command-safety.js",
         "enabled": true,
         "blocking": true,
-        "timeout": 5,
+        "timeout": 30,
         "alwaysRun": true
       }
     ],

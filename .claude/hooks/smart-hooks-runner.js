@@ -21,18 +21,33 @@ const readline = require("readline");
 
 let hookInput = {};
 
+// See validate-command-safety.js: these are constant per start directory but were
+// re-spawning `git` on every call. Cache on startDir rather than unconditionally,
+// since hookInput.cwd is filled in asynchronously from stdin.
+const gitLookupCache = new Map();
+
+function cachedGitLookup(kind, startDir, resolve) {
+  const cacheKey = `${kind} ${startDir}`;
+  if (gitLookupCache.has(cacheKey)) return gitLookupCache.get(cacheKey);
+  const value = resolve();
+  gitLookupCache.set(cacheKey, value);
+  return value;
+}
+
 function getProjectDir() {
   const startDir = process.env.CLAUDE_PROJECT_DIR || hookInput.cwd || process.cwd();
-  try {
-    return execSync("git rev-parse --show-toplevel", {
-      cwd: startDir,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-      windowsHide: true,
-    }).trim();
-  } catch {
-    return startDir;
-  }
+  return cachedGitLookup("toplevel", startDir, () => {
+    try {
+      return execSync("git rev-parse --show-toplevel", {
+        cwd: startDir,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        windowsHide: true,
+      }).trim();
+    } catch {
+      return startDir;
+    }
+  });
 }
 
 function getScriptProjectDir() {
@@ -154,10 +169,24 @@ function runCheck(check, inputData, editedFiles) {
     });
     return { success: true, output: "" };
   } catch (err) {
-    return {
-      success: false,
-      output: [err.stdout || "", err.stderr || ""].join("\n").trim(),
-    };
+    // A killed-on-timeout check still fails closed, but it is NOT a policy
+    // decision — it never got to evaluate the command. Saying so turns an
+    // empty-reason block (which reads as an unexplained veto) into an
+    // actionable infra failure.
+    const timedOut = err.signal === "SIGTERM" || err.code === "ETIMEDOUT";
+    const output = [err.stdout || "", err.stderr || ""].join("\n").trim();
+    if (timedOut) {
+      return {
+        success: false,
+        timedOut: true,
+        output:
+          `${check.name || check.command} could not evaluate this command: ` +
+          `the check timed out after ${timeout / 1000}s and was killed. ` +
+          `Blocking anyway (fail closed) — this is a hook infrastructure failure, not a safety violation.` +
+          (output ? `\n${output}` : ""),
+      };
+    }
+    return { success: false, output };
   }
 }
 
@@ -202,16 +231,18 @@ function getMainCheckout() {
   // In a worktree, --git-common-dir resolves to the MAIN checkout's .git, whose parent
   // is the main checkout; in the main checkout it resolves to ./.git → the repo root.
   const startDir = process.env.CLAUDE_PROJECT_DIR || hookInput.cwd || process.cwd();
-  try {
-    const commonDir = execSync("git rev-parse --path-format=absolute --git-common-dir", {
-      cwd: startDir,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-      windowsHide: true,
-    }).trim();
-    if (commonDir) return path.dirname(commonDir);
-  } catch {}
-  return getProjectDir();
+  return cachedGitLookup("common-dir", startDir, () => {
+    try {
+      const commonDir = execSync("git rev-parse --path-format=absolute --git-common-dir", {
+        cwd: startDir,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        windowsHide: true,
+      }).trim();
+      if (commonDir) return path.dirname(commonDir);
+    } catch {}
+    return getProjectDir();
+  });
 }
 
 function isWorktreePath(p) {
