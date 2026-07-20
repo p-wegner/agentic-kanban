@@ -6,8 +6,8 @@ import {
   type ContentionVerdict,
   type FileContentionMode,
 } from "@agentic-kanban/shared/lib/file-contention";
-import { issues, workspaces } from "@agentic-kanban/shared/schema";
-import { eq, sql } from "drizzle-orm";
+import { issues, projectStatuses, workspaces } from "@agentic-kanban/shared/schema";
+import { and, eq, notInArray, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { parseTouchedFilePaths } from "../services/issue-ai.service.js";
 
@@ -33,8 +33,26 @@ import { parseTouchedFilePaths } from "../services/issue-ai.service.js";
 
 const CONTENTION_PREF_PREFIX = "file_contention_";
 
-/** Workspace statuses that mean an agent is actively holding the shared file. */
-const IN_FLIGHT_WORKSPACE_STATUSES = ["active", "reviewing", "fixing"] as const;
+/**
+ * SQL predicate matching workspaces that hold an UNMERGED edit to the shared file.
+ *
+ * Deliberately NOT `AUTO_START_WIP_STATUSES` (`active`/`reviewing`/`fixing`) from
+ * `monitor-auto-start.ts`. That set answers a different question — "is a live agent
+ * consuming a WIP slot?" — and was narrowed in #690 precisely so dead/idle
+ * workspaces stop holding capacity. Contention is not about a live agent: it is
+ * about a branch that still carries the registration-file edit and has not landed
+ * on the base yet. A workspace sitting in `ready_for_merge` (session-restore /
+ * markReadyForMerge) or `idle` has FINISHED writing `src/app.ts` and is waiting to
+ * merge — that is the PEAK contention window, and scoping to the WIP set made the
+ * gate blind to exactly the #119 case it exists to prevent.
+ *
+ * `closed` is the correct cutoff and matches the auto-start loop's own
+ * "issue already taken" check: closed+`mergedAt` means the edit is already in the
+ * base (no conflict possible), closed without it means the branch was abandoned.
+ * Everything else may still conflict. This errs toward deferring a start by one
+ * cycle, which is cheap; under-deferring costs a full agent fix-and-merge cycle.
+ */
+export const inFlightWorkspacePredicate = sql`${workspaces.status} != 'closed'`;
 
 export interface FileContentionGate {
   mode: FileContentionMode;
@@ -76,10 +94,18 @@ export function resolveProjectContentionMode(prefMap: Map<string, string>, proje
 /**
  * Build the contention gate for one project.
  *
- * Hot files are derived from ALL of the project's issues that carry a cached
+ * Hot files are derived from the project's OPEN issues that carry a cached
  * prediction (not just the in-flight ones) so the empirical
  * "predicted by >= N issues" signal has enough evidence — a registration file
  * the name heuristic doesn't know about still gets caught.
+ *
+ * Scoped to open issues on purpose. Counting Done/Cancelled issues too would make
+ * the evidence set grow monotonically with project age: on a mature board (this
+ * one is ~800 issues) almost any moderately-common file eventually accumulates 3
+ * predictions, the hot set degenerates toward "every file", and the gate collapses
+ * into "serialize on ANY shared predicted file" — throttling exactly the
+ * parallelism it exists to protect. Open issues are also the semantically right
+ * population: contention is a property of work that can still collide.
  */
 export async function buildFileContentionGate(
   prefMap: Map<string, string>,
@@ -93,7 +119,11 @@ export async function buildFileContentionGate(
     const predicted = await database
       .select({ id: issues.id, touchedFilesJson: issues.touchedFilesJson })
       .from(issues)
-      .where(eq(issues.projectId, projectId));
+      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+      .where(and(
+        eq(issues.projectId, projectId),
+        notInArray(projectStatuses.name, ["Done", "Cancelled"]),
+      ));
 
     const filesByIssue = new Map<string, string[]>();
     const all: ContentionIssueFiles[] = [];
@@ -108,7 +138,7 @@ export async function buildFileContentionGate(
     const inFlightRows = await database
       .select({ issueId: workspaces.issueId })
       .from(workspaces)
-      .where(sql`${workspaces.status} IN (${sql.join(IN_FLIGHT_WORKSPACE_STATUSES.map((s) => sql`${s}`), sql`, `)})`);
+      .where(inFlightWorkspacePredicate);
 
     const inFlight: ContentionIssueFiles[] = [];
     const seen = new Set<string>();
