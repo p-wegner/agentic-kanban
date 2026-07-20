@@ -6,6 +6,7 @@ import { db } from "../db/index.js";
 import { runAutoStart, type AutoStartDeps } from "../startup/monitor-auto-start.js";
 import {
   buildFileContentionGate,
+  inFlightWorkspacePredicate,
   openFileContentionGate,
   shouldDeferForContention,
 } from "../startup/monitor-file-contention.js";
@@ -119,10 +120,86 @@ describe("buildFileContentionGate (#119)", () => {
     expect(gate.check("ticket-b")?.hotFiles).toEqual(["src/app.ts"]);
   });
 
+  // Regression: the gate originally reused AUTO_START_WIP_STATUSES
+  // (active/reviewing/fixing), which #690 narrowed for WIP *capacity* accounting.
+  // Contention is not about a live agent — a workspace in `ready_for_merge` or
+  // `idle` has already WRITTEN the registration file and is sitting on an unmerged
+  // branch. That is the peak contention window, and scoping to the WIP set made the
+  // gate blind to the exact #119 case. The query must select every non-closed
+  // workspace; these tests pin that by feeding rows the old predicate excluded.
+  it.each(["ready_for_merge", "idle", "blocked", "awaiting-plan-approval", "error"])(
+    "defers against an in-flight ticket whose workspace is %s (unmerged branch still holds the file)",
+    async (status) => {
+      const gate = await buildFileContentionGate(
+        new Map(),
+        PROJECT,
+        // The fake db returns whatever the query selects; the real filtering lives in
+        // SQL, so this asserts the row SHAPE is honoured for non-WIP statuses.
+        fakeDb([projectIssues, [{ issueId: "ticket-a", status }]]),
+      );
+      expect(gate.check("ticket-b")?.hotFiles).toEqual(["src/app.ts"]);
+    },
+  );
+
   it("noteStarted ignores an issue with no prediction", async () => {
     const gate = await buildFileContentionGate(new Map(), PROJECT, fakeDb([projectIssues, []]));
     gate.noteStarted("unknown-issue");
     expect(gate.check("ticket-b")).toBeNull();
+  });
+});
+
+describe("in-flight scope (review regressions)", () => {
+  /**
+   * Flatten a drizzle SQL fragment to a string so its scope can be asserted.
+   *
+   * Must NOT use JSON.stringify: a fragment's chunks include Column objects, and
+   * `column.table.column` is a cycle ("Converting circular structure to JSON").
+   * Walk the tree instead, collecting only primitives and skipping Columns/Tables.
+   */
+  function sqlText(node: unknown, depth = 0): string {
+    if (depth > 8 || node == null) return "";
+    if (typeof node === "string") return node;
+    if (typeof node === "number" || typeof node === "boolean") return String(node);
+    if (Array.isArray(node)) return node.map((n) => sqlText(n, depth + 1)).join(" ");
+    if (typeof node !== "object") return "";
+    const o = node as Record<string, unknown>;
+    if ("table" in o) return ""; // a Column — its identifier is irrelevant here
+    const parts: string[] = [];
+    if ("queryChunks" in o) parts.push(sqlText(o.queryChunks, depth + 1));
+    if ("value" in o) parts.push(sqlText(o.value, depth + 1));
+    return parts.join(" ");
+  }
+
+  // A workspace that has FINISHED writing src/app.ts and is waiting to merge
+  // (`idle`, `ready_for_merge`, `blocked`) still holds the registration-file edit,
+  // so a second builder starting into that window hits the #119 conflict. Scoping
+  // the query to the WIP statuses (active/reviewing/fixing) — which exist to answer
+  // "is an agent burning capacity?" — made the gate blind to the dominant case.
+  it("counts every non-closed workspace, not just the live-agent WIP statuses", () => {
+    const text = sqlText(inFlightWorkspacePredicate);
+    expect(text).toContain("!= 'closed'");
+    for (const wipOnly of ["active", "reviewing", "fixing"]) {
+      expect(text).not.toContain(`'${wipOnly}'`);
+    }
+  });
+
+  it("derives hot-file evidence from open issues only (excludes Done/Cancelled)", async () => {
+    const where = vi.fn();
+    const chain: Record<string, unknown> = {};
+    for (const fn of ["from", "innerJoin", "orderBy"]) chain[fn] = () => chain;
+    chain.where = (arg: unknown) => { where(arg); return chain; };
+    chain.then = (r: (v: unknown) => unknown) => Promise.resolve([]).then(r);
+
+    await buildFileContentionGate(new Map(), PROJECT, {
+      select: () => chain,
+    } as unknown as Pick<typeof db, "select">);
+
+    // The issue-snapshot query must filter the status name, or a mature board's
+    // Done issues inflate the >=3-issue hotness count until every file reads hot
+    // and the gate throttles all parallelism.
+    const filter = sqlText(where.mock.calls[0]?.[0]);
+    expect(filter).toContain("Done");
+    expect(filter).toContain("Cancelled");
   });
 });
 
