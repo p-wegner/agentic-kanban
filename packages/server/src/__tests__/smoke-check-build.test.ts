@@ -39,6 +39,7 @@ describe("buildSmokeCheck", () => {
       devCommand: "pnpm vite dev",
       healthUrl: "http://localhost:5173",
       expectBodyContains: ["<html", "<body"],
+      acceptNon5xx: false,
     });
   });
 
@@ -46,6 +47,29 @@ describe("buildSmokeCheck", () => {
     const p = profile({ isWeb: true, devCommand: "pnpm vite dev", devHealthUrl: null, devPort: 3000 });
     const check = buildSmokeCheck(p);
     expect(check?.healthUrl).toBe("http://127.0.0.1:3000");
+  });
+
+  // #121: a JSON-only API (shopcart/Ktor) has no root route, so the DERIVED root URL answers
+  // 404 from a perfectly healthy server. Grade the guessed probe on "did it bind and route".
+  it("accepts any non-5xx for a JSON API whose health URL was derived from devPort", () => {
+    const p = profile({ isWeb: true, devCommand: "./gradlew run", devHealthUrl: null, devPort: 8080 });
+    const check = buildSmokeCheck(p);
+    expect(check?.healthUrl).toBe("http://127.0.0.1:8080");
+    expect(check?.expectBodyContains).toEqual([]);
+    expect(check?.acceptNon5xx).toBe(true);
+  });
+
+  it("keeps the strict 200 bar when the health URL is explicitly configured", () => {
+    // The user named a real health route — a 404 there IS a failure, not a missing root route.
+    const p = profile({ isWeb: true, devCommand: "./gradlew run", devHealthUrl: "http://127.0.0.1:8080/health" });
+    expect(buildSmokeCheck(p)?.acceptNon5xx).toBe(false);
+  });
+
+  it("keeps the strict 200 bar for a browser stack even with a derived URL", () => {
+    // A dev server's 404 page still contains <html>/<body>, so relaxing here would let a
+    // genuinely broken UI through the gate.
+    const p = profile({ isWeb: true, devCommand: "pnpm vite dev", devHealthUrl: null, devPort: 5173 });
+    expect(buildSmokeCheck(p)?.acceptNon5xx).toBe(false);
   });
 
   it("asserts only HTTP-200 (no body needles) for a headless HTTP service", () => {
