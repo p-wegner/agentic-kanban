@@ -29,3 +29,8 @@ export type * from "./smoke-check.js";
 // runtime is imported from the deep path (@agentic-kanban/shared/lib/docker-exec)
 // server-side; only the types are needed through the barrel. (#791 client white-screen.)
 export type * from "./docker-exec.js";
+// Type-only: devcontainer-exec.ts imports node:child_process/node:fs, which crashes
+// the browser bundle if pulled into the client via this barrel. The runtime is
+// imported from the deep path (@agentic-kanban/shared/lib/devcontainer-exec)
+// server-side; only the types are needed through the barrel. (#791 client white-screen.)
+export type * from "./devcontainer-exec.js";

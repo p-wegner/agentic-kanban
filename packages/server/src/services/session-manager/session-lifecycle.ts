@@ -18,6 +18,8 @@ import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import { modelBelongsToProvider } from "@agentic-kanban/shared";
 import type { SessionManagerOptions, SessionState, StartSessionOptions } from "./types.js";
 import { workspaceLaunchPreflight } from "../preflight-check.js";
+import { provisionContainerForWorkspace } from "../devcontainer-workspace.service.js";
+import type { ContainerProvision } from "../devcontainer-workspace.service.js";
 import { WorkspaceError } from "../workspace-internals.js";
 import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../../constants/preference-keys.js";
 import { parseSymlinkDirs } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
@@ -617,6 +619,22 @@ export function createSessionLifecycle(
       }
     }
 
+    // Provision the builder's devcontainer BEFORE the (synchronous) spawn. This
+    // is best-effort by contract — any missing prerequisite resolves to
+    // undefined and the agent launches on the host as before.
+    let containerProvision: ContainerProvision | undefined;
+    try {
+      containerProvision = await provisionContainerForWorkspace({
+        enabled: parseBoolSetting(
+          "devcontainer_builders",
+          await lifecycleRepo.getPreferenceValue("devcontainer_builders", db),
+        ),
+        worktreePath: effectiveWorkingDir,
+      });
+    } catch (err) {
+      console.warn(`[devcontainer] provisioning threw for sessionId=${sessionId} — running on host`, err);
+    }
+
     try {
       const proc = agentService.launch(effectiveWorkingDir, sessionId, effectivePrompt, effectiveAgentArgs, (event) => {
         if (event.type === "exit") {
@@ -634,7 +652,7 @@ export function createSessionLifecycle(
           handleExitEvent(event.exitCode ?? null);
         }
       // When resumeWithNewModel is true, omit --resume so the new profile/provider is used instead
-      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider, launchProfile, effectiveExtraEnv, skipPermissions, effectiveModel, contextFiles, (effectiveSystemInstructions ?? "").trim() || undefined);
+      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider, launchProfile, effectiveExtraEnv, skipPermissions, effectiveModel, contextFiles, (effectiveSystemInstructions ?? "").trim() || undefined, containerProvision);
 
       // Persist PID so hot-reload can detect surviving processes
       if (proc.pid) {
