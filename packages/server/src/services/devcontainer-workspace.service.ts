@@ -17,7 +17,13 @@ import {
   type DependencyVolume,
 } from "@agentic-kanban/shared/lib/container-dep-volumes";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
-import { provisionContainerProfile, transcriptMount } from "./container-profile.service.js";
+import {
+  HOST_GATEWAY_HOSTNAME,
+  provisionContainerProfile,
+  transcriptMount,
+  writeContainerMcpConfig,
+} from "./container-profile.service.js";
+import { ensureMcpHttpBridge } from "./mcp-http-bridge.service.js";
 import type { ContainerPathMapping } from "./agent-provider/container-wrap.js";
 
 /**
@@ -39,6 +45,8 @@ export interface ContainerProvision {
    * Carries `CLAUDE_CONFIG_DIR` pointing at the container-side profile mount (#133/#134).
    */
   containerEnv: Record<string, string>;
+  /** Host path of the container's HTTP MCP config (#136); undefined = no board tools. */
+  containerMcpConfigPath?: string;
 }
 
 export interface ProvisionOptions {
@@ -268,16 +276,67 @@ export async function provisionContainerForWorkspace(
         : ""),
   );
 
+  // Point the builder's MCP client at the board over HTTP (#136). Best-effort: if
+  // the listener will not start, the builder runs without board tools rather than
+  // failing the workspace — same contract as the rest of provisioning.
+  let containerMcpConfigPath: string | undefined;
+  if (workspaceId) {
+    const mcp = await ensureMcpHttpBridge();
+    if (mcp) {
+      containerMcpConfigPath = writeContainerMcpConfig({
+        hostTmp,
+        workspaceId,
+        port: mcp.port,
+        token: mcp.token,
+      });
+      await warnIfBoardUnreachable(handle, mcp.port);
+    } else {
+      console.warn(
+        "[devcontainer] board MCP listener unavailable — this containerized builder " +
+          "will have no board tools (it cannot use the host stdio config).",
+      );
+    }
+  }
+
   return {
     handle,
     pathMappings: buildPathMappings(worktreePath, handle, narrowProfile.hostDir, hostTmp),
     dependencyVolumes,
+    containerMcpConfigPath,
     // Point the CLI at the mounted profile. This also fixes #134: with
     // CLAUDE_CONFIG_DIR set, the CLI reads `<dir>/.claude.json` instead of
     // `$HOME/.claude.json`, so the "configuration file not found" preamble that
     // every containerized turn printed to stderr goes away.
     containerEnv: { CLAUDE_CONFIG_DIR: `${containerHomeFor(handle.remoteUser)}/.claude` },
   };
+}
+
+/**
+ * Check the container can actually resolve the host gateway, and say so loudly if not.
+ *
+ * `host.docker.internal` is provided automatically by Docker Desktop (Windows/macOS)
+ * but NOT by a plain Linux docker engine, where it needs
+ * `--add-host=host.docker.internal:host-gateway`. The devcontainer CLI has no
+ * pass-through for that, so on Linux this is a real limitation rather than something
+ * the board can paper over. Without the probe it would present as MCP tools that are
+ * merely "pending" forever — the exact silent symptom #136 was filed for.
+ */
+async function warnIfBoardUnreachable(handle: DevcontainerHandle, port: number): Promise<void> {
+  const probe = await dockerExec([
+    "exec",
+    handle.containerId,
+    "getent",
+    "hosts",
+    HOST_GATEWAY_HOSTNAME,
+  ]);
+  if (probe.code === 0 && probe.stdout.trim()) return;
+  console.warn(
+    `[devcontainer] the container cannot resolve ${HOST_GATEWAY_HOSTNAME}, so the board MCP ` +
+      `endpoint on :${port} is unreachable and the builder will have NO board tools. ` +
+      "Docker Desktop provides this name automatically; a plain Linux engine needs " +
+      "`--add-host=host.docker.internal:host-gateway`, which the devcontainer CLI cannot " +
+      "pass through — declare it in the repo's devcontainer.json `runArgs` instead.",
+  );
 }
 
 /**
