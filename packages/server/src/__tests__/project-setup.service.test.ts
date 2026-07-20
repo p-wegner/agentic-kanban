@@ -92,6 +92,20 @@ describe("deriveVerifyScript", () => {
     expect(result).toBe("python -m pytest");
   });
 
+  // #120: bare `python -m pytest` fails with "No module named pytest" in a uv project
+  // (deps live in a project-local .venv) and blocked every merge.
+  it("returns uv run pytest for a uv repo (pyproject.toml + uv.lock)", async () => {
+    await writeFile(join(dir, "pyproject.toml"), '[project]\nname = "x"\n');
+    const result = deriveVerifyScript(dir, ["pyproject.toml", "uv.lock"]);
+    expect(result).toBe("uv run pytest");
+  });
+
+  it("returns uv run pytest when pyproject declares [tool.uv] without a lockfile", async () => {
+    await writeFile(join(dir, "pyproject.toml"), '[project]\nname = "x"\n\n[tool.uv]\n');
+    const result = deriveVerifyScript(dir, ["pyproject.toml"]);
+    expect(result).toBe("uv run pytest");
+  });
+
   it("returns bundle exec rake test for a Ruby repo", () => {
     const result = deriveVerifyScript(dir, ["Gemfile"]);
     expect(result).toBe("bundle exec rake test");
