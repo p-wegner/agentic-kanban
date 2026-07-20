@@ -518,7 +518,12 @@ export function createWorkspaceMergeService(deps: {
       throw new WorkspaceError("Workspace not set up", "BAD_REQUEST");
     }
 
-    await gitService.abortRebase(workspace.workingDir);
+    // Idempotent: `git rebase --abort` exits non-zero when no rebase is in progress
+    // (e.g. a stale UI retry, or a rebase that already resolved), which previously
+    // surfaced as a 500. Only invoke it when a rebase is actually in progress.
+    if (await gitService.isRebaseInProgress(workspace.workingDir)) {
+      await gitService.abortRebase(workspace.workingDir);
+    }
     await killWorktreeProcesses(workspace.workingDir, "abort-rebase");
     const projectId = await resolveProjectId(id, database);
     if (projectId) boardEvents?.broadcast(projectId, "board_changed");
