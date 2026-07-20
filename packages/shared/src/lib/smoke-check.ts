@@ -18,6 +18,18 @@ export interface SmokeCheck {
    * HTTP-200 alone passes — appropriate for an API/service with no HTML to assert on.
    */
   expectBodyContains: string[];
+  /**
+   * Accept any non-5xx status as "up" instead of requiring a 200 (#121).
+   *
+   * Set when the health URL was DERIVED (`http://127.0.0.1:<devPort>`) rather than configured:
+   * a JSON-only API has no root route, so the derived URL answers 404 even though the server
+   * booted fine — the port bound and the router replied, which is all the derived probe can
+   * honestly assert. Same contract as `healthCheckDevServer` in the dev-server service.
+   * Never set when the URL is explicit (the user named a real health route, so 200 is the
+   * meaningful bar) or when render assertions exist (a browser stack's 404 page still has
+   * `<html>`, so relaxing there would mask a genuinely broken UI).
+   */
+  acceptNon5xx?: boolean;
 }
 
 export interface SmokeCheckResult {
@@ -115,6 +127,19 @@ function snippet(body: string, max: number): string {
   return body.slice(0, Math.max(0, max));
 }
 
+/**
+ * True when the observed status means "the server is up" for this check (#121).
+ *
+ * Status 0 (unreachable) is never up. Otherwise a 200 always counts; under `acceptNon5xx`
+ * anything below 500 counts too, because a derived root-URL probe against a JSON-only API
+ * legitimately answers 404 from a perfectly healthy server.
+ */
+function statusIsUp(status: number, check: SmokeCheck): boolean {
+  if (status === 0) return false;
+  if (status === 200) return true;
+  return Boolean(check.acceptNon5xx) && status < 500;
+}
+
 /** True when every required substring is present in the body (case-insensitive). */
 function bodyAssertionsPass(body: string, expect: string[]): boolean {
   if (expect.length === 0) return true;
@@ -197,12 +222,12 @@ async function runSmokeCheckInner(
       }
 
       last = await probe(check.healthUrl, requestTimeoutMs);
-      if (last.status === 200 && bodyAssertionsPass(last.body, check.expectBodyContains)) {
+      if (statusIsUp(last.status, check) && bodyAssertionsPass(last.body, check.expectBodyContains)) {
         return {
           passed: true,
           skipped: false,
-          status: 200,
-          message: `Smoke check passed: ${check.healthUrl} returned 200${check.expectBodyContains.length ? ` and rendered expected content (${check.expectBodyContains.join(", ")})` : ""}.`,
+          status: last.status,
+          message: `Smoke check passed: ${check.healthUrl} returned ${last.status}${last.status === 200 ? "" : " (server is up — any non-5xx proves the port bound and routed)"}${check.expectBodyContains.length ? ` and rendered expected content (${check.expectBodyContains.join(", ")})` : ""}.`,
           bodySnippet: snippet(last.body, snippetLength),
         };
       }
@@ -220,12 +245,12 @@ async function runSmokeCheckInner(
         bodySnippet: snippet(serverLog, snippetLength),
       };
     }
-    if (last.status !== 200) {
+    if (!statusIsUp(last.status, check)) {
       return {
         passed: false,
         skipped: false,
         status: last.status,
-        message: `Smoke check failed: ${check.healthUrl} returned HTTP ${last.status} (expected 200).`,
+        message: `Smoke check failed: ${check.healthUrl} returned HTTP ${last.status} (expected ${check.acceptNon5xx ? "any non-5xx" : "200"}).`,
         bodySnippet: snippet(last.body, snippetLength),
       };
     }
@@ -233,7 +258,7 @@ async function runSmokeCheckInner(
       passed: false,
       skipped: false,
       status: last.status,
-      message: `Smoke check failed: ${check.healthUrl} returned 200 but the body was missing expected content (${check.expectBodyContains.join(", ")}).`,
+      message: `Smoke check failed: ${check.healthUrl} returned ${last.status} but the body was missing expected content (${check.expectBodyContains.join(", ")}).`,
       bodySnippet: snippet(last.body, snippetLength),
     };
   } finally {

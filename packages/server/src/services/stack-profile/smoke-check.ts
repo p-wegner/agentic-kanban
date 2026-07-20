@@ -5,10 +5,17 @@
 
 import type { StackProfile, SmokeCheck } from "@agentic-kanban/shared";
 
-/** Resolve the health URL to poll, from an explicit URL or a known dev port. */
-function resolveHealthUrl(profile: StackProfile): string | null {
-  if (profile.devHealthUrl && profile.devHealthUrl.trim()) return profile.devHealthUrl.trim();
-  if (profile.devPort && profile.devPort > 0) return `http://127.0.0.1:${profile.devPort}`;
+/**
+ * Resolve the health URL to poll, from an explicit URL or a known dev port.
+ *
+ * `explicit` distinguishes "the user named a real health route" from "we guessed the root URL
+ * off the dev port" — only the latter may be graded leniently (#121).
+ */
+function resolveHealthUrl(profile: StackProfile): { url: string; explicit: boolean } | null {
+  if (profile.devHealthUrl && profile.devHealthUrl.trim())
+    return { url: profile.devHealthUrl.trim(), explicit: true };
+  if (profile.devPort && profile.devPort > 0)
+    return { url: `http://127.0.0.1:${profile.devPort}`, explicit: false };
   return null;
 }
 
@@ -31,16 +38,23 @@ function resolveHealthUrl(profile: StackProfile): string | null {
 export function buildSmokeCheck(profile: StackProfile | null): SmokeCheck | null {
   if (!profile || !profile.isWeb) return null;
   if (!profile.devCommand || !profile.devCommand.trim()) return null;
-  const healthUrl = resolveHealthUrl(profile);
-  if (!healthUrl) return null;
+  const health = resolveHealthUrl(profile);
+  if (!health) return null;
 
   // Render assertion: for a browser UI the served document contains an <html>/<body> shell.
   // Asserting on these universal tokens (not app-specific copy) keeps the check generic across
   // any web toy-project. A non-browser HTTP service still passes on the 200 with no body needle.
+  const expectBodyContains = isLikelyBrowserStack(profile) ? ["<html", "<body"] : [];
+
   return {
     devCommand: profile.devCommand.trim(),
-    healthUrl,
-    expectBodyContains: isLikelyBrowserStack(profile) ? ["<html", "<body"] : [],
+    healthUrl: health.url,
+    expectBodyContains,
+    // A guessed root URL against a JSON-only API answers 404 from a healthy server (#121), so
+    // grade it on "did the port bind and route" instead of a 200. Only for the guessed URL and
+    // only without render assertions — an explicit health route, or a browser stack whose 404
+    // page still contains <html>, must keep the strict 200 bar.
+    acceptNon5xx: !health.explicit && expectBodyContains.length === 0,
   };
 }
 
