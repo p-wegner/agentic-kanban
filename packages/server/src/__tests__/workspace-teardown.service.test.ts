@@ -86,6 +86,7 @@ describe("teardownWorktree", () => {
     return {
       killDir: vi.fn(async () => 1),
       killPorts: vi.fn(async () => 1),
+      killSupervisor: vi.fn(async () => 1),
       runScript: vi.fn(async () => ({ ok: true, output: "" })),
     };
   }
@@ -118,6 +119,38 @@ describe("teardownWorktree", () => {
     expect(d.killDir).toHaveBeenCalledWith("C:/andrena/.worktrees/feature_ak-42-foo");
     // exact ports only — 3043/5215 — never a range
     expect(d.killPorts).toHaveBeenCalledWith([3043, 5215]);
+    // the respawning dev.mjs supervisor is killed on the same exact ports
+    expect(d.killSupervisor).toHaveBeenCalledWith([3043, 5215]);
+  });
+
+  it("kills the respawning dev.mjs supervisor BEFORE the port sweep (else vite respawns)", async () => {
+    const order: string[] = [];
+    const d = {
+      killDir: vi.fn(async () => 1),
+      killSupervisor: vi.fn(async () => { order.push("supervisor"); return 1; }),
+      killPorts: vi.fn(async () => { order.push("ports"); return 1; }),
+      runScript: vi.fn(async () => ({ ok: true, output: "" })),
+    };
+    await teardownWorktree(
+      { workingDir: "C:/andrena/.worktrees/feature_ak-42-foo", branch: "feature/ak-42-foo", label: "merge" },
+      d,
+    );
+    // Supervisor first: dev.mjs respawns killed children, so a bare port kill without
+    // first killing the supervisor lets vite/tsx reappear within ~1s (the leak).
+    expect(order).toEqual(["supervisor", "ports"]);
+  });
+
+  it("still sweeps ports if the supervisor kill throws (best-effort)", async () => {
+    const d = {
+      killDir: vi.fn(async () => 0),
+      killSupervisor: vi.fn(async () => { throw new Error("boom"); }),
+      killPorts: vi.fn(async () => 1),
+      runScript: vi.fn(async () => ({ ok: true, output: "" })),
+    };
+    await expect(
+      teardownWorktree({ workingDir: "C:/andrena/.worktrees/feature_ak-1-x", label: "delete" }, d),
+    ).resolves.toBeTruthy();
+    expect(d.killPorts).toHaveBeenCalled();
   });
 
   it("runs the generic teardownScript with worktree context env", async () => {

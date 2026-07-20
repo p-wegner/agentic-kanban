@@ -5,7 +5,10 @@
 // Two layers, intentionally separated:
 //
 //  1. BUILT-IN, app-convention cleanup (best-effort, generic-safe):
-//       - kill processes whose command line references the worktree dir, AND
+//       - kill processes whose command line references the worktree dir,
+//       - kill the `scripts/dev.mjs` SUPERVISOR that owns the worktree's dev
+//         ports (it respawns killed children, so freeing only the port listener
+//         makes vite/tsx reappear within ~1s — the dev-server-leak root cause), AND
 //       - free the deterministic dev ports this app assigns to the worktree
 //         (worktree dev servers resolve vite/tsx from the shared main-checkout
 //         node_modules, so a dir-only match misses them).
@@ -20,7 +23,7 @@
 // Ordering matters: kill/teardown BEFORE the caller removes the worktree, so nothing
 // holds the directory open (which also fixes the EBUSY worktree-remove crash).
 
-import { killProcessesInDir, killProcessesOnPorts } from "./process-cleanup.js";
+import { killProcessesInDir, killProcessesOnPorts, killDevServerSupervisorOnPorts } from "./process-cleanup.js";
 import { runScript } from "./script-runner.js";
 import { resolveWorktreeDevPorts } from "./worktree-ports.js";
 import { auditProcessEvent, guardProcessKill } from "./process-guard.js";
@@ -107,6 +110,8 @@ export interface TeardownWorktreeParams {
 export interface TeardownDeps {
   killDir?: (dir: string) => Promise<number>;
   killPorts?: (ports: number[]) => Promise<number>;
+  /** Kill the respawning `dev.mjs` supervisor owning the worktree's ports. */
+  killSupervisor?: (ports: number[]) => Promise<number>;
   runScript?: typeof runScript;
 }
 
@@ -134,6 +139,7 @@ export async function teardownWorktree(
 
   const killDir = deps.killDir ?? killProcessesInDir;
   const killPorts = deps.killPorts ?? killProcessesOnPorts;
+  const killSupervisor = deps.killSupervisor ?? killDevServerSupervisorOnPorts;
   const run = deps.runScript ?? runScript;
 
   // Layer 1a — processes whose command line references the worktree dir.
@@ -146,8 +152,21 @@ export async function teardownWorktree(
   // Layer 1b — free the app-convention dev ports for this worktree (exact ports only).
   const ports = resolveWorktreeDevPorts(workingDir);
   if (ports) {
+    const portList = [ports.serverPort, ports.clientPort];
+    // Kill the `dev.mjs` supervisor FIRST. It respawns killed children, so a bare
+    // port-listener kill (killPorts below) makes vite/tsx reappear within ~1s — the
+    // dev-server-leak root cause. The supervisor kill is scoped via THESE port
+    // listeners (so it only reaches this worktree's supervisor) and taskkills the
+    // whole tree (proxy + vite + backend). A no-op for generic projects with no
+    // dev.mjs ancestor. The port sweep after it mops up anything not under it (e.g.
+    // a true orphan whose supervisor already died).
     try {
-      result.killedOnPorts = await killPorts([ports.serverPort, ports.clientPort]);
+      await killSupervisor(portList);
+    } catch (err) {
+      console.warn(`[teardown:${label}] supervisor cleanup failed (non-fatal):`, err instanceof Error ? err.message : String(err));
+    }
+    try {
+      result.killedOnPorts = await killPorts(portList);
     } catch (err) {
       console.warn(`[teardown:${label}] port cleanup failed (non-fatal):`, err instanceof Error ? err.message : String(err));
     }
