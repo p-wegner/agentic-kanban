@@ -99,6 +99,7 @@ venv/
 *.war
 *.ear
 .gradle/
+.kotlin/
 build/
 .env
 *.log
