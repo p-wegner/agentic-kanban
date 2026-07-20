@@ -8,6 +8,7 @@ import {
   hostTranscriptDir,
   provisionContainerProfile,
   transcriptMount,
+  writeContainerMcpConfig,
 } from "../services/container-profile.service.js";
 
 let home: string;
@@ -127,6 +128,34 @@ describe("provisionContainerProfile — narrow profile (#133)", () => {
     });
     expect(profile.hostDir.startsWith(containerProfileRoot(stateDir))).toBe(true);
     expect(profile.hostDir).not.toContain("..");
+  });
+});
+
+describe("writeContainerMcpConfig — reachable board MCP (#136)", () => {
+  it("describes an HTTP transport on the host gateway, not a host stdio command", () => {
+    // The stdio config names a command that does not exist in the container, and
+    // path-translating it is a dead end because the MCP server opens the DB through
+    // a natively-compiled Windows better-sqlite3 binding.
+    const path = writeContainerMcpConfig({ hostTmp: home, workspaceId: "ws1", port: 51234, token: "tok" });
+    const config = JSON.parse(readFileSync(path, "utf8"));
+
+    expect(config.mcpServers["agentic-kanban"]).toEqual({
+      type: "http",
+      url: "http://host.docker.internal:51234/mcp",
+      headers: { Authorization: "Bearer tok" },
+    });
+    expect(JSON.stringify(config)).not.toContain("command");
+  });
+
+  it("writes one config per workspace so concurrent builders never race", () => {
+    const a = writeContainerMcpConfig({ hostTmp: home, workspaceId: "ws1", port: 1, token: "t" });
+    const b = writeContainerMcpConfig({ hostTmp: home, workspaceId: "ws2", port: 1, token: "t" });
+    expect(a).not.toBe(b);
+  });
+
+  it("writes into the host temp dir, which is already mounted", () => {
+    const path = writeContainerMcpConfig({ hostTmp: home, workspaceId: "ws1", port: 1, token: "t" });
+    expect(path.startsWith(home)).toBe(true);
   });
 });
 

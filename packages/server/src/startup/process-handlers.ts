@@ -3,6 +3,7 @@ import { rawClient, rawWriteClient } from "../db/index.js";
 import { createBackup } from "../db/backup.js";
 import { isTransientNetworkError } from "./transient-errors.js";
 import { activeMerges } from "../services/workspace-internals.js";
+import { stopMcpHttpBridge } from "../services/mcp-http-bridge.service.js";
 
 /** Checkpoint the WAL and take a verified shutdown backup, bounded so it can't hang exit. */
 async function checkpointAndBackup(): Promise<void> {
@@ -71,6 +72,10 @@ export function setupProcessHandlers(
     // Agent processes are spawned detached+unref'd — they survive hot-reload without being killed.
     // Only kill them on explicit SIGINT (user Ctrl+C) to avoid orphaning on intentional shutdown.
     const activeCount = signal === "SIGINT" ? agentServiceModule.killAll() : 0;
+    // The HTTP MCP listener is a child of THIS process and holds a port, so it must
+    // go on any shutdown — not just SIGINT like the detached agents. A survivor
+    // would keep the port bound and the next board start would spawn a second one.
+    stopMcpHttpBridge();
     console.log(`[shutdown] Received ${signal} — closing server (${activeCount} agent process(es) terminated, survivors continue)...`);
     // Hard cap so shutdown work can never block exit indefinitely.
     setTimeout(() => {
