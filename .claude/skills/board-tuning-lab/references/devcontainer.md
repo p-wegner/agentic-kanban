@@ -114,22 +114,37 @@ live: containerized builder authenticated as the host profile, initialized with
 cwd inside the container, implemented the fixture ticket (new route, new test,
 app wiring) with a clean 3-file `git status`.
 
-**NOT sealed.** Two blockers keep containerized builders below host parity:
+**NOT sealed.** Blockers: #135 (setup on host) and #136 (MCP unreachable), plus
+#133 (whole-profile RW mount) and #134 (`~/.claude.json` outside the mount).
 
-- **#135 (critical)** — `setup_script` runs on the HOST, so pnpm's node_modules
-  symlinks point at Windows store paths and nothing resolves in the container
-  (`Cannot find module .../vitest.mjs`). The agent can write code but cannot run
-  tests, so it cannot honestly reach ready-for-merge. Needs provisioning moved to
-  workspace creation, then setup dispatched through the container.
-- **#136 (high)** — board MCP tools unreachable. The MCP config is a host-stdio
-  server, and bind-mounting the board repo will NOT fix it: the MCP server opens
-  the DB via `better-sqlite3`, a native Windows binary. Needs an HTTP transport +
-  `host.docker.internal`.
+## Round 2 outcome (2026-07-20)
 
-Plus #133 (whole-profile RW mount), #134 (`~/.claude.json` sits outside the
-mounted profile → config-not-found noise on stderr every turn).
+**#135 FIXED** (`18a9faec`) — `runSetupScript` takes an optional container and
+dispatches through `docker exec … /bin/sh -c`, and provisioning moved ahead of
+setup in `workspace-provision.service`. The two provisioning call sites need no
+coordination *because `devcontainer up` is idempotent* — lean on that rather than
+threading container state. Windows verbatim quoting must be OFF for the container
+path (it is a cmd.exe concern; leaving it on corrupts the script — the inverse of
+#111).
 
-Start round 2 at #135 — it is the one that decides whether the feature is usable.
+Verified: full fixture suite passes IN the container — 30 files, 291 tests,
+including the `/api/version` test the containerized builder wrote in round 1. So
+a containerized agent can now write code AND verify it.
+
+**New finding #138 (high)** — the COLD `pnpm install` on a bind-mounted Windows
+worktree flakes once with `ERR_PNPM_EACCES` on rename, then succeeds on retry.
+Do not misread it as a permissions bug: both root and the remote user can rename
+in the mount, and the mount is mode 777. It is a Docker Desktop bind-mount (9p)
+transient under pnpm's rename-heavy cold path — so it hits ~every fresh worktree
+and vanishes on retry, the worst shape for a flake. The same mount also costs
+`collect 408s` on an 86s suite. Both fix together by putting dependency dirs on a
+**named volume** instead of the bind mount (also permanently prevents host-built
+node_modules from leaking in, which was the root of #135).
+
+**Still open: #136** — board MCP tools unreachable; needs an HTTP transport +
+`host.docker.internal`. Bind-mounting the board repo is a dead end (native
+`better-sqlite3`). Start round 3 there, or at #138 if you want containerized
+builders fast and reliable before making them board-aware.
 
 ## Side finding
 
