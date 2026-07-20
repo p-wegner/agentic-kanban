@@ -73,7 +73,12 @@ export const STACK_BUILD_ARTIFACT_GITIGNORE: Record<string, string[]> = {
   rust: ["target/", "**/*.rs.bk"],
   go: ["bin/", "*.exe", "*.test", "*.out"],
   python: ["__pycache__/", "*.py[cod]", "*.egg-info/", ".pytest_cache/", ".mypy_cache/", ".ruff_cache/", "build/", "dist/", ".venv/"],
-  java: ["target/", "build/", "*.class", ".gradle/", "out/"],
+  // `.kotlin/` holds the Kotlin daemon's session markers (`.kotlin/sessions/*.salive`), rewritten
+  // on EVERY gradle build. Committed once, they churn the main checkout into `dirty_main` and block
+  // all merges until untracked (#122, observed on a real Kotlin/Gradle project). Kotlin is detected
+  // as the coarse "java" family, so it belongs here — harmless on a pure-Java repo, which never
+  // creates the directory.
+  java: ["target/", "build/", "*.class", ".gradle/", ".kotlin/", "out/"],
   ruby: ["*.gem", ".bundle/", "vendor/bundle/", "tmp/"],
   elixir: ["_build/", "deps/", "*.beam", "cover/"],
 };

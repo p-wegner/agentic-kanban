@@ -118,6 +118,22 @@ function chain(test: string | null, build: string | null): string | null {
   return `${test} && ${build}`;
 }
 
+/**
+ * How to invoke pytest for THIS project, for the narrow-re-run failure hint.
+ *
+ * Must not be hardcoded to `python -m pytest`: a `uv`/poetry/pipenv project installs into a
+ * project-local venv, so the global interpreter has no pytest and the hint would send the
+ * builder into the exact "No module named pytest" dead end the gate itself avoids (#120).
+ * Taken verbatim from the pytest segment of the derived command, minus its arguments.
+ */
+function pytestInvocation(base: string): string {
+  const segment = base.split(" && ").find((s) => /\bpytest\b/.test(s));
+  if (!segment) return "python -m pytest";
+  const tokens = segment.trim().split(/\s+/);
+  const pytestIndex = tokens.findIndex((t) => t === "pytest" || t.endsWith("/pytest"));
+  return pytestIndex === -1 ? "python -m pytest" : tokens.slice(0, pytestIndex + 1).join(" ");
+}
+
 function resolveStackKey(profile: StackProfile): VerifyStackKey {
   const pm = profile.packageManager?.toLowerCase() ?? "";
   if (pm === "gradle") return "gradle";
@@ -175,7 +191,7 @@ export function deriveVerifyCommandPlan(profile: StackProfile | null | undefined
         rules: [...POWERSHELL_RULES, NO_RAW_REPORT_RULE],
         onFailure:
           "Re-run only the failing test for its full traceback: " +
-          "`python -m pytest '<path>::<test_name>' --tb=long`.",
+          `\`${pytestInvocation(base)} '<path>::<test_name>' --tb=long\`.`,
       };
     case "node":
       return {

@@ -32,7 +32,8 @@ import {
   type LatestSetupRun,
   type LatestSymlinkRun,
 } from "./workspace-run-records.js";
-import { writeAgentSkillFile, readLocalSkillPrompt, copySkillToWorktree } from "@agentic-kanban/shared/lib/agent-skill-files";
+import { writeAgentSkillFile, readLocalSkillPrompt, copySkillToWorktree, listLocalSkillNames } from "@agentic-kanban/shared/lib/agent-skill-files";
+import { buildSkillInvocationBlock, selectBuilderSkills } from "@agentic-kanban/shared/lib/builder-skill-policy";
 import { writeTicketContextFile } from "@agentic-kanban/shared/lib/ticket-context";
 import { bootstrapSymlinks } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
 import { resolveWorkflowStart, buildTransitionBlock } from "@agentic-kanban/shared/lib/workflow-engine";
@@ -389,6 +390,21 @@ exit 1
     const skillName = worktreePath
       ? await resolveSkillFile(effectiveSkillId, effectiveDiskSkill, worktreePath, project.repoPath)
       : null;
+
+    // #129: a skill nobody invokes is a per-turn context tax for nothing — over
+    // 200 builder sessions, 0/47 materialized skills were ever fired. Name the
+    // ones this worktree actually has so the agent knows to reach for them.
+    // Scoped to the builder-relevant set + the resolved skill; the repo may have
+    // dozens of committed skills and listing them all would BE the tax.
+    if (worktreePath) {
+      const present = await listLocalSkillNames(worktreePath);
+      const announced = selectBuilderSkills(present);
+      if (skillName && present.includes(skillName) && !announced.includes(skillName)) {
+        announced.unshift(skillName);
+      }
+      const block = buildSkillInvocationBlock(announced);
+      if (block) agentPrompt += `\n\n${block}`;
+    }
 
     return { agentPrompt, skillName, effectiveSkillId, hasWorkflowStart: Boolean(workflowStart) };
   }

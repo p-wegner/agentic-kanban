@@ -1,6 +1,6 @@
 import { projects, projectStatuses, issues, workspaces } from "@agentic-kanban/shared/schema";
 import { deleteProjectCascade as deleteProjectCascadeShared } from "@agentic-kanban/shared/lib/cascade-delete";
-import { eq, sql, and, isNull, gte, inArray } from "drizzle-orm";
+import { eq, sql, and, isNull, isNotNull, gte, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -46,6 +46,20 @@ export async function getProjectByRepoPath(
     .where(eq(projects.repoPath, repoPath))
     .limit(1);
   return rows[0] ?? null;
+}
+
+/**
+ * Raw `servicesConfig` JSON for every project that has one set (#142 — narrow
+ * accessor so `anyProjectHasEnabledServiceStack` in workspace-service-state.repository.ts
+ * doesn't re-query `projects` directly).
+ */
+export async function getProjectsWithServicesConfig(
+  database: Database = db,
+): Promise<{ servicesConfig: string | null }[]> {
+  return database
+    .select({ servicesConfig: projects.servicesConfig })
+    .from(projects)
+    .where(isNotNull(projects.servicesConfig));
 }
 
 export async function getAllProjects(

@@ -518,7 +518,12 @@ export function createWorkspaceMergeService(deps: {
       throw new WorkspaceError("Workspace not set up", "BAD_REQUEST");
     }
 
-    await gitService.abortRebase(workspace.workingDir);
+    // Idempotent: `git rebase --abort` exits non-zero when no rebase is in progress
+    // (e.g. a stale UI retry, or a rebase that already resolved), which previously
+    // surfaced as a 500. Only invoke it when a rebase is actually in progress.
+    if (await gitService.isRebaseInProgress(workspace.workingDir)) {
+      await gitService.abortRebase(workspace.workingDir);
+    }
     await killWorktreeProcesses(workspace.workingDir, "abort-rebase");
     const projectId = await resolveProjectId(id, database);
     if (projectId) boardEvents?.broadcast(projectId, "board_changed");
@@ -611,12 +616,12 @@ export function createWorkspaceMergeService(deps: {
     const prompt = buildConflictResolutionPrompt(conflictingFiles, baseBranch, conflictContext);
 
     const resolverProjectId = await resolveProjectId(id, database);
-    const { agentCommand, agentArgs, claudeProfile, profile, provider } =
+    const { agentCommand, agentArgs, claudeProfile, profile, provider, model } =
       await resolveRelaunchAgentSelection(database, resolverProjectId, refreshedWorkspace);
     const executorProvider = toExecutorProvider(provider);
 
     const sessionId = await getSessionManager().startSession({
-      workspaceId: id, prompt, agentCommand, agentArgs, claudeProfile, profile,
+      workspaceId: id, prompt, agentCommand, agentArgs, claudeProfile, profile, model,
       provider: executorProvider, multiTurn: executorProvider === "codex" ? false : true, triggerType: "fix-conflicts",
     });
 
@@ -647,12 +652,12 @@ export function createWorkspaceMergeService(deps: {
     const prompt = buildFixAndMergePrompt(`${errorMessage}\n\n${rebuildNote}`, baseBranch);
 
     const fixProjectId = await resolveProjectId(id, database);
-    const { agentCommand, agentArgs, claudeProfile, profile, provider } =
+    const { agentCommand, agentArgs, claudeProfile, profile, provider, model } =
       await resolveRelaunchAgentSelection(database, fixProjectId, workspace);
     const executorProvider = toExecutorProvider(provider);
 
     const sessionId = await getSessionManager().startSession({
-      workspaceId: id, prompt, agentCommand, agentArgs, claudeProfile, profile,
+      workspaceId: id, prompt, agentCommand, agentArgs, claudeProfile, profile, model,
       provider: executorProvider, multiTurn: executorProvider === "codex" ? false : true, triggerType: "fix-and-merge",
       skipLaunchPreflight: true,
     });
@@ -836,12 +841,12 @@ export function createWorkspaceMergeService(deps: {
       strandedBatch: opts.strandedBatchJson,
     });
 
-    const { agentCommand, agentArgs, claudeProfile, profile, provider } =
+    const { agentCommand, agentArgs, claudeProfile, profile, provider, model } =
       await resolveRelaunchAgentSelection(database, projectId, workspace);
     const executorProvider = toExecutorProvider(provider);
 
     const sessionId = await getSessionManager().startSession({
-      workspaceId: integrationWorkspaceId, prompt, agentCommand, agentArgs, claudeProfile, profile,
+      workspaceId: integrationWorkspaceId, prompt, agentCommand, agentArgs, claudeProfile, profile, model,
       provider: executorProvider, multiTurn: executorProvider === "codex" ? false : true, triggerType: "reconcile",
       skipLaunchPreflight: true, extraEnv: { KANBAN_SESSION_TYPE: "reconcile" },
     });

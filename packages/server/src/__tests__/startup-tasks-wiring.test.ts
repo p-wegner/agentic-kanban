@@ -37,8 +37,12 @@ vi.mock("../db/index.js", () => ({
   rawWriteClient: {},
 }));
 vi.mock("node:child_process", () => ({
-  // killOrphanedServers (win32): wmic returns no processes, so nothing is ever killed.
+  // killOrphanedServers (win32): taskkill calls only, process listing goes through
+  // ../services/process-exec.js (mocked below) so nothing is ever actually killed.
   execSync: vi.fn(() => ""),
+}));
+vi.mock("../services/process-exec.js", () => ({
+  listOsProcesses: vi.fn(async () => []),
 }));
 vi.mock("../db/manual-migrate.js", () => ({ applyMigrations: vi.fn(async () => {}) }));
 vi.mock("../db/backup.js", () => ({ createBackup: vi.fn(async () => {}) }));
