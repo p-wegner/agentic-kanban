@@ -196,6 +196,21 @@ export async function scanLocalSkills(repoPath: string): Promise<DiskSkillEntry[
 }
 
 /**
+ * Names of the skills materialized under `<path>/.claude/skills`, without
+ * reading any SKILL.md body. Used on the launch path (#129) where we only need
+ * to know WHICH skills a worktree has, not what they say — `scanLocalSkills`
+ * would read and parse every file for nothing.
+ */
+export async function listLocalSkillNames(repoPath: string): Promise<string[]> {
+  const skillsDir = join(repoPath, ".claude", "skills");
+  const entries = await readdir(skillsDir, { withFileTypes: true }).catch(() => null);
+  if (!entries) return [];
+  return entries
+    .filter((entry) => entry.isDirectory() && isSafeSkillName(entry.name))
+    .map((entry) => entry.name);
+}
+
+/**
  * Copy a SKILL.md verbatim from the project repo to the worktree.
  * Used when launching a disk-only skill that has no DB entry.
  */
