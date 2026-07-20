@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer, request as httpRequest } from "node:http";
+import { createServer as createNetServer, connect as netConnect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkDrizzleFiles, findDrizzlePnpmDirs } from "../../../../scripts/drizzle-preflight.mjs";
@@ -51,6 +52,37 @@ function createBackend(label) {
   return createHttpServer((_req, res) => {
     res.writeHead(200, { "content-type": "text/plain" });
     res.end(label);
+  });
+}
+
+// A raw TCP server standing in for the app's WS backend (board events, session
+// streaming): on receiving the HTTP upgrade request it replies with a 101 and a
+// label, so the test can tell which backend instance actually served the upgrade.
+function createUpgradeBackend(label) {
+  return createNetServer((socket) => {
+    socket.on("data", () => {
+      socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n${label}`);
+    });
+  });
+}
+
+function requestUpgrade(port, path = "/ws") {
+  return new Promise((resolveRequest, rejectRequest) => {
+    const socket = netConnect(port, "127.0.0.1");
+    socket.on("connect", () => {
+      socket.write(
+        `GET ${path} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n`,
+      );
+    });
+    socket.once("data", (chunk) => {
+      socket.destroy();
+      resolveRequest(chunk.toString());
+    });
+    socket.on("error", rejectRequest);
+    socket.setTimeout(5000, () => {
+      socket.destroy();
+      rejectRequest(new Error("upgrade request timed out"));
+    });
   });
 }
 
@@ -159,6 +191,51 @@ describe("server dev proxy", () => {
         status: 200,
         body: "after-restart",
       });
+    } finally {
+      if (proxy) await closeServer(proxy).catch(() => {});
+      if (backend.listening) await closeServer(backend).catch(() => {});
+      if (restartedBackend?.listening) await closeServer(restartedBackend).catch(() => {});
+    }
+  });
+
+  it("keeps WebSocket upgrades reachable while the watched backend restarts (#144)", async () => {
+    // Repro for #144: a self-hosted auto-merge that touches watched server/shared
+    // source makes tsx watch restart the backend the merge is running inside. The
+    // HTTP leg of this proxy already retries through that ~restart window (see the
+    // test above), but the WS upgrade leg failed a proxied WS connection instantly
+    // with a 503 instead of waiting for the backend to come back — every board-event
+    // / session-stream socket caught mid-restart died immediately and (with the
+    // client's own reconnect loop) flooded reconnect/error noise for the whole
+    // window instead of just riding it out like plain HTTP requests do.
+    const backend = createUpgradeBackend("before-restart");
+    let restartedBackend = null;
+    let proxy = null;
+
+    try {
+      await listen(backend, 0);
+      const backendPort = serverPort(backend);
+      proxy = createStableDevProxy({
+        publicPort: 0,
+        backendPort,
+        retryTimeoutMs: 2000,
+        retryDelayMs: 25,
+      });
+      await listen(proxy, 0);
+      const publicPort = serverPort(proxy);
+
+      await expect(requestUpgrade(publicPort)).resolves.toContain("before-restart");
+
+      await closeServer(backend);
+      const duringRestart = requestUpgrade(publicPort);
+      await new Promise((resolveRestart) => {
+        setTimeout(async () => {
+          restartedBackend = createUpgradeBackend("after-restart");
+          await listen(restartedBackend, backendPort);
+          resolveRestart();
+        }, 100);
+      });
+
+      await expect(duringRestart).resolves.toContain("after-restart");
     } finally {
       if (proxy) await closeServer(proxy).catch(() => {});
       if (backend.listening) await closeServer(backend).catch(() => {});
