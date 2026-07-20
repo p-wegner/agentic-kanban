@@ -221,6 +221,12 @@ function proxyUpgradeOnce(req, socket, head, opts, client) {
       if (head.length > 0) backendSocket.write(head);
       socket.pipe(backendSocket);
       backendSocket.pipe(socket);
+      // Once the pipe is up, `finish` above is a one-shot settled promise and
+      // stops reacting to further events — without these, a backend restart or
+      // client disconnect mid-session (not just mid-upgrade) leaked the other
+      // side of the pipe forever instead of tearing it down.
+      socket.on("error", () => backendSocket.destroy());
+      backendSocket.on("error", () => socket.destroy());
       finish(resolveUpgrade);
     });
     backendSocket.on("error", (err) => finish(rejectUpgrade, err));
