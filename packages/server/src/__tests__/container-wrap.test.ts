@@ -217,3 +217,56 @@ describe("wrapLaunchConfigForContainer", () => {
     expect(wrapped.promptPrefix).toBe("PREFIX");
   });
 });
+
+describe("container env (#133/#134)", () => {
+  function envOf(wrapped: { args: string[] }): Record<string, string> {
+    const env: Record<string, string> = {};
+    for (let i = 0; i < wrapped.args.length - 1; i++) {
+      if (wrapped.args[i] !== "-e") continue;
+      const [key, ...rest] = wrapped.args[i + 1]!.split("=");
+      env[key!] = rest.join("=");
+    }
+    return env;
+  }
+
+  it("injects containerEnv, e.g. CLAUDE_CONFIG_DIR for the narrow profile mount", () => {
+    const wrapped = wrapLaunchConfigForContainer(baseConfig(), {
+      handle: HANDLE,
+      pathMappings: MAPPINGS,
+      containerEnv: { CLAUDE_CONFIG_DIR: "/home/node/.claude" },
+    });
+    expect(envOf(wrapped).CLAUDE_CONFIG_DIR).toBe("/home/node/.claude");
+  });
+
+  it("translates host paths in forwarded env VALUES, not just args", () => {
+    // Env values crossed the boundary verbatim while args were translated, so a var
+    // naming a host location resolved to a path that does not exist in the
+    // container — silent, unlike the `-e PATH=C:\…` exit-127 failure.
+    const wrapped = wrapLaunchConfigForContainer(
+      baseConfig({ env: { CLAUDE_CONFIG_DIR: "C:\\Users\\dev\\.claude" } }),
+      { handle: HANDLE, pathMappings: MAPPINGS },
+    );
+    expect(envOf(wrapped).CLAUDE_CONFIG_DIR).toBe("/home/node/.claude");
+  });
+
+  it("lets the container's own value win over a forwarded host one", () => {
+    const wrapped = wrapLaunchConfigForContainer(
+      baseConfig({ env: { CLAUDE_CONFIG_DIR: "C:\\Users\\dev\\.claude-max2" } }),
+      {
+        handle: HANDLE,
+        pathMappings: MAPPINGS,
+        containerEnv: { CLAUDE_CONFIG_DIR: "/home/node/.claude" },
+      },
+    );
+    const flags = wrapped.args.filter((a, i) => wrapped.args[i - 1] === "-e" && a.startsWith("CLAUDE_CONFIG_DIR="));
+    expect(flags).toEqual(["CLAUDE_CONFIG_DIR=/home/node/.claude"]);
+  });
+
+  it("leaves a non-path value untouched", () => {
+    const wrapped = wrapLaunchConfigForContainer(
+      baseConfig({ env: { ANTHROPIC_API_KEY: "sk-ant-abc123" } }),
+      { handle: HANDLE, pathMappings: MAPPINGS },
+    );
+    expect(envOf(wrapped).ANTHROPIC_API_KEY).toBe("sk-ant-abc123");
+  });
+});
