@@ -154,24 +154,37 @@ export function parseDevcontainerUpResult(stdout: string): DevcontainerHandle | 
   return undefined;
 }
 
-/** A bind mount the BOARD injects at provision time (not declared by the repo). */
-export interface DevcontainerBindMount {
+/**
+ * A mount the BOARD injects at provision time (not declared by the repo).
+ *
+ * `bind` shares a host directory (the profile, the host temp dir). `volume`
+ * attaches a container-managed named volume — used for dependency directories,
+ * which must NOT live on a Windows bind mount (#138: rename-heavy installs flake
+ * with EACCES on the 9p/virtiofs layer, and every file read pays a round trip).
+ */
+export interface DevcontainerMount {
+  /** Defaults to "bind". */
+  type?: "bind" | "volume";
+  /** Host path for a bind mount, or the volume NAME for a volume mount. */
   source: string;
   target: string;
 }
 
+/** @deprecated Use {@link DevcontainerMount}. Retained for readability at bind-only call sites. */
+export type DevcontainerBindMount = DevcontainerMount;
+
 export interface DevcontainerUpOptions extends DevcontainerExecOptions {
   /**
-   * Bind mounts injected via `--mount`. This is how agent credentials reach the
-   * container WITHOUT the target repo having to declare them in its
-   * devcontainer.json — the repo owns its toolchain, the board owns the profile.
+   * Mounts injected via `--mount`. This is how agent credentials and dependency
+   * volumes reach the container WITHOUT the target repo having to declare them in
+   * its devcontainer.json — the repo owns its toolchain, the board owns the rest.
    */
-  mounts?: DevcontainerBindMount[];
+  mounts?: DevcontainerMount[];
 }
 
-/** `--mount` takes a docker-style `type=bind,source=...,target=...` descriptor. */
-export function formatBindMount(mount: DevcontainerBindMount): string {
-  return `type=bind,source=${mount.source},target=${mount.target}`;
+/** `--mount` takes a docker-style `type=<t>,source=...,target=...` descriptor. */
+export function formatMount(mount: DevcontainerMount): string {
+  return `type=${mount.type ?? "bind"},source=${mount.source},target=${mount.target}`;
 }
 
 /**
@@ -186,7 +199,7 @@ export async function devcontainerUp(
   const { mounts = [], ...execOpts } = opts;
   const args = ["up", "--workspace-folder", worktreePath];
   for (const mount of mounts) {
-    args.push("--mount", formatBindMount(mount));
+    args.push("--mount", formatMount(mount));
   }
   const result = await devcontainerExec(args, execOpts);
   if (result.code !== 0) return undefined;
