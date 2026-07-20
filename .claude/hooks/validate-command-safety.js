@@ -23,6 +23,7 @@
  */
 
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const { execSync } = require("child_process");
 const readline = require("readline");
@@ -49,8 +50,45 @@ function getDbProjectDir() {
   return getProjectDir();
 }
 
+/**
+ * Resolve the database this machine is ACTUALLY using, mirroring the precedence in
+ * `packages/shared/src/lib/db-path.ts` (`resolveDbLocation`). Keep the two in sync.
+ *
+ * This used to hardcode `<mainCheckout>/packages/server/kanban.db`. In a clone that
+ * has never run `pnpm db:setup` in-checkout, that file does not exist and the live
+ * database is the home fallback — so the guard still BLOCKED correctly (the filename
+ * regex matches either path) but its pre-block backup silently protected nothing,
+ * while the block message advertised a safety net that wasn't there.
+ *
+ * Returns `{ path, source }`; `path` is null for a non-file DB_URL (a remote libsql
+ * endpoint has nothing on disk to copy).
+ */
+function resolveDbLocation() {
+  const dbUrl = process.env.DB_URL;
+  if (dbUrl) {
+    if (!dbUrl.startsWith("file:")) return { path: null, source: "DB_URL", url: dbUrl };
+    let p;
+    try {
+      p = require("url").fileURLToPath(dbUrl);
+    } catch {
+      p = dbUrl.slice("file:".length);
+    }
+    return { path: path.resolve(p), source: "DB_URL" };
+  }
+
+  const envDir = process.env.AGENTIC_KANBAN_DIR;
+  if (envDir) {
+    return { path: path.resolve(envDir, "kanban.db"), source: "AGENTIC_KANBAN_DIR" };
+  }
+
+  const local = path.join(getDbProjectDir(), "packages", "server", "kanban.db");
+  if (fs.existsSync(local)) return { path: local, source: "local-checkout" };
+
+  return { path: path.join(os.homedir(), ".agentic-kanban", "kanban.db"), source: "home-fallback" };
+}
+
 function getDbPath() {
-  return path.join(getDbProjectDir(), "packages", "server", "kanban.db");
+  return resolveDbLocation().path;
 }
 
 // References to the vital database file, in any path form (Windows, POSIX, WSL).
@@ -61,6 +99,10 @@ const DB_REFERENCE = [
 
 // Destructive verbs that could erase or overwrite a file. Word-boundary anchored
 // so SQL like "DELETE FROM" does not trip the `del` verb.
+//
+// NOTE: shell redirects are deliberately NOT in this list. A redirect's
+// destructiveness is a property of its TARGET, not of the command containing it
+// — see `hasDbTargetedRedirect`.
 const DESTRUCTIVE_VERB = [
   /\brm\b/i,                     // rm, rm -f, rm -rf
   /\bRemove-Item\b/i,
@@ -78,11 +120,53 @@ const DESTRUCTIVE_VERB = [
   /\bMove-Item\b/i,              // moving the db away erases it in place
   /\bmv\b/i,
   /\bmove\b/i,
-  /[^>\d]>\s*[^>]/,              // shell `>` redirect (overwrite); excludes 2>&1 / >>
 ];
 
+// Heredoc bodies are DATA being transmitted (an HTTP payload, a file being
+// written), never a filesystem argument. Matching the db filename inside one is
+// always a false positive — `curl -d @- <<'EOF' ... EOF` filing a ticket whose
+// text mentions kanban.db is not a filesystem operation. Strip those bodies
+// before looking for db references.
+//
+// Deliberately NOT stripped: quoted strings generally. A quoted string is exactly
+// where a real destructive path lives (`rm "C:\...\kanban.db"`), so blanket-
+// stripping quotes would blow a hole straight through the guard.
+function stripHeredocBodies(command) {
+  // <<EOF / <<-EOF / <<'EOF' / <<"EOF" ... up to a line that is just the delimiter.
+  return command.replace(
+    /<<-?\s*(["']?)([A-Za-z_][A-Za-z0-9_]*)\1[\s\S]*?^\s*\2\s*$/gm,
+    "<<HEREDOC-BODY-STRIPPED",
+  );
+}
+
+// Redirect targets, e.g. `> out.txt`, `>> log`, `1> x`. Excludes fd duplication
+// (`2>&1`, `>&2`) which names a descriptor, not a file.
+function redirectTargets(command) {
+  const targets = [];
+  const re = /(?<![>\d&])\d?>>?\s*(?!&)(["']?)([^\s;&|"']+)\1/g;
+  let m;
+  while ((m = re.exec(command)) !== null) targets.push(m[2]);
+  return targets;
+}
+
+// A redirect is destructive only when it POINTS AT the db. `curl ... >/dev/null`
+// is not a filesystem operation on the database; `echo x > kanban.db` is.
+// Append (`>>`) counts too — appending bytes to a SQLite file corrupts it.
+//
+// Heredoc bodies are stripped FIRST, for the same reason `referencesDb` strips
+// them — otherwise prose inside a payload can masquerade as a redirect. This bit
+// during development: a commit message containing the path
+// `<mainCheckout>/packages/server/kanban.db` parsed as a redirect into the db
+// (the `>` of `<mainCheckout>` followed by the path) and blocked its own commit.
+function hasDbTargetedRedirect(command) {
+  return redirectTargets(stripHeredocBodies(command)).some(
+    (t) => DB_REFERENCE.some((re) => re.test(t)) || /\*[^\s"']*\.db\b/i.test(t),
+  );
+}
+
 function referencesDb(command) {
-  return DB_REFERENCE.some((re) => re.test(command));
+  const args = stripHeredocBodies(command);
+  return DB_REFERENCE.some((re) => re.test(args));
 }
 
 function hasDestructiveVerb(command) {
@@ -95,12 +179,14 @@ function isDbResetCommand(command) {
 
 function isDangerous(command) {
   if (isDbResetCommand(command)) return true;
-  if (referencesDb(command) && hasDestructiveVerb(command)) {
-    // A `>` redirect that only targets a log file (not the db) is a false positive
-    // unless the db is also referenced — but we already require referencesDb, so a
-    // command mentioning kanban.db AND containing a redirect is genuinely suspect.
-    return true;
-  }
+  // A redirect INTO the db, judged by its target alone. Independent of the
+  // decoupled check below because the target is the whole story for a redirect.
+  if (hasDbTargetedRedirect(command)) return true;
+  // Decoupled check: "names the db" AND "has a destructive verb", each anywhere in
+  // the command. Deliberately loose so path-evasion (WSL `/mnt/c/.../kanban.db`,
+  // a variable holding the path) still trips it. `referencesDb` looks only at the
+  // command minus heredoc data, so a transmitted payload can't stand in for a path.
+  if (referencesDb(command) && hasDestructiveVerb(command)) return true;
   // Glob deletions that could sweep up the db (e.g. rm *.db, del *.db).
   if (hasDestructiveVerb(command) && /\*[^\s"']*\.db\b/i.test(command)) return true;
   return false;
@@ -379,18 +465,35 @@ function getBlockedNonDbReason(command) {
   return null;
 }
 
-/** Best-effort timestamped backup of the db and its WAL/SHM sidecars. Returns the backup dir or null. */
+/**
+ * Best-effort timestamped backup of the db and its WAL/SHM sidecars, taken next to
+ * the database ACTUALLY in use (see `resolveDbLocation`).
+ *
+ * Returns `{ ok: true, dir }` on success, or `{ ok: false, reason }` describing
+ * precisely why no backup exists — the caller surfaces that verbatim rather than
+ * implying a backup step ran.
+ */
 function backupDatabase() {
-  const dbPath = getDbPath();
+  const loc = resolveDbLocation();
+  if (!loc.path) {
+    return {
+      ok: false,
+      reason: `DB_URL points at a non-file database (${loc.url}) — this hook cannot copy it. Back it up yourself before proceeding.`,
+    };
+  }
+
+  const dbPath = loc.path;
   try {
     const stat = fs.statSync(dbPath);
-    if (stat.size === 0) return null; // nothing meaningful to back up
+    if (stat.size === 0) {
+      return { ok: false, reason: `the database at ${dbPath} (resolved via ${loc.source}) is empty — nothing to back up.` };
+    }
   } catch {
-    return null; // db doesn't exist — nothing to back up
+    return { ok: false, reason: `no database file exists at ${dbPath} (resolved via ${loc.source}) — nothing to back up.` };
   }
 
   try {
-    const backupDir = path.join(getDbProjectDir(), "packages", "server", ".db-backups");
+    const backupDir = path.join(path.dirname(dbPath), ".db-backups");
     fs.mkdirSync(backupDir, { recursive: true });
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     for (const suffix of ["", "-wal", "-shm"]) {
@@ -400,9 +503,9 @@ function backupDatabase() {
       }
     }
     pruneBackups(backupDir, 10);
-    return backupDir;
-  } catch {
-    return null;
+    return { ok: true, dir: backupDir };
+  } catch (err) {
+    return { ok: false, reason: `backing up ${dbPath} failed (${err && err.message}).` };
   }
 }
 
@@ -500,10 +603,10 @@ async function main() {
   if (!isDangerous(command)) process.exit(0);
 
   // Always create a backup first, regardless of what happens next.
-  const backupDir = backupDatabase();
-  const backupNote = backupDir
-    ? `A safety backup was just created in:\n  ${backupDir}`
-    : `(No backup created — the db was missing or empty.)`;
+  const backup = backupDatabase();
+  const backupNote = backup.ok
+    ? `A safety backup was just created in:\n  ${backup.dir}`
+    : `⚠ NO BACKUP EXISTS — ${backup.reason}`;
 
   // Explicit, user-set override. Backup still taken above. The agent must NOT set
   // this itself to get past the guard — it exists for a human to authorize recovery.
