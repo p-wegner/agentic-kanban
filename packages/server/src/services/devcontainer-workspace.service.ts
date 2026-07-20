@@ -17,6 +17,7 @@ import {
   type DependencyVolume,
 } from "@agentic-kanban/shared/lib/container-dep-volumes";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
+import { provisionContainerProfile, transcriptMount } from "./container-profile.service.js";
 import type { ContainerPathMapping } from "./agent-provider/container-wrap.js";
 
 /**
@@ -33,6 +34,11 @@ export interface ContainerProvision {
   pathMappings: ContainerPathMapping[];
   /** Dependency directories relocated onto named volumes (#138). */
   dependencyVolumes: DependencyVolume[];
+  /**
+   * Env the CONTAINER needs, merged over the (host) launch env by the wrapper.
+   * Carries `CLAUDE_CONFIG_DIR` pointing at the container-side profile mount (#133/#134).
+   */
+  containerEnv: Record<string, string>;
 }
 
 export interface ProvisionOptions {
@@ -46,31 +52,39 @@ export interface ProvisionOptions {
   workspaceId?: string;
   /** The project's `symlink_dirs` (raw column or parsed), naming dependency directories. */
   symlinkDirs?: string | string[] | null;
+  /** Selected Claude profile name; keys the narrow profile directory (#133). */
+  claudeProfile?: string;
+  /** An OAuth subscription's `CLAUDE_CONFIG_DIR`, when one is in play — the seed source. */
+  claudeConfigDir?: string;
+  /** A settings-file profile whose `settings_<name>.json` must also be seeded. */
+  settingsProfile?: string;
   /** Overridable for tests; defaults to the host user's home. */
   hostHome?: string;
   /** Overridable for tests; defaults to the host temp directory. */
   hostTmp?: string;
 }
 
+/** The container-side home directory for a given remote user. */
+function containerHomeFor(remoteUser: string): string {
+  return remoteUser === "root" ? "/root" : `/home/${remoteUser}`;
+}
+
 /**
- * The host profile directory bind-mounted into the container so the agent
- * authenticates as the user's normal profile.
+ * The Claude config directory bind-mounted into the container (#133).
  *
- * SECURITY (tracked by #133): this mounts the WHOLE profile read-write, so the
- * agent inside the container can read and overwrite the host's OAuth
- * credentials, settings and transcripts. That gives back much of the isolation
- * containerization is supposed to buy (see docs/decisions/011, which treats
- * agent code as host-root-equivalent today). It is why `devcontainer_builders`
- * ships OFF by default. #133 replaces this with a minimal per-workspace profile.
+ * `source` is the NARROW, board-owned profile seeded by
+ * `provisionContainerProfile` — credentials, settings and `.claude.json` only —
+ * NOT the host's `~/.claude`, which carries every other profile's credentials and
+ * thousands of past transcripts. See container-profile.service.ts for the
+ * credential/refresh policy.
  *
  * A directory (not a single-file) mount is required: credential refresh rewrites
  * `.credentials.json` via atomic rename, which would break a file bind mount.
  */
-function profileMount(hostHome: string, remoteUser: string) {
-  const containerHome = remoteUser === "root" ? "/root" : `/home/${remoteUser}`;
+function profileMount(narrowProfileDir: string, remoteUser: string) {
   return {
-    source: join(hostHome, ".claude").replace(/\\/g, "/"),
-    target: `${containerHome}/.claude`,
+    source: narrowProfileDir.replace(/\\/g, "/"),
+    target: `${containerHomeFor(remoteUser)}/.claude`,
   };
 }
 
@@ -156,6 +170,9 @@ export async function provisionContainerForWorkspace(
     worktreePath,
     workspaceId,
     symlinkDirs,
+    claudeProfile,
+    claudeConfigDir,
+    settingsProfile,
     hostHome = homedir(),
     hostTmp = tmpdir(),
   } = options;
@@ -187,13 +204,32 @@ export async function provisionContainerForWorkspace(
       )
     : [];
 
-  // remoteUser is only known AFTER `up` resolves the config, but the profile
-  // mount must be passed IN. "node" covers the devcontainer images in practice;
-  // a mismatch surfaces as an unauthenticated agent rather than a crash, and the
-  // mapping below is rebuilt from the real remoteUser the CLI reports.
-  const provisionalMount = profileMount(hostHome, "node");
+  // Seed the narrow profile (#133) — credentials/settings/.claude.json only,
+  // reseeded every provision so the container's copy tracks the host's.
+  const narrowProfile = provisionContainerProfile({
+    sourceDir: claudeConfigDir ?? join(hostHome, ".claude"),
+    profileKey: claudeProfile ?? "default",
+    settingsProfile,
+    hostHome,
+  });
+
+  // remoteUser is only known AFTER `up` resolves the config, but the mounts must
+  // be passed IN. "node" covers the devcontainer images in practice; a mismatch
+  // surfaces as an unauthenticated agent rather than a crash, and the mappings
+  // below are rebuilt from the real remoteUser the CLI reports.
+  const provisionalHome = containerHomeFor("node");
+  const containerConfigDir = `${provisionalHome}/.claude`;
+  const provisionalMount = profileMount(narrowProfile.hostDir, "node");
   const mounts: DevcontainerMount[] = [
     provisionalMount,
+    // Keep the builder's sessions readable by session-inspector/fleet-analysis by
+    // mapping the container's transcript dir onto the host's real one (#133 note).
+    transcriptMount({
+      worktreePath,
+      remoteWorkspaceFolder: predictedFolder,
+      containerConfigDir,
+      hostHome,
+    }),
     hostTmpMount(hostTmp),
     ...dependencyVolumes.map((volume) => ({
       type: "volume" as const,
@@ -234,8 +270,13 @@ export async function provisionContainerForWorkspace(
 
   return {
     handle,
-    pathMappings: buildPathMappings(worktreePath, handle, hostHome, hostTmp),
+    pathMappings: buildPathMappings(worktreePath, handle, narrowProfile.hostDir, hostTmp),
     dependencyVolumes,
+    // Point the CLI at the mounted profile. This also fixes #134: with
+    // CLAUDE_CONFIG_DIR set, the CLI reads `<dir>/.claude.json` instead of
+    // `$HOME/.claude.json`, so the "configuration file not found" preamble that
+    // every containerized turn printed to stderr goes away.
+    containerEnv: { CLAUDE_CONFIG_DIR: `${containerHomeFor(handle.remoteUser)}/.claude` },
   };
 }
 
@@ -279,13 +320,13 @@ export async function chownDependencyVolumes(
 export function buildPathMappings(
   worktreePath: string,
   handle: DevcontainerHandle,
-  hostHome: string,
+  narrowProfileDir: string,
   hostTmp: string,
 ): ContainerPathMapping[] {
-  const mount = profileMount(hostHome, handle.remoteUser);
+  const mount = profileMount(narrowProfileDir, handle.remoteUser);
   return [
     { hostPrefix: worktreePath, containerPrefix: handle.remoteWorkspaceFolder },
-    { hostPrefix: join(hostHome, ".claude"), containerPrefix: mount.target },
+    { hostPrefix: narrowProfileDir, containerPrefix: mount.target },
     { hostPrefix: hostTmp, containerPrefix: HOST_TMP_CONTAINER_PATH },
   ];
 }

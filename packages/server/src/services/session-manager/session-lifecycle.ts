@@ -637,6 +637,14 @@ export function createSessionLifecycle(
           worktreePath: effectiveWorkingDir,
           workspaceId,
           symlinkDirs: projectInfo?.symlinkEnabled ? projectInfo.symlinkDirs : null,
+          // Seed the narrow container profile from whatever this launch actually
+          // authenticates with (#133). An OAuth subscription resolved above put its
+          // CLAUDE_CONFIG_DIR in effectiveExtraEnv and reset launchProfile to
+          // "default"; a settings-file profile keeps its name and needs its
+          // settings_<name>.json seeded too.
+          claudeProfile: profile?.name ?? "default",
+          claudeConfigDir: effectiveExtraEnv?.CLAUDE_CONFIG_DIR,
+          settingsProfile: launchProfile?.name !== "default" ? launchProfile?.name : undefined,
         });
       }
     } catch (err) {
