@@ -8,6 +8,8 @@ import { guardProcessKill, auditProcessEvent } from "./process-guard.js";
 import { resolveWorktreeDevPorts as resolveWorktreeDevPortsShared } from "./worktree-ports.js";
 import { shouldDetachAgent, resolveLaunchPorts, buildAgentSpawnEnv } from "../lib/agent-launch-env.js";
 import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
+import { wrapLaunchConfigForContainer } from "./agent-provider/container-wrap.js";
+import type { ContainerProvision } from "./devcontainer-workspace.service.js";
 
 function resolveWorktreeDevPorts(worktreePath: string): { serverPort: string; clientPort: string } | null {
   const ports = resolveWorktreeDevPortsShared(worktreePath);
@@ -435,11 +437,17 @@ export function launch(
   model?: string,
   contextFiles?: string[],
   systemInstructions?: string,
+  /**
+   * When present the agent runs INSIDE this provisioned devcontainer instead of
+   * on the host. Provisioning is async and happens in the caller; this function
+   * stays synchronous. Absent = normal host execution.
+   */
+  containerProvision?: ContainerProvision,
 ): ChildProcess {
   const effectivePrompt = provider === "codex"
     ? appendContextFilesToPrompt(prompt, contextFiles)
     : prompt;
-  const launchConfig = buildAgentLaunchConfig({
+  const hostLaunchConfig = buildAgentLaunchConfig({
     agentArgs,
     providerSessionId,
     agentCommand,
@@ -457,6 +465,12 @@ export function launch(
     piSkillPaths: provider === "pi" ? materializedSkillFiles(worktreePath) : undefined,
     skipPermissions,
   });
+  // Containerization is a transformation of the finished launch config, so every
+  // provider is containerizable without knowing it exists. Mock agents run
+  // in-process on the host and are never containerized.
+  const launchConfig = containerProvision && !hostLaunchConfig.isMockAgent
+    ? wrapLaunchConfigForContainer(hostLaunchConfig, containerProvision)
+    : hostLaunchConfig;
   const { command, args, useShell, env: spawnEnv, promptPrefix, suppressStdinPrompt, keepStdinOpen, isMockAgent } = launchConfig;
   const stdinPrompt = promptPrefix ? `${promptPrefix}\n\n${effectivePrompt}` : effectivePrompt;
   const ports = resolveLaunchPorts(process.env, resolveWorktreeDevPorts(worktreePath));
