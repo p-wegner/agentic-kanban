@@ -21,6 +21,7 @@ import { modelBelongsToProvider } from "@agentic-kanban/shared";
 import { PREF_DEFAULT_MODEL, PREF_PROVIDER } from "../constants/preference-keys.js";
 import { MODEL_PREF_KEYS_BY_PROVIDER } from "../services/effective-config.service.js";
 import { narrowProviderName } from "../services/agent-provider.js";
+import { listOsProcesses } from "../services/process-exec.js";
 
 /** Kill orphaned tsx server processes from previous hot-reload cycles (Windows only). */
 export function shouldKillOrphanedServerProcess(input: {
@@ -46,23 +47,12 @@ export async function killOrphanedServers(): Promise<void> {
   if (process.platform !== "win32") return;
   try {
     const { execSync: _execSync } = await import("node:child_process");
-    const wmic = _execSync(
-      `wmic process where "name='node.exe'" get ProcessId,ParentProcessId,CommandLine /format:list`,
-      { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], windowsHide: true, timeout: 8000 },
-    );
+    // wmic was removed starting with Windows 11 24H2, which silently killed this whole
+    // cleanup (the catch below swallowed the "'wmic' is not recognized" error every boot).
+    // listOsProcesses() uses the Get-CimInstance PowerShell equivalent instead.
+    const osProcs = await listOsProcesses();
     const myPid = process.pid;
-    const lines = wmic.split(/\r?\n/);
-    const procs: { pid: number; ppid: number; cmd: string }[] = [];
-    let curCmd = "";
-    let curPid = 0;
-    let curPpid = 0;
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed.startsWith("CommandLine=")) curCmd = trimmed.slice("CommandLine=".length);
-      if (trimmed.startsWith("ParentProcessId=")) curPpid = parseInt(trimmed.slice("ParentProcessId=".length), 10);
-      if (trimmed.startsWith("ProcessId=")) curPid = parseInt(trimmed.slice("ProcessId=".length), 10);
-      if (curCmd && curPid) { procs.push({ pid: curPid, ppid: curPpid, cmd: curCmd }); curCmd = ""; curPid = 0; curPpid = 0; }
-    }
+    const procs: { pid: number; ppid: number; cmd: string }[] = osProcs.map((p) => ({ pid: p.pid, ppid: p.ppid, cmd: p.commandLine }));
     // Collect the full ancestor chain of our process to avoid self-kill.
     const ppidMap = new Map(procs.map(p => [p.pid, p.ppid]));
     const ancestors = new Set<number>();
