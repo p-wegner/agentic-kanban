@@ -40,6 +40,7 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   "project_stack_profile",
   "auto_merge_disabled",
   "auto_contract_coupled",
+  "file_contention",
 ] as const;
 
 /**
