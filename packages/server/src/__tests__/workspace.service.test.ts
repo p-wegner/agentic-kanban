@@ -164,6 +164,7 @@ function createFakeGitService(overrides: Partial<GitService> = {}): GitService {
     pruneWorktrees: vi.fn(async () => {}),
     rebaseOntoBase: vi.fn(async () => ({ success: true })),
     abortRebase: vi.fn(async () => {}),
+    isRebaseInProgress: vi.fn(async () => true),
     // Stateful ancestry: pre-merge resolveMergeState passes the worktreeDir (4th arg) and
     // must see the branch as NOT yet merged so the merge proceeds; the post-merge invariant
     // check (verifyPostMergeAncestry) calls WITHOUT a worktreeDir and must see it as merged.
@@ -1188,6 +1189,57 @@ describe("workspace.service", () => {
 
       expect(result.success).toBe(true);
       expect(gitService.rebaseOntoBase).toHaveBeenCalled();
+    });
+  });
+
+  describe("abortRebase", () => {
+    async function seedWorkspaceForAbortRebase(projectId: string, issueId: string): Promise<string> {
+      const now = new Date().toISOString();
+      const id = randomUUID();
+      await db.insert(workspaces).values({
+        id,
+        issueId,
+        branch: "feature/ak-1-test",
+        workingDir: "/tmp/test-repo/.worktrees/feature-1",
+        baseBranch: "main",
+        isDirect: false,
+        status: "active",
+        provider: "claude",
+        createdAt: now,
+        updatedAt: now,
+      });
+      return id;
+    }
+
+    it("skips git rebase --abort (and its no-rebase-in-progress error) when no rebase is in progress", async () => {
+      const { projectId, issueId } = await seedProjectAndIssue(db);
+      const wsId = await seedWorkspaceForAbortRebase(projectId, issueId);
+      const gitService = createFakeGitService({
+        isRebaseInProgress: vi.fn(async () => false),
+        abortRebase: vi.fn(async () => {
+          throw new Error("fatal: No rebase in progress?");
+        }),
+      });
+
+      const service = createWorkspaceService({ database: db, gitService });
+
+      // Previously this rejected with the raw git error (surfaced as a 500 by the route)
+      // instead of the idempotent no-op the UI expects on a stale retry.
+      await expect(service.abortRebase(wsId)).resolves.toEqual({ ok: true });
+      expect(gitService.abortRebase).not.toHaveBeenCalled();
+    });
+
+    it("aborts the rebase when one is actually in progress", async () => {
+      const { projectId, issueId } = await seedProjectAndIssue(db);
+      const wsId = await seedWorkspaceForAbortRebase(projectId, issueId);
+      const gitService = createFakeGitService({
+        isRebaseInProgress: vi.fn(async () => true),
+      });
+
+      const service = createWorkspaceService({ database: db, gitService });
+
+      await expect(service.abortRebase(wsId)).resolves.toEqual({ ok: true });
+      expect(gitService.abortRebase).toHaveBeenCalledWith("/tmp/test-repo/.worktrees/feature-1");
     });
   });
 
