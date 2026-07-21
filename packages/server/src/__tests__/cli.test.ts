@@ -5,7 +5,6 @@ import { createClient } from "@libsql/client";
 import * as schema from "@agentic-kanban/shared/schema";
 import { eq, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
-import { createHash } from "node:crypto";
 import { existsSync, readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,14 +35,16 @@ function applyMigrations(dbPath: string) {
   const client = createClient({ url: `file:${dbPath}` });
   applyMigrationsToClient(client);
 
-  // Populate __drizzle_migrations so CLI's runMigrations() is a no-op
+  // Populate __drizzle_migrations so the CLI's own runMigrations() is a no-op.
+  // manual-migrate.ts tracks applied migrations BY TAG (it skips on
+  // `appliedTags.has(entry.tag)` and records `hash = entry.tag`, see #954), so the
+  // seed MUST use the tag — not a sha256 of the file content. Seeding sha256 here
+  // (the pre-#954 drizzle-kit format) left every tag unmatched, so the CLI re-ran
+  // all migrations on the already-migrated temp DB and died on the FK-toggling 0010.
   client.execute("CREATE TABLE IF NOT EXISTS __drizzle_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL UNIQUE, created_at BIGINT NOT NULL)");
   const journal = JSON.parse(readFileSync(resolve(MIGRATIONS_DIR, "meta/_journal.json"), "utf-8"));
   for (const entry of journal.entries) {
-    const sqlFile = resolve(MIGRATIONS_DIR, `${entry.tag}.sql`);
-    const sqlContent = readFileSync(sqlFile, "utf-8");
-    const hash = createHash("sha256").update(sqlContent).digest("hex");
-    client.execute({ sql: "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)", args: [hash, entry.when] });
+    client.execute({ sql: "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)", args: [entry.tag, entry.when] });
   }
 
   client.close();

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -442,6 +442,25 @@ describe("GitService", () => {
 });
 
 describe("autoRenumberMigrations", () => {
+  // Self-heal against leftovers from a KILLED prior run: createWorktree derives the worktree
+  // dir from the branch name at the GLOBAL %TEMP%/.worktrees/<leaf> path (not under the
+  // per-test repo), so this block's short fixed branches (feature/A, feature/B, …) collide
+  // with a stale on-disk dir a crashed run left behind → "git worktree add … already exists".
+  // Remove those specific leaves before each test so the block is deterministic.
+  beforeEach(async () => {
+    const { rm, readdir } = await import("node:fs/promises");
+    const wtRoot = join(tmpdir(), ".worktrees");
+    const prefixes = ["feature_A", "feature_B", "feature_no-mig", "feature_dirty-rebase"];
+    try {
+      const entries = await readdir(wtRoot);
+      await Promise.all(
+        entries
+          .filter((e) => prefixes.some((p) => e === p || e.startsWith(`${p}-`)))
+          .map((e) => rm(join(wtRoot, e), { recursive: true, force: true })),
+      );
+    } catch { /* no leftovers to clean */ }
+  });
+
   const DRIZZLE_DIR = "packages/shared/drizzle";
   const JOURNAL_REL = `${DRIZZLE_DIR}/meta/_journal.json`;
 

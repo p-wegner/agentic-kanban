@@ -45,6 +45,8 @@ export async function runWorkspacePostMergeCleanup(
     database: Database;
     gitService: GitService;
     killProcesses: (dir: string) => Promise<number>;
+    killPorts?: (ports: number[]) => Promise<number>;
+    killSupervisor?: (ports: number[]) => Promise<number>;
     getSessionManager?: () => SessionManager;
     boardEvents?: BoardEvents;
   },
@@ -115,7 +117,11 @@ export async function runWorkspacePostMergeCleanup(
 
 async function teardownMergedWorktree(
   args: WorkspacePostMergeCleanupArgs,
-  deps: { killProcesses: (dir: string) => Promise<number> },
+  deps: {
+    killProcesses: (dir: string) => Promise<number>;
+    killPorts?: (ports: number[]) => Promise<number>;
+    killSupervisor?: (ports: number[]) => Promise<number>;
+  },
   warnings: MergeWarning[],
 ): Promise<void> {
   if (!args.workingDir || args.isDirect) return;
@@ -140,7 +146,7 @@ async function teardownMergedWorktree(
         setupEnabled: args.setupEnabled,
         label: "merge",
       },
-      { killDir: deps.killProcesses },
+      { killDir: deps.killProcesses, killPorts: deps.killPorts, killSupervisor: deps.killSupervisor },
     );
   } catch (err) {
     addRecoverableWarning(warnings, "teardown-worktree", err);

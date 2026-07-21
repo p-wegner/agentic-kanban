@@ -9,8 +9,11 @@ import { applyPragmas } from "./pragmas.js";
 ensureDataDir();
 const DB_URL = getDbUrl();
 // Log the resolved absolute DB path at startup so a split-brain (server and MCP
-// opening different databases) is visible instead of silent (#962).
-console.log(`[db] opening ${DB_LOCATION.path ?? DB_URL} (source: ${DB_LOCATION.source})`);
+// opening different databases) is visible instead of silent (#962). Emit on STDERR,
+// not stdout: this fires at import for the CLI too, and a stdout line corrupts
+// `--json` output (e.g. `pnpm cli -- issue list --json | jq`). stderr keeps it
+// visible without polluting machine-readable stdout.
+console.error(`[db] opening ${DB_LOCATION.path ?? DB_URL} (source: ${DB_LOCATION.source})`);
 
 // Read connection — used for board/API queries. With WAL, readers proceed against the
 // last checkpoint while the write connection commits, so board reads no longer queue
