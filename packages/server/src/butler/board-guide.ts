@@ -82,7 +82,9 @@ sibling repos**. When you launch a workspace, the board creates a worktree on th
 same branch in *every* repo; the diff aggregates across all of them and **Merge**
 lands each repo that has commits.
 - **Add a repo to the current project:** click the **++** button in the top bar
-  (just right of the **+** "add project" button). Enter a local path or a clone URL.
+  (just right of the **+** "add project" button). Three ways: a local path, a clone
+  URL, or **Create new** (type a name — a new folder + git repo is created inside the
+  project folder, beside the leading repo).
 - **Set one up from scratch:** click **+** → **Import existing**. The first path is
   the **leading repo**; use **+ Add another repository** to list the siblings, then
   **Register**. (You can also add siblings later via **++** or in
