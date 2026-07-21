@@ -347,12 +347,16 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
     return c.json(rows.map(toProjectRepoResponse));
   });
 
-  // POST /api/projects/:id/repos — add an additional repo (local path or clone URL)
+  // POST /api/projects/:id/repos — add an additional repo. Three modes (exactly one):
+  //   { path }       — an existing local git repo (absolute path)
+  //   { cloneUrl }   — clone a remote repo into the server's repos dir
+  //   { createName } — scaffold a NEW git repo (folder created inside the project folder)
   router.post("/:id/repos", async (c) => {
     const projectId = c.req.param("id");
-    const body = await parseJsonBody<{ path?: string; cloneUrl?: string; name?: string; setupScript?: string | null; composeFile?: string | null }>(c);
-    if (!body.path === !body.cloneUrl) {
-      return c.json({ error: "Provide exactly one of path or cloneUrl" }, 400);
+    const body = await parseJsonBody<{ path?: string; cloneUrl?: string; createName?: string; name?: string; generateReadme?: boolean; setupScript?: string | null; composeFile?: string | null }>(c);
+    const modeCount = [body.path, body.cloneUrl, body.createName].filter((v) => typeof v === "string" && v.trim()).length;
+    if (modeCount !== 1) {
+      return c.json({ error: "Provide exactly one of path, cloneUrl, or createName" }, 400);
     }
     // A relative `path` would otherwise be resolved against the SERVER's CWD (packages/server) by
     // detectRepoInfo, yielding a misleading "not a git repository: <server-dir>/<fragment>" error
@@ -370,6 +374,9 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
       } catch (err) {
         return c.json({ error: `Clone failed: ${err instanceof Error ? err.message : String(err)}` }, 400);
       }
+    } else if (body.createName) {
+      // Throws ProjectError (mapped to 400/404/409 by the domain error handler) on failure.
+      localPath = await projectService.createSiblingRepoDir(projectId, { name: body.createName, generateReadme: body.generateReadme });
     }
     let repoInfo;
     try {

@@ -96,7 +96,7 @@ export function Layout({
   const [additionalRepos, setAdditionalRepos] = useState<string[]>([]);
   // "++" add-repo-to-current-project modal.
   const [showAddRepo, setShowAddRepo] = useState(false);
-  const [addRepoMode, setAddRepoMode] = useState<"path" | "clone">("path");
+  const [addRepoMode, setAddRepoMode] = useState<"path" | "clone" | "create">("path");
   const [addRepoInput, setAddRepoInput] = useState("");
   const [addingRepo, setAddingRepo] = useState(false);
   const [addRepoError, setAddRepoError] = useState<string | null>(null);
@@ -154,10 +154,17 @@ export function Layout({
     e.preventDefault();
     const value = addRepoInput.trim();
     if (!value || !activeProjectId) return;
+    if (addRepoMode === "create" && /[/\\<>:"|?*\x00]/.test(value)) {
+      setAddRepoError('Name cannot contain: / \\ < > : " | ? *');
+      return;
+    }
     setAddingRepo(true);
     setAddRepoError(null);
     try {
-      const body = addRepoMode === "clone" ? { cloneUrl: value } : { path: value };
+      const body =
+        addRepoMode === "clone" ? { cloneUrl: value }
+        : addRepoMode === "create" ? { createName: value }
+        : { path: value };
       const r = await apiPost<{ error?: string; name?: string }>(`/api/projects/${activeProjectId}/repos`, body);
       if (r.error) throw new Error(r.error);
       setShowAddRepo(false);
@@ -805,14 +812,18 @@ export function Layout({
             </p>
             <form onSubmit={handleAddRepoSubmit} className="space-y-4">
               <div>
-                <div className="flex items-center gap-4 mb-1">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-1">
                   <label className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
-                    <input type="radio" name="add-repo-mode" checked={addRepoMode === "path"} onChange={() => setAddRepoMode("path")} className="h-3.5 w-3.5 text-brand-600 focus:ring-brand-500" />
+                    <input type="radio" name="add-repo-mode" checked={addRepoMode === "path"} onChange={() => { setAddRepoMode("path"); setAddRepoError(null); }} className="h-3.5 w-3.5 text-brand-600 focus:ring-brand-500" />
                     Local path
                   </label>
                   <label className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
-                    <input type="radio" name="add-repo-mode" checked={addRepoMode === "clone"} onChange={() => setAddRepoMode("clone")} className="h-3.5 w-3.5 text-brand-600 focus:ring-brand-500" />
+                    <input type="radio" name="add-repo-mode" checked={addRepoMode === "clone"} onChange={() => { setAddRepoMode("clone"); setAddRepoError(null); }} className="h-3.5 w-3.5 text-brand-600 focus:ring-brand-500" />
                     Clone from URL
+                  </label>
+                  <label className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
+                    <input type="radio" name="add-repo-mode" checked={addRepoMode === "create"} onChange={() => { setAddRepoMode("create"); setAddRepoError(null); }} className="h-3.5 w-3.5 text-brand-600 focus:ring-brand-500" />
+                    Create new
                   </label>
                 </div>
                 <input
@@ -820,9 +831,14 @@ export function Layout({
                   type="text"
                   value={addRepoInput}
                   onChange={(e) => setAddRepoInput(e.target.value)}
-                  placeholder={addRepoMode === "clone" ? "https://github.com/user/repo.git" : "C:/path/to/other-repo"}
+                  placeholder={addRepoMode === "clone" ? "https://github.com/user/repo.git" : addRepoMode === "create" ? "new-repo-name" : "C:/path/to/other-repo"}
                   className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 font-mono focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
                 />
+                {addRepoMode === "create" && (
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    A new folder + git repo is created inside the project folder (beside the leading repo).
+                  </p>
+                )}
               </div>
               {addRepoError && <p className="text-sm text-red-600">{addRepoError}</p>}
               <div className="flex justify-end gap-2">

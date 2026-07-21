@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
-import { resolve, sep, join } from "node:path";
+import { resolve, sep, join, dirname } from "node:path";
 import { getDefaultSkillId } from "./project-scaffold.js";
 import { scaffoldAndPopulateProject } from "./project-registration.js";
 import { isSkillsDirAbsentOrEmpty, writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
@@ -389,6 +389,55 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     });
 
     return result;
+  }
+
+  /**
+   * Scaffold a brand-new git repo to be attached as an ADDITIONAL (sibling) repo of a
+   * multi-repo project — the third "add repo" mode alongside a local path and a clone URL.
+   * The new folder is created inside the PROJECT folder (the leading repo's parent), so the
+   * sibling sits beside the leading repo, matching how multi-repo projects are laid out on
+   * disk. Returns the created repo's absolute path; the caller (the repos route) then runs the
+   * same detect/duplicate-check/insert flow it uses for a local path or a freshly cloned repo.
+   * Throws ProjectError (mapped to 400/404/409) on validation, existing-dir, or git failures.
+   */
+  async function createSiblingRepoDir(
+    projectId: string,
+    opts: { name: string; generateReadme?: boolean },
+  ): Promise<string> {
+    const project = await getProjectById(projectId, database);
+    if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
+    const name = opts.name.trim();
+    if (!name) throw new ProjectError("Repository name is required", "BAD_REQUEST");
+    if (/[/\\<>:"|?*\x00]/.test(name)) {
+      throw new ProjectError('Repository name contains invalid characters. Avoid: / \\ < > : " | ? *', "BAD_REQUEST");
+    }
+    const parent = dirname(project.repoPath);
+    const targetPath = resolve(join(parent, name));
+    if (existsSync(targetPath)) {
+      throw new ProjectError(`Directory already exists: ${targetPath}. To add an existing repo, use "Local path" instead.`, "CONFLICT");
+    }
+    try {
+      mkdirSync(targetPath, { recursive: true });
+    } catch (err) {
+      throw new ProjectError(`Failed to create directory: ${err instanceof Error ? err.message : String(err)}`, "BAD_REQUEST");
+    }
+    try {
+      gitExecSync(["init"], { cwd: targetPath, stdio: "pipe" });
+    } catch (err: unknown) {
+      try { rmSync(targetPath, { recursive: true, force: true }); } catch {}
+      const stderr = (err as { stderr?: string | Buffer }).stderr;
+      throw new ProjectError(`git init failed: ${stderr ? String(stderr).trim() : String(err)}`, "BAD_REQUEST");
+    }
+    if (opts.generateReadme) {
+      try { writeFileSync(join(targetPath, "README.md"), `# ${name}\n`, "utf8"); } catch { /* non-fatal */ }
+    }
+    try {
+      createInitialCommit(targetPath);
+    } catch (err) {
+      try { rmSync(targetPath, { recursive: true, force: true }); } catch {}
+      throw new ProjectError(`Failed to create the initial commit: ${err instanceof Error ? err.message : String(err)}`, "BAD_REQUEST");
+    }
+    return targetPath;
   }
 
   async function updateProject(
@@ -911,6 +960,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
   return {
     registerProject,
     createProject,
+    createSiblingRepoDir,
     updateProject,
     deleteProject,
     archiveProject,
