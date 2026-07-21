@@ -16,6 +16,7 @@ import { getWorkspaceDetails } from "../repositories/workspace.repository.js";
 vi.mock("../services/process-cleanup.js", () => ({
   killProcessesInDir: vi.fn(async () => 0),
   killProcessesOnPorts: vi.fn(async () => 0),
+  killDevServerSupervisorOnPorts: vi.fn(async () => 0),
 }));
 
 /**
