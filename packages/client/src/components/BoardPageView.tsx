@@ -333,7 +333,6 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
             activeColumns={activeColumns}
             archiveColumns={archiveColumns}
             projectId={activeProjectId}
-            backlogColumn={backlogColumn}
           />
         )}
         {viewMode !== "butler" && (
@@ -345,6 +344,7 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
         )}
         <BoardToolbar
           activeColumns={activeColumns}
+          backlogCount={backlogColumn?.count ?? 0}
           onShowQuickTasks={() => panels.setShowQuickTasks(true)}
           autoMonitor={prefs.autoMonitor}
           monitorRunning={prefs.monitorRunning}
