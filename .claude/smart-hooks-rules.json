@@ -1,0 +1,36 @@
+{
+  "version": "1.0.0",
+  "generated": true,
+  "stack": "node",
+  "generatedAt": "2026-07-21T19:31:12.021Z",
+  "rules": [
+    {
+      "name": "Typecheck",
+      "command": "pnpm typecheck",
+      "filePatterns": [
+        "**/*.ts",
+        "**/*.tsx",
+        "**/*.js",
+        "**/*.jsx",
+        "**/*.mjs",
+        "**/*.cjs"
+      ],
+      "blocking": true,
+      "timeout": 120
+    },
+    {
+      "name": "Quick tests",
+      "command": "pnpm test:mine",
+      "filePatterns": [
+        "**/*.ts",
+        "**/*.tsx",
+        "**/*.js",
+        "**/*.jsx",
+        "**/*.mjs",
+        "**/*.cjs"
+      ],
+      "blocking": true,
+      "timeout": 180
+    }
+  ]
+}
