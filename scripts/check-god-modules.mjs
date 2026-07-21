@@ -79,7 +79,9 @@ const COHESION_BASELINE = {
   "packages/server/src/services/git-info.service.ts": 28,
   "packages/server/src/repositories/workspace-crud.repository.ts": 27,
   "packages/server/src/scripts/mock-agent.ts": 23,
-  "packages/server/src/repositories/workspace.repository.ts": 22,
+  // workspace.repository.ts decomposed into ./workspace-{reads,mutations,analytics,
+  // project-resolution,issue-status}.repository.ts (#913); the facade barrel
+  // re-exports only, so its baseline entry is removed.
   "packages/server/src/repositories/session-lifecycle.repository.ts": 21,
   "packages/shared/src/lib/openspec.ts": 21,
 };

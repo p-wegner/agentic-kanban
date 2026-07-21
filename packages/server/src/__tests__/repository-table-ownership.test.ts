@@ -71,7 +71,10 @@ const BASELINE: Record<string, number> = {
   "workspace-session.repository.ts::sessions-read": 1,
   "workspace-summary.repository.ts::sessions-read": 1,
   "workspace-timeline.repository.ts::sessions-read": 1,
-  "workspace.repository.ts::sessions-read": 2,
+  // workspace.repository.ts (2) was decomposed (#913): getCostOverTimeRows moved to
+  // workspace-analytics, getWorkspaceDetails' latest-session read to workspace-reads.
+  "workspace-analytics.repository.ts::sessions-read": 1,
+  "workspace-reads.repository.ts::sessions-read": 1,
   // sessions writes — lifecycle/broadcast own their session mutations for now.
   "bisect.repository.ts::sessions-write": 2,
   "broadcast.repository.ts::sessions-write": 2,
