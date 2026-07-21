@@ -64,3 +64,4 @@ docker-compose.override.yml
 # AI agent artifacts (written during a workspace session; not project source)
 .claude/skills/
 .codex/skills
+.claude/smart-hooks-rules.json
