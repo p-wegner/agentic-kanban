@@ -53,12 +53,31 @@ export function useProjectManagement(deps: UseProjectManagementDeps) {
     }
   }
 
-  async function handleRegisterProject({ repoPath, cloneUrl, gitignoreTemplate, generateReadme }: { repoPath?: string; cloneUrl?: string; gitignoreTemplate: string; generateReadme: boolean }) {
+  async function handleRegisterProject({ repoPath, cloneUrl, gitignoreTemplate, generateReadme, additionalRepos }: { repoPath?: string; cloneUrl?: string; gitignoreTemplate: string; generateReadme: boolean; additionalRepos?: string[] }) {
     const result = await apiPost<{ id: string; name: string; error?: string }>("/api/projects", { repoPath, cloneUrl, gitignoreTemplate: gitignoreTemplate || undefined, generateReadme: generateReadme || undefined });
     if (result.error) throw new Error(result.error);
+    // Multi-repo setup: the registered repo is the leading repo; attach the rest as siblings.
+    // Each is a separate POST so one bad path is reported without discarding the good ones.
+    const siblings = (additionalRepos ?? []).map((s) => s.trim()).filter(Boolean);
+    const failed: string[] = [];
+    for (const entry of siblings) {
+      const body = /^(https?:|git@|ssh:\/\/)/i.test(entry) ? { cloneUrl: entry } : { path: entry };
+      try {
+        const r = await apiPost<{ error?: string }>(`/api/projects/${result.id}/repos`, body);
+        if (r.error) failed.push(`${entry}: ${r.error}`);
+      } catch (err) {
+        failed.push(`${entry}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
     await loadProjects();
     await handleProjectChange(result.id);
-    showToast(`Registered "${result.name}"`, "success");
+    if (failed.length > 0) {
+      showToast(`Registered "${result.name}", but ${failed.length} repo(s) failed: ${failed.join("; ")}`, "error");
+    } else if (siblings.length > 0) {
+      showToast(`Registered "${result.name}" with ${siblings.length + 1} repos`, "success");
+    } else {
+      showToast(`Registered "${result.name}"`, "success");
+    }
   }
 
   async function handleCreateProject(name: string, path: string, gitignoreTemplate: string, generateReadme: boolean) {

@@ -82,6 +82,9 @@ import { registerRegisterProject } from "./tools/register-project.js";
 import { registerCreateProject } from "./tools/create-project.js";
 import { registerListProjects } from "./tools/list-projects.js";
 import { registerUnregisterProject } from "./tools/unregister-project.js";
+import { registerAddProjectRepo } from "./tools/add-project-repo.js";
+import { registerListProjectRepos } from "./tools/list-project-repos.js";
+import { registerRemoveProjectRepo } from "./tools/remove-project-repo.js";
 import { registerCleanupProject } from "./tools/cleanup-project.js";
 import { registerGetPreference } from "./tools/get-preference.js";
 import { registerSetPreference } from "./tools/set-preference.js";
@@ -175,6 +178,9 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   create_project: registerCreateProject,
   list_projects: registerListProjects,
   unregister_project: registerUnregisterProject,
+  add_project_repo: registerAddProjectRepo,
+  list_project_repos: registerListProjectRepos,
+  remove_project_repo: registerRemoveProjectRepo,
   cleanup_project: registerCleanupProject,
   get_preference: registerGetPreference,
   set_preference: registerSetPreference,
