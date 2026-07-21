@@ -37,3 +37,4 @@ export type * from "./devcontainer-exec.js";
 // Type-only: container-dep-volumes.ts imports node:fs. Same #791 rule — runtime via
 // the deep path (@agentic-kanban/shared/lib/container-dep-volumes) server-side.
 export type * from "./container-dep-volumes.js";
+export * from "./butler-scope.js";

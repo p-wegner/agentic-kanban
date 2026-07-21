@@ -1,13 +1,15 @@
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
-import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
+import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS, GLOBAL_BUTLER_PROJECT_ID, GLOBAL_BUTLER_PROJECT_NAME } from "@agentic-kanban/shared";
+import { homedir } from "node:os";
 import { streamSSE } from "hono/streaming";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { getPreference, setPreference } from "../repositories/preferences.repository.js";
 import { deleteRuntimeState, getRuntimeState, setRuntimeState } from "../repositories/runtime-state.repository.js";
 import { getProjectById } from "../repositories/project.repository.js";
+import { getProjectsBasePath } from "../repositories/project-service.repository.js";
 import {
   getButlerPrompt,
   getButlerOverride,
@@ -200,8 +202,40 @@ export function createButlerRoute(
 ) {
   const router = createRouter();
 
+  /** cwd for the global (project-less) butler: the projects base dir, else the home dir. */
+  async function getGlobalButlerCwd(): Promise<string> {
+    const rows = await getProjectsBasePath(database);
+    return rows[0]?.value?.trim() || homedir();
+  }
+
+  /**
+   * Resolve the project row for a butler request. For the reserved GLOBAL id there is no DB
+   * row — return a synthetic project rooted at the projects base dir, so the butler is usable
+   * with no project registered (e.g. to ask it to import/create one). All downstream code only
+   * reads `.id`/`.name`/`.repoPath`, so the synthetic object is a full substitute.
+   */
   async function resolveProject(projectId: string) {
+    if (projectId === GLOBAL_BUTLER_PROJECT_ID) {
+      return { id: GLOBAL_BUTLER_PROJECT_ID, name: GLOBAL_BUTLER_PROJECT_NAME, repoPath: await getGlobalButlerCwd() };
+    }
     return getProjectById(projectId, database);
+  }
+
+  /** System prompt for the GLOBAL (project-less) butler. No project is registered/active,
+   *  so its job is to help the user import or create their first project. */
+  function buildGlobalButlerPrompt(baseDir: string): string {
+    const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
+    const boardGuidePath = ensureBoardGuideFile();
+    return [
+      `You are the agentic-kanban butler, running WITHOUT an active project — no project is registered or selected yet.`,
+      `Your primary job right now is to help the user get their first project onto the board: IMPORT an existing git repository, or CREATE a new one.`,
+      `Board API: http://localhost:${serverPort}/api`,
+      `Use the "agentic-kanban" MCP tools: register_project (existing repo — pass its absolute repoPath), create_project (scaffold a new repo by name), or init_project. For a MULTI-REPO project, register/create the leading repo first, then add_project_repo({ projectId, path | cloneUrl | createName }) once per additional repo.`,
+      `Default parent directory for new projects: ${baseDir}. If the user gives a name but no path, a folder is created under that base dir.`,
+      `After you register/create a project, tell the user it is now on the board and to SELECT it (top-left project switcher) — selecting it makes it active and its own per-project butler takes over. You cannot start board work (issues/workspaces) until a project exists and is selected.`,
+      `A UI how-to is bundled at ${boardGuidePath}; READ it for "how do I…" questions and answer with simple UI steps. Never claim an action succeeded unless a tool result confirms it; if unsure, say so.`,
+      `Be concise and helpful. You have read access to the local filesystem and standard tools for inspecting a repo the user points you at before importing it.`,
+    ].join("\n");
   }
 
   /** Resolve the butler's system prompt from the editable `butler` agent skill
@@ -351,7 +385,9 @@ export function createButlerRoute(
     // Model is a property of the (global) butler definition, not a per-project pref.
     const model = normalizeModelForBackend(def?.model, sdkBackend) || undefined;
     const resumeSessionId = (await getRuntimeState(butlerSessionStateKey(projectId, butlerId), database)) || undefined;
-    const systemPromptAppend = await resolveButlerPrompt(projectId, project.name, project.repoPath);
+    const systemPromptAppend = projectId === GLOBAL_BUTLER_PROJECT_ID
+      ? buildGlobalButlerPrompt(project.repoPath)
+      : await resolveButlerPrompt(projectId, project.name, project.repoPath);
     const wasActive = getButlerSession(projectId, butlerId).active;
     // When the resolved profile is "mock", use the in-process mock backend instead
     // of the Claude SDK (which would fail without real API credentials).
