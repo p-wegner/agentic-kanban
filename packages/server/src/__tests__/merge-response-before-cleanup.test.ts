@@ -40,6 +40,13 @@ function makeGitService(overrides: Partial<Record<string, (...args: unknown[]) =
   };
 }
 
+// The post-merge worktree teardown frees the worktree's derived dev ports via real
+// `netstat`/`taskkill` (killProcessesOnPorts / killDevServerSupervisorOnPorts). In a unit
+// test that is slow AND could kill a genuine dev server on those ports (an `ak-99` worktree
+// resolves to 3100/5272), so every service here injects no-op port/supervisor killers — the
+// same hermeticity the existing `processKiller` stub already provides for the in-dir kill.
+const noopKill = async (_ports: number[]): Promise<number> => 0;
+
 async function seedWorkspace(db: ReturnType<typeof createTestDb>["db"]) {
   const now = new Date().toISOString();
   const projectId = randomUUID();
@@ -108,6 +115,8 @@ describe("merge endpoint response before cleanup", () => {
 
     const svc = createWorkspaceMergeService({
       database: db,
+      portKiller: noopKill,
+      supervisorKiller: noopKill,
       gitService: git as never,
       createBackup: async () => {},
     });
@@ -131,6 +140,8 @@ describe("merge endpoint response before cleanup", () => {
 
     const svc = createWorkspaceMergeService({
       database: db,
+      portKiller: noopKill,
+      supervisorKiller: noopKill,
       gitService: git as never,
       createBackup: async () => {},
     });
@@ -152,6 +163,8 @@ describe("merge endpoint response before cleanup", () => {
 
     const svc = createWorkspaceMergeService({
       database: db,
+      portKiller: noopKill,
+      supervisorKiller: noopKill,
       gitService: git as never,
       createBackup: async () => {},
       processKiller,
@@ -179,6 +192,8 @@ describe("merge endpoint response before cleanup", () => {
 
     const svc = createWorkspaceMergeService({
       database: db,
+      portKiller: noopKill,
+      supervisorKiller: noopKill,
       gitService: git as never,
       createBackup: async () => {},
     });
@@ -215,6 +230,8 @@ describe("merge endpoint response before cleanup", () => {
 
     const svc = createWorkspaceMergeService({
       database: db,
+      portKiller: noopKill,
+      supervisorKiller: noopKill,
       gitService: git as never,
       createBackup: async () => {},
       processKiller,
@@ -258,6 +275,8 @@ describe("merge endpoint response before cleanup", () => {
     const git = makeGitService();
     const svc = createWorkspaceMergeService({
       database: db,
+      portKiller: noopKill,
+      supervisorKiller: noopKill,
       gitService: git as never,
       createBackup: async () => {},
     });
@@ -301,6 +320,8 @@ describe("merge endpoint response before cleanup", () => {
 
     const svc = createWorkspaceMergeService({
       database: db,
+      portKiller: noopKill,
+      supervisorKiller: noopKill,
       gitService: git as never,
       createBackup: async () => {},
     });
@@ -337,6 +358,8 @@ describe("merge endpoint response before cleanup", () => {
     const git = makeGitService({ mergeBranch });
     const svc = createWorkspaceMergeService({
       database: db,
+      portKiller: noopKill,
+      supervisorKiller: noopKill,
       gitService: git as never,
       createBackup: async () => {},
       processKiller,
@@ -376,6 +399,8 @@ describe("merge endpoint response before cleanup", () => {
 
     const svc = createWorkspaceMergeService({
       database: db,
+      portKiller: noopKill,
+      supervisorKiller: noopKill,
       gitService: git as never,
       createBackup: async () => {},
       processKiller,
@@ -428,6 +453,8 @@ describe("merge endpoint response before cleanup", () => {
 
     const svc = createWorkspaceMergeService({
       database: db,
+      portKiller: noopKill,
+      supervisorKiller: noopKill,
       gitService: git as never,
       createBackup: async () => {},
       processKiller,
