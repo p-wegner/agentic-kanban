@@ -7,45 +7,23 @@ function col(name: string, count: number): StatusWithIssues {
   return { id: name, name, projectId: "p", sortOrder: 0, issues: [], count } as StatusWithIssues;
 }
 
-describe("BoardStats backlog count badge (#118)", () => {
-  it("renders the Backlog column's count at a glance", () => {
+describe("BoardStats", () => {
+  // The Backlog count used to render here as a standalone pill (#118). It has
+  // since moved onto the Backlog view tab in BoardToolbar so it shares the Board
+  // tab's inline activity-summary treatment — one consistent tab-header pattern.
+  it("no longer renders a standalone backlog-count badge", () => {
     const html = renderToStaticMarkup(
-      <BoardStats
-        activeColumns={[col("In Progress", 2)]}
-        archiveColumns={[col("Done", 1)]}
-        backlogColumn={col("Backlog", 7)}
-      />,
-    );
-    expect(html).toContain('data-testid="backlog-count-badge"');
-    expect(html).toContain(">7<");
-    expect(html).toContain(">Backlog<");
-  });
-
-  it("updates live when the backlog column's count changes", () => {
-    const before = renderToStaticMarkup(
-      <BoardStats
-        activeColumns={[]}
-        archiveColumns={[]}
-        backlogColumn={col("Backlog", 3)}
-      />,
-    );
-    expect(before).toContain(">3<");
-
-    const after = renderToStaticMarkup(
-      <BoardStats
-        activeColumns={[]}
-        archiveColumns={[]}
-        backlogColumn={col("Backlog", 4)}
-      />,
-    );
-    expect(after).toContain(">4<");
-    expect(after).not.toContain(">3<");
-  });
-
-  it("omits the badge when there is no Backlog column", () => {
-    const html = renderToStaticMarkup(
-      <BoardStats activeColumns={[]} archiveColumns={[]} />,
+      <BoardStats activeColumns={[col("In Progress", 2)]} archiveColumns={[col("Done", 1)]} />,
     );
     expect(html).not.toContain('data-testid="backlog-count-badge"');
+  });
+
+  it("renders the open-work pulse count", () => {
+    const html = renderToStaticMarkup(
+      <BoardStats activeColumns={[col("In Progress", 2), col("In Review", 1)]} archiveColumns={[col("Done", 1)]} />,
+    );
+    expect(html).toContain('data-testid="board-stats-bar"');
+    // 2 In Progress + 1 In Review = 3 open (active, non-archive) items.
+    expect(html).toContain(">3<");
   });
 });

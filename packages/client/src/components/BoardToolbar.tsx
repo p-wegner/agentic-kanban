@@ -108,6 +108,9 @@ interface BoardToolbarProps {
   nudgeWipLimit: string;
   onNudgeWipLimitChange: (v: string) => void;
   columns: StatusWithIssues[];
+  /** Backlog column count, rendered as an inline badge on the Backlog tab (mirrors
+      the Board tab's activity summary — one consistent tab-header treatment). */
+  backlogCount?: number;
   onOpenWorkspace: (workspaceId: string, issueId: string) => void;
   viewMode: ViewMode;
   onViewModeChange: (mode: ViewMode) => void;
@@ -153,6 +156,7 @@ export function BoardToolbar({
   nudgeWipLimit,
   onNudgeWipLimitChange,
   columns,
+  backlogCount = 0,
   onOpenWorkspace,
   viewMode,
   onViewModeChange,
@@ -323,7 +327,7 @@ export function BoardToolbar({
     const ro = new ResizeObserver(recompute);
     ro.observe(wrap);
     return () => ro.disconnect();
-  }, [butlerBadgeCount, boardActivitySummary]);
+  }, [butlerBadgeCount, boardActivitySummary, backlogCount]);
 
   const { visiblePrimaryViews, moreViews, activeMoreView } =
     splitToolbarViews(PRIMARY_VIEWS, SECONDARY_VIEWS, visibleViewCount, viewMode);
@@ -356,6 +360,18 @@ export function BoardToolbar({
             title={boardActivitySummary}
           >
             {boardActivitySummary}
+          </span>
+        )}
+        {view.id === "backlog" && backlogCount > 0 && (
+          <span
+            className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${
+              isActive
+                ? "bg-white/20 text-white"
+                : "bg-surface-sunken dark:bg-gray-800 text-ink-soft dark:text-gray-400"
+            }`}
+            title={`${backlogCount} in Backlog`}
+          >
+            {backlogCount}
           </span>
         )}
         {showBadge && (
