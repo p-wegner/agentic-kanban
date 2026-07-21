@@ -9,6 +9,8 @@ import { isBuilderRelevantSkill } from "@agentic-kanban/shared/lib/builder-skill
 import { listAgentSkills } from "../repositories/agent-skill.repository.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import type { Database } from "../db/index.js";
+import { withTransaction } from "../db/index.js";
+import { listProjectRepos, insertProjectRepo, deleteProjectRepo } from "../repositories/repo.repository.js";
 import { branchExists, detectRepoInfo, getProjectGitStatsAsync } from "./git-info.service.js";
 import { gitExecSync } from "@agentic-kanban/shared/lib/git-exec";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from "./git.service.js";
@@ -438,6 +440,71 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       throw new ProjectError(`Failed to create the initial commit: ${err instanceof Error ? err.message : String(err)}`, "BAD_REQUEST");
     }
     return targetPath;
+  }
+
+  /**
+   * Change WHICH repo leads a multi-repo project (#multirepo). "Leading" is not a flag
+   * — it is which repo's identity sits on the project row (repoPath/repoName/defaultBranch/
+   * setupScript) versus in the `repos` table. Promoting a sibling therefore SWAPS the two:
+   * the project adopts the sibling's identity, the sibling's `repos` row is dropped, and the
+   * former leading is demoted into a new sibling row. Atomic (all-or-nothing) so a mid-swap
+   * failure can never leave the old leading unrecorded.
+   *
+   * Guarded against open workspaces: every workspace's worktrees are provisioned against the
+   * CURRENT leading, so swapping while any are open would strand those worktrees against a repo
+   * the project no longer considers leading. The caller must merge/close them first.
+   */
+  async function promoteRepoToLeading(projectId: string, repoId: string) {
+    const project = await getProjectById(projectId, database);
+    if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
+    const siblings = await listProjectRepos(projectId, database);
+    const target = siblings.find((r) => r.id === repoId);
+    if (!target) throw new ProjectError("Repo not found in this project", "NOT_FOUND");
+
+    const openWorkspaces = (await getProjectWorkspacesWithIssue(projectId, database))
+      .filter((w) => w.status !== "closed");
+    if (openWorkspaces.length > 0) {
+      throw new ProjectError(
+        `Cannot change the leading repo while ${openWorkspaces.length} workspace(s) are open — their worktrees are tied to the current leading repo. Merge or delete them first.`,
+        "CONFLICT",
+      );
+    }
+
+    const baseName = (p: string) => p.split(/[/\\]/).filter(Boolean).pop() ?? p;
+    const newLeadingName = target.name ?? baseName(target.path);
+    // Snapshot the current leading BEFORE the project row is overwritten, so it can be
+    // re-inserted as a sibling. Its remoteUrl is the leading's own; the demoted sibling row
+    // has no remoteUrl column, so that value is intentionally dropped (siblings track only
+    // path/name/branch/setup/compose).
+    const demoted = {
+      path: project.repoPath,
+      name: project.repoName,
+      defaultBranch: project.defaultBranch,
+      setupScript: project.setupScript,
+    };
+
+    await withTransaction(database, async (tx) => {
+      await updateProjectFields(projectId, {
+        repoPath: target.path,
+        repoName: newLeadingName,
+        defaultBranch: target.defaultBranch ?? null,
+        setupScript: target.setupScript ?? null,
+        // The old remote no longer describes the new leading; clear it rather than mislead.
+        remoteUrl: null,
+        updatedAt: new Date().toISOString(),
+      }, tx);
+      await deleteProjectRepo(repoId, projectId, tx);
+      await insertProjectRepo({
+        projectId,
+        path: demoted.path,
+        name: demoted.name,
+        defaultBranch: demoted.defaultBranch,
+        setupScript: demoted.setupScript,
+        composeFile: null,
+      }, tx);
+    }, "promoteRepoToLeading");
+
+    return { id: projectId, repoName: newLeadingName };
   }
 
   async function updateProject(
@@ -961,6 +1028,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     registerProject,
     createProject,
     createSiblingRepoDir,
+    promoteRepoToLeading,
     updateProject,
     deleteProject,
     archiveProject,

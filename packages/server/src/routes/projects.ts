@@ -449,6 +449,17 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
     return c.json({ success: true });
   });
 
+  // POST /api/projects/:id/repos/:repoId/promote — make this sibling the project's LEADING repo,
+  // demoting the current leading into a sibling. Throws ProjectError (409 on open workspaces) via
+  // the domain error handler.
+  router.post("/:id/repos/:repoId/promote", async (c) => {
+    const projectId = c.req.param("id");
+    const repoId = c.req.param("repoId");
+    const result = await projectService.promoteRepoToLeading(projectId, repoId);
+    options?.boardEvents?.broadcastProjectsChanged(projectId, "project_updated");
+    return c.json({ success: true, ...result });
+  });
+
   // GET /api/projects/:id/stats — lightweight project stats
   router.get("/:id/stats", async (c) => {
     const projectId = c.req.param("id");

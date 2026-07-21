@@ -111,6 +111,7 @@ export function Layout({
   // row here; it lives on the project's repoPath/repoName and is shown separately.
   const [projectRepos, setProjectRepos] = useState<ProjectRepoResponse[]>([]);
   const [removingRepoId, setRemovingRepoId] = useState<string | null>(null);
+  const [promotingRepoId, setPromotingRepoId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   // Below sm the utility icons (workspaces/failures/worktrees/theme/settings)
   // collapse into a single ⋯ menu so the header fits on one row.
@@ -215,6 +216,25 @@ export function Layout({
       showToast(err instanceof Error ? err.message : "Failed to remove repo", "error");
     } finally {
       setRemovingRepoId(null);
+    }
+  }
+
+  async function handleMakeLeading(repo: ProjectRepoResponse) {
+    if (!activeProjectId) return;
+    if (!window.confirm(`Make "${repo.name ?? repo.path}" the leading repo of this project?\n\nThe current leading repo becomes a sibling. Only allowed when no workspaces are open.`)) {
+      return;
+    }
+    setPromotingRepoId(repo.id);
+    try {
+      await apiPost(`/api/projects/${activeProjectId}/repos/${repo.id}/promote`, {});
+      // The project row's repoName changes; the WS "project_updated" broadcast reloads the
+      // project list (leading display), and this refreshes the sibling list here.
+      await loadProjectRepos(activeProjectId);
+      showToast(`"${repo.name ?? repo.path}" is now the leading repo`, "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to change the leading repo", "error");
+    } finally {
+      setPromotingRepoId(null);
     }
   }
 
@@ -883,14 +903,25 @@ export function Layout({
                         <span className="font-medium">{repo.name ?? repo.path}</span>
                         <span className="block text-xs text-gray-500 font-mono truncate">{repo.path}{repo.defaultBranch ? ` (${repo.defaultBranch})` : ""}</span>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => void handleRemoveRepo(repo)}
-                        disabled={removingRepoId === repo.id}
-                        className="shrink-0 text-xs text-red-600 hover:text-red-800 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {removingRepoId === repo.id ? "Removing…" : "Remove"}
-                      </button>
+                      <div className="flex items-center gap-2.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => void handleMakeLeading(repo)}
+                          disabled={promotingRepoId === repo.id || removingRepoId === repo.id}
+                          className="text-xs text-brand-600 hover:text-brand-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Make this the project's leading repo (demotes the current leading to a sibling)"
+                        >
+                          {promotingRepoId === repo.id ? "Promoting…" : "Make leading"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleRemoveRepo(repo)}
+                          disabled={removingRepoId === repo.id || promotingRepoId === repo.id}
+                          className="text-xs text-red-600 hover:text-red-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {removingRepoId === repo.id ? "Removing…" : "Remove"}
+                        </button>
+                      </div>
                     </li>
                   ))}
                 </ul>

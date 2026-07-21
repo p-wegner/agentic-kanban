@@ -2,7 +2,7 @@ import { projects, projectStatuses, issues, workspaces, preferences } from "@age
 import { ACTIVE_WORKSPACE_STATUSES } from "@agentic-kanban/shared/lib/workspace-activity-state";
 import { eq, and, inArray, notInArray, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
-import type { Database } from "../db/index.js";
+import type { Database, TransactionClient } from "../db/index.js";
 
 export async function getProjectsBasePath(database: Database = db) {
   const rows = await database
@@ -16,7 +16,7 @@ export async function getProjectsBasePath(database: Database = db) {
 export async function updateProjectFields(
   id: string,
   updates: Record<string, unknown>,
-  database: Database = db,
+  database: Database | TransactionClient = db,
 ): Promise<void> {
   await database.update(projects).set(updates).where(eq(projects.id, id));
 }

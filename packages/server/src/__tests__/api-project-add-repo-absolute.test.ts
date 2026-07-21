@@ -65,6 +65,6 @@ describe("POST /:id/repos absolute-path guard (#68)", () => {
     const app = createApp();
     const res = await postRepo(app, {});
     expect(res.status).toBe(400);
-    expect((await res.json()).error).toBe("Provide exactly one of path or cloneUrl");
+    expect((await res.json()).error).toBe("Provide exactly one of path, cloneUrl, or createName");
   });
 });
