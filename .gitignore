@@ -60,3 +60,8 @@ docker-compose.override.yml
 
 # per-project board state written into checkouts/worktrees (services.env holds stack secrets)
 .kanban/
+
+# AI agent artifacts (written during a workspace session; not project source)
+.claude/skills/
+.codex/skills
+.claude/smart-hooks-rules.json

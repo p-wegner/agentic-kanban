@@ -1,6 +1,26 @@
 packages:
   - "packages/*"
 
+# Security overrides — force patched versions of vulnerable TRANSITIVE deps
+# (npm audit --prod highs/moderates). Each package resolves to a single major in
+# our tree, so a plain override is safe; brace-expansion is scoped to @2 because a
+# 1.x line is also present (forcing all of it to 2.x would break the 1.x consumers).
+#   fast-uri      high  — path traversal / host confusion (via @modelcontextprotocol/sdk>ajv)
+#   ws            high  — DoS + uninitialized-memory disclosure (via @libsql/client)
+#   brace-expansion high — DoS via exponential expansion (via ts-morph>minimatch)
+#   ip-address    moderate — XSS in Address6 HTML methods
+#   qs            moderate — remotely-triggerable stringify DoS
+overrides:
+  # hono is also pulled transitively by @modelcontextprotocol/sdk at 4.12.16 (< the
+  # direct bump in packages/server), so override it too — fixes the high CORS-reflect
+  # and moderate CSS-injection advisories and dedupes to one 4.x version.
+  hono: "^4.12.31"
+  fast-uri: "^3.1.2"
+  ws: "^8.21.0"
+  "brace-expansion@2": "^2.1.2"
+  ip-address: "^10.1.1"
+  qs: "^6.15.2"
+
 # Always fetch the win32-x64 native binaries (rollup/esbuild/swc) in addition to
 # the host platform's, so a lockfile produced on one OS installs cleanly on
 # another. Replaces the old hard devDependency on @rollup/rollup-win32-x64-msvc,

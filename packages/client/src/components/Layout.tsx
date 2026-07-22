@@ -1,9 +1,12 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { ProjectTabs } from "./ProjectTabs.js";
 import { ProjectSelector } from "./ProjectSelector.js";
 import { NotificationBell } from "./NotificationBell.js";
 import type { NotificationEvent } from "../hooks/useActivityNotifications.js";
 import { useBoardFilterStore } from "../stores/boardFilterStore.js";
+import { apiDelete, apiFetch, apiPost } from "../lib/api.js";
+import { showToast } from "../lib/toast.js";
+import type { ProjectRepoResponse } from "@agentic-kanban/shared";
 
 interface Project {
   id: string;
@@ -25,7 +28,7 @@ interface LayoutProps {
   onArchiveProject?: (id: string) => Promise<void>;
   onUnarchiveProject?: (id: string) => Promise<void>;
   archivedProjects?: Project[];
-  onRegisterProject?: (args: { repoPath?: string; cloneUrl?: string; gitignoreTemplate: string; generateReadme: boolean }) => Promise<void>;
+  onRegisterProject?: (args: { repoPath?: string; cloneUrl?: string; gitignoreTemplate: string; generateReadme: boolean; additionalRepos?: string[] }) => Promise<void>;
   onCreateProject?: (name: string, path: string, gitignoreTemplate: string, generateReadme: boolean) => Promise<void>;
   priorityFilter?: string;
   onPriorityFilterChange?: (priority: string) => void;
@@ -90,11 +93,25 @@ export function Layout({
   const [generateReadme, setGenerateReadme] = useState(false);
   const [registering, setRegistering] = useState(false);
   const [registerError, setRegisterError] = useState<string | null>(null);
+  // Multi-repo setup: additional sibling repo paths entered alongside the leading repo.
+  const [additionalRepos, setAdditionalRepos] = useState<string[]>([]);
+  // "++" add-repo-to-current-project modal.
+  const [showAddRepo, setShowAddRepo] = useState(false);
+  const [addRepoMode, setAddRepoMode] = useState<"path" | "clone" | "create">("path");
+  const [addRepoInput, setAddRepoInput] = useState("");
+  const [addingRepo, setAddingRepo] = useState(false);
+  const [addRepoError, setAddRepoError] = useState<string | null>(null);
   const [createName, setCreateName] = useState("");
   const [createPath, setCreatePath] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const createNameInvalid = /[/\\<>:"|?*\x00]/.test(createName);
+  // Additional (sibling) repos of the active project — powers the ++ button badge
+  // and the manage-repositories modal (list + remove). The leading repo is not a
+  // row here; it lives on the project's repoPath/repoName and is shown separately.
+  const [projectRepos, setProjectRepos] = useState<ProjectRepoResponse[]>([]);
+  const [removingRepoId, setRemovingRepoId] = useState<string | null>(null);
+  const [promotingRepoId, setPromotingRepoId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   // Below sm the utility icons (workspaces/failures/worktrees/theme/settings)
   // collapse into a single ⋯ menu so the header fits on one row.
@@ -126,16 +143,107 @@ export function Layout({
         ...(importMode === "clone" ? { cloneUrl: repoPath.trim() } : { repoPath: repoPath.trim() }),
         gitignoreTemplate,
         generateReadme,
+        additionalRepos: additionalRepos.map((r) => r.trim()).filter(Boolean),
       });
       setShowRegister(false);
       setRepoPath("");
       setGitignoreTemplate("");
       setGenerateReadme(false);
+      setAdditionalRepos([]);
     } catch (err) {
       setRegisterError(err instanceof Error ? err.message : String(err));
     } finally {
       setRegistering(false);
     }
+  }
+
+  const loadProjectRepos = useCallback(async (projectId: string | null | undefined) => {
+    if (!projectId) {
+      setProjectRepos([]);
+      return;
+    }
+    try {
+      setProjectRepos(await apiFetch<ProjectRepoResponse[]>(`/api/projects/${projectId}/repos`));
+    } catch {
+      // non-fatal: badge/list just stays empty
+    }
+  }, []);
+
+  // Keep the sibling-repo count (button badge) in sync with the active project.
+  useEffect(() => {
+    void loadProjectRepos(activeProjectId);
+  }, [activeProjectId, loadProjectRepos]);
+
+  async function handleAddRepoSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const value = addRepoInput.trim();
+    if (!value || !activeProjectId) return;
+    if (addRepoMode === "create" && /[/\\<>:"|?*\x00]/.test(value)) {
+      setAddRepoError('Name cannot contain: / \\ < > : " | ? *');
+      return;
+    }
+    setAddingRepo(true);
+    setAddRepoError(null);
+    try {
+      const body =
+        addRepoMode === "clone" ? { cloneUrl: value }
+        : addRepoMode === "create" ? { createName: value }
+        : { path: value };
+      const r = await apiPost<{ error?: string; name?: string }>(`/api/projects/${activeProjectId}/repos`, body);
+      if (r.error) throw new Error(r.error);
+      // Stay open so multiple repos can be added and the new one appears in the list.
+      setAddRepoInput("");
+      await loadProjectRepos(activeProjectId);
+      showToast(`Added repo "${r.name ?? value}" to the project`, "success");
+    } catch (err) {
+      setAddRepoError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAddingRepo(false);
+    }
+  }
+
+  async function handleRemoveRepo(repo: ProjectRepoResponse) {
+    if (!activeProjectId) return;
+    if (!window.confirm(`Remove "${repo.name ?? repo.path}" from this project?\n\nThis detaches the repo from the project; the checkout on disk is left untouched.`)) {
+      return;
+    }
+    setRemovingRepoId(repo.id);
+    try {
+      await apiDelete(`/api/projects/${activeProjectId}/repos/${repo.id}`);
+      await loadProjectRepos(activeProjectId);
+      showToast(`Removed "${repo.name ?? repo.path}" from the project`, "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to remove repo", "error");
+    } finally {
+      setRemovingRepoId(null);
+    }
+  }
+
+  async function handleMakeLeading(repo: ProjectRepoResponse) {
+    if (!activeProjectId) return;
+    if (!window.confirm(`Make "${repo.name ?? repo.path}" the leading repo of this project?\n\nThe current leading repo becomes a sibling. Only allowed when no workspaces are open.`)) {
+      return;
+    }
+    setPromotingRepoId(repo.id);
+    try {
+      await apiPost(`/api/projects/${activeProjectId}/repos/${repo.id}/promote`, {});
+      // The project row's repoName changes; the WS "project_updated" broadcast reloads the
+      // project list (leading display), and this refreshes the sibling list here.
+      await loadProjectRepos(activeProjectId);
+      showToast(`"${repo.name ?? repo.path}" is now the leading repo`, "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to change the leading repo", "error");
+    } finally {
+      setPromotingRepoId(null);
+    }
+  }
+
+  function openAddRepo() {
+    setAddRepoError(null);
+    setAddRepoInput("");
+    setAddRepoMode("path");
+    setShowAddRepo(true);
+    void loadProjectRepos(activeProjectId);
   }
 
   async function handleCreateSubmit(e: React.FormEvent) {
@@ -197,6 +305,7 @@ export function Layout({
     setCreatePath("");
     setGitignoreTemplate("");
     setGenerateReadme(false);
+    setAdditionalRepos([]);
     setModalTab("import");
     setShowRegister(true);
     setTimeout(() => inputRef.current?.focus(), 50);
@@ -260,6 +369,28 @@ export function Layout({
                 <path d="M12 5v14M5 12h14" />
               </svg>
             </button>
+            {activeProjectId && (
+              <button
+                onClick={openAddRepo}
+                className="relative p-1 text-gray-400 dark:text-gray-500 hover:text-brand-600 dark:hover:text-brand-400 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
+                title={projectRepos.length > 0
+                  ? `Manage repositories (${projectRepos.length + 1} repos in this project)`
+                  : "Add a repository to this project (multi-repo)"}
+              >
+                {/* two overlapped plus glyphs → "++" = add another repo to the current project */}
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M8 5v9M4 9.5h8M16 10v9M12 14.5h8" />
+                </svg>
+                {projectRepos.length > 0 && (
+                  <span
+                    className="absolute -top-0.5 -right-0.5 min-w-[1rem] h-4 px-1 flex items-center justify-center rounded-full bg-brand-600 text-white text-[10px] font-semibold leading-none"
+                    aria-label={`${projectRepos.length + 1} repos in this project`}
+                  >
+                    {projectRepos.length + 1}
+                  </span>
+                )}
+              </button>
+            )}
           </div>
           <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
             <div className="relative">
@@ -524,9 +655,45 @@ export function Layout({
                     className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
                   />
                   <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    {importMode === "clone"
+                    {additionalRepos.length > 0
+                      ? "The leading repository — the agent starts here. The repos below are worked on alongside it."
+                      : importMode === "clone"
                       ? "Git URL to clone into the server's repos directory. Branch and remote URL are auto-detected."
                       : "Absolute path to a git repository. Branch and remote URL are auto-detected."}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Additional repositories <span className="text-gray-400 dark:text-gray-500 font-normal">(optional — makes this a multi-repo project)</span>
+                  </label>
+                  {additionalRepos.map((val, i) => (
+                    <div key={i} className="flex gap-2 mb-1.5">
+                      <input
+                        type="text"
+                        value={val}
+                        onChange={(e) => setAdditionalRepos((rs) => rs.map((r, j) => (j === i ? e.target.value : r)))}
+                        placeholder="C:/path/to/other-repo  or  https://github.com/user/repo.git"
+                        className="flex-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 font-mono focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setAdditionalRepos((rs) => rs.filter((_, j) => j !== i))}
+                        className="shrink-0 px-2 text-sm text-red-600 hover:text-red-800 border border-gray-300 dark:border-gray-600 rounded-md"
+                        title="Remove this repository"
+                      >
+                        &times;
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setAdditionalRepos((rs) => [...rs, ""])}
+                    className="text-xs text-brand-600 hover:text-brand-800 dark:text-brand-400"
+                  >
+                    + Add another repository
+                  </button>
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Each sibling repo gets a worktree on the same branch per workspace; merge lands every repo with commits. Local absolute paths or clone URLs.
                   </p>
                 </div>
                 <div>
@@ -699,6 +866,116 @@ export function Layout({
                 </ul>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {showAddRepo && (
+        <div
+          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowAddRepo(false); }}
+        >
+          <div className="bg-surface-raised dark:bg-surface-raised-dark rounded-lg shadow-xl w-full max-w-md mx-4 p-6">
+            <h2 className="text-lg font-semibold text-ink dark:text-stone-100 mb-1">Repositories</h2>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+              Repos that{" "}
+              <span className="font-medium">{projects.find((p) => p.id === activeProjectId)?.name ?? "this project"}</span>{" "}
+              spans. Every new workspace gets a worktree on the same branch in each; merge lands each repo that has commits. Edit a repo's name/setup/compose in Settings → Project Settings.
+            </p>
+            {(() => {
+              const activeProject = projects.find((p) => p.id === activeProjectId);
+              return (
+                <ul className="space-y-1 mb-4">
+                  <li className="flex items-center justify-between gap-2 text-sm border border-gray-200 dark:border-gray-700 rounded px-2.5 py-1.5">
+                    <div className="min-w-0">
+                      <span className="font-medium">{activeProject?.repoName || activeProject?.repoPath || "leading repo"}</span>
+                      {activeProject?.repoPath && (
+                        <span className="block text-xs text-gray-500 font-mono truncate">{activeProject.repoPath}</span>
+                      )}
+                    </div>
+                    <span className="shrink-0 text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 rounded px-1.5 py-0.5">
+                      leading
+                    </span>
+                  </li>
+                  {projectRepos.map((repo) => (
+                    <li key={repo.id} className="flex items-center justify-between gap-2 text-sm border border-gray-200 dark:border-gray-700 rounded px-2.5 py-1.5">
+                      <div className="min-w-0">
+                        <span className="font-medium">{repo.name ?? repo.path}</span>
+                        <span className="block text-xs text-gray-500 font-mono truncate">{repo.path}{repo.defaultBranch ? ` (${repo.defaultBranch})` : ""}</span>
+                      </div>
+                      <div className="flex items-center gap-2.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => void handleMakeLeading(repo)}
+                          disabled={promotingRepoId === repo.id || removingRepoId === repo.id}
+                          className="text-xs text-brand-600 hover:text-brand-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Make this the project's leading repo (demotes the current leading to a sibling)"
+                        >
+                          {promotingRepoId === repo.id ? "Promoting…" : "Make leading"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleRemoveRepo(repo)}
+                          disabled={removingRepoId === repo.id || promotingRepoId === repo.id}
+                          className="text-xs text-red-600 hover:text-red-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {removingRepoId === repo.id ? "Removing…" : "Remove"}
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              );
+            })()}
+            <h3 className="text-sm font-semibold text-ink dark:text-stone-100 mb-2">Add a repository</h3>
+            <form onSubmit={handleAddRepoSubmit} className="space-y-4">
+              <div>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-1">
+                  <label className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
+                    <input type="radio" name="add-repo-mode" checked={addRepoMode === "path"} onChange={() => { setAddRepoMode("path"); setAddRepoError(null); }} className="h-3.5 w-3.5 text-brand-600 focus:ring-brand-500" />
+                    Local path
+                  </label>
+                  <label className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
+                    <input type="radio" name="add-repo-mode" checked={addRepoMode === "clone"} onChange={() => { setAddRepoMode("clone"); setAddRepoError(null); }} className="h-3.5 w-3.5 text-brand-600 focus:ring-brand-500" />
+                    Clone from URL
+                  </label>
+                  <label className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
+                    <input type="radio" name="add-repo-mode" checked={addRepoMode === "create"} onChange={() => { setAddRepoMode("create"); setAddRepoError(null); }} className="h-3.5 w-3.5 text-brand-600 focus:ring-brand-500" />
+                    Create new
+                  </label>
+                </div>
+                <input
+                  autoFocus
+                  type="text"
+                  value={addRepoInput}
+                  onChange={(e) => setAddRepoInput(e.target.value)}
+                  placeholder={addRepoMode === "clone" ? "https://github.com/user/repo.git" : addRepoMode === "create" ? "new-repo-name" : "C:/path/to/other-repo"}
+                  className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 font-mono focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
+                />
+                {addRepoMode === "create" && (
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    A new folder + git repo is created inside the project folder (beside the leading repo).
+                  </p>
+                )}
+              </div>
+              {addRepoError && <p className="text-sm text-red-600">{addRepoError}</p>}
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddRepo(false)}
+                  className="px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800"
+                >
+                  Close
+                </button>
+                <button
+                  type="submit"
+                  disabled={addingRepo || !addRepoInput.trim()}
+                  className="px-3 py-1.5 text-sm text-white bg-brand-600 rounded-md hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {addingRepo ? "Adding…" : "Add repository"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

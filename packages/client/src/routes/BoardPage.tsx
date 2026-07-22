@@ -40,6 +40,8 @@ import type {
   DependencyInfo,
   IssueWithStatus,
 } from "@agentic-kanban/shared";
+import { GLOBAL_BUTLER_PROJECT_ID } from "@agentic-kanban/shared";
+import { ButlerView } from "../components/ButlerView.js";
 import type { SavedViewReference } from "../lib/boardSavedViews.js";
 
 
@@ -134,6 +136,8 @@ export function BoardPage() {
   // A prompt to seed the butler with when entering its view via "Chat about this
   // ticket" (#838). Cleared once ButlerView has consumed it.
   const [butlerInitialPrompt, setButlerInitialPrompt] = useState<string | null>(null);
+  // When no project is registered, the user can still open a GLOBAL butler to import/create one.
+  const [showGlobalButler, setShowGlobalButler] = useState(false);
   // Filter slice (#958) — filter state lives in the board filter store. This
   // container only reads what it needs to compute `filteredColumns` (below)
   // and to run the validation/hydration effects; consumers (toolbar, filter
@@ -467,16 +471,35 @@ export function BoardPage() {
   if (projects.length === 0 || !activeProjectId) {
     return (
       <Layout onRegisterProject={handleRegisterProject} onCreateProject={handleCreateProject}>
-        <div className="flex items-center justify-center h-96 text-gray-500 dark:text-gray-400">
-          <div className="text-center">
-            <p className="text-lg font-medium text-gray-700 dark:text-gray-300 mb-2">
-              No projects registered
-            </p>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              Click the <strong>+</strong> button in the header to register a git repo as a project.
-            </p>
+        {showGlobalButler ? (
+          <div className="h-[calc(100vh-3rem)]">
+            <ButlerView
+              projectId={GLOBAL_BUTLER_PROJECT_ID}
+              columns={[]}
+              liveActivity={{}}
+              liveStats={{}}
+              onIssueClick={() => {}}
+              onExit={() => setShowGlobalButler(false)}
+            />
           </div>
-        </div>
+        ) : (
+          <div className="flex items-center justify-center h-96 text-gray-500 dark:text-gray-400">
+            <div className="text-center">
+              <p className="text-lg font-medium text-gray-700 dark:text-gray-300 mb-2">
+                No projects registered
+              </p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Click the <strong>+</strong> button in the header to register a git repo as a project.
+              </p>
+              <button
+                onClick={() => setShowGlobalButler(true)}
+                className="mt-4 px-4 py-2 text-sm font-medium text-white bg-brand-600 rounded-md hover:bg-brand-700"
+              >
+                Or ask the Butler to set one up
+              </button>
+            </div>
+          </div>
+        )}
       </Layout>
     );
   }

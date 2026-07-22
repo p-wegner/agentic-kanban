@@ -23,53 +23,11 @@ import type { WorkspaceSummaryCache } from "./workspace-summary-cache.service.js
 import type { WorkspaceSummary } from "./workspace-summary.service.js";
 import { buildBoardColumns } from "../lib/board-view.js";
 
-export class ProjectError extends Error {
-  constructor(
-    message: string,
-    public readonly code: "NOT_FOUND" | "BAD_REQUEST" | "CONFLICT",
-  ) {
-    super(message);
-  }
-}
+import { ProjectError } from "./project-error.js";
+import { createInitialCommit, createSiblingRepoDir, promoteRepoToLeading } from "./project-repos.service.js";
 
-const INITIAL_COMMIT_MESSAGE = "chore: initialise repository";
-
-/**
- * Give a freshly `git init`ed repo its first commit, so HEAD is born (#47).
- *
- * Commits whatever the caller has written so far (a README, when requested) and falls back
- * to an empty commit. `--allow-empty` covers the no-README case; `add -A` runs before the
- * scaffold, so it can only ever pick up the caller's own file in a directory this service
- * just created. A machine with no `user.name`/`user.email` configured cannot commit at all,
- * so an identity is supplied for that case only — a configured identity still wins.
- *
- * This bootstrap commit is deliberately insulated from the user's global git config, because
- * unlike the scaffold commit (which is non-fatal and merely degrades) a failure here aborts
- * project creation and removes the directory. `commit.gpgsign=true` with no usable key, and a
- * global `core.hooksPath` pre-commit hook that rejects an empty/near-empty tree, are both
- * common enough that they would otherwise make createProject refuse to work at all — on a
- * commit whose only job is to give HEAD a parent.
- */
-function createInitialCommit(repoPath: string): void {
-  gitExecSync(["add", "-A"], { cwd: repoPath, stdio: "pipe" });
-  const commit = [
-    "-c",
-    "commit.gpgsign=false",
-    "commit",
-    "--no-verify",
-    "--allow-empty",
-    "-m",
-    INITIAL_COMMIT_MESSAGE,
-  ];
-  try {
-    gitExecSync(commit, { cwd: repoPath, stdio: "pipe" });
-  } catch {
-    gitExecSync(
-      ["-c", "user.name=agentic-kanban", "-c", "user.email=agentic-kanban@localhost", ...commit],
-      { cwd: repoPath, stdio: "pipe" },
-    );
-  }
-}
+// Re-export so existing importers (routes, tests) keep `import { ProjectError } from "./project.service.js"`.
+export { ProjectError };
 
 const GITIGNORE_TEMPLATES: Record<string, string> = {
   node: `node_modules/
@@ -911,6 +869,10 @@ export function createProjectService(deps: { database: Database; workspaceSummar
   return {
     registerProject,
     createProject,
+    createSiblingRepoDir: (projectId: string, opts: { name: string; generateReadme?: boolean }) =>
+      createSiblingRepoDir(database, projectId, opts),
+    promoteRepoToLeading: (projectId: string, repoId: string) =>
+      promoteRepoToLeading(database, projectId, repoId),
     updateProject,
     deleteProject,
     archiveProject,

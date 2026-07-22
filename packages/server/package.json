@@ -1,6 +1,6 @@
 {
   "name": "agentic-kanban",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "type": "module",
   "description": "Kanban board for AI-driven coding tasks — each card is a Claude Code session with built-in diff review and merge. Local-first, MCP-enabled, zero config.",
   "license": "MIT",
@@ -45,7 +45,7 @@
     "@modelcontextprotocol/sdk": "1.29.0",
     "commander": "^14.0.3",
     "drizzle-orm": "0.45.2",
-    "hono": "4.12.16",
+    "hono": "4.12.31",
     "ts-morph": "^24.0.0",
     "zod": "3.25.76"
   },

@@ -74,6 +74,25 @@ Open the issue's workspace (in its panel) to find these buttons:
 - **Merge** — merges the branch into the project's default branch and closes the
   workspace. (If it conflicts, the board offers a fix-and-retry.)
 
+## Multi-repo projects (several git repos, one board)
+A project can span **more than one git repository** — e.g. a backend, a frontend, and
+a few services worked on together. One repo is the **leading repo** (the one you
+registered; the agent starts its worktree there) and the rest are **additional /
+sibling repos**. When you launch a workspace, the board creates a worktree on the
+same branch in *every* repo; the diff aggregates across all of them and **Merge**
+lands each repo that has commits.
+- **Add a repo to the current project:** click the **++** button in the top bar
+  (just right of the **+** "add project" button). Three ways: a local path, a clone
+  URL, or **Create new** (type a name — a new folder + git repo is created inside the
+  project folder, beside the leading repo).
+- **Set one up from scratch:** click **+** → **Import existing**. The first path is
+  the **leading repo**; use **+ Add another repository** to list the siblings, then
+  **Register**. (You can also add siblings later via **++** or in
+  **Settings › Project › Additional Repositories**.)
+- **Manage them:** **Settings › Project › Additional Repositories** lists every
+  sibling and lets you rename one, set a per-repo setup script / compose file, or
+  remove it.
+
 ## Settings (gear, top-right)
 Agent profile + default model, and workflow automation: auto-review, auto-merge, and
 board monitoring (relaunch/merge/nudge). Toggle these to control how hands-off the

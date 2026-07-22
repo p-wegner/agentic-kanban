@@ -13,7 +13,7 @@ import { buildRepoPatch, repoFormFromResponse, type RepoEditFormState } from "./
  */
 export function ProjectReposSection({ projectId }: { projectId: string }) {
   const [repos, setRepos] = useState<ProjectRepoResponse[]>([]);
-  const [mode, setMode] = useState<"path" | "clone">("path");
+  const [mode, setMode] = useState<"path" | "clone" | "create">("path");
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,11 +30,20 @@ export function ProjectReposSection({ projectId }: { projectId: string }) {
   useEffect(() => { void load(); }, [load]);
 
   async function handleAdd() {
-    if (!input.trim() || busy) return;
+    const value = input.trim();
+    if (!value || busy) return;
+    if (mode === "create" && /[/\\<>:"|?*\x00]/.test(value)) {
+      setError('Name cannot contain: / \\ < > : " | ? *');
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      await apiPost(`/api/projects/${projectId}/repos`, mode === "clone" ? { cloneUrl: input.trim() } : { path: input.trim() });
+      const body =
+        mode === "clone" ? { cloneUrl: value }
+        : mode === "create" ? { createName: value }
+        : { path: value };
+      await apiPost(`/api/projects/${projectId}/repos`, body);
       setInput("");
       await load();
       showToast("Repo added to project", "success");
@@ -136,12 +145,16 @@ export function ProjectReposSection({ projectId }: { projectId: string }) {
       )}
       <div className="flex items-center gap-3">
         <label className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300">
-          <input type="radio" name={`repo-add-mode-${projectId}`} checked={mode === "path"} onChange={() => setMode("path")} className="h-3 w-3" />
+          <input type="radio" name={`repo-add-mode-${projectId}`} checked={mode === "path"} onChange={() => { setMode("path"); setError(null); }} className="h-3 w-3" />
           Local path
         </label>
         <label className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300">
-          <input type="radio" name={`repo-add-mode-${projectId}`} checked={mode === "clone"} onChange={() => setMode("clone")} className="h-3 w-3" />
+          <input type="radio" name={`repo-add-mode-${projectId}`} checked={mode === "clone"} onChange={() => { setMode("clone"); setError(null); }} className="h-3 w-3" />
           Clone from URL
+        </label>
+        <label className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300">
+          <input type="radio" name={`repo-add-mode-${projectId}`} checked={mode === "create"} onChange={() => { setMode("create"); setError(null); }} className="h-3 w-3" />
+          Create new
         </label>
       </div>
       <div className="flex gap-2">
@@ -149,7 +162,7 @@ export function ProjectReposSection({ projectId }: { projectId: string }) {
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={mode === "clone" ? "https://github.com/user/repo.git" : "C:/path/to/other-repo"}
+          placeholder={mode === "clone" ? "https://github.com/user/repo.git" : mode === "create" ? "new-repo-name" : "C:/path/to/other-repo"}
           className="flex-1 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 font-mono"
         />
         <button
@@ -160,6 +173,11 @@ export function ProjectReposSection({ projectId }: { projectId: string }) {
           {busy ? "Adding…" : "Add"}
         </button>
       </div>
+      {mode === "create" && (
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          A new folder + git repo is created inside the project folder (beside the leading repo).
+        </p>
+      )}
       {error && <p className="text-xs text-red-600">{error}</p>}
     </CollapsibleSection>
   );

@@ -64,11 +64,25 @@ export function createWorkspaceMergeService(deps: {
   createBackup?: (reason: string) => Promise<unknown>;
   /** Injectable process killer for testing (defaults to the real killProcessesInDir). */
   processKiller?: (dir: string) => Promise<number>;
+  /**
+   * Injectable port/supervisor killers for the post-merge worktree teardown. Left
+   * undefined in production so {@link teardownWorktree} applies its own real defaults
+   * (which spawn `netstat`/`taskkill`). Unit tests SHOULD stub them — otherwise the
+   * deferred teardown runs real port sweeps on the worktree's derived dev ports (e.g.
+   * an `ak-99` worktree → 3100/5272), which is slow AND could kill a genuine dev server
+   * listening there. NOT defaulted here: the merge service must not reference the real
+   * port killers, so a test that partially mocks `process-cleanup.js` (only
+   * killProcessesInDir) does not trip vitest's strict missing-export guard.
+   */
+  portKiller?: (ports: number[]) => Promise<number>;
+  supervisorKiller?: (ports: number[]) => Promise<number>;
 }) {
   const { database, getSessionManager, boardEvents } = deps;
   const gitService = deps.gitService ?? realGitService;
   const createBackup = deps.createBackup ?? realCreateBackup;
   const killProcesses = deps.processKiller ?? killProcessesInDir;
+  const killPorts = deps.portKiller;
+  const killSupervisor = deps.supervisorKiller;
 
   /**
    * Options threaded from the merge entry points down into {@link doMerge}.
@@ -409,7 +423,7 @@ export function createWorkspaceMergeService(deps: {
       setImmediate(() => {
         runWorkspacePostMergeCleanup(
           postMergeArgs,
-          { database, gitService, killProcesses, getSessionManager, boardEvents },
+          { database, gitService, killProcesses, killPorts, killSupervisor, getSessionManager, boardEvents },
           { onMainCheckoutSettled },
         )
           .catch((err) => {
