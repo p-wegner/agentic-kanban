@@ -448,13 +448,15 @@ docker compose up -d --build
 # UI + API on http://<host>:3001
 ```
 
-**Using the published image instead of building locally:** each tagged release also publishes `<dockerhub-username>/agentic-kanban` to Docker Hub (`linux/amd64`, tagged `latest` and `vX.Y.Z`) via the `docker-publish` GitHub Actions workflow — see [Publishing a New Release](#publishing-a-new-release). Pull it directly:
+**Using the published image instead of building locally:** each tagged release publishes the image to Docker Hub as [`pwegner3141/agentic-kanban`](https://hub.docker.com/r/pwegner3141/agentic-kanban) (`linux/amd64`), tagged `latest`, the full version (`0.1.9`), and major.minor (`0.1`). Pull it directly:
 
 ```bash
-docker pull <dockerhub-username>/agentic-kanban:latest
+docker pull pwegner3141/agentic-kanban:latest
 ```
 
-or swap `docker-compose.yml`'s `build: .` for `image: <dockerhub-username>/agentic-kanban:latest` to skip the local build entirely — everything else (volumes, env vars, DooD/DinD options below) is unchanged.
+or swap `docker-compose.yml`'s `build: .` for `image: pwegner3141/agentic-kanban:latest` to skip the local build entirely — everything else (volumes, env vars, DooD/DinD options below) is unchanged.
+
+The image is meant to be published by the `docker-publish` GitHub Actions workflow on tag push (see [Publishing a New Release](#publishing-a-new-release)), but until that workflow's Docker Hub secrets are configured it is published **manually** from a local `docker build` + `docker push` as part of the release.
 
 Key points:
 
@@ -612,15 +614,33 @@ Users install the beta with:
 npx agentic-kanban@beta dev
 ```
 
-### Docker Hub Image (CI)
+### Docker Hub Image
 
-Pushing a `v*` git tag (Standard Release step above, or the `release` skill) also triggers `.github/workflows/docker-publish.yml`, which builds the root `Dockerfile` and pushes `<dockerhub-username>/agentic-kanban:vX.Y.Z` + `:latest` to Docker Hub. One-time setup (already done for this repo, listed for reference/recovery):
+Pushing a `v*` git tag (Standard Release step above, or the `release` skill) triggers `.github/workflows/docker-publish.yml`, which builds the root `Dockerfile` and pushes `pwegner3141/agentic-kanban:X.Y.Z` + `:X.Y` + `:latest` to Docker Hub.
 
-1. A Docker Hub account + `agentic-kanban` repository (public repos are free, unlimited).
+> **⚠️ CI is not yet wired — the image is currently published manually.** The workflow needs two GitHub repo secrets (`DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`) that are **not set** on this repo, so every tag push currently makes the `docker-publish` run **fail at the `docker/login-action` step** ("Username and password required"). Until the secrets are added, the release publishes the image with a local build + push instead (this is how `0.1.9` shipped):
+>
+> ```bash
+> for tag in X.Y.Z X.Y latest; do
+>   docker build -t pwegner3141/agentic-kanban:$tag .
+>   docker push pwegner3141/agentic-kanban:$tag
+> done
+> # verify: docker manifest inspect pwegner3141/agentic-kanban:latest
+> ```
+>
+> The image is a multi-stage server build (~1.6 GB), so allow a few minutes for the build and the push.
+
+**To wire up CI (one-time, then every tag push publishes automatically):**
+
+1. A Docker Hub account (`pwegner3141`) + `agentic-kanban` repository (public repos are free, unlimited).
 2. A Docker Hub access token (Account Settings → Security → New Access Token).
-3. Two GitHub repo secrets: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`.
+3. Add the two GitHub repo secrets:
+   ```bash
+   gh secret set DOCKERHUB_USERNAME --body "pwegner3141"
+   gh secret set DOCKERHUB_TOKEN    --body "<the Docker Hub access token>"
+   ```
 
-To re-run the image build without cutting a new release (e.g. after a transient push failure): `gh workflow run docker-publish.yml --ref vX.Y.Z`.
+Once the secrets exist, re-run the image build for an already-cut release without a local build: `gh workflow run docker-publish.yml --ref vX.Y.Z` (also useful to recover from a transient push failure).
 
 ---
 

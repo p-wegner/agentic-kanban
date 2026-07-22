@@ -54,6 +54,8 @@ pnpm dev             # start server (port 3001) + client (port 5173)
 
 Open http://localhost:5173 — the board loads with 3 active columns for the registered project.
 
+Prefer not to build from source? Run the published image instead — `docker pull pwegner3141/agentic-kanban:latest`, or `npx agentic-kanban dev`. See [docs/deployment.md](docs/deployment.md) for the Docker Compose setup (volumes, agent auth, DinD/DooD service stacks).
+
 For prerequisites, troubleshooting, and clean-clone gotchas see [docs/install.md](docs/install.md).
 
 ## CLI
