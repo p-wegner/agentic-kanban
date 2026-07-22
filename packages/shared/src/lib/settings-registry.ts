@@ -54,6 +54,13 @@ export const SETTINGS_REGISTRY = {
   mock_agent_profile: { type: "string", default: "" },
   mock_agent_delay_ms: { type: "number", default: "" },
   permission_prompt_tool: { type: "bool", default: "false" },
+  /**
+   * Run builder agents INSIDE the worktree's devcontainer instead of as host
+   * processes. Off by default: it requires Docker + the @devcontainers/cli, and
+   * only takes effect for worktrees that actually declare a devcontainer — any
+   * missing prerequisite falls back to host execution rather than failing.
+   */
+  devcontainer_builders: { type: "bool", default: "false" },
   auto_review: { type: "bool", default: "true" },
   auto_merge: { type: "bool", default: "true" },
   auto_merge_in_review: { type: "bool", default: "false" },
@@ -75,8 +82,21 @@ export const SETTINGS_REGISTRY = {
   learning_step_before_merge: { type: "bool", default: "false" },
   auto_monitor: { type: "bool", default: "false" },
   auto_monitor_interval: { type: "number", default: "4" },
+  // Merged-workspace count after which the compounding "setup once" pass runs for a
+  // project (#127). The pass scaffolds hooks, lint/test config, the project's agent
+  // skills and a domain map ONCE, between tickets, so later builders inherit an already
+  // set-up environment instead of re-discovering it. 0 disables it board-wide.
+  compounding_setup_min_merges: { type: "number", default: "5" },
+  // Max per-workspace Docker service stacks that may be "up" at once (#56). Empty/0 =
+  // unlimited (default — unchanged behaviour). When >0, provisioning DEFERS rather than
+  // starting an (N+1)th stack, so an over-subscribed host queues instead of thrashing.
+  // In a DinD deployment the KANBAN_STACK_PORT_RANGE size is ALSO a natural cap.
+  max_concurrent_stacks: { type: "number", default: "" },
   nudge_auto_start: { type: "bool", default: "false" },
   nudge_wip_limit: { type: "number", default: "" },
+  // Idle-seconds threshold after which a running/fixing agent that has produced no
+  // activity/stats delta is surfaced with a "stalled" badge on the agent views (#86).
+  agent_stall_threshold_sec: { type: "number", default: "240" },
   projects_base_path: { type: "string", default: "" },
   plan_auto_continue: { type: "bool", default: "true" },
   visual_verification_mode: { type: "string", default: "before_merge" },

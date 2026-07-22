@@ -224,14 +224,20 @@ async function getDisabledTools(): Promise<Set<string>> {
   return new Set();
 }
 
-const server = new McpServer({
-  name: "agentic-kanban",
-  version: "0.0.1",
-});
-
-async function main() {
-  const disabledTools = await getDisabledTools();
-
+/**
+ * Build a fully-registered MCP server.
+ *
+ * A FACTORY rather than a module-level singleton because `McpServer` and a
+ * transport are 1:1 — the HTTP transport (#136) needs a fresh pair per request in
+ * stateless mode, so it cannot share one instance the way stdio does. Registration
+ * is just closure creation, so calling this per request is cheap.
+ */
+export function createConfiguredServer(disabledTools: Set<string>): {
+  server: McpServer;
+  registered: number;
+  skipped: number;
+} {
+  const server = new McpServer({ name: "agentic-kanban", version: "0.0.1" });
   let registered = 0;
   let skipped = 0;
   for (const [name, register] of Object.entries(TOOL_REGISTRARS)) {
@@ -242,9 +248,46 @@ async function main() {
       registered++;
     }
   }
+  return { server, registered, skipped };
+}
+
+async function main() {
+  const disabledTools = await getDisabledTools();
+  const { server, registered, skipped } = createConfiguredServer(disabledTools);
 
   if (skipped > 0) {
     console.error(`Skipped ${skipped} disabled tool(s): ${[...disabledTools].filter(t => TOOL_REGISTRARS[t]).join(", ")}`);
+  }
+
+  // HTTP mode (#136): serve over the network so a CONTAINERIZED builder can reach
+  // the board. Stdio remains the default and the host path — a stdio config
+  // describes a command the container cannot run, and the DB binding is a
+  // native-Windows better-sqlite3, so path translation is a dead end.
+  //
+  // The token comes from the environment, never a flag: argv is world-readable in
+  // the process list on both Windows and Linux.
+  if (process.argv.includes("--http")) {
+    const token = process.env.KANBAN_MCP_TOKEN;
+    if (!token) {
+      console.error(
+        "Refusing to start MCP over HTTP without KANBAN_MCP_TOKEN — this endpoint " +
+          "exposes the full board tool surface off-loopback.",
+      );
+      process.exit(1);
+    }
+    const portArg = process.argv[process.argv.indexOf("--http") + 1];
+    const port = portArg && /^\d+$/.test(portArg) ? Number(portArg) : 0;
+
+    const { startMcpHttpServer } = await import("./http-transport.js");
+    const handle = await startMcpHttpServer({
+      createServer: () => createConfiguredServer(disabledTools).server,
+      token,
+      port,
+    });
+    // The board parses this line to learn the OS-assigned port. Keep the format.
+    console.error(`MCP_HTTP_PORT=${handle.port}`);
+    console.error(`Agentic Kanban MCP server running on http (${registered} tools registered)`);
+    return;
   }
 
   const transport = new StdioServerTransport();

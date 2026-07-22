@@ -18,6 +18,10 @@ import type { Database } from "../db/index.js";
 import * as crudRepo from "../repositories/workspace-crud.repository.js";
 import type { ProviderName } from "./agent-provider.js";
 import { runSetupScript } from "./setup-script.js";
+import type { SetupScriptContainer } from "@agentic-kanban/shared/lib/setup-script";
+import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
+import { getPreference } from "../repositories/preferences.repository.js";
+import { provisionContainerForWorkspace } from "./devcontainer-workspace.service.js";
 import {
   buildSetupRunFromResult,
   buildSetupRunFromError,
@@ -28,7 +32,8 @@ import {
   type LatestSetupRun,
   type LatestSymlinkRun,
 } from "./workspace-run-records.js";
-import { writeAgentSkillFile, readLocalSkillPrompt, copySkillToWorktree } from "@agentic-kanban/shared/lib/agent-skill-files";
+import { writeAgentSkillFile, readLocalSkillPrompt, copySkillToWorktree, listLocalSkillNames } from "@agentic-kanban/shared/lib/agent-skill-files";
+import { buildSkillInvocationBlock, selectBuilderSkills } from "@agentic-kanban/shared/lib/builder-skill-policy";
 import { writeTicketContextFile } from "@agentic-kanban/shared/lib/ticket-context";
 import { bootstrapSymlinks } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
 import { resolveWorkflowStart, buildTransitionBlock } from "@agentic-kanban/shared/lib/workflow-engine";
@@ -107,11 +112,46 @@ export function createWorkspaceProvisionService(deps: {
     const { setupScript, setupBlocking, setupEnabled } = setupConfig;
     let latestSetup = skippedSetupRun(setupScript);
     let setupCompletion: Promise<LatestSetupRun> | undefined;
+
+    // Provision the devcontainer BEFORE the setup script (#135). A host-run
+    // install produces node_modules that cannot resolve inside the container, so
+    // when the builder is containerized the install has to happen in there.
+    //
+    // Provisioning here does not conflict with the launch-time call in
+    // session-lifecycle: `devcontainer up` is idempotent, so the later call
+    // simply re-derives the same handle. That keeps the two call sites
+    // independent — no container state has to be threaded or persisted.
+    let setupContainer: SetupScriptContainer | undefined;
+    if (!isDirect && setupScript && setupEnabled && !input.skipSetup) {
+      try {
+        const provision = await provisionContainerForWorkspace({
+          enabled: parseBoolSetting(
+            "devcontainer_builders",
+            await getPreference("devcontainer_builders", database),
+          ),
+          worktreePath,
+          workspaceId,
+          symlinkDirs: symlinkConfig.dirs,
+        });
+        setupContainer = provision?.handle;
+      } catch (err) {
+        console.warn(
+          `[devcontainer] provisioning threw before setup for workspaceId=${workspaceId} — running setup on the host`,
+          err,
+        );
+      }
+    }
+
     if (!isDirect && setupScript && setupEnabled && !input.skipSetup) {
       const startedAt = new Date().toISOString();
+      if (setupContainer) {
+        console.log(
+          `[workspaces] setup runs in container ${setupContainer.containerId.slice(0, 12)} for workspaceId=${workspaceId}`,
+        );
+      }
       if (setupBlocking) {
         try {
-          const result = await runSetupScript(worktreePath, setupScript);
+          const result = await runSetupScript(worktreePath, setupScript, { container: setupContainer });
           latestSetup = buildSetupRunFromResult(setupScript, startedAt, result);
           if (result.exitCode === 0) {
             console.log(`[workspaces] setup complete: workspaceId=${workspaceId}`);
@@ -133,7 +173,7 @@ export function createWorkspaceProvisionService(deps: {
           stdoutTail: null,
           stderrTail: null,
         };
-        setupCompletion = runSetupScript(worktreePath, setupScript).then(result => {
+        setupCompletion = runSetupScript(worktreePath, setupScript, { container: setupContainer }).then(result => {
           if (result.exitCode === 0) {
             console.log(`[workspaces] parallel setup complete: workspaceId=${workspaceId}`);
           } else {
@@ -286,6 +326,8 @@ exit 1
     worktreePath: string,
     issue: { issueNumber: number | null; title: string; description: string | null; projectId: string },
     contextPrimer: string | null,
+    additionalRepos?: Array<{ name: string | null; worktreePath: string }>,
+    serviceStack?: { ports: Record<string, number>; envFilePath: string; composeProjectName: string; serviceHost: string } | null,
   ): Promise<string | null> {
     let stackProfile = null;
     try {
@@ -299,6 +341,8 @@ exit 1
       description: issue.description,
       contextPrimer,
       stackProfile,
+      additionalRepos,
+      serviceStack,
     });
   }
 
@@ -346,6 +390,21 @@ exit 1
     const skillName = worktreePath
       ? await resolveSkillFile(effectiveSkillId, effectiveDiskSkill, worktreePath, project.repoPath)
       : null;
+
+    // #129: a skill nobody invokes is a per-turn context tax for nothing — over
+    // 200 builder sessions, 0/47 materialized skills were ever fired. Name the
+    // ones this worktree actually has so the agent knows to reach for them.
+    // Scoped to the builder-relevant set + the resolved skill; the repo may have
+    // dozens of committed skills and listing them all would BE the tax.
+    if (worktreePath) {
+      const present = await listLocalSkillNames(worktreePath);
+      const announced = selectBuilderSkills(present);
+      if (skillName && present.includes(skillName) && !announced.includes(skillName)) {
+        announced.unshift(skillName);
+      }
+      const block = buildSkillInvocationBlock(announced);
+      if (block) agentPrompt += `\n\n${block}`;
+    }
 
     return { agentPrompt, skillName, effectiveSkillId, hasWorkflowStart: Boolean(workflowStart) };
   }

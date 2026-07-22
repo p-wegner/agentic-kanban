@@ -9,7 +9,9 @@ import { AllWorkspacesPanel } from "./AllWorkspacesPanel.js";
 import { WorkspaceLaunchFailuresPanel } from "./WorkspaceLaunchFailuresPanel.js";
 import { CleanupQueuePanel } from "./CleanupQueuePanel.js";
 import { FileContentionPanel } from "./FileContentionPanel.js";
+import { MultiRepoMonitorPanel } from "./MultiRepoMonitorPanel.js";
 import { TranscriptSearchPanel } from "./TranscriptSearchPanel.js";
+import { SessionTranscriptPanel } from "./SessionTranscriptPanel.js";
 import { MergeQueuePanel } from "./MergeQueuePanel.js";
 import { RunQueueForecastPanel } from "./RunQueueForecastPanel.js";
 import { AgentStartDryRunModal } from "./AgentStartDryRunModal.js";
@@ -45,6 +47,7 @@ interface Props {
   showLaunchFailures: boolean;
   showCleanupQueue: boolean;
   showFileContention: boolean;
+  showMultiRepoMonitor: boolean;
   showTranscriptSearch: boolean;
   showMergeQueue: boolean;
   showRunQueueForecast: boolean;
@@ -63,6 +66,7 @@ interface Props {
   onCloseLaunchFailures: () => void;
   onCloseCleanupQueue: () => void;
   onCloseFileContention: () => void;
+  onCloseMultiRepoMonitor: () => void;
   onCloseTranscriptSearch: () => void;
   onCloseMergeQueue: () => void;
   onCloseRunQueueForecast: () => void;
@@ -76,6 +80,8 @@ interface Props {
 
   // Shared data
   activeProjectId: string | null;
+  /** Leading repo path of the active project — used by the Multi-Repo Monitor (#82). */
+  leadingRepoPath?: string | null;
   columns: StatusWithIssues[];
   nudgeWipLimit: string;
   viewMode: ViewMode;
@@ -124,6 +130,7 @@ export function BoardOverlayPanels({
   showLaunchFailures,
   showCleanupQueue,
   showFileContention,
+  showMultiRepoMonitor,
   showTranscriptSearch,
   showMergeQueue,
   showRunQueueForecast,
@@ -140,6 +147,7 @@ export function BoardOverlayPanels({
   onCloseLaunchFailures,
   onCloseCleanupQueue,
   onCloseFileContention,
+  onCloseMultiRepoMonitor,
   onCloseTranscriptSearch,
   onCloseMergeQueue,
   onCloseRunQueueForecast,
@@ -151,6 +159,7 @@ export function BoardOverlayPanels({
   onWorkspaceStarted,
   onCloseShortcutHelp,
   activeProjectId,
+  leadingRepoPath,
   columns,
   nudgeWipLimit,
   viewMode,
@@ -271,6 +280,26 @@ export function BoardOverlayPanels({
           onClose={onCloseFileContention}
         />
       )}
+      {showMultiRepoMonitor && (
+        <MultiRepoMonitorPanel
+          activeProjectId={activeProjectId ?? null}
+          leadingRepoPath={leadingRepoPath ?? null}
+          columns={columns}
+          onClose={onCloseMultiRepoMonitor}
+          onOpenWorkspace={(workspaceId, issueId) => {
+            const issue = columnsRef.current.flatMap((c) => c.issues).find((i) => i.id === issueId);
+            if (issue) {
+              onCloseMultiRepoMonitor();
+              setSelectedIssue(null);
+              setWorkspaceIssue(issue);
+              setWorkspaceOpenCreate(false);
+              setWorkspaceInitial({ workspaceId });
+            } else {
+              showToast("Issue not found on current board — try refreshing", "error");
+            }
+          }}
+        />
+      )}
       {showTranscriptSearch && activeProjectId && (
         <TranscriptSearchPanel
           projectId={activeProjectId}
@@ -369,6 +398,9 @@ export function BoardOverlayPanels({
       {showShortcutHelp && (
         <ShortcutHelp onClose={onCloseShortcutHelp} currentView={viewMode} />
       )}
+      {/* Full session transcript viewer — self-mounted; opened via the
+          openSessionTranscript() window event from any launch site (#87). */}
+      <SessionTranscriptPanel />
       {expandedCreatePanel && activeProjectId && (
         <CreateIssuePanel
           projectId={activeProjectId}

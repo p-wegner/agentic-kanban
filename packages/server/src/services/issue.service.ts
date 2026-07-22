@@ -1,4 +1,5 @@
 import { isTerminalStatusName, isTerminalStatusView } from "@agentic-kanban/shared";
+import type { ServiceStackState } from "@agentic-kanban/shared";
 import type { WebhookIssueStatusPayload } from "@agentic-kanban/shared/lib";
 import { buildIssueStatusPayload } from "@agentic-kanban/shared/lib";
 import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
@@ -18,7 +19,10 @@ import {
     setIssueStatus,
     updateIssueTitleDescription,
 } from "../repositories/issue-ai.repository.js";
+import { getProjectRepoNames } from "../repositories/repo.repository.js";
+import { resolveRepoName } from "@agentic-kanban/shared/lib/repo-tags";
 import { isIssueNumberUniqueConstraintError, nextIssueNumber } from "../repositories/issue-number.repository.js";
+import { applyRepoTags } from "./repo-tags.service.js";
 import {
     archiveIssuesByIds,
     closeOpenWorkspacesForIssue,
@@ -70,6 +74,22 @@ export { IssueError } from "./issue-error.js";
 export { validateBatchDependencies } from "./issue-dependency.service.js";
 
 const ISSUE_NUMBER_INSERT_ATTEMPTS = 3;
+
+/**
+ * Parse a persisted `workspaces.service_state` JSON blob into the wire shape,
+ * mirroring the details projection's mapServiceState (workspace-details-projection.ts)
+ * exactly — the issue-workspaces LIST rows must match the details DTO so the client's
+ * per-workspace serviceState hydration can self-retire.
+ */
+function parseServiceStateJson(raw: string | null | undefined): ServiceStackState | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as ServiceStackState;
+    return parsed && typeof parsed === "object" && typeof parsed.composeProjectName === "string" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
 
 type ContractIssueRow = {
   id: string;
@@ -146,6 +166,9 @@ export interface CreateIssueInput {
   workflowTemplateId?: string | null;
   externalKey?: string | null;
   externalUrl?: string | null;
+  /** Repos this issue touches (#94). Applied as `repo:<name>` tags after insert (multi-repo
+   *  authoring); omitted/empty for single-repo projects. */
+  reposTouched?: string[];
 }
 
 export type CreateIssueResult = NonNullable<Awaited<ReturnType<typeof getIssueDescription>>>;
@@ -266,6 +289,19 @@ export function createIssueService(deps: {
     // node mapping to that status (null for statuses with no node, e.g. "Todo").
     if (input.workflowTemplateId) {
       await syncCurrentNodeToStatus(database, createdId).catch(() => {});
+    }
+
+    // Repo-aware authoring (#94): mark the repos this issue touches as repo:<name> tags.
+    // Validate against the project's real repo set (canonicalizing + dropping unknowns) so
+    // a stale client can't mint junk tags. Best-effort — a tag failure must not fail create.
+    if (input.reposTouched && input.reposTouched.length > 0) {
+      try {
+        const knownRepos = await getProjectRepoNames(input.projectId, database);
+        const valid = input.reposTouched
+          .map((r) => resolveRepoName(r, knownRepos))
+          .filter((r): r is string => r !== null);
+        if (valid.length > 0) await applyRepoTags(createdId, valid, database);
+      } catch { /* tagging is best-effort */ }
     }
 
     if (input.projectId) boardEvents?.broadcast(input.projectId, "issue_created");
@@ -763,6 +799,7 @@ export function createIssueService(deps: {
         diffStatCacheInsertions,
         diffStatCacheDeletions,
         scorecardScore,
+        serviceState: serviceStateRaw,
         ...workspace
       } = w;
       const conflicts = conflictCacheHasConflicts !== null && conflictCacheHasConflicts !== undefined
@@ -807,6 +844,7 @@ export function createIssueService(deps: {
           endedAt: latestSymlinkEndedAt,
           error: latestSymlinkError,
         } : null,
+        serviceState: parseServiceStateJson(serviceStateRaw),
         contextTokens: contextTokensMap.get(w.id) ?? null,
         lastTool: lastToolMap.get(w.id) ?? null,
       };

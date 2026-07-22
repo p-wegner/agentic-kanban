@@ -84,6 +84,8 @@ export const workspaces = sqliteTable("workspaces", {
   contextPrimer: text("context_primer"),
   /** Set when worktree removal fails post-merge (e.g. EBUSY). Cleared on successful retry cleanup. */
   cleanupWarning: text("cleanup_warning"),
+  /** JSON `ServiceStackState` — this workspace's provisioned Docker service stack (compose project name, allocated ports, env file, status). Nullable = no stack. */
+  serviceState: text("service_state"),
 }, (table) => ({
   issueIdIdx: index("idx_workspaces_issue_id").on(table.issueId),
   statusIdx: index("idx_workspaces_status").on(table.status),

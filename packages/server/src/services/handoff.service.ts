@@ -1,10 +1,11 @@
 import { existsSync } from "node:fs";
-import { readFile, appendFile, writeFile } from "node:fs/promises";
+import { readFile, appendFile, writeFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { getLatestCommit, getDiffShortstat, getChangedFileNames } from "./git.service.js";
 import { parseSessionSummary } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
 import { getSessionMessageRows, getSessionStatsRaw } from "../repositories/session.repository.js";
+import { listWorkspaceRepos } from "../repositories/repo.repository.js";
 
 const HANDOFF_FILENAME = "HANDOFF.md";
 const MAX_FILES = 20;
@@ -49,6 +50,7 @@ export async function generateHandoff(
   sessionId: string,
   database: Database,
   baseBranch?: string | null,
+  workspaceId?: string | null,
 ): Promise<string> {
   const diffBase = baseBranch || "HEAD~1";
   const [lastCommit, diffStatsResult, changedFilesResult, statsRaw, messageRows] = await Promise.all([
@@ -59,6 +61,33 @@ export async function generateHandoff(
     getSessionMessageRows(sessionId, database),
   ]);
 
+  // Multi-repo (#78): fold each SIBLING repo's diff into the handoff so the next agent sees
+  // work done outside the leading worktree. Sibling shortstats are summed into the totals;
+  // sibling changed files are namespaced `name::file` (consistent with merge-queue/#76/#77).
+  // Best-effort per repo — a sibling that can't be scanned just contributes nothing.
+  let diffStats = diffStatsResult;
+  const changedFiles = [...changedFilesResult];
+  if (workspaceId) {
+    let siblings: Awaited<ReturnType<typeof listWorkspaceRepos>> = [];
+    try { siblings = await listWorkspaceRepos(workspaceId, database); } catch { siblings = []; }
+    for (const repo of siblings) {
+      if (!repo.worktreePath || !repo.baseBranch) continue;
+      const ns = repo.name ?? repo.path;
+      const [ss, sf] = await Promise.all([
+        getDiffShortstat(repo.worktreePath, repo.baseBranch).catch(() => null),
+        getChangedFileNames(repo.worktreePath, repo.baseBranch).catch(() => [] as string[]),
+      ]);
+      if (ss && (ss.filesChanged || ss.insertions || ss.deletions)) {
+        diffStats = {
+          filesChanged: (diffStats?.filesChanged ?? 0) + ss.filesChanged,
+          insertions: (diffStats?.insertions ?? 0) + ss.insertions,
+          deletions: (diffStats?.deletions ?? 0) + ss.deletions,
+        };
+      }
+      for (const f of sf) changedFiles.push(`${ns}::${f}`);
+    }
+  }
+
   const summary = parseSessionSummary(messageRows);
   const statsJson = statsRaw;
   let parsedStats: Record<string, unknown> = {};
@@ -68,9 +97,9 @@ export async function generateHandoff(
 
   const data: HandoffData = {
     lastCommit,
-    diffStats: diffStatsResult,
+    diffStats,
     agentSummary: truncateText(finalSummary(summary.agentSummary, (parsedStats.agentSummary as string) || null), MAX_SUMMARY_CHARS),
-    changedFiles: changedFilesResult,
+    changedFiles,
     filesModified: [...new Set([...summary.filesEdited, ...summary.filesWritten])],
     errors: summary.errors,
     model: summary.model || (parsedStats.model as string) || "",
@@ -162,8 +191,9 @@ export async function writeHandoffFile(
   sessionId: string,
   database: Database,
   baseBranch?: string | null,
+  workspaceId?: string | null,
 ): Promise<void> {
-  const content = await generateHandoff(workingDir, sessionId, database, baseBranch);
+  const content = await generateHandoff(workingDir, sessionId, database, baseBranch, workspaceId);
   const handoffPath = join(workingDir, HANDOFF_FILENAME);
   await writeFile(handoffPath, content, "utf8");
 
@@ -190,5 +220,32 @@ export async function readHandoffFile(workingDir: string): Promise<string | null
     return await readFile(handoffPath, "utf8");
   } catch {
     return null;
+  }
+}
+
+const MAX_EXCERPT_CHARS = 500;
+
+/** Lightweight HANDOFF.md metadata (mtime + truncated content) for the cross-repo feed (#89). */
+export interface HandoffMeta {
+  exists: boolean;
+  /** ISO mtime — the client's poll+delta key. */
+  updatedAt: string | null;
+  excerpt: string | null;
+}
+
+/**
+ * Read-only HANDOFF.md metadata for one worktree: whether it exists, its mtime, and a
+ * truncated excerpt of the content — the poll+delta feed source (#89). Best-effort:
+ * any fs error (missing worktree, unreadable file) resolves to the absent shape.
+ */
+export async function readHandoffMeta(workingDir: string, maxChars = MAX_EXCERPT_CHARS): Promise<HandoffMeta> {
+  const handoffPath = join(workingDir, HANDOFF_FILENAME);
+  try {
+    if (!existsSync(handoffPath)) return { exists: false, updatedAt: null, excerpt: null };
+    const [info, content] = await Promise.all([stat(handoffPath), readFile(handoffPath, "utf8")]);
+    const excerpt = content.length > maxChars ? content.slice(0, maxChars) + "..." : content;
+    return { exists: true, updatedAt: info.mtime.toISOString(), excerpt };
+  } catch {
+    return { exists: false, updatedAt: null, excerpt: null };
   }
 }

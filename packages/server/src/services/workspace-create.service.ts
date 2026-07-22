@@ -13,7 +13,12 @@
 import { randomUUID } from "node:crypto";
 import { isResolvedDependencyStatusView } from "@agentic-kanban/shared/lib/status-view";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
+import { isTerminalWorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import { derivePortsFromBranch } from "./worktree-ports.js";
+import { workspaceServicesService, resolveServiceHost } from "./workspace-services.service.js";
+import { provisionServicesForLaunch } from "./workspace-create-stack.service.js";
+import type { ServiceStackState } from "@agentic-kanban/shared";
+import type { TicketContext } from "@agentic-kanban/shared/lib/ticket-context";
 import { withTransaction, type Database, type TransactionClient } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
@@ -35,12 +40,25 @@ import { preflightAgentProfile } from "./agent-profile-health.service.js";
 import { emitButlerSystemEvent } from "./butler-event-feed.js";
 import { moveIssueToInProgressStrict } from "../repositories/workspace.repository.js";
 import {
+  updateWorkspaceServiceState,
+  getWorkspaceLifecycleStatus,
+} from "../repositories/workspace-service-state.repository.js";
+import {
   WorkspaceError,
   type CreateWorkspaceInput,
   type CreateWorkspaceResult,
   type GitService,
 } from "./workspace-internals.js";
 import { createWorkspaceProvisionService } from "./workspace-provision.service.js";
+import {
+  provisionSiblingWorktrees,
+  insertSiblingWorktreeRecords,
+  rollbackSiblingWorktrees,
+  resolveScopedSiblingRepos,
+  type SiblingWorktree,
+} from "./workspace-repos.service.js";
+import { listProjectRepos } from "../repositories/repo.repository.js";
+import { basename } from "node:path";
 
 export function createWorkspaceCreateService(deps: {
   database: Database;
@@ -73,7 +91,7 @@ export function createWorkspaceCreateService(deps: {
 
   async function resolveIssueAndProject(issueId: string): Promise<{
     issue: { projectId: string; issueNumber: number | null; title: string; description: string | null; priority: string | null };
-    project: { repoPath: string; defaultBranch: string | null; defaultSkillId: string | null };
+    project: { repoPath: string; defaultBranch: string | null; defaultSkillId: string | null; servicesConfig: string | null };
     setupConfig: { setupScript: string | null; setupBlocking: boolean; setupEnabled: boolean };
     symlinkConfig: { enabled: boolean; dirs: string[] };
   }> {
@@ -94,7 +112,7 @@ export function createWorkspaceCreateService(deps: {
     const projectRow = projectRows[0];
     return {
       issue,
-      project: { repoPath: projectRow.repoPath, defaultBranch: projectRow.defaultBranch, defaultSkillId: projectRow.defaultSkillId ?? null },
+      project: { repoPath: projectRow.repoPath, defaultBranch: projectRow.defaultBranch, defaultSkillId: projectRow.defaultSkillId ?? null, servicesConfig: projectRow.servicesConfig ?? null },
       setupConfig: {
         setupScript: projectRow.setupScript ?? null,
         setupBlocking: projectRow.setupBlocking ?? true,
@@ -126,6 +144,7 @@ export function createWorkspaceCreateService(deps: {
     resolvedProvider: ProviderName;
     model: string | undefined;
     contextPrimer: string | null;
+    serviceState: string | null;
     latestSetup: LatestSetupRun;
     latestSymlink: LatestSymlinkRun;
     now: string;
@@ -167,6 +186,7 @@ export function createWorkspaceCreateService(deps: {
       latestSymlinkFailed: stringifyJson(params.latestSymlink.failed),
       latestSymlinkError: params.latestSymlink.error,
       contextPrimer: params.contextPrimer,
+      serviceState: params.serviceState,
       createdAt: params.now,
       updatedAt: params.now,
     }, params.database ?? database);
@@ -300,43 +320,171 @@ export function createWorkspaceCreateService(deps: {
   }
 
   /**
-   * Launch the builder agent OFF the hot path (setImmediate) so the HTTP response
-   * flushes before any long-running git/binary work begins (same pattern as the
-   * merge endpoint, #578). A deferred launch failure can't reach createWorkspace's
-   * catch block, so it's handled here: persist the error + downgrade the workspace
+   * OFF the HTTP hot path (setImmediate, same pattern as the merge endpoint #578), and
+   * AFTER the workspace row exists: provision the service stack (#F3b — the up to 120s
+   * `up --wait` no longer blocks the 201), persist its state, write the (service-aware)
+   * ticket-context, then launch the builder agent. A failure here can't reach
+   * createWorkspace's catch block, so it's handled locally: persist the error + downgrade
    * status, and surface a Butler event when a stale safety policy blocked it.
    */
-  function scheduleDeferredAgentLaunch(
+  function scheduleDeferredProvisionAndLaunch(
     agentLaunchArgs: Parameters<typeof launchAgent>[0],
-    ctx: { workspaceId: string; projectId: string; timing: (phase: string, startMs: number) => void },
+    ctx: {
+      workspaceId: string;
+      projectId: string;
+      isDirect: boolean;
+      worktreePath: string | null;
+      servicesConfigRaw: string | null;
+      branch: string;
+      createdAt: string;
+      siblings: SiblingWorktree[];
+      issue: { issueNumber: number | null; title: string; description: string | null; projectId: string };
+      contextPrimer: string | null;
+      timing: (phase: string, startMs: number) => void;
+    },
   ): void {
     const { workspaceId, projectId, timing } = ctx;
     setImmediate(() => {
-      const t = Date.now();
-      void launchAgent(agentLaunchArgs)
-        .then(() => timing("agent-launch", t))
-        .catch((err: unknown) => {
-          const errorMsg = err instanceof Error ? err.message : String(err);
-          const staleSafetyPolicy =
-            err instanceof WorkspaceError && err.data?.code === "STALE_SAFETY_POLICY";
-          const persistedError = staleSafetyPolicy ? `STALE_SAFETY_POLICY: ${errorMsg}` : errorMsg;
-          const nextStatus = staleSafetyPolicy ? "error" : "idle";
-          console.error(`[workspaces] deferred agent launch failed for workspace ${workspaceId}: ${errorMsg}`);
-          if (staleSafetyPolicy) {
-            emitButlerSystemEvent({
-              projectId,
-              kind: "workspace_error",
-              workspaceId,
-              text: `Workspace launch blocked by stale safety policy for ${workspaceId}: ${errorMsg.slice(0, 200)}`,
-            });
+      void (async () => {
+        // 1. Provision the service stack (off the hot path) and persist its state. No-op
+        //    (null, no fs/docker) when the project declares no enabled stack — so the
+        //    common no-stack deferred path is launch-only.
+        let serviceState: ServiceStackState | null = null;
+        // Shared-worktree ADOPTION (finding 12): an adopted state records a CO-RESIDENT
+        // workspace's stack — this workspace never owns it, so the convergence teardowns
+        // below must never down it (the engine's last-reference guard is the backstop).
+        let stackAdopted = false;
+        if (!ctx.isDirect && ctx.worktreePath) {
+          const t = Date.now();
+          const provisioned = await provisionServicesForLaunch(database, {
+            servicesConfigRaw: ctx.servicesConfigRaw,
+            workspaceId,
+            workspaceCreatedAt: ctx.createdAt,
+            branch: ctx.branch,
+            leadingWorktreePath: ctx.worktreePath,
+            siblings: ctx.siblings,
+          });
+          serviceState = provisioned?.state ?? null;
+          stackAdopted = provisioned?.adopted ?? false;
+          if (serviceState) {
+            timing("service-stack", t);
+            if (serviceState.status === "error" && serviceState.deferred) {
+              // A deliberate capacity deferral (#56), not a failure — log calmly and do
+              // NOT raise a workspace_error alarm on the Butler feed.
+              console.log(`[services] stack for branch ${ctx.branch} deferred (admission cap): ${serviceState.error ?? ""}`);
+            } else if (serviceState.status === "error") {
+              console.warn(`[services] stack for branch ${ctx.branch} came up with status=error: ${serviceState.error ?? ""}`);
+              // Surface the failure via the Butler feed too — a non-throwing error
+              // state never reaches the deferred catch handler below (#20).
+              emitButlerSystemEvent({
+                projectId,
+                kind: "workspace_error",
+                workspaceId,
+                text: `Service stack failed to start for branch ${ctx.branch}: ${(serviceState.error ?? "unknown error").slice(0, 200)}`,
+              });
+            }
+            let persistedRows = 0;
+            try {
+              persistedRows = await updateWorkspaceServiceState(workspaceId, stringifyJson(serviceState), database);
+              if (persistedRows > 0) boardEvents?.broadcast(projectId, "workspace_setup");
+            } catch (dbErr) {
+              // #F5b: if the state can't be persisted, no teardown path can find the stack
+              // (they all gate on the STORED state) — it would orphan. Tear it down now.
+              // Never for an ADOPTED stack: the co-resident owner still references it.
+              console.warn(`[services] failed to persist service_state for ${workspaceId}; ${stackAdopted ? "adopted stack left to its owner" : "tearing the stack down to avoid an orphan"}: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`);
+              if (serviceState.status === "up" && !stackAdopted) {
+                await workspaceServicesService.teardownWorkspaceServices({
+                  composeProjectName: serviceState.composeProjectName,
+                  composeWorktreePath: ctx.worktreePath,
+                  releasedByWorkspaceId: workspaceId,
+                });
+              }
+              serviceState = null;
+            }
+
+            // A 0-row persist means the workspace was DELETED or closed/merged during
+            // the long `up --wait` window: its delete/close teardown ran BEFORE the
+            // state existed, so nothing else will ever down the fresh stack (#F5c).
+            // Converge here — tear it down (unless it is a co-resident's ADOPTED stack,
+            // which the owner still references) and abandon the rest of the launch chain.
+            if (serviceState && persistedRows === 0) {
+              console.warn(`[services] workspace ${workspaceId} was deleted/closed during service provisioning; ${stackAdopted ? "leaving the adopted co-resident stack up" : "tearing the stack down"} and skipping the agent launch`);
+              if (serviceState.status === "up" && !stackAdopted) {
+                await workspaceServicesService.teardownWorkspaceServices({
+                  composeProjectName: serviceState.composeProjectName,
+                  composeWorktreePath: ctx.worktreePath,
+                  releasedByWorkspaceId: workspaceId,
+                });
+              }
+              return;
+            }
+
+            // 2. REWRITE the ticket-context (already written pre-insert, minus the
+            //    service section): on "up" add the running-stack section (host+ports);
+            //    on "error" add an explicit stack-FAILED note so the agent knows the
+            //    declared services are absent instead of burning the session against a
+            //    missing database (#20).
+            if (serviceState && ctx.worktreePath) {
+              const stackSection: NonNullable<TicketContext["serviceStack"]> =
+                serviceState.status === "up"
+                  ? {
+                      ports: serviceState.ports,
+                      envFilePath: serviceState.envFilePath,
+                      composeProjectName: serviceState.composeProjectName,
+                      serviceHost: resolveServiceHost(),
+                    }
+                  : {
+                      status: "error",
+                      error: serviceState.error ?? null,
+                      ports: serviceState.ports,
+                      envFilePath: serviceState.envFilePath,
+                      composeProjectName: serviceState.composeProjectName,
+                      serviceHost: resolveServiceHost(),
+                    };
+              await writeWorktreeTicketContext(
+                ctx.worktreePath,
+                ctx.issue,
+                ctx.contextPrimer,
+                ctx.siblings.map((s) => ({ name: s.name, worktreePath: s.worktreePath })),
+                stackSection,
+              );
+            }
           }
-          crudRepo.updateWorkspaceLaunchFailure(workspaceId, {
-            status: nextStatus,
-            latestLaunchError: persistedError,
-            updatedAt: new Date().toISOString(),
-          }, database)
-            .catch((dbErr: unknown) => console.warn(`[workspaces] failed to update workspace status after deferred launch failure: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`));
-        });
+        }
+
+        // 3. Launch the builder agent — after re-checking the workspace still exists
+        //    and is open: it may have been deleted or closed while the (up to 120s)
+        //    provisioning ran, and an agent must never launch into a removed workspace.
+        const lifecycle = await getWorkspaceLifecycleStatus(workspaceId, database);
+        if (!lifecycle || isTerminalWorkspaceStatus(lifecycle.status)) {
+          console.warn(`[workspaces] workspace ${workspaceId} is ${lifecycle ? lifecycle.status : "deleted"} — skipping the deferred agent launch`);
+          return;
+        }
+        const t2 = Date.now();
+        await launchAgent(agentLaunchArgs);
+        timing("agent-launch", t2);
+      })().catch((err: unknown) => {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        const staleSafetyPolicy =
+          err instanceof WorkspaceError && err.data?.code === "STALE_SAFETY_POLICY";
+        const persistedError = staleSafetyPolicy ? `STALE_SAFETY_POLICY: ${errorMsg}` : errorMsg;
+        const nextStatus = staleSafetyPolicy ? "error" : "idle";
+        console.error(`[workspaces] deferred provision/launch failed for workspace ${workspaceId}: ${errorMsg}`);
+        if (staleSafetyPolicy) {
+          emitButlerSystemEvent({
+            projectId,
+            kind: "workspace_error",
+            workspaceId,
+            text: `Workspace launch blocked by stale safety policy for ${workspaceId}: ${errorMsg.slice(0, 200)}`,
+          });
+        }
+        crudRepo.updateWorkspaceLaunchFailure(workspaceId, {
+          status: nextStatus,
+          latestLaunchError: persistedError,
+          updatedAt: new Date().toISOString(),
+        }, database)
+          .catch((dbErr: unknown) => console.warn(`[workspaces] failed to update workspace status after deferred launch failure: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`));
+      });
     });
   }
 
@@ -364,6 +512,9 @@ export function createWorkspaceCreateService(deps: {
     // Hoisted so it is in scope in the catch block's failure handler. The real
     // value (priority-derived default or explicit input) is assigned inside try.
     let planMode = input.planMode === true;
+    // Sibling worktrees provisioned for the project's additional repos (multi-repo);
+    // hoisted so the catch block can roll them back alongside the leading worktree.
+    let siblingWorktrees: SiblingWorktree[] = [];
 
     const phaseStart = Date.now();
     const timing = (phase: string, startMs: number) =>
@@ -388,6 +539,20 @@ export function createWorkspaceCreateService(deps: {
       ));
       timing("worktree-setup", t);
 
+      // Multi-repo (full-peers): a worktree on the same branch in every additional
+      // repo. No-op for single-repo projects and direct workspaces. A failure here
+      // throws so the catch-block rollback removes leading + sibling worktrees.
+      if (!isDirect) {
+        t = Date.now();
+        siblingWorktrees = await provisionSiblingWorktrees({ gitService, database, projectId: issue.projectId, branch, repoScope: input.repoScope });
+        if (siblingWorktrees.length > 0) timing("sibling-worktrees", t);
+      }
+
+      // Per-workspace Docker service stack provisioning has MOVED off the HTTP hot path
+      // (#F3b): the row is inserted with service_state null below, and the deferred step
+      // (after the 201 flushes) provisions the stack, persists its state, and only then
+      // launches the agent — so `up --wait` (up to 120s) never blocks the create response.
+
       // Run context packer (best-effort: never blocks workspace creation).
       let contextPrimer: string | null = null;
       if (!isDirect && !input.skipContextPacker) {
@@ -396,10 +561,19 @@ export function createWorkspaceCreateService(deps: {
         timing("context-packer", t);
       }
 
-      // Inject ticket details (+ optional context primer + stack profile) into the
-      // worktree as a gitignored `CLAUDE.local.md`. Skipped for direct workspaces.
+      // Inject ticket details (+ context primer + stack profile) into the worktree as a
+      // gitignored `CLAUDE.local.md`. Written WITHOUT the service-stack section here (the
+      // stack isn't provisioned until the deferred step); the deferred step REWRITES this
+      // file to add the running-stack section once the stack is up. Skipped for direct
+      // workspaces. This write is cheap (never the hot-path cost — only `up --wait` was).
       const ticketContextPath = !isDirect && worktreePath
-        ? await writeWorktreeTicketContext(worktreePath, issue, contextPrimer)
+        ? await writeWorktreeTicketContext(
+            worktreePath,
+            issue,
+            contextPrimer,
+            siblingWorktrees.map((s) => ({ name: s.name, worktreePath: s.worktreePath })),
+            null,
+          )
         : null;
 
       const { agentPrompt, skillName, effectiveSkillId, hasWorkflowStart } = await resolveAgentPromptAndSkill({
@@ -417,8 +591,15 @@ export function createWorkspaceCreateService(deps: {
           id, issueId: input.issueId, branch, worktreePath, baseBranch, isDirect,
           baseCommitSha, requiresReview, thoroughReview, planMode, tddMode, includeVisualProof,
           skillId: effectiveSkillId, claudeProfile, agentCommand, resolvedProvider, model: agentConfig.model,
-          contextPrimer, latestSetup, latestSymlink, now, database: tx,
+          contextPrimer, serviceState: null,
+          latestSetup, latestSymlink, now, database: tx,
         });
+
+        // Multi-repo: per-repo worktree records ride the same transaction as the
+        // workspace row, so a rollback leaves no dangling repo rows.
+        if (siblingWorktrees.length > 0) {
+          await insertSiblingWorktreeRecords(id, issue.projectId, siblingWorktrees, tx);
+        }
 
         // Place the workspace on the workflow start node + sync the derived status.
         // Any failure here rolls back the workspace row inserted above.
@@ -444,10 +625,12 @@ export function createWorkspaceCreateService(deps: {
 
       boardEvents?.broadcast(issue.projectId, "workspace_created");
 
-      // Defer agent launch off the hot path so the HTTP response is sent before any
-      // long-running git/binary operations begin.  setImmediate ensures the Hono
-      // response write (including the JSON body flush) happens before the first tick
-      // of launchAgent — the same pattern used by the merge endpoint fix (#578).
+      // Defer service-stack provisioning + agent launch off the hot path so the HTTP
+      // response is sent before any long-running work begins. setImmediate ensures the
+      // Hono response write (including the JSON body flush) happens before the first tick
+      // — the same pattern as the merge endpoint fix (#578). Provisioning lives here (not
+      // pre-insert) so `up --wait` doesn't block the 201, and so the compose name is keyed
+      // on the now-persisted workspace id (#F1).
       const agentLaunchArgs = {
         workspaceId: id, branch, isDirect, agentPrompt,
         agentCommand, agentArgs: agentConfig.agentArgs,
@@ -460,7 +643,19 @@ export function createWorkspaceCreateService(deps: {
         contextFiles: ticketContextPath ? [ticketContextPath] : undefined,
         skillName,
       };
-      scheduleDeferredAgentLaunch(agentLaunchArgs, { workspaceId: id, projectId: issue.projectId, timing });
+      scheduleDeferredProvisionAndLaunch(agentLaunchArgs, {
+        workspaceId: id,
+        projectId: issue.projectId,
+        isDirect,
+        worktreePath,
+        servicesConfigRaw: project.servicesConfig,
+        branch,
+        createdAt: now,
+        siblings: siblingWorktrees,
+        issue: { issueNumber: issue.issueNumber, title: issue.title, description: issue.description, projectId: issue.projectId },
+        contextPrimer,
+        timing,
+      });
 
       return {
         id,
@@ -486,11 +681,13 @@ export function createWorkspaceCreateService(deps: {
         // on-disk worktree+branch, leaving an orphan with no backing row (#893).
         // Compensate first, then surface the original WorkspaceError unchanged.
         await rollbackOrphanedWorktree(isDirect, worktreePath, repoPath);
+        await rollbackSiblingWorktrees(gitService, siblingWorktrees);
         throw err;
       }
       // Agent launch is now deferred (setImmediate), so failures there are handled
       // in the background callback and never reach this catch block. Only pre-return
       // failures (worktree setup, DB insert, workflow init) land here.
+      await rollbackSiblingWorktrees(gitService, siblingWorktrees);
       return handleCreateFailure(err, {
         id, issueId: input.issueId, branch, worktreePath, repoPath, baseBranch, isDirect,
         baseCommitSha, requiresReview, thoroughReview, planMode, includeVisualProof,
@@ -516,6 +713,10 @@ export function createWorkspaceCreateService(deps: {
     budgetEstimate: BudgetEstimate;
     ports: { serverPort: number; clientPort: number } | null;
     blockedBy: { issueNumber: number; title: string }[];
+    multiRepo: {
+      leadingRepoName: string;
+      worktrees: { id: string; name: string; leading: boolean; selected: boolean; hasServiceStack: boolean }[];
+    } | null;
   }> {
     const isDirect = input.isDirect === true;
     const warnings: string[] = [];
@@ -641,6 +842,43 @@ export function createWorkspaceCreateService(deps: {
       }),
     );
 
+    // 14. Multi-repo fan-out preview (#91): for a multi-repo project, list the leading
+    //     worktree plus each additional-repo worktree, marking which the selected
+    //     `repoScope` will actually provision. null for single-repo projects and direct
+    //     workspaces (no worktree fan-out) so the selector/preview stays hidden there.
+    let multiRepo: {
+      leadingRepoName: string;
+      worktrees: { id: string; name: string; leading: boolean; selected: boolean; hasServiceStack: boolean }[];
+    } | null = null;
+    if (!isDirect) {
+      const projectRepos = await listProjectRepos(issue.projectId, database).catch(() => []);
+      if (projectRepos.length > 0) {
+        const scopedIds = new Set(resolveScopedSiblingRepos(projectRepos, input.repoScope).map((r) => r.id));
+        const leadingRepoName = basename(project.repoPath) || project.repoPath;
+        multiRepo = {
+          leadingRepoName,
+          worktrees: [
+            // The leading repo is always provisioned; a project-level service stack
+            // (servicesConfig) rides its worktree.
+            {
+              id: "__leading__",
+              name: leadingRepoName,
+              leading: true,
+              selected: true,
+              hasServiceStack: Boolean(project.servicesConfig && project.servicesConfig.trim()),
+            },
+            ...projectRepos.map((r) => ({
+              id: r.id,
+              name: r.name ?? basename(r.path),
+              leading: false,
+              selected: scopedIds.has(r.id),
+              hasServiceStack: Boolean(r.composeFile && r.composeFile.trim()),
+            })),
+          ],
+        };
+      }
+    }
+
     return {
       branch,
       baseBranch,
@@ -657,6 +895,7 @@ export function createWorkspaceCreateService(deps: {
       budgetEstimate,
       ports,
       blockedBy,
+      multiRepo,
     };
   }
 

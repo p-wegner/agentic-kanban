@@ -5,11 +5,13 @@ import { applyMigrations } from "../db/manual-migrate.js";
 import { deduplicateProjects } from "../services/project-registration.js";
 import type * as agentServiceType from "../services/agent.service.js";
 import * as agentService from "../services/agent.service.js";import * as gitService from "../services/git.service.js";
+import { cleanupSiblingWorktrees } from "../services/workspace-repos.service.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { Database } from "../db/index.js";
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { reconcileAncestorBranchWorkspaces } from "./ancestor-branch-reconciler.js";
+import { reconcileHandMergedBranches } from "./hand-merged-branch-reconciler.js";
 import { scanDoneUnmergedWorkspaces } from "./done-unmerged-invariant-scanner.js";
 import { reapTerminalWorkspaces } from "./terminal-workspace-reaper.js";
 import { finalizeMergeCleanup, reconcileMergedIssue } from "../services/merge-cleanup.service.js";
@@ -19,6 +21,7 @@ import { modelBelongsToProvider } from "@agentic-kanban/shared";
 import { PREF_DEFAULT_MODEL, PREF_PROVIDER } from "../constants/preference-keys.js";
 import { MODEL_PREF_KEYS_BY_PROVIDER } from "../services/effective-config.service.js";
 import { narrowProviderName } from "../services/agent-provider.js";
+import { listOsProcesses } from "../services/process-exec.js";
 
 /** Kill orphaned tsx server processes from previous hot-reload cycles (Windows only). */
 export function shouldKillOrphanedServerProcess(input: {
@@ -44,23 +47,12 @@ export async function killOrphanedServers(): Promise<void> {
   if (process.platform !== "win32") return;
   try {
     const { execSync: _execSync } = await import("node:child_process");
-    const wmic = _execSync(
-      `wmic process where "name='node.exe'" get ProcessId,ParentProcessId,CommandLine /format:list`,
-      { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], windowsHide: true, timeout: 8000 },
-    );
+    // wmic was removed starting with Windows 11 24H2, which silently killed this whole
+    // cleanup (the catch below swallowed the "'wmic' is not recognized" error every boot).
+    // listOsProcesses() uses the Get-CimInstance PowerShell equivalent instead.
+    const osProcs = await listOsProcesses();
     const myPid = process.pid;
-    const lines = wmic.split(/\r?\n/);
-    const procs: { pid: number; ppid: number; cmd: string }[] = [];
-    let curCmd = "";
-    let curPid = 0;
-    let curPpid = 0;
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed.startsWith("CommandLine=")) curCmd = trimmed.slice("CommandLine=".length);
-      if (trimmed.startsWith("ParentProcessId=")) curPpid = parseInt(trimmed.slice("ParentProcessId=".length), 10);
-      if (trimmed.startsWith("ProcessId=")) curPid = parseInt(trimmed.slice("ProcessId=".length), 10);
-      if (curCmd && curPid) { procs.push({ pid: curPid, ppid: curPpid, cmd: curCmd }); curCmd = ""; curPid = 0; curPpid = 0; }
-    }
+    const procs: { pid: number; ppid: number; cmd: string }[] = osProcs.map((p) => ({ pid: p.pid, ppid: p.ppid, cmd: p.commandLine }));
     // Collect the full ancestor chain of our process to avoid self-kill.
     const ppidMap = new Map(procs.map(p => [p.pid, p.ppid]));
     const ancestors = new Set<number>();
@@ -339,6 +331,11 @@ export async function pruneStaleWorktrees(): Promise<void> {
           try { await gitService.removeWorktree(repoPath, ws.workingDir!); } catch { /* locked — skip */ }
         }
       }
+      // Multi-repo: sibling worktrees + branches too (no-op single-repo).
+      // preserveUnmerged: this path prunes stale WORKTREES of closed workspaces — it
+      // never deletes the leading branch, so an unmerged sibling branch (unshipped
+      // work) must not be force-deleted either.
+      await cleanupSiblingWorktrees(gitService, ws.id, db, { preserveUnmerged: true });
       await db.update(workspaces).set({ workingDir: null, updatedAt: new Date().toISOString() }).where(eq(workspaces.id, ws.id));
     } catch (err) {
       console.warn(`[startup] Failed to prune worktree for workspace ${ws.id}:`, err);
@@ -517,9 +514,28 @@ export async function runStartupTasks(sessionManager: SessionManager, _deps?: { 
   await cleanupStaleSessions(sessionManager);
   await reconcileSilentlyMergedWorkspaces();
   try {
+    // Multi-repo crash gap: a crash between the leading merge and the sibling merges
+    // strands sibling repos unmerged on a mergedAt-stamped workspace — no other startup
+    // reconciler sees them. Dynamically imported: merge-workflow pulls in the whole
+    // merge pipeline, which other startup-task consumers don't need at module load.
+    const { reconcileStrandedSiblingMerges } = await import("./merge-workflow.js");
+    await reconcileStrandedSiblingMerges();
+  } catch (err) {
+    console.warn("[startup] reconcileStrandedSiblingMerges failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
+  try {
     await reconcileAncestorBranchWorkspaces();
   } catch (err) {
     console.warn("[startup] reconcileAncestorBranchWorkspaces failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
+  try {
+    // #113: hand-merged `feature/ak-<N>` branches (dev fixes landed WITHOUT a board
+    // workspace) have no workspace row to key off, so the linked issue #N never
+    // auto-transitions. Scan each project's default-branch merge history and converge
+    // still-open matching issues to Done. Idempotent; skips Backlog/terminal issues.
+    await reconcileHandMergedBranches();
+  } catch (err) {
+    console.warn("[startup] reconcileHandMergedBranches failed (non-fatal):", err instanceof Error ? err.message : String(err));
   }
   try {
     await scanDoneUnmergedWorkspaces({ reopenToInReview: false });

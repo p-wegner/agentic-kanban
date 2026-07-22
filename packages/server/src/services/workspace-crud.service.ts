@@ -21,7 +21,13 @@ import {
   type GitService,
 } from "./workspace-internals.js";
 import { createWorkspaceCleanupService } from "./workspace-cleanup.service.js";
+import { cleanupSiblingWorktrees } from "./workspace-repos.service.js";
 import { createWorkspaceCreateService } from "./workspace-create.service.js";
+import { workspaceServicesService, parseStoredComposeProjectName } from "./workspace-services.service.js";
+import { reapWorkspaceContainer } from "./devcontainer-workspace.service.js";
+import { resolveProjectDevServerPlan } from "./dev-server.service.js";
+import { isSelfProjectRepo } from "./self-project.js";
+import type { WorkspaceDevServerPlanResponse } from "@agentic-kanban/shared";
 
 export function createWorkspaceCrudService(deps: {
   database: Database;
@@ -50,7 +56,29 @@ export function createWorkspaceCrudService(deps: {
     const repoPath = wsRow[0]?.repoPath;
     const deletedProjectId = wsRow[0]?.projectId;
 
+    // Multi-repo: remove sibling worktrees + branches BEFORE the cascade deletes
+    // the workspace's `repos` rows that record where they live. No-op single-repo.
+    await cleanupSiblingWorktrees(gitService, workspaceId, database);
+
     await deleteWorkspaceCascade(workspaceId, database);
+
+    // Per-workspace Docker service stack teardown runs UNCONDITIONALLY (stacks are
+    // keyed per workspace/compose project, NOT per worktree) — it must not hide behind
+    // the sharedByOthers worktree gate below, or a deleted sharer's own stack leaks
+    // (finding 12). The engine's last-reference guard skips the down while another
+    // live workspace still references the SAME compose project (shared-worktree
+    // adoption), so the last sharer to go downs the shared stack. Uses the STORED
+    // compose project name (never a recompute, #F1). Best-effort — never throws.
+    if (workingDir && !isDirect && repoPath) {
+      const delComposeName = parseStoredComposeProjectName(wsRow[0]?.serviceState);
+      if (delComposeName) {
+        await workspaceServicesService.teardownWorkspaceServices({
+          composeProjectName: delComposeName,
+          composeWorktreePath: workingDir,
+          releasedByWorkspaceId: workspaceId,
+        });
+      }
+    }
 
     // A shared-worktree fork child reuses its parent's workingDir. Never remove the
     // directory while another (e.g. the parent) workspace still points at it — this
@@ -72,6 +100,7 @@ export function createWorkspaceCrudService(deps: {
         branch: wsRow[0]?.branch,
         teardownScript: wsRow[0]?.teardownScript,
         setupEnabled: wsRow[0]?.setupEnabled,
+        workspaceId,
       });
     }
 
@@ -104,10 +133,35 @@ export function createWorkspaceCrudService(deps: {
 
     // Clean up the worktree for non-direct workspaces (mirrors merge/close behaviour).
     if (!workspace.isDirect && workspace.workingDir) {
+      // Per-workspace Docker service stack down (only when one was provisioned) before
+      // the worktree goes away. Uses the STORED compose project name (#F1). Best-effort —
+      // the engine never throws. This workspace's own (still-live) row must not block
+      // its own release, so it is passed as the releaser; the engine's last-reference
+      // guard still skips the down while a co-resident sharer references the stack.
+      const closeComposeName = parseStoredComposeProjectName(workspace.serviceState);
+      if (closeComposeName) {
+        await workspaceServicesService.teardownWorkspaceServices({
+          composeProjectName: closeComposeName,
+          composeWorktreePath: workspace.workingDir,
+          releasedByWorkspaceId: workspaceId,
+        });
+      }
+      // Devcontainer builder teardown (#138), also before the worktree goes away:
+      // the container bind-mounts this directory, and its dependency volumes
+      // cannot be removed while it still holds them. No-op when the workspace was
+      // never containerized (nothing matches the label / name prefix).
+      await reapWorkspaceContainer({ worktreePath: workspace.workingDir, workspaceId });
+
       const { repoPath } = await resolveProjectRepo(workspaceId, database).catch(() => ({ repoPath: null as string | null }));
       if (repoPath) {
         try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch { /* best effort */ }
       }
+      // Multi-repo: sibling worktrees + branches too (no-op single-repo). Close
+      // deliberately preserves the LEADING branch (worktree removal only, above) so
+      // abandoned work stays recoverable — preserveUnmerged mirrors that per sibling
+      // repo: a sibling branch with unmerged commits survives instead of being
+      // force-deleted (only fully-merged/empty sibling branches are dropped).
+      await cleanupSiblingWorktrees(gitService, workspaceId, database, { preserveUnmerged: true });
     }
 
     const now = new Date().toISOString();
@@ -189,6 +243,32 @@ export function createWorkspaceCrudService(deps: {
     return getWorkspaceDetails(id, database);
   }
 
+  /**
+   * Resolve the honest dev-server plan for a workspace — the command/health-URL/port
+   * the board would actually boot for THIS project, with provenance. Powers the
+   * diagnostics tab so it never shows this app's private 3001/5173 worktree ports for a
+   * project that doesn't use them (ticket #100). The worktree-port fallback is applied
+   * only when the workspace belongs to the board's own checkout (isSelfProject).
+   */
+  async function getWorkspaceDevServerPlan(id: string): Promise<WorkspaceDevServerPlanResponse | null> {
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) return null;
+
+    const projectId = await resolveProjectId(id, database);
+    if (!projectId) return { workspaceId: id, isSelfProject: false, plan: null };
+
+    const repoPath = await resolveProjectRepo(id, database)
+      .then((r) => r.repoPath)
+      .catch(() => null);
+    const isSelfProject = isSelfProjectRepo(repoPath);
+
+    const plan = await resolveProjectDevServerPlan(projectId, database, {
+      workingDir: workspace.workingDir,
+      isSelfProject,
+    });
+    return { workspaceId: id, isSelfProject, plan };
+  }
+
   return {
     createWorkspace: create.createWorkspace,
     deleteWorkspace,
@@ -197,6 +277,7 @@ export function createWorkspaceCrudService(deps: {
     setupWorkspace,
     updateWorkspace,
     getWorkspace,
+    getWorkspaceDevServerPlan,
     listStaleWorktrees: cleanup.listStaleWorktrees,
     removeStaleWorktree: cleanup.removeStaleWorktree,
     listCleanupWarnings: cleanup.listCleanupWarnings,

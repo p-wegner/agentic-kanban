@@ -8,6 +8,7 @@ vi.mock("../db/index.js", () => ({
 
 import { db } from "../db/index.js";
 import { runAutoStart, type AutoStartDeps } from "../startup/monitor-auto-start.js";
+import { openFileContentionGate } from "../startup/monitor-file-contention.js";
 
 function makeSelectChain(result: unknown[]) {
   const chain: Record<string, unknown> = {};
@@ -27,6 +28,10 @@ function makeDeps(overrides: Partial<AutoStartDeps> = {}): AutoStartDeps {
     boardEvents: { broadcast: vi.fn() } as unknown as AutoStartDeps["boardEvents"],
     logMonitorAction: vi.fn(),
     allowProject: () => true,
+    // These suites exercise dependency/eligibility/launch logic, not #119 file
+    // contention. Inject an open gate so they don't have to model its queries in
+    // their ordered db.select mock chains; contention has its own suite.
+    buildContentionGate: async () => openFileContentionGate(),
     ...overrides,
   };
 }

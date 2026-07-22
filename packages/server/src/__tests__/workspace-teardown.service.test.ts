@@ -1,5 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
-import { teardownWorktree } from "../services/workspace-teardown.service.js";
+import { mkdtempSync, rmSync, mkdirSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { teardownWorktree, removeDirWithRetry } from "../services/workspace-teardown.service.js";
 import { resolveWorktreeDevPorts } from "../services/worktree-ports.js";
 
 describe("resolveWorktreeDevPorts", () => {
@@ -31,11 +34,59 @@ describe("resolveWorktreeDevPorts", () => {
   });
 });
 
+describe("removeDirWithRetry", () => {
+  it("refuses to remove a directory outside a managed .worktrees directory", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ak-removeDirWithRetry-"));
+    const repoLikeDir = join(root, "some-real-repo");
+    mkdirSync(repoLikeDir, { recursive: true });
+    try {
+      // Simulates a corrupt/legacy workspace row whose workingDir equals the
+      // project's repoPath (or any path outside <parent>/.worktrees) — this must
+      // NOT be recursively deleted.
+      const result = await removeDirWithRetry(repoLikeDir, 1, 1);
+      expect(result).toBe(false);
+      expect(existsSync(repoLikeDir)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("removes a directory that is inside a managed .worktrees directory", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ak-removeDirWithRetry-"));
+    const worktreeDir = join(root, ".worktrees", "feature_ak-30-foo");
+    mkdirSync(worktreeDir, { recursive: true });
+    try {
+      const result = await removeDirWithRetry(worktreeDir, 1, 1);
+      expect(result).toBe(true);
+      expect(existsSync(worktreeDir)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to remove the .worktrees directory itself (would wipe every worktree)", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ak-removeDirWithRetry-"));
+    const worktreesRoot = join(root, ".worktrees");
+    mkdirSync(join(worktreesRoot, "feature_ak-30-foo"), { recursive: true });
+    try {
+      // Simulates a corrupt row whose workingDir was set to the .worktrees root
+      // itself rather than a specific worktree subdirectory — deleting it would
+      // destroy every other active worktree, not just this workspace's.
+      const result = await removeDirWithRetry(worktreesRoot, 1, 1);
+      expect(result).toBe(false);
+      expect(existsSync(worktreesRoot)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("teardownWorktree", () => {
   function deps() {
     return {
       killDir: vi.fn(async () => 1),
       killPorts: vi.fn(async () => 1),
+      killSupervisor: vi.fn(async () => 1),
       runScript: vi.fn(async () => ({ ok: true, output: "" })),
     };
   }
@@ -68,6 +119,38 @@ describe("teardownWorktree", () => {
     expect(d.killDir).toHaveBeenCalledWith("C:/andrena/.worktrees/feature_ak-42-foo");
     // exact ports only — 3043/5215 — never a range
     expect(d.killPorts).toHaveBeenCalledWith([3043, 5215]);
+    // the respawning dev.mjs supervisor is killed on the same exact ports
+    expect(d.killSupervisor).toHaveBeenCalledWith([3043, 5215]);
+  });
+
+  it("kills the respawning dev.mjs supervisor BEFORE the port sweep (else vite respawns)", async () => {
+    const order: string[] = [];
+    const d = {
+      killDir: vi.fn(async () => 1),
+      killSupervisor: vi.fn(async () => { order.push("supervisor"); return 1; }),
+      killPorts: vi.fn(async () => { order.push("ports"); return 1; }),
+      runScript: vi.fn(async () => ({ ok: true, output: "" })),
+    };
+    await teardownWorktree(
+      { workingDir: "C:/andrena/.worktrees/feature_ak-42-foo", branch: "feature/ak-42-foo", label: "merge" },
+      d,
+    );
+    // Supervisor first: dev.mjs respawns killed children, so a bare port kill without
+    // first killing the supervisor lets vite/tsx reappear within ~1s (the leak).
+    expect(order).toEqual(["supervisor", "ports"]);
+  });
+
+  it("still sweeps ports if the supervisor kill throws (best-effort)", async () => {
+    const d = {
+      killDir: vi.fn(async () => 0),
+      killSupervisor: vi.fn(async () => { throw new Error("boom"); }),
+      killPorts: vi.fn(async () => 1),
+      runScript: vi.fn(async () => ({ ok: true, output: "" })),
+    };
+    await expect(
+      teardownWorktree({ workingDir: "C:/andrena/.worktrees/feature_ak-1-x", label: "delete" }, d),
+    ).resolves.toBeTruthy();
+    expect(d.killPorts).toHaveBeenCalled();
   });
 
   it("runs the generic teardownScript with worktree context env", async () => {

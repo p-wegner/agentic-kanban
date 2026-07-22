@@ -31,6 +31,7 @@ import {
   fetchLatestCommits,
   fetchGithubDrafts,
   fetchPlanContents,
+  fetchServiceStates,
   pickInitialWorkspaceId,
 } from "../lib/workspace-secondary-data.js";
 import type { LiveSessionStats } from "../lib/useBoardEvents.js";
@@ -262,14 +263,18 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
       // per-workspace `/handoff` GET never existed on the server — only
       // `/handoff-bundle` and `/github-handoff-draft` do — so it was dropped to kill
       // the 404 noise; wiring handoff display to a real endpoint is tracked separately.)
-      const [commits, drafts, plans] = await Promise.all([
+      const [commits, drafts, plans, serviceStates] = await Promise.all([
         fetchLatestCommits(data, apiFetch),
         fetchGithubDrafts(data, apiFetch),
         fetchPlanContents(data, apiFetch),
+        fetchServiceStates(data, apiFetch),
       ]);
       setLatestCommits(commits);
       setGithubDrafts(drafts);
       setPlanContent(plans);
+      // The list DTO lacks serviceState (only the details endpoint maps it) — merge
+      // the hydrated stack state into the rows so cards/diagnostics can render it.
+      setWorkspaces((prev) => prev.map((w) => (w.id in serviceStates ? { ...w, serviceState: serviceStates[w.id] } : w)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load workspaces");
     } finally {

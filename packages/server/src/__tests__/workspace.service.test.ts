@@ -8,6 +8,7 @@ import { projects, projectStatuses, issues, workspaces, preferences, sessions, i
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createMockSessionManager } from "./helpers/mocks.js";
 import { createWorkspaceService, type GitService } from "../services/workspace.service.js";
+import { workspaceServicesService } from "../services/workspace-services.service.js";
 import { activeMerges, MERGE_LOCK_STALE_MS } from "../services/workspace-internals.js";
 import { getWorkspaceDetails } from "../repositories/workspace.repository.js";
 
@@ -21,6 +22,17 @@ vi.mock("../services/process-cleanup.js", () => ({
  * Unit tests for workspace.service using an in-memory SQLite DB plus an injected
  * fake git service and session manager. No real git, no subprocesses, no E2E.
  */
+
+/**
+ * Drain the deferred provision+launch chain (setImmediate → async provisioning →
+ * service_state persist → ticket-context write → agent launch). Since the chain has
+ * several real fs/DB awaits before the agent launches, flush multiple event-loop turns.
+ */
+async function flushDeferred(times = 25): Promise<void> {
+  for (let i = 0; i < times; i++) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+}
 
 /** Seed a project (with Todo/In Progress/Done statuses) and one issue. */
 async function seedProjectAndIssue(
@@ -152,6 +164,7 @@ function createFakeGitService(overrides: Partial<GitService> = {}): GitService {
     pruneWorktrees: vi.fn(async () => {}),
     rebaseOntoBase: vi.fn(async () => ({ success: true })),
     abortRebase: vi.fn(async () => {}),
+    isRebaseInProgress: vi.fn(async () => true),
     // Stateful ancestry: pre-merge resolveMergeState passes the worktreeDir (4th arg) and
     // must see the branch as NOT yet merged so the merge proceeds; the post-merge invariant
     // check (verifyPostMergeAncestry) calls WITHOUT a worktreeDir and must see it as merged.
@@ -214,8 +227,8 @@ describe("workspace.service", () => {
       // Worktree was created off the project default branch
       expect(gitService.revParse).toHaveBeenCalledWith("/tmp/test-repo", "main");
       expect(gitService.createWorktree).toHaveBeenCalledWith("/tmp/test-repo", "feature/ak-1-test", "main");
-      // Agent launch happened (deferred — flush the setImmediate first)
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      // Agent launch happened (deferred — flush the provision+launch chain first)
+      await flushDeferred();
       expect(sessionManager.startSession).toHaveBeenCalledOnce();
 
       // Workspace row persisted
@@ -248,6 +261,8 @@ describe("workspace.service", () => {
         const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-test" });
         expect(result.error).toBeUndefined();
 
+        // Ticket-context write is deferred (with provisioning + launch) off the hot path.
+        await flushDeferred();
         const ctx = (await readFile(join(worktreeDir, "CLAUDE.local.md"), "utf-8")).trim();
         // Seed issue: number 1, title "Implement feature", description "Do the thing"
         expect(ctx).toContain("# Ticket #1: Implement feature");
@@ -281,8 +296,8 @@ describe("workspace.service", () => {
       const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, result.id));
       expect(wsRows[0].provider).toBe("codex");
       expect(wsRows[0].claudeProfile).toBeNull();
-      // Agent launch is deferred (#587) — flush the setImmediate before asserting the call.
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      // Agent launch is deferred (#587) — flush the provision+launch chain before asserting.
+      await flushDeferred();
       expect(sessionManager.startSession).toHaveBeenCalledWith(expect.objectContaining({
         provider: "codex",
         profile: undefined,
@@ -310,8 +325,8 @@ describe("workspace.service", () => {
       const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, result.id));
       expect(wsRows[0].provider).toBe("codex");
       expect(wsRows[0].claudeProfile).toBe("fast");
-      // Agent launch is deferred (#587) — flush the setImmediate before asserting the call.
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      // Agent launch is deferred (#587) — flush the provision+launch chain before asserting.
+      await flushDeferred();
       expect(sessionManager.startSession).toHaveBeenCalledWith(expect.objectContaining({
         provider: "codex",
         profile: { provider: "codex", name: "fast" },
@@ -336,8 +351,8 @@ describe("workspace.service", () => {
       const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-fail" });
       expect(result.error).toBeUndefined();
 
-      // Let the deferred setImmediate fire so the failing launch + status update run.
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      // Let the deferred chain fire so the failing launch + status update run.
+      await flushDeferred();
 
       // The workspace row remains (relaunchable) and is marked idle with the launch error.
       const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, result.id));
@@ -867,14 +882,19 @@ describe("workspace.service", () => {
       expect(activeMerges.has("/tmp/test-repo")).toBe(false);
     });
 
-    it("holds the repo merge lock until the deferred post-merge cleanup completes (#970)", { timeout: 30000 }, async () => {
+    it("holds the repo merge lock until the deferred MAIN-checkout sync applies (#970), then releases while the cleanup long tail is still running", { timeout: 30000 }, async () => {
       const { projectId, issueId } = await seedProjectAndIssue(db);
       const wsId = await seedWorkspaceForMerge(projectId, issueId);
       let releaseCleanup!: () => void;
       const cleanupGate = new Promise<void>((resolve) => { releaseCleanup = resolve; });
       const gitService = createFakeGitService({
-        // removeWorktree runs only in the deferred post-merge cleanup — gate it
-        // so the cleanup stays in flight while we probe the lock.
+        // Emit the [pending-wt-sync] tag: the merge deferred the git reset --hard
+        // of the MAIN checkout, so the repo lock must outlive the merge result
+        // until that sync has been applied (#970). Without the tag the main
+        // checkout is already consistent and no hold is registered at all.
+        mergeBranch: vi.fn(async () => "Merge made by the 'ort' strategy. [pending-wt-sync:abc123def456]"),
+        // removeWorktree runs in the post-sync long tail — gate it so the
+        // cleanup stays in flight while we probe the lock-release boundary.
         removeWorktree: vi.fn(async () => { await cleanupGate; }),
       });
       const service = createWorkspaceService({
@@ -887,20 +907,30 @@ describe("workspace.service", () => {
       const result = await service.mergeWorkspace(wsId);
       expect(result.id).toBe(wsId);
 
-      // The HTTP-facing result resolved, but the deferred cleanup (which applies
-      // the git reset --hard sync of the MAIN checkout) has not finished: the
-      // repo lock must still be held so a second merge cannot acquire it and
-      // observe the main checkout mid-cleanup (#970).
+      // The HTTP-facing result resolved, but the deferred cleanup runs in a
+      // setImmediate that cannot have fired yet (no macrotask boundary since the
+      // result settled), so the reset --hard of the MAIN checkout is still
+      // pending — the repo lock must still be held (#970): a second merge must
+      // not acquire it and observe the stale main tree.
       const lock = activeMerges.get("/tmp/test-repo");
       expect(lock?.workspaceId).toBe(wsId);
 
-      // A second merge for a different workspace is refused, not admitted.
+      // A second merge for a different workspace is refused while the sync is pending.
       const otherWsId = await seedWorkspaceForMerge(projectId, issueId);
       await expect(service.mergeWorkspace(otherWsId)).rejects.toMatchObject({ code: "CONFLICT" });
 
-      releaseCleanup();
+      // Once the deferred sync has been applied, the lock releases EVEN THOUGH
+      // the long tail (gated removeWorktree) is still in flight — holding it
+      // through the whole chain starved every other merge on the repo with
+      // "A merge is already in progress" (seconds to minutes).
       await lock!.promise;
       expect(activeMerges.has("/tmp/test-repo")).toBe(false);
+
+      // Unblock and drain the long tail so it cannot race later tests.
+      releaseCleanup();
+      await vi.waitFor(() => {
+        expect(gitService.deleteBranch).toHaveBeenCalled();
+      });
     });
 
   });
@@ -1159,6 +1189,57 @@ describe("workspace.service", () => {
 
       expect(result.success).toBe(true);
       expect(gitService.rebaseOntoBase).toHaveBeenCalled();
+    });
+  });
+
+  describe("abortRebase", () => {
+    async function seedWorkspaceForAbortRebase(projectId: string, issueId: string): Promise<string> {
+      const now = new Date().toISOString();
+      const id = randomUUID();
+      await db.insert(workspaces).values({
+        id,
+        issueId,
+        branch: "feature/ak-1-test",
+        workingDir: "/tmp/test-repo/.worktrees/feature-1",
+        baseBranch: "main",
+        isDirect: false,
+        status: "active",
+        provider: "claude",
+        createdAt: now,
+        updatedAt: now,
+      });
+      return id;
+    }
+
+    it("skips git rebase --abort (and its no-rebase-in-progress error) when no rebase is in progress", async () => {
+      const { projectId, issueId } = await seedProjectAndIssue(db);
+      const wsId = await seedWorkspaceForAbortRebase(projectId, issueId);
+      const gitService = createFakeGitService({
+        isRebaseInProgress: vi.fn(async () => false),
+        abortRebase: vi.fn(async () => {
+          throw new Error("fatal: No rebase in progress?");
+        }),
+      });
+
+      const service = createWorkspaceService({ database: db, gitService });
+
+      // Previously this rejected with the raw git error (surfaced as a 500 by the route)
+      // instead of the idempotent no-op the UI expects on a stale retry.
+      await expect(service.abortRebase(wsId)).resolves.toEqual({ ok: true });
+      expect(gitService.abortRebase).not.toHaveBeenCalled();
+    });
+
+    it("aborts the rebase when one is actually in progress", async () => {
+      const { projectId, issueId } = await seedProjectAndIssue(db);
+      const wsId = await seedWorkspaceForAbortRebase(projectId, issueId);
+      const gitService = createFakeGitService({
+        isRebaseInProgress: vi.fn(async () => true),
+      });
+
+      const service = createWorkspaceService({ database: db, gitService });
+
+      await expect(service.abortRebase(wsId)).resolves.toEqual({ ok: true });
+      expect(gitService.abortRebase).toHaveBeenCalledWith("/tmp/test-repo/.worktrees/feature-1");
     });
   });
 
@@ -1590,5 +1671,365 @@ describe("getWorkspaceDetails — live session fields", () => {
     expect(details!.lastSessionTriggerType).toBe("chat");
     expect(details!.contextTokens).toBe(42000);
     expect(details!.lastTool).toBe("Write");
+  });
+});
+
+/**
+ * The deferred provision+launch chain around per-workspace service stacks. The compose
+ * engine singleton is spied so no docker/fs is touched; what is under test is the
+ * ORCHESTRATION: fail-loud composeRepo resolution, the delete/close-during-provisioning
+ * race (0-row persist → teardown, no launch), the pre-launch lifecycle re-check, and
+ * the stack-FAILED ticket-context note.
+ */
+describe("createWorkspace — service stack deferred chain", () => {
+  let db: TestDb;
+
+  beforeEach(() => {
+    ({ db } = createTestDb());
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const SERVICES_CONFIG = JSON.stringify({ enabled: true, composeFile: "docker-compose.yml", ports: ["db"] });
+
+  async function seedServicesProject(servicesConfig: string): Promise<{ projectId: string; issueId: string }> {
+    const seeded = await seedProjectAndIssue(db);
+    await db.update(projects).set({ servicesConfig }).where(eq(projects.id, seeded.projectId));
+    return seeded;
+  }
+
+  function makeService(gitService = createFakeGitService()) {
+    const sessionManager = createMockSessionManager();
+    const service = createWorkspaceService({
+      database: db,
+      getSessionManager: () => sessionManager,
+      gitService,
+    });
+    return { service, sessionManager };
+  }
+
+  function upState(worktree: string): { composeProjectName: string; ports: Record<string, number>; envFilePath: string; status: "up"; updatedAt: string } {
+    return {
+      composeProjectName: "ak-testinst-ws-abc123def456",
+      ports: { db: 61000 },
+      envFilePath: join(worktree, ".kanban", "services.env"),
+      status: "up",
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  it("fails LOUDLY when composeRepo doesn't resolve: persists an error state, never provisions a fallback stack (#15)", async () => {
+    const { issueId } = await seedServicesProject(JSON.stringify({ enabled: true, composeRepo: "infra" }));
+    const provisionSpy = vi
+      .spyOn(workspaceServicesService, "provisionWorkspaceServices")
+      .mockResolvedValue(upState("/nowhere"));
+    const { service, sessionManager } = makeService();
+
+    const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-badrepo" });
+    expect(result.error).toBeUndefined();
+    await flushDeferred();
+
+    // The engine was NEVER invoked — no unrelated compose file was brought up.
+    expect(provisionSpy).not.toHaveBeenCalled();
+
+    const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, result.id));
+    const state = JSON.parse(wsRows[0].serviceState!) as { status: string; error?: string };
+    expect(state.status).toBe("error");
+    expect(state.error).toContain("composeRepo 'infra'");
+
+    // The workspace itself still lives and the agent still launches (non-fatal error).
+    expect(sessionManager.startSession).toHaveBeenCalledOnce();
+  });
+
+  it("tears the stack down and skips the launch when the workspace is DELETED during provisioning (#11)", async () => {
+    const { issueId } = await seedServicesProject(SERVICES_CONFIG);
+    const teardownSpy = vi
+      .spyOn(workspaceServicesService, "teardownWorkspaceServices")
+      .mockResolvedValue(undefined);
+    // Deterministic race: the delete happens INSIDE the (mocked) provisioning window.
+    const provisionSpy = vi
+      .spyOn(workspaceServicesService, "provisionWorkspaceServices")
+      .mockImplementation(async (args) => {
+        await db.delete(workspaces).where(eq(workspaces.id, args.workspaceId));
+        return upState("/tmp/test-repo/.worktrees/feature-1");
+      });
+    const { service, sessionManager } = makeService();
+
+    const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-deleted" });
+    expect(result.error).toBeUndefined();
+    await flushDeferred();
+
+    expect(provisionSpy).toHaveBeenCalledOnce();
+    // The freshly-started stack was downed (0-row persist → convergent teardown) …
+    expect(teardownSpy).toHaveBeenCalledOnce();
+    expect(teardownSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ composeProjectName: "ak-testinst-ws-abc123def456" }),
+    );
+    // … and no agent was launched into the removed workspace.
+    expect(sessionManager.startSession).not.toHaveBeenCalled();
+  });
+
+  it("tears the stack down and skips the launch when the workspace is CLOSED during provisioning (#11 close variant)", async () => {
+    const { issueId } = await seedServicesProject(SERVICES_CONFIG);
+    const teardownSpy = vi
+      .spyOn(workspaceServicesService, "teardownWorkspaceServices")
+      .mockResolvedValue(undefined);
+    vi.spyOn(workspaceServicesService, "provisionWorkspaceServices").mockImplementation(async (args) => {
+      await db
+        .update(workspaces)
+        .set({ status: "closed", closedAt: new Date().toISOString() })
+        .where(eq(workspaces.id, args.workspaceId));
+      return upState("/tmp/test-repo/.worktrees/feature-1");
+    });
+    const { service, sessionManager } = makeService();
+
+    const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-closed" });
+    expect(result.error).toBeUndefined();
+    await flushDeferred();
+
+    expect(teardownSpy).toHaveBeenCalledOnce();
+    expect(sessionManager.startSession).not.toHaveBeenCalled();
+    // The closed row's state was NOT clobbered by the late persist.
+    const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, result.id));
+    expect(wsRows[0].serviceState).toBeNull();
+  });
+
+  it("skips the deferred agent launch when the workspace vanished even WITHOUT a stack (pre-launch re-check)", async () => {
+    const { issueId } = await seedServicesProject(SERVICES_CONFIG);
+    const teardownSpy = vi
+      .spyOn(workspaceServicesService, "teardownWorkspaceServices")
+      .mockResolvedValue(undefined);
+    // Provisioning reports "no stack" (null) but the workspace is deleted meanwhile.
+    vi.spyOn(workspaceServicesService, "provisionWorkspaceServices").mockImplementation(async (args) => {
+      await db.delete(workspaces).where(eq(workspaces.id, args.workspaceId));
+      return null as never;
+    });
+    const { service, sessionManager } = makeService();
+
+    const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-gone" });
+    expect(result.error).toBeUndefined();
+    await flushDeferred();
+
+    expect(sessionManager.startSession).not.toHaveBeenCalled();
+    expect(teardownSpy).not.toHaveBeenCalled(); // nothing came up, nothing to down
+  });
+
+  it("ADOPTS a live co-resident's stack on a shared worktree: no second provision, services.env untouched (finding 12)", async () => {
+    const worktreeDir = await mkdtemp(join(tmpdir(), "ak-ws-shared-"));
+    try {
+      const { issueId } = await seedServicesProject(SERVICES_CONFIG);
+      const donorId = randomUUID();
+      const donorState = {
+        composeProjectName: "ak-testinst-ws-donor0000001",
+        ports: { db: 61234 },
+        envFilePath: join(worktreeDir, ".kanban", "services.env"),
+        status: "up",
+        updatedAt: new Date(Date.now() - 60_000).toISOString(),
+      };
+      // Live co-resident (the donor) already on this worktree with its stack up.
+      await db.insert(workspaces).values({
+        id: donorId,
+        issueId,
+        branch: "feature/ak-1-shared",
+        status: "active",
+        workingDir: worktreeDir,
+        serviceState: JSON.stringify(donorState),
+        createdAt: new Date(Date.now() - 60_000).toISOString(),
+        updatedAt: new Date(Date.now() - 60_000).toISOString(),
+      });
+      // The donor's generated env file — must never be rewritten by the second create.
+      const { mkdir, writeFile } = await import("node:fs/promises");
+      await mkdir(join(worktreeDir, ".kanban"), { recursive: true });
+      await writeFile(join(worktreeDir, ".kanban", "services.env"), "SENTINEL='donor'\n", "utf-8");
+
+      const provisionSpy = vi
+        .spyOn(workspaceServicesService, "provisionWorkspaceServices")
+        .mockResolvedValue(upState(worktreeDir));
+      const gitService = createFakeGitService({ createWorktree: vi.fn(async () => worktreeDir) });
+      const { service, sessionManager } = makeService(gitService);
+
+      const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-shared" });
+      expect(result.error).toBeUndefined();
+      await flushDeferred();
+      // The agent launch is the LAST deferred step — once it ran, the whole chain ran.
+      await vi.waitFor(() => expect(sessionManager.startSession).toHaveBeenCalledOnce());
+
+      // No second stack was brought up …
+      expect(provisionSpy).not.toHaveBeenCalled();
+      // … the donor's env file is byte-identical …
+      const env = await readFile(join(worktreeDir, ".kanban", "services.env"), "utf-8");
+      expect(env).toBe("SENTINEL='donor'\n");
+      // … and the new workspace RECORDS the donor's compose project (adoption).
+      const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, result.id));
+      const state = JSON.parse(wsRows[0].serviceState!) as { composeProjectName: string; status: string; ports: Record<string, number> };
+      expect(state.composeProjectName).toBe(donorState.composeProjectName);
+      expect(state.status).toBe("up");
+      expect(state.ports).toEqual({ db: 61234 });
+    } finally {
+      await rm(worktreeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("REFUSES to provision on a shared worktree when the senior co-resident has no adoptable stack yet", async () => {
+    const worktreeDir = await mkdtemp(join(tmpdir(), "ak-ws-shared-pend-"));
+    try {
+      const { issueId } = await seedServicesProject(SERVICES_CONFIG);
+      const seniorId = randomUUID();
+      // Senior co-resident whose own provisioning hasn't persisted a state yet
+      // (e.g. still inside its `up --wait` window).
+      await db.insert(workspaces).values({
+        id: seniorId,
+        issueId,
+        branch: "feature/ak-1-pending",
+        status: "active",
+        workingDir: worktreeDir,
+        serviceState: null,
+        createdAt: new Date(Date.now() - 60_000).toISOString(),
+        updatedAt: new Date(Date.now() - 60_000).toISOString(),
+      });
+      const provisionSpy = vi
+        .spyOn(workspaceServicesService, "provisionWorkspaceServices")
+        .mockResolvedValue(upState(worktreeDir));
+      const gitService = createFakeGitService({ createWorktree: vi.fn(async () => worktreeDir) });
+      const { service, sessionManager } = makeService(gitService);
+
+      const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-pending" });
+      expect(result.error).toBeUndefined();
+      await flushDeferred();
+      // Refusal is non-fatal, like every other stack error: the agent still launches.
+      // The launch is the LAST deferred step — once it ran, the whole chain ran.
+      await vi.waitFor(() => expect(sessionManager.startSession).toHaveBeenCalledOnce());
+
+      // Never raced the senior sharer for .kanban/services.env.
+      expect(provisionSpy).not.toHaveBeenCalled();
+      const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, result.id));
+      const state = JSON.parse(wsRows[0].serviceState!) as { composeProjectName: string; status: string; error?: string };
+      expect(state.status).toBe("error");
+      expect(state.composeProjectName).toBe("");
+      expect(state.error).toContain(seniorId);
+    } finally {
+      await rm(worktreeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("delete runs the stack teardown UNCONDITIONALLY (with releaser id) even while the worktree is shared", async () => {
+    const { issueId } = await seedServicesProject(SERVICES_CONFIG);
+    const sharedDir = "/tmp/test-repo/.worktrees/feature-del-shared";
+    const stack = "ak-testinst-ws-shared000001";
+    const stateJson = JSON.stringify({
+      composeProjectName: stack,
+      ports: { db: 61000 },
+      envFilePath: join(sharedDir, ".kanban", "services.env"),
+      status: "up",
+      updatedAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+    const keeperId = randomUUID();
+    const goingId = randomUUID();
+    for (const [id, offset] of [[keeperId, 120_000], [goingId, 60_000]] as const) {
+      await db.insert(workspaces).values({
+        id,
+        issueId,
+        branch: "feature/ak-1-del-shared",
+        status: "active",
+        workingDir: sharedDir,
+        serviceState: stateJson,
+        createdAt: new Date(Date.now() - offset).toISOString(),
+        updatedAt: new Date(Date.now() - offset).toISOString(),
+      });
+    }
+    const teardownSpy = vi
+      .spyOn(workspaceServicesService, "teardownWorkspaceServices")
+      .mockResolvedValue(undefined);
+    const gitService = createFakeGitService();
+    const { service } = makeService(gitService);
+
+    await service.deleteWorkspace(goingId);
+
+    // The per-workspace teardown was NOT skipped behind the shared-worktree gate; the
+    // engine's last-reference guard (given the releaser id) decides whether to down.
+    expect(teardownSpy).toHaveBeenCalledOnce();
+    expect(teardownSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ composeProjectName: stack, releasedByWorkspaceId: goingId }),
+    );
+    // The shared worktree itself stays (the keeper still points at it).
+    expect(gitService.removeWorktree).not.toHaveBeenCalled();
+    // The keeper row survives untouched.
+    const keeperRows = await db.select().from(workspaces).where(eq(workspaces.id, keeperId));
+    expect(keeperRows).toHaveLength(1);
+  });
+
+  it("close passes the releaser id to the stack teardown", async () => {
+    const { issueId } = await seedServicesProject(SERVICES_CONFIG);
+    const wsId = randomUUID();
+    const stack = "ak-testinst-ws-close0000001";
+    await db.insert(workspaces).values({
+      id: wsId,
+      issueId,
+      branch: "feature/ak-1-close",
+      status: "active",
+      workingDir: "/tmp/test-repo/.worktrees/feature-close",
+      serviceState: JSON.stringify({
+        composeProjectName: stack,
+        ports: {},
+        envFilePath: "/tmp/test-repo/.worktrees/feature-close/.kanban/services.env",
+        status: "up",
+        updatedAt: new Date(Date.now() - 60_000).toISOString(),
+      }),
+      createdAt: new Date(Date.now() - 60_000).toISOString(),
+      updatedAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+    const teardownSpy = vi
+      .spyOn(workspaceServicesService, "teardownWorkspaceServices")
+      .mockResolvedValue(undefined);
+    const { service } = makeService();
+
+    await service.closeWorkspace(wsId);
+
+    expect(teardownSpy).toHaveBeenCalledOnce();
+    expect(teardownSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ composeProjectName: stack, releasedByWorkspaceId: wsId }),
+    );
+  });
+
+  it("rewrites the ticket-context with an explicit stack-FAILED note when the stack errors (#20)", async () => {
+    const worktreeDir = await mkdtemp(join(tmpdir(), "ak-ws-svcerr-"));
+    try {
+      const { issueId } = await seedServicesProject(SERVICES_CONFIG);
+      vi.spyOn(workspaceServicesService, "provisionWorkspaceServices").mockResolvedValue({
+        composeProjectName: "ak-testinst-ws-abc123def456",
+        ports: {},
+        envFilePath: join(worktreeDir, ".kanban", "services.env"),
+        status: "error",
+        error: "image xyz not found",
+        updatedAt: new Date().toISOString(),
+      });
+      const gitService = createFakeGitService({ createWorktree: vi.fn(async () => worktreeDir) });
+      const { service, sessionManager } = makeService(gitService);
+
+      const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-stackerr" });
+      expect(result.error).toBeUndefined();
+      await flushDeferred();
+
+      // The agent's context file states the services are NOT available, with the reason.
+      // Poll the read: the deferred chain rewrites CLAUDE.local.md with a plain
+      // (non-atomic) writeFile, so a single read under event-loop contention can
+      // interleave between truncate and write and observe an empty file.
+      await vi.waitFor(async () => {
+        const ctx = await readFile(join(worktreeDir, "CLAUDE.local.md"), "utf-8");
+        expect(ctx).toContain("FAILED TO START");
+        expect(ctx).toContain("image xyz not found");
+      }, { timeout: 5000 });
+
+      // serviceState carries the error, and the agent still launches (non-fatal).
+      const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, result.id));
+      const state = JSON.parse(wsRows[0].serviceState!) as { status: string; error?: string };
+      expect(state.status).toBe("error");
+      expect(state.error).toContain("image xyz not found");
+      expect(sessionManager.startSession).toHaveBeenCalledOnce();
+    } finally {
+      await rm(worktreeDir, { recursive: true, force: true });
+    }
   });
 });

@@ -28,6 +28,11 @@ export interface LaunchPreviewData {
   budgetEstimate?: BudgetEstimate;
   ports: { serverPort: number; clientPort: number } | null;
   blockedBy: { issueNumber: number; title: string }[];
+  /** Multi-repo fan-out (#91): null for single-repo projects / direct workspaces. */
+  multiRepo: {
+    leadingRepoName: string;
+    worktrees: { id: string; name: string; leading: boolean; selected: boolean; hasServiceStack: boolean }[];
+  } | null;
 }
 
 interface LaunchPreviewPanelProps {
@@ -42,6 +47,8 @@ interface LaunchPreviewPanelProps {
   skillId: string;
   selectedProfile: string;
   selectedModel: string;
+  /** Multi-repo scope (#91): repo ids the workspace will span; undefined = all. */
+  repoScope?: string[];
   /** Whether the form is in a valid state to launch */
   disabled: boolean;
 }
@@ -133,6 +140,7 @@ export function LaunchPreviewPanel({
   skillId,
   selectedProfile,
   selectedModel,
+  repoScope,
   disabled,
 }: LaunchPreviewPanelProps) {
   const [preview, setPreview] = useState<LaunchPreviewData | null>(null);
@@ -180,6 +188,7 @@ export function LaunchPreviewPanel({
         skillId: skillId || undefined,
         profile: profileObj,
         model: selectedModel || undefined,
+        repoScope: repoScope && repoScope.length > 0 ? repoScope : undefined,
       };
 
       apiFetch<LaunchPreviewData>("/api/workspaces/preview", {
@@ -206,7 +215,9 @@ export function LaunchPreviewPanel({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [issueId, branch, baseBranch, isDirect, requiresReview, planMode, tddMode, skipSetup, skillId, selectedProfile, selectedModel, disabled]);
+    // repoScope is an array; serialize so a new-but-equal array reference doesn't refetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [issueId, branch, baseBranch, isDirect, requiresReview, planMode, tddMode, skipSetup, skillId, selectedProfile, selectedModel, JSON.stringify(repoScope), disabled]);
 
   if (disabled || !issueId) return null;
 
@@ -284,6 +295,34 @@ export function LaunchPreviewPanel({
               label="Ports"
               value={`server :${preview.ports.serverPort} · client :${preview.ports.clientPort}`}
             />
+          )}
+
+          {preview.multiRepo && (
+            <div className="space-y-0.5 pt-0.5" data-testid="launch-preview-multirepo">
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-gray-500 dark:text-gray-400">Worktrees</span>
+                <span className="text-gray-400 dark:text-gray-500 text-[10px]">
+                  {preview.multiRepo.worktrees.filter((w) => w.selected).length}/{preview.multiRepo.worktrees.length} repos
+                </span>
+              </div>
+              {preview.multiRepo.worktrees.map((w) => (
+                <div
+                  key={w.id}
+                  className={`flex items-center gap-1.5 text-xs ${w.selected ? "text-gray-700 dark:text-gray-200" : "text-gray-400 dark:text-gray-600 line-through"}`}
+                >
+                  <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${w.selected ? "bg-green-500" : "bg-gray-300 dark:bg-gray-600"}`} />
+                  <span className="font-mono truncate">{w.name}</span>
+                  {w.leading && (
+                    <span className="text-[9px] uppercase tracking-wide text-brand-600 dark:text-brand-400">lead</span>
+                  )}
+                  {w.hasServiceStack && w.selected && (
+                    <span className="inline-flex items-center px-1 py-0 rounded text-[9px] font-medium bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
+                      stack
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
           )}
 
           {preview.budgetEstimate && (

@@ -3,7 +3,10 @@ import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { apiFetch, apiDelete } from "../lib/api.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { WorkspaceRiskHeatmap } from "./WorkspaceRiskHeatmap.js";
+import { MultirepoHealthPill } from "./MultirepoHealthPill.js";
 import { CollapsibleSection } from "./CollapsibleSection.js";
+import { openSessionTranscript } from "../lib/sessionTranscriptEvents.js";
+import { AgentStallIndicator, useAgentStallThreshold } from "./AgentStallBadge.js";
 import { useStaleWorkspaceManager } from "../hooks/useStaleWorkspaceManager.js";
 import {
   type CrossProjectGroup,
@@ -59,6 +62,7 @@ const ISSUE_STATUS_COLORS: Record<string, string> = {
 };
 
 export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueClick, onProjectSwitch, onRefresh }: AllWorkspacesPanelProps) {
+  const stallThresholdSec = useAgentStallThreshold();
   const [viewMode, setViewMode] = useState<ViewMode>("workspaces");
   const [statusFilter, setStatusFilter] = useState<WsStatusFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -425,6 +429,21 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
                             {workspaceRowStatusLabel(main)}
                           </span>
 
+                          {/* Stalled / looping agent badge (#86). Seed the idle baseline
+                              from the session start only for active-project rows — a
+                              cross-project agent's live stream isn't on this tab, so we
+                              avoid a false "stalled" on a healthy remote agent. */}
+                          <AgentStallIndicator
+                            issueId={issue.id}
+                            status={main.status}
+                            sessionStartMs={
+                              issue.projectId === activeProjectId && main.lastSessionAt
+                                ? new Date(main.lastSessionAt).getTime()
+                                : null
+                            }
+                            thresholdSec={stallThresholdSec}
+                          />
+
                           {/* Ready to merge */}
                           {main.readyForMerge && main.status !== "closed" && (
                             <span className="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700">
@@ -448,6 +467,29 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
                               {main.conflicts.conflictingFiles.length} conflict{main.conflicts.conflictingFiles.length !== 1 ? "s" : ""}
                               {main.status === "fixing" ? " (fixing)" : ""}
                             </span>
+                          )}
+
+                          {/* Multi-repo health (#83): lazy repo-merge-status fetch on expand */}
+                          <span onClick={(e) => e.stopPropagation()}>
+                            <MultirepoHealthPill
+                              workspaceId={main.id}
+                              hasConflicts={main.conflicts?.hasConflicts}
+                              conflictingFiles={main.conflicts?.conflictingFiles}
+                            />
+                          </span>
+
+                          {/* Full transcript viewer (#87) */}
+                          {main.lastSessionAt && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openSessionTranscript({ workspaceId: main.id, title: `#${issue.issueNumber} ${issue.title}` });
+                              }}
+                              className="text-[10px] px-1.5 py-0.5 rounded text-gray-500 dark:text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/40 transition-colors"
+                              title="Open full transcript"
+                            >
+                              📜 Transcript
+                            </button>
                           )}
 
                           {/* Last session trigger */}

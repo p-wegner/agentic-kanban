@@ -1,5 +1,7 @@
 // Project resource wire-contract types (pure DTOs). See ../api.ts barrel.
 
+import type { ServiceStackConfig } from "../service-stack.js";
+
 export interface CreateProjectRequest {
   name?: string;
   repoPath: string;
@@ -21,6 +23,8 @@ export interface UpdateProjectRequest {
   maxRetries?: number;
   symlinkEnabled?: boolean;
   symlinkDirs?: string | string[] | null;
+  /** Declared per-workspace Docker Compose service stack. null/"" clears it. */
+  servicesConfig?: ServiceStackConfig | string | null;
 }
 
 export interface ProjectResponse {
@@ -40,9 +44,48 @@ export interface ProjectResponse {
   maxRetries: number | null;
   symlinkEnabled: boolean;
   symlinkDirs: string | null;
+  /** Declared per-workspace Docker Compose service stack (parsed), or null when none. */
+  servicesConfig: ServiceStackConfig | null;
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * An ADDITIONAL repo of a multi-repo project (full-peers model). The leading repo
+ * stays on ProjectResponse.repoPath; single-repo projects return an empty list.
+ */
+export interface ProjectRepoResponse {
+  id: string;
+  projectId: string;
+  path: string;
+  name: string | null;
+  defaultBranch: string | null;
+  /** Per-repo setup/install command run in this repo's worktree at workspace creation (#71). */
+  setupScript: string | null;
+  /** Per-repo compose file (relative to the repo) whose services join the workspace stack (#71). */
+  composeFile: string | null;
+  createdAt: string;
+}
+
+export interface AddProjectRepoRequest {
+  /** Local path to an existing git repo. Exactly one of path/cloneUrl. */
+  path?: string;
+  /** Git URL to clone into the server's repos root. Exactly one of path/cloneUrl. */
+  cloneUrl?: string;
+  name?: string;
+  /** Per-repo setup/install command (#71). */
+  setupScript?: string | null;
+  /** Per-repo compose file, relative to the repo root (#71). */
+  composeFile?: string | null;
+}
+
+/** PATCH body for updating a registered repo's per-repo config (#71, name added #90). */
+export interface UpdateProjectRepoRequest {
+  /** Display name (used for compose-repo lookup + diff labels). Non-empty, unique among the project's repos. */
+  name?: string;
+  setupScript?: string | null;
+  composeFile?: string | null;
 }
 
 export interface ProjectStatsResponse {
@@ -133,6 +176,42 @@ export interface StackProfileResponse {
   projectId: string;
   /** Null when the project has no persisted profile yet. */
   profile: StackProfile | null;
+}
+
+/** Where each field of a resolved {@link DevServerPlan} came from, for honest UI provenance. */
+export interface DevServerPlanSource {
+  command: "pref" | "profile" | "none";
+  healthUrl: "pref" | "profile" | "worktree-port" | "none";
+  port: "pref" | "profile" | "worktree-port" | "none";
+}
+
+/**
+ * A fully-resolved plan for booting + health-checking a project's dev server, derived
+ * (in precedence order) from per-project `dev_command`/`health_url` overrides, the
+ * persisted stack profile, and — ONLY for the board's own checkout — this app's
+ * worktree-port convention (3001+N/5173+N). The `source` fields tell the UI how
+ * trustworthy each value is, so the diagnostics tab never presents a fabricated port
+ * for a project (e.g. a docker-compose / multi-repo app) whose real ports it can't know.
+ */
+export interface DevServerPlan {
+  /** Shell command that starts the dev server (e.g. "pnpm dev", "uvicorn app:app"). */
+  command: string;
+  /** URL to poll to confirm the server is up, or null when it isn't a web project / is unknown. */
+  healthUrl: string | null;
+  /** TCP port the server binds, or null when it can't be known for this project. */
+  port: number | null;
+  /** Whether this project serves an HTTP endpoint at all. */
+  isWeb: boolean;
+  /** Provenance of each field. */
+  source: DevServerPlanSource;
+}
+
+export interface WorkspaceDevServerPlanResponse {
+  workspaceId: string;
+  /** True when this workspace belongs to the board's own checkout (agentic-kanban). */
+  isSelfProject: boolean;
+  /** Null when the project has no bootable dev-server command configured/detected. */
+  plan: DevServerPlan | null;
 }
 
 export type ProjectScriptLastRunStatus = "running" | "success" | "failed" | "error";

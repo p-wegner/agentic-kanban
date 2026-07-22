@@ -82,7 +82,7 @@ import { Hono } from "hono";
 import { describe, it, expect, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, projects, repos, workspaces, preferences } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceActionsRoute } from "../routes/workspace-actions.js";
 import { activeMerges } from "../services/workspace-internals.js";
@@ -194,6 +194,94 @@ describe("POST /api/workspaces/:id/fix-and-merge — endpoint drives status→fi
     // The issue is NOT moved to Done — recovery is in progress, the branch has not landed.
     const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
     expect(issue.statusId).toBe(inReviewStatusId);
+  });
+
+  it("preflight rebase CONFLICT: aborts the rebase (worktree left attached, not detached mid-rebase) then still launches the agent", async () => {
+    // Regression for the fix-and-merge stranding defect: when the preflight rebase conflicts,
+    // the worktree must NOT be left in a detached mid-rebase state — otherwise the reconciler
+    // agent launches into a worktree the stale-safety guard rejects, produces zero output, and
+    // /resolve-conflicts refuses to recover it (STALE_SAFETY_POLICY catch-22). The fix aborts
+    // the conflicted rebase so the worktree returns to its attached branch HEAD.
+    const { workspaceId } = await seedWorkspace(db);
+    gitHolder.current = makeGitH({
+      rebaseOntoBase: vi.fn(async () => ({ success: false, conflictingFiles: ["src/server.js"] })),
+    });
+    const startSession = vi.fn(async () => "fix-session-conflict");
+    const fixAndMergeSessionIds = new Set<string>();
+    const app = mountRoute(db, startSession, fixAndMergeSessionIds);
+
+    const res = await app.request(`/api/workspaces/${workspaceId}/fix-and-merge`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mergeError: "CONFLICT (content): Merge conflict in src/server.js" }),
+    });
+
+    expect(res.status).toBe(201);
+    // THE FIX: the conflicted preflight rebase is aborted so the worktree is left attached.
+    expect(gitHolder.current.abortRebase).toHaveBeenCalled();
+    // The agent is still launched and the workspace still enters `fixing` (recovery in progress).
+    expect(startSession).toHaveBeenCalledTimes(1);
+    const [ws] = await db.select({ status: workspaces.status }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.status).toBe("fixing");
+  });
+
+  it("MULTI-REPO preflight conflict: rebases EVERY sibling worktree and the reconcile prompt enumerates each one (#105)", async () => {
+    // Regression for the fix-and-merge leading-repo blind spot: a cross-cutting overlapping
+    // ticket touches all repos, but fix-and-merge used to rebase ONLY the leading worktree and
+    // the prompt named ONLY "this branch" — so the reconciler resolved the leading repo, reported
+    // "ready to land", and left every sibling conflicted against its advanced main (atomic merge
+    // blocked forever). The fix rebases each sibling worktree too and, on conflict, hands the agent
+    // an explicit per-worktree reconcile checklist that includes the sibling worktree paths.
+    const { workspaceId, projectId } = await seedWorkspace(db);
+    const now = new Date().toISOString();
+    const siblingWorktree = "/repo2/.worktrees/feature_ak-548-test";
+    await db.insert(repos).values({
+      id: randomUUID(), workspaceId, projectId, path: "/repo2", name: "sibling-svc",
+      worktreePath: siblingWorktree, branch: "feature/ak-548-test", baseBranch: "master", createdAt: now,
+    });
+
+    // Every worktree's rebase conflicts → both leading and sibling need a `git merge` reconcile.
+    gitHolder.current = makeGitH({
+      rebaseOntoBase: vi.fn(async () => ({ success: false, conflictingFiles: ["src/server.js"] })),
+    });
+    const startSession = vi.fn(async () => "fix-session-multirepo");
+    const fixAndMergeSessionIds = new Set<string>();
+    const app = mountRoute(db, startSession, fixAndMergeSessionIds);
+
+    const res = await app.request(`/api/workspaces/${workspaceId}/fix-and-merge`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mergeError: "CONFLICT (content): Merge conflict in src/server.js" }),
+    });
+
+    expect(res.status).toBe(201);
+    // Both worktrees' conflicted rebases were aborted (worktrees left attached, not detached).
+    expect(gitHolder.current.abortRebase).toHaveBeenCalledTimes(2);
+    // The reconcile prompt must be MULTI-REPO aware and NAME the sibling worktree so the agent
+    // cannot stop after the leading repo.
+    const prompt = startSession.mock.calls[0][0].prompt as string;
+    expect(prompt).toContain("MULTI-REPO");
+    expect(prompt).toContain(siblingWorktree);
+    expect(prompt).toContain("sibling repo 'sibling-svc'");
+    expect(prompt).toContain("leading repo");
+  });
+
+  it("#143: forwards the board's default_model_claude to the relaunched fix-and-merge session", async () => {
+    const { workspaceId } = await seedWorkspace(db);
+    await db.insert(preferences).values({ key: "default_model_claude", value: "claude-opus-4-8" });
+    const startSession = vi.fn(async () => "fix-session-model");
+    const app = mountRoute(db, startSession, new Set<string>());
+
+    const res = await app.request(`/api/workspaces/${workspaceId}/fix-and-merge`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mergeError: "CONFLICT (content): Merge conflict in src/foo.ts" }),
+    });
+
+    expect(res.status).toBe(201);
+    expect(startSession).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "claude-opus-4-8" }),
+    );
   });
 
   it("a SECOND fix-and-merge while one is already running is rejected as a conflict (no duplicate launch)", async () => {

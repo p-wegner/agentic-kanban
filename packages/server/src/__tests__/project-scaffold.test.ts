@@ -141,6 +141,21 @@ describe("project-scaffold", () => {
         await rm(dir, { recursive: true, force: true });
       }
     });
+
+    // #122: a builder committed `.kotlin/sessions/*.salive` (Kotlin daemon markers). They are
+    // rewritten on every gradle build, so the main checkout kept flipping to `dirty_main` and
+    // blocked ALL merges. Kotlin/Gradle detects as the "java" family, so scaffolding must ship
+    // `.kotlin/` alongside `.gradle/` and `build/` from the very first commit.
+    it("ignores the Kotlin daemon-marker dir for a gradle/kotlin project (#122)", async () => {
+      const dir = await tmp();
+      try {
+        ensureAgentGitignore(dir, undefined, "java");
+        const gi = await readFile(join(dir, ".gitignore"), "utf8");
+        for (const line of [".kotlin/", ".gradle/", "build/"]) expect(gi).toContain(line);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
   });
 
   it("writes a starter CLAUDE.md only when absent (never clobbers an existing one)", async () => {
@@ -543,7 +558,12 @@ describe("project-scaffold", () => {
     it("is invoked by ensureVerifyGateRunner so the scaffold flow approves esbuild", async () => {
       const dir = await tmp();
       try {
-        await writeFile(join(dir, "package.json"), JSON.stringify({ name: "app" }, null, 2) + "\n");
+        // Must actually depend on an approved native dep — the scaffold no longer writes a
+        // pnpm block into a project that needs no approval (#38).
+        await writeFile(
+          join(dir, "package.json"),
+          JSON.stringify({ name: "app", devDependencies: { esbuild: "^0.21" } }, null, 2) + "\n"
+        );
         ensureVerifyGateRunner(dir);
         const pkg = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
         expect(pkg.pnpm.onlyBuiltDependencies).toContain("esbuild");
@@ -662,6 +682,231 @@ describe("project-scaffold", () => {
         expect(afterSecond).toBe(afterFirst);
         pkg = JSON.parse(afterSecond);
         expect(pkg.trustedDependencies.filter((d: string) => d === "esbuild").length).toBe(1);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("registration must not leave the main checkout dirty (#38)", () => {
+    it("leaves a bare-package.json npm project that needs no approval completely untouched", async () => {
+      const dir = await tmp();
+      try {
+        // The exact repro: a plain Node repo with a dependency and NO lockfile. It is not a
+        // pnpm project and depends on neither approved dep.
+        const original =
+          JSON.stringify({ name: "backend", dependencies: { pg: "^8.11.3" } }, null, 2) + "\n";
+        await writeFile(join(dir, "package.json"), original);
+
+        const changed = ensureBuildableFromClean(dir);
+
+        expect(changed).toBe(false);
+        const after = await readFile(join(dir, "package.json"), "utf8");
+        expect(after).toBe(original); // byte-for-byte: no reformat, no churn
+        const pkg = JSON.parse(after);
+        expect(pkg.pnpm).toBeUndefined(); // no pnpm config in an npm project
+        expect(pkg.packageManager).toBeUndefined();
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("registering a bare-package.json project leaves git status clean (the dirty_main blocker)", async () => {
+      const dir = await tmp();
+      try {
+        await gitInit(dir);
+        await writeFile(
+          join(dir, "package.json"),
+          JSON.stringify({ name: "backend", dependencies: { pg: "^8.11.3" } }, null, 2) + "\n"
+        );
+        execFileSync("git", ["add", "package.json"], { cwd: dir, windowsHide: true });
+        execFileSync("git", ["commit", "-m", "add manifest", "-q"], { cwd: dir, windowsHide: true });
+
+        // The registration scaffold sequence (register.ts / project.service.ts).
+        ensureAgentGitignore(dir, undefined, "node");
+        ensureHookScaffold(dir, { includeWorktreeGuard: false });
+        ensureVerifyGateRunner(dir);
+        await commitProjectScaffoldArtifacts(dir);
+
+        const status = execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], {
+          cwd: dir,
+          encoding: "utf8",
+          windowsHide: true,
+        });
+        expect(status).toBe(""); // no `M package.json` -> merges are not blocked
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("still approves esbuild for a bare-package.json project that DOES depend on it (#777 preserved)", async () => {
+      const dir = await tmp();
+      try {
+        await writeFile(
+          join(dir, "package.json"),
+          JSON.stringify({ name: "vite-app", devDependencies: { vite: "^5", esbuild: "^0.21" } }, null, 2) + "\n"
+        );
+        expect(ensureBuildableFromClean(dir)).toBe(true);
+        const pkg = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
+        expect(pkg.pnpm.onlyBuiltDependencies).toContain("esbuild");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("still approves esbuild for a real pnpm project even when the manifest only names vite (#777 preserved)", async () => {
+      const dir = await tmp();
+      try {
+        // A pnpm lockfile is a concrete signal: the approval stays unconditional, because
+        // esbuild commonly arrives TRANSITIVELY under vite and a fresh clone has no node_modules.
+        await writeFile(
+          join(dir, "package.json"),
+          JSON.stringify({ name: "app", devDependencies: { vite: "^5" } }, null, 2) + "\n"
+        );
+        await writeFile(join(dir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+        expect(ensureBuildableFromClean(dir)).toBe(true);
+        const pkg = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
+        expect(pkg.pnpm.onlyBuiltDependencies).toContain("esbuild");
+        expect(pkg.packageManager).toMatch(/^pnpm@/);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("detects an approved dep installed transitively in node_modules", async () => {
+      const dir = await tmp();
+      try {
+        // Manifest names only vite; esbuild is present underneath it.
+        await writeFile(
+          join(dir, "package.json"),
+          JSON.stringify({ name: "app", devDependencies: { vite: "^5" } }, null, 2) + "\n"
+        );
+        await mkdir(join(dir, "node_modules", "esbuild"), { recursive: true });
+        expect(ensureBuildableFromClean(dir)).toBe(true);
+        const pkg = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
+        expect(pkg.pnpm.onlyBuiltDependencies).toContain("esbuild");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("commits a package.json the scaffold DID change, so main stays clean", async () => {
+      const dir = await tmp();
+      try {
+        await gitInit(dir);
+        await writeFile(
+          join(dir, "package.json"),
+          JSON.stringify({ name: "vite-app", devDependencies: { esbuild: "^0.21" } }, null, 2) + "\n"
+        );
+        execFileSync("git", ["add", "package.json"], { cwd: dir, windowsHide: true });
+        execFileSync("git", ["commit", "-m", "add manifest", "-q"], { cwd: dir, windowsHide: true });
+
+        ensureVerifyGateRunner(dir); // writes the pnpm approval into package.json
+        const pkg = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
+        expect(pkg.pnpm.onlyBuiltDependencies).toContain("esbuild"); // precondition: it changed
+
+        await commitProjectScaffoldArtifacts(dir);
+
+        const status = execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], {
+          cwd: dir,
+          encoding: "utf8",
+          windowsHide: true,
+        });
+        expect(status).toBe(""); // the board's own edit is committed, not left dirty
+        const show = execFileSync("git", ["show", "--stat", "--format=%s", "HEAD"], {
+          cwd: dir,
+          encoding: "utf8",
+          windowsHide: true,
+        });
+        expect(show).toContain("package.json");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("does not sweep an unrelated package.json edit the scaffold did not make", async () => {
+      const dir = await tmp();
+      try {
+        await gitInit(dir);
+        await writeFile(join(dir, "package.json"), JSON.stringify({ name: "app" }, null, 2) + "\n");
+        execFileSync("git", ["add", "package.json"], { cwd: dir, windowsHide: true });
+        execFileSync("git", ["commit", "-m", "add manifest", "-q"], { cwd: dir, windowsHide: true });
+
+        // A user edit already in flight — the scaffold writes nothing here (no approval needed).
+        await writeFile(
+          join(dir, "package.json"),
+          JSON.stringify({ name: "app", version: "9.9.9" }, null, 2) + "\n"
+        );
+        ensureHookScaffold(dir, { includeWorktreeGuard: false });
+        await commitProjectScaffoldArtifacts(dir);
+
+        const status = execFileSync("git", ["status", "--porcelain"], {
+          cwd: dir,
+          encoding: "utf8",
+          windowsHide: true,
+        });
+        expect(status).toContain("package.json"); // still the user's to commit
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("board-materialized agent skills are not committed to the driven project (#40)", () => {
+    it("gitignores .claude/skills/ and the .codex/skills symlink", async () => {
+      const dir = await tmp();
+      try {
+        ensureAgentGitignore(dir);
+        const gi = await readFile(join(dir, ".gitignore"), "utf8");
+        const lines = gi.split(/\r?\n/).map((l) => l.trim());
+        expect(lines).toContain(".claude/skills/");
+        expect(lines).toContain(".codex/skills");
+        // the symlink entry must NOT have a trailing slash (it is a symlink, not a directory)
+        expect(lines).not.toContain(".codex/skills/");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("git actually ignores a board-materialized SKILL.md in a scaffolded repo", async () => {
+      const dir = await tmp();
+      try {
+        await gitInit(dir);
+        ensureAgentGitignore(dir);
+
+        // What workspace-provision.service.ts writes into every worktree.
+        await mkdir(join(dir, ".claude", "skills", "board-navigator"), { recursive: true });
+        await writeFile(join(dir, ".claude", "skills", "board-navigator", "SKILL.md"), "# prompt\n");
+        await mkdir(join(dir, ".codex", "skills", "board-navigator"), { recursive: true });
+        await writeFile(join(dir, ".codex", "skills", "board-navigator", "SKILL.md"), "# prompt\n");
+
+        const status = execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], {
+          cwd: dir,
+          encoding: "utf8",
+          windowsHide: true,
+        });
+        // The agent's end-of-task `git add -A` sweep can no longer pick these up.
+        expect(status).not.toContain("SKILL.md");
+        expect(status).not.toContain(".codex/skills");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("keeps a repo's OWN already-tracked skills tracked (gitignore does not untrack)", async () => {
+      const dir = await tmp();
+      try {
+        await gitInit(dir);
+        // A repo that authors its own skills and committed them BEFORE the scaffold ran.
+        await mkdir(join(dir, ".claude", "skills", "my-own-skill"), { recursive: true });
+        await writeFile(join(dir, ".claude", "skills", "my-own-skill", "SKILL.md"), "# mine\n");
+        execFileSync("git", ["add", "-A"], { cwd: dir, windowsHide: true });
+        execFileSync("git", ["commit", "-m", "my skill", "-q"], { cwd: dir, windowsHide: true });
+
+        ensureAgentGitignore(dir);
+
+        const tracked = execFileSync("git", ["ls-files"], { cwd: dir, encoding: "utf8", windowsHide: true });
+        expect(tracked).toContain(".claude/skills/my-own-skill/SKILL.md");
       } finally {
         await rm(dir, { recursive: true, force: true });
       }

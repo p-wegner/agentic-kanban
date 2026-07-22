@@ -20,7 +20,9 @@ import { registerSystemCommands } from "./commands/system.js";
 import { registerTagCommand } from "./commands/tag.js";
 import { registerOpenspecCommand } from "./commands/openspec.js";
 import { registerBoardCommand } from "./commands/board.js";
+import { registerServicesCommand } from "./commands/services.js";
 import { runMigrations, logDefaultBranch } from "./shared.js";
+import { homeFallbackDbWarning } from "./db-warning.js";
 
 const program = new Command();
 
@@ -57,6 +59,24 @@ registerSystemCommands(program);
 registerTagCommand(program);
 registerOpenspecCommand(program);
 registerBoardCommand(program);
+registerServicesCommand(program);
+
+// ── Split-brain guard (#112): warn loudly when a CLI subcommand resolves to the
+// home-fallback DB (~/.agentic-kanban/kanban.db). A dev server started from a
+// checkout uses the in-checkout packages/server/kanban.db instead, so the CLI can
+// silently read/mutate a DIFFERENT database than the running server (the recurring
+// "board looks empty" / "server doesn't see the project I just registered"
+// incident). preAction only fires for action subcommands — never for
+// --help/--version — and is non-fatal.
+program.hook("preAction", async () => {
+  try {
+    const { DB_LOCATION } = await import("../db/data-dir.js");
+    const warning = homeFallbackDbWarning(DB_LOCATION);
+    if (warning) console.warn(warning);
+  } catch {
+    // Non-fatal: never let the DB-source probe block a command.
+  }
+});
 
 // ── `pnpm cli -- <args>` forwards a literal "--" as the first script argument.
 // Commander treats a leading "--" as "end of options", so every token after it

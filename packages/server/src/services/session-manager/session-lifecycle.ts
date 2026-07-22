@@ -1,11 +1,11 @@
 import { db as realDb } from "../../db/index.js";
 import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
 import type { Database } from "../../db/index.js";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import * as lifecycleRepo from "../../repositories/session-lifecycle.repository.js";
+import * as agentSkillRepo from "../../repositories/agent-skill.repository.js";
 import * as realAgentService from "../agent.service.js";
-import { extractPlanFromMessages, writePlanFile, buildImplementPrompt } from "../plan-mode.service.js";
-import { getHarnessBoolSetting } from "../harness-settings.js";
+import { extractPlanFromMessages } from "../plan-mode.service.js";
 import { computeScorecard } from "../workspace-scorecard.service.js";
 import { computeWorkspaceCodeMetrics } from "../workspace-code-metrics.service.js";
 import { recordAgentProfileLaunchFailure } from "../agent-profile-health.service.js";
@@ -18,6 +18,8 @@ import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import { modelBelongsToProvider } from "@agentic-kanban/shared";
 import type { SessionManagerOptions, SessionState, StartSessionOptions } from "./types.js";
 import { workspaceLaunchPreflight } from "../preflight-check.js";
+import { provisionContainerForWorkspace } from "../devcontainer-workspace.service.js";
+import type { ContainerProvision } from "../devcontainer-workspace.service.js";
 import { WorkspaceError } from "../workspace-internals.js";
 import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../../constants/preference-keys.js";
 import { parseSymlinkDirs } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
@@ -31,10 +33,24 @@ import {
 import {
   buildZeroOutputLaunchFailureStats,
   buildModelErrorLaunchFailureStats,
+  buildStaleResumeLaunchFailureStats,
   buildCodexUsageLimitStats,
   buildClaudeUsageLimitStats,
   buildIndeterminateExitStats,
 } from "./session-exit-stats.js";
+import {
+  CODEX_SPARK_MODEL,
+  CODEX_SAFE_DEFAULT_MODEL,
+  isBuilderSession,
+  buildStaleResumeHandoffPrompt,
+  instructionFingerprint,
+  mergeExistingSessionStats,
+  lifecycleProviderName,
+} from "./session-launch-helpers.js";
+import { finalizePlanModeExit } from "./plan-mode-exit.js";
+
+/** Bounds the missing-transcript fallback (#26) to one automatic retry per workspace. */
+const MAX_STALE_RESUME_RECOVERIES = 1;
 
 /** Subset of agent.service that the lifecycle depends on. Injectable for tests. */
 export type AgentService = typeof realAgentService;
@@ -48,39 +64,6 @@ export interface SessionLifecycleDeps {
 
 /** Re-exported from the exit state machine, which now owns the canonical value. */
 export const ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS = EXIT_WINDOW_MS;
-const CODEX_SPARK_MODEL = "gpt-5.3-codex-spark";
-const CODEX_SAFE_DEFAULT_MODEL = "gpt-5.5";
-
-function isBuilderSession(triggerType: string | undefined, planMode: boolean | undefined): boolean {
-  if (planMode) return false;
-  if (!triggerType) return true;
-  return triggerType === "agent" || triggerType === "auto-start" || triggerType === "plan-implement" || triggerType.startsWith("skill:");
-}
-
-function instructionFingerprint(value: string | undefined): string | null {
-  const text = (value ?? "").trim();
-  if (!text) return null;
-  return createHash("sha256").update(text).digest("hex").slice(0, 16);
-}
-
-async function mergeExistingSessionStats(database: Database, sessionId: string, statsToSave: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const stats = await lifecycleRepo.getSessionStats(sessionId, database);
-  if (!stats) return statsToSave;
-  try {
-    const existing = JSON.parse(stats) as Record<string, unknown>;
-    return { ...existing, ...statsToSave };
-  } catch {
-    return statsToSave;
-  }
-}
-
-function lifecycleProviderName(provider: string | undefined, profile?: { provider?: string; name?: string }): ProviderName {
-  // A recorded profile.provider (a valid ProviderName) wins; otherwise narrow the
-  // launch provider string (handles the legacy "claude-code" id, defaults to claude).
-  const fromProfile = profile?.provider;
-  if (fromProfile === "codex" || fromProfile === "copilot" || fromProfile === "claude" || fromProfile === "pi") return fromProfile;
-  return narrowProviderName(provider);
-}
 
 export function createSessionLifecycle(
   state: SessionState,
@@ -221,7 +204,8 @@ export function createSessionLifecycle(
     const sessionSkillId: string | null = workspace.skillId ?? null;
     let sessionSkillName: string | null = null;
     if (sessionSkillId) {
-      sessionSkillName = await lifecycleRepo.getAgentSkillName(sessionSkillId, db);
+      const skillRow = await agentSkillRepo.getAgentSkillById(sessionSkillId, db);
+      sessionSkillName = skillRow?.name ?? null;
     }
 
     // Cache session context for activity broadcasting
@@ -383,7 +367,19 @@ export function createSessionLifecycle(
         .finally(() => options?.onSessionExit?.(workspaceId, sessionId, effectiveExitCode, planMode));
     }
 
-    /** launch-failure route: a fast zero-output crash or a non-zero exit with error text. */
+    /**
+     * launch-failure route: a fast zero-output crash or a non-zero exit with error text.
+     *
+     * Special-cased sub-route: a resumed launch whose error text names a missing provider
+     * transcript ("No conversation found with session ID: <uuid>" for Claude — volume
+     * deleted, ~/.claude pruned, image rebuild without the state volume). The butler SDK
+     * path already recovers from this (`isStaleResumeError` in butler-sdk.service.ts);
+     * workspace agents did not, so a stale `--resume` used to be reported as a plain
+     * launch failure and left the workspace idle awaiting a manual relaunch. Instead: clear
+     * the dead provider session id so it can't be forwarded again, and relaunch fresh with
+     * a handoff note — bounded to one automatic retry per workspace so a launch failure for
+     * an unrelated reason can't loop.
+     */
     function finalizeLaunchFailureExit(
       route: Extract<ReturnType<typeof classifySessionExitRoute>, { phase: "launch-failure" }>,
       endNow: string,
@@ -392,10 +388,20 @@ export function createSessionLifecycle(
       capturedStderr: string,
     ): void {
       const { isZeroOutput, isNonZeroExit, effectiveExitCode, errorText } = route;
-      const stats = isZeroOutput
-        ? buildZeroOutputLaunchFailureStats(executor, durationMs, exitCode, capturedStderr)
-        : buildModelErrorLaunchFailureStats(executor, durationMs, exitCode, errorText);
-      void (async () => {
+      const usedProviderSessionId = resumeWithNewModel ? undefined : providerSessionId;
+      const staleResumeRecoveryCount = state.workspaceStaleResumeRecoveryCount.get(workspaceId) ?? 0;
+      const isStaleResume =
+        Boolean(usedProviderSessionId) &&
+        staleResumeRecoveryCount < MAX_STALE_RESUME_RECOVERIES &&
+        getProviderExitBehavior(narrowProviderName(executor)).isStaleResumeError(errorText || capturedStderr);
+
+      const stats = isStaleResume
+        ? buildStaleResumeLaunchFailureStats(executor, durationMs, exitCode, errorText || capturedStderr)
+        : isZeroOutput
+          ? buildZeroOutputLaunchFailureStats(executor, durationMs, exitCode, capturedStderr)
+          : buildModelErrorLaunchFailureStats(executor, durationMs, exitCode, errorText);
+
+      const sessionFinalized = (async () => {
         await recordAgentProfileLaunchFailure(db, {
           provider: lifecycleProviderName(provider, profile),
           profileName: profile?.name,
@@ -413,20 +419,51 @@ export function createSessionLifecycle(
           data: stats.failureReason,
           exitCode: null,
         }, db);
-        await lifecycleRepo.updateWorkspaceStatus(workspaceId, "idle", endNow, db);
+        if (isStaleResume) {
+          if (resumeFromId) await lifecycleRepo.clearProviderSessionId(resumeFromId, db);
+        } else {
+          await lifecycleRepo.updateWorkspaceStatus(workspaceId, "idle", endNow, db);
+        }
         if (projectId) {
           emitButlerSystemEvent({
             projectId,
             kind: "session_failed",
             workspaceId,
-            text: isNonZeroExit
-              ? `Agent launch failed for workspace ${workspaceId}: exited with code ${effectiveExitCode} in ${Math.round(durationMs / 1000)}s${errorText ? ` — ${errorText.slice(0, 200)}` : ""}.`
-              : `Agent launch failed for workspace ${workspaceId}: zero output within ${Math.round(durationMs / 1000)}s.`,
+            text: isStaleResume
+              ? `Agent resume failed for workspace ${workspaceId}: the previous conversation transcript was missing. Clearing the stale resume id and relaunching fresh.`
+              : isNonZeroExit
+                ? `Agent launch failed for workspace ${workspaceId}: exited with code ${effectiveExitCode} in ${Math.round(durationMs / 1000)}s${errorText ? ` — ${errorText.slice(0, 200)}` : ""}.`
+                : `Agent launch failed for workspace ${workspaceId}: zero output within ${Math.round(durationMs / 1000)}s.`,
           });
         }
       })()
-        .catch((err) => console.error("Failed to record launch failure:", err))
-        .finally(() => options?.onSessionExit?.(workspaceId, sessionId, effectiveExitCode, planMode));
+        .catch((err) => console.error("Failed to record launch failure:", err));
+
+      void sessionFinalized.finally(() => options?.onSessionExit?.(workspaceId, sessionId, effectiveExitCode, planMode));
+
+      if (isStaleResume) {
+        state.workspaceStaleResumeRecoveryCount.set(workspaceId, staleResumeRecoveryCount + 1);
+        sessionFinalized.finally(() => startSession({
+          workspaceId,
+          prompt: buildStaleResumeHandoffPrompt(prompt),
+          agentCommand,
+          agentArgs: effectiveAgentArgs,
+          resumeFromId: sessionId,
+          claudeProfile,
+          multiTurn,
+          permissionPromptTool,
+          planMode,
+          provider,
+          triggerType: triggerType ?? "agent",
+          profile,
+          model,
+          systemInstructions,
+          contextFiles,
+          extraEnv,
+          workingDirOverride,
+          skipPermissions: skipPermissionsOpt,
+        })).catch((err) => console.error(`[session] stale-resume relaunch failed: workspaceId=${workspaceId}`, err));
+      }
     }
 
     /**
@@ -446,7 +483,7 @@ export function createSessionLifecycle(
         if (effectiveWorkingDir) {
           try {
             const { writeHandoffFile } = await import("../handoff.service.js");
-            await writeHandoffFile(effectiveWorkingDir, sessionId, db, workspace.baseBranch);
+            await writeHandoffFile(effectiveWorkingDir, sessionId, db, workspace.baseBranch, workspaceId);
             console.log(`[session] HANDOFF.md written: workspaceId=${workspaceId} sessionId=${sessionId}`);
           } catch (err) {
             console.warn(`[session] HANDOFF.md write failed: sessionId=${sessionId}`, err);
@@ -497,92 +534,21 @@ export function createSessionLifecycle(
       //   2. no plan / non-zero exit → mark the workspace blocked (needs-attention).
       if (planMode) {
         void sessionFinalized.then(() =>
-          finalizePlanModeExit(workspaceId, exitCode, planText, {
-            agentCommand,
-            agentArgs: effectiveAgentArgs,
-            claudeProfile,
-            permissionPromptTool,
-            provider,
-            profile,
-          }),
-        );
-      }
-    }
-
-    /**
-     * Plan-mode completion (#924). Always clears planMode and lands the workspace in a
-     * VISIBLE state — never a silent idle In Progress with planMode stuck true. Extracted
-     * so the "no plan captured / non-zero exit" recovery path is explicit and testable.
-     */
-    async function finalizePlanModeExit(
-      workspaceId: string,
-      exitCode: number | null,
-      planText: string | null,
-      relaunch: {
-        agentCommand: string | undefined;
-        agentArgs: string | undefined;
-        claudeProfile: string | undefined;
-        permissionPromptTool: string | undefined;
-        provider: import("../agent-provider.js").ProviderId | undefined;
-        profile: { provider: ProviderName; name: string } | undefined;
-      },
-    ): Promise<void> {
-      try {
-        // `planText` is already the strict marker-block (or null) from the raw-buffer scan;
-        // a non-zero exit invalidates it (a crashed run can't have produced a real plan).
-        const plan = exitCode === 0 ? planText : null;
-        const nowIso = () => new Date().toISOString();
-
-        // No usable plan (empty text, extract failed, or non-zero exit): clear plan mode
-        // and surface a needs-attention state instead of stranding the workspace. A normal
-        // follow-up turn then implements (never re-runs read-only — planMode is now false).
-        if (!plan || !workspace.workingDir) {
-          await lifecycleRepo.updateWorkspacePlanMode(workspaceId, false, nowIso(), db);
-          await lifecycleRepo.updateWorkspaceStatusOnly(workspaceId, "blocked", nowIso(), db);
-          const reason = exitCode !== 0
-            ? `plan run exited with code ${exitCode}`
-            : "plan run produced no plan text";
-          console.warn(`[session] plan-mode run produced no usable plan (${reason}): workspaceId=${workspaceId} — cleared planMode, marked blocked`);
-          if (projectId) {
-            emitButlerSystemEvent({
-              projectId,
-              kind: "session_failed",
-              workspaceId,
-              text: `Plan-mode run for workspace ${workspaceId} produced no usable plan (${reason}). Cleared plan mode and marked the workspace blocked — a normal turn will now implement.`,
-            });
-          }
-          return;
-        }
-
-        const planPath = writePlanFile(workspace.workingDir, plan);
-        await lifecycleRepo.updateWorkspacePlanMode(workspaceId, false, nowIso(), db);
-
-        const harness = relaunch.provider === "codex" ? "codex" : relaunch.provider === "copilot" ? "copilot" : "claude";
-        const prefRows = await lifecycleRepo.getAllPreferences(db);
-        const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
-        const autoContinue = getHarnessBoolSetting(prefMap, harness, "plan_auto_continue");
-
-        if (autoContinue) {
-          console.log(`[session] plan ready (${planPath}) — auto-continuing to implementation: workspaceId=${workspaceId}`);
-          await lifecycleRepo.updateWorkspaceStatusOnly(workspaceId, "active", nowIso(), db);
-          await startSession({
+          finalizePlanModeExit(
             workspaceId,
-            prompt: buildImplementPrompt(),
-            agentCommand: relaunch.agentCommand,
-            agentArgs: relaunch.agentArgs,
-            claudeProfile: relaunch.claudeProfile,
-            permissionPromptTool: relaunch.permissionPromptTool,
-            planMode: false,
-            provider: relaunch.provider,
-            triggerType: "plan-implement",
-            profile: relaunch.profile,
-          });
-        } else {
-          console.log(`[session] plan ready (${planPath}) — awaiting human approval: workspaceId=${workspaceId}`);
-          await lifecycleRepo.updateWorkspacePendingPlan(workspaceId, planPath, "awaiting-plan-approval", nowIso(), db);
-        }
-      } catch (err) {
-        console.error(`[session] plan completion handling failed: workspaceId=${workspaceId}`, err);
+            exitCode,
+            planText,
+            {
+              agentCommand,
+              agentArgs: effectiveAgentArgs,
+              claudeProfile,
+              permissionPromptTool,
+              provider,
+              profile,
+            },
+            { db, workspaceWorkingDir: workspace.workingDir, projectId, startSession },
+          ),
+        );
       }
     }
 
@@ -653,6 +619,38 @@ export function createSessionLifecycle(
       }
     }
 
+    // Provision the builder's devcontainer BEFORE the (synchronous) spawn. This
+    // is best-effort by contract — any missing prerequisite resolves to
+    // undefined and the agent launches on the host as before.
+    let containerProvision: ContainerProvision | undefined;
+    try {
+      const devcontainerEnabled = parseBoolSetting(
+        "devcontainer_builders",
+        await lifecycleRepo.getPreferenceValue("devcontainer_builders", db),
+      );
+      if (devcontainerEnabled) {
+        // Only read the project when the feature is on — this is the default-off
+        // path for every launch, and it should not pay for a lookup it won't use.
+        const projectInfo = projectId ? await lifecycleRepo.getProjectPreflightInfo(projectId, db) : null;
+        containerProvision = await provisionContainerForWorkspace({
+          enabled: true,
+          worktreePath: effectiveWorkingDir,
+          workspaceId,
+          symlinkDirs: projectInfo?.symlinkEnabled ? projectInfo.symlinkDirs : null,
+          // Seed the narrow container profile from whatever this launch actually
+          // authenticates with (#133). An OAuth subscription resolved above put its
+          // CLAUDE_CONFIG_DIR in effectiveExtraEnv and reset launchProfile to
+          // "default"; a settings-file profile keeps its name and needs its
+          // settings_<name>.json seeded too.
+          claudeProfile: profile?.name ?? "default",
+          claudeConfigDir: effectiveExtraEnv?.CLAUDE_CONFIG_DIR,
+          settingsProfile: launchProfile?.name !== "default" ? launchProfile?.name : undefined,
+        });
+      }
+    } catch (err) {
+      console.warn(`[devcontainer] provisioning threw for sessionId=${sessionId} — running on host`, err);
+    }
+
     try {
       const proc = agentService.launch(effectiveWorkingDir, sessionId, effectivePrompt, effectiveAgentArgs, (event) => {
         if (event.type === "exit") {
@@ -670,7 +668,7 @@ export function createSessionLifecycle(
           handleExitEvent(event.exitCode ?? null);
         }
       // When resumeWithNewModel is true, omit --resume so the new profile/provider is used instead
-      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider, launchProfile, effectiveExtraEnv, skipPermissions, effectiveModel, contextFiles, (effectiveSystemInstructions ?? "").trim() || undefined);
+      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider, launchProfile, effectiveExtraEnv, skipPermissions, effectiveModel, contextFiles, (effectiveSystemInstructions ?? "").trim() || undefined, containerProvision);
 
       // Persist PID so hot-reload can detect surviving processes
       if (proc.pid) {

@@ -60,8 +60,60 @@ async function readRequestBody(req) {
   return Buffer.concat(chunks);
 }
 
-function proxyOnce(req, res, body, opts) {
+// Sentinel rejection meaning "the client hung up" — distinct from a backend
+// failure, so proxyWithRetry knows not to retry or write an error response.
+const CLIENT_GONE = Symbol("client-gone");
+
+// One 'error'/'close' pair per RESPONSE, not per proxy attempt. proxyWithRetry
+// can call proxyOnce ~retryTimeoutMs/retryDelayMs times (≈100 with the defaults)
+// while the backend is restarting, so registering these inside proxyOnce leaked
+// two listeners per attempt onto the same `res` — MaxListenersExceededWarning
+// plus retained handles on every request that hit a backend restart window.
+// Keeping them here also means `res` is never momentarily without an 'error'
+// listener, which is the exact gap that crashed this process (#117).
+function watchClient(res) {
+  const state = { gone: false, onGone: null };
+  const markGone = () => {
+    if (state.gone) return;
+    state.gone = true;
+    const handler = state.onGone;
+    state.onGone = null;
+    handler?.();
+  };
+  res.on("error", markGone);
+  res.on("close", () => {
+    if (res.writableFinished) return;
+    markGone();
+  });
+  return state;
+}
+
+function proxyOnce(req, res, body, opts, client) {
   return new Promise((resolveProxy, rejectProxy) => {
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      if (client.onGone === onClientGone) client.onGone = null;
+      fn(value);
+    };
+
+    // The client aborting mid-response is routine under load (page reloads, a
+    // vite restart, a burst of board events). Writing to that dead socket fails
+    // with ECONNABORTED/EPIPE; unhandled, it crashes the dev proxy and takes the
+    // backend it supervises down with it (#117). Stop the backend leg too, so a
+    // burst of aborts cannot leak sockets or hang this promise forever.
+    function onClientGone() {
+      backendReq.destroy();
+      finish(rejectProxy, CLIENT_GONE);
+    }
+
+    if (client.gone) {
+      finish(rejectProxy, CLIENT_GONE);
+      return;
+    }
+    client.onGone = onClientGone;
+
     const headers = { ...req.headers, host: `${opts.backendHost}:${opts.backendPort}`, connection: "close" };
     const backendReq = httpRequest(
       {
@@ -73,57 +125,143 @@ function proxyOnce(req, res, body, opts) {
       },
       (backendRes) => {
         res.writeHead(backendRes.statusCode ?? 502, backendRes.statusMessage, backendRes.headers);
+        // Without this listener a mid-response read failure is an unhandled
+        // stream error, i.e. an uncaught exception that kills this process.
+        backendRes.on("error", () => {
+          res.destroy();
+          finish(rejectProxy, CLIENT_GONE);
+        });
         backendRes.pipe(res);
-        backendRes.on("end", () => resolveProxy());
+        backendRes.on("end", () => finish(resolveProxy));
       },
     );
-    backendReq.on("error", rejectProxy);
+
+    backendReq.on("error", (err) => finish(rejectProxy, err));
     backendReq.end(body);
   });
 }
 
-async function proxyWithRetry(req, res, body, opts) {
+async function proxyWithRetry(req, res, body, opts, client) {
   const deadline = Date.now() + opts.retryTimeoutMs;
   let lastError = null;
 
   while (Date.now() <= deadline) {
     try {
-      await proxyOnce(req, res, body, opts);
+      await proxyOnce(req, res, body, opts, client);
       return;
     } catch (err) {
+      // Nobody is waiting for this response any more — retrying would only burn
+      // backend connections during exactly the bursts that trigger the aborts.
+      if (err === CLIENT_GONE) return;
       lastError = err;
-      if (res.headersSent || res.writableEnded) return;
+      if (res.headersSent || res.writableEnded || res.destroyed) return;
       await wait(opts.retryDelayMs);
     }
   }
 
+  if (res.headersSent || res.writableEnded || res.destroyed) return;
   const message = lastError instanceof Error ? lastError.message : String(lastError ?? "backend unavailable");
   res.writeHead(503, { "content-type": "application/json" });
   res.end(JSON.stringify({ error: "dev_server_backend_unavailable", message }));
 }
 
-function proxyUpgrade(req, socket, head, opts) {
-  const backendSocket = netConnect(opts.backendPort, opts.backendHost);
-  backendSocket.on("connect", () => {
-    backendSocket.write(`${req.method} ${req.url} HTTP/${req.httpVersion}\r\n`);
-    for (let i = 0; i < req.rawHeaders.length; i += 2) {
-      const name = req.rawHeaders[i];
-      const value = req.rawHeaders[i + 1];
-      if (name.toLowerCase() === "host") {
-        backendSocket.write(`Host: ${opts.backendHost}:${opts.backendPort}\r\n`);
-      } else {
-        backendSocket.write(`${name}: ${value}\r\n`);
-      }
+// Mirrors watchClient() for a raw upgrade socket: one 'error'/'close' pair for
+// the lifetime of the client connection, not one per retry attempt (retrying
+// would otherwise leak a listener pair onto `socket` per attempt, same trap as
+// #117 fixed for the HTTP leg above).
+function watchSocket(socket) {
+  const state = { gone: false, onGone: null };
+  const markGone = () => {
+    if (state.gone) return;
+    state.gone = true;
+    const handler = state.onGone;
+    state.onGone = null;
+    handler?.();
+  };
+  socket.on("error", markGone);
+  socket.on("close", markGone);
+  return state;
+}
+
+function proxyUpgradeOnce(req, socket, head, opts, client) {
+  return new Promise((resolveUpgrade, rejectUpgrade) => {
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      if (client.onGone === onClientGone) client.onGone = null;
+      fn(value);
+    };
+
+    function onClientGone() {
+      backendSocket.destroy();
+      finish(rejectUpgrade, CLIENT_GONE);
     }
-    backendSocket.write("\r\n");
-    if (head.length > 0) backendSocket.write(head);
-    socket.pipe(backendSocket);
-    backendSocket.pipe(socket);
+
+    if (client.gone) {
+      finish(rejectUpgrade, CLIENT_GONE);
+      return;
+    }
+    client.onGone = onClientGone;
+
+    const backendSocket = netConnect(opts.backendPort, opts.backendHost);
+
+    backendSocket.on("connect", () => {
+      backendSocket.write(`${req.method} ${req.url} HTTP/${req.httpVersion}\r\n`);
+      for (let i = 0; i < req.rawHeaders.length; i += 2) {
+        const name = req.rawHeaders[i];
+        const value = req.rawHeaders[i + 1];
+        if (name.toLowerCase() === "host") {
+          backendSocket.write(`Host: ${opts.backendHost}:${opts.backendPort}\r\n`);
+        } else {
+          backendSocket.write(`${name}: ${value}\r\n`);
+        }
+      }
+      backendSocket.write("\r\n");
+      if (head.length > 0) backendSocket.write(head);
+      socket.pipe(backendSocket);
+      backendSocket.pipe(socket);
+      // Once the pipe is up, `finish` above is a one-shot settled promise and
+      // stops reacting to further events — without these, a backend restart or
+      // client disconnect mid-session (not just mid-upgrade) leaked the other
+      // side of the pipe forever instead of tearing it down.
+      socket.on("error", () => backendSocket.destroy());
+      backendSocket.on("error", () => socket.destroy());
+      finish(resolveUpgrade);
+    });
+    backendSocket.on("error", (err) => finish(rejectUpgrade, err));
   });
-  backendSocket.on("error", () => {
+}
+
+// A WS upgrade caught mid tsx-watch restart (e.g. a self-hosted auto-merge that
+// touches watched server/shared source — #144) used to fail instantly with a 503
+// instead of riding out the restart window like the HTTP leg does. Retrying here
+// the same way proxyWithRetry does for HTTP means a board-event/session-stream
+// socket opened during the ~restart window waits for the backend to come back
+// instead of dying immediately and flooding reconnect/error noise.
+async function proxyUpgradeWithRetry(req, socket, head, opts, client) {
+  const deadline = Date.now() + opts.retryTimeoutMs;
+  let lastError = null;
+
+  while (Date.now() <= deadline) {
+    try {
+      await proxyUpgradeOnce(req, socket, head, opts, client);
+      return;
+    } catch (err) {
+      if (err === CLIENT_GONE) return;
+      lastError = err;
+      if (socket.destroyed) return;
+      await wait(opts.retryDelayMs);
+    }
+  }
+
+  if (socket.destroyed) return;
+  try {
     socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
-    socket.destroy();
-  });
+  } catch {
+    // client socket already gone — nothing to respond to
+  }
+  socket.destroy();
 }
 
 export function createStableDevProxy(options) {
@@ -137,17 +275,30 @@ export function createStableDevProxy(options) {
   };
 
   const server = createHttpServer(async (req, res) => {
+    // Install before reading the body: a client that aborts mid-upload must not
+    // leave `res` without an 'error' listener either.
+    const client = watchClient(res);
     try {
       const body = await readRequestBody(req);
-      await proxyWithRetry(req, res, body, opts);
+      await proxyWithRetry(req, res, body, opts, client);
     } catch (err) {
+      if (client.gone || res.destroyed || res.writableEnded) return;
       if (!res.headersSent) {
         res.writeHead(500, { "content-type": "application/json" });
       }
       res.end(JSON.stringify({ error: "dev_server_proxy_error", message: err instanceof Error ? err.message : String(err) }));
     }
   });
-  server.on("upgrade", (req, socket, head) => proxyUpgrade(req, socket, head, opts));
+  server.on("upgrade", (req, socket, head) => {
+    const client = watchSocket(socket);
+    proxyUpgradeWithRetry(req, socket, head, opts, client).catch(() => {
+      if (!socket.destroyed) socket.destroy();
+    });
+  });
+  // Malformed/aborted requests must not become uncaught errors on the server.
+  server.on("clientError", (_err, socket) => {
+    if (!socket.destroyed) socket.destroy();
+  });
   return server;
 }
 
@@ -216,7 +367,24 @@ export function spawnWatchedBackend({ serverDir, publicPort, internalPort, env =
   });
 }
 
+// Socket-level errnos that mean "the peer went away". These are expected during
+// a burst and must never be fatal here: this process supervises the backend, so
+// dying on one takes the API down with it (#117).
+const SURVIVABLE_SOCKET_ERRNOS = new Set(["ECONNABORTED", "ECONNRESET", "EPIPE", "ERR_STREAM_DESTROYED"]);
+
+export function installSocketErrorGuard(proc = process) {
+  proc.on("uncaughtException", (err) => {
+    if (err && SURVIVABLE_SOCKET_ERRNOS.has(err.code)) {
+      console.warn(`[dev-proxy] ignoring transient socket error: ${err.code}`);
+      return;
+    }
+    // Anything else is a real bug — preserve the default crash behaviour.
+    throw err;
+  });
+}
+
 async function main() {
+  installSocketErrorGuard();
   const publicPort = resolvePublicServerPort();
   const publicHost = process.env.KANBAN_HOST || DEFAULT_HOST;
   const backendHost = publicHost === "0.0.0.0" ? DEFAULT_HOST : publicHost;

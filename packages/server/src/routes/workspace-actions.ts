@@ -3,6 +3,7 @@ import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
 import { createWorkspaceService } from "../services/workspace.service.js";
+import { createWorkspaceServicesControlService } from "../services/workspace-services-control.service.js";
 import { createBisectService, type BisectScope } from "../services/bisect.service.js";
 import { createSessionArtifactsService } from "../services/session-artifacts.service.js";
 import { getWorkspaceTimeline } from "../services/workspace-timeline.service.js";
@@ -27,6 +28,47 @@ export function createWorkspaceActionsRoute(
     boardEvents: options?.boardEvents,
   });
   const artifactsService = createSessionArtifactsService({ database });
+  const servicesControl = createWorkspaceServicesControlService({
+    database,
+    boardEvents: options?.boardEvents,
+  });
+
+  // ── Per-workspace Docker service-stack lifecycle controls (#92) ──────────────
+  // Reuse the existing compose/port engine — the compose project name + allocated
+  // host ports are preserved across start/stop/restart (no reallocation).
+
+  // POST /api/workspaces/:id/services/up — start (or, with ?recreate=true, rebuild) the
+  // stack; (re)provisions a deferred/errored/never-run stack (the "Retry" control).
+  router.post("/:id/services/up", async (c) => {
+    const id = c.req.param("id");
+    const recreate = c.req.query("recreate") === "true";
+    const serviceState = await servicesControl.up(id, { recreate });
+    return c.json({ serviceState });
+  });
+
+  // POST /api/workspaces/:id/services/down — stop the stack (containers removed, named
+  // volumes kept so a subsequent start finds its data intact).
+  router.post("/:id/services/down", async (c) => {
+    const id = c.req.param("id");
+    const serviceState = await servicesControl.down(id);
+    return c.json({ serviceState });
+  });
+
+  // POST /api/workspaces/:id/services/restart — bounce the running containers.
+  router.post("/:id/services/restart", async (c) => {
+    const id = c.req.param("id");
+    const serviceState = await servicesControl.restart(id);
+    return c.json({ serviceState });
+  });
+
+  // GET /api/workspaces/:id/services/logs?tail=N — a bounded, non-following log tail.
+  router.get("/:id/services/logs", async (c) => {
+    const id = c.req.param("id");
+    const tailRaw = Number(c.req.query("tail"));
+    const tail = Number.isFinite(tailRaw) && tailRaw > 0 ? Math.min(Math.floor(tailRaw), 2000) : 200;
+    const result = await servicesControl.logs(id, tail);
+    return c.json(result);
+  });
 
   // POST /api/workspaces/:id/setup
   router.post("/:id/setup", async (c) => {
@@ -134,6 +176,12 @@ export function createWorkspaceActionsRoute(
     return c.json(await workspaceService.checkAlreadyMerged(id));
   });
 
+  // GET /api/workspaces/:id/repo-merge-status — per-repo (leading + siblings) merge status (#70)
+  router.get("/:id/repo-merge-status", async (c) => {
+    const id = c.req.param("id");
+    return c.json(await workspaceService.getRepoMergeStatus(id));
+  });
+
   // POST /api/workspaces/:id/reconcile-as-done — close a workspace whose branch is already on master
   router.post("/:id/reconcile-as-done", async (c) => {
     const id = c.req.param("id");
@@ -158,6 +206,12 @@ export function createWorkspaceActionsRoute(
     return c.json(await workspaceService.getConflicts(id));
   });
 
+  // GET /api/workspaces/:id/handoff — HANDOFF.md metadata (mtime + excerpt) per repo (#89)
+  router.get("/:id/handoff", async (c) => {
+    const id = c.req.param("id");
+    return c.json(await workspaceService.getHandoff(id));
+  });
+
   // POST /api/workspaces/:id/update-base
   router.post("/:id/update-base", async (c) => {
     const id = c.req.param("id");
@@ -170,6 +224,14 @@ export function createWorkspaceActionsRoute(
   router.post("/:id/abort-rebase", async (c) => {
     const id = c.req.param("id");
     return c.json(await workspaceService.abortRebase(id));
+  });
+
+  // POST /api/workspaces/:id/repos/:repoName/rebase — per-repo recovery for a stranded sibling (#93):
+  // rebase ONE repo's worktree branch onto its base (REBASE only — never lands a repo in isolation).
+  router.post("/:id/repos/:repoName/rebase", async (c) => {
+    const id = c.req.param("id");
+    const repoName = decodeURIComponent(c.req.param("repoName"));
+    return c.json(await workspaceService.rebaseRepo(id, repoName));
   });
 
   // POST /api/workspaces/:id/resolve-conflicts

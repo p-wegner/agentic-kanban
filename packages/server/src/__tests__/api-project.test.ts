@@ -112,7 +112,15 @@ describe("Projects API", () => {
   });
 
   it("GET /api/projects/:id/branches returns error for non-git path", async () => {
-    const res = await app.request(`/api/projects/${projectId}/branches`);
+    // Explicitly a NON-git directory: the suite's default project now points at a
+    // real throwaway git repo (hermetic fixture), so this test must bring its own
+    // plain directory instead of relying on the default path not being a repo.
+    const nonGitPath = mkdtempSync(join(tmpdir(), "kanban-non-git-"));
+    const nonGitProjectId = await createProjectDirectly(database, {
+      name: "Non-Git Project",
+      repoPath: nonGitPath,
+    });
+    const res = await app.request(`/api/projects/${nonGitProjectId}/branches`);
     expect(res.status).toBe(500);
     const body = await res.json() as any;
     expect(body.error).toBeTruthy();
@@ -151,6 +159,141 @@ describe("Projects API", () => {
     } finally {
       rmSync(repoPath, { recursive: true, force: true });
     }
+  });
+
+  it("PATCH /api/projects/:id persists+validates servicesConfig; GET returns it parsed", async () => {
+    const svcProjectId = await createProjectDirectly(database, { name: "Svc Stack", repoPath: "/tmp/svc-stack" });
+
+    // Valid config round-trips (stored as JSON string, GET returns parsed object).
+    const ok = await app.request(`/api/projects/${svcProjectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ servicesConfig: { enabled: true, composeFile: "docker-compose.yml", ports: ["db", "cache"], composeRepo: "backend" } }),
+    });
+    expect(ok.status).toBe(200);
+    // F12: the PATCH response itself returns the PARSED config (matching ProjectResponse), not the raw string.
+    const okBody = await ok.json() as { servicesConfig: unknown };
+    expect(okBody.servicesConfig).toMatchObject({ enabled: true, composeFile: "docker-compose.yml", ports: ["db", "cache"], composeRepo: "backend" });
+    expect(typeof okBody.servicesConfig).toBe("object");
+
+    const stored = await database.select({ servicesConfig: schema.projects.servicesConfig }).from(schema.projects).where(eq(schema.projects.id, svcProjectId));
+    expect(typeof stored[0].servicesConfig).toBe("string");
+    expect(JSON.parse(stored[0].servicesConfig as string)).toMatchObject({ enabled: true, composeFile: "docker-compose.yml", ports: ["db", "cache"], composeRepo: "backend" });
+
+    const list = await app.request("/api/projects");
+    const projects = await list.json() as Array<{ id: string; servicesConfig: unknown }>;
+    const svc = projects.find((p) => p.id === svcProjectId);
+    expect(svc?.servicesConfig).toMatchObject({ enabled: true, composeFile: "docker-compose.yml", ports: ["db", "cache"] });
+
+    // enabled but empty composeFile → 422
+    const missingFile = await app.request(`/api/projects/${svcProjectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ servicesConfig: { enabled: true, composeFile: "" } }),
+    });
+    expect(missingFile.status).toBe(422);
+
+    // enabled not a boolean → 422
+    const badEnabled = await app.request(`/api/projects/${svcProjectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ servicesConfig: { enabled: "yes", composeFile: "docker-compose.yml" } }),
+    });
+    expect(badEnabled.status).toBe(422);
+
+    // illegal port name → 422
+    const badPort = await app.request(`/api/projects/${svcProjectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ servicesConfig: { enabled: true, composeFile: "docker-compose.yml", ports: ["db-1"] } }),
+    });
+    expect(badPort.status).toBe(422);
+
+    // F7: case-insensitive port-name collision (both map to KANBAN_SVC_DB_PORT) → 422
+    const collidingPorts = await app.request(`/api/projects/${svcProjectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ servicesConfig: { enabled: true, composeFile: "docker-compose.yml", ports: ["db", "DB"] } }),
+    });
+    expect(collidingPorts.status).toBe(422);
+
+    // F8: readyTimeoutMs <= 0 (would become "no timeout" → indefinite hang) → 422
+    const zeroTimeout = await app.request(`/api/projects/${svcProjectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ servicesConfig: { enabled: true, composeFile: "docker-compose.yml", readyTimeoutMs: 0 } }),
+    });
+    expect(zeroTimeout.status).toBe(422);
+
+    // F11: an env value with a newline injects extra lines into the generated env file → 422
+    const newlineEnv = await app.request(`/api/projects/${svcProjectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ servicesConfig: { enabled: true, composeFile: "docker-compose.yml", env: { FOO: "x\nBAR=1" } } }),
+    });
+    expect(newlineEnv.status).toBe(422);
+
+    // profiles: valid array persists and round-trips
+    const okProfiles = await app.request(`/api/projects/${svcProjectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ servicesConfig: { enabled: true, composeFile: "docker-compose.yml", profiles: ["debug", "seed"] } }),
+    });
+    expect(okProfiles.status).toBe(200);
+    expect((await okProfiles.json() as { servicesConfig: { profiles?: string[] } }).servicesConfig.profiles).toEqual(["debug", "seed"]);
+
+    // profiles: a comma in a name (the COMPOSE_PROFILES separator) → 422
+    const commaProfile = await app.request(`/api/projects/${svcProjectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ servicesConfig: { enabled: true, composeFile: "docker-compose.yml", profiles: ["a,b"] } }),
+    });
+    expect(commaProfile.status).toBe(422);
+
+    // null clears it back to none
+    const cleared = await app.request(`/api/projects/${svcProjectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ servicesConfig: null }),
+    });
+    expect(cleared.status).toBe(200);
+    const clearedRows = await database.select({ servicesConfig: schema.projects.servicesConfig }).from(schema.projects).where(eq(schema.projects.id, svcProjectId));
+    expect(clearedRows[0].servicesConfig).toBeNull();
+  });
+
+  it("PATCH /api/projects/:id rejects servicesConfig env entries the env-file writer would drop", async () => {
+    // Mirrors isEnvLineSafe in workspace-services.service.ts: the writer silently DROPS
+    // (with a warning) entries with non-identifier keys or values carrying ' or CR/LF.
+    // These must 422 at save time instead of vanishing at provision time.
+    const envProjectId = await createProjectDirectly(database, { name: "Svc Env Guard", repoPath: "/tmp/svc-env-guard" });
+    const patch = (env: Record<string, string>) =>
+      app.request(`/api/projects/${envProjectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ servicesConfig: { enabled: true, composeFile: "docker-compose.yml", env } }),
+      });
+
+    // Key with a dash is not a shell identifier (`MY-VAR=…` aborts `. services.env`).
+    const dashKey = await patch({ "MY-VAR": "x" });
+    expect(dashKey.status).toBe(422);
+    expect(((await dashKey.json()) as { error: string }).error).toContain("A-Za-z_");
+
+    // Key starting with a digit is not a shell identifier either.
+    const digitKey = await patch({ "1FOO": "x" });
+    expect(digitKey.status).toBe(422);
+
+    // Value with a single quote cannot be emitted identically for compose + shell.
+    const quoteValue = await patch({ FOO: "it's" });
+    expect(quoteValue.status).toBe(422);
+    expect(((await quoteValue.json()) as { error: string }).error).toContain("single quote");
+
+    // Value with a CR (not just LF) still injects a line break into the env file.
+    const crValue = await patch({ FOO: "x\rBAR=1" });
+    expect(crValue.status).toBe(422);
+
+    // Sanity: identifier keys + quote-free values still pass.
+    const okEnv = await patch({ POSTGRES_PASSWORD: "kanban", _UNDERSCORE_OK: "a b c" });
+    expect(okEnv.status).toBe(200);
   });
 
   it("GET /api/projects/:id/stats includes code metrics and history", async () => {
@@ -419,6 +562,55 @@ describe("Agent Throughput by Provider (AK-514)", () => {
     // copilot count should only be 1 (from this issue), not 2
     expect(copilotBefore).toBeDefined();
     expect(copilotBefore.count).toBe(1);
+  });
+});
+
+describe("PATCH /api/projects/:id/repos/:repoId — name editing (#90)", () => {
+  const { app, db: database } = createTestApp();
+  let projectId: string;
+  let repoAId: string;
+  let repoBId: string;
+
+  beforeAll(async () => {
+    projectId = await createProjectDirectly(database);
+    repoAId = randomUUID();
+    repoBId = randomUUID();
+    await database.insert(schema.repos).values({
+      id: repoAId, projectId, path: "/repo/a", name: "web", setupScript: "pnpm install",
+    });
+    await database.insert(schema.repos).values({
+      id: repoBId, projectId, path: "/repo/b", name: "api",
+    });
+  });
+
+  it("updates name (trimmed) without clobbering setupScript", async () => {
+    const res = await app.request(`/api/projects/${projectId}/repos/${repoAId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "  frontend  " }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.name).toBe("frontend");
+    expect(body.setupScript).toBe("pnpm install");
+  });
+
+  it("rejects a whitespace-only name with 400", async () => {
+    const res = await app.request(`/api/projects/${projectId}/repos/${repoAId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "   " }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects a name already used by another repo with 409", async () => {
+    const res = await app.request(`/api/projects/${projectId}/repos/${repoBId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "frontend" }),
+    });
+    expect(res.status).toBe(409);
   });
 });
 

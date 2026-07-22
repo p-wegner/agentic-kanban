@@ -34,6 +34,8 @@ export interface AgentSettings {
   provider: ProviderName;
   resumeWithNewModel: boolean;
   permissionPromptTool: string | undefined;
+  /** Resolved model (e.g. from default_model_<provider>). Undefined = let the CLI use its own default. */
+  model?: string | undefined;
 }
 
 export async function loadAgentSettings(

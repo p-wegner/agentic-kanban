@@ -1,6 +1,7 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { StackProfile } from "../types/api.js";
+import { deriveVerifyCommandPlan } from "./verify-command.js";
 
 export type TicketContext = {
   issueNumber?: number | null;
@@ -14,6 +15,34 @@ export type TicketContext = {
    * commands from turn 1 instead of guessing them.
    */
   stackProfile?: StackProfile | null;
+  /**
+   * Multi-repo projects: the sibling worktrees created for the project's additional
+   * repos (same branch as this worktree). Rendered so the agent knows it may edit
+   * them and where they live.
+   */
+  additionalRepos?: Array<{ name: string | null; worktreePath: string }> | null;
+  /**
+   * Per-workspace Docker service stack, when the project declares one. Rendered so
+   * the agent knows the sidecar services are already running (on which host ports,
+   * and where the env vars live so it can source them) — or, when the stack FAILED
+   * to come up (`status: "error"`), so the agent knows the declared services are NOT
+   * available instead of burning the session debugging their absence.
+   */
+  serviceStack?: {
+    /** "up" (default when omitted) renders the running-stack section; "error" a failure note. */
+    status?: "up" | "error";
+    /** Compose stderr / config error when status is "error". */
+    error?: string | null;
+    ports: Record<string, number>;
+    envFilePath: string;
+    composeProjectName: string;
+    /**
+     * Host the agent must use to reach the services — `localhost` when the board runs
+     * on the host, `host.docker.internal` (DooD) or the `dind` sidecar name (DinD) when
+     * the board itself runs in a container. Sourced from KANBAN_SERVICE_HOST (F2).
+     */
+    serviceHost: string;
+  } | null;
 };
 
 /**
@@ -55,6 +84,99 @@ export function buildStackProfileSection(profile: StackProfile | null | undefine
   if (profile.isWeb && profile.devHealthUrl) {
     lines.push(`- **Dev health URL:** ${profile.devHealthUrl}`);
   }
+
+  // The canonical verify command + its running rules (#124). This is the command the merge
+  // gate will run against this branch, so the builder must be told it verbatim — and told
+  // how to run it, since the stack-specific traps (PowerShell native-stderr, raw XML reports)
+  // are what turned the jvm-gradle cohort into the fleet's re-run outlier.
+  const verify = deriveVerifyCommandPlan(profile);
+  if (verify) {
+    lines.push(
+      "",
+      "### Verify (the merge gate)",
+      "",
+      "Before you finish, run this EXACT command. It is the same command the board runs as",
+      "the merge gate, so a green run here is what lets your work merge. Use it as-is —",
+      "do not hand-roll your own build/test invocation, and do not add flags or pipes.",
+      "",
+      "```",
+      verify.command,
+      "```",
+      "",
+    );
+    for (const rule of verify.rules) {
+      lines.push(`- ${rule}`);
+    }
+    if (verify.onFailure) {
+      lines.push(`- **When it fails:** ${verify.onFailure}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Render the service-stack section, or null when there is no stack. For a running
+ * stack it tells the agent the sidecar services are already up, on which host ports,
+ * and that the matching env vars are in `.kanban/services.env` (source it before
+ * running app commands). For a FAILED stack it states explicitly that the declared
+ * services are NOT running, with the failure reason — so the agent doesn't spend the
+ * session failing integration tests against a missing database and guessing why.
+ */
+export function buildServiceStackSection(
+  stack: TicketContext["serviceStack"],
+): string | null {
+  if (!stack) return null;
+  if (stack.status === "error") {
+    const lines = [
+      "## Service stack — FAILED TO START",
+      "",
+      "This project declares a per-workspace Docker Compose service stack (sidecar",
+      "services such as a database), but it FAILED to come up for this workspace.",
+      "The declared services are **NOT running** — do not assume a database or other",
+      "sidecar is available, and do not spend the session debugging their absence.",
+      "",
+      "Work on what does not require the services (unit tests, code changes) and state",
+      "clearly in your final summary that the service stack was unavailable.",
+    ];
+    if (stack.error?.trim()) {
+      lines.push("", "Failure reason:", "", "```", stack.error.trim(), "```");
+    }
+    return lines.join("\n");
+  }
+  // The "NOT necessarily localhost" warning is only true — and only useful — when the
+  // board runs in a container (DooD/DinD) and the host really is something else. When the
+  // host IS localhost it contradicts itself, so state the reach address plainly instead.
+  const isLocalhost = stack.serviceHost === "localhost";
+  const reachLines = isLocalhost
+    ? [
+        `Reach the services at **\`${stack.serviceHost}:<port>\`**. The connection host`,
+        "`KANBAN_SERVICE_HOST` and the",
+      ]
+    : [
+        `Reach the services at **\`${stack.serviceHost}:<port>\`** (NOT necessarily \`localhost\` —`,
+        `the host is \`${stack.serviceHost}\`). The connection host \`KANBAN_SERVICE_HOST\` and the`,
+      ];
+  const lines = [
+    "## Service stack",
+    "",
+    "This workspace has an isolated Docker Compose service stack that is ALREADY RUNNING",
+    `(compose project \`${stack.composeProjectName}\`). Do not start it yourself.`,
+    "",
+    ...reachLines,
+    "allocated `KANBAN_SVC_<NAME>_PORT` values are in `.kanban/services.env` (absolute path",
+    "below). Source that file before running app/test commands that need the services,",
+    "e.g. `set -a; . .kanban/services.env; set +a`.",
+    "",
+    `- **Service host:** \`${stack.serviceHost}\` (env \`KANBAN_SERVICE_HOST\`)`,
+    `- **Env file:** \`${stack.envFilePath}\``,
+  ];
+  const portEntries = Object.entries(stack.ports);
+  if (portEntries.length > 0) {
+    lines.push("- **Allocated host ports:**");
+    for (const [name, port] of portEntries) {
+      lines.push(`  - \`${name}\` → \`${stack.serviceHost}:${port}\` (env \`KANBAN_SVC_${name.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_PORT\`)`);
+    }
+  }
   return lines.join("\n");
 }
 
@@ -88,6 +210,25 @@ export function buildTicketContextMarkdown(ctx: TicketContext): string {
   const stackSection = buildStackProfileSection(ctx.stackProfile);
   if (stackSection) {
     lines.push(stackSection);
+    lines.push("");
+  }
+  if (ctx.additionalRepos && ctx.additionalRepos.length > 0) {
+    lines.push(
+      "## Additional repositories",
+      "",
+      "This is a multi-repo project. Each repo below has a worktree checked out on the",
+      "SAME branch as this one — you may read and edit files there when the task requires",
+      "it; commits you make there are diffed, reviewed, and merged together with this repo.",
+      "",
+    );
+    for (const repo of ctx.additionalRepos) {
+      lines.push(`- ${repo.name ? `**${repo.name}**: ` : ""}\`${repo.worktreePath}\``);
+    }
+    lines.push("");
+  }
+  const serviceSection = buildServiceStackSection(ctx.serviceStack);
+  if (serviceSection) {
+    lines.push(serviceSection);
     lines.push("");
   }
   if (ctx.contextPrimer?.trim()) {

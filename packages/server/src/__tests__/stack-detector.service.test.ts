@@ -63,6 +63,46 @@ describe("stack-detector.service detectStackProfile", () => {
     expect(p.testCommand).toBe("python -m pytest");
   });
 
+  // #120: a uv project's deps live in a project-local .venv, so `pip install -r
+  // requirements.txt` + bare `python -m pytest` produced a merge gate that always failed
+  // with "No module named pytest" and blocked every merge.
+  it("detects a uv project (pyproject.toml + uv.lock) as uv sync / uv run pytest", async () => {
+    await writeFile(join(dir, "pyproject.toml"), '[project]\nname = "bookvault"\n');
+    await writeFile(join(dir, "uv.lock"), 'version = 1\n');
+    const p = detectStackProfile(dir);
+    expect(p.stack).toBe("python");
+    expect(p.packageManager).toBe("uv");
+    expect(p.installCommand).toBe("uv sync");
+    expect(p.testCommand).toBe("uv run pytest");
+    expect(p.quickTestCommand).toBe("uv run pytest -x");
+    expect(p.lintCommand).toBe("uv run ruff check .");
+    expect(p.typecheckCommand).toBe("uv run mypy .");
+  });
+
+  it("detects uv from a [tool.uv] section when no uv.lock is committed", async () => {
+    await writeFile(join(dir, "pyproject.toml"), '[project]\nname = "x"\n\n[tool.uv]\ndev-dependencies = ["pytest"]\n');
+    const p = detectStackProfile(dir);
+    expect(p.packageManager).toBe("uv");
+    expect(p.installCommand).toBe("uv sync");
+    expect(p.testCommand).toBe("uv run pytest");
+  });
+
+  it("prefers uv over poetry when a pyproject carries both", async () => {
+    await writeFile(join(dir, "pyproject.toml"), '[tool.poetry]\nname = "x"\n\n[tool.uv]\n');
+    await writeFile(join(dir, "uv.lock"), 'version = 1\n');
+    const p = detectStackProfile(dir);
+    expect(p.packageManager).toBe("uv");
+    expect(p.testCommand).toBe("uv run pytest");
+  });
+
+  it("still detects poetry when there is no uv marker", async () => {
+    await writeFile(join(dir, "pyproject.toml"), '[tool.poetry]\nname = "x"\n');
+    const p = detectStackProfile(dir);
+    expect(p.packageManager).toBe("poetry");
+    expect(p.installCommand).toBe("poetry install");
+    expect(p.testCommand).toBe("poetry run python -m pytest");
+  });
+
   it("returns a sparse 'detected' profile (stack null) for an unknown/empty repo", async () => {
     const p = detectStackProfile(dir);
     expect(p.stack).toBeNull();

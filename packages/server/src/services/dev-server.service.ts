@@ -21,7 +21,7 @@ import type { ChildProcess } from "node:child_process";
 import { openSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { StackProfile } from "@agentic-kanban/shared";
+import type { StackProfile, DevServerPlan } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { getStackProfile } from "./stack-profile.service.js";
@@ -37,23 +37,12 @@ export function healthUrlPrefKey(projectId: string): string {
   return `health_url_${projectId}`;
 }
 
-/** A fully-resolved plan for booting + health-checking a project's dev server. */
-export interface DevServerPlan {
-  /** Shell command that starts the dev server (e.g. "pnpm dev", "uvicorn app:app"). */
-  command: string;
-  /** URL to poll to confirm the server is up, or null when it isn't a web project. */
-  healthUrl: string | null;
-  /** TCP port the server binds (for targeted teardown), or null when unknown. */
-  port: number | null;
-  /** Whether this project serves an HTTP endpoint at all. */
-  isWeb: boolean;
-  /** Where each field came from, for debuggability. */
-  source: {
-    command: "pref" | "profile" | "none";
-    healthUrl: "pref" | "profile" | "worktree-port" | "none";
-    port: "pref" | "profile" | "worktree-port" | "none";
-  };
-}
+/**
+ * A fully-resolved plan for booting + health-checking a project's dev server.
+ * The wire shape lives in `@agentic-kanban/shared` so the diagnostics UI can render
+ * the same plan (and its `source` provenance) the server resolves.
+ */
+export type { DevServerPlan } from "@agentic-kanban/shared";
 
 /** Extract a port number from an http(s) URL, or null. */
 function portFromUrl(url: string): number | null {
@@ -85,6 +74,15 @@ export interface ResolveDevServerPlanInput {
    * itself, which the static profile can't know the worktree-shifted port of.
    */
   workingDir?: string | null;
+  /**
+   * Whether `workingDir` belongs to the board's OWN checkout (agentic-kanban). The
+   * 3001+N/5173+N worktree convention is this app's private port math — applying it
+   * to another project's worktree (a docker-compose / multi-repo app) fabricates a
+   * port that project never binds (ticket #100). So the worktree-port fallback is
+   * gated on this flag. Defaults to `true` to preserve the historical behaviour for
+   * callers that only ever resolve the app's own worktrees.
+   */
+  isSelfProject?: boolean;
 }
 
 /**
@@ -98,13 +96,17 @@ export interface ResolveDevServerPlanInput {
  * valid plan (a CLI/headless service we can start but can't HTTP-probe).
  */
 export function resolveDevServerPlan(input: ResolveDevServerPlanInput): DevServerPlan | null {
-  const { profile, devCommandOverride, healthUrlOverride, workingDir } = input;
+  const { profile, devCommandOverride, healthUrlOverride, workingDir, isSelfProject } = input;
 
   const commandPref = devCommandOverride?.trim() || "";
   const command = commandPref || profile?.devCommand?.trim() || "";
   if (!command) return null; // nothing to boot
 
-  const worktreePorts = workingDir ? resolveWorktreeDevPorts(workingDir) : null;
+  // The worktree-port convention (3001+N/5173+N) is only meaningful for the board's
+  // own checkout. For any OTHER project it would fabricate a port the app never binds,
+  // so gate it on isSelfProject (default true keeps historical single-project callers).
+  const worktreePorts =
+    workingDir && isSelfProject !== false ? resolveWorktreeDevPorts(workingDir) : null;
 
   // Health URL precedence: explicit pref > profile > worktree convention.
   const healthPref = healthUrlOverride?.trim() || "";
@@ -160,7 +162,7 @@ export function resolveDevServerPlan(input: ResolveDevServerPlanInput): DevServe
 export async function resolveProjectDevServerPlan(
   projectId: string,
   database: Database,
-  options?: { workingDir?: string | null; profile?: StackProfile | null },
+  options?: { workingDir?: string | null; profile?: StackProfile | null; isSelfProject?: boolean },
 ): Promise<DevServerPlan | null> {
   const [devCommandOverride, healthUrlOverride] = await Promise.all([
     getPreference(devCommandPrefKey(projectId), database),
@@ -172,6 +174,7 @@ export async function resolveProjectDevServerPlan(
     devCommandOverride,
     healthUrlOverride,
     workingDir: options?.workingDir,
+    isSelfProject: options?.isSelfProject,
   });
 }
 

@@ -1,5 +1,5 @@
 import { auditProcessEvent, guardProcessKill } from "./process-guard.js";
-import { execCommand, listOsProcesses, listenerPidsForPort, parseLsofPids, parseWmicProcessList, taskkillTree } from "./process-exec.js";
+import { execCommand, listOsProcesses, listenerPidsForPort, parseLsofPids, taskkillTree } from "./process-exec.js";
 
 /**
  * Kill the process (tree) listening on each of the given ports. Used to free the
@@ -114,14 +114,11 @@ export async function killProcessesInDir(dir: string): Promise<number> {
   auditProcessEvent({ action: "process-cleanup-start", dir });
   try {
     if (process.platform === "win32") {
-      const { stdout } = await execCommand("wmic", [
-        "process", "where",
-        `ExecutablePath is not null and CommandLine is not null`,
-        "get", "ProcessId,ParentProcessId,CommandLine", "/format:list",
-      ], { timeout: 10000 });
-
+      // wmic was removed from Windows 11 24H2+ — listOsProcesses uses the
+      // Get-CimInstance PowerShell equivalent, which works on every supported version.
+      const osProcs = await listOsProcesses();
       const dirNormalized = dir.replace(/\\/g, "/");
-      const procs = parseWmicProcessList(stdout).map((proc) => ({ pid: proc.pid, ppid: proc.ppid, cmd: proc.commandLine }));
+      const procs = osProcs.map((proc) => ({ pid: proc.pid, ppid: proc.ppid, cmd: proc.commandLine }));
 
       // Build ancestor set for the current process so we never kill our own server.
       const ppidMap = new Map(procs.map(p => [p.pid, p.ppid]));

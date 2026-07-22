@@ -20,6 +20,8 @@ export const WorkflowAnalyticsDashboard = lazy(() => import("./WorkflowAnalytics
 export const InsightsPanel = lazy(() => import("./InsightsPanel.js").then((m) => ({ default: m.InsightsPanel })));
 export const DigestView = lazy(() => import("./DigestView.js").then((m) => ({ default: m.DigestView })));
 export const ActivityFeedView = lazy(() => import("./ActivityFeedView.js").then((m) => ({ default: m.ActivityFeedView })));
+export const CrossRepoActivityFeed = lazy(() => import("./CrossRepoActivityFeed.js").then((m) => ({ default: m.CrossRepoActivityFeed })));
+export const AgentFlightRecorder = lazy(() => import("./AgentFlightRecorder.js").then((m) => ({ default: m.AgentFlightRecorder })));
 export const FocusView = lazy(() => import("./FocusView.js").then((m) => ({ default: m.FocusView })));
 export const StrategyTargetsView = lazy(() => import("./StrategyTargetsView.js").then((m) => ({ default: m.StrategyTargetsView })));
 export const SwimlaneView = lazy(() => import("./SwimlaneView.js").then((m) => ({ default: m.SwimlaneView })));

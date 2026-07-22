@@ -16,6 +16,11 @@ const mergeWorkspaceMock = vi.hoisted(() => vi.fn(async (id: string) => ({
 // promise, so the underlying mergeWorkspace runs once even across a dropped + retried request.
 const inFlightMerges = vi.hoisted(() => new Map<string, Promise<unknown>>());
 
+const rebaseRepoMock = vi.hoisted(() => vi.fn(async (id: string, repoName: string) => ({
+  repo: repoName,
+  success: true,
+})));
+
 vi.mock("../services/workspace.service.js", () => ({
   createWorkspaceService: vi.fn(() => ({
     mergeWorkspace: mergeWorkspaceMock,
@@ -26,6 +31,7 @@ vi.mock("../services/workspace.service.js", () => ({
       inFlightMerges.set(id, promise);
       return promise;
     }),
+    rebaseRepo: rebaseRepoMock,
   })),
 }));
 
@@ -39,6 +45,7 @@ describe("workspace actions route", () => {
         { step: "remove-worktree", message: "worktree still busy", recoverable: true },
       ],
     });
+    rebaseRepoMock.mockClear();
   });
 
   it("keeps POST /api/workspaces/:id/merge successful when merge returns recoverable cleanup warnings", async () => {
@@ -97,5 +104,23 @@ describe("workspace actions route", () => {
     });
     expect(mergeWorkspaceMock).toHaveBeenCalledTimes(1);
     await droppedRequest.catch(() => undefined);
+  });
+
+  it("routes POST /api/workspaces/:id/repos/:repoName/rebase to rebaseRepo, url-decoding the repo name", async () => {
+    rebaseRepoMock.mockResolvedValueOnce({ repo: "auth svc", success: false, conflictingFiles: ["src/a.ts"] });
+    const app = new Hono();
+    app.route(
+      "/api/workspaces",
+      createWorkspaceActionsRoute(
+        () => ({}) as never,
+        {} as never,
+      ),
+    );
+
+    const res = await app.request("/api/workspaces/workspace-1/repos/auth%20svc/rebase", { method: "POST" });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ repo: "auth svc", success: false, conflictingFiles: ["src/a.ts"] });
+    expect(rebaseRepoMock).toHaveBeenCalledWith("workspace-1", "auth svc");
   });
 });

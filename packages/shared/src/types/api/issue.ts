@@ -20,6 +20,9 @@ export interface CreateIssueRequest {
   externalKey?: string | null;
   /** Optional external-tracker deep link; must be http/https. */
   externalUrl?: string | null;
+  /** Repos this issue touches (#94, multi-repo projects). Applied server-side as
+   *  `repo:<name>` tags; omitted/empty for single-repo projects. */
+  reposTouched?: string[];
 }
 
 export interface UpdateIssueRequest {

@@ -1,6 +1,7 @@
 import React from "react";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { getOutputFormatForAgent, getOutputFormatForProvider } from "../lib/agent-output-parser.js";
+import { openSessionTranscript } from "../lib/sessionTranscriptEvents.js";
 import { SessionStatsBadge } from "../lib/session-stats.js";
 import {
   formatDuration,
@@ -127,6 +128,24 @@ export function WorkspaceSessionList({
                       title="Step through this session turn by turn"
                     >
                       ⏯ Replay
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const outputFormat = ws.provider
+                          ? getOutputFormatForProvider(ws.provider)
+                          : getOutputFormatForAgent(ws.agentCommand ?? prefs.agent_command);
+                        const label = getTriggerTypeLabel(session.triggerType, session.skillName)?.label ?? "Agent";
+                        openSessionTranscript({
+                          sessionId: session.id,
+                          outputFormat,
+                          title: `${label} · ${formatRelativeTime(session.startedAt)}`,
+                        });
+                      }}
+                      className="text-[10px] text-gray-400 dark:text-gray-500 hover:text-brand-500 dark:hover:text-brand-400 px-1.5 py-0.5 rounded hover:bg-brand-50 dark:hover:bg-brand-950/40 transition-colors shrink-0"
+                      title="Open the full turn-by-turn transcript"
+                    >
+                      📜 Transcript
                     </button>
                     {ws.status !== "closed" && (
                       session.providerSessionId ? (

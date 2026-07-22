@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
+import { insertWorkspaceRepo, listWorkspaceRepos, setWorkspaceRepoMergedSha } from "../repositories/repo.repository.js";
 
 // Minimal git service fake
 function makeGitService(overrides: Partial<{
@@ -441,5 +442,236 @@ describe("reconcileAlreadyMerged", () => {
     await svc.reconcileAlreadyMerged(workspaceId);
 
     expect(removeWorktree).toHaveBeenCalledWith("/repo", "/repo/.worktrees/ws");
+  });
+});
+
+// ─── Multi-repo sibling awareness (review finding #16) ──────────────────────────────
+// checkAlreadyMerged must judge "fully merged" across EVERY repo of the workspace, and
+// reconcileAlreadyMerged must clean up the sibling worktrees instead of orphaning them.
+
+describe("already-merged reconciliation — multi-repo siblings (#16)", () => {
+  const SIBLING_PATH = "/extra";
+  let db: ReturnType<typeof createTestDb>["db"];
+  beforeEach(() => {
+    ({ db } = createTestDb());
+  });
+
+  /** Fake git where the LEADING branch reads fully merged, sibling probes dispatch on repo path. */
+  function makeMultiRepoGit(siblingAhead: number) {
+    return {
+      ...makeGitService({
+        getDiff: async () => "",
+        revParse: async (repoPath, ref) => {
+          if (repoPath === SIBLING_PATH) return "sib-sha";
+          return ref === "feature/ak-42-test" ? "deadbeef" : "headsha";
+        },
+        isAncestor: async () => true,
+      }),
+      countUniqueCommits: vi.fn(async (repoPath: string) => (repoPath === SIBLING_PATH ? siblingAhead : 1)),
+      getCurrentBranch: vi.fn(async () => "master"),
+    };
+  }
+
+  async function insertSibling(db2: ReturnType<typeof createTestDb>["db"], ids: { workspaceId: string; projectId: string }, opts: { mergedHeadSha?: string } = {}) {
+    await insertWorkspaceRepo({
+      workspaceId: ids.workspaceId,
+      projectId: ids.projectId,
+      path: SIBLING_PATH,
+      name: "extra",
+      worktreePath: `${SIBLING_PATH}/.worktrees/ws`,
+      branch: "feature/ak-42-test",
+      baseBranch: "master",
+    }, db2);
+    if (opts.mergedHeadSha) {
+      const [row] = await listWorkspaceRepos(ids.workspaceId, db2);
+      await setWorkspaceRepoMergedSha(row.id, opts.mergedHeadSha, db2);
+    }
+  }
+
+  it("checkAlreadyMerged refuses when a sibling repo still has unmerged commits", async () => {
+    const ids = await seedScenario(db, {});
+    await insertSibling(db, ids);
+    const git = makeMultiRepoGit(2);
+
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+    const result = await svc.checkAlreadyMerged(ids.workspaceId);
+
+    expect(result.isAlreadyMerged).toBe(false);
+    expect(result.reason).toMatch(/sibling/i);
+    expect(result.reason).toContain("extra");
+  });
+
+  it("checkAlreadyMerged still passes when the sibling merge already landed (mergedHeadSha stamped)", async () => {
+    const ids = await seedScenario(db, {});
+    await insertSibling(db, ids, { mergedHeadSha: "landed-sha" });
+    const git = makeMultiRepoGit(5 /* would be pending if unstamped */);
+
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+    const result = await svc.checkAlreadyMerged(ids.workspaceId);
+
+    expect(result.isAlreadyMerged).toBe(true);
+  });
+
+  // #69: a SIBLING-ONLY ticket's leading branch never diverges (0 unique commits). Before
+  // the fix, the leading "no unique commits" early return fired BEFORE the sibling check, so
+  // once the sibling landed the workspace could never be reconciled as Done — it stranded
+  // open forever. After the fix, a clean-ancestor leading repo + a landed sibling = merged.
+  it("checkAlreadyMerged reports merged for a sibling-only ticket once the sibling landed (leading has 0 unique commits) (#69)", async () => {
+    const ids = await seedScenario(db, {}); // baseCommitSha null → no historic-unique fallback
+    await insertSibling(db, ids, { mergedHeadSha: "landed-sha" });
+    const git = {
+      ...makeGitService({
+        getDiff: async () => "",
+        // leading branch tip already equals base (clean ancestor, no unique commits)
+        revParse: async (repoPath: string, ref: string) => (repoPath === SIBLING_PATH ? "sib-sha" : ref === "feature/ak-42-test" ? "same-sha" : "same-sha"),
+        isAncestor: async () => true,
+      }),
+      countUniqueCommits: vi.fn(async () => 0), // leading contributes nothing
+      getCurrentBranch: vi.fn(async () => "master"),
+    };
+
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+    const result = await svc.checkAlreadyMerged(ids.workspaceId);
+
+    expect(result.isAlreadyMerged).toBe(true);
+    expect(result.reason).toBeUndefined();
+  });
+
+  it("reconcileAlreadyMerged refuses (throws) while a sibling has unmerged commits", async () => {
+    const ids = await seedScenario(db, {});
+    await insertSibling(db, ids);
+    const git = makeMultiRepoGit(1);
+
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+    await expect(svc.reconcileAlreadyMerged(ids.workspaceId)).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+    // Nothing destroyed: the sibling branch was never touched.
+    expect(git.deleteBranch).not.toHaveBeenCalledWith(SIBLING_PATH, "feature/ak-42-test", expect.anything());
+  });
+
+  it("reconcileAlreadyMerged cleans up landed sibling worktrees + branches (no orphans)", async () => {
+    const ids = await seedScenario(db, {});
+    await insertSibling(db, ids, { mergedHeadSha: "landed-sha" });
+    const git = makeMultiRepoGit(0);
+
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+    const result = await svc.reconcileAlreadyMerged(ids.workspaceId);
+    expect(result.reconciledAt).toBeTruthy();
+
+    expect(git.removeWorktree).toHaveBeenCalledWith(SIBLING_PATH, `${SIBLING_PATH}/.worktrees/ws`);
+    expect(git.deleteBranch).toHaveBeenCalledWith(SIBLING_PATH, "feature/ak-42-test", { force: true });
+  });
+
+  // #70: per-repo merge status makes a partial multi-repo merge visible.
+  it("getRepoMergeStatus reports a stranded sibling while the leading repo is merged", async () => {
+    const ids = await seedScenario(db, {});
+    await insertSibling(db, ids); // not stamped
+    const git = {
+      ...makeGitService({
+        revParse: async () => "sha",
+        isAncestor: async () => true,
+      }),
+      // leading fully landed (0 ahead), sibling 3 commits ahead of base (stranded)
+      countUniqueCommits: vi.fn(async (repoPath: string) => (repoPath === SIBLING_PATH ? 3 : 0)),
+    };
+
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+    const status = await svc.getRepoMergeStatus(ids.workspaceId);
+
+    expect(status.allMerged).toBe(false);
+    const leading = status.repos.find((r) => r.isLeading)!;
+    const sibling = status.repos.find((r) => !r.isLeading)!;
+    // sibling-only ticket: leading repo did nothing (no work), so it is neither merged nor stranded
+    expect(leading.hasWork).toBe(false);
+    expect(leading.stranded).toBe(false);
+    expect(sibling.stranded).toBe(true);
+    expect(sibling.hasWork).toBe(true);
+    expect(sibling.ahead).toBe(3);
+    expect(sibling.name).toBe("extra");
+  });
+
+  // #75: a MERGED sibling-only workspace stamps the workspace scalar `mergedAt`, but the
+  // leading repo contributed no commits. The old code ORed `Boolean(mergedAt)` into the
+  // leading verdict, falsely reporting the leading repo as hasWork+merged.
+  it("getRepoMergeStatus does NOT attribute a sibling-only merge to the leading repo (#75)", async () => {
+    const ids = await seedScenario(db, { baseCommitSha: "base-sha" });
+    // Sibling-only merge landed: mergedAt stamped (closeWorkspace markMerged), but the leading
+    // repo never merged commits, so its mergedHeadSha stays null.
+    await db.update(workspaces).set({ status: "closed", mergedAt: new Date().toISOString() }).where(eq(workspaces.id, ids.workspaceId));
+    await insertSibling(db, ids, { mergedHeadSha: "landed-sha" }); // the sibling that actually landed
+    const git = {
+      ...makeGitService({ revParse: async () => "sha", isAncestor: async () => true }),
+      countUniqueCommits: vi.fn(async () => 0), // leading: 0 ahead AND 0 historic (base..tip)
+    };
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+    const status = await svc.getRepoMergeStatus(ids.workspaceId);
+
+    const leading = status.repos.find((r) => r.isLeading)!;
+    expect(leading.hasWork).toBe(false); // was true before the fix (mergedAt leaked in)
+    expect(leading.merged).toBe(false);
+    expect(leading.stranded).toBe(false);
+    const sibling = status.repos.find((r) => !r.isLeading)!;
+    expect(sibling.merged).toBe(true); // the sibling that actually landed
+    expect(status.allMerged).toBe(true);
+  });
+
+  // #75: a REAL leading-repo merge must still read as merged after its feature branch is
+  // cleaned up — the historic tip falls back to the stamped `mergedHeadSha`, which survives
+  // the branch deletion (the old code relied on the now-removed `mergedAt` term for this).
+  it("getRepoMergeStatus still reports the leading repo merged after its branch is cleaned up, via mergedHeadSha (#75)", async () => {
+    const ids = await seedScenario(db, { baseCommitSha: "base-sha" });
+    await db.update(workspaces).set({ status: "closed", mergedAt: new Date().toISOString(), mergedHeadSha: "merged-tip" }).where(eq(workspaces.id, ids.workspaceId));
+    const git = {
+      ...makeGitService({
+        // Leading feature branch is GONE (cleaned up post-merge): its ref no longer resolves.
+        revParse: async (_repo: string, ref: string) => { if (ref === "feature/ak-42-test") throw new Error("unknown revision"); return "sha"; },
+        isAncestor: async () => true,
+      }),
+      // 0 ahead of base (merged); base..mergedHeadSha = 2 (the leading repo DID have work).
+      countUniqueCommits: vi.fn(async (_repo: string, from: string) => (from === "base-sha" ? 2 : 0)),
+    };
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+    const status = await svc.getRepoMergeStatus(ids.workspaceId);
+
+    const leading = status.repos.find((r) => r.isLeading)!;
+    expect(leading.hasWork).toBe(true);
+    expect(leading.merged).toBe(true);
+    expect(leading.stranded).toBe(false);
+  });
+
+  // #75: a no-work sibling's branch is force-deleted by cleanup just like a worked one, so a
+  // gone unstamped branch must read as "no changes", NOT silently as merged.
+  it("getRepoMergeStatus reports a no-work sibling as no-changes (not merged) after cleanup (#75)", async () => {
+    const ids = await seedScenario(db, {});
+    await insertSibling(db, ids); // no work, not stamped
+    const git = {
+      ...makeGitService({
+        // sibling branch cleaned up → its refs no longer resolve.
+        revParse: async (repo: string) => { if (repo === SIBLING_PATH) throw new Error("gone"); return "sha"; },
+      }),
+      countUniqueCommits: vi.fn(async () => 0),
+    };
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+    const status = await svc.getRepoMergeStatus(ids.workspaceId);
+
+    const sibling = status.repos.find((r) => !r.isLeading)!;
+    expect(sibling.hasWork).toBe(false);
+    expect(sibling.merged).toBe(false); // was true before the fix (branch-gone treated as landed)
+    expect(sibling.stranded).toBe(false);
+  });
+
+  it("getRepoMergeStatus reports allMerged once every repo has landed", async () => {
+    const ids = await seedScenario(db, {});
+    await insertSibling(db, ids, { mergedHeadSha: "landed-sha" });
+    const git = {
+      ...makeGitService({ revParse: async () => "sha", isAncestor: async () => true }),
+      countUniqueCommits: vi.fn(async () => 0),
+    };
+
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+    const status = await svc.getRepoMergeStatus(ids.workspaceId);
+
+    expect(status.allMerged).toBe(true);
+    expect(status.repos.find((r) => !r.isLeading)!.merged).toBe(true);
   });
 });

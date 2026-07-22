@@ -12,3 +12,17 @@ export async function stampWorkspaceMergedAt(
 ): Promise<void> {
   await database.update(workspaces).set({ mergedAt: now, mergedHeadSha, updatedAt: now }).where(eq(workspaces.id, id));
 }
+
+/**
+ * Stamp ONLY mergedHeadSha (+updatedAt) on a workspace row, leaving mergedAt untouched.
+ * Used by the reconcile-as-done close path (#115) which sets mergedAt separately via
+ * closeWorkspace/finalizeMergeCleanup and only needs to record the landed leading tip.
+ */
+export async function stampWorkspaceMergedHeadSha(
+  id: string,
+  mergedHeadSha: string,
+  now: string,
+  database: Database = db,
+): Promise<void> {
+  await database.update(workspaces).set({ mergedHeadSha, updatedAt: now }).where(eq(workspaces.id, id));
+}

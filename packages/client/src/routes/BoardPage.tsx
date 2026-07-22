@@ -11,6 +11,7 @@ import { BoardPageView } from "../components/BoardPageView.js";
 import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
 import { SkeletonBoard } from "../components/SkeletonBoard.js";
 import { showToast } from "../components/Toast.js";
+import { apiFetch } from "../lib/api.js";
 import { matchesBoardFilters } from "../lib/boardFiltering.js";
 import { reconcileSelectedIssue } from "../lib/selectedIssueSync.js";
 import { createQuickUpdateHandlers } from "../lib/issueQuickUpdates.js";
@@ -417,6 +418,19 @@ export function BoardPage() {
     handleViewModeChange, refetchBoard, setCollapsedGroups,
   });
 
+  // Multi-repo gate (#82): the Multi-Repo Monitor is only offered when the active
+  // project has >0 additional repos registered.
+  const [hasAdditionalRepos, setHasAdditionalRepos] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    setHasAdditionalRepos(false);
+    if (!activeProjectId) return;
+    apiFetch<unknown[]>(`/api/projects/${activeProjectId}/repos`)
+      .then((rows) => { if (!cancelled) setHasAdditionalRepos(rows.length > 0); })
+      .catch(() => { /* single-repo behavior on failure */ });
+    return () => { cancelled = true; };
+  }, [activeProjectId]);
+
   // Keyboard shortcuts (cursor/search/focus state is read from the board
   // stores inside the hook — no setter wiring from this container).
   useBoardKeyboardShortcuts(
@@ -430,6 +444,7 @@ export function BoardPage() {
       viewMode,
       projects,
       activeProjectId,
+      hasAdditionalRepos,
     },
     {
       handleIssueClick,

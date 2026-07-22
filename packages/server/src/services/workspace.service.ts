@@ -51,19 +51,23 @@ export function createWorkspaceService(deps: {
     setupWorkspace: crud.setupWorkspace,
     updateWorkspace: crud.updateWorkspace,
     getWorkspace: crud.getWorkspace,
+    getWorkspaceDevServerPlan: crud.getWorkspaceDevServerPlan,
     // diff
     getWorkspaceDiff: diff.getWorkspaceDiff,
     getConflicts: diff.getConflicts,
     getLatestCommit: diff.getLatestCommit,
+    getHandoff: diff.getHandoff,
     // merge
     mergeWorkspace: merge.mergeWorkspace,
     mergeWorkspaceDeduped: merge.mergeWorkspaceDeduped,
     updateBase: merge.updateBase,
     abortRebase: merge.abortRebase,
+    rebaseRepo: merge.rebaseRepo,
     resolveConflicts: merge.resolveConflicts,
     fixAndMerge: merge.fixAndMerge,
     checkAlreadyMerged: merge.checkAlreadyMerged,
     reconcileAlreadyMerged: merge.reconcileAlreadyMerged,
+    getRepoMergeStatus: merge.getRepoMergeStatus,
     // session
     launchSession: session.launchSession,
     sendTurn: session.sendTurn,

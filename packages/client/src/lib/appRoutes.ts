@@ -29,6 +29,8 @@ const VIEW_ROUTE_PATHS: Record<ViewMode, string> = {
   momentum: "/momentum",
   fireworks: "/fireworks",
   activity: "/activity",
+  "cross-repo-activity": "/cross-repo-activity",
+  "agent-flight-recorder": "/agent-flight-recorder",
   "stale-work": "/stale-work",
   throughput: "/throughput",
   "provider-mix": "/provider-mix",

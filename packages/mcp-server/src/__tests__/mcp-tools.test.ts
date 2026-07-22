@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess } from "node:child_process";
 import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
@@ -7,10 +7,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { migrationFilesInOrder } from "./helpers/test-db.js";
+import { startMcpServer, stopMcpServer } from "./helpers/server-process.js";
 import { MCP_TOOL_DEFINITIONS } from "@agentic-kanban/shared/lib";
 
 const MONOREPO_ROOT = resolve(import.meta.dirname, "../../../..");
 const SHARED_DRIZZLE = resolve(MONOREPO_ROOT, "packages/shared/drizzle");
+
+// This suite launches REAL server processes; see helpers/server-process.ts. The old
+// inline `spawn("pnpm", …, "dev")` left a tsx/node grandchild alive after every run
+// because proc.kill() only reached the pnpm shim (#46).
+const SPAWN_HOOK_TIMEOUT_MS = 60_000;
+const SPAWN_TEST_TIMEOUT_MS = 60_000;
 
 // Read the migration order from the drizzle journal so this never goes stale as
 // migrations are added (the old hardcoded list froze at 0024 and broke the suite).
@@ -93,21 +100,7 @@ describe("MCP Server Tools", () => {
     seedProject(db, { id: randomUUID(), name: "Default Project", active: true });
     db.close();
 
-    proc = spawn("pnpm", ["--filter", "@agentic-kanban/mcp-server", "dev"], {
-      cwd: MONOREPO_ROOT,
-      stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, DB_URL: `file:${dbPath}` },
-    });
-
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error("MCP server didn't start")), 10000);
-      proc.stderr!.on("data", (data: Buffer) => {
-        if (data.toString().includes("running on stdio")) {
-          clearTimeout(timeout);
-          resolve();
-        }
-      });
-    });
+    proc = await startMcpServer(dbPath);
 
     const initResp = await sendAndReceive(proc, makeRequest("initialize", {
       protocolVersion: "2024-11-05",
@@ -117,11 +110,11 @@ describe("MCP Server Tools", () => {
     expect(initResp.result.serverInfo.name).toBe("agentic-kanban");
 
     proc.stdin!.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
-  });
+  }, SPAWN_HOOK_TIMEOUT_MS);
 
-  afterAll(() => {
-    if (proc) proc.kill();
-    try { rmSync(tmpDir, { recursive: true }); } catch { /* ignore */ }
+  afterAll(async () => {
+    await stopMcpServer(proc);
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
   });
 
   it("the MCP_TOOL_DEFINITIONS catalog and the runtime tools/list stay in exact name- and description-parity", async () => {
@@ -307,21 +300,7 @@ describe("MCP active project resolution", () => {
     db.exec(`INSERT INTO preferences (key, value, updated_at) VALUES ('activeProjectId', '${secondProjectId}', '${now}')`);
     db.close();
 
-    proc = spawn("pnpm", ["--filter", "@agentic-kanban/mcp-server", "dev"], {
-      cwd: MONOREPO_ROOT,
-      stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, DB_URL: `file:${dbPath}` },
-    });
-
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error("MCP server didn't start")), 10000);
-      proc.stderr!.on("data", (data: Buffer) => {
-        if (data.toString().includes("running on stdio")) {
-          clearTimeout(timeout);
-          resolve();
-        }
-      });
-    });
+    proc = await startMcpServer(dbPath);
 
     await sendAndReceive(proc, makeRequest("initialize", {
       protocolVersion: "2024-11-05",
@@ -329,11 +308,11 @@ describe("MCP active project resolution", () => {
       clientInfo: { name: "test-client", version: "0.1.0" },
     }));
     proc.stdin!.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
-  });
+  }, SPAWN_HOOK_TIMEOUT_MS);
 
-  afterAll(() => {
-    if (proc) proc.kill();
-    try { rmSync(tmpDir, { recursive: true }); } catch {}
+  afterAll(async () => {
+    await stopMcpServer(proc);
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
   });
 
   it("get_context with no projectId returns the active project, not the first inserted", async () => {
@@ -380,23 +359,9 @@ describe("MCP active project resolution", () => {
     const noActiveDbPath = join(noActiveTmpDir, "test.db");
     createTestDb(noActiveDbPath);
 
-    const noActiveProc = spawn("pnpm", ["--filter", "@agentic-kanban/mcp-server", "dev"], {
-      cwd: MONOREPO_ROOT,
-      stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, DB_URL: `file:${noActiveDbPath}` },
-    });
+    const noActiveProc = await startMcpServer(noActiveDbPath);
 
     try {
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error("MCP server didn't start")), 10000);
-        noActiveProc.stderr!.on("data", (data: Buffer) => {
-          if (data.toString().includes("running on stdio")) {
-            clearTimeout(timeout);
-            resolve();
-          }
-        });
-      });
-
       await sendAndReceive(noActiveProc, makeRequest("initialize", {
         protocolVersion: "2024-11-05",
         capabilities: {},
@@ -410,33 +375,19 @@ describe("MCP active project resolution", () => {
       }));
       expect(resp.result.content[0].text).toContain("No active project");
     } finally {
-      noActiveProc.kill();
-      try { rmSync(noActiveTmpDir, { recursive: true }); } catch {}
+      await stopMcpServer(noActiveProc);
+      try { rmSync(noActiveTmpDir, { recursive: true, force: true }); } catch {}
     }
-  });
+  }, SPAWN_TEST_TIMEOUT_MS);
 
   it("create_issue returns error when no activeProjectId preference is set", async () => {
     const noActiveTmpDir = mkdtempSync(join(tmpdir(), "mcp-test-noactive2-"));
     const noActiveDbPath = join(noActiveTmpDir, "test.db");
     createTestDb(noActiveDbPath);
 
-    const noActiveProc = spawn("pnpm", ["--filter", "@agentic-kanban/mcp-server", "dev"], {
-      cwd: MONOREPO_ROOT,
-      stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, DB_URL: `file:${noActiveDbPath}` },
-    });
+    const noActiveProc = await startMcpServer(noActiveDbPath);
 
     try {
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error("MCP server didn't start")), 10000);
-        noActiveProc.stderr!.on("data", (data: Buffer) => {
-          if (data.toString().includes("running on stdio")) {
-            clearTimeout(timeout);
-            resolve();
-          }
-        });
-      });
-
       await sendAndReceive(noActiveProc, makeRequest("initialize", {
         protocolVersion: "2024-11-05",
         capabilities: {},
@@ -450,10 +401,10 @@ describe("MCP active project resolution", () => {
       }));
       expect(resp.result.content[0].text).toContain("No active project");
     } finally {
-      noActiveProc.kill();
-      try { rmSync(noActiveTmpDir, { recursive: true }); } catch {}
+      await stopMcpServer(noActiveProc);
+      try { rmSync(noActiveTmpDir, { recursive: true, force: true }); } catch {}
     }
-  });
+  }, SPAWN_TEST_TIMEOUT_MS);
 
   it("regression: correct project is used when multiple projects exist and second is active", async () => {
     // Verify get_context still returns second project (not first) after issue creation

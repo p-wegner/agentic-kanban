@@ -16,6 +16,7 @@ import { ensureBuildableFromClean } from "../services/project-scaffold.js";
 import * as gitService from "../services/git.service.js";
 import { createSessionManager } from "../services/session.manager.js";
 import { applyWorkspaceProfileToPrefs, buildReviewArgs, buildReviewPrompt, getEffectiveProfile, parseProviderPref } from "./review-helpers.js";
+import { buildReviewContext } from "../services/phase-context.service.js";
 import type { MergeWorkspace } from "./merge-workflow.js";
 import { isAutomaticMergeEnabled } from "./merge-strategy.js";
 import type { Database } from "../db/index.js";
@@ -26,6 +27,8 @@ import { rotateClaudeSubscription } from "../services/claude-subscription-ring.j
 import { decideRateLimitExit, formatRateLimitBlockedReason } from "./rate-limit-exit-decision.js";
 import { classifySessionExit, resolveSessionRoleFlags } from "./session-exit-classification.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
+import { listWorkspaceRepos, type RepoRow } from "../repositories/repo.repository.js";
+import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
 import type { SessionRoleFlags } from "./session-exit-classification.js";
 import { buildLearningStepPrompt } from "../services/merge-helpers.service.js";
 import { isFoundationalBlocker } from "../services/foundational-merge.service.js";
@@ -163,7 +166,7 @@ async function launchLearningStep(database: Database, sessionManager: ReturnType
   }
 }
 
-async function hasCommittedChanges(workspace: WorkspaceRow, defaultBranch: string | null, workspaceId: string) {
+async function hasCommittedChanges(workspace: WorkspaceRow, defaultBranch: string | null, workspaceId: string, database: Database) {
   if (!workspace.workingDir) return false;
   try {
     if (workspace.isDirect) {
@@ -175,8 +178,39 @@ async function hasCommittedChanges(workspace: WorkspaceRow, defaultBranch: strin
       console.warn(`[workflow] workspace ${workspaceId} has no base/default branch; treating as no committed changes`);
       return false;
     }
-    return (await gitExec(["diff", "--quiet", baseBranch], { cwd: workspace.workingDir! })).code !== 0;
+    if ((await gitExec(["diff", "--quiet", baseBranch], { cwd: workspace.workingDir! })).code !== 0) return true;
+    // Multi-repo: the leading repo being clean does NOT mean the workspace did nothing —
+    // a sibling-only ticket commits entirely in a sibling repo (#69). Without this, the
+    // exit workflow reads the sibling work as "no committed changes", never routes it to
+    // review/merge, and force-closes the issue to Done with the sibling commit stranded.
+    return await hasSiblingCommittedChanges(workspaceId, defaultBranch, database);
   } catch { return false; }
+}
+
+/**
+ * True when any sibling repo of the workspace has committed changes against its base
+ * branch. Mirrors the leading-repo `git diff --quiet <base>` probe per sibling worktree,
+ * falling back to a branch-vs-base commit count when the worktree is already gone.
+ * Best-effort: a git error on one sibling reads as "no change" (safe direction).
+ */
+async function hasSiblingCommittedChanges(workspaceId: string, defaultBranch: string | null, database: Database): Promise<boolean> {
+  let repos: RepoRow[];
+  try {
+    repos = await listWorkspaceRepos(workspaceId, database);
+  } catch { return false; }
+  for (const repo of repos) {
+    const base = repo.baseBranch || defaultBranch;
+    if (!base) continue;
+    try {
+      if (repo.worktreePath) {
+        if ((await gitExec(["diff", "--quiet", base], { cwd: repo.worktreePath })).code !== 0) return true;
+      } else if (repo.branch) {
+        const out = (await gitExec(["rev-list", "--count", `${base}..${repo.branch}`], { cwd: repo.path })).stdout.trim();
+        if (Number(out) > 0) return true;
+      }
+    } catch { /* non-fatal: treat this sibling as no-change */ }
+  }
+  return false;
 }
 
 /** Extract the "try again / resets at X" hint persisted on the rate-limited session's stats. */
@@ -671,7 +705,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     // #629 Guard: re-verify the branch still has committed changes ahead of base.
     // A race (e.g. branch reset/rebased to equal base between review start and exit)
     // can leave a 0-commit branch incorrectly marked ready-for-merge.
-    const stillHasChanges = await hasCommittedChanges(workspace, defaultBranch, workspaceId);
+    const stillHasChanges = await hasCommittedChanges(workspace, defaultBranch, workspaceId, db);
     if (!stillHasChanges) {
       console.log(`[workflow] review session ${sessionId} completed but branch has no committed changes — withholding readyForMerge (issue #629)`);
       boardEvents.broadcast(projectId, "issue_updated");
@@ -712,7 +746,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
   async function handleBuilderSessionExit(ctx: ExitContext): Promise<void> {
     const { workspace, projectId, issueId, sessionId, skipAutoReview, now, prefMap, statuses, findStatus, defaultBranch } = ctx;
     const workspaceId = workspace.id;
-    const committedChanges = await hasCommittedChanges(workspace, defaultBranch, workspaceId);
+    const committedChanges = await hasCommittedChanges(workspace, defaultBranch, workspaceId, db);
     if (await isSpecPlanningNode(db, workspace.currentNodeId)) {
       console.log(`[workflow] planning phase session ${sessionId} completed; waiting for explicit user approval before advancing`);
       boardEvents.broadcast(projectId, "issue_updated");
@@ -738,12 +772,20 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       const currentStatusName2 = currentIssueRows2.length > 0 ? statuses.find((s) => s.id === currentIssueRows2[0].statusId)?.name : undefined;
       if (currentStatusName2 === "In Review") {
         const doneStatus = findStatus("Done");
-        await setWorkspaceStatus(db, workspaceId, "closed", { now, set: { workingDir: null } });
+        // The issue only reaches In Review AFTER committedChanges was true (the builder
+        // produced work). "No committed changes now, was In Review" therefore means the
+        // work already LANDED (a sibling-only ticket's auto-merge cleans its branch, so a
+        // later exit pass sees the leading repo clean and the sibling branch gone). Stamp
+        // mergedAt via closeWorkspace(markMerged) instead of setWorkspaceStatus, which left
+        // mergedAt null and made a genuinely-merged workspace read as not-merged to the
+        // merge-queue guard / analytics (#74). Genuinely-empty workspaces never reach In
+        // Review — they fall through to the "leaving issue in current status" branch below.
+        await closeWorkspace({ database: db, workspaceId, now, markMerged: true, clearWorkingDir: true });
         if (doneStatus) {
           await transitionIssueStatus(db, issueId, doneStatus.id, { now });
         }
         boardEvents.broadcast(projectId, "workspace_merged");
-        console.log(`[workflow] non-direct workspace ${workspaceId} closed on agent exit (no committed changes, was In Review)  issue moved to Done`);
+        console.log(`[workflow] non-direct workspace ${workspaceId} closed on agent exit (no committed changes, was In Review, work already landed  mergedAt stamped)  issue moved to Done`);
         return;
       }
       console.log(`[workflow] agent session ${sessionId} completed but no committed changes  leaving issue in current status`);
@@ -793,7 +835,13 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     }
     const reviewSkillName = workspace.thoroughReview ? "code-review-thorough" : "code-review";
     const verifyAgent = prefMap.get("after_merge_verify_agent") || "none";
-    const { prompt, model } = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles, uncommittedChanges, workspaceId, reviewSkillName, verifyAgent);
+    // Hand the reviewer the diff instead of making a cold agent rediscover it (#128).
+    // Skipped when the rebase failed — the tree is mid-conflict, so a diff taken now
+    // would describe a state the reviewer is about to change.
+    const precomputedContext = workspace.workingDir && diffRef && !conflictingFiles && !uncommittedChanges
+      ? await buildReviewContext({ workingDir: workspace.workingDir, baseRef: diffRef, isDirect: workspace.isDirect })
+      : null;
+    const { prompt, model } = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles, uncommittedChanges, workspaceId, reviewSkillName, verifyAgent, precomputedContext);
     const reviewArgsWithModel = model && reviewProvider === "claude" ? `${reviewArgs ?? ""} --model ${model}`.trim() : reviewArgs;
     try {
       await setWorkspaceStatus(db, workspaceId, "reviewing", { now });

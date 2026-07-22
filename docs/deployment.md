@@ -11,6 +11,7 @@ This guide covers running agentic-kanban outside of development mode — from so
 - [MCP Server for Claude Code](#mcp-server-for-claude-code)
 - [Tauri Desktop App](#tauri-desktop-app)
 - [Running as a Background Service](#running-as-a-background-service)
+- [Per-workspace service stacks (DinD/DooD)](#per-workspace-service-stacks-dinddood)
 - [Publishing a New Release](#publishing-a-new-release)
 - [Troubleshooting](#troubleshooting)
 
@@ -438,25 +439,128 @@ sudo systemctl start agentic-kanban
 
 ### Docker
 
-There is no official Docker image yet. To run in a container:
+The repo ships a production `Dockerfile` (multi-stage, `node:22-bookworm-slim` — Debian/glibc is required by `@libsql/client` and the Claude Agent SDK native binary) and a `docker-compose.yml`. The image bundles git, pnpm, and the `claude` CLI; the server serves the built client UI on one port.
 
-```dockerfile
-FROM node:20-slim
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
-WORKDIR /app
-COPY . .
-RUN corepack enable && pnpm install && pnpm build
-WORKDIR /app/packages/server
-EXPOSE 3001
-CMD ["node", "dist/index.js"]
+```bash
+# .env next to docker-compose.yml (or export in the shell):
+#   ANTHROPIC_API_KEY=sk-...        # or CLAUDE_CODE_OAUTH_TOKEN=...
+docker compose up -d --build
+# UI + API on http://<host>:3001
 ```
 
-```powershell
-docker build -t agentic-kanban .
-docker run -p 3001:3001 -v /path/to/your/repos:/repos agentic-kanban
+**Using the published image instead of building locally:** each tagged release also publishes `<dockerhub-username>/agentic-kanban` to Docker Hub (`linux/amd64`, tagged `latest` and `vX.Y.Z`) via the `docker-publish` GitHub Actions workflow — see [Publishing a New Release](#publishing-a-new-release). Pull it directly:
+
+```bash
+docker pull <dockerhub-username>/agentic-kanban:latest
 ```
 
-**Note:** Git operations (worktree creation, branching, merging) require the container to have access to the host's git repositories via volume mounts. This is only practical for local Docker usage.
+or swap `docker-compose.yml`'s `build: .` for `image: <dockerhub-username>/agentic-kanban:latest` to skip the local build entirely — everything else (volumes, env vars, DooD/DinD options below) is unchanged.
+
+Key points:
+
+- **State** lives in two named volumes. `kanban-data` (at `/data`) holds the database (`AGENTIC_KANBAN_DIR=/data`), cloned repos (`KANBAN_REPOS_DIR=/data/repos`), and their `.worktrees`. `claude-state` (at `/root/.claude`) holds the Claude CLI's session transcripts (`~/.claude/projects`) and settings: the DB stores each session's resume id, but `claude --resume <id>` needs the matching transcript file — without this volume an image rebuild (`docker compose up -d --build`) wipes the transcripts, so every pre-rebuild workspace's next follow-up turn fails once and its conversation history is permanently lost (the retry starts a fresh session from the worktree's handoff notes).
+- **Agent auth**: the server strips `ANTHROPIC_*`/`CLAUDE_CODE_*` from agent spawn envs (cross-profile bleed guard), so the entrypoint (`docker/entrypoint.sh`) bridges `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` into a Claude profile (`~/.claude/settings_docker.json`) and selects it via the `claude_profile` preference. Alternatively mount an authenticated `~/.claude` to `/root/.claude` (replacing the `claude-state` named volume — a container can't mount two things at one path) and set no env vars. The interactive `claude /login` flow does not work headless.
+- **Getting repos in**: either register with a clone URL (Settings → Register project → "Clone from URL", or `agentic-kanban register --clone <url>`) — the server clones into `/data/repos` — or bind-mount host checkouts. When bind-mounting, mount the **parent** directory of the repos (worktrees are created as a `.worktrees` sibling of each repo) and register `/repos/<name>`. `safe.directory '*'` is preconfigured for foreign-UID mounts.
+- **Commit identity** comes from `GIT_AUTHOR_*`/`GIT_COMMITTER_*` env (defaults set in compose).
+- **No app-level auth** — run on a trusted network (VPN/Tailscale) or behind an authenticating reverse proxy.
+- **Per-workspace service stacks**: the image also bundles the `docker` CLI + `compose` v2 plugin so agents can bring up a project's declared compose stack (a DB sidecar, etc.). That needs a Docker daemon wired in via DooD or DinD — see [Per-workspace service stacks (DinD/DooD)](#per-workspace-service-stacks-dinddood) below.
+
+---
+
+## Per-workspace service stacks (DinD/DooD)
+
+A project can declare a **service stack** — a Docker Compose file (typically a database sidecar such as postgres) — and the board gives *every* workspace its own isolated instance, brought **up** on workspace create (`docker compose up -d --wait`) and **down** on merge/delete/abandon, with this instance's orphaned stacks reaped on startup. See [decision 011](decisions/011-per-workspace-service-stacks.md) for the full rationale, and the worked [`examples/multi-repo-postgres/`](../examples/multi-repo-postgres/) reference.
+
+Isolation is by a deterministic, **unique-per-workspace, instance-scoped** Compose project name — `ak-<instanceId8>-ws-<workspaceId12>`, e.g. `ak-1f3a9c2b-ws-b3d9f01a2c4e` (see `composeProjectName` in `packages/shared/src/lib/service-ports.ts`), so no two workspaces (even on the same issue) ever share a stack — plus **free host ports allocated at create time** (never colliding across projects/workspaces), exposed to the agent as `KANBAN_SVC_<NAME>_PORT` env vars. The `<instanceId8>` part is a per-board-instance id persisted in that instance's DB (`getOrCreateServiceStackInstanceId`, preferences table): every board instance on a host shares the Docker daemon (main checkout, worktree dev servers, DooD containers), so the startup orphan-stack reaper filters on `isInstanceManagedComposeProject` and only ever downs stacks carrying **this** instance's id — never another instance's live stacks, and never unrelated compose projects.
+
+> **Upgrade note (legacy `ak-ws-*` stacks):** stacks created before instance scoping are named `ak-ws-<id>` and are deliberately **never auto-downed** by the reaper (they could belong to any instance on the shared daemon). Their normal merge/close/delete teardown still works via the stored name; only orphans left over from before the upgrade need one manual sweep: `docker compose ls` and `docker compose -p <name> down -v` for each leftover `ak-ws-*` project.
+
+### Two-tier model: where the Docker daemon lives
+
+The board shells out to `docker compose`, which needs a Docker **daemon**. Where that daemon lives depends on how the board is deployed:
+
+| Deployment | Daemon | DinD/DooD |
+|---|---|---|
+| **Windows-native** (the local single-user case) | Docker Desktop on the host | **Neither.** The board process runs on the host and talks to Docker Desktop directly. No nesting, no socket gymnastics. This is the zero-config path. |
+| **Linux-container** (the server case) | Not present in the board image | **DooD** (mount the host socket) **or DinD** (a nested daemon sidecar). Pick one. |
+
+The runtime image ships the `docker` CLI + the `compose` v2 plugin (see `Dockerfile`), but **no daemon** — the daemon is supplied by one of the two Linux-container options below. When no stack is declared, or Docker is absent, everything degrades gracefully (`dockerAvailable()` guard) and the no-docker workflow is completely unaffected.
+
+### Reaching the stack: `KANBAN_SERVICE_HOST`
+
+Once the board is containerized, **three things live in three different network namespaces**: the board process, the Docker daemon that creates the stack, and the published service port. So the host the agent must dial to reach its stack's DB **differs by deployment mode**. The board injects `KANBAN_SERVICE_HOST` (default `localhost`) into the generated `.kanban/services.env` and the agent context; set it to match your mode:
+
+| Mode | `KANBAN_SERVICE_HOST` | Why / extra wiring |
+|---|---|---|
+| **Windows-native / board-on-host** | `localhost` (default) | Board, daemon, and the published port all share the host namespace — `localhost:${KANBAN_SVC_DB_PORT}` just works. No setting needed. |
+| **DooD** (host socket) | `host.docker.internal` | The port is published in the **host** namespace, not the board container's. The board service also needs `extra_hosts: ["host.docker.internal:host-gateway"]` so `host.docker.internal` resolves to the host gateway. Set both (see `docker-compose.yml`). |
+| **DinD** (nested daemon) | `dind` | The port is published on the **dind container**, reachable from the board over the shared `dind-net`. Dial the dind **service name** (`dind:${KANBAN_SVC_DB_PORT}`) rather than a host-published port. The overlay `docker-compose.dind.yml` already sets this — nothing to configure. |
+
+The agent's connection string should therefore use `${KANBAN_SERVICE_HOST:-localhost}:${KANBAN_SVC_DB_PORT}` rather than a hardcoded `localhost`.
+
+### Option A — DooD (Docker-out-of-Docker): mount the host socket
+
+Lightest option. Uncomment in `docker-compose.yml`:
+
+```yaml
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+```
+
+**⚠️ The socket-mount path pitfall.** With DooD the `docker compose` commands run *inside* the container, but the daemon that actually creates the stack containers is the **host** daemon. Any bind-mount in a *project's* compose file (e.g. `./data:/var/lib/postgresql/data`, or a repo checkout mounted into a service) is resolved by the **host** daemon against the **host** filesystem — not the board container's filesystem. If repos live in a **named volume** (`kanban-data`), the path `/data/repos/...` does not exist on the host and every source bind-mount silently breaks (or mounts an empty dir).
+
+**Fix:** with DooD, repos MUST live on a **host bind-mount at an identical path on both sides**, so `/data/repos/...` means the same thing inside the container and on the host. In `docker-compose.yml` replace the named volume with:
+
+```yaml
+    volumes:
+      - /srv/kanban-data:/data          # SAME path both sides → project bind-mounts resolve
+```
+
+and keep `KANBAN_REPOS_DIR=/data/repos` (the default). If you can't guarantee identical paths, use DinD instead.
+
+### Option B — DinD (Docker-in-Docker): a nested daemon sidecar
+
+Recommended when project compose files bind-mount source. Overlay `docker-compose.dind.yml`:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dind.yml up -d --build
+```
+
+This adds a privileged `docker:27-dind` sidecar that shares the **same repos volume at the same path** (`/data`) as the board, so `/data/repos/<repo>` resolves to identical bytes on both the board and the nested daemon — the DooD pitfall disappears. The board's `docker` CLI is pointed at the sidecar via `DOCKER_HOST=tcp://dind:2375` over a private compose network (TLS off, never publicly exposed). The overlay also sets `KANBAN_SERVICE_HOST=dind`, so the generated `.kanban/services.env` and the agent's injected context point at the sidecar — where the stack's ports are actually published — instead of `localhost`. The entrypoint waits (polls `docker version`, up to 30s) for the nested daemon before starting the server.
+
+### ⚠️ Security: DooD/DinD give agents host-root
+
+This feature widens the trust boundary. **Mounting `/var/run/docker.sock` (DooD) gives every agent effectively ROOT on the host.** Agents run **autonomously** with `--dangerously-skip-permissions` (the container sets `IS_SANDBOX=1`), so a compromised or misdirected agent can do `docker run -v /:/host …` to read/write the entire host filesystem as root — and doing it *through the Docker socket* **bypasses the board's PreToolUse safety hooks** (those gate the agent's own shell/file tools, not the daemon it drives). The privileged `docker:dind` daemon on `dind-net` (DinD) is similarly reachable by a compromised agent and is a comparable escalation surface.
+
+Treat DooD as **host-root-equivalent for all agent code**. Recommendations:
+- Run the server **only on a trusted, isolated host/network** (a dedicated VM, no other tenants), never on a shared/production host.
+- Prefer DinD over DooD where the pitfall allows — the blast radius is the dind container rather than the host — but still treat the dind daemon as privileged and reachable by agents.
+- Do not expose the board (or the dind daemon) to any untrusted network.
+
+### Resource caps: WIP × stack size
+
+Every in-flight workspace with an enabled stack runs a full copy of that stack. **Peak resource use ≈ (WIP limit) × (per-stack footprint)** — CPU, RAM, disk, *and host ports*. A postgres-per-workspace at WIP 4 means up to 4 postgres containers and 4 published ports simultaneously. Size the host (and any `mem_limit` you set) for the peak, or lower the board's WIP limit. Teardown-on-merge and the startup reaper keep this bounded, but a burst of parallel tickets hits the peak. DinD also needs disk for its own image/layer cache (`dind-storage` volume).
+
+### Cross-namespace port allocation (containerized only)
+
+Free host ports are probed for availability **inside the board container's** network namespace, but the stack actually publishes them in the **host** (DooD) or **dind** (DinD) namespace. Those namespaces don't share their port tables, so a port the board saw as free can already be taken on the publishing side. There is no port-range setting to tune — ports are OS-assigned ephemeral ports (the allocator binds port `0` and takes what the OS hands back). On a `port already allocated` failure the board automatically reallocates fresh ports and retries the `up` (bounded, a few attempts); if it still fails, the error is **non-fatal** — the workspace is created anyway with `serviceState.status = "error"` and the compose stderr preserved for diagnosis. If collisions recur under heavy parallel WIP, reduce the board's WIP limit. For DinD, prefer reaching services by the `dind` **service name** rather than host-published ports, which sidesteps host-side port pressure entirely.
+
+### Declaring a stack on a project
+
+A project's stack is the `servicesConfig` JSON on the project (persisted to `projects.services_config`; edit it in **Settings → project → Service stack**, or via `PATCH /api/projects/:id`). Shape:
+
+```jsonc
+{
+  "enabled": true,
+  "composeFile": "docker-compose.yml",   // path RELATIVE to its repo root
+  "composeRepo": null,                    // repo name holding the compose file; null = leading repo
+  "ports": ["db"],                        // named host ports → KANBAN_SVC_DB_PORT, allocated free at create
+  "readyTimeoutMs": 120000,               // wait budget for `up -d --wait`
+  "env": { "POSTGRES_PASSWORD": "kanban" }// extra static env written verbatim into the env file
+}
+```
+
+On workspace create the board allocates the named ports, writes `<composeWorktree>/.kanban/services.env` (`COMPOSE_PROJECT_NAME`, each `KANBAN_SVC_<NAME>_PORT`, your `env` entries, `KANBAN_STACK=1`), and runs `docker compose -p <name> -f <composeFile> --env-file <envFile> up -d --wait`. Your compose file consumes those vars (e.g. `ports: ["${KANBAN_SVC_DB_PORT}:5432"]`). The agent is told the stack is up, the allocated ports, and to `source .kanban/services.env`. See [`examples/multi-repo-postgres/`](../examples/multi-repo-postgres/) for a complete 2-repo + postgres walkthrough.
 
 ---
 
@@ -507,6 +611,16 @@ Users install the beta with:
 ```powershell
 npx agentic-kanban@beta dev
 ```
+
+### Docker Hub Image (CI)
+
+Pushing a `v*` git tag (Standard Release step above, or the `release` skill) also triggers `.github/workflows/docker-publish.yml`, which builds the root `Dockerfile` and pushes `<dockerhub-username>/agentic-kanban:vX.Y.Z` + `:latest` to Docker Hub. One-time setup (already done for this repo, listed for reference/recovery):
+
+1. A Docker Hub account + `agentic-kanban` repository (public repos are free, unlimited).
+2. A Docker Hub access token (Account Settings → Security → New Access Token).
+3. Two GitHub repo secrets: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`.
+
+To re-run the image build without cutting a new release (e.g. after a transient push failure): `gh workflow run docker-publish.yml --ref vX.Y.Z`.
 
 ---
 

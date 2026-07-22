@@ -73,6 +73,8 @@ export interface SessionState {
   sessionExitPlanModeDenied: Set<string>;
   sessionExitHandled: Set<string>;
   workspaceAutoResumeCount: Map<string, number>;
+  /** Bounds the missing-transcript fallback (#26) to one automatic retry per workspace. */
+  workspaceStaleResumeRecoveryCount: Map<string, number>;
   sessionProviders: Map<string, string>;
   dbWriteBuffer: Map<string, DbWriteBufferEntry[]>;
   dbWriteTimers: Map<string, ReturnType<typeof setTimeout>>;
@@ -99,6 +101,7 @@ export function createSessionState(): SessionState {
     sessionExitPlanModeDenied: new Set(),
     sessionExitHandled: new Set(),
     workspaceAutoResumeCount: new Map(),
+    workspaceStaleResumeRecoveryCount: new Map(),
     sessionProviders: new Map(),
     dbWriteBuffer: new Map(),
     dbWriteTimers: new Map(),

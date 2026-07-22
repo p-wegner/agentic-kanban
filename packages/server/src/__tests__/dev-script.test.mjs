@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer, request as httpRequest } from "node:http";
+import { createServer as createNetServer, connect as netConnect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkDrizzleFiles, findDrizzlePnpmDirs } from "../../../../scripts/drizzle-preflight.mjs";
@@ -11,6 +12,7 @@ import { resolveDevPorts } from "../../../../scripts/dev-port-plan.mjs";
 import { buildBackendEnv, createStableDevProxy, listen, preferredInternalPort, resolvePublicServerPort } from "../../../../scripts/server-dev-proxy.mjs";
 import {
   classifyProcessExit,
+  HEALTHY_UPTIME_MS,
   createDependencyRecoveryState,
   createSharedDistRecoveryState,
   dependencyManifestsChanged,
@@ -53,6 +55,37 @@ function createBackend(label) {
   });
 }
 
+// A raw TCP server standing in for the app's WS backend (board events, session
+// streaming): on receiving the HTTP upgrade request it replies with a 101 and a
+// label, so the test can tell which backend instance actually served the upgrade.
+function createUpgradeBackend(label) {
+  return createNetServer((socket) => {
+    socket.on("data", () => {
+      socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n${label}`);
+    });
+  });
+}
+
+function requestUpgrade(port, path = "/ws") {
+  return new Promise((resolveRequest, rejectRequest) => {
+    const socket = netConnect(port, "127.0.0.1");
+    socket.on("connect", () => {
+      socket.write(
+        `GET ${path} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n`,
+      );
+    });
+    socket.once("data", (chunk) => {
+      socket.destroy();
+      resolveRequest(chunk.toString());
+    });
+    socket.on("error", rejectRequest);
+    socket.setTimeout(5000, () => {
+      socket.destroy();
+      rejectRequest(new Error("upgrade request timed out"));
+    });
+  });
+}
+
 describe("dev launcher exit classification", () => {
   it("treats intentional exits and termination signals as clean", () => {
     expect(classifyProcessExit(0, null)).toBe("clean");
@@ -62,6 +95,20 @@ describe("dev launcher exit classification", () => {
 
   it("keeps code 1 fatal because tsx watch handles hot reload internally", () => {
     expect(classifyProcessExit(1, null)).toBe("fatal");
+  });
+
+  it("keeps an early code 1 fatal so deterministic startup failures do not loop", () => {
+    // EADDRINUSE / migration failure / syntax error all reproduce on every retry.
+    expect(classifyProcessExit(1, null, { uptimeMs: 0 })).toBe("fatal");
+    expect(classifyProcessExit(1, null, { uptimeMs: HEALTHY_UPTIME_MS - 1 })).toBe("fatal");
+  });
+
+  it("retries a code 1 exit from a child that had been running healthily", () => {
+    // Repro for #117: vite crashed with `write ECONNABORTED` under a burst of
+    // board-event WS traffic after serving fine for minutes. Treating that as
+    // fatal left the client permanently dead instead of restarting it.
+    expect(classifyProcessExit(1, null, { uptimeMs: HEALTHY_UPTIME_MS })).toBe("retry");
+    expect(classifyProcessExit(1, null, { uptimeMs: 5 * 60_000 })).toBe("retry");
   });
 
   it("retries unexpected nonfatal exit codes", () => {
@@ -148,6 +195,164 @@ describe("server dev proxy", () => {
       if (proxy) await closeServer(proxy).catch(() => {});
       if (backend.listening) await closeServer(backend).catch(() => {});
       if (restartedBackend?.listening) await closeServer(restartedBackend).catch(() => {});
+    }
+  });
+
+  it("keeps WebSocket upgrades reachable while the watched backend restarts (#144)", async () => {
+    // Repro for #144: a self-hosted auto-merge that touches watched server/shared
+    // source makes tsx watch restart the backend the merge is running inside. The
+    // HTTP leg of this proxy already retries through that ~restart window (see the
+    // test above), but the WS upgrade leg failed a proxied WS connection instantly
+    // with a 503 instead of waiting for the backend to come back — every board-event
+    // / session-stream socket caught mid-restart died immediately and (with the
+    // client's own reconnect loop) flooded reconnect/error noise for the whole
+    // window instead of just riding it out like plain HTTP requests do.
+    const backend = createUpgradeBackend("before-restart");
+    let restartedBackend = null;
+    let proxy = null;
+
+    try {
+      await listen(backend, 0);
+      const backendPort = serverPort(backend);
+      proxy = createStableDevProxy({
+        publicPort: 0,
+        backendPort,
+        retryTimeoutMs: 2000,
+        retryDelayMs: 25,
+      });
+      await listen(proxy, 0);
+      const publicPort = serverPort(proxy);
+
+      await expect(requestUpgrade(publicPort)).resolves.toContain("before-restart");
+
+      await closeServer(backend);
+      const duringRestart = requestUpgrade(publicPort);
+      await new Promise((resolveRestart) => {
+        setTimeout(async () => {
+          restartedBackend = createUpgradeBackend("after-restart");
+          await listen(restartedBackend, backendPort);
+          resolveRestart();
+        }, 100);
+      });
+
+      await expect(duringRestart).resolves.toContain("after-restart");
+    } finally {
+      if (proxy) await closeServer(proxy).catch(() => {});
+      if (backend.listening) await closeServer(backend).catch(() => {});
+      if (restartedBackend?.listening) await closeServer(restartedBackend).catch(() => {});
+    }
+  });
+
+  it("survives clients aborting mid-response instead of crashing the whole dev stack", async () => {
+    // Repro for #117. A burst of workspace creations makes the client abort
+    // in-flight API responses (page reloads, vite restarting its ws-proxy).
+    // The proxy piped backendRes -> res with no 'error' listener on `res`, so
+    // the resulting ECONNABORTED/EPIPE write error surfaced as an uncaught
+    // exception, killing the dev-proxy process — which kills the tsx backend
+    // it supervises. One client-side hiccup took down the backend.
+    const uncaught = [];
+    const captureUncaught = (err) => uncaught.push(err);
+    process.on("uncaughtException", captureUncaught);
+
+    const timers = new Set();
+    const backend = createHttpServer((_req, res) => {
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.write("x".repeat(1024));
+      // Keep writing so the proxy is guaranteed to write to a client socket
+      // that has already gone away.
+      const timer = setInterval(() => {
+        try {
+          res.write("x".repeat(1024));
+        } catch {
+          // response already torn down
+        }
+      }, 5);
+      timers.add(timer);
+      res.on("close", () => {
+        clearInterval(timer);
+        timers.delete(timer);
+      });
+    });
+
+    let proxy = null;
+    try {
+      await listen(backend, 0);
+      proxy = createStableDevProxy({
+        publicPort: 0,
+        backendPort: serverPort(backend),
+        retryTimeoutMs: 2000,
+        retryDelayMs: 25,
+      });
+      await listen(proxy, 0);
+      const publicPort = serverPort(proxy);
+
+      // A burst of clients that all hang up as soon as bytes start flowing.
+      await Promise.all(
+        Array.from({ length: 8 }, () =>
+          new Promise((resolveAbort) => {
+            const req = httpRequest({ hostname: "127.0.0.1", port: publicPort, path: "/api/board" }, (res) => {
+              res.once("data", () => {
+                req.destroy();
+                resolveAbort();
+              });
+            });
+            req.on("error", () => resolveAbort());
+            req.end();
+          }),
+        ),
+      );
+
+      // Give the doomed writes time to surface.
+      await new Promise((r) => setTimeout(r, 300));
+
+      expect(uncaught.map((e) => e?.code ?? e?.message)).toEqual([]);
+      expect(proxy.listening).toBe(true);
+    } finally {
+      process.off("uncaughtException", captureUncaught);
+      for (const timer of timers) clearInterval(timer);
+      if (proxy) await closeServer(proxy).catch(() => {});
+      if (backend.listening) await closeServer(backend).catch(() => {});
+    }
+  });
+
+  it("does not accumulate response listeners while retrying a down backend", async () => {
+    // proxyWithRetry calls proxyOnce once per retry (~retryTimeoutMs/retryDelayMs
+    // times). Registering the client-abort listeners per attempt leaked two
+    // handlers per retry onto the same `res`, tripping Node's max-listeners
+    // warning on every request that hit a backend restart window.
+    const deadBackend = createHttpServer(() => {});
+    await listen(deadBackend, 0);
+    const deadPort = serverPort(deadBackend);
+    await closeServer(deadBackend); // nothing is listening on deadPort now
+
+    let proxy = null;
+    let peakListeners = 0;
+    try {
+      proxy = createStableDevProxy({
+        publicPort: 0,
+        backendPort: deadPort,
+        retryTimeoutMs: 600,
+        retryDelayMs: 10,
+      });
+      proxy.on("request", (_req, res) => {
+        const sample = setInterval(() => {
+          peakListeners = Math.max(peakListeners, res.listenerCount("close") + res.listenerCount("error"));
+        }, 20);
+        res.on("close", () => clearInterval(sample));
+      });
+      await listen(proxy, 0);
+      const publicPort = serverPort(proxy);
+
+      const { status } = await requestText(publicPort);
+      expect(status).toBe(503);
+      // Guard against a vacuous pass: the sampler must actually have observed
+      // the in-flight response, otherwise the bound below proves nothing.
+      expect(peakListeners).toBeGreaterThan(0);
+      // One 'error' + one 'close' from watchClient, plus whatever Node itself
+      // attaches. Per-attempt registration would have pushed this past 60.
+      expect(peakListeners).toBeLessThan(10);
+    } finally {
+      if (proxy) await closeServer(proxy).catch(() => {});
     }
   });
 

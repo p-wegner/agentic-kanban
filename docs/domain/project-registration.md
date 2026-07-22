@@ -215,10 +215,14 @@ rather than re-deriving. The `stack-profile.service.ts` façade is a **Shared
 Kernel** export surface kept byte-identical across the #911/#853 splits so its ~21
 importers are unaffected.
 
-**Hidden coupling:** `saveStackProfile` (`persistence.ts:142`) has filesystem
-side-effects (writes `.claude/smart-hooks-rules.json` + the test scaffold into the
-repo) that no type signature advertises — a reader expecting a pure DB write will
-miss that persisting a profile mutates the working tree.
+**Scaffold writes are opt-in (#41):** persisting a profile is a pure DB write by
+default. `saveStackProfile` / `populateStackProfile` only materialize the
+profile-derived files (`.claude/smart-hooks-rules.json` + the test scaffold) when
+passed `{ scaffold: true }`, so a *read* never mutates the working tree — a plain
+`GET /api/projects/:id/stack-profile` used to write both files into the user's repo.
+The only opt-in caller is `scaffoldAndPopulateProject`, which sequences
+ensure\* → populate (`scaffold: true`) → `commitProjectScaffoldArtifacts`, so
+everything the board writes is also committed and registration leaves a clean tree.
 
 ## File topology
 

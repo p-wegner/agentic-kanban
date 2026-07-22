@@ -63,10 +63,11 @@ const COHESION_MAX_FN_DECLS = 20;
 const COHESION_BASELINE: Record<string, number> = {
   // session-summary.ts rewritten to consume the agent-stream parsers (#951) — entry removed.
   "packages/server/src/services/butler-sdk.service.ts": 30,
-  // #957: the blanket /repositories/ cohesion exemption was removed — the two large
+  // #957: the blanket /repositories/ cohesion exemption was removed — the large
   // aggregate repositories are now RATCHETED instead of invisible. They may only shrink.
   "packages/server/src/repositories/issue.repository.ts": 36,
-  "packages/server/src/repositories/session.repository.ts": 32,
+  // session.repository.ts decomposed into ./session/* sub-modules (#45); the facade
+  // barrel re-exports only, so its baseline entry is removed.
   // stack-profile.service.ts decomposed behind a facade barrel (#911) — entry removed.
   "packages/server/src/services/agent.service.ts": 27,
   "packages/server/src/services/insights.service.ts": 23,

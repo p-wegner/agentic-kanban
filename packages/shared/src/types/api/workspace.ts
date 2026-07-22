@@ -1,6 +1,7 @@
 // Workspace / showdown / launch-failure / timeline wire-contract types (pure DTOs).
 // See ../api.ts barrel.
 import type { ProfileSelection } from "./common.js";
+import type { ServiceStackState } from "../service-stack.js";
 
 export interface MainWorkspaceInfo {
   id: string;
@@ -156,6 +157,71 @@ export interface WorkspaceResponse {
   conflicts?: { hasConflicts: boolean; conflictingFiles: string[] } | null;
   latestSetup?: WorkspaceSetupRun | null;
   latestSymlink?: WorkspaceSymlinkRun | null;
+  /** Per-workspace Docker service stack status + allocated host ports (null = no stack). */
+  serviceState?: ServiceStackState | null;
+}
+
+/** One repo's entry in GET /api/workspaces/:id/repo-merge-status (#70/#75). */
+export interface RepoMergeStatusRepoEntry {
+  /** Sibling repo name; null for the leading repo. */
+  name: string | null;
+  path: string;
+  isLeading: boolean;
+  /** The repo's branch ever diverged from base (or a sibling merge was stamped). */
+  hasWork: boolean;
+  /** Commits on the branch not yet on base (0 once landed). */
+  ahead: number;
+  /** The work has landed on base. */
+  merged: boolean;
+  /** Has work, but it is NOT on base — the #69 failure mode, made visible. */
+  stranded: boolean;
+}
+
+/** Response of GET /api/workspaces/:id/repo-merge-status (multi-repo, non-direct workspaces). */
+export interface RepoMergeStatusResponse {
+  branch: string | null;
+  baseBranch: string;
+  allMerged: boolean;
+  repos: RepoMergeStatusRepoEntry[];
+}
+
+/**
+ * Response of POST /api/workspaces/:id/repos/:repoName/rebase (per-repo rebase, #93).
+ * The reserved `:repoName` for the leading repo is `LEADING_REPO_KEY` (a runtime value,
+ * so it lives in lib/branch.ts, re-exported through the barrel).
+ */
+export interface RepoRebaseResponse {
+  /** Which repo was rebased — a sibling name, or "leading" for the leading repo. */
+  repo: string;
+  /** The rebase completed cleanly onto the latest base. */
+  success: boolean;
+  /** Files with conflicts when the rebase could not complete (the rebase was aborted, tree left clean). */
+  conflictingFiles?: string[];
+  error?: string;
+}
+
+/** One repo's HANDOFF.md metadata in GET /api/workspaces/:id/handoff (#89). */
+export interface WorkspaceHandoffRepoEntry {
+  /** Sibling repo name; null for the leading repo. */
+  name: string | null;
+  /** A HANDOFF.md exists in this repo's worktree. */
+  exists: boolean;
+  /** ISO mtime of the file (null when absent) — the client's poll+delta key. */
+  updatedAt: string | null;
+  /** Leading, truncated slice of the file content (null when absent). */
+  excerpt: string | null;
+}
+
+/**
+ * Response of GET /api/workspaces/:id/handoff (#89): the leading repo's HANDOFF.md
+ * metadata at the top level (the common single-repo shape), plus a per-repo `repos`
+ * array covering the leading repo and every sibling worktree.
+ */
+export interface WorkspaceHandoffResponse {
+  exists: boolean;
+  updatedAt: string | null;
+  excerpt: string | null;
+  repos: WorkspaceHandoffRepoEntry[];
 }
 
 export interface ShowdownContestant {

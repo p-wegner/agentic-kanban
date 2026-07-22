@@ -41,6 +41,8 @@ export type ViewMode =
   | "momentum"
   | "fireworks"
   | "activity"
+  | "cross-repo-activity"
+  | "agent-flight-recorder"
   | "stale-work"
   | "throughput"
   | "provider-mix"
@@ -255,6 +257,19 @@ const ICON = {
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h2M19 12h2M12 3v2M12 19v2" />
+    </svg>
+  ),
+  "cross-repo-activity": (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <circle cx="6" cy="6" r="2" />
+      <circle cx="6" cy="18" r="2" />
+      <circle cx="18" cy="12" r="2" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 8v8M8 6h5a3 3 0 013 3v1M8 18h5a3 3 0 003-3v-1" />
+    </svg>
+  ),
+  "agent-flight-recorder": (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h3l2 5 4-14 2 9 2-3h5" />
     </svg>
   ),
   "stale-work": (
@@ -638,6 +653,28 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteDescription: "Project-wide activity: status transitions, merges, sessions in reverse-chronological order",
     // No single-key shortcut: "x" is a reserved global board action (see
     // useBoardKeyboardShortcuts). Reachable via the More menu and Ctrl+K palette.
+    group: "secondary",
+  },
+  {
+    id: "cross-repo-activity",
+    toolbarLabel: "Cross-Repo",
+    label: "Cross-Repo Activity",
+    tooltip: "Cross-Repo Activity — live timeline of merges, commits, and conflicts across a multi-repo project's repos",
+    icon: ICON["cross-repo-activity"],
+    paletteIcon: "CR",
+    paletteDescription: "Live, repo-labeled timeline of what is landing across a multi-repo project (merges, commits, conflicts)",
+    activeClass: "bg-indigo-600 text-white",
+    group: "secondary",
+  },
+  {
+    id: "agent-flight-recorder",
+    toolbarLabel: "Flight Rec",
+    label: "Agent Flight Recorder",
+    tooltip: "Agent Flight Recorder — one live, filterable stream of high-signal agent-runtime events (tool errors, questions, stalls, status changes, merges) across all active workspaces",
+    icon: ICON["agent-flight-recorder"],
+    paletteIcon: "FR",
+    paletteDescription: "Unified live runtime-event stream across the fleet — filter by workspace, repo, or severity; jump to any transcript",
+    activeClass: "bg-indigo-600 text-white",
     group: "secondary",
   },
   {

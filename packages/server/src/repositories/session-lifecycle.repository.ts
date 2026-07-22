@@ -1,11 +1,16 @@
-import { sessions, sessionMessages, workspaces, issues, preferences, agentSkills } from "@agentic-kanban/shared/schema";
+import { sessions, sessionMessages, workspaces, issues, preferences } from "@agentic-kanban/shared/schema";
 import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
 import { setWorkspaceStatus, type WorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
-import { getSessionStatsRaw, getSessionStatus as getSessionStatusCanonical } from "./session.repository.js";
+import {
+  clearSessionProviderSessionId,
+  getSessionStatsRaw,
+  getSessionStatus as getSessionStatusCanonical,
+  getSessionWorkspaceId as getSessionWorkspaceIdCanonical,
+} from "./session.repository.js";
 
 export async function getWorkspaceById(
   workspaceId: string,
@@ -49,16 +54,15 @@ export async function getPrevSessionResumeInfo(
   return rows[0] ?? null;
 }
 
-export async function getAgentSkillName(
-  skillId: string,
+/**
+ * Clear a session's stored provider session id (#26 missing-transcript fallback) so a
+ * future resume off this row can't keep forwarding a dead `--resume <id>`.
+ */
+export async function clearProviderSessionId(
+  sessionId: string,
   database: Database = db,
-): Promise<string | null> {
-  const rows = await database
-    .select({ name: agentSkills.name })
-    .from(agentSkills)
-    .where(eq(agentSkills.id, skillId))
-    .limit(1);
-  return rows[0]?.name ?? null;
+): Promise<void> {
+  await clearSessionProviderSessionId(sessionId, database);
 }
 
 export async function getPreferenceValue(
@@ -230,9 +234,6 @@ export async function getSessionWorkspaceId(
   sessionId: string,
   database: Database = db,
 ) {
-  const rows = await database.select({ workspaceId: sessions.workspaceId })
-    .from(sessions)
-    .where(eq(sessions.id, sessionId))
-    .limit(1);
-  return rows[0] ?? null;
+  const workspaceId = await getSessionWorkspaceIdCanonical(sessionId, database);
+  return workspaceId === null ? null : { workspaceId };
 }

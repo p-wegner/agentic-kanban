@@ -20,6 +20,8 @@ import { teardownWorktree, killProcessTree, removeDirWithRetry } from "./workspa
 import { resolveProjectRepo, getWorkspaceById } from "../repositories/workspace.repository.js";
 import * as crudRepo from "../repositories/workspace-crud.repository.js";
 import type { GitService } from "./workspace-internals.js";
+import { cleanupSiblingWorktrees } from "./workspace-repos.service.js";
+import { reapWorkspaceContainer } from "./devcontainer-workspace.service.js";
 
 export interface StaleWorktreeEntry {
   id: string;
@@ -107,13 +109,21 @@ export function createWorkspaceCleanupService(deps: {
     branch?: string | null;
     teardownScript?: string | null;
     setupEnabled?: boolean | null;
+    /** Scopes devcontainer dependency-volume teardown (#138). */
+    workspaceId?: string;
   }): Promise<void> {
-    const { workingDir, repoPath, isDirect, branch, teardownScript, setupEnabled } = params;
+    const { workingDir, repoPath, isDirect, branch, teardownScript, setupEnabled, workspaceId } = params;
 
     // Free everything the worktree spun up BEFORE removing it: dir procs + the
     // worktree's dev ports + the project's generic teardownScript. Killing the
     // dir/port holders first also prevents the EBUSY/ENOTEMPTY removal race.
     await teardownWorktree({ workingDir, branch, isDirect, teardownScript, setupEnabled, label: "delete" });
+
+    // Devcontainer builder + its dependency volumes (#138). Ordered before the
+    // directory removal for the same reason as teardownWorktree: the container
+    // bind-mounts this directory and holds the volumes open. No-op for a
+    // workspace that was never containerized.
+    await reapWorkspaceContainer({ worktreePath: workingDir, workspaceId });
 
     // Use git as the authoritative step to drop the worktree registration + branch
     // (`git worktree remove --force` also deletes the directory). This succeeds even
@@ -238,6 +248,12 @@ export function createWorkspaceCleanupService(deps: {
       const message = err instanceof Error ? err.message : String(err);
       return { success: false, error: `Failed to remove worktree: ${message}` };
     }
+
+    // Multi-repo: sibling worktrees + branches too (no-op single-repo). Stale
+    // cleanup, like closeWorkspace, never touches the LEADING branch — so mirror
+    // that per sibling repo: preserveUnmerged keeps a sibling branch that still
+    // carries unmerged commits instead of force-deleting the work.
+    await cleanupSiblingWorktrees(gitService, workspaceId, database, { preserveUnmerged: true });
 
     // Null out workingDir so it no longer shows as stale
     const now = new Date().toISOString();

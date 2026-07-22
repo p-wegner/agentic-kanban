@@ -6,6 +6,7 @@ import { createBoardEvents } from "../services/board-events.js";
 import type { MonitorActionName } from "../services/monitor-nudge.js";
 import { resolveMonitorTunables } from "../services/strategy-objective.service.js";
 import { isMonitorEligibleIssue, monitorEligibleIssueSql } from "./monitor-eligibility.js";
+import { buildFileContentionGate, shouldDeferForContention, type BuildFileContentionGate } from "./monitor-file-contention.js";
 
 /** Issues carrying this tag are an explicit opt-out of monitor auto-start. */
 const SKIP_AUTO_START_TAG = "no-auto-start";
@@ -127,9 +128,16 @@ export interface AutoStartDeps {
    * status promotion. Defaults to false (Backlog stays a triage area for non-driven projects).
    */
   isAutoDrivenProject?: (projectId: string) => boolean;
+  /**
+   * Builds the per-project shared-registration-file contention gate (#119).
+   * Defaults to the real DB-backed builder, so production needs no wiring;
+   * injectable so tests of unrelated auto-start logic can pass an open gate
+   * instead of modelling this module's queries.
+   */
+  buildContentionGate?: BuildFileContentionGate;
 }
 
-export async function runAutoStart(prefMap: Map<string, string>, { serverPort, boardEvents, logMonitorAction, allowProject, isAutoDrivenProject = () => false }: AutoStartDeps) {
+export async function runAutoStart(prefMap: Map<string, string>, { serverPort, boardEvents, logMonitorAction, allowProject, isAutoDrivenProject = () => false, buildContentionGate = buildFileContentionGate }: AutoStartDeps) {
   const baseUrl = `http://127.0.0.1:${serverPort}`;
   const inProgressStatuses = (await db.select({ id: projectStatuses.id, projectId: projectStatuses.projectId }).from(projectStatuses)
     .where(sql`${projectStatuses.name} = 'In Progress'`))
@@ -160,6 +168,9 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
     }
     if (currentWip >= wipLimit) continue;
 
+    // #119: one snapshot per project per loop, then a cheap synchronous check per candidate.
+    const contentionGate = await buildContentionGate(prefMap, inProgressSt.projectId);
+
     const inProgressIssues = await db.select({ id: issues.id, title: issues.title, description: issues.description, issueType: issues.issueType, issueNumber: issues.issueNumber }).from(issues)
       .where(and(eq(issues.statusId, inProgressSt.id), notDriveOrEpicMetaSql())); // #824: don't backfill a builder onto a meta created directly In Progress
     for (const issue of inProgressIssues) {
@@ -170,6 +181,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       if (openWs.length > 0) continue;
       if (!isMonitorEligibleIssue(issue, allowFeatureTypes)) continue;
       if (await hasSkipAutoStartTag(issue.id)) continue;
+      if (shouldDeferForContention(contentionGate, issue.id, issue.issueNumber)) continue;
       const branchSlug = issue.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").substring(0, 40);
       const branch = `feature/ak-${issue.issueNumber}-${branchSlug}`;
       const prompt = issue.description ? `${issue.title}\n\n${issue.description}` : issue.title;
@@ -186,6 +198,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       // (#775) so it is no longer invisible in the monitor logs / recentActions.
       currentWip++;
       noteStart(inProgressSt.projectId);
+      contentionGate.noteStarted(issue.id);
       if (!resp || !resp.ok) {
         const body = resp ? await resp.text().catch(() => "") : "";
         console.warn(`[monitor] Auto-start FAILED for In Progress issue #${issue.issueNumber} (${issue.id}): ${resp ? `HTTP ${resp.status} ${body.slice(0, 500)}` : "no response"}`);
@@ -213,6 +226,10 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
     if (todoStatus.length === 0) continue;
 
     const slotsAvailable = wipLimit - currentWip;
+    // #119: snapshot once, then gate each candidate; launches this cycle feed back
+    // via noteStarted so two backlog tickets sharing a registration file don't both
+    // start in the SAME cycle.
+    const contentionGate = await buildContentionGate(prefMap, inProgressSt.projectId);
 
     // For auto-driven projects, also pull Backlog issues so newly-created tickets
     // start without requiring a manual Backlog→Todo promotion (#536).
@@ -248,6 +265,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       if (existingWs.length > 0) continue;
       if (!isMonitorEligibleIssue(issue, allowFeatureTypes)) continue;
       if (await hasSkipAutoStartTag(issue.id)) continue;
+      if (shouldDeferForContention(contentionGate, issue.id, issue.issueNumber)) continue;
 
       const deps = await db.select({ dependsOnId: issueDependencies.dependsOnId }).from(issueDependencies)
         .where(sql`${issueDependencies.issueId} = ${issue.id} AND (${issueDependencies.type} = 'depends_on' OR ${issueDependencies.type} = 'blocked_by')`);
@@ -306,6 +324,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
         boardEvents.broadcast(issue.projectId, "board_changed");
         started++;
         noteStart(inProgressSt.projectId);
+        contentionGate.noteStarted(issue.id);
       } else if (resp) {
         // #775: a non-ok response (e.g. HTTP 400 "No default branch") was previously
         // invisible — no log, no recorded action. Warn with the status + body and record

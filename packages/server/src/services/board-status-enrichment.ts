@@ -1,6 +1,7 @@
 import type { db } from "../db/index.js";
 import type { workspaces } from "@agentic-kanban/shared/schema";
 import { detectConflicts } from "./git.service.js";
+import { listWorkspaceRepos } from "../repositories/repo.repository.js";
 import { getWorkspaceDiffStats } from "./workspace-diff-stats.js";
 import { extractMeaningfulOutput } from "@agentic-kanban/shared";
 import type { BoardStatusIssue } from "@agentic-kanban/shared";
@@ -57,7 +58,7 @@ export function collectBoardStatusEntryWork(
       entry.conflicts = cached.result;
     } else {
       work.push(
-        detectConflicts(workingDir, baseBranch)
+        detectMultiRepoConflicts(mainWs, workingDir, baseBranch, database)
           .then(result => {
             conflictCache.set(mainWs.id, { result, ts: Date.now() });
             entry.conflicts = result;
@@ -72,6 +73,51 @@ export function collectBoardStatusEntryWork(
   }
 
   return work;
+}
+
+/**
+ * Conflict detection across a multi-repo workspace's LEADING worktree AND every sibling
+ * worktree (#76). The board conflict badge used to probe the leading worktree only, so a
+ * workspace whose only conflict-against-base lived in a sibling repo showed as clean — a
+ * false "safe to merge" signal (the atomic sibling prevalidation still blocked the real
+ * merge, but the board gave no early warning). Mirrors the sibling scan merge-queue already
+ * does for overlap (#72): each sibling's conflicting files are namespaced `name::file` so
+ * they stay distinguishable from the leading repo's. detectConflicts is a read-only
+ * merge-tree probe, and the whole result is TTL-cached by the caller, so the extra per-repo
+ * probes are cheap and amortized. Best-effort per repo: a sibling that can't be probed never
+ * masks a real leading conflict, and a failed leading probe degrades to no-conflicts.
+ */
+export async function detectMultiRepoConflicts(
+  mainWs: WorkspaceRow,
+  workingDir: string,
+  baseBranch: string,
+  database: typeof db,
+  detect: (repoDir: string, base: string) => Promise<{ hasConflicts: boolean; conflictingFiles: string[] }> = detectConflicts,
+): Promise<{ hasConflicts: boolean; conflictingFiles: string[] }> {
+  const leading = await detect(workingDir, baseBranch).catch(() => ({ hasConflicts: false, conflictingFiles: [] as string[] }));
+  let hasConflicts = leading.hasConflicts;
+  const conflictingFiles = [...leading.conflictingFiles];
+
+  if (!mainWs.isDirect) {
+    let siblings: Awaited<ReturnType<typeof listWorkspaceRepos>> = [];
+    try {
+      siblings = await listWorkspaceRepos(mainWs.id, database);
+    } catch {
+      return { hasConflicts, conflictingFiles }; // leading-only if the sibling scan fails
+    }
+    for (const repo of siblings) {
+      if (!repo.worktreePath) continue;
+      const repoBase = repo.baseBranch || baseBranch;
+      const ns = repo.name ?? repo.path;
+      const res = await detect(repo.worktreePath, repoBase).catch(() => null);
+      if (res?.hasConflicts) {
+        hasConflicts = true;
+        for (const f of res.conflictingFiles) conflictingFiles.push(`${ns}::${f}`);
+      }
+    }
+  }
+
+  return { hasConflicts, conflictingFiles };
 }
 
 /**

@@ -1,10 +1,10 @@
-import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gitExecSync } from "@agentic-kanban/shared/lib/git-exec";
-import { getCurrentBranch } from "@agentic-kanban/shared/lib/git-service";
 import { db, type Database } from "../db/index.js";
 import { getBoardNavigatorSkillId } from "../repositories/project-scaffold.repository.js";
+import { ensureBuildableFromClean } from "./project-scaffold/buildable-from-clean.js";
 
 /**
  * New-project scaffold: the small, project-agnostic, clobber-safe pieces the board writes when a
@@ -13,324 +13,51 @@ import { getBoardNavigatorSkillId } from "../repositories/project-scaffold.repos
  * Deliberately GENERIC — only translate the *ideas* the board relies on; never embed
  * board-specific entries (kanban.db, agentic-kanban paths). Heavier constructs (hook delivery,
  * a verify-gate runner, objective.md, bundling skills into repos) are tracked as separate tickets.
- */
-
-/**
- * Generic artifacts an AI coding agent may write into a worktree during a session — scratch, not
- * project source. Appended (if missing) to every scaffolded/imported project's .gitignore so they
- * never get committed to the project's history (this was a real pollution bug: CLAUDE.local.md /
- * verify-*.png / .playwright-cli landed on a project's master). Project-agnostic ONLY.
- */
-export const GENERIC_AGENT_GITIGNORE = [
-  "CLAUDE.local.md",
-  "HANDOFF.md",
-  "verify-*.png",
-  ".playwright-cli/",
-  ".claude/settings.local.json",
-  ".claude/hooks/.edited-files.json",
-  ".claude/hooks/.smart-hooks-state.json",
-  ".claude/hooks/.verify-gate-state.json",
-  ".claude/hooks/.verify-gate-escalation.json",
-  ".claude/scheduled_tasks.lock",
-  // App-run capture logs the board's smoke/visual-verification (agent-launched `gradlew run`
-  // / dev-server) leaves in the repo ROOT (#825). The reviewer invents arbitrary names
-  // (app.log, app2.log, final-run.log, gallery-stderr.log, install3.log, …), so the only robust
-  // catch is a ROOT-level `*.log` ignore. Anchored with "/" so a project's own logs/*.log is
-  // unaffected; root-level .log files in a checkout are virtually always runtime/agent artifacts.
-  "/*.log",
-  "/classpath.txt",
-  ".verify/", // the directory visual-verification is told to write screenshots/logs into
-  "/*-review.png", // reviewer screenshots that miss the verify-*.png pattern
-];
-
-const AGENT_GITIGNORE_HEADER = "# AI agent artifacts (written during a workspace session; not project source)";
-const STACK_BUILD_GITIGNORE_HEADER = "# Build output (per-stack; generated, not source — keeps a fresh worktree's main clean for auto-merge)";
-const SCAFFOLD_COMMIT_MESSAGE = "chore: scaffold agent guards and onboarding";
-const DURABLE_CLAUDE_SCAFFOLD_PATHS = [
-  ".claude/settings.json",
-  ".claude/hooks/README.md",
-  ".claude/hooks/smart-hooks-runner.js",
-  ".claude/hooks/vital-file-guard.js",
-  ".claude/hooks/vital-files.json",
-  ".claude/hooks/prevent-cross-worktree-writes.js",
-  ".claude/hooks/smart-hooks-config.json",
-  ".claude/hooks/verify-gate-runner.js",
-  ".claude/hooks/verify-gate.config.json",
-  ".claude/smart-hooks-rules.json",
-];
-
-/**
- * Per-stack build/compile output that a builder agent inevitably produces in a worktree but that
- * is NOT project source. Without these ignored, a cargo/python/java toy-project leaves `target/`,
- * `__pycache__/`, `dist/`, `*.class` etc. untracked after the first build, which makes the main
- * checkout dirty and blocks auto-merge (`dirty_main`) — a recurring obstacle on fresh non-Node
- * projects (#811). The generic Node/TS case was already covered ad-hoc by language templates; this
- * extends the same protection to every stack the profile detector recognizes.
  *
- * Keyed by the coarse `StackProfile.stack` family. Lines are .gitignore patterns, deduped against
- * whatever the repo already ignores, so this never clobbers a hand-written .gitignore.
- */
-export const STACK_BUILD_ARTIFACT_GITIGNORE: Record<string, string[]> = {
-  node: ["node_modules/", "dist/", "build/", "*.tsbuildinfo", ".next/", "coverage/"],
-  rust: ["target/", "**/*.rs.bk"],
-  go: ["bin/", "*.exe", "*.test", "*.out"],
-  python: ["__pycache__/", "*.py[cod]", "*.egg-info/", ".pytest_cache/", ".mypy_cache/", ".ruff_cache/", "build/", "dist/", ".venv/"],
-  java: ["target/", "build/", "*.class", ".gradle/", "out/"],
-  ruby: ["*.gem", ".bundle/", "vendor/bundle/", "tmp/"],
-  elixir: ["_build/", "deps/", "*.beam", "cover/"],
-};
-
-/**
- * Build-artifact .gitignore lines for a stack family, or [] for an unknown/null stack.
- * Pure — callers feed the result into `ensureAgentGitignore` so per-stack output stays untracked.
- */
-export function stackBuildArtifactGitignore(stack: string | null | undefined): string[] {
-  if (!stack) return [];
-  return STACK_BUILD_ARTIFACT_GITIGNORE[stack] ?? [];
-}
-
-function statusLineToPath(line: string): string {
-  const raw = line.slice(3).trim();
-  if (!raw) return "";
-  const arrow = raw.indexOf(" -> ");
-  return arrow >= 0 ? raw.slice(arrow + 4) : raw;
-}
-
-function isScaffoldTrackedPath(pathName: string): boolean {
-  if (pathName === ".gitignore" || pathName === "CLAUDE.md" || pathName === "AGENTS.md") return true;
-  return pathName === ".claude" || pathName.startsWith(".claude/");
-}
-
-/**
- * Commit board-authored scaffold files in the main checkout so future workspace
- * worktrees fork from a clean main branch and auto-merge does not fail on dirty_main.
+ * FACADE (god-module gate, #875/#888/#889): the single-file version grew past the 1000-line
+ * hard ceiling, so it was split by responsibility into ./project-scaffold/* and re-exported
+ * here — see stack-profile.service.ts / agent-stream-parser.ts for the same pattern. The PUBLIC
+ * export surface is byte-identical, so the existing importers (project-registration.ts,
+ * project.service.ts, cli/commands/*, startup/exit-workflow.ts, stack-profile/persistence.ts,
+ * tests) are unchanged.
  *
- * Behavior:
- * - non-fatal on all failures (registration must not block),
- * - no-op on detached HEAD (explicitly skip),
- * - no-op unless one of the scaffold paths changed in git status,
- * - commits only the scaffold paths by explicit message.
+ * The hook-scaffold / verify-gate helpers below stay in this module ON PURPOSE: `resolveHookSource`
+ * anchors on `import.meta.url` (this file's directory) to locate the shipped hook sources, so
+ * moving them into a subdirectory would silently shift every packaged/dev lookup path by one level.
  */
-export async function commitProjectScaffoldArtifacts(repoPath: string): Promise<void> {
-  try {
-    const branch = await getCurrentBranch(repoPath);
-    if (branch === "HEAD") return;
 
-    const status = gitExecSync(["status", "--porcelain", "--untracked-files=all"], {
-      cwd: repoPath,
-      stdio: ["ignore", "pipe", "ignore"],
-    });
+// --- .gitignore scaffold (generic agent artifacts + per-stack build output, #811) ---
+export {
+  GENERIC_AGENT_GITIGNORE,
+  STACK_BUILD_ARTIFACT_GITIGNORE,
+  stackBuildArtifactGitignore,
+  ensureAgentGitignore,
+} from "./project-scaffold/gitignore.js";
 
-    const pathsToCommit = new Set<string>();
-    for (const line of status.split("\n")) {
-      const pathName = statusLineToPath(line);
-      if (!isScaffoldTrackedPath(pathName)) continue;
+// --- Starter onboarding docs (CLAUDE.md / AGENTS.md) ---
+export {
+  STARTER_CLAUDE_MD,
+  ensureStarterClaudeMd,
+  STARTER_AGENTS_MD,
+  ensureStarterAgentsMd,
+} from "./project-scaffold/starter-docs.js";
 
-      if (pathName === ".gitignore") pathsToCommit.add(".gitignore");
-      if (pathName === "CLAUDE.md") pathsToCommit.add("CLAUDE.md");
-      if (pathName === "AGENTS.md") pathsToCommit.add("AGENTS.md");
-    }
+// --- "Buildable from clean" scaffold — per-package-manager (#777, #783, #789) ---
+export {
+  PNPM_BUILD_APPROVED_DEPS,
+  NATIVE_BUILD_APPROVED_DEPS,
+  PNPM_PACKAGE_MANAGER_PIN,
+  PACKAGE_MANAGER_PINS,
+  ensureBuildableFromClean,
+  ensurePnpmBuildApproval,
+} from "./project-scaffold/buildable-from-clean.js";
 
-    for (const pathName of DURABLE_CLAUDE_SCAFFOLD_PATHS) {
-      if (existsSync(join(repoPath, ...pathName.split("/")))) pathsToCommit.add(pathName);
-    }
-
-    if (pathsToCommit.size === 0) return;
-    const paths = [...pathsToCommit];
-    const regularPaths = paths.filter((pathName) => !pathName.startsWith(".claude/"));
-    const claudePaths = paths.filter((pathName) => pathName.startsWith(".claude/"));
-
-    if (regularPaths.length > 0) {
-      gitExecSync(["add", "-A", "--", ...regularPaths], {
-        cwd: repoPath,
-        stdio: ["ignore", "ignore", "ignore"],
-      });
-    }
-    if (claudePaths.length > 0) {
-      gitExecSync(["add", "-f", "--", ...claudePaths], {
-        cwd: repoPath,
-        stdio: ["ignore", "ignore", "ignore"],
-      });
-    }
-
-    try {
-      gitExecSync(["diff", "--cached", "--quiet", "--", ...paths], {
-        cwd: repoPath,
-        stdio: ["ignore", "ignore", "ignore"],
-      });
-      return;
-    } catch {
-      gitExecSync(["commit", "-m", SCAFFOLD_COMMIT_MESSAGE, "--", ...paths], {
-        cwd: repoPath,
-        stdio: ["ignore", "ignore", "ignore"],
-      });
-    }
-  } catch {
-    /* non-fatal: registration must never fail because of scaffold commit */
-  }
-}
-
-/**
- * Ensure the generic agent-artifact ignore lines (and, when a stack is known, that stack's
- * build-output lines) are present in the repo's .gitignore.
- * - No .gitignore: write the optional language template, then the agent block, then the
- *   per-stack build-artifact block (when a stack is given).
- * - Existing .gitignore: append only the lines (from either block) that aren't already present.
- * Clobber-safe and idempotent — never rewrites or removes existing entries; a second run with
- * the same stack is a no-op. Non-fatal on any error.
- *
- * @param stack the coarse `StackProfile.stack` family (e.g. "rust", "python", "java"). When given,
- *   the matching build-output patterns are added so a non-Node stack's build output never makes
- *   the main checkout dirty and blocks auto-merge (#811). Omit (or pass null) to skip — e.g. when
- *   the stack is not yet known.
- */
-export function ensureAgentGitignore(repoPath: string, languageTemplate?: string, stack?: string | null): void {
-  try {
-    const gitignorePath = join(repoPath, ".gitignore");
-    const stackLines = stackBuildArtifactGitignore(stack);
-    const stackBlock = stackLines.length
-      ? `\n${STACK_BUILD_GITIGNORE_HEADER}\n${stackLines.join("\n")}\n`
-      : "";
-
-    if (!existsSync(gitignorePath)) {
-      const base = languageTemplate ? languageTemplate.replace(/\s*$/, "") + "\n\n" : "";
-      writeFileSync(
-        gitignorePath,
-        `${base}${AGENT_GITIGNORE_HEADER}\n${GENERIC_AGENT_GITIGNORE.join("\n")}\n${stackBlock}`,
-        "utf8",
-      );
-      return;
-    }
-
-    const existing = readFileSync(gitignorePath, "utf8");
-    const present = new Set(existing.split(/\r?\n/).map((line) => line.trim()));
-    const missingAgent = GENERIC_AGENT_GITIGNORE.filter((line) => !present.has(line));
-    const missingStack = stackLines.filter((line) => !present.has(line));
-    if (missingAgent.length === 0 && missingStack.length === 0) return;
-
-    const sep = existing.endsWith("\n") ? "" : "\n";
-    let appended = sep;
-    if (missingAgent.length) appended += `\n${AGENT_GITIGNORE_HEADER}\n${missingAgent.join("\n")}\n`;
-    if (missingStack.length) appended += `\n${STACK_BUILD_GITIGNORE_HEADER}\n${missingStack.join("\n")}\n`;
-    appendFileSync(gitignorePath, appended);
-  } catch {
-    /* non-fatal: scaffolding must never block registration */
-  }
-}
-
-/**
- * A generic, project-agnostic starter CLAUDE.md. Translates the *ideas* the board relies on
- * (commit-when-done, scope discipline, no destructive git, an optional verify-gate, the
- * gitignored agent artifacts) without copying the board's own board-specific guidance.
- */
-export const STARTER_CLAUDE_MD = `# CLAUDE.md
-
-Guidance for AI coding agents working in this repository (and for the agentic-kanban board that
-orchestrates them). Edit freely to fit this project's stack and conventions.
-
-## Working agreement
-- **Commit your work when the task is done** — don't wait to be asked. Each ticket should end in a
-  commit on the workspace branch; the board reviews and merges from there.
-- **Stay in scope.** Change only what the ticket asks. If you spot an unrelated bug or improvement,
-  create a separate ticket instead of fixing it inline.
-- **Leave the worktree clean.** Commit (or delete) any files you create — stray uncommitted files
-  block the automatic merge.
-
-## Safety
-- **Never run destructive git** (\`git reset --hard\`, \`git push --force\`, history rewrites) and
-  don't delete files you didn't create. Prefer additive, reversible changes.
-- If an action would erase data or someone else's work, stop and surface it instead of proceeding.
-
-## Quality gate (recommended)
-- Set a **Verify Script** for this project (Project Settings -> Verify Script), e.g.
-  \`npm test && npm run build\`, \`pytest\`, or \`cargo test\`. The board runs it in your worktree
-  after a session and withholds the merge if it fails — so broken code can't be auto-approved.
-- Keep the app runnable and prefer adding/maintaining tests for what you change.
-- Visual verification is board-owned. Configure it in Project Settings with
-  \`visual_verification_mode\` and \`after_merge_verify_agent\`; builders should not install browsers,
-  run Playwright, take screenshots, or attach visual proof during implementation.
-
-## Agent artifacts
-Agents may write local scratch files during a session (\`CLAUDE.local.md\`, \`HANDOFF.md\`,
-\`verify-*.png\` screenshots, a \`.playwright-cli/\` dir). These are gitignored on purpose — they
-are not project source. Don't commit them.
-`;
-
-/** Write a starter CLAUDE.md only if the repo doesn't already have one. Non-fatal. */
-export function ensureStarterClaudeMd(repoPath: string): void {
-  try {
-    const claudeMdPath = join(repoPath, "CLAUDE.md");
-    if (!existsSync(claudeMdPath)) writeFileSync(claudeMdPath, STARTER_CLAUDE_MD, "utf8");
-  } catch {
-    /* non-fatal */
-  }
-}
-
-/**
- * A generic, project-agnostic starter AGENTS.md. **Codex reads AGENTS.md, not CLAUDE.md**, so a
- * freshly scaffolded project must carry the same working-agreement/safety baseline here AND a
- * compact PowerShell + codex pitfalls block. Without it, every new codex project re-pays the
- * "shell tax" — the recurring path-not-found / ParserError / $pid-automatic / native-stderr
- * failures (codex on one project: 503 shell calls, 28 failures; fleet PowerShell fails ~17%).
- * Keep this SHORT — it is read into every codex builder's context each session.
- */
-export const STARTER_AGENTS_MD = `# AGENTS.md
-
-Guidance for AI coding agents (codex reads THIS file, not CLAUDE.md) working in this repository.
-Edit freely to fit this project's stack and conventions.
-
-## Working agreement
-- **Commit your work when the task is done** — don't wait to be asked. Each ticket should end in a
-  commit on the workspace branch; the board reviews and merges from there.
-- **Stay in scope.** Change only what the ticket asks. File a separate ticket for unrelated bugs.
-- **Leave the worktree clean.** Commit (or delete) any files you create — stray uncommitted files
-  block the automatic merge.
-
-## Safety
-- **Never run destructive git** (\`git reset --hard\`, \`git push --force\`, history rewrites) and
-  don't delete files you didn't create. Prefer additive, reversible changes.
-- Visual verification is board-owned. Configure it with \`visual_verification_mode\` and
-  \`after_merge_verify_agent\`; builders should not install browsers, run Playwright, take
-  screenshots, or attach visual proof during implementation.
-
-## Use the right tool, not the shell
-Reach for a dedicated tool before a shell command — it's faster and doesn't fail on quoting.
-- **Read a file** with the read/view tool, **NOT** \`Get-Content\` / \`cat\`.
-- **Search** with the grep/search tool, **NOT** \`Select-String\` / \`findstr\`.
-- **Find files** with the glob/find tool, **NOT** \`Get-ChildItem -Recurse\`.
-- Prefer the board's MCP tools for board/issue/workspace operations over hand-rolled HTTP.
-
-## Windows PowerShell pitfalls (this is a Windows shell — these recur constantly)
-- **No \`&&\`, \`||\`, ternary, or \`??\`** (PowerShell 5.1). Run commands on separate lines, or use
-  \`;\` (unconditional) / \`if ($?) { ... }\` (conditional-on-success).
-- **Don't redirect native-exe stderr with \`2>&1\`** — PS 5.1 wraps each line as an ErrorRecord and
-  flips \`$?\`/exit to *failure on success*. stderr is already captured; leave it alone.
-- **Never name a variable \`$pid\`, \`$host\`, \`$home\`, \`$true\`, \`$null\`, or \`$pshome\`** — they are
-  read-only automatic variables; assigning silently keeps the built-in (so an id ends up wrong).
-  Use \`$procId\` / \`$projectId\` instead.
-- **\`$var:\` parses as a drive reference** — write \`"\${name}:"\` when a var is followed by a colon.
-- **Quote paths with spaces**, and avoid unterminated strings — a stray quote yields
-  \`ParserError: unterminated string\` and the whole command fails before it runs.
-- **\`-Path\` that doesn't exist throws \`path ... does not exist\`** — verify with \`Test-Path\` first
-  rather than assuming a relative path resolves from the current directory.
-- PS 5.1 has **no Unix \`head\`/\`tail\`/\`which\`/\`touch\`/\`grep\`** — use the dedicated read/search
-  tools above. Default file encoding is UTF-16; pass \`-Encoding utf8\` when writing files other
-  tools must read.
-
-## Agent artifacts
-Local scratch files (\`CLAUDE.local.md\`, \`HANDOFF.md\`, \`verify-*.png\`, \`.playwright-cli/\`) are
-gitignored on purpose — they are not project source. Don't commit them.
-`;
-
-/** Write a starter AGENTS.md only if the repo doesn't already have one. Non-fatal. */
-export function ensureStarterAgentsMd(repoPath: string): void {
-  try {
-    const agentsMdPath = join(repoPath, "AGENTS.md");
-    if (!existsSync(agentsMdPath)) writeFileSync(agentsMdPath, STARTER_AGENTS_MD, "utf8");
-  } catch {
-    /* non-fatal */
-  }
-}
+// --- Scaffold-write record (#38, #41) + the commit that consumes it ---
+// `recordScaffoldArtifactWrite` (producer) and `commitProjectScaffoldArtifacts` (consumer) share
+// ONE module-level record, owned by ./project-scaffold/scaffold-writes.js and imported by both —
+// never duplicated, or a write recorded by one side is invisible to the other (#38 dirty-main).
+export { recordScaffoldArtifactWrite } from "./project-scaffold/scaffold-writes.js";
+export { commitProjectScaffoldArtifacts } from "./project-scaffold/commit.js";
 
 // ---------------------------------------------------------------------------
 // Hook scaffold
@@ -703,202 +430,6 @@ export function ensureVerifyGateRunner(repoPath: string): void {
   } catch {
     /* non-fatal: scaffolding must never block registration */
   }
-}
-
-// ---------------------------------------------------------------------------
-// "Buildable from clean" scaffold — per-package-manager (#777, #783, #789)
-// ---------------------------------------------------------------------------
-
-/**
- * Native deps whose postinstall build step a strict package manager blocks by default until
- * approved. A scaffolded Vite/React/TS project pulls in esbuild (Vite's bundler); under pnpm
- * a missing approval fails `pnpm install` / `pnpm build` on a clean checkout with
- * `ERR_PNPM_IGNORED_BUILDS` (exit 1), and bun likewise refuses to run an untrusted package's
- * lifecycle scripts. Keep this list aligned with the board's own root package.json
- * `pnpm.onlyBuiltDependencies`. Used for BOTH pnpm `onlyBuiltDependencies` and bun
- * `trustedDependencies`.
- */
-export const PNPM_BUILD_APPROVED_DEPS = ["esbuild", "@swc/core"];
-
-/** Alias: the same approved native-build deps, named generically for non-pnpm callers. */
-export const NATIVE_BUILD_APPROVED_DEPS = PNPM_BUILD_APPROVED_DEPS;
-
-/**
- * A pnpm version that HONORS `pnpm.onlyBuiltDependencies`. The global pnpm 11.0.8 ignores
- * the approval config in package.json / pnpm-workspace.yaml / .npmrc entirely (still throws
- * ERR_PNPM_IGNORED_BUILDS on a clean install), so a scaffolded toy with no `packageManager`
- * pin runs under whatever global pnpm exists and fails. Pinning corepack to this version —
- * the same one the board itself uses — makes the approval take effect. (#783)
- */
-export const PNPM_PACKAGE_MANAGER_PIN = "pnpm@10.12.1";
-
-/**
- * `packageManager` corepack pins for the other Node managers (#789). A clean
- * `corepack <pm> install` resolves the project's lockfile under a deterministic manager
- * version instead of "whatever is global", which is what makes a fresh clone build the same
- * way the builder's worktree did. Versions chosen to match the lockfile formats the detector
- * already understands (yarn berry, the current npm/bun lines).
- */
-export const PACKAGE_MANAGER_PINS: Record<"pnpm" | "npm" | "yarn" | "bun", string> = {
-  pnpm: PNPM_PACKAGE_MANAGER_PIN,
-  npm: "npm@10.9.2",
-  yarn: "yarn@4.5.3",
-  bun: "bun@1.1.38",
-};
-
-/** The literal placeholder a buggy scaffold once emitted — must NEVER appear in output. */
-const PNPM_PLACEHOLDER_MARKER = "set this to true or false";
-
-/** Which Node package manager a repo uses, inferred from lockfiles + existing manifest config. */
-type NodePm = "pnpm" | "npm" | "yarn" | "bun";
-
-interface PmDetection {
-  /** The detected package manager. Defaults to "pnpm" for a bare package.json (the board's
-   *  default, and what the original #777/#783 logic assumed). */
-  pm: NodePm;
-  /** True only when a concrete signal (explicit pin or a lockfile) identified the manager —
-   *  the gate for PINNING `packageManager`. A bare package.json has `pinnable: false` so we
-   *  don't stamp a manager onto a repo that hasn't chosen one (matches the #783 test). */
-  pinnable: boolean;
-}
-
-function detectNodePmForApproval(repoPath: string, pkg: Record<string, unknown>): PmDetection {
-  const pm = typeof pkg.packageManager === "string" ? (pkg.packageManager) : "";
-  // An explicit packageManager pin is authoritative (it's already pinned, so pinnable is moot).
-  if (pm.startsWith("pnpm@")) return { pm: "pnpm", pinnable: true };
-  if (pm.startsWith("yarn@")) return { pm: "yarn", pinnable: true };
-  if (pm.startsWith("bun@")) return { pm: "bun", pinnable: true };
-  if (pm.startsWith("npm@")) return { pm: "npm", pinnable: true };
-  // Otherwise infer from lockfiles / pnpm config.
-  if (
-    pkg.pnpm !== undefined ||
-    existsSync(join(repoPath, "pnpm-lock.yaml")) ||
-    existsSync(join(repoPath, "pnpm-workspace.yaml"))
-  )
-    return { pm: "pnpm", pinnable: true };
-  if (existsSync(join(repoPath, "bun.lockb")) || existsSync(join(repoPath, "bun.lock")))
-    return { pm: "bun", pinnable: true };
-  if (existsSync(join(repoPath, "yarn.lock"))) return { pm: "yarn", pinnable: true };
-  if (existsSync(join(repoPath, "package-lock.json"))) return { pm: "npm", pinnable: true };
-  // Bare package.json, no lockfile yet: assume pnpm (the board default) for the build-script
-  // approval, but DON'T pin a manager onto a repo that hasn't chosen one.
-  return { pm: "pnpm", pinnable: false };
-}
-
-/**
- * Generalized "buildable from clean" scaffold (#789).
- *
- * Make a freshly-cloned project's build pass with NO manual approval prompts, whatever its
- * package manager:
- *  - **pnpm** — approve native build scripts (`pnpm.onlyBuiltDependencies`) + pin a pnpm version
- *    that honors them (#777/#783) + repair a broken `pnpm-workspace.yaml` placeholder.
- *  - **bun** — declare the same native deps as `trustedDependencies` (bun refuses untrusted
- *    postinstall scripts on a clean install) + pin `packageManager`.
- *  - **npm / yarn** — pin `packageManager` so the lockfile resolves under the right manager
- *    (npm/classic-yarn already run lifecycle scripts on a clean install, so no extra approval).
- *  - **cargo / go / python / java** — a clean clone builds without any approval gate; no-op.
- *
- * Returns true if it changed any file (so callers can commit the repair). Clobber-safe,
- * idempotent, non-fatal. Never clobbers a deliberate `packageManager` choice the project
- * already made.
- */
-export function ensureBuildableFromClean(repoPath: string): boolean {
-  let changed = false;
-  try {
-    const pkgJsonPath = join(repoPath, "package.json");
-    if (existsSync(pkgJsonPath)) {
-      const raw = readFileSync(pkgJsonPath, "utf8");
-      let pkg: Record<string, unknown>;
-      try {
-        pkg = JSON.parse(raw) as Record<string, unknown>;
-      } catch {
-        pkg = {};
-      }
-      let pkgChanged = false;
-
-      const { pm, pinnable } = detectNodePmForApproval(repoPath, pkg);
-
-      // 1. Approve native build scripts under the strict managers that block them by default.
-      if (pm === "pnpm") {
-        // pnpm: `pnpm.onlyBuiltDependencies` is the canonical approval mechanism.
-        const pnpmCfg = (pkg.pnpm ?? {}) as Record<string, unknown>;
-        if (mergeApprovedDeps(pnpmCfg, "onlyBuiltDependencies")) {
-          pkg.pnpm = pnpmCfg;
-          pkgChanged = true;
-        }
-      } else if (pm === "bun") {
-        // bun: `trustedDependencies` whitelists packages allowed to run lifecycle scripts.
-        if (mergeApprovedDeps(pkg, "trustedDependencies")) pkgChanged = true;
-      }
-      // npm / yarn run lifecycle scripts on a clean install by default — nothing to approve.
-
-      // 2. Pin a packageManager version so a clean clone resolves the lockfile deterministically
-      //    (and, for pnpm, so the approval above is actually honored — #783). Only when the
-      //    project has no packageManager yet (never clobber a deliberate choice) and we could
-      //    identify the manager from a real signal — so we don't pin onto a bare package.json.
-      if (pkg.packageManager === undefined && pinnable) {
-        pkg.packageManager = PACKAGE_MANAGER_PINS[pm];
-        pkgChanged = true;
-      }
-
-      if (pkgChanged) {
-        const trailingNewline = raw.endsWith("\n") ? "\n" : "";
-        writeFileSync(pkgJsonPath, JSON.stringify(pkg, null, 2) + trailingNewline, "utf8");
-        changed = true;
-      }
-    }
-
-    // Repair a broken pnpm-workspace.yaml: a placeholder OR a bogus `allowBuilds:` block
-    // (not a real pnpm key — the old repair left `allowBuilds: esbuild: true`, a silent no-op).
-    // Replace it with a VALID `onlyBuiltDependencies:` list.
-    const wsPath = join(repoPath, "pnpm-workspace.yaml");
-    if (existsSync(wsPath)) {
-      const ws = readFileSync(wsPath, "utf8");
-      if (ws.includes(PNPM_PLACEHOLDER_MARKER) || /^\s*allowBuilds\s*:/m.test(ws)) {
-        // Drop the bogus `allowBuilds:` key and its indented children.
-        let repaired = ws.replace(/^[ \t]*allowBuilds[ \t]*:[ \t]*\r?\n(?:[ \t]+\S.*\r?\n?)*/m, "");
-        if (!/^\s*onlyBuiltDependencies\s*:/m.test(repaired)) {
-          const list = PNPM_BUILD_APPROVED_DEPS.map((d) => `  - ${d}`).join("\n");
-          repaired = repaired.replace(/\s*$/, "\n") + `onlyBuiltDependencies:\n${list}\n`;
-        }
-        if (repaired !== ws) {
-          writeFileSync(wsPath, repaired, "utf8");
-          changed = true;
-        }
-      }
-    }
-  } catch {
-    /* non-fatal: scaffolding must never block registration */
-  }
-  return changed;
-}
-
-/**
- * Merge the approved native-build deps into `obj[key]` (an array of package names), preserving
- * any the project already declared and never duplicating. Returns true if the array changed.
- */
-function mergeApprovedDeps(obj: Record<string, unknown>, key: string): boolean {
-  const existing = Array.isArray(obj[key])
-    ? (obj[key] as unknown[]).filter((d): d is string => typeof d === "string")
-    : [];
-  const merged = [...existing];
-  for (const dep of PNPM_BUILD_APPROVED_DEPS) {
-    if (!merged.includes(dep)) merged.push(dep);
-  }
-  if (merged.length === existing.length && existing.every((d, i) => d === merged[i])) return false;
-  obj[key] = merged;
-  return true;
-}
-
-/**
- * Backward-compatible alias for {@link ensureBuildableFromClean}.
- *
- * The original #777/#783 entry point was pnpm-only; #789 generalized it across package
- * managers. Kept so existing callers/tests that import `ensurePnpmBuildApproval` keep working —
- * behavior is identical for pnpm projects.
- */
-export function ensurePnpmBuildApproval(repoPath: string): boolean {
-  return ensureBuildableFromClean(repoPath);
 }
 
 /**

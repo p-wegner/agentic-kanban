@@ -18,6 +18,28 @@ const MCP_SERVER_PATH = resolve(__dirname, "../../../../mcp-server/src/index.ts"
 const TSX_LOADER = resolve(__dirname, "../../../node_modules/tsx/dist/loader.mjs");
 const TSX_URL = pathToFileURL(TSX_LOADER).href;
 
+/**
+ * How to invoke the agentic-kanban MCP server. In a bundled install (npm package,
+ * Docker image) the compiled `mcp.js` sits next to `dist/server.js` or one level above
+ * `dist/cli/index.js` — helpers.ts is inlined into BOTH bundles, so probe both. Only a
+ * dev checkout falls back to tsx + the TypeScript source.
+ */
+export function resolveMcpServerInvocation(fs: FileSystem = nodeFileSystem): { command: string; args: string[] } {
+  for (const candidate of [resolve(__dirname, "mcp.js"), resolve(__dirname, "../mcp.js")]) {
+    if (fs.existsSync(candidate)) return { command: "node", args: [candidate] };
+  }
+  // Dev-checkout fallback (tsx + TypeScript source) — the pre-bundle-fix behavior.
+  // Returned even when the source path is missing (matching the old unconditional
+  // behavior; providers embed this config without probing), but warn loudly so a
+  // broken install is diagnosable instead of agents silently lacking MCP tools.
+  if (!fs.existsSync(MCP_SERVER_PATH)) {
+    console.warn(
+      `[agent] agentic-kanban MCP server not found — probed bundled paths ${resolve(__dirname, "mcp.js")}, ${resolve(__dirname, "../mcp.js")} and source path ${MCP_SERVER_PATH}. Agents may lack kanban MCP tools.`,
+    );
+  }
+  return { command: "node", args: ["--import", TSX_URL, MCP_SERVER_PATH] };
+}
+
 let claudeMcpConfigPath: string | null = null;
 
 // --- Copilot constants ---
@@ -70,12 +92,10 @@ export const COPILOT_DEFAULT_ALLOWED_TOOLS = [
 
 export function getMcpConfigPath(fs: FileSystem = nodeFileSystem): string {
   if (claudeMcpConfigPath && fs.existsSync(claudeMcpConfigPath)) return claudeMcpConfigPath;
+  const invocation = resolveMcpServerInvocation(fs);
   const config = {
     mcpServers: {
-      "agentic-kanban": {
-        command: "node",
-        args: ["--import", TSX_URL, MCP_SERVER_PATH],
-      },
+      "agentic-kanban": invocation,
     },
   };
   const path = resolve(tmpdir(), "agentic-kanban-mcp-config.json");
@@ -96,10 +116,11 @@ export function getMcpServersConfig(): Record<string, { command: string; args: s
   // Pin the spawned MCP server to the SAME database this server uses. Without this it
   // re-runs data-dir resolution under a different cwd and can fall back to
   // ~/.agentic-kanban (a different DB), so the butler would answer about the wrong board.
+  const invocation = resolveMcpServerInvocation();
   return {
     "agentic-kanban": {
-      command: "node",
-      args: ["--import", TSX_URL, MCP_SERVER_PATH],
+      command: invocation.command,
+      args: invocation.args,
       env: { SERVER_PORT: serverPort, DB_URL: getDbUrl() },
     },
   };

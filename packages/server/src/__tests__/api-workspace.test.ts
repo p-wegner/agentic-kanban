@@ -23,6 +23,9 @@ describe("Workspaces API", () => {
     // Create project + status + issue
     projectId = await createProjectDirectly(database, { name: "Workspace Test Project" });
     const statusId = await createStatusDirectly(database, projectId, "Todo", 0);
+    // Workspace creation moves the issue to In Progress transactionally and rolls the
+    // whole create back if the status is missing — seed it like a real project has.
+    await createStatusDirectly(database, projectId, "In Progress", 1);
 
     const issueRes = await app.request("/api/issues", {
       method: "POST",
@@ -251,6 +254,7 @@ describe("Workspaces API", () => {
       setupEnabled: true,
     });
     const directStatusId = await createStatusDirectly(database, directProjectId, "Todo", 0);
+    await createStatusDirectly(database, directProjectId, "In Progress", 1);
     const issueRes = await app.request("/api/issues", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -274,8 +278,17 @@ describe("Workspaces API", () => {
   });
 
   it("GET /api/issues/:id/workspaces includes the latest setup script status", async () => {
-    const repoPath = mkdtempSync(join(tmpdir(), "kanban-setup-status-"));
+    // Nest the repo one level inside the mkdtemp parent so the worktree the product
+    // code creates (`dirname(repoPath)/.worktrees/<branch>`) lands in the throwaway
+    // parent. Using the mkdtemp dir itself as the repo puts it at the shared
+    // `os.tmpdir()/.worktrees/feature_setup-status`, where a leftover from any earlier
+    // run makes `git worktree add` fail with "already exists" forever.
+    const repoParent = mkdtempSync(join(tmpdir(), "kanban-setup-status-"));
+    const repoPath = join(repoParent, "test-repo");
+    mkdirSync(repoPath);
     execFileSync("git", ["init", "-b", "main"], { cwd: repoPath });
+    execFileSync("git", ["config", "user.email", "test@test.com"], { cwd: repoPath });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: repoPath });
     execFileSync("git", ["commit", "--allow-empty", "-m", "initial"], { cwd: repoPath });
     const setupProjectId = await createProjectDirectly(database, {
       name: "Setup Status Project",
@@ -285,6 +298,7 @@ describe("Workspaces API", () => {
       setupEnabled: true,
     });
     const setupStatusId = await createStatusDirectly(database, setupProjectId, "Todo", 0);
+    await createStatusDirectly(database, setupProjectId, "In Progress", 1);
     const issueRes = await app.request("/api/issues", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

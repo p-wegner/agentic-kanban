@@ -4,6 +4,8 @@ import type { LiveSessionStats } from "../lib/useBoardEvents.js";
 import { formatRelativeTime, formatAbsoluteTime } from "../lib/formatRelativeTime.js";
 import { getLastSessionBadge } from "../lib/sessionBadgeHelpers.js";
 import { CodeMetricsBadges, WorkflowMiniIndicator } from "./IssueBadges.js";
+import { groupConflictsByRepo, formatConflictSummary } from "../lib/groupConflictsByRepo.js";
+import { MultirepoHealthPill } from "./MultirepoHealthPill.js";
 
 function RelativeTime({ timestamp, prefix = "" }: { timestamp: string; prefix?: string }) {
   const [, setTick] = useState(0);
@@ -121,11 +123,34 @@ export function WorkspaceSummarySection(props: {
               </span>
             )}
           </span>
-          {ws.main.conflicts?.hasConflicts && ws.main.status !== "fixing" && (
-            <span className="order-last inline-flex items-center px-1.5 py-0.5 rounded bg-red-100 text-red-700 text-[10px] font-medium shrink-0">
-              {ws.main.conflicts.conflictingFiles.length} file{ws.main.conflicts.conflictingFiles.length !== 1 ? "s" : ""}
-            </span>
-          )}
+          {ws.main.conflicts?.hasConflicts && ws.main.status !== "fixing" && (() => {
+            const grouped = groupConflictsByRepo(ws.main.conflicts.conflictingFiles);
+            const summary = formatConflictSummary(grouped);
+            // Multi-repo (#81): when the conflict spans more than the leading repo, surface
+            // the per-repo breakdown ("auth-svc 2, leading 1") inline; a single-repo conflict
+            // keeps the compact "N files" label. Full breakdown is always in the tooltip.
+            const multiRepo = grouped.groups.length > 1;
+            return (
+              <span
+                className="order-last inline-flex items-center px-1.5 py-0.5 rounded bg-red-100 text-red-700 text-[10px] font-medium shrink-0 max-w-full truncate"
+                title={`Conflicts: ${summary}`}
+              >
+                {multiRepo
+                  ? summary
+                  : `${grouped.total} file${grouped.total !== 1 ? "s" : ""}`}
+              </span>
+            );
+          })()}
+          {/* Multi-repo health pill (#83): lazy — only fetches repo-merge-status when
+              expanded; the collapsed teaser shows only when board-loaded data already
+              hints multi-repo (a sibling-namespaced conflict). */}
+          <span className="order-last shrink-0" onClick={(e) => e.stopPropagation()}>
+            <MultirepoHealthPill
+              workspaceId={ws.main.id}
+              hasConflicts={ws.main.conflicts?.hasConflicts}
+              conflictingFiles={ws.main.conflicts?.conflictingFiles}
+            />
+          </span>
           {ws.main.planMode && (
             <span className="order-last inline-flex items-center px-1.5 py-0.5 rounded bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 text-[10px] font-medium shrink-0">
               Plan Mode

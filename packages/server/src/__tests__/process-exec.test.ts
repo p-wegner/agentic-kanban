@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { EventEmitter } from "node:events";
+import type { ChildProcess } from "node:child_process";
 import {
   parseLsofPids,
   parseNetstatListenerPids,
@@ -63,5 +65,35 @@ describe("process-exec parsers", () => {
     expect(parsePsProcessList("  10   1 node node server.js --flag\n")).toEqual([
       { pid: 10, ppid: 1, name: "node", commandLine: "node server.js --flag" },
     ]);
+  });
+});
+
+describe("listOsProcesses on a runtime with no ps binary (e.g. node:*-slim Docker images)", () => {
+  afterEach(() => {
+    vi.doUnmock("node:child_process");
+    vi.resetModules();
+  });
+
+  it("degrades to an empty list instead of throwing spawn ps ENOENT", async () => {
+    vi.resetModules();
+    vi.doMock("node:child_process", async () => {
+      const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+      return {
+        ...actual,
+        execFile: (...args: unknown[]) => {
+          const cb = args[args.length - 1] as (err: Error) => void;
+          cb(Object.assign(new Error("spawn ps ENOENT"), { code: "ENOENT" }));
+          return new EventEmitter() as unknown as ChildProcess;
+        },
+      };
+    });
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "linux" });
+    try {
+      const { listOsProcesses } = await import("../services/process-exec.js");
+      await expect(listOsProcesses()).resolves.toEqual([]);
+    } finally {
+      Object.defineProperty(process, "platform", { value: originalPlatform });
+    }
   });
 });

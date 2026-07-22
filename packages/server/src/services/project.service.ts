@@ -2,8 +2,10 @@ import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { resolve, sep, join } from "node:path";
-import { ensureAgentGitignore, ensureStarterClaudeMd, ensureStarterAgentsMd, ensureHookScaffold, ensureVerifyGateRunner, getDefaultSkillId, commitProjectScaffoldArtifacts } from "./project-scaffold.js";
+import { getDefaultSkillId } from "./project-scaffold.js";
+import { scaffoldAndPopulateProject } from "./project-registration.js";
 import { isSkillsDirAbsentOrEmpty, writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
+import { isBuilderRelevantSkill } from "@agentic-kanban/shared/lib/builder-skill-policy";
 import { listAgentSkills } from "../repositories/agent-skill.repository.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import type { Database } from "../db/index.js";
@@ -14,8 +16,9 @@ import { buildWorkspaceSummaryMap, buildBlockedMap, buildTagMap, buildGraphEdges
 import { getProjectById, getProjectByRepoPath, getAllProjects, insertProject, deleteProjectCascade, setProjectArchived, getProjectStats, getProjectStatuses, createProjectStatus, deleteProjectStatus, updateProjectStatusSortOrder } from "../repositories/project.repository.js";
 import { getProjectsBasePath, updateProjectFields, clearActiveProjectPreference, getProjectWorkspacesWithIssue, getWorkspaceWorkingDirById, getProjectStatusIdsAndNames, getBoardIssueRows, getProjectStatusesOrdered, getBoardIssues, getPreferenceValue, getGraphIssues, getCrossProjectIssues, getActiveWorkspaceCounts, getBoardSummaryRows } from "../repositories/project-service.repository.js";
 import { generateSetupScript as generateSetupScriptAI, generateTeardownScript as generateTeardownScriptAI, generateVerifyScript as generateVerifyScriptAI } from "./project-setup.service.js";
-import { populateStackProfile, populateVerifyScript, detectStackProfile } from "./stack-profile.service.js";
+import { cloneRepo } from "./repo-clone.service.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
+import { workspaceServicesService, parseStoredComposeProjectName } from "./workspace-services.service.js";
 import type { WorkspaceSummaryCache } from "./workspace-summary-cache.service.js";
 import type { WorkspaceSummary } from "./workspace-summary.service.js";
 import { buildBoardColumns } from "../lib/board-view.js";
@@ -26,6 +29,45 @@ export class ProjectError extends Error {
     public readonly code: "NOT_FOUND" | "BAD_REQUEST" | "CONFLICT",
   ) {
     super(message);
+  }
+}
+
+const INITIAL_COMMIT_MESSAGE = "chore: initialise repository";
+
+/**
+ * Give a freshly `git init`ed repo its first commit, so HEAD is born (#47).
+ *
+ * Commits whatever the caller has written so far (a README, when requested) and falls back
+ * to an empty commit. `--allow-empty` covers the no-README case; `add -A` runs before the
+ * scaffold, so it can only ever pick up the caller's own file in a directory this service
+ * just created. A machine with no `user.name`/`user.email` configured cannot commit at all,
+ * so an identity is supplied for that case only — a configured identity still wins.
+ *
+ * This bootstrap commit is deliberately insulated from the user's global git config, because
+ * unlike the scaffold commit (which is non-fatal and merely degrades) a failure here aborts
+ * project creation and removes the directory. `commit.gpgsign=true` with no usable key, and a
+ * global `core.hooksPath` pre-commit hook that rejects an empty/near-empty tree, are both
+ * common enough that they would otherwise make createProject refuse to work at all — on a
+ * commit whose only job is to give HEAD a parent.
+ */
+function createInitialCommit(repoPath: string): void {
+  gitExecSync(["add", "-A"], { cwd: repoPath, stdio: "pipe" });
+  const commit = [
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "--no-verify",
+    "--allow-empty",
+    "-m",
+    INITIAL_COMMIT_MESSAGE,
+  ];
+  try {
+    gitExecSync(commit, { cwd: repoPath, stdio: "pipe" });
+  } catch {
+    gitExecSync(
+      ["-c", "user.name=agentic-kanban", "-c", "user.email=agentic-kanban@localhost", ...commit],
+      { cwd: repoPath, stdio: "pipe" },
+    );
   }
 }
 
@@ -58,6 +100,7 @@ venv/
 *.war
 *.ear
 .gradle/
+.kotlin/
 build/
 .env
 *.log
@@ -125,7 +168,8 @@ export function createProjectService(deps: { database: Database; workspaceSummar
   const boardWarmupTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   async function registerProject(body: {
-    repoPath: string;
+    repoPath?: string;
+    cloneUrl?: string;
     name?: string;
     description?: string;
     color?: string;
@@ -133,13 +177,25 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     generateReadme?: boolean;
     exportSkillsOnRegistration?: boolean;
   }) {
-    if (!body.repoPath) {
-      throw new ProjectError("repoPath is required", "BAD_REQUEST");
+    if (!body.repoPath && !body.cloneUrl) {
+      throw new ProjectError("repoPath or cloneUrl is required", "BAD_REQUEST");
+    }
+    if (body.repoPath && body.cloneUrl) {
+      throw new ProjectError("Provide either repoPath or cloneUrl, not both", "BAD_REQUEST");
+    }
+
+    let localPath = body.repoPath;
+    if (body.cloneUrl) {
+      try {
+        localPath = await cloneRepo(body.cloneUrl, { name: body.name });
+      } catch (err) {
+        throw new ProjectError(`Clone failed: ${err instanceof Error ? err.message : String(err)}`, "BAD_REQUEST");
+      }
     }
 
     let repoInfo;
     try {
-      repoInfo = await detectRepoInfo(body.repoPath);
+      repoInfo = await detectRepoInfo(localPath!);
     } catch (err) {
       throw new ProjectError(`Invalid repo: ${err instanceof Error ? err.message : String(err)}`, "BAD_REQUEST");
     }
@@ -164,19 +220,18 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       defaultSkillId: await getDefaultSkillId(database),
     }, database);
 
-    // Scaffold (clobber-safe for imports): ensure the generic agent-artifact ignores are present
-    // (append-if-missing; seeds the chosen language template only when no .gitignore exists), and
-    // drop a starter CLAUDE.md when the repo has none â€” keeps agent scratch out of the project's
-    // history and gives agents a baseline working agreement. The synchronous rule-based stack
-    // detection also feeds per-stack build-output ignores (target/, __pycache__/, *.class, …) so a
-    // non-Node project's build artifacts never make main dirty and block auto-merge (#811).
-    const detectedStack = detectStackProfile(repoInfo.repoPath).stack;
-    ensureAgentGitignore(repoInfo.repoPath, body.gitignoreTemplate ? GITIGNORE_TEMPLATES[body.gitignoreTemplate] : undefined, detectedStack);
-    ensureStarterClaudeMd(repoInfo.repoPath);
-    ensureStarterAgentsMd(repoInfo.repoPath);
-    ensureHookScaffold(repoInfo.repoPath);
-    ensureVerifyGateRunner(repoInfo.repoPath);
-    await commitProjectScaffoldArtifacts(repoInfo.repoPath);
+    // THE shared registration step (#43) — see scaffoldAndPopulateProject in
+    // project-registration.ts: scaffold → populate the derived config → commit what the board
+    // wrote (#41). The fast rule-based pass is AWAITED, closing this path's race: a caller
+    // creating a workspace immediately after POST /api/projects used to beat the old
+    // fire-and-forget population and get `{"command": null, "state": "skipped"}` setup. The
+    // optional ~30s LLM gap-fill stays backgrounded so the request never blocks on it.
+    //
+    // This path also never called populateSetupScript at all, so REST-registered projects had
+    // setup_script = null forever — the #37 bug, fixed by routing through the shared step (#43).
+    await scaffoldAndPopulateProject(id, repoInfo.repoPath, database, {
+      gitignoreTemplate: body.gitignoreTemplate ? GITIGNORE_TEMPLATES[body.gitignoreTemplate] : undefined,
+    });
 
     if (body.generateReadme) {
       const readmePath = join(repoInfo.repoPath, "README.md");
@@ -193,6 +248,12 @@ export function createProjectService(deps: { database: Database; workspaceSummar
         try {
           const builtinSkills = await listAgentSkills(undefined, false, database);
           for (const skill of builtinSkills) {
+            // #129: only export the skills a worktree agent actually fires. Every
+            // exported skill rides into every worktree and pays an always-on
+            // name+description context tax per turn; board-side skills (monitor,
+            // conductor, enhancer) run from their DB prompt against the main
+            // checkout and would be pure tax here.
+            if (!isBuilderRelevantSkill(skill.name)) continue;
             if (skill.isBuiltin && !/[/\\]|\.\./.test(skill.name)) {
               await writeAgentSkillFile(repoInfo.repoPath, skill);
             }
@@ -202,16 +263,6 @@ export function createProjectService(deps: { database: Database; workspaceSummar
         }
       }
     }
-
-    // Populate the durable stack profile (#786) — ONE descriptor every harness piece
-    // (hooks/verify/dev-server/build-clean) reads instead of re-deriving stack facts.
-    // The rule-based pass is fast; the optional LLM gap-fill is best-effort and must not
-    // block (or fail) registration, so run it fire-and-forget. Once the profile lands,
-    // auto-populate & activate the verify (merge-gate) command (#788) — the keystone
-    // auto-merge gate must be live from ticket #1, derived from the same profile.
-    void populateStackProfile(id, repoInfo.repoPath, database)
-      .then((profile) => populateVerifyScript(id, repoInfo.repoPath, database, profile))
-      .catch(() => { /* non-fatal */ });
 
     return { ...result, id };
   }
@@ -268,6 +319,28 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       throw new ProjectError(`git init failed: ${stderr ? String(stderr).trim() : String(err)}`, "BAD_REQUEST");
     }
 
+    // `git init` leaves HEAD on an UNBORN branch — a repo with no commits (#47). Everything
+    // downstream assumes a born HEAD: the scaffold commit resolved the current branch and threw
+    // into a non-fatal catch (so the board's own scaffold stayed permanently untracked, and the
+    // first agent's `git add -A` swept it into an unrelated feature commit), and `git worktree
+    // add` cannot branch from a commit that does not exist. Give the repo its first commit here,
+    // BEFORE scaffolding — then registration's shared step behaves exactly as it does for an
+    // imported repo, which always arrives with a commit.
+    //
+    // The README (when requested) is the natural content for it; otherwise commit empty.
+    if (body.generateReadme) {
+      try { writeFileSync(join(targetPath, "README.md"), `# ${name}\n`, "utf8"); } catch { /* non-fatal */ }
+    }
+    try {
+      createInitialCommit(targetPath);
+    } catch (err) {
+      try { rmSync(targetPath, { recursive: true, force: true }); } catch {}
+      throw new ProjectError(
+        `Failed to create the initial commit: ${err instanceof Error ? err.message : String(err)}`,
+        "BAD_REQUEST",
+      );
+    }
+
     const existing = await getProjectByRepoPath(targetPath, database);
     if (existing) {
       throw new ProjectError(`Project "${existing.name}" is already registered at this path`, "CONFLICT");
@@ -292,24 +365,29 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       remoteUrl: repoInfo.remoteUrl,
       defaultSkillId: await getDefaultSkillId(database),
     }, database);
-    // Scaffold the fresh repo with the generic agent-artifact ignores + a starter CLAUDE.md + hooks.
-    // A just-`git init`-ed repo usually has no stack markers yet (stack === null ⇒ no per-stack
-    // block); detect anyway so a pre-seeded directory still gets its build-output ignores (#811).
-    const freshStack = detectStackProfile(repoInfo.repoPath).stack;
-    ensureAgentGitignore(repoInfo.repoPath, body.gitignoreTemplate ? GITIGNORE_TEMPLATES[body.gitignoreTemplate] : undefined, freshStack);
-    ensureStarterClaudeMd(repoInfo.repoPath);
-    ensureStarterAgentsMd(repoInfo.repoPath);
-    ensureHookScaffold(repoInfo.repoPath);
-    ensureVerifyGateRunner(repoInfo.repoPath);
-    await commitProjectScaffoldArtifacts(repoInfo.repoPath);
+    // THE shared registration step (#43/#44) — see scaffoldAndPopulateProject in
+    // project-registration.ts: scaffold → populate the derived config → commit what the board
+    // wrote (#41). This path used to hand-roll the ensure*/commit chain AND never call
+    // populateStackProfile / populateVerifyScript / populateSetupScript at all, so a project
+    // created here had setup_script = null (no dependency install in worktrees — #37/#810) and
+    // verify_script = null (the #788 auto-merge gate never live) forever.
+    //
+    // `skipLlm: true` on purpose (#44). Unlike every other registration entry point, this one
+    // OWNS the directory: it refuses a pre-existing path and `git init`s an empty one, so at
+    // population time the repo provably contains nothing but the board's own scaffold. The LLM
+    // gap-fill would therefore be handed "Detected marker files: none / Repo root entries:
+    // .claude, .gitignore, CLAUDE.md, AGENTS.md" — any non-null answer is invention, not
+    // detection, and an invented setup_script is strictly WORSE than null: it is executed in
+    // every worktree, so a guessed `npm install` fails on what the user then builds as a Python
+    // project, whereas null lets the Builder install correctly. Skipping also costs a ~30s
+    // `claude` subprocess per project creation. As a bonus it makes the #41 hazard unreachable
+    // rather than merely defused: no enrichment is scheduled at all, so nothing can settle after
+    // the scaffold commit and re-dirty the user's checkout.
+    await scaffoldAndPopulateProject(id, repoInfo.repoPath, database, {
+      gitignoreTemplate: body.gitignoreTemplate ? GITIGNORE_TEMPLATES[body.gitignoreTemplate] : undefined,
+      skipLlm: true,
+    });
 
-    if (body.generateReadme) {
-      const readmePath = join(repoInfo.repoPath, "README.md");
-      if (!existsSync(readmePath)) {
-        try { writeFileSync(readmePath, `# ${projectName}
-`, "utf8"); } catch { /* non-fatal */ }
-      }
-    }
     return result;
   }
 
@@ -471,6 +549,24 @@ export function createProjectService(deps: { database: Database; workspaceSummar
 
       const ws = wsRows[0];
       if (ws.workingDir) removedPath = ws.workingDir;
+
+      // Per-workspace Docker service stack teardown runs UNCONDITIONALLY, before the
+      // cascade delete, mirroring deleteWorkspace (workspace-crud.service.ts) — a
+      // fork-child worktree removal must not strand its compose stack until the
+      // startup reaper. Uses the STORED compose project name; the engine's
+      // last-reference guard still skips the down while another live workspace
+      // shares the same compose project. Best-effort — never throws.
+      if (ws.workingDir && !ws.isDirect) {
+        const composeName = parseStoredComposeProjectName(ws.serviceState);
+        if (composeName) {
+          await workspaceServicesService.teardownWorkspaceServices({
+            composeProjectName: composeName,
+            composeWorktreePath: ws.workingDir,
+            releasedByWorkspaceId: ws.id,
+          });
+        }
+      }
+
       await deleteWorkspaceCascade(ws.id, database);
     }
 

@@ -64,6 +64,7 @@ export async function getProjectForWorkspaceCreate(
         setupEnabled: project.setupEnabled,
         symlinkEnabled: project.symlinkEnabled,
         symlinkDirs: project.symlinkDirs,
+        servicesConfig: project.servicesConfig ?? null,
       }]
     : [];
 }
@@ -147,6 +148,7 @@ export async function getWorkspaceDeletionContext(
       projectId: issues.projectId,
       teardownScript: projects.teardownScript,
       setupEnabled: projects.setupEnabled,
+      serviceState: workspaces.serviceState,
     })
     .from(workspaces)
     .leftJoin(issues, eq(workspaces.issueId, issues.id))

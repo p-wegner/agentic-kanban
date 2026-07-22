@@ -62,6 +62,22 @@
   --color-ink: #2a2622;
   --color-ink-soft: #5b544c;
   --color-ink-faint: #8a8175;
+
+  /* Ink — dark-mode counterparts. Named separately, mirroring the
+     surface-*-dark pattern above, because the theme swaps tokens rather than
+     re-declaring values under `.dark`. These are warm off-whites: on a paper
+     theme, cold grays (#d1d5db & friends) read as a different product. */
+  --color-ink-dark: #f0ebe2;
+  --color-ink-soft-dark: #cfc7ba;
+  --color-ink-faint-dark: #a39a8c;
+
+  /* Hairlines and insets — the warm replacements for cold gray borders and
+     black/white alpha fills. `rule` is a 1px divider; `surface-inset-dark` is
+     the fill for small sunken chips (inline code) on a dark surface, which sit
+     lighter than the full sunken surface. */
+  --color-rule: #e0d8cb;
+  --color-rule-dark: #34302a;
+  --color-surface-inset-dark: #34302a;
 }
 
 /* Butler markdown (`prose`) inline-code polish.
@@ -71,7 +87,7 @@
    and add a subtle GitHub-style pill so inline code reads cleanly. Fenced code
    blocks (pre > code) keep the plugin's own styling. */
 .prose :where(code):not(pre code) {
-  background-color: rgb(0 0 0 / 0.06);
+  background-color: color-mix(in srgb, var(--color-ink) 6%, transparent);
   padding: 0.1em 0.35em;
   border-radius: 0.3rem;
   font-weight: 500;
@@ -83,7 +99,7 @@
   content: none;
 }
 .dark .prose :where(code):not(pre code) {
-  background-color: rgb(255 255 255 / 0.1);
+  background-color: color-mix(in srgb, var(--color-ink-dark) 10%, transparent);
 }
 
 html, body {
@@ -106,17 +122,32 @@ body {
 /* Warm text selection so highlighting reads as part of the paper theme rather
    than the browser's default cold blue. */
 ::selection {
-  background-color: rgb(194 95 54 / 0.22); /* brand-500 @ 22% */
+  background-color: color-mix(in srgb, var(--color-brand-500) 22%, transparent);
   color: inherit;
 }
 
 /* App-wide scrollbar treatment. Give scrollable panels a thin, warm,
    unobtrusive bar that matches the paper theme. Components may override this
    locally for their own surfaces. The `.scrollbar-hide` utility wins because
-   `display: none` removes the bar entirely. */
+   `display: none` removes the bar entirely.
+
+   The thumb tints are plain custom properties rather than @theme colors: they
+   are alpha tints of the ink, not palette entries, and nothing should be able
+   to say `bg-scrollbar-thumb`. Declaring them here (and swapping them under
+   `.dark`) means every scrollbar in the app — including component-local ones
+   like .column-scroll-container — inherits the theme from one place. */
+:root {
+  --scrollbar-thumb: color-mix(in srgb, var(--color-ink-soft) 28%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--color-ink-soft) 45%, transparent);
+}
+.dark {
+  --scrollbar-thumb: color-mix(in srgb, var(--color-ink-dark) 22%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--color-ink-dark) 38%, transparent);
+}
+
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(90, 84, 76, 0.28) transparent; /* ink-soft tint */
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 *::-webkit-scrollbar {
   width: 10px;
@@ -126,27 +157,13 @@ body {
   background: transparent;
 }
 *::-webkit-scrollbar-thumb {
-  background: rgba(90, 84, 76, 0.28); /* ink-soft tint */
+  background: var(--scrollbar-thumb);
   border-radius: 9999px;
   border: 3px solid transparent;
   background-clip: padding-box;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: rgba(90, 84, 76, 0.45);
-  background-clip: padding-box;
-}
-.dark,
-.dark * {
-  scrollbar-color: rgba(231, 224, 213, 0.22) transparent;
-}
-.dark::-webkit-scrollbar-thumb,
-.dark *::-webkit-scrollbar-thumb {
-  background: rgba(231, 224, 213, 0.22);
-  background-clip: padding-box;
-}
-.dark::-webkit-scrollbar-thumb:hover,
-.dark *::-webkit-scrollbar-thumb:hover {
-  background: rgba(231, 224, 213, 0.38);
+  background: var(--scrollbar-thumb-hover);
   background-clip: padding-box;
 }
 
@@ -208,6 +225,19 @@ body {
   animation: count-pop 0.3s ease-out;
 }
 
+/* Multi-Repo Monitor (#84): brief highlight on a cell whose merge-state changed
+   during a live refresh. A ring + subtle scale draws the eye without shifting layout. */
+@keyframes cell-flash {
+  0%   { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); transform: scale(1); }
+  25%  { box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.55); transform: scale(1.08); }
+  100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); transform: scale(1); }
+}
+
+.cell-flash {
+  animation: cell-flash 1.2s ease-out;
+  border-radius: 0.25rem;
+}
+
 /* Graph view: "actively worked on" progress indication.
    The pulsing halo + bar mark issues with a live agent workspace; the marching
    dash overlay animates the unblock-flow edges from an active ticket to the
@@ -249,7 +279,8 @@ body {
   .graph-active-halo,
   .graph-active-bar,
   .graph-active-dot,
-  .graph-unblock-flow {
+  .graph-unblock-flow,
+  .cell-flash {
     animation: none;
   }
 }
@@ -276,23 +307,23 @@ body {
 
 .markdown-body {
   font-size: 0.875rem;
-  color: #5b544c;
+  color: var(--color-ink-soft);
   line-height: 1.6;
 }
 .markdown-body h1, .markdown-body h2, .markdown-body h3,
 .markdown-body h4, .markdown-body h5, .markdown-body h6 {
   font-family: var(--font-serif);
   font-weight: 600;
-  color: #2a2622;
+  color: var(--color-ink);
   margin-top: 1em;
   margin-bottom: 0.25em;
 }
 .dark .markdown-body {
-  color: #d1d5db;
+  color: var(--color-ink-soft-dark);
 }
 .dark .markdown-body h1, .dark .markdown-body h2, .dark .markdown-body h3,
 .dark .markdown-body h4, .dark .markdown-body h5, .dark .markdown-body h6 {
-  color: #f3f4f6;
+  color: var(--color-ink-dark);
 }
 .markdown-body h1 { font-size: 1.25rem; }
 .markdown-body h2 { font-size: 1.1rem; }
@@ -306,53 +337,53 @@ body {
 .markdown-body ol { list-style-type: decimal; }
 .markdown-body li { margin-bottom: 0.15em; }
 .markdown-body code {
-  background: #efe9df;
+  background: var(--color-surface-sunken);
   border-radius: 4px;
   padding: 0.1em 0.35em;
   font-size: 0.85em;
   font-family: ui-monospace, monospace;
 }
 .dark .markdown-body code {
-  background: #34302a;
+  background: var(--color-surface-inset-dark);
 }
 .markdown-body pre {
-  background: #efe9df;
+  background: var(--color-surface-sunken);
   border-radius: 6px;
   padding: 0.75em;
   overflow-x: auto;
   margin-bottom: 0.5em;
 }
 .dark .markdown-body pre {
-  background: #161412;
+  background: var(--color-surface-sunken-dark);
 }
 .markdown-body pre code {
   background: none;
   padding: 0;
 }
 .markdown-body a {
-  color: #b4552f;
+  color: var(--color-brand-600);
   text-decoration: underline;
 }
 .dark .markdown-body a {
-  color: #df9f7e;
+  color: var(--color-brand-300);
 }
 .markdown-body blockquote {
-  border-left: 3px solid #df9f7e;
+  border-left: 3px solid var(--color-brand-300);
   padding-left: 0.75em;
-  color: #8a8175;
+  color: var(--color-ink-faint);
   margin-bottom: 0.5em;
 }
 .dark .markdown-body blockquote {
-  border-left-color: #934428;
-  color: #a39a8c;
+  border-left-color: var(--color-brand-700);
+  color: var(--color-ink-faint-dark);
 }
 .markdown-body hr {
   border: none;
-  border-top: 1px solid #e0d8cb;
+  border-top: 1px solid var(--color-rule);
   margin: 0.75em 0;
 }
 .dark .markdown-body hr {
-  border-top-color: #34302a;
+  border-top-color: var(--color-rule-dark);
 }
 .markdown-body strong { font-weight: 600; }
 .markdown-body em { font-style: italic; }

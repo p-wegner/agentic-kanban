@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
+import type { ServiceStackConfig } from "@agentic-kanban/shared";
+import { buildServicesConfig } from "../lib/services-config.js";
 import { apiFetch, apiPost, apiPut, apiPatch } from "../lib/api.js";
 import { setSettings as savePreferences } from "../lib/settingsStore.js";
 import { invalidateClientSurfaceLocal } from "../lib/clientInvalidation.js";
@@ -26,10 +28,12 @@ type ProjectRow = {
   symlinkEnabled?: boolean;
   symlinkDirs?: string | null;
   defaultSkillId?: string | null;
+  servicesConfig?: ServiceStackConfig | null;
 };
 
 /** Map a raw project row + its verify-script pref into the panel's ProjectSettingsState. */
 function buildProjectSettingsState(project: ProjectRow, verifyScript: string): ProjectSettingsState {
+  const svc = project.servicesConfig ?? null;
   return {
     defaultBranch: project.defaultBranch || "",
     setupScript: project.setupScript || "",
@@ -41,6 +45,13 @@ function buildProjectSettingsState(project: ProjectRow, verifyScript: string): P
     symlinkEnabled: project.symlinkEnabled === true,
     symlinkDirs: project.symlinkDirs || "",
     defaultSkillId: project.defaultSkillId || null,
+    servicesEnabled: svc?.enabled === true,
+    servicesComposeFile: svc?.composeFile || "",
+    servicesComposeRepo: svc?.composeRepo || "",
+    servicesPorts: (svc?.ports ?? []).join(", "),
+    // Full fetched config: buildServicesConfig merges the form fields over this so
+    // API-only fields (env, readyTimeoutMs) survive a settings save.
+    servicesConfigBase: svc,
   };
 }
 import { AgentSettings } from "./settings/AgentSettings.js";
@@ -80,6 +91,11 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
     symlinkEnabled: false,
     symlinkDirs: "",
     defaultSkillId: null,
+    servicesEnabled: false,
+    servicesComposeFile: "",
+    servicesComposeRepo: "",
+    servicesPorts: "",
+    servicesConfigBase: null,
   });
   const [projectBranches, setProjectBranches] = useState<{ local: string[]; remote: string[] } | null>(null);
   const [generatingScript, setGeneratingScript] = useState(false);
@@ -351,6 +367,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
               symlinkEnabled: projectSettings.symlinkEnabled,
               symlinkDirs: projectSettings.symlinkDirs.trim() || null,
               defaultSkillId: projectSettings.defaultSkillId || null,
+              servicesConfig: buildServicesConfig(projectSettings),
             }),
         );
       }
