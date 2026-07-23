@@ -278,3 +278,87 @@ Was noch fehlt:
 ```
 
 Wenn Score = MAX: Gratuliere dem Teilnehmer — Aufgabe {AUFGABE_NR} ist abgeschlossen!
+
+---
+
+# TEIL 5: PR-Kommentare veröffentlichen (nur Aufgabe 6)
+
+Dieser Teil läuft **nur wenn AUFGABE_NR == 6**. Für alle anderen Aufgaben endet der Durchlauf
+nach TEIL 4 wie bisher.
+
+Aufgabe 6 ist die einzige Aufgabe mit einem **echten** GitHub Issue + PR
+(`p-wegner/agentic-kanban`, Issue **#4**, PR **#5**) statt
+nur einem lokalen `aufgabeN`-Branch. Der Teilnehmer-Skill soll hier nicht nur JSON-Findings
+ausgeben (TEIL 2), sondern seine Findings **als echte Review-Kommentare auf dem PR** hinterlassen
+— das ist die eigentliche Übung: den Review dort abliefern, wo ein echter Reviewer ihn
+hinterlassen würde.
+
+Der PR ist **geteilt** — alle Teilnehmer kommentieren denselben PR #5. Das ist
+gewollt (siehe Kommentare anderer Teilnehmer als Kontext), nicht als Fehler behandeln.
+
+## Schritt 5.1: Kommentarstand vorher erfassen
+
+```bash
+gh api repos/p-wegner/agentic-kanban/pulls/5/comments --jq 'length'
+gh pr view 5 --repo p-wegner/agentic-kanban --json reviews --jq '.reviews | length'
+```
+
+Merke die beiden Zahlen als **COMMENTS_BEFORE** und **REVIEWS_BEFORE**.
+
+## Schritt 5.2: Teilnehmer-Skill mit gh ausführen
+
+Starte **im selben Worktree** (vor dessen Cleanup in TEIL 3 — führe TEIL 5 stattdessen VOR
+Schritt 3.1 aus, wenn AUFGABE_NR == 6, damit der Worktree noch existiert) einen weiteren
+`claude -p` Aufruf mit demselben `--append-system-prompt "$SKILL_BODY"`, diesmal mit der
+Anweisung, die bereits ermittelten FINDINGS (aus TEIL 3.2) als echte PR-Kommentare zu
+veröffentlichen:
+
+```bash
+cd "$WORKTREE_PATH" && claude -p \
+  --append-system-prompt "$SKILL_BODY" \
+  --output-format json \
+  --permission-mode bypassPermissions << HARNESS_PROMPT > "${ENVELOPE_FILE}.pr-comments"
+Aufgabe: 6 — PR-Kommentare veröffentlichen
+
+Du hast bereits folgende Findings ermittelt:
+$(cat <<< "$FINDINGS_JSON")
+
+Veröffentliche diese Findings jetzt als echte Review-Kommentare auf dem GitHub PR
+https://github.com/p-wegner/agentic-kanban/pull/5 — mit \`gh\` (bereits
+authentifiziert). Wähle selbst, ob du Line-Kommentare (\`gh api
+repos/p-wegner/agentic-kanban/pulls/5/comments\`) oder eine gesammelte
+Review (\`gh pr review 5 --comment -b "..."\`) verwendest — das ist Teil der
+Übung.
+
+Gib am Ende genau eine Zeile aus: "PR_COMMENTS_POSTED: <Anzahl>"
+HARNESS_PROMPT
+```
+
+(`FINDINGS_JSON` = das in Schritt 3.2 geparste `findings`-Array, roh als JSON-Text eingesetzt.)
+
+## Schritt 5.3: Veröffentlichung verifizieren
+
+```bash
+gh api repos/p-wegner/agentic-kanban/pulls/5/comments --jq 'length'
+gh pr view 5 --repo p-wegner/agentic-kanban --json reviews --jq '.reviews | length'
+```
+
+Vergleiche mit COMMENTS_BEFORE/REVIEWS_BEFORE aus Schritt 5.1 → **NEW_COMMENTS** /
+**NEW_REVIEWS** (Differenz). Dies ist ein Best-Effort-Check (mehrere Teilnehmer können parallel
+kommentieren) — kein Score, nur eine Bestätigung, dass etwas Reales veröffentlicht wurde.
+
+## Schritt 5.4: PR-Block ausgeben
+
+Gib als dritten und letzten Block aus (nach dem Review-Ergebnis aus TEIL 3.3 und dem
+Benchmark-Block aus TEIL 4.5):
+
+```
+=== PR-Kommentare Aufgabe 6 ===
+PR: https://github.com/p-wegner/agentic-kanban/pull/5
+Neue Kommentare in diesem Durchlauf: {NEW_COMMENTS}
+Neue Reviews in diesem Durchlauf: {NEW_REVIEWS}
+```
+
+Falls NEW_COMMENTS == 0 und NEW_REVIEWS == 0: weise darauf hin, dass der Teilnehmer-Skill
+offenbar noch keine `gh`-Integration hat — das ist der Teil, den die Teilnehmer für Aufgabe 6
+selbst ergänzen müssen.
