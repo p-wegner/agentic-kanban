@@ -1,6 +1,7 @@
 import { createProjectsRoute } from "./projects.js";
 import { createProjectAnalyticsRoute } from "./project-analytics.js";
 import { createProjectHealthRoute } from "./project-health.js";
+import { createStaleIssuesRoute } from "./stale-issues.js";
 import { createProjectStackProfileRoute } from "./project-stack-profile.js";
 import { createProjectScriptsRoute } from "./project-scripts.js";
 import { createDriveRoute } from "./drive.js";
@@ -69,6 +70,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   // (arch-review §1.5). Mounted at the SAME `/projects` prefix so paths are unchanged.
   routes.route("/projects", createProjectAnalyticsRoute(database, { ...options, getSessionManager }));
   routes.route("/projects", createProjectHealthRoute(database));
+  routes.route("/projects", createStaleIssuesRoute(database));
   routes.route("/projects", createProjectStackProfileRoute(database));
   routes.route("/projects", createProjectScriptsRoute(database));
   routes.route("/projects", createDriveRoute(database));

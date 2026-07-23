@@ -1,0 +1,36 @@
+{
+  "task": "aufgabe6",
+  "description": "feat: add stale-issues endpoint",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "high",
+      "description": "Stale-Filter-Richtung ist invertiert: Der Filter gibt Issues mit `daysSinceUpdate < clampedDays` zurück — das sind die zuletzt aktualisierten (frischen) Issues, nicht die liegengebliebenen. AC2 verlangt genau das Gegenteil: Issues, die seit MINDESTENS `days` Tagen nicht mehr aktualisiert wurden, sollten zurückgegeben werden (`daysSinceUpdate >= clampedDays`).",
+      "location": "packages/server/src/routes/stale-issues.ts:32"
+    },
+    {
+      "id": "F2",
+      "severity": "high",
+      "description": "`daysSinceUpdate` wird aus `issue.createdAt` statt `issue.updatedAt` berechnet. AC4 verlangt explizit die Anzahl Tage seit der letzten Aktualisierung — dadurch werden alte, aber kürzlich bearbeitete Issues fälschlich als lange liegengeblieben ausgewiesen (und umgekehrt).",
+      "location": "packages/server/src/routes/stale-issues.ts:29"
+    },
+    {
+      "id": "F3",
+      "severity": "medium",
+      "description": "`includeDone` hat keine Wirkung auf `done`-Issues: Der Filter schließt nur `cancelled` aus, unabhängig vom `includeDone`-Parameter. AC3 verlangt, dass `done`-Issues standardmäßig ebenfalls ausgeschlossen werden und nur mit `?includeDone=true` erscheinen.",
+      "location": "packages/server/src/routes/stale-issues.ts:24"
+    },
+    {
+      "id": "F4",
+      "severity": "medium",
+      "description": "Sortierung ist aufsteigend statt absteigend: `sort((a, b) => a.daysSinceUpdate - b.daysSinceUpdate)` zeigt die am wenigsten liegengebliebenen Issues zuerst. AC5 verlangt absteigende Sortierung (am längsten liegengeblieben zuerst).",
+      "location": "packages/server/src/routes/stale-issues.ts:34"
+    },
+    {
+      "id": "F5",
+      "severity": "low",
+      "description": "Der `days`-Query-Parameter wird nicht auf `NaN` geprüft: Ein ungültiger Wert (z.B. `?days=abc`) ergibt `Number(\"abc\") === NaN`, wodurch `clampedDays` selbst `NaN` wird und der Vergleich `daysSinceUpdate < NaN` immer `false` liefert — die Antwort ist dann stillschweigend immer leer statt auf den Default (14) zurückzufallen oder einen Fehler zu liefern.",
+      "location": "packages/server/src/routes/stale-issues.ts:18"
+    }
+  ]
+}
