@@ -22,6 +22,8 @@ import { PREF_DEFAULT_MODEL, PREF_PROVIDER } from "../constants/preference-keys.
 import { MODEL_PREF_KEYS_BY_PROVIDER } from "../services/effective-config.service.js";
 import { narrowProviderName } from "../services/agent-provider.js";
 import { listOsProcesses } from "../services/process-exec.js";
+import { refreshContainerMcpConfig } from "../services/devcontainer-workspace.service.js";
+import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 
 /** Kill orphaned tsx server processes from previous hot-reload cycles (Windows only). */
 export function shouldKillOrphanedServerProcess(input: {
@@ -330,6 +332,35 @@ export async function cleanupStaleSessions(sessionManager: SessionManager, agent
         },
         s.containerId ?? undefined,
       );
+
+      // #156: the containerized agent survived the restart, but the board's MCP
+      // HTTP bridge did not — it dies on every shutdown (incl. SIGTERM/hot-reload)
+      // and comes back with a fresh port+token. Rewrite this workspace's mounted
+      // config with the new values so its board tool calls stop 401ing/timing out.
+      if (s.containerId) {
+        try {
+          const configPath = await refreshContainerMcpConfig(s.workspaceId);
+          if (configPath) {
+            console.log(`[startup] refreshed container MCP config on reattach: workspaceId=${s.workspaceId} path=${configPath}`);
+            if (issueId) {
+              await insertIssueComment({
+                issueId,
+                workspaceId: s.workspaceId,
+                kind: "note",
+                author: "system",
+                body: "Server restarted while this containerized agent was running. Its board MCP token/port were refreshed on reattach so board tool calls keep working.",
+                createdAt: now,
+              }).catch((err) => {
+                console.warn(`[startup] failed to record MCP-refresh comment: workspaceId=${s.workspaceId}`, err);
+              });
+            }
+          } else {
+            console.warn(`[startup] could not refresh container MCP config on reattach (bridge unavailable): workspaceId=${s.workspaceId}`);
+          }
+        } catch (err) {
+          console.warn(`[startup] container MCP config refresh failed on reattach: workspaceId=${s.workspaceId}`, err);
+        }
+      }
     }
   }
 }
