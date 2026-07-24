@@ -29,7 +29,7 @@ import {
 import { toExecutorProvider } from "./agent-settings.service.js";
 import { buildConflictContext } from "./phase-context.service.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
-import { insertIssueComment } from "../repositories/issue-comments.repository.js";
+import { insertIssueComment, getLatestIssueCommentByKind } from "../repositories/issue-comments.repository.js";
 import {
   WorkspaceError,
   resolveRelaunchAgentSelection,
@@ -112,7 +112,7 @@ export function createWorkspaceMergeService(deps: {
 
   async function recordMergeAttempt(
     workspace: typeof workspaces.$inferSelect,
-    eventType: "conflict" | "fix-and-merge-launched" | "reconcile-launched" | "merged" | "warning" | "already-merged" | "direct-closed",
+    eventType: "conflict" | "fix-and-merge-launched" | "reconcile-launched" | "merged" | "warning" | "already-merged" | "direct-closed" | "gate-failed",
     body: string,
     payload: Record<string, unknown> = {},
     createdAt = new Date().toISOString(),
@@ -130,6 +130,35 @@ export function createWorkspaceMergeService(deps: {
     } catch (err) {
       console.warn("[workspace-merge] failed to record merge timeline event:", err instanceof Error ? err.message : String(err));
     }
+  }
+
+  /**
+   * Record a pre-merge-gate withhold, deduped against the most recent gate-failure note for this
+   * issue: an orchestrator tick retries every ~30s, so an unchanged verify/smoke failure would
+   * otherwise spam a fresh "merge-attempt" comment every cycle (#170). Only inserts a new note
+   * when the gate message actually changed (new failure signature) or none was recorded yet.
+   */
+  async function recordGateFailureNote(
+    workspace: typeof workspaces.$inferSelect,
+    stage: string,
+    gateMessage: string,
+    targetBranch: string,
+  ): Promise<void> {
+    try {
+      const latest = await getLatestIssueCommentByKind(workspace.issueId, "merge-attempt", database);
+      const latestPayload = latest?.payload ? (JSON.parse(latest.payload) as Record<string, unknown>) : null;
+      if (latestPayload?.mergeReason === "pre_merge_gate_failed" && latestPayload?.gateMessage === gateMessage) {
+        return; // identical failure repeating — already recorded, don't spam another note
+      }
+    } catch (err) {
+      console.warn("[workspace-merge] failed to check prior gate-failure note (non-fatal):", err instanceof Error ? err.message : String(err));
+    }
+    await recordMergeAttempt(
+      workspace,
+      "gate-failed",
+      `Merge withheld: pre-merge gate failed (${stage}). ${gateMessage}`,
+      { mergeReason: "pre_merge_gate_failed", gateStage: stage, gateMessage, targetBranch },
+    );
   }
 
   /** Best-effort kill of processes in the worktree dir using the injected killer. */
@@ -313,12 +342,7 @@ export function createWorkspaceMergeService(deps: {
         database,
       });
       if (!gate.passed) {
-        await recordMergeAttempt(
-          workspace,
-          "conflict",
-          `Merge withheld: pre-merge gate failed (${gate.stage}). ${gate.message}`,
-          { mergeReason: "pre_merge_gate_failed", gateStage: gate.stage, gateMessage: gate.message, targetBranch: baseBranch },
-        );
+        await recordGateFailureNote(workspace, gate.stage, gate.message, baseBranch);
         throw new WorkspaceError(
           `Pre-merge gate failed (${gate.stage}) — merge withheld. ${gate.message}`,
           "CONFLICT",

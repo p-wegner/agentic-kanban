@@ -22,6 +22,7 @@ import { createWorkspaceMergeService } from "../services/workspace-merge.service
 import { activeMerges } from "../services/workspace-internals.js";
 import { setPreference } from "../repositories/preferences.repository.js";
 import { verifyScriptPrefKey } from "../services/stack-profile.service.js";
+import { getIssueComments } from "../repositories/issue-comments.repository.js";
 
 // The gate runs a real build via runSetupScript (and a real dev server via runSmokeCheck). Mock both
 // boundaries so we force the verify outcome deterministically without spawning anything.
@@ -289,6 +290,65 @@ describe("review-merge.gate.verify-smoke — gate decision + which merge path ru
 
     expect(runSetupScript).not.toHaveBeenCalled();
     expect(result.merged).toBe(true);
+  });
+
+  // #170: an orchestrator tick retries a stranded readyForMerge workspace every ~30s. Before the
+  // fix, EVERY tick's gate withhold inserted a fresh "merge-attempt" comment, spamming the issue
+  // timeline for an unchanged failure. A repeated IDENTICAL verify failure must dedupe to one note.
+  it("a repeated identical verify failure produces ONE deduped issue note carrying the failure tail (#170)", async () => {
+    const { projectId, issueId, workspaceId } = await seedApprovedWorkspace(db);
+    await setPreference(verifyScriptPrefKey(projectId), ".\\verify.sh", db);
+    runSetupScript.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "boom: assertion failed at line 42" });
+
+    const git = makeGit();
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+
+    // Two orchestrator ticks hitting the SAME failing verify_script.
+    await expect(svc.mergeWorkspace(workspaceId)).rejects.toBeTruthy();
+    await expect(svc.mergeWorkspace(workspaceId)).rejects.toBeTruthy();
+
+    const comments = await getIssueComments(issueId, db);
+    const gateNotes = comments.filter((c) => {
+      if (c.kind !== "merge-attempt" || !c.payload) return false;
+      const payload = JSON.parse(c.payload) as Record<string, unknown>;
+      return payload.mergeReason === "pre_merge_gate_failed";
+    });
+    expect(gateNotes).toHaveLength(1);
+    expect(gateNotes[0].body).toContain("boom: assertion failed at line 42");
+  });
+
+  // A DIFFERENT verify failure (new stderr) after a prior one must still be recorded — dedup only
+  // suppresses an unchanged repeat, not a genuinely new failure signature.
+  it("a CHANGED verify failure after a prior one is recorded as a second note", async () => {
+    const { projectId, issueId, workspaceId } = await seedApprovedWorkspace(db);
+    await setPreference(verifyScriptPrefKey(projectId), ".\\verify.sh", db);
+
+    const git = makeGit();
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+
+    runSetupScript.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "first failure" });
+    await expect(svc.mergeWorkspace(workspaceId)).rejects.toBeTruthy();
+
+    runSetupScript.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "second, different failure" });
+    await expect(svc.mergeWorkspace(workspaceId)).rejects.toBeTruthy();
+
+    const comments = await getIssueComments(issueId, db);
+    const gateNotes = comments.filter((c) => {
+      if (c.kind !== "merge-attempt" || !c.payload) return false;
+      const payload = JSON.parse(c.payload) as Record<string, unknown>;
+      return payload.mergeReason === "pre_merge_gate_failed";
+    });
+    expect(gateNotes).toHaveLength(2);
   });
 });
 

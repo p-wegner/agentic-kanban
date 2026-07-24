@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { issueComments } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
@@ -39,6 +39,21 @@ export async function insertIssueComment(
   };
   await database.insert(issueComments).values(row);
   return row;
+}
+
+/** Most recent comment of a given kind for an issue, or null. Used to dedup repeated system notes. */
+export async function getLatestIssueCommentByKind(
+  issueId: string,
+  kind: IssueCommentKind,
+  database: Database = db,
+): Promise<IssueCommentRow | null> {
+  const rows = await database
+    .select()
+    .from(issueComments)
+    .where(and(eq(issueComments.issueId, issueId), eq(issueComments.kind, kind)))
+    .orderBy(desc(issueComments.createdAt))
+    .limit(1);
+  return rows[0] ?? null;
 }
 
 export async function getIssueComments(
