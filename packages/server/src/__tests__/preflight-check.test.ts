@@ -255,6 +255,91 @@ describe("workspaceLaunchPreflight", () => {
     expect(calls.some((a) => a[0] === "commit")).toBe(true);
   });
 
+  it("does not overwrite a safety file the branch's own commits intentionally modified", async () => {
+    const calls: string[][] = [];
+    const files = new Map<string, string>([
+      ["main:.codex/hooks.json", "old codex hooks"],
+      ["worktree:.codex/hooks.json", "branch-modified codex hooks"],
+      ["main:.claude/hooks/smart-hooks-runner.js", "runner"],
+      ["worktree:.claude/hooks/smart-hooks-runner.js", "runner"],
+      ["main:.claude/hooks/validate-command-safety.js", "validator"],
+      ["worktree:.claude/hooks/validate-command-safety.js", "validator"],
+      ["main:.claude/hooks/prevent-cross-worktree-writes.js", "cross-worktree"],
+      ["worktree:.claude/hooks/prevent-cross-worktree-writes.js", "cross-worktree"],
+      ["main:CLAUDE.md", "guidance"],
+      ["worktree:CLAUDE.md", "guidance"],
+    ]);
+
+    const result = await workspaceLaunchPreflight({
+      repoPath: "main",
+      worktreePath: "worktree",
+      baseBranch: "master",
+      branch: "feature/test",
+      isDirect: false,
+      execGit: async (args) => {
+        calls.push(args);
+        if (args[0] === "status") return "";
+        if (args[0] === "rev-parse") return "feature/test\n";
+        if (args[0] === "rebase") return "";
+        // The branch's own commits touched .codex/hooks.json relative to master
+        if (args[0] === "diff" && args[1] === "--name-only") return ".codex/hooks.json\n";
+        if (args[0] === "checkout" && args[1] === "master") {
+          throw new Error("must not reconcile a branch-owned safety file");
+        }
+        return "";
+      },
+      readFile: async (root, path) => files.get(`${root}:${path}`) ?? "",
+      exists: async (root, path) => files.has(`${root}:${path}`),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.errors).toHaveLength(0);
+    // The branch-owned file is left alone — never checked out from base.
+    expect(calls.some((a) => a[0] === "checkout" && a[1] === "master")).toBe(false);
+    expect(files.get("worktree:.codex/hooks.json")).toBe("branch-modified codex hooks");
+  });
+
+  it("aborts with a loud error instead of looping when the same file was already reconciled once", async () => {
+    const files = new Map<string, string>([
+      ["main:.codex/hooks.json", "new codex hooks"],
+      ["worktree:.codex/hooks.json", "old codex hooks"],
+      ["main:.claude/hooks/smart-hooks-runner.js", "runner"],
+      ["worktree:.claude/hooks/smart-hooks-runner.js", "runner"],
+      ["main:.claude/hooks/validate-command-safety.js", "validator"],
+      ["worktree:.claude/hooks/validate-command-safety.js", "validator"],
+      ["main:.claude/hooks/prevent-cross-worktree-writes.js", "cross-worktree"],
+      ["worktree:.claude/hooks/prevent-cross-worktree-writes.js", "cross-worktree"],
+      ["main:CLAUDE.md", "guidance"],
+      ["worktree:CLAUDE.md", "guidance"],
+    ]);
+
+    const result = await workspaceLaunchPreflight({
+      repoPath: "main",
+      worktreePath: "worktree",
+      baseBranch: "master",
+      branch: "feature/test",
+      isDirect: false,
+      execGit: async (args) => {
+        if (args[0] === "status") return "";
+        if (args[0] === "rev-parse") return "feature/test\n";
+        if (args[0] === "rebase") return "";
+        if (args[0] === "diff" && args[1] === "--name-only") return "";
+        // A prior [preflight] reconcile commit already touched this exact file once.
+        if (args[0] === "log" && args.includes("--")) return "abc123 chore: reconcile safety files from master [preflight]\n";
+        if (args[0] === "checkout" && args[1] === "master") {
+          throw new Error("must not reconcile again — ping-pong guard should have aborted first");
+        }
+        return "";
+      },
+      readFile: async (root, path) => files.get(`${root}:${path}`) ?? "",
+      exists: async (root, path) => files.has(`${root}:${path}`),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.join("\n")).toContain("ping-pong");
+    expect(result.staleFiles).toContain(".codex/hooks.json");
+  });
+
   it("returns ok=false with stale file list when reconciliation checkout fails", async () => {
     const files = new Map<string, string>([
       ["main:.codex/hooks.json", "new codex hooks"],
