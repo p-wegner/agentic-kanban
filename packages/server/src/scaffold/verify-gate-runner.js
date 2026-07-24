@@ -24,9 +24,10 @@
 //   1  — command failed; session blocked to drive another self-repair attempt
 //   2  — configuration error (bad JSON, etc.)
 
-const { execFileSync } = require("child_process");
+const { execFileSync, spawn } = require("child_process");
 const { readFileSync, writeFileSync, existsSync, unlinkSync } = require("fs");
 const { join, dirname } = require("path");
+const { tmpdir } = require("os");
 
 // Use the directory of the script file itself so the config is always found
 // alongside the runner — whether called directly or via smart-hooks-runner.
@@ -110,6 +111,119 @@ function writeEscalation(payload) {
   }
 }
 
+// --- Post-run zombie sweep (#172) ---
+// Windows does not tear down a process tree when only its root exits: a `pnpm test`
+// run that forks a vitest worker pool can leave those workers alive long after the
+// launching shell has returned control here (vitest's Windows fork pool is the
+// observed repeat offender — 18-20 orphaned node.exe per worktree). Best-effort,
+// self-contained (no board deps, ships to any scaffolded repo): after the verify
+// command finishes, find any process whose command line still references `cwd` and
+// isn't part of this runner's own ancestor chain, and kill it.
+function listProcessesForSweep() {
+  try {
+    if (process.platform === "win32") {
+      const script =
+        "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress";
+      const out = execFileSync("powershell.exe", ["-NoProfile", "-Command", script], {
+        encoding: "utf8",
+        windowsHide: true,
+        timeout: 10000,
+      });
+      const raw = out && out.trim() ? out : "[]";
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        const controlCharPattern = new RegExp("[\\x00-\\x1f]", "g");
+        parsed = JSON.parse(raw.replace(controlCharPattern, " "));
+      }
+      const rows = Array.isArray(parsed) ? parsed : [parsed];
+      return rows
+        .map((row) => ({
+          pid: Number(row.ProcessId),
+          ppid: Number(row.ParentProcessId) || 0,
+          commandLine: String(row.CommandLine || ""),
+        }))
+        .filter((row) => Number.isInteger(row.pid) && row.pid > 0);
+    }
+    const out = execFileSync("ps", ["-eo", "pid=,ppid=,args="], { encoding: "utf8", timeout: 10000 });
+    return out
+      .split("\n")
+      .map((line) => {
+        const match = line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/);
+        if (!match) return null;
+        return { pid: Number(match[1]), ppid: Number(match[2]), commandLine: match[3] || "" };
+      })
+      .filter((row) => row && Number.isInteger(row.pid) && row.pid > 0);
+  } catch {
+    return [];
+  }
+}
+
+function killPidTree(pid) {
+  try {
+    if (process.platform === "win32") {
+      execFileSync("taskkill", ["/pid", String(pid), "/T", "/F"], { timeout: 5000, windowsHide: true });
+    } else {
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch {
+        process.kill(pid, "SIGKILL");
+      }
+    }
+  } catch {
+    /* already gone — best-effort */
+  }
+}
+
+function killDirDescendants(cwd) {
+  if (!cwd) return;
+  const processes = listProcessesForSweep();
+  if (processes.length === 0) return;
+  const byPid = new Map(processes.map((p) => [p.pid, p]));
+
+  // Never kill this runner or anything in its own ancestor chain (the agent/session
+  // process, the harness, etc.) even if their command line happens to reference cwd.
+  const ancestors = new Set([process.pid]);
+  let cursor = byPid.get(process.pid);
+  for (let i = 0; cursor && i < 15; i++) {
+    const parentPid = cursor.ppid;
+    if (!parentPid || ancestors.has(parentPid)) break;
+    ancestors.add(parentPid);
+    cursor = byPid.get(parentPid);
+  }
+
+  const dirNormalized = cwd.replace(/\\/g, "/").toLowerCase();
+  for (const proc of processes) {
+    if (ancestors.has(proc.pid)) continue;
+    const cmdNormalized = proc.commandLine.replace(/\\/g, "/").toLowerCase();
+    if (cmdNormalized.includes(dirNormalized)) killPidTree(proc.pid);
+  }
+}
+
+// The sweep enumerates every OS process (a multi-second PowerShell/WMI round trip on
+// Windows) — synchronous, that latency lands on every single Stop-hook invocation,
+// not just ones that actually leaked something. Run it as a detached, unref'd child
+// instead: the gate's own pass/fail decision returns immediately, and the sweep
+// re-invokes this same script with --sweep-only in the background.
+function spawnBackgroundSweep(cwd) {
+  if (!cwd) return;
+  try {
+    const child = spawn(process.execPath, [process.argv[1], "--sweep-only", cwd], {
+      // NOT hookDir/cwd — a detached child inheriting the caller's cwd holds an OS
+      // handle on that directory for as long as it runs, which would block that
+      // worktree/hook dir from being removed or reused while the sweep is in flight.
+      cwd: tmpdir(),
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    child.unref();
+  } catch {
+    /* best-effort */
+  }
+}
+
 function runVerifyCommand(command, cwd) {
   const isWindows = process.platform === "win32";
   const shell = isWindows ? "cmd.exe" : "/bin/sh";
@@ -139,6 +253,13 @@ function runVerifyCommand(command, cwd) {
 }
 
 async function main() {
+  if (process.argv[2] === "--sweep-only") {
+    // Background sweep worker spawned by spawnBackgroundSweep — not a real hook
+    // invocation, just does the dir-scoped kill and exits.
+    killDirDescendants(process.argv[3]);
+    process.exit(0);
+  }
+
   const lines = [];
   for await (const chunk of process.stdin) lines.push(chunk);
   let input = {};
@@ -157,6 +278,14 @@ async function main() {
   process.stderr.write(`[verify-gate] Working dir: ${cwd}\n`);
 
   const { exitCode, cmdOutput } = runVerifyCommand(command, cwd);
+
+  // Best-effort, non-blocking: never let a leftover worker fleet (or the cost of
+  // sweeping for one) affect the gate's own pass/fail decision or its latency.
+  try {
+    spawnBackgroundSweep(cwd);
+  } catch {
+    /* best-effort */
+  }
 
   if (exitCode === 0) {
     // Passed — clear any in-progress self-repair state so the next failure starts fresh.

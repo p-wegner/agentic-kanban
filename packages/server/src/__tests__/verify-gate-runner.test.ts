@@ -144,6 +144,72 @@ describe("verify-gate-runner", () => {
   });
 });
 
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+describe("verify-gate-runner — zombie process sweep (#172)", () => {
+  let hookDir: string;
+  let projectDir: string;
+
+  beforeEach(async () => {
+    hookDir = await tmp();
+    projectDir = await tmp();
+  });
+
+  afterEach(async () => {
+    await rm(hookDir, { recursive: true, force: true });
+    await rm(projectDir, { recursive: true, force: true });
+  });
+
+  it("kills a detached descendant left running under cwd after the gate command exits", async () => {
+    // Simulates the vitest-worker-fleet leak: the command's own process (like `pnpm
+    // test`'s shell) exits cleanly, but it spawned a detached, unref'd descendant
+    // (like a vitest fork worker) that keeps running under the SAME worktree path.
+    // Windows never tears that descendant down just because its ancestor exited.
+    const markerWorker = join(projectDir, "marker-worker.js");
+    await writeFile(markerWorker, "setInterval(() => {}, 1000);\n");
+    const lingerScript = join(projectDir, "linger.js");
+    const pidFile = join(projectDir, "linger.pid");
+    await writeFile(
+      lingerScript,
+      [
+        "const fs = require('fs');",
+        "const { spawn } = require('child_process');",
+        `const child = spawn(process.execPath, [${JSON.stringify(markerWorker)}], { detached: true, stdio: 'ignore' });`,
+        `fs.writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));`,
+        "child.unref();",
+      ].join("\n"),
+    );
+
+    // No quotes around the path: embedding a quoted arg inside the command string here
+    // collides with execFileSync's own Windows cmd.exe argument re-quoting. Test tmp
+    // dirs never contain spaces, so this is safe.
+    await writeFile(join(hookDir, "verify-gate.config.json"), JSON.stringify({ command: `node ${lingerScript}` }));
+    const result = runGate({ hookDir, stdin: JSON.stringify({ cwd: projectDir }) });
+    expect(result.status).toBe(0);
+
+    const pid = Number(await readFile(pidFile, "utf8"));
+    expect(Number.isInteger(pid)).toBe(true);
+
+    // The sweep that reaps the descendant runs as a detached background process (so
+    // the gate itself returns immediately, unaffected by the sweep's own OS-process-
+    // enumeration latency) — poll instead of asserting immediately after runGate returns.
+    const deadline = Date.now() + 15_000;
+    let alive = isPidAlive(pid);
+    while (alive && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      alive = isPidAlive(pid);
+    }
+    expect(alive).toBe(false);
+  }, 20_000);
+});
+
 describe("verify-gate-runner — bounded self-repair loop (#795)", () => {
   let hookDir: string;
   const FAIL = process.platform === "win32" ? "exit 1" : "false";
