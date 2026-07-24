@@ -121,14 +121,22 @@ export async function checkAlreadyMerged(
   // Done, stranding it open forever with its issue never reaching Done.
   const pendingSiblings = await listPendingSiblingMerges(gitService, database, id);
   if (pendingSiblings.length > 0) {
+    const unverifiable = pendingSiblings.filter((p) => p.unverifiable);
+    const reason = unverifiable.length > 0
+      ? "Sibling repo pendency could not be verified — refusing to reconcile as merged: " +
+        unverifiable.map((p) => p.unverifiableReason ?? `${p.repo.name ?? p.repo.path} at ${p.repo.path}`).join("; ") +
+        (pendingSiblings.length > unverifiable.length
+          ? `; also unmerged: ${pendingSiblings.filter((p) => !p.unverifiable).map((p) => `${p.repo.name ?? p.repo.path} (${p.uniqueCommits})`).join(", ")}`
+          : "")
+      : "Sibling repo(s) still have unmerged commits: " +
+        pendingSiblings.map((p) => `${p.repo.name ?? p.repo.path} (${p.uniqueCommits})`).join(", ");
     return {
       isAlreadyMerged: false,
       branch: workspace.branch,
       baseBranch,
       mergeCommitSha: null,
       issueNumber,
-      reason: "Sibling repo(s) still have unmerged commits: " +
-        pendingSiblings.map((p) => `${p.repo.name ?? p.repo.path} (${p.uniqueCommits})`).join(", "),
+      reason,
     };
   }
 
