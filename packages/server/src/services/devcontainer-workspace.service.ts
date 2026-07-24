@@ -319,6 +319,35 @@ export async function provisionContainerForWorkspace(
 }
 
 /**
+ * Rewrite a containerized session's MCP config with the CURRENT bridge port+token
+ * (#156).
+ *
+ * The bridge is per-boot (`mcp-http-bridge.service.ts`) and is torn down on every
+ * server shutdown INCLUDING `SIGTERM` (hot-reload), unlike the containerized
+ * agent process itself, which is detached and survives. So a session reattached
+ * after a restart is left holding a config that names a dead port/token — the
+ * new bridge started with a fresh port and token that nothing ever pushes back
+ * into the container's mounted config file.
+ *
+ * The config file lives on the host-temp bind mount (`hostTmpMount`), keyed only
+ * by `workspaceId` (see `writeContainerMcpConfig`), so it can be rewritten from
+ * the host without touching the container — the same mechanism that makes the
+ * mount work in the first place. Call this from the boot-time reattach path for
+ * every session that has a persisted `containerId`.
+ *
+ * Best-effort, matching the rest of provisioning: if the bridge cannot (re)start,
+ * resolves undefined and the caller decides whether/how to warn.
+ */
+export async function refreshContainerMcpConfig(
+  workspaceId: string,
+  hostTmp: string = tmpdir(),
+): Promise<string | undefined> {
+  const mcp = await ensureMcpHttpBridge();
+  if (!mcp) return undefined;
+  return writeContainerMcpConfig({ hostTmp, workspaceId, port: mcp.port, token: mcp.token });
+}
+
+/**
  * Check the container can actually resolve the host gateway, and say so loudly if not.
  *
  * `host.docker.internal` is provided automatically by Docker Desktop (Windows/macOS)
