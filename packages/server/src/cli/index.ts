@@ -23,6 +23,7 @@ import { registerBoardCommand } from "./commands/board.js";
 import { registerServicesCommand } from "./commands/services.js";
 import { runMigrations, logDefaultBranch } from "./shared.js";
 import { homeFallbackDbWarning } from "./db-warning.js";
+import { checkAndRecordDbResolution } from "./last-resolved-db.js";
 
 const program = new Command();
 
@@ -61,18 +62,24 @@ registerOpenspecCommand(program);
 registerBoardCommand(program);
 registerServicesCommand(program);
 
-// ── Split-brain guard (#112): warn loudly when a CLI subcommand resolves to the
-// home-fallback DB (~/.agentic-kanban/kanban.db). A dev server started from a
-// checkout uses the in-checkout packages/server/kanban.db instead, so the CLI can
-// silently read/mutate a DIFFERENT database than the running server (the recurring
-// "board looks empty" / "server doesn't see the project I just registered"
-// incident). preAction only fires for action subcommands — never for
-// --help/--version — and is non-fatal.
+// ── Split-brain guards (#112, #165): warn loudly whenever a CLI subcommand's
+// resolved DB might not be the one the user expects.
+// - #112: resolved to the home-fallback DB while a dev server started from a
+//   checkout would use the in-checkout packages/server/kanban.db instead.
+// - #165: resolved to a DIFFERENT database than the immediately preceding CLI
+//   invocation — the exact symptom that let an empty shadow DB go unnoticed
+//   across several calls in one session before this fix. db/index.ts already
+//   logs the resolved path/source on every invocation (stderr, unconditionally —
+//   kept off stdout so it never corrupts `--json` output, see its own comment).
+// preAction only fires for action subcommands — never for --help/--version —
+// and both checks are non-fatal.
 program.hook("preAction", async () => {
   try {
     const { DB_LOCATION } = await import("../db/data-dir.js");
-    const warning = homeFallbackDbWarning(DB_LOCATION);
-    if (warning) console.warn(warning);
+    const homeFallback = homeFallbackDbWarning(DB_LOCATION);
+    if (homeFallback) console.warn(homeFallback);
+    const flip = checkAndRecordDbResolution(DB_LOCATION);
+    if (flip) console.warn(flip);
   } catch {
     // Non-fatal: never let the DB-source probe block a command.
   }

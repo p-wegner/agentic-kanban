@@ -34,6 +34,14 @@ vi.mock("node:fs", async (importOriginal) => {
     // else (e.g. real path checks) to the real implementation.
     existsSync: (p: import("node:fs").PathLike) =>
       String(p).endsWith("kanban.db") ? fsState.localDbExists : actual.existsSync(p),
+    // #165: resolveDbLocation also size-checks a present candidate before
+    // adopting it. Report a plausible real-DB size when the fixture says the
+    // local db "exists", so these existence-driven cases still exercise the
+    // local-checkout branch (there is no real file on disk to stat here).
+    statSync: (p: import("node:fs").PathLike) =>
+      String(p).endsWith("kanban.db") && fsState.localDbExists
+        ? ({ size: 1_000_000 } as ReturnType<typeof actual.statSync>)
+        : actual.statSync(p),
   };
 });
 
