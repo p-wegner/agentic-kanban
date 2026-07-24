@@ -66,11 +66,17 @@ Examples:
         }
 
         const runner = createDefaultComposeRunner();
-        const [composeProjectNames, currentInstanceId, liveIds] = await Promise.all([
+        const [containerProjectNames, residualProjectNames, currentInstanceId, liveIds] = await Promise.all([
           runner.list(),
+          // Container-less residue (#163): a project whose containers are already gone
+          // (failed compensating down, external prune) is invisible to `compose ls` but
+          // still carries labeled volumes/networks/images the wide sweep must also see.
+          runner.listResidualProjects(),
           getOrCreateServiceStackInstanceId(),
           getNonTerminalWorkspaceIds(),
         ]);
+        const composeProjectNames = [...new Set([...containerProjectNames, ...residualProjectNames])];
+        const containerNameSet = new Set(containerProjectNames);
         const liveWsTokens = new Set(liveIds.map(serviceStackWsToken));
 
         const scope: StackSweepScope = options.allInstances
@@ -114,10 +120,15 @@ Examples:
         }
 
         // --yes: actually down each candidate. Best-effort per stack; report the tally.
+        // A candidate with no live container left (residue-only) can't be resolved by
+        // `compose down -p` (it discovers the project via container labels) — remove its
+        // labeled volumes/networks/images directly instead (#163).
         const reaped: string[] = [];
         const failed: { name: string; stderr: string }[] = [];
         for (const c of plan.reap) {
-          const { ok, stderr } = await runner.down({ projectName: c.name, cwd: process.cwd() });
+          const { ok, stderr } = containerNameSet.has(c.name)
+            ? await runner.down({ projectName: c.name, cwd: process.cwd() })
+            : await runner.removeResidualProjectResources(c.name);
           if (ok) reaped.push(c.name);
           else failed.push({ name: c.name, stderr });
         }
