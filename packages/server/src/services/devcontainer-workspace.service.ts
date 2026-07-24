@@ -303,11 +303,18 @@ export async function provisionContainerForWorkspace(
     pathMappings: buildPathMappings(worktreePath, handle, narrowProfile.hostDir, hostTmp),
     dependencyVolumes,
     containerMcpConfigPath,
-    // Point the CLI at the mounted profile. This also fixes #134: with
-    // CLAUDE_CONFIG_DIR set, the CLI reads `<dir>/.claude.json` instead of
-    // `$HOME/.claude.json`, so the "configuration file not found" preamble that
-    // every containerized turn printed to stderr goes away.
-    containerEnv: { CLAUDE_CONFIG_DIR: `${containerHomeFor(handle.remoteUser)}/.claude` },
+    containerEnv: {
+      // Point the CLI at the mounted profile. This also fixes #134: with
+      // CLAUDE_CONFIG_DIR set, the CLI reads `<dir>/.claude.json` instead of
+      // `$HOME/.claude.json`, so the "configuration file not found" preamble that
+      // every containerized turn printed to stderr goes away.
+      CLAUDE_CONFIG_DIR: `${containerHomeFor(handle.remoteUser)}/.claude`,
+      // The only signal the in-container hook scripts have that they're running inside a
+      // builder image rather than on the host — smart-hooks-runner.js reads this to skip
+      // host-toolchain quick-checks instead of exec'ing them and failing closed on a host
+      // path/binary assumption the image doesn't meet (#158).
+      AGENTIC_KANBAN_CONTAINER: "1",
+    },
   };
 }
 
