@@ -18,6 +18,10 @@ export const GENERIC_AGENT_GITIGNORE = [
   ".claude/hooks/.verify-gate-state.json",
   ".claude/hooks/.verify-gate-escalation.json",
   ".claude/scheduled_tasks.lock",
+  // Machine-regenerated per checkout (see project-scaffold/commit.ts's
+  // DURABLE_CLAUDE_SCAFFOLD_PATHS comment) — deliberately never committed, so it must
+  // also never show up as untracked cruft in a fresh scaffold/registration.
+  ".claude/smart-hooks-rules.json",
   // App-run capture logs the board's smoke/visual-verification (agent-launched `gradlew run`
   // / dev-server) leaves in the repo ROOT (#825). The reviewer invents arbitrary names
   // (app.log, app2.log, final-run.log, gallery-stderr.log, install3.log, …), so the only robust
