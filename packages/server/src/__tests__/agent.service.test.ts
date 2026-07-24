@@ -12,6 +12,14 @@ vi.mock("node:fs", () => ({
   existsSync: vi.fn(() => false),
   readFileSync: vi.fn(),
   readdirSync: vi.fn(() => []),
+  statSync: vi.fn(() => {
+    throw new Error("ENOENT");
+  }),
+  openSync: vi.fn(() => 0),
+  closeSync: vi.fn(),
+  readSync: vi.fn(() => 0),
+  unlinkSync: vi.fn(),
+  appendFileSync: vi.fn(),
 }));
 
 // Fake docker runner (#154) — asserts the container kill leg without shelling out.
@@ -19,11 +27,18 @@ vi.mock("@agentic-kanban/shared/lib/docker-exec", () => ({
   dockerExec: vi.fn(async () => ({ stdout: "", stderr: "", code: 0 })),
 }));
 
+// #167: spy on the version guard so tests can assert WHICH command it was asked
+// to check, without actually shelling out to `--version`.
+vi.mock("../services/agent-cli-version.service.js", () => ({
+  warnIfCliVersionRisky: vi.fn(async () => null),
+}));
+
 // Import after mocking
 import { launch, kill, killAll, sendInput, closeStdin, isStdinOpen, getProcess, agentState } from "../services/agent.service.js";
 import { spawn as spawnMock } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dockerExec as dockerExecMock } from "@agentic-kanban/shared/lib/docker-exec";
+import { warnIfCliVersionRisky as warnIfCliVersionRiskyMock } from "../services/agent-cli-version.service.js";
 import { createMockProc } from "./helpers/mocks.js";
 import type { ContainerProvision } from "../services/devcontainer-workspace.service.js";
 
@@ -534,6 +549,49 @@ describe("agent.service", () => {
 
       expect(result).toBe(true);
       expect(dockerExecMock).not.toHaveBeenCalled();
+    });
+
+    // #167 leak 1: the version guard used to run on the WRAPPED command, so a
+    // containerized launch version-checked `docker` as if it were the agent CLI.
+    it("version-checks the pre-wrap agent CLI command, not the wrapped `docker`", () => {
+      (spawnMock as any).mockReturnValue(createMockProc());
+
+      launch(
+        "/tmp", "sess-container-version", "prompt", undefined, vi.fn(),
+        undefined, "claude", undefined, undefined, undefined, undefined, "claude",
+        undefined, undefined, undefined, undefined, undefined, undefined,
+        makeContainerProvision("container-version1"),
+      );
+
+      expect(warnIfCliVersionRiskyMock).toHaveBeenCalledTimes(1);
+      const [, checkedCommand] = (warnIfCliVersionRiskyMock as any).mock.calls[0];
+      expect(checkedCommand).toBe("claude");
+      expect(checkedCommand).not.toBe("docker");
+    });
+
+    // #167 leak 2: env assembled AFTER the wrap (ports/extraEnv/session vars)
+    // used to land only on the host docker-exec client, never inside the
+    // container, because the wrap's `-e` allowlist was computed from the
+    // provider's base env before that later env was layered on. The full env
+    // must now be computed BEFORE the wrap so it shows up in the `-e` flags.
+    it("carries session/extraEnv vars into the container's `-e` allowlist, not just the host docker client", () => {
+      (spawnMock as any).mockReturnValue(createMockProc());
+
+      launch(
+        "/tmp", "sess-container-env", "prompt", undefined, vi.fn(),
+        undefined, "claude", undefined, undefined, undefined, undefined, "claude",
+        undefined, { KANBAN_CUSTOM_TEST: "abc123" }, undefined, undefined, undefined, undefined,
+        makeContainerProvision("container-env1"),
+      );
+
+      const [cmd, args, opts] = (spawnMock as any).mock.calls[0];
+      expect(cmd).toBe("docker");
+      expect(args).toContain("-e");
+      expect(args).toContain("KANBAN_SESSION_ID=sess-container-env");
+      expect(args).toContain("KANBAN_CUSTOM_TEST=abc123");
+      // The docker CLIENT process itself no longer needs the full env — it all
+      // travels inside the container via -e flags now.
+      expect(opts.env).toEqual({});
     });
   });
 
