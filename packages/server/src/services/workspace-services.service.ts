@@ -35,6 +35,7 @@ import {
   isInstanceManagedComposeProject,
   findSiblingComposeRelativePaths,
   siblingComposeRelativePathWarning,
+  extractComposeFileReferences,
 } from "@agentic-kanban/shared";
 import { dockerExec, dockerAvailable } from "@agentic-kanban/shared/lib/docker-exec";
 import { createStackPortAllocator, releaseStackPorts, type StackPortAllocator } from "./port-allocator.js";
@@ -134,20 +135,63 @@ function portEnvVar(name: string): string {
 }
 
 /**
- * Discover host-port names a compose file references via `${KANBAN_SVC_<NAME>_PORT}` that
- * are NOT already declared in `existingNames` (#71 union port allocation). Lets a sibling
- * repo ship its OWN published ports (a broker, a second DB, …) and have them allocated +
- * injected, instead of being limited to the project's declared port block. Deduped by the
- * canonical env var so "db" (declared) and a compose's "DB" reference never double-allocate.
+ * Read a compose file and follow its `include:`/`extends: file:` references ONE level
+ * deep (dev #162) — resolved relative to EACH referenced file's own directory, matching
+ * how docker compose itself resolves those directives (unlike the `-f` multi-project-dir
+ * quirk #109 targets). Returns the primary file's text plus every readable referenced
+ * file's text. Best-effort: a missing/unreadable primary or reference contributes
+ * nothing rather than throwing — a compose file appearing in multiple lists (e.g. a
+ * shared base extended by two services) is naturally deduped by the caller's Map.
+ */
+async function readComposeFileShallow(absPath: string): Promise<Array<{ path: string; text: string }>> {
+  const out: Array<{ path: string; text: string }> = [];
+  let text: string;
+  try {
+    text = await readFile(absPath, "utf-8");
+  } catch {
+    return out;
+  }
+  out.push({ path: absPath, text });
+  const fileDir = dirname(absPath);
+  for (const ref of extractComposeFileReferences(text)) {
+    const refAbs = join(fileDir, ref);
+    try {
+      const refText = await readFile(refAbs, "utf-8");
+      out.push({ path: refAbs, text: refText });
+    } catch {
+      continue;
+    }
+  }
+  return out;
+}
+
+/** Expand a list of compose files (primary + siblings) one level via `readComposeFileShallow`, deduped by resolved path. */
+async function expandComposeFilesShallow(composeFiles: string[]): Promise<Array<{ path: string; text: string }>> {
+  const seen = new Map<string, string>();
+  for (const file of composeFiles) {
+    for (const { path, text } of await readComposeFileShallow(file)) {
+      if (!seen.has(path)) seen.set(path, text);
+    }
+  }
+  return [...seen.entries()].map(([path, text]) => ({ path, text }));
+}
+
+/**
+ * Discover host-port names referenced via `${KANBAN_SVC_<NAME>_PORT}` across a compose
+ * file, its siblings, AND anything they pull in via `include:`/`extends:` (one level,
+ * dev #162) that are NOT already declared in `existingNames` (#71 union port
+ * allocation). Lets a sibling repo — or a file it includes/extends — ship its OWN
+ * published ports (a broker, a second DB, …) and have them allocated + injected, instead
+ * of being limited to the project's declared port block. Deduped by the canonical env
+ * var so "db" (declared) and a compose's "DB" reference never double-allocate.
  * Best-effort text scan (not full YAML) — an unreadable file contributes nothing.
  */
 async function discoverComposePortNames(composeFiles: string[], existingNames: string[]): Promise<string[]> {
   const seenEnv = new Set(existingNames.map(portEnvVar));
   const discovered: string[] = [];
   const re = /KANBAN_SVC_([A-Z0-9_]+?)_PORT/g;
-  for (const file of composeFiles) {
-    let text: string;
-    try { text = await readFile(file, "utf-8"); } catch { continue; }
+  const expanded = await expandComposeFilesShallow(composeFiles);
+  for (const { text } of expanded) {
     for (const m of text.matchAll(re)) {
       const name = m[1].toLowerCase();
       const env = portEnvVar(name);
@@ -273,14 +317,18 @@ export function buildServicesEnvFile(args: {
 }
 
 /**
- * Best-effort diagnostic for merged SIBLING compose files (dev #109): read each extra
- * `-f` compose file and warn if it declares a relative env_file/build-context/secret-or-
- * config file path, because `docker compose -f <leading> -f <sibling>` resolves those
- * against the LEADING worktree (project directory = first `-f`), not the sibling's own
- * dir — a cryptic "file not found under <leading>" `up` failure. Never throws; silent
- * when siblings use absolute or `${VAR}` paths (the common, working case).
+ * Best-effort diagnostic for merged SIBLING compose files (dev #109): scan each extra
+ * `-f` compose file for a relative env_file/build-context/dockerfile/secret-or-config-
+ * file/volumes-bind-mount path, because `docker compose -f <leading> -f <sibling>`
+ * resolves those against the LEADING worktree (project directory = first `-f`), not the
+ * sibling's own dir — a cryptic "file not found under <leading>" `up` failure. Logged
+ * to the server console AND returned so the caller can attach it to the persisted
+ * ServiceStackState + ticket-context (dev #162) — previously console.warn-only, so a
+ * failure was undiagnosable outside the server log. Never throws; returns [] when
+ * siblings use absolute or `${VAR}` paths (the common, working case).
  */
-async function warnSiblingComposeRelativePaths(leadingWorktreePath: string, extraComposeFiles: string[]): Promise<void> {
+async function lintSiblingComposeFiles(leadingWorktreePath: string, extraComposeFiles: string[]): Promise<string[]> {
+  const warnings: string[] = [];
   for (const abs of extraComposeFiles) {
     let text: string;
     try {
@@ -295,8 +343,12 @@ async function warnSiblingComposeRelativePaths(leadingWorktreePath: string, extr
       leadingWorktreePath,
       issues,
     });
-    if (warning) console.warn(warning);
+    if (warning) {
+      console.warn(warning);
+      warnings.push(warning);
+    }
   }
+  return warnings;
 }
 
 /**
@@ -338,6 +390,9 @@ export function parseStoredServiceStackState(serviceStateJson: string | null | u
       status: parsed.status,
       ...(typeof parsed.error === "string" ? { error: parsed.error } : {}),
       ...(parsed.deferred === true ? { deferred: true } : {}),
+      ...(Array.isArray(parsed.lintWarnings) && parsed.lintWarnings.every((w) => typeof w === "string")
+        ? { lintWarnings: parsed.lintWarnings as string[] }
+        : {}),
       updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date().toISOString(),
     };
   } catch {
@@ -538,13 +593,15 @@ export function createWorkspaceServicesService(deps: {
     // join THIS workspace's compose project + env file and are torn down together by the
     // project-name `down`. Best-effort.
     const extraComposeFiles = await resolveExtraComposeFiles(workspaceId).catch(() => [] as string[]);
-    // Sibling relative-path diagnostic (dev #109): a merged sibling compose (`-f`) that
-    // uses a relative env_file/build-context/secret+config file path will have compose
-    // resolve it against the LEADING worktree (composeWorktreePath), not the sibling — a
-    // failure whose "file not found under <leading>" message is otherwise undiagnosable.
-    // Warn loudly up front. Best-effort, off the success path (silent when siblings use no
+    // Sibling relative-path diagnostic (dev #109/#162): a merged sibling compose (`-f`)
+    // that uses a relative env_file/build-context/dockerfile/secret+config-file/volumes
+    // bind-mount path will have compose resolve it against the LEADING worktree
+    // (composeWorktreePath), not the sibling — a failure whose "file not found under
+    // <leading>" message is otherwise undiagnosable. Logged AND attached to the returned
+    // state (below) so it survives past the server log into the persisted stack state +
+    // ticket-context (#162). Best-effort, empty on the success path (siblings use no
     // relative paths, e.g. absolute or ${VAR} interpolated).
-    await warnSiblingComposeRelativePaths(composeWorktreePath, extraComposeFiles).catch(() => {});
+    const lintWarnings = await lintSiblingComposeFiles(composeWorktreePath, extraComposeFiles).catch(() => [] as string[]);
     // Union port allocation (#71): a sibling (or the primary) compose may publish ports the
     // project never declared in `servicesConfig.ports`. Discover every `${KANBAN_SVC_*_PORT}`
     // referenced across all compose files and allocate the union, so those services get a
@@ -562,7 +619,7 @@ export function createWorkspaceServicesService(deps: {
       name = composeProjectName(workspaceId, await getInstanceId());
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return { composeProjectName: "", ports: {}, envFilePath, status: "error", error: `failed to resolve the service-stack instance id: ${message}`.slice(0, MAX_ERROR_CHARS), updatedAt: new Date().toISOString() };
+      return { composeProjectName: "", ports: {}, envFilePath, status: "error", error: `failed to resolve the service-stack instance id: ${message}`.slice(0, MAX_ERROR_CHARS), ...(lintWarnings.length ? { lintWarnings } : {}), updatedAt: new Date().toISOString() };
     }
 
     // Allocate host ports (if any) and (re)write the env file. Broken out so the
@@ -593,7 +650,7 @@ export function createWorkspaceServicesService(deps: {
         await allocateAndWriteEnv();
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        return { composeProjectName: name, ports, envFilePath, status: "error", error: message.slice(0, MAX_ERROR_CHARS), updatedAt: new Date().toISOString() };
+        return { composeProjectName: name, ports, envFilePath, status: "error", error: message.slice(0, MAX_ERROR_CHARS), ...(lintWarnings.length ? { lintWarnings } : {}), updatedAt: new Date().toISOString() };
       }
 
       // `up -d --wait` with a bounded port-collision retry. A parallel create or the
@@ -606,7 +663,7 @@ export function createWorkspaceServicesService(deps: {
       for (let attempt = 1; attempt <= MAX_UP_ATTEMPTS; attempt++) {
         const { ok, stderr } = await runner.up({ composeFile, extraComposeFiles, cwd: composeWorktreePath, projectName: name, envFile: envFilePath, timeoutMs });
         if (ok) {
-          return { composeProjectName: name, ports, envFilePath, status: "up", updatedAt: new Date().toISOString() };
+          return { composeProjectName: name, ports, envFilePath, status: "up", ...(lintWarnings.length ? { lintWarnings } : {}), updatedAt: new Date().toISOString() };
         }
         lastStderr = stderr;
         const canRetry = attempt < MAX_UP_ATTEMPTS && portNames.length > 0 && isPortInUseError(stderr);
@@ -627,7 +684,7 @@ export function createWorkspaceServicesService(deps: {
       // before we return the error state.
       await runner.down({ projectName: name, cwd: composeWorktreePath }).catch(() => {});
 
-      return { composeProjectName: name, ports, envFilePath, status: "error", error: (lastStderr || "compose up failed").slice(0, MAX_ERROR_CHARS), updatedAt: new Date().toISOString() };
+      return { composeProjectName: name, ports, envFilePath, status: "error", error: (lastStderr || "compose up failed").slice(0, MAX_ERROR_CHARS), ...(lintWarnings.length ? { lintWarnings } : {}), updatedAt: new Date().toISOString() };
     } finally {
       releaseStackPorts(Object.values(ports));
     }

@@ -432,6 +432,7 @@ export function createWorkspaceCreateService(deps: {
                       envFilePath: serviceState.envFilePath,
                       composeProjectName: serviceState.composeProjectName,
                       serviceHost: resolveServiceHost(),
+                      lintWarnings: serviceState.lintWarnings ?? null,
                     }
                   : {
                       status: "error",
@@ -440,6 +441,7 @@ export function createWorkspaceCreateService(deps: {
                       envFilePath: serviceState.envFilePath,
                       composeProjectName: serviceState.composeProjectName,
                       serviceHost: resolveServiceHost(),
+                      lintWarnings: serviceState.lintWarnings ?? null,
                     };
               await writeWorktreeTicketContext(
                 ctx.worktreePath,

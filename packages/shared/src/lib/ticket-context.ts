@@ -42,6 +42,12 @@ export type TicketContext = {
      * the board itself runs in a container. Sourced from KANBAN_SERVICE_HOST (F2).
      */
     serviceHost: string;
+    /**
+     * Relative-path lint warnings found in the primary/sibling compose files (dev
+     * #109/#162) — rendered regardless of `status` so an "up" stack that still carries
+     * a directive that will misresolve is diagnosable, not just a hard failure.
+     */
+    lintWarnings?: string[] | null;
   } | null;
 };
 
@@ -141,6 +147,7 @@ export function buildServiceStackSection(
     if (stack.error?.trim()) {
       lines.push("", "Failure reason:", "", "```", stack.error.trim(), "```");
     }
+    appendLintWarnings(lines, stack.lintWarnings);
     return lines.join("\n");
   }
   // The "NOT necessarily localhost" warning is only true — and only useful — when the
@@ -177,7 +184,21 @@ export function buildServiceStackSection(
       lines.push(`  - \`${name}\` → \`${stack.serviceHost}:${port}\` (env \`KANBAN_SVC_${name.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_PORT\`)`);
     }
   }
+  appendLintWarnings(lines, stack.lintWarnings);
   return lines.join("\n");
+}
+
+/**
+ * Append compose relative-path lint warnings (dev #109/#162), if any, to a stack
+ * section's line buffer. No-op when there is nothing to warn about, so a clean stack
+ * stays exactly as before.
+ */
+function appendLintWarnings(lines: string[], lintWarnings: string[] | null | undefined): void {
+  if (!lintWarnings || lintWarnings.length === 0) return;
+  lines.push("", "**Compose lint warning(s):**", "");
+  for (const w of lintWarnings) {
+    lines.push("```", w, "```");
+  }
 }
 
 /**
