@@ -208,6 +208,37 @@ describe("verify-gate-runner — zombie process sweep (#172)", () => {
     }
     expect(alive).toBe(false);
   }, 20_000);
+
+  it("does not kill an unrelated live process whose parent is still alive, even if its command line references cwd (#172 regression)", async () => {
+    // Simulates a legitimate `pnpm dev` server (or another agent's session) that is
+    // still running in the SAME worktree cwd when this gate happens to fire. Its
+    // process tree has nothing to do with the gate's own command, and its parent
+    // (this test process) is alive the whole time — the sweep must not path-match
+    // its way into killing it. Regression for the bug where killDirDescendants
+    // matched ANY process referencing cwd, not just orphaned descendants of the
+    // already-completed verify command.
+    const liveServerScript = join(projectDir, "live-server.js");
+    await writeFile(liveServerScript, "setInterval(() => {}, 1000);\n");
+    // Not detached — stays parented to this test process, which stays alive for the
+    // duration of the test, so its recorded ppid is always present in the snapshot.
+    const { spawn } = await import("node:child_process");
+    const liveServerProc = spawn(process.execPath, [liveServerScript, `--workdir=${projectDir}`], {
+      stdio: "ignore",
+    });
+    expect(liveServerProc.pid).toBeDefined();
+
+    try {
+      await writeFile(join(hookDir, "verify-gate.config.json"), JSON.stringify({ command: "node -e \"process.exit(0)\"" }));
+      const result = runGate({ hookDir, stdin: JSON.stringify({ cwd: projectDir }) });
+      expect(result.status).toBe(0);
+
+      // Give the background sweep the same window used above to do its (wrong) kill.
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      expect(isPidAlive(liveServerProc.pid as number)).toBe(true);
+    } finally {
+      liveServerProc.kill("SIGKILL");
+    }
+  }, 20_000);
 });
 
 describe("verify-gate-runner — bounded self-repair loop (#795)", () => {
