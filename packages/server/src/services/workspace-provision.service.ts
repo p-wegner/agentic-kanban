@@ -124,7 +124,7 @@ export function createWorkspaceProvisionService(deps: {
     let setupContainer: SetupScriptContainer | undefined;
     if (!isDirect && setupScript && setupEnabled && !input.skipSetup) {
       try {
-        const provision = await provisionContainerForWorkspace({
+        const { provision } = await provisionContainerForWorkspace({
           enabled: parseBoolSetting(
             "devcontainer_builders",
             await getPreference("devcontainer_builders", database),

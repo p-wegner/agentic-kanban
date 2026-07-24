@@ -18,8 +18,7 @@ import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import { modelBelongsToProvider } from "@agentic-kanban/shared";
 import type { SessionManagerOptions, SessionState, StartSessionOptions } from "./types.js";
 import { workspaceLaunchPreflight } from "../preflight-check.js";
-import { provisionContainerForWorkspace } from "../devcontainer-workspace.service.js";
-import type { ContainerProvision } from "../devcontainer-workspace.service.js";
+import { resolveContainerProvision, surfaceIsolationDowngrade } from "./devcontainer-launch.js";
 import { WorkspaceError } from "../workspace-internals.js";
 import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../../constants/preference-keys.js";
 import { parseSymlinkDirs } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
@@ -619,37 +618,12 @@ export function createSessionLifecycle(
       }
     }
 
-    // Provision the builder's devcontainer BEFORE the (synchronous) spawn. This
-    // is best-effort by contract — any missing prerequisite resolves to
-    // undefined and the agent launches on the host as before.
-    let containerProvision: ContainerProvision | undefined;
-    try {
-      const devcontainerEnabled = parseBoolSetting(
-        "devcontainer_builders",
-        await lifecycleRepo.getPreferenceValue("devcontainer_builders", db),
-      );
-      if (devcontainerEnabled) {
-        // Only read the project when the feature is on — this is the default-off
-        // path for every launch, and it should not pay for a lookup it won't use.
-        const projectInfo = projectId ? await lifecycleRepo.getProjectPreflightInfo(projectId, db) : null;
-        containerProvision = await provisionContainerForWorkspace({
-          enabled: true,
-          worktreePath: effectiveWorkingDir,
-          workspaceId,
-          symlinkDirs: projectInfo?.symlinkEnabled ? projectInfo.symlinkDirs : null,
-          // Seed the narrow container profile from whatever this launch actually
-          // authenticates with (#133). An OAuth subscription resolved above put its
-          // CLAUDE_CONFIG_DIR in effectiveExtraEnv and reset launchProfile to
-          // "default"; a settings-file profile keeps its name and needs its
-          // settings_<name>.json seeded too.
-          claudeProfile: profile?.name ?? "default",
-          claudeConfigDir: effectiveExtraEnv?.CLAUDE_CONFIG_DIR,
-          settingsProfile: launchProfile?.name !== "default" ? launchProfile?.name : undefined,
-        });
-      }
-    } catch (err) {
-      console.warn(`[devcontainer] provisioning threw for sessionId=${sessionId} — running on host`, err);
-    }
+    // Provision the builder's devcontainer BEFORE the (synchronous) spawn, and surface
+    // any isolation downgrade instead of leaving it in a console.warn only (#160) — see
+    // devcontainer-launch.ts for the best-effort/strict-mode contract.
+    const { devcontainerEnabled, containerProvision, isolationDowngradeReason } = await resolveContainerProvision({
+      db, state, sessionId, workspaceId, projectId, effectiveWorkingDir, profile, launchProfile, effectiveExtraEnv,
+    });
 
     // Persist the container id (#154) so stop/hang-kill/killAll — and a post-restart
     // reattach — can reach the in-container process, not just the host docker-exec
@@ -659,6 +633,11 @@ export function createSessionLifecycle(
       lifecycleRepo.updateSessionContainerId(sessionId, containerProvision.handle.containerId, db)
         .catch((err) => console.error(`Failed to store session containerId: sessionId=${sessionId}`, err));
     }
+
+    surfaceIsolationDowngrade({
+      db, workspaceId, devcontainerEnabled, isolationDowngradeReason,
+      wasAlreadyDowngraded: workspace.isolationDowngraded,
+    });
 
     try {
       const proc = agentService.launch(effectiveWorkingDir, sessionId, effectivePrompt, effectiveAgentArgs, (event) => {

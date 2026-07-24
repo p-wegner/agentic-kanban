@@ -86,6 +86,15 @@ export const workspaces = sqliteTable("workspaces", {
   cleanupWarning: text("cleanup_warning"),
   /** JSON `ServiceStackState` — this workspace's provisioned Docker service stack (compose project name, allocated ports, env file, status). Nullable = no stack. */
   serviceState: text("service_state"),
+  /**
+   * Set when this workspace requested containerized isolation (`devcontainer_builders`
+   * on) but the builder actually ran on the HOST — a security-posture downgrade for a
+   * feature whose purpose is isolation (decision 011). Cleared on a launch that
+   * containerizes successfully.
+   */
+  isolationDowngraded: integer("isolation_downgraded", { mode: "boolean" }).notNull().default(false),
+  /** Human-readable reason for the isolation downgrade (CLI missing, provisioning failed, ...). */
+  isolationDowngradeReason: text("isolation_downgrade_reason"),
 }, (table) => ({
   issueIdIdx: index("idx_workspaces_issue_id").on(table.issueId),
   statusIdx: index("idx_workspaces_status").on(table.status),

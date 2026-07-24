@@ -39,6 +39,10 @@ export interface WorkspaceDetails {
   latestSetup: WorkspaceSetupRun | null;
   latestSymlink: WorkspaceSymlinkRun | null;
   serviceState: ServiceStackState | null;
+  /** Set when containerized isolation was requested but this workspace's builder ran on the host instead (#160). */
+  isolationDowngraded: boolean;
+  /** Reason for the isolation downgrade (CLI missing, provisioning failed, ...); null when not downgraded. */
+  isolationDowngradeReason: string | null;
   createdAt: string;
   updatedAt: string;
   issue: { title: string; priority: string | null };
@@ -90,6 +94,8 @@ export interface WorkspaceDetailsRow {
   latestSymlinkFailed: string | null;
   latestSymlinkError: string | null;
   serviceState: string | null;
+  isolationDowngraded: boolean;
+  isolationDowngradeReason: string | null;
   createdAt: string;
   updatedAt: string;
   issueTitle: string;
@@ -227,6 +233,8 @@ export function mapWorkspaceDetailsRow(row: WorkspaceDetailsRow, sess: Workspace
     latestSetup: mapLatestSetup(row),
     latestSymlink: mapSymlinkRun(row),
     serviceState: mapServiceState(row),
+    isolationDowngraded: row.isolationDowngraded,
+    isolationDowngradeReason: row.isolationDowngradeReason,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     issue: { title: row.issueTitle, priority: row.issuePriority },
