@@ -2,8 +2,24 @@ import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { runSmokeCheck } from "@agentic-kanban/shared/lib/smoke-check";
 import type { Database } from "../db/index.js";
 import { getPreference } from "../repositories/preferences.repository.js";
+import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
 import { buildSmokeCheck, getStackProfile, verifyScriptPrefKey } from "./stack-profile.service.js";
 import { runUnderBuildGate } from "./jvm-build-gate.js";
+
+/**
+ * Failure-message signature of a verify_script that couldn't even resolve its own
+ * tooling because dependencies were never installed (#169 — a worktree whose blocking
+ * setup script failed silently proceeds, then fails the verify gate hours later with an
+ * opaque "Could not resolve 'vitest/config'"-style error). Matched against the combined
+ * stdout+stderr of a failed verify run to decide whether a one-shot install+retry is
+ * worth attempting before withholding the merge.
+ */
+const MISSING_DEPS_SIGNATURE =
+  /cannot find module|could not resolve|err_module_not_found|module_not_found|unresolved_import|enoent.*node_modules|command not found|is not recognized as an internal or external command/i;
+
+function looksLikeMissingDepsFailure(output: string): boolean {
+  return MISSING_DEPS_SIGNATURE.test(output);
+}
 
 /** The workspace fields the pre-merge gate needs. A thin shape so any caller (exit-workflow's
  *  full WorkspaceRow, the monitor's WorkspaceCandidate) can satisfy it. */
@@ -60,16 +76,39 @@ export async function runPreMergeGate(
     return { passed: false, skipped: false, stage: "verify", message: "verify_script configured but workspace has no worktree — cannot verify" };
   }
   if (verifyConfigured && workspace.workingDir) {
-    const result = await runUnderBuildGate(() =>
-      runSetupScript(workspace.workingDir!, verifyScript!).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e) })),
-    );
+    const workingDir = workspace.workingDir;
+    const runVerify = () =>
+      runUnderBuildGate(() =>
+        runSetupScript(workingDir, verifyScript!).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e) })),
+      );
+    let result = await runVerify();
     if (result.exitCode !== 0) {
-      return {
-        passed: false,
-        skipped: false,
-        stage: "verify",
-        message: `verify_script failed (exit ${result.exitCode}): ${(result.stderr || result.stdout || "").slice(0, 300)}`,
-      };
+      // #169: a failure that LOOKS like missing dependencies (rather than a real test/build
+      // regression) is worth one automatic install+retry before withholding the merge — this
+      // is exactly the failure mode a silently-failed worktree setup script produces hours
+      // later. Only attempted once, and only when the project has an install command configured.
+      const failureOutput = `${result.stderr || ""}\n${result.stdout || ""}`;
+      let retried = false;
+      if (looksLikeMissingDepsFailure(failureOutput)) {
+        const installCommand = await getProjectSetupScript(projectId, database).catch(() => null);
+        if (installCommand && installCommand.trim()) {
+          console.warn(`[pre-merge-gate] verify_script failed with a missing-deps signature for workspace ${workspace.id} — retrying once after running the project's install command`);
+          await runUnderBuildGate(() =>
+            runSetupScript(workingDir, installCommand).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e) })),
+          );
+          retried = true;
+          result = await runVerify();
+        }
+      }
+      if (result.exitCode !== 0) {
+        const suffix = retried ? " (retried once after an auto-install; still failing)" : "";
+        return {
+          passed: false,
+          skipped: false,
+          stage: "verify",
+          message: `verify_script failed (exit ${result.exitCode})${suffix}: ${(result.stderr || result.stdout || "").slice(0, 300)}`,
+        };
+      }
     }
   }
 

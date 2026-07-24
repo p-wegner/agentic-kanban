@@ -369,3 +369,63 @@ describe("resolveMergeGate — single owner of the merge-gate decision (arch-rev
     expect(resolved.message).toContain("already-approved work");
   });
 });
+
+// #169: a worktree whose blocking setup script silently failed reaches the verify gate hours
+// later with node_modules missing, producing an opaque "Could not resolve 'vitest/config'"-style
+// failure. The gate now recognizes that failure signature and retries once after re-running the
+// project's install command before withholding the merge.
+describe("runPreMergeGate — missing-deps signature triggers one install+retry (#169)", () => {
+  let db: ReturnType<typeof createTestDb>["db"];
+  beforeEach(() => { ({ db } = createTestDb()); });
+
+  it("retries once after an install and PASSES when the retry is green", async () => {
+    const { projectId, workspaceId } = await seedApprovedWorkspace(db);
+    await setPreference(verifyScriptPrefKey(projectId), "pnpm test", db);
+    await db.update(projects).set({ setupScript: "pnpm install -r" }).where(eq(projects.id, projectId));
+
+    runSetupScript
+      .mockResolvedValueOnce({ exitCode: 1, stdout: "", stderr: "Error: Could not resolve 'vitest/config'" })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: "installed", stderr: "" }) // the install retry
+      .mockResolvedValueOnce({ exitCode: 0, stdout: "ok", stderr: "" }); // the re-run verify
+
+    const result = await runPreMergeGate({ id: workspaceId, workingDir: "/repo/.worktrees/feature_ak-821-test" }, projectId, db);
+
+    expect(runSetupScript).toHaveBeenCalledTimes(3);
+    expect(runSetupScript).toHaveBeenNthCalledWith(2, "/repo/.worktrees/feature_ak-821-test", "pnpm install -r");
+    expect(runSetupScript).toHaveBeenNthCalledWith(3, "/repo/.worktrees/feature_ak-821-test", "pnpm test");
+    expect(result.passed).toBe(true);
+  });
+
+  it("withholds with a clear retried-once reason when the retry is still red", async () => {
+    const { projectId, workspaceId } = await seedApprovedWorkspace(db);
+    await setPreference(verifyScriptPrefKey(projectId), "pnpm test", db);
+    await db.update(projects).set({ setupScript: "pnpm install -r" }).where(eq(projects.id, projectId));
+
+    runSetupScript
+      .mockResolvedValueOnce({ exitCode: 1, stdout: "", stderr: "Error: Cannot find module 'vitest'" })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: "installed", stderr: "" }) // the install retry
+      .mockResolvedValueOnce({ exitCode: 1, stdout: "", stderr: "still red: real test failure" }); // re-run verify
+
+    const result = await runPreMergeGate({ id: workspaceId, workingDir: "/repo/.worktrees/feature_ak-821-test" }, projectId, db);
+
+    expect(runSetupScript).toHaveBeenCalledTimes(3);
+    expect(result.passed).toBe(false);
+    expect(result.message).toContain("retried once");
+    expect(result.message).toContain("still red: real test failure");
+  });
+
+  it("does NOT retry when the verify failure is a genuine test/build error (no missing-deps signature)", async () => {
+    const { projectId, workspaceId } = await seedApprovedWorkspace(db);
+    await setPreference(verifyScriptPrefKey(projectId), "pnpm test", db);
+    await db.update(projects).set({ setupScript: "pnpm install -r" }).where(eq(projects.id, projectId));
+
+    runSetupScript.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "1 failing: expected 2 to equal 3" });
+
+    const result = await runPreMergeGate({ id: workspaceId, workingDir: "/repo/.worktrees/feature_ak-821-test" }, projectId, db);
+
+    // Only the single verify call — no install attempt for a non-missing-deps failure.
+    expect(runSetupScript).toHaveBeenCalledTimes(1);
+    expect(result.passed).toBe(false);
+    expect(result.message).not.toContain("retried once");
+  });
+});
