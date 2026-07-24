@@ -114,6 +114,23 @@ describe("provisionContainerProfile — narrow profile (#133)", () => {
     expect(readFileSync(join(second.hostDir, ".credentials.json"), "utf8")).toContain("rotated");
   });
 
+  it("scopes the copy per workspace so a sibling's reseed cannot clobber a live container's credentials (#157)", () => {
+    seedHostProfile();
+
+    // Workspace A provisions first and its container rotates the refresh token —
+    // simulated by writing straight into A's copy, as the container would.
+    const a = provisionContainerProfile({ sourceDir, profileKey: "default", workspaceId: "wsA", hostHome: home, stateDir });
+    writeFileSync(join(a.hostDir, ".credentials.json"), '{"claudeAiOauth":{"accessToken":"rotated-by-A"}}');
+
+    // Workspace B provisions next, on the SAME profile, while A's container is live.
+    const b = provisionContainerProfile({ sourceDir, profileKey: "default", workspaceId: "wsB", hostHome: home, stateDir });
+
+    expect(a.hostDir).not.toBe(b.hostDir);
+    // B's reseed must not have touched A's directory.
+    expect(readFileSync(join(a.hostDir, ".credentials.json"), "utf8")).toContain("rotated-by-A");
+    expect(readFileSync(join(b.hostDir, ".credentials.json"), "utf8")).toContain("tok");
+  });
+
   it("tolerates a source profile with nothing to seed", () => {
     const profile = provisionContainerProfile({ sourceDir, profileKey: "default", hostHome: home, stateDir });
     expect(profile.seeded).toEqual([]);
