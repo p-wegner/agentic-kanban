@@ -10,6 +10,10 @@ vi.mock("node:fs", () => ({
   writeFileSync: vi.fn(),
   existsSync: vi.fn(() => false),
   readFileSync: vi.fn(),
+  // resolveDbLocation (db-path.ts, #165) statSync's a local-checkout DB to detect an
+  // empty stub; never called when existsSync is false, but the module import chain
+  // still needs the export present.
+  statSync: vi.fn(),
 }));
 
 import {

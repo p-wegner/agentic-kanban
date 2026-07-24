@@ -39,7 +39,11 @@ vi.mock("../services/stale-dev-processes.js", () => ({
   })),
 }));
 
-const reconcileStrandedSiblingMergesMock = vi.fn(() => Promise.resolve({ landed: 0, preserved: 0 }));
+// vi.mock factories are hoisted above top-level const declarations, so the mock fn
+// referenced inside must itself be declared via vi.hoisted() to avoid a TDZ error.
+const { reconcileStrandedSiblingMergesMock } = vi.hoisted(() => ({
+  reconcileStrandedSiblingMergesMock: vi.fn(() => Promise.resolve({ landed: 0, preserved: 0 })),
+}));
 vi.mock("../startup/merge-workflow.js", () => ({
   reconcileStrandedSiblingMerges: reconcileStrandedSiblingMergesMock,
 }));
