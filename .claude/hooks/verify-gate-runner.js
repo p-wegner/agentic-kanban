@@ -197,7 +197,24 @@ function killDirDescendants(cwd) {
   for (const proc of processes) {
     if (ancestors.has(proc.pid)) continue;
     const cmdNormalized = proc.commandLine.replace(/\\/g, "/").toLowerCase();
-    if (cmdNormalized.includes(dirNormalized)) killPidTree(proc.pid);
+    if (commandReferencesDir(cmdNormalized, dirNormalized)) killPidTree(proc.pid);
+  }
+}
+
+// Plain substring matching would let a worktree dir that is a NAME PREFIX of a
+// sibling worktree (e.g. ".../feature_ak-17" vs ".../feature_ak-172") cross-match
+// and kill the sibling's processes — ticket numbers are sequential so this
+// collision is common. Require the match to end at a path/quote/space boundary.
+function commandReferencesDir(cmdNormalized, dirNormalized) {
+  let searchFrom = 0;
+  for (;;) {
+    const idx = cmdNormalized.indexOf(dirNormalized, searchFrom);
+    if (idx === -1) return false;
+    const next = cmdNormalized[idx + dirNormalized.length];
+    if (next === undefined || next === "/" || next === '"' || next === "'" || next === " ") {
+      return true;
+    }
+    searchFrom = idx + 1;
   }
 }
 
@@ -279,17 +296,17 @@ async function main() {
 
   const { exitCode, cmdOutput } = runVerifyCommand(command, cwd);
 
-  // Best-effort, non-blocking: never let a leftover worker fleet (or the cost of
-  // sweeping for one) affect the gate's own pass/fail decision or its latency.
-  try {
-    spawnBackgroundSweep(cwd);
-  } catch {
-    /* best-effort */
-  }
-
   if (exitCode === 0) {
     // Passed — clear any in-progress self-repair state so the next failure starts fresh.
     clearState();
+    // Session is actually exiting on this path: safe to reap leftover worker fleets.
+    // Best-effort, non-blocking: never let the sweep (or its cost) affect the gate's
+    // own pass/fail decision or latency.
+    try {
+      spawnBackgroundSweep(cwd);
+    } catch {
+      /* best-effort */
+    }
     process.stderr.write(`[verify-gate] Passed.\n`);
     process.exit(0);
   }
@@ -321,6 +338,13 @@ async function main() {
       `The failure above is attached for human/reviewer follow-up ` +
       `(see ${ESCALATION_PATH}). Stopping the self-repair loop to avoid an endless cycle.`;
     process.stderr.write(reason + "\n");
+    // Session is actually exiting on this path too (no more `block` decisions coming):
+    // safe to reap leftover worker fleets. Best-effort, non-blocking.
+    try {
+      spawnBackgroundSweep(cwd);
+    } catch {
+      /* best-effort */
+    }
     // Do NOT emit a `block` decision: blocking again would re-prompt and loop forever.
     // We surface the escalation (no silent strand) and let the session exit so the
     // board's review / stranded-reconciler can pick it up with the captured error in
