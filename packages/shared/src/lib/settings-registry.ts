@@ -61,6 +61,12 @@ export const SETTINGS_REGISTRY = {
    * missing prerequisite falls back to host execution rather than failing.
    */
   devcontainer_builders: { type: "bool", default: "false" },
+  /**
+   * When `devcontainer_builders` is on, refuse to launch instead of silently
+   * falling back to host execution on a containerization prerequisite failure.
+   * Off by default (best-effort fallback is the default contract, #160).
+   */
+  devcontainer_strict: { type: "bool", default: "false" },
   auto_review: { type: "bool", default: "true" },
   auto_merge: { type: "bool", default: "true" },
   auto_merge_in_review: { type: "bool", default: "false" },
