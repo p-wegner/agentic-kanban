@@ -16,10 +16,25 @@
 //     docs, and lock-file churn don't trip it.
 
 const { execFileSync } = require("child_process");
-const { DatabaseSync } = require("node:sqlite");
 const { resolve } = require("path");
 const { existsSync } = require("fs");
 const readline = require("readline");
+
+// `node:sqlite` needs `--experimental-sqlite` on most Node 22.x builds, and a builder
+// container's Node install may not carry that flag / the module at all. A top-level
+// `require` throw here would crash the whole hook before any of the try/catch logic
+// below could help, so guard it — degrade to "can't look up the workspace" (falls through
+// to the git-porcelain-only main-checkout check, which stays toolchain-agnostic) with a
+// loud, visible notice instead of a silent stop-hook-error (#158).
+let DatabaseSync = null;
+try {
+  ({ DatabaseSync } = require("node:sqlite"));
+} catch {
+  console.error(
+    "[check-uncommitted] node:sqlite unavailable — skipping workspace-DB lookup " +
+      "(falling back to the main-checkout git check only)."
+  );
+}
 
 // packages/**/*.{ts,tsx,sql} — the source/migration files whose stranding
 // actually breaks builds, blocks merges, or silently loses fixes.
@@ -85,6 +100,7 @@ if (require.main !== module) {
 }
 
 function lookupWorkspace(sessionId) {
+  if (!DatabaseSync) return null;
   const DB_PATH = resolve(__dirname, "../../packages/server/kanban.db");
   if (!sessionId || !existsSync(DB_PATH)) return null;
   let db;
