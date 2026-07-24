@@ -72,23 +72,64 @@ export async function getCommitSummariesBetween(
   }
 }
 
+/** A single MERGE commit's subject and author date (ISO-8601), newest first. */
+export interface MergeCommitSubject {
+  subject: string;
+  /** Author date, ISO-8601 (`%aI`). */
+  date: string;
+}
+
 /**
- * List the subject line of each MERGE commit reachable from `ref`, newest first
- * (`git log --merges --format=%s`). Used by the hand-merged-branch reconciler (#113)
- * to recover which `feature/ak-<N>` branches were landed by a manual `--no-ff` merge
- * (no board workspace), so the linked issue can be auto-transitioned to Done.
+ * List each MERGE commit reachable from `ref` (subject + author date), newest first
+ * (`git log --merges --format=%s%x1f%aI`). Used by the hand-merged-branch reconciler
+ * (#113) to recover which `feature/ak-<N>` branches were landed by a manual `--no-ff`
+ * merge (no board workspace), so the linked issue can be auto-transitioned to Done.
  *
- * Bounded by `maxCount` (default 1000) so an ancient repo doesn't scan unboundedly.
+ * `sinceIso`, when given, bounds the scan to commits at or after that date
+ * (`--since`) — e.g. the earliest candidate issue's `createdAt`, so the scan doesn't
+ * walk all history looking for a branch name that could only postdate the issue.
+ * Also bounded by `maxCount` (default 1000) as a hard ceiling regardless of `sinceIso`.
  * Returns [] on any git error (unknown ref, not a repo) so callers degrade gracefully.
  */
-export async function getMergeCommitSubjects(
+export async function getMergeCommits(
+  repoPath: string,
+  ref: string,
+  sinceIso?: string,
+  maxCount = 1000,
+): Promise<MergeCommitSubject[]> {
+  try {
+    const args = ["log", "--merges", "--format=%s%x1f%aI", `--max-count=${maxCount}`];
+    if (sinceIso) args.push(`--since=${sinceIso}`);
+    args.push(ref);
+    const output = await execGit(args, repoPath);
+    return output
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const idx = line.indexOf("\x1f");
+        return idx === -1 ? { subject: line, date: "" } : { subject: line.slice(0, idx), date: line.slice(idx + 1) };
+      });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * List the subject line of each commit reachable from `ref` whose subject looks like
+ * a revert of a merge (`Revert "Merge ...`), newest first. Used by the hand-merged-branch
+ * reconciler to skip a `feature/ak-<N>` branch whose merge was later reverted — the
+ * merge subject itself stays in history, so without this check a reverted branch would
+ * still read as "merged".
+ */
+export async function getRevertedMergeCommitSubjects(
   repoPath: string,
   ref: string,
   maxCount = 1000,
 ): Promise<string[]> {
   try {
     const output = await execGit(
-      ["log", "--merges", "--format=%s", `--max-count=${maxCount}`, ref],
+      ["log", "--format=%s", `--max-count=${maxCount}`, `--grep=^Revert "Merge`, ref],
       repoPath,
     );
     return output
