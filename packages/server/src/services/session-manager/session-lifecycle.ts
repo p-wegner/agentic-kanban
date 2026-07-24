@@ -621,7 +621,7 @@ export function createSessionLifecycle(
     // Provision the builder's devcontainer BEFORE the (synchronous) spawn, and surface
     // any isolation downgrade instead of leaving it in a console.warn only (#160) — see
     // devcontainer-launch.ts for the best-effort/strict-mode contract.
-    const { devcontainerEnabled, containerProvision, isolationDowngradeReason } = await resolveContainerProvision({
+    const { containerProvision, isolationDowngradeReason } = await resolveContainerProvision({
       db, state, sessionId, workspaceId, projectId, effectiveWorkingDir, profile, launchProfile, effectiveExtraEnv,
     });
 
@@ -635,7 +635,7 @@ export function createSessionLifecycle(
     }
 
     surfaceIsolationDowngrade({
-      db, workspaceId, devcontainerEnabled, isolationDowngradeReason,
+      db, workspaceId, isolationDowngradeReason,
       wasAlreadyDowngraded: workspace.isolationDowngraded,
     });
 
