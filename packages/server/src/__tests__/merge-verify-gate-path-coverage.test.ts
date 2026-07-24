@@ -300,7 +300,11 @@ describe("review-merge.gate.verify-smoke — gate decision + which merge path ru
     await setPreference(verifyScriptPrefKey(projectId), ".\\verify.sh", db);
     runSetupScript.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "boom: assertion failed at line 42" });
 
-    const git = makeGit();
+    // makeGit()'s default checkBranchTipIsAncestor flips to isAncestor:true after its
+    // first call (simulating "landed on the 2nd check"), which doesn't fit here: both
+    // orchestrator ticks below hit the SAME failing gate, so the branch never actually
+    // lands and every check must keep reporting isAncestor:false.
+    const git = makeGit({ checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: false as const, branchSha: "feature-sha", baseSha: "master-sha-before" })) });
     const svc = createWorkspaceMergeService({
       database: db,
       gitService: git as never,
@@ -328,7 +332,9 @@ describe("review-merge.gate.verify-smoke — gate decision + which merge path ru
     const { projectId, issueId, workspaceId } = await seedApprovedWorkspace(db);
     await setPreference(verifyScriptPrefKey(projectId), ".\\verify.sh", db);
 
-    const git = makeGit();
+    // See the note in the preceding test: both attempts below fail the gate, so the
+    // branch never lands — pin isAncestor:false on every check.
+    const git = makeGit({ checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: false as const, branchSha: "feature-sha", baseSha: "master-sha-before" })) });
     const svc = createWorkspaceMergeService({
       database: db,
       gitService: git as never,

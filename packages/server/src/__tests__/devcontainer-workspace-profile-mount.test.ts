@@ -150,7 +150,7 @@ describe("provisionContainerForWorkspace — profile mount parity (#155)", () =>
       "stale123",
     ]);
     // `devcontainer up` still ran afterwards and produced a fresh container.
-    expect(result?.handle.containerId).toBe("freshcontainer123");
+    expect(result?.provision?.handle.containerId).toBe("freshcontainer123");
 
     warnSpy.mockRestore();
   });
