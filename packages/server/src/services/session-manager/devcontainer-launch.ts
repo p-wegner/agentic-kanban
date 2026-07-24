@@ -96,18 +96,22 @@ export async function resolveContainerProvision(
 
 /**
  * Persist a downgrade (flag + reason) onto the workspace and post a workspace
- * comment naming it — or clear a stale downgrade once a later launch
- * containerizes cleanly. Best-effort: a write/comment failure must not turn an
+ * comment naming it — or clear a stale downgrade once a later launch either
+ * containerizes cleanly OR no longer requests isolation at all (feature toggled
+ * off). Clearing must NOT be gated on `devcontainerEnabled`: if it were, a
+ * workspace downgraded while the feature was on would keep showing the
+ * downgrade warning forever after the user turns `devcontainer_builders` back
+ * off, even though no isolation is being requested (or silently skipped) on
+ * any subsequent launch. Best-effort: a write/comment failure must not turn an
  * already-decided host fallback into a launch failure.
  */
 export function surfaceIsolationDowngrade(params: {
   db: Database;
   workspaceId: string;
-  devcontainerEnabled: boolean;
   isolationDowngradeReason?: string;
   wasAlreadyDowngraded: boolean;
 }): void {
-  const { db, workspaceId, devcontainerEnabled, isolationDowngradeReason, wasAlreadyDowngraded } = params;
+  const { db, workspaceId, isolationDowngradeReason, wasAlreadyDowngraded } = params;
 
   if (isolationDowngradeReason) {
     updateWorkspaceIsolationDowngrade(workspaceId, true, isolationDowngradeReason, db)
@@ -131,7 +135,7 @@ export function surfaceIsolationDowngrade(params: {
         console.warn(`[devcontainer] failed to post isolation-downgrade comment: workspaceId=${workspaceId}`, err);
       }
     })();
-  } else if (devcontainerEnabled && wasAlreadyDowngraded) {
+  } else if (wasAlreadyDowngraded) {
     updateWorkspaceIsolationDowngrade(workspaceId, false, null, db)
       .catch((err) => console.error(`Failed to clear isolation downgrade: workspaceId=${workspaceId}`, err));
   }

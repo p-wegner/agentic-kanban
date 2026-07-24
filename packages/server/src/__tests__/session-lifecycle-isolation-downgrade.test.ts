@@ -146,6 +146,30 @@ describe("session-lifecycle — isolation downgrade (#160)", () => {
     expect(wsRows[0].isolationDowngraded).toBe(false);
   });
 
+  it("clears a stale downgrade flag once devcontainer_builders is turned back off", async () => {
+    const workspaceId = await seedWorkspace(db);
+    await db.update(workspaces)
+      .set({ isolationDowngraded: true, isolationDowngradeReason: "stale reason from an earlier launch" })
+      .where(eq(workspaces.id, workspaceId));
+    // devcontainer_builders left unset (off, the default) — this launch requests no
+    // isolation at all, so the earlier downgrade is no longer current and must clear.
+
+    const agentService = createFakeAgentService();
+    const lifecycle = createSessionLifecycle(createSessionState(), undefined, vi.fn(), { db, agentService, preflight: okPreflight() });
+
+    const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it" });
+    expect(sessionId).toBeTruthy();
+
+    await flush(async () => {
+      const rows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+      return rows[0]?.isolationDowngraded === false;
+    });
+
+    const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(wsRows[0].isolationDowngraded).toBe(false);
+    expect(wsRows[0].isolationDowngradeReason).toBeNull();
+  });
+
   it("no downgrade when the feature is off (the default)", async () => {
     const workspaceId = await seedWorkspace(db);
     const agentService = createFakeAgentService();
