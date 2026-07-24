@@ -22,7 +22,12 @@ import { getWorkspaceById, resolveProjectId } from "../repositories/workspace.re
 import { getProjectById } from "../repositories/project.repository.js";
 import { listWorkspaceRepos } from "../repositories/repo.repository.js";
 import { updateWorkspaceServiceState } from "../repositories/workspace-service-state.repository.js";
-import { workspaceServicesService, parseStoredServiceStackState, type WorkspaceServicesEngine } from "./workspace-services.service.js";
+import {
+  workspaceServicesService,
+  parseStoredServiceStackState,
+  StackSharedInUseError,
+  type WorkspaceServicesEngine,
+} from "./workspace-services.service.js";
 import { parseServicesConfig, provisionServicesForLaunch } from "./workspace-create-stack.service.js";
 import type { SiblingWorktree } from "./workspace-repos.service.js";
 import { WorkspaceError } from "./workspace-internals.js";
@@ -159,13 +164,34 @@ export function createWorkspaceServicesControlService(deps: {
     return provisionAndPersist(ctx);
   }
 
+  /**
+   * Convert the engine's guard refusal (#161) into a WorkspaceError the routes/UI
+   * already know how to surface, instead of a raw engine exception.
+   */
+  function asWorkspaceError(err: unknown): WorkspaceError {
+    if (err instanceof StackSharedInUseError) {
+      return new WorkspaceError(
+        err.otherSharers.length > 0
+          ? `This service stack is shared with ${err.otherSharers.length} other live workspace(s) — stop/restart is refused so their agents keep a working stack.`
+          : "Could not verify this service stack has no other live sharers — refusing to stop/restart it to be safe.",
+        "CONFLICT",
+        { otherSharers: err.otherSharers },
+      );
+    }
+    return err instanceof WorkspaceError ? err : new WorkspaceError(err instanceof Error ? err.message : String(err), "CONFLICT");
+  }
+
   async function down(workspaceId: string): Promise<ServiceStackState> {
     const ctx = await resolveContext(workspaceId);
     if (!isProvisioned(ctx.state)) {
       throw new WorkspaceError("No running service stack to stop for this workspace", "CONFLICT");
     }
-    const state = await engine.stopWorkspaceServices(controlCtx(ctx, ctx.state));
-    return persist(ctx, state);
+    try {
+      const state = await engine.stopWorkspaceServices(controlCtx(ctx, ctx.state));
+      return await persist(ctx, state);
+    } catch (err) {
+      throw asWorkspaceError(err);
+    }
   }
 
   async function restart(workspaceId: string): Promise<ServiceStackState> {
@@ -173,8 +199,12 @@ export function createWorkspaceServicesControlService(deps: {
     if (!isProvisioned(ctx.state)) {
       throw new WorkspaceError("No service stack to restart for this workspace", "CONFLICT");
     }
-    const state = await engine.restartWorkspaceServices(controlCtx(ctx, ctx.state));
-    return persist(ctx, state);
+    try {
+      const state = await engine.restartWorkspaceServices(controlCtx(ctx, ctx.state));
+      return await persist(ctx, state);
+    } catch (err) {
+      throw asWorkspaceError(err);
+    }
   }
 
   async function logs(workspaceId: string, tail: number): Promise<{ ok: boolean; logs: string }> {

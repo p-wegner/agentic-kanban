@@ -783,6 +783,90 @@ describe("lifecycle controls (#92) — start / stop / restart / rebuild / logs",
   });
 });
 
+/**
+ * The last-reference guard (finding 12) applied to the user-initiated Stop/Restart
+ * controls (#92), not just merge/delete/close teardown (#161 — the sharer guard used
+ * to live ONLY in teardownWorkspaceServices, so Stop/Restart on an adopted stack went
+ * straight to runner.down/restart with no check at all).
+ */
+describe("stopWorkspaceServices / restartWorkspaceServices — shared-stack last-reference guard (#161)", () => {
+  const OWNER_ID = "550e8400-e29b-41d4-a716-446655440000";
+  const ADOPTER_ID = "99998888-7777-6666-5555-444433332222";
+  const STACK = composeProjectName(OWNER_ID, INSTANCE);
+  const STORED = {
+    composeProjectName: STACK,
+    ports: { db: 61000, cache: 61001 },
+    envFilePath: "C:/wt/.kanban/services.env",
+    status: "up" as const,
+    updatedAt: new Date(Date.now() - 60000).toISOString(),
+  };
+  const ctxFor = (workspaceId: string) => ({
+    state: STORED,
+    config: CONFIG,
+    composeWorktreePath: "C:/wt",
+    workspaceId,
+  });
+
+  it("stopWorkspaceServices refuses (throws) while ANOTHER live workspace still references the stack", async () => {
+    const { runner, downs } = makeFakeRunner();
+    const { svc, markedDown } = makeService({
+      runner,
+      findLiveStackReferences: async () => [{ id: OWNER_ID }],
+    });
+    // ADOPTER_ID is the acting workspace; OWNER_ID is still live — refuse.
+    await expect(svc.stopWorkspaceServices(ctxFor(ADOPTER_ID))).rejects.toThrow(/other live workspace/);
+    expect(downs).toHaveLength(0);
+    expect(markedDown).toEqual([]);
+  });
+
+  it("stopWorkspaceServices refuses when the sharer check itself fails (fail safe, not fail open)", async () => {
+    const { runner, downs } = makeFakeRunner();
+    const { svc } = makeService({
+      runner,
+      findLiveStackReferences: async () => {
+        throw new Error("db unavailable");
+      },
+    });
+    await expect(svc.stopWorkspaceServices(ctxFor(OWNER_ID))).rejects.toThrow();
+    expect(downs).toHaveLength(0);
+  });
+
+  it("stopWorkspaceServices proceeds and marks the state down when the acting workspace is the ONLY live referent", async () => {
+    const { runner, downs } = makeFakeRunner();
+    const { svc, markedDown } = makeService({
+      runner,
+      findLiveStackReferences: async () => [{ id: OWNER_ID }],
+    });
+    const state = await svc.stopWorkspaceServices(ctxFor(OWNER_ID));
+    expect(state.status).toBe("down");
+    expect(downs).toHaveLength(1);
+    expect(markedDown).toEqual([STACK]);
+  });
+
+  it("restartWorkspaceServices refuses while ANOTHER live workspace still references the stack", async () => {
+    const { runner, restarts } = makeFakeRunner();
+    const { svc } = makeService({
+      runner,
+      resolveExtraComposeFiles: async () => [],
+      findLiveStackReferences: async () => [{ id: OWNER_ID }],
+    });
+    await expect(svc.restartWorkspaceServices(ctxFor(ADOPTER_ID))).rejects.toThrow(/other live workspace/);
+    expect(restarts).toHaveLength(0);
+  });
+
+  it("restartWorkspaceServices proceeds when the acting workspace is the only live referent", async () => {
+    const { runner, restarts } = makeFakeRunner();
+    const { svc } = makeService({
+      runner,
+      resolveExtraComposeFiles: async () => [],
+      findLiveStackReferences: async () => [{ id: OWNER_ID }],
+    });
+    const state = await svc.restartWorkspaceServices(ctxFor(OWNER_ID));
+    expect(state.status).toBe("up");
+    expect(restarts).toHaveLength(1);
+  });
+});
+
 describe("default compose runner — docker-unavailable path", () => {
   // The default runner shells out to real `docker`. On a host without docker the
   // adapter's dockerAvailable() returns false and every method degrades cleanly.
