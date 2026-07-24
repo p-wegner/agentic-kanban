@@ -333,6 +333,71 @@ describe("provisionWorkspaceServices", () => {
     expect(ups[0].extraComposeFiles).toEqual([siblingCompose]);
   });
 
+  // dev #162: a port var referenced ONLY in a file pulled in via `include:` (or
+  // `extends: file:`) previously got NO port allocated/env var, so compose interpolated
+  // an empty value and `up` failed cryptically.
+  it("discovers + allocates a port var that appears only in an include:d compose file", async () => {
+    await writeFile(
+      join(workDir, "base-broker.yml"),
+      "services:\n  broker:\n    image: rabbitmq:3\n    ports: [\"${KANBAN_SVC_BROKER_PORT}:5672\"]\n",
+      "utf-8",
+    );
+    await writeFile(
+      join(workDir, "docker-compose.yml"),
+      ["include:", "  - ./base-broker.yml", "services:", "  app:", "    image: node:20"].join("\n"),
+      "utf-8",
+    );
+    const requested: string[][] = [];
+    const allocatePorts = async (names: string[]) => {
+      requested.push(names);
+      return Object.fromEntries(names.map((n, i) => [n, 60000 + i]));
+    };
+    const { runner } = makeFakeRunner();
+    const { svc } = makeService({ runner, allocatePorts, resolveExtraComposeFiles: async () => [] });
+
+    const state = await svc.provisionWorkspaceServices({
+      config: { ...CONFIG, ports: [] }, // declares nothing; broker is only in the included file
+      workspaceId: WORKSPACE_ID,
+      composeWorktreePath: workDir,
+    });
+
+    expect(requested[0]).toEqual(["broker"]);
+    expect(state.ports).toHaveProperty("broker");
+    const written = await readFile(state.envFilePath, "utf-8");
+    expect(written).toContain("KANBAN_SVC_BROKER_PORT=");
+  });
+
+  // dev #162: lint findings must survive past the fire-and-forget server console.warn —
+  // they're attached to the persisted ServiceStackState so a diagnosable failure reaches
+  // the UI / ticket-context, not just the server log.
+  it("attaches sibling compose lint warnings (relative volumes bind mount) to the returned state", async () => {
+    const siblingCompose = join(workDir, "sibling-compose.yml");
+    await writeFile(
+      siblingCompose,
+      ["services:", "  db:", "    image: postgres", "    volumes:", "      - ./seed:/docker-entrypoint-initdb.d"].join(
+        "\n",
+      ),
+      "utf-8",
+    );
+    const { runner } = makeFakeRunner();
+    const { svc } = makeService({
+      runner,
+      allocatePorts: async (names) => Object.fromEntries(names.map((n, i) => [n, 60000 + i])),
+      resolveExtraComposeFiles: async () => [siblingCompose],
+    });
+
+    const state = await svc.provisionWorkspaceServices({
+      config: CONFIG,
+      workspaceId: WORKSPACE_ID,
+      composeWorktreePath: workDir,
+    });
+
+    expect(state.status).toBe("up");
+    expect(state.lintWarnings).toBeDefined();
+    expect(state.lintWarnings?.[0]).toContain("./seed");
+    expect(state.lintWarnings?.[0]).toContain("#109");
+  });
+
   it("writes a self-ignoring .kanban/.gitignore so the env file (secrets/ports) never enters git status", async () => {
     // Real git repo + LINKED WORKTREE — the exact context provisioning writes into.
     const repoDir = await mkdtemp(join(tmpdir(), "ak-svc-git-"));

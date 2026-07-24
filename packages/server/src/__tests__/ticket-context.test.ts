@@ -166,6 +166,25 @@ describe("ticket-context", () => {
       expect(errored).toContain("port in use");
       expect(errored).not.toContain("NOT necessarily");
     });
+
+    // dev #162: lint findings must reach the agent even when the stack came up "up" —
+    // previously they were console.warn-only and never surfaced past the server log.
+    it("renders compose lint warnings on a running stack, not just a failed one", () => {
+      const section = buildServiceStackSection(
+        makeStack({ lintWarnings: ["[services] sibling 'inv' compose declares relative path(s) [volume: ./seed] (dev #109)."] }),
+      );
+      expect(section).toContain("Compose lint warning(s)");
+      expect(section).toContain("./seed");
+    });
+
+    it("renders compose lint warnings on a failed stack alongside the failure reason", () => {
+      const errored = buildServiceStackSection(
+        makeStack({ status: "error", error: "port in use", lintWarnings: ["some lint warning"] }),
+      );
+      expect(errored).toContain("port in use");
+      expect(errored).toContain("Compose lint warning(s)");
+      expect(errored).toContain("some lint warning");
+    });
   });
 
   describe("writeTicketContextFile", () => {
