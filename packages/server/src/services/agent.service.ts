@@ -506,15 +506,35 @@ export function launch(
     piSkillPaths: provider === "pi" ? materializedSkillFiles(worktreePath) : undefined,
     skipPermissions,
   });
+  const ports = resolveLaunchPorts(process.env, resolveWorktreeDevPorts(worktreePath));
+  // Converge the two env pipelines (#167): compute the FULL child env (provider
+  // base env + ports + protected pids + session markers + extraEnv) BEFORE
+  // containerization, so the wrap's `-e` allowlist is derived from the same env
+  // the host process would have received — not just the provider's base env
+  // computed earlier. Previously ports/extraEnv/session vars were layered on
+  // AFTER the wrap and landed only on the host `docker exec` client, never
+  // inside the container.
+  const fullEnvWithUndefined = buildAgentSpawnEnv({
+    spawnEnv: hostLaunchConfig.env,
+    ports,
+    serverPid: String(process.pid),
+    protectedPidsEnv: process.env.KANBAN_PROTECTED_PIDS,
+    sessionId,
+    extraEnv,
+  });
+  const fullEnv: Record<string, string> = {};
+  for (const [key, value] of Object.entries(fullEnvWithUndefined)) {
+    if (value !== undefined) fullEnv[key] = value;
+  }
+  const hostLaunchConfigWithFullEnv = { ...hostLaunchConfig, env: fullEnv };
   // Containerization is a transformation of the finished launch config, so every
   // provider is containerizable without knowing it exists. Mock agents run
   // in-process on the host and are never containerized.
   const launchConfig = containerProvision && !hostLaunchConfig.isMockAgent
-    ? wrapLaunchConfigForContainer(hostLaunchConfig, containerProvision)
-    : hostLaunchConfig;
+    ? wrapLaunchConfigForContainer(hostLaunchConfigWithFullEnv, containerProvision)
+    : hostLaunchConfigWithFullEnv;
   const { command, args, useShell, env: spawnEnv, promptPrefix, suppressStdinPrompt, keepStdinOpen, isMockAgent } = launchConfig;
   const stdinPrompt = promptPrefix ? `${promptPrefix}\n\n${effectivePrompt}` : effectivePrompt;
-  const ports = resolveLaunchPorts(process.env, resolveWorktreeDevPorts(worktreePath));
 
   // Spawn-layer hang watchdog: reset on every output event; fire on prolonged
   // silence. Disabled for the mock agent (deterministic, short-lived) so tests
@@ -533,8 +553,13 @@ export function launch(
   // every check until preflight happened to run. Fire-and-forget + TTL-cached
   // (one `--version` subprocess per provider:command per 30 min), warn-only —
   // never blocks or delays the spawn. Mock agents are not third-party CLIs.
+  //
+  // Checked against the PRE-WRAP command (#167): for a containerized launch,
+  // `command` is `docker` — version-checking that tells us nothing about the
+  // agent CLI running inside the container. The un-wrapped command is always
+  // the real agent binary regardless of where it executes.
   if (!isMockAgent) {
-    void warnIfCliVersionRisky(narrowProviderName(provider), command, {
+    void warnIfCliVersionRisky(narrowProviderName(provider), hostLaunchConfig.command, {
       // Below-min is ACTIONABLE (the user must upgrade the CLI), not just one
       // warn among many (review §2.2 / ticket #20). Surface it with the launch
       // context this spawn site has — sessionId + worktree — so it is traceable
@@ -583,14 +608,11 @@ export function launch(
     shell: useShell,
     windowsHide: true,
     detached: shouldDetach,
-    env: buildAgentSpawnEnv({
-      spawnEnv,
-      ports,
-      serverPid: String(process.pid),
-      protectedPidsEnv: process.env.KANBAN_PROTECTED_PIDS,
-      sessionId,
-      extraEnv,
-    }),
+    // `spawnEnv` is already the full converged env computed above, pre-wrap
+    // (ports + protected pids + session markers + extraEnv) — for a host launch
+    // that's the whole child env; for a containerized launch it's `{}` since the
+    // wrap moved everything into the docker-exec `-e` flags baked into `args`.
+    env: spawnEnv,
     stdio: stdioConfig,
   });
   // Allow server to exit/restart without waiting for real agents
