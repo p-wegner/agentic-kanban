@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { projects, projectStatuses, issues, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import type { Database } from "../db/index.js";

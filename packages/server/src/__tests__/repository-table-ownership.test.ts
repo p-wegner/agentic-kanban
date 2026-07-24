@@ -78,7 +78,8 @@ const BASELINE: Record<string, number> = {
   // sessions writes — lifecycle/broadcast own their session mutations for now.
   "bisect.repository.ts::sessions-write": 2,
   "broadcast.repository.ts::sessions-write": 2,
-  "session-lifecycle.repository.ts::sessions-write": 5,
+  // #172 added updateSessionContainerId's write site (still in the correct owning file).
+  "session-lifecycle.repository.ts::sessions-write": 6,
   "workspace-lifecycle-reconcile.repository.ts::sessions-write": 1,
   "workspace-merge.repository.ts::sessions-write": 1,
   // projects writes — registration/dedup + per-project column updates. Reads are
