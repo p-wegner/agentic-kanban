@@ -29,11 +29,35 @@ import type { ContainerPathMapping } from "./agent-provider/container-wrap.js";
 /**
  * Provisions the devcontainer a builder agent runs inside.
  *
- * Design contract: containerization is BEST-EFFORT. Every prerequisite that is
- * missing (setting off, no devcontainer.json, no CLI, provisioning failure)
- * resolves to `undefined`, and the caller falls back to launching the agent on
- * the host. A container problem must never turn into a failed workspace.
+ * Design contract: containerization is BEST-EFFORT BY DEFAULT. Every prerequisite
+ * that is missing (setting off, no devcontainer.json, no CLI, provisioning
+ * failure) resolves to `{ provision: undefined }`, and the caller falls back to
+ * launching the agent on the host. A container problem must never turn into a
+ * failed workspace UNLESS `strict` is set (#160) — in that mode, a downgrade
+ * (CLI missing / provisioning failed; NOT "off" or "no devcontainer declared",
+ * which are not downgrades) refuses the launch via
+ * `DevcontainerIsolationRefusedError` instead of falling back silently.
+ *
+ * Either way, a downgrade is never silent: `result.downgradeReason` is set
+ * whenever isolation was requested (`enabled`) and a devcontainer was declared,
+ * but the container did not come up — the caller persists it onto the workspace
+ * and posts a workspace comment so "container requested, host delivered" is
+ * visible instead of a console.warn only.
  */
+
+/** Thrown by `provisionContainerForWorkspace` in strict mode instead of falling back to the host. */
+export class DevcontainerIsolationRefusedError extends Error {
+  constructor(public readonly reason: string) {
+    super(`Containerized isolation was requested (strict mode) but is unavailable: ${reason}`);
+    this.name = "DevcontainerIsolationRefusedError";
+  }
+}
+
+export interface ContainerProvisionResult {
+  provision?: ContainerProvision;
+  /** Set when isolation was requested but the launch fell back to (or, in strict mode, refused) the host. */
+  downgradeReason?: string;
+}
 
 export interface ContainerProvision {
   handle: DevcontainerHandle;
@@ -70,6 +94,8 @@ export interface ProvisionOptions {
   hostHome?: string;
   /** Overridable for tests; defaults to the host temp directory. */
   hostTmp?: string;
+  /** The `devcontainer_strict` setting: refuse the launch instead of falling back to host (#160). */
+  strict?: boolean;
 }
 
 /** The container-side home directory for a given remote user. */
@@ -168,11 +194,16 @@ export async function configureContainerGit(
 
 /**
  * Bring up the worktree's devcontainer and return the handle plus the host->container
- * path mappings the launch wrapper needs. Returns undefined to mean "run on the host".
+ * path mappings the launch wrapper needs. `provision` is undefined to mean "run on
+ * the host"; `downgradeReason` is set alongside that whenever isolation was actually
+ * requested (not just "off" / "no devcontainer declared") and did not happen.
+ *
+ * Throws `DevcontainerIsolationRefusedError` instead of falling back when
+ * `options.strict` is set and a downgrade would otherwise occur (#160).
  */
 export async function provisionContainerForWorkspace(
   options: ProvisionOptions,
-): Promise<ContainerProvision | undefined> {
+): Promise<ContainerProvisionResult> {
   const {
     enabled,
     worktreePath,
@@ -183,21 +214,26 @@ export async function provisionContainerForWorkspace(
     settingsProfile,
     hostHome = homedir(),
     hostTmp = tmpdir(),
+    strict = false,
   } = options;
-  if (!enabled) return undefined;
+  if (!enabled) return {};
 
   if (!hasDevcontainerConfig(worktreePath)) {
     // Not an error: most repos have no devcontainer, and those simply run on the host.
-    return undefined;
+    return {};
   }
 
+  const refuseOrDowngrade = (reason: string): ContainerProvisionResult => {
+    if (strict) throw new DevcontainerIsolationRefusedError(reason);
+    console.warn(`[devcontainer] ${reason} — falling back to host execution.`);
+    return { downgradeReason: reason };
+  };
+
   if (!(await devcontainerAvailable())) {
-    console.warn(
-      `[devcontainer] devcontainer_builders is on and ${worktreePath} declares a devcontainer, ` +
-        "but the @devcontainers/cli is not installed (npm i -g @devcontainers/cli) — " +
-        "falling back to host execution.",
+    return refuseOrDowngrade(
+      `devcontainer_builders is on and ${worktreePath} declares a devcontainer, but the ` +
+        "@devcontainers/cli is not installed (npm i -g @devcontainers/cli)",
     );
-    return undefined;
   }
 
   // Dependency volumes must be passed INTO `up`, but the real
@@ -256,10 +292,7 @@ export async function provisionContainerForWorkspace(
 
   const handle = await devcontainerUp(worktreePath, { mounts });
   if (!handle) {
-    console.warn(
-      `[devcontainer] provisioning failed for ${worktreePath} — falling back to host execution.`,
-    );
-    return undefined;
+    return refuseOrDowngrade(`provisioning failed for ${worktreePath}`);
   }
 
   // A config with a custom `workspaceFolder` we failed to read would have mounted
@@ -307,21 +340,23 @@ export async function provisionContainerForWorkspace(
   }
 
   return {
-    handle,
-    pathMappings: buildPathMappings(worktreePath, handle, narrowProfile.hostDir, hostTmp),
-    dependencyVolumes,
-    containerMcpConfigPath,
-    containerEnv: {
-      // Point the CLI at the mounted profile. This also fixes #134: with
-      // CLAUDE_CONFIG_DIR set, the CLI reads `<dir>/.claude.json` instead of
-      // `$HOME/.claude.json`, so the "configuration file not found" preamble that
-      // every containerized turn printed to stderr goes away.
-      CLAUDE_CONFIG_DIR: `${containerHomeFor(handle.remoteUser)}/.claude`,
-      // The only signal the in-container hook scripts have that they're running inside a
-      // builder image rather than on the host — smart-hooks-runner.js reads this to skip
-      // host-toolchain quick-checks instead of exec'ing them and failing closed on a host
-      // path/binary assumption the image doesn't meet (#158).
-      AGENTIC_KANBAN_CONTAINER: "1",
+    provision: {
+      handle,
+      pathMappings: buildPathMappings(worktreePath, handle, narrowProfile.hostDir, hostTmp),
+      dependencyVolumes,
+      containerMcpConfigPath,
+      containerEnv: {
+        // Point the CLI at the mounted profile. This also fixes #134: with
+        // CLAUDE_CONFIG_DIR set, the CLI reads `<dir>/.claude.json` instead of
+        // `$HOME/.claude.json`, so the "configuration file not found" preamble that
+        // every containerized turn printed to stderr goes away.
+        CLAUDE_CONFIG_DIR: `${containerHomeFor(handle.remoteUser)}/.claude`,
+        // The only signal the in-container hook scripts have that they're running inside a
+        // builder image rather than on the host — smart-hooks-runner.js reads this to skip
+        // host-toolchain quick-checks instead of exec'ing them and failing closed on a host
+        // path/binary assumption the image doesn't meet (#158).
+        AGENTIC_KANBAN_CONTAINER: "1",
+      },
     },
   };
 }

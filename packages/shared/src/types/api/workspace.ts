@@ -159,6 +159,10 @@ export interface WorkspaceResponse {
   latestSymlink?: WorkspaceSymlinkRun | null;
   /** Per-workspace Docker service stack status + allocated host ports (null = no stack). */
   serviceState?: ServiceStackState | null;
+  /** Set when containerized isolation was requested but this workspace's builder ran on the host instead (#160). */
+  isolationDowngraded?: boolean;
+  /** Reason for the isolation downgrade (CLI missing, provisioning failed, ...); null when not downgraded. */
+  isolationDowngradeReason?: string | null;
 }
 
 /** One repo's entry in GET /api/workspaces/:id/repo-merge-status (#70/#75). */
