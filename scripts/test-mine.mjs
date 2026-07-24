@@ -26,6 +26,12 @@
 //     - cli.test.ts        spawn-based CLI integration; stale migration list / worktree DB resolution
 //     - cli-butler.test.ts spawn-based CLI integration; same root causes
 //     - git.service.test.ts real git on temp dirs; Windows file-locking / timing
+//     - done-unmerged-invariant-scanner.test.ts, workspace-merge-service.test.ts,
+//       workspace-already-merged.test.ts, api-workspace.test.ts, workspace-lifecycle-transitions.test.ts,
+//       merge-endpoint-reconcile-noop.test.ts, merge-service-edge-cases.test.ts, preferences.test.ts,
+//       auto-review-pref.test.ts (#173) — every one of these is green in isolation; under full
+//       parallelism a single file can hit CPU-contention timeouts of 15-17min, flaking the
+//       merge gate red and (via #172) leaking a vitest worker fleet on each retry.
 //   mcp-server:
 //     - mcp-tools.test.ts  spawn-based MCP integration; stale migration list FIXED (reads journal dynamically).
 //       Its catalog↔runtime parity gate has a fast NON-SPAWNING twin that DOES run here:
@@ -57,7 +63,20 @@ const PACKAGES = [
   {
     dir: "packages/server",
     label: "server",
-    exclude: ["**/cli.test.ts", "**/cli-butler.test.ts", "**/git.service.test.ts"],
+    exclude: [
+      "**/cli.test.ts",
+      "**/cli-butler.test.ts",
+      "**/git.service.test.ts",
+      "**/done-unmerged-invariant-scanner.test.ts",
+      "**/workspace-merge-service.test.ts",
+      "**/workspace-already-merged.test.ts",
+      "**/api-workspace.test.ts",
+      "**/workspace-lifecycle-transitions.test.ts",
+      "**/merge-endpoint-reconcile-noop.test.ts",
+      "**/merge-service-edge-cases.test.ts",
+      "**/preferences.test.ts",
+      "**/auto-review-pref.test.ts",
+    ],
   },
   {
     dir: "packages/mcp-server",
