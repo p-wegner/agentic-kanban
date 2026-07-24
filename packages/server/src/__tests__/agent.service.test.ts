@@ -14,11 +14,27 @@ vi.mock("node:fs", () => ({
   readdirSync: vi.fn(() => []),
 }));
 
+// Fake docker runner (#154) — asserts the container kill leg without shelling out.
+vi.mock("@agentic-kanban/shared/lib/docker-exec", () => ({
+  dockerExec: vi.fn(async () => ({ stdout: "", stderr: "", code: 0 })),
+}));
+
 // Import after mocking
 import { launch, kill, killAll, sendInput, closeStdin, isStdinOpen, getProcess, agentState } from "../services/agent.service.js";
 import { spawn as spawnMock } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { dockerExec as dockerExecMock } from "@agentic-kanban/shared/lib/docker-exec";
 import { createMockProc } from "./helpers/mocks.js";
+import type { ContainerProvision } from "../services/devcontainer-workspace.service.js";
+
+function makeContainerProvision(containerId: string): ContainerProvision {
+  return {
+    handle: { containerId, remoteUser: "node", remoteWorkspaceFolder: "/workspaces/wt" },
+    pathMappings: [],
+    dependencyVolumes: [],
+    containerEnv: {},
+  };
+}
 
 describe("agent.service", () => {
   const originalAgentCommand = process.env.AGENT_COMMAND;
@@ -458,6 +474,66 @@ describe("agent.service", () => {
       expect(count).toBe(2);
       expect(getProcess("ka-1")).toBeUndefined();
       expect(getProcess("ka-2")).toBeUndefined();
+    });
+  });
+
+  // #154: stopSession/hang-kill/killAll used to kill only the host docker-exec
+  // CLIENT for a containerized session, orphaning the exec'd agent inside the
+  // container — invisible, still able to edit the bind-mounted worktree. kill()
+  // and killAll() must also reach the container itself.
+  describe("containerized sessions (#154)", () => {
+    beforeEach(() => {
+      // isMockAgent is derived from AGENT_COMMAND being set — disable it so the
+      // container-wrap path actually runs (mock agents are never containerized).
+      delete process.env.AGENT_COMMAND;
+    });
+
+    it("kill() sends docker kill to the container in addition to the host client", () => {
+      const mockProc = createMockProc();
+      (spawnMock as any).mockReturnValue(mockProc);
+      const containerProvision = makeContainerProvision("container-abc123");
+
+      launch(
+        "/tmp", "sess-container-1", "prompt", undefined, vi.fn(),
+        undefined, "claude", undefined, undefined, undefined, undefined, "claude",
+        undefined, undefined, undefined, undefined, undefined, undefined,
+        containerProvision,
+      );
+
+      const result = kill("sess-container-1");
+
+      expect(result).toBe(true);
+      expect(dockerExecMock).toHaveBeenCalledWith(["kill", "container-abc123"]);
+      // Host leg still fires (the docker-exec client itself is also cleaned up).
+      expect(getProcess("sess-container-1")).toBeUndefined();
+    });
+
+    it("killAll() sends docker kill for every containerized session", () => {
+      (spawnMock as any).mockReturnValue(createMockProc());
+      launch(
+        "/tmp", "sess-container-2", "prompt", undefined, vi.fn(),
+        undefined, "claude", undefined, undefined, undefined, undefined, "claude",
+        undefined, undefined, undefined, undefined, undefined, undefined,
+        makeContainerProvision("container-def456"),
+      );
+      launch("/tmp", "sess-host-only", "prompt", undefined, vi.fn());
+
+      const count = killAll();
+
+      expect(count).toBe(2);
+      expect(dockerExecMock).toHaveBeenCalledWith(["kill", "container-def456"]);
+      expect(dockerExecMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("does NOT touch docker for a host (non-container) session stop", () => {
+      const mockProc = createMockProc();
+      (spawnMock as any).mockReturnValue(mockProc);
+
+      launch("/tmp", "sess-host-1", "prompt", undefined, vi.fn());
+      const result = kill("sess-host-1");
+
+      expect(result).toBe(true);
+      expect(dockerExecMock).not.toHaveBeenCalled();
     });
   });
 

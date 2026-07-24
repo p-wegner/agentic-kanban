@@ -255,6 +255,7 @@ export async function cleanupStaleSessions(sessionManager: SessionManager, agent
     workspaceId: sessions.workspaceId,
     pid: sessions.pid,
     executor: sessions.executor,
+    containerId: sessions.containerId,
   }).from(sessions).where(eq(sessions.status, "running"));
 
   if (staleSessions.length === 0) return;
@@ -307,6 +308,7 @@ export async function cleanupStaleSessions(sessionManager: SessionManager, agent
             console.error(`[startup] Failed to handle reattached session exit: sessionId=${s.id}`, err);
           });
         },
+        s.containerId ?? undefined,
       );
     }
   }
