@@ -187,16 +187,24 @@ function killPidTree(pid) {
 function listListeningPids() {
   try {
     if (process.platform === "win32") {
-      const out = execFileSync("netstat", ["-ano", "-p", "TCP"], {
+      // Do NOT parse `netstat`'s STATE column text (e.g. "LISTENING") — it is
+      // localized by the OS UI language (observed as "ABHÖREN" on German Windows),
+      // so a plain substring match silently returns zero listeners on any
+      // non-English machine and this whole protection goes dark. `-State Listen`
+      // filters on the .NET enum NAME, which is culture-invariant.
+      const script =
+        "Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ConvertTo-Json -Compress";
+      const out = execFileSync("powershell.exe", ["-NoProfile", "-Command", script], {
         encoding: "utf8",
         windowsHide: true,
         timeout: 10000,
       });
+      const raw = out && out.trim() ? out : "[]";
+      const parsed = JSON.parse(raw);
+      const rows = Array.isArray(parsed) ? parsed : [parsed];
       const pids = new Set();
-      for (const line of out.split("\n")) {
-        if (!line.includes("LISTENING")) continue;
-        const parts = line.trim().split(/\s+/);
-        const pid = Number(parts[parts.length - 1]);
+      for (const row of rows) {
+        const pid = Number(row);
         if (Number.isInteger(pid) && pid > 0) pids.add(pid);
       }
       return pids;
