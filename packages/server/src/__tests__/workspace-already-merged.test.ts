@@ -537,6 +537,61 @@ describe("already-merged reconciliation — multi-repo siblings (#16)", () => {
     expect(result.reason).toBeUndefined();
   });
 
+  // #152: a git error resolving a sibling's refs (deleted/moved repo directory, renamed
+  // base branch) must fail CLOSED — surfaced as unverifiable and blocking, never silently
+  // read as "not pending" (which would let reconcile-as-done close the workspace and
+  // abandon the sibling's unmerged work).
+  it("checkAlreadyMerged refuses when the sibling repo directory is missing/unresolvable (#152)", async () => {
+    const ids = await seedScenario(db, {});
+    await insertSibling(db, ids);
+    const git = {
+      ...makeGitService({
+        getDiff: async () => "",
+        revParse: async (repoPath: string, ref: string) => {
+          if (repoPath === SIBLING_PATH) throw new Error("repository path does not exist");
+          return ref === "feature/ak-42-test" ? "deadbeef" : "headsha";
+        },
+        isAncestor: async () => true,
+      }),
+      countUniqueCommits: vi.fn(async () => 1),
+      getCurrentBranch: vi.fn(async () => "master"),
+    };
+
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+    const result = await svc.checkAlreadyMerged(ids.workspaceId);
+
+    expect(result.isAlreadyMerged).toBe(false);
+    expect(result.reason).toContain("extra");
+    expect(result.reason).toContain(SIBLING_PATH);
+  });
+
+  it("reconcileAlreadyMerged refuses (throws) when the sibling base branch cannot be resolved (#152)", async () => {
+    const ids = await seedScenario(db, {});
+    await insertSibling(db, ids);
+    const git = {
+      ...makeGitService({
+        getDiff: async () => "",
+        revParse: async (repoPath: string, ref: string) => {
+          if (repoPath === SIBLING_PATH) throw new Error("unknown revision 'master'");
+          return ref === "feature/ak-42-test" ? "deadbeef" : "headsha";
+        },
+        isAncestor: async () => true,
+      }),
+      countUniqueCommits: vi.fn(async () => 1),
+      getCurrentBranch: vi.fn(async () => "master"),
+    };
+
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+    await expect(svc.reconcileAlreadyMerged(ids.workspaceId)).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      data: { reason: expect.stringContaining(SIBLING_PATH) },
+    });
+
+    // Nothing destroyed: the sibling branch/worktree was never touched.
+    expect(git.removeWorktree).not.toHaveBeenCalled();
+    expect(git.deleteBranch).not.toHaveBeenCalled();
+  });
+
   it("reconcileAlreadyMerged refuses (throws) while a sibling has unmerged commits", async () => {
     const ids = await seedScenario(db, {});
     await insertSibling(db, ids);
