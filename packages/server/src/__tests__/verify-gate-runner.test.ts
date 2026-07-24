@@ -144,6 +144,154 @@ describe("verify-gate-runner", () => {
   });
 });
 
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+describe("verify-gate-runner — zombie process sweep (#172)", () => {
+  let hookDir: string;
+  let projectDir: string;
+
+  beforeEach(async () => {
+    hookDir = await tmp();
+    projectDir = await tmp();
+  });
+
+  afterEach(async () => {
+    await rm(hookDir, { recursive: true, force: true });
+    await rm(projectDir, { recursive: true, force: true });
+  });
+
+  it("kills a detached descendant left running under cwd after the gate command exits", async () => {
+    // Simulates the vitest-worker-fleet leak: the command's own process (like `pnpm
+    // test`'s shell) exits cleanly, but it spawned a detached, unref'd descendant
+    // (like a vitest fork worker) that keeps running under the SAME worktree path.
+    // Windows never tears that descendant down just because its ancestor exited.
+    const markerWorker = join(projectDir, "marker-worker.js");
+    await writeFile(markerWorker, "setInterval(() => {}, 1000);\n");
+    const lingerScript = join(projectDir, "linger.js");
+    const pidFile = join(projectDir, "linger.pid");
+    await writeFile(
+      lingerScript,
+      [
+        "const fs = require('fs');",
+        "const { spawn } = require('child_process');",
+        `const child = spawn(process.execPath, [${JSON.stringify(markerWorker)}], { detached: true, stdio: 'ignore' });`,
+        `fs.writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));`,
+        "child.unref();",
+      ].join("\n"),
+    );
+
+    // No quotes around the path: embedding a quoted arg inside the command string here
+    // collides with execFileSync's own Windows cmd.exe argument re-quoting. Test tmp
+    // dirs never contain spaces, so this is safe.
+    await writeFile(join(hookDir, "verify-gate.config.json"), JSON.stringify({ command: `node ${lingerScript}` }));
+    const result = runGate({ hookDir, stdin: JSON.stringify({ cwd: projectDir }) });
+    expect(result.status).toBe(0);
+
+    const pid = Number(await readFile(pidFile, "utf8"));
+    expect(Number.isInteger(pid)).toBe(true);
+
+    // The sweep that reaps the descendant runs as a detached background process (so
+    // the gate itself returns immediately, unaffected by the sweep's own OS-process-
+    // enumeration latency) — poll instead of asserting immediately after runGate returns.
+    const deadline = Date.now() + 15_000;
+    let alive = isPidAlive(pid);
+    while (alive && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      alive = isPidAlive(pid);
+    }
+    expect(alive).toBe(false);
+  }, 20_000);
+
+  it("does not kill an orphaned descendant under cwd that owns a listening TCP port (#172 regression)", async () => {
+    // Simulates a `pnpm dev` server left running for visual verification, per this
+    // project's dev-server workflow: it's routinely started DETACHED (so its
+    // launching shell exits immediately), making it look identical to an orphaned
+    // zombie test worker under the orphan+path heuristic ALONE. The only thing that
+    // actually distinguishes a leaked test worker (never listens) from a dev server
+    // (always listens) is whether it owns a listening socket — the sweep must check
+    // that before killing an orphan.
+    const listenerWorker = join(projectDir, "listener-worker.js");
+    await writeFile(
+      listenerWorker,
+      [
+        "const http = require('http');",
+        "const fs = require('fs');",
+        "const server = http.createServer((_req, res) => res.end('ok'));",
+        `server.listen(0, () => fs.writeFileSync(${JSON.stringify(join(projectDir, "listener.port"))}, String(server.address().port)));`,
+      ].join("\n"),
+    );
+    const lingerScript = join(projectDir, "linger-listener.js");
+    const pidFile = join(projectDir, "linger-listener.pid");
+    await writeFile(
+      lingerScript,
+      [
+        "const fs = require('fs');",
+        "const { spawn } = require('child_process');",
+        `const child = spawn(process.execPath, [${JSON.stringify(listenerWorker)}], { detached: true, stdio: 'ignore' });`,
+        `fs.writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));`,
+        "child.unref();",
+      ].join("\n"),
+    );
+
+    await writeFile(join(hookDir, "verify-gate.config.json"), JSON.stringify({ command: `node ${lingerScript}` }));
+    const result = runGate({ hookDir, stdin: JSON.stringify({ cwd: projectDir }) });
+    expect(result.status).toBe(0);
+
+    const pid = Number(await readFile(pidFile, "utf8"));
+    expect(Number.isInteger(pid)).toBe(true);
+
+    try {
+      // Give the background sweep the same window used elsewhere to do its (wrong) kill.
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+      expect(isPidAlive(pid)).toBe(true);
+    } finally {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        /* already gone */
+      }
+    }
+  }, 20_000);
+
+  it("does not kill an unrelated live process whose parent is still alive, even if its command line references cwd (#172 regression)", async () => {
+    // Simulates a legitimate `pnpm dev` server (or another agent's session) that is
+    // still running in the SAME worktree cwd when this gate happens to fire. Its
+    // process tree has nothing to do with the gate's own command, and its parent
+    // (this test process) is alive the whole time — the sweep must not path-match
+    // its way into killing it. Regression for the bug where killDirDescendants
+    // matched ANY process referencing cwd, not just orphaned descendants of the
+    // already-completed verify command.
+    const liveServerScript = join(projectDir, "live-server.js");
+    await writeFile(liveServerScript, "setInterval(() => {}, 1000);\n");
+    // Not detached — stays parented to this test process, which stays alive for the
+    // duration of the test, so its recorded ppid is always present in the snapshot.
+    const { spawn } = await import("node:child_process");
+    const liveServerProc = spawn(process.execPath, [liveServerScript, `--workdir=${projectDir}`], {
+      stdio: "ignore",
+    });
+    expect(liveServerProc.pid).toBeDefined();
+
+    try {
+      await writeFile(join(hookDir, "verify-gate.config.json"), JSON.stringify({ command: "node -e \"process.exit(0)\"" }));
+      const result = runGate({ hookDir, stdin: JSON.stringify({ cwd: projectDir }) });
+      expect(result.status).toBe(0);
+
+      // Give the background sweep the same window used above to do its (wrong) kill.
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      expect(isPidAlive(liveServerProc.pid as number)).toBe(true);
+    } finally {
+      liveServerProc.kill("SIGKILL");
+    }
+  }, 20_000);
+});
+
 describe("verify-gate-runner — bounded self-repair loop (#795)", () => {
   let hookDir: string;
   const FAIL = process.platform === "win32" ? "exit 1" : "false";
