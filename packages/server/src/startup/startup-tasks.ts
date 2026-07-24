@@ -2,7 +2,7 @@ import { db, rawClient, rawWriteClient } from "../db/index.js";
 import { workspaces, issues, projects, preferences, sessions } from "@agentic-kanban/shared/schema";
 import { and, eq, isNotNull, ne } from "drizzle-orm";
 import { applyMigrations } from "../db/manual-migrate.js";
-import { deduplicateProjects } from "../services/project-registration.js";
+import { deduplicateProjects, unregisterLeakedTempProjects, findProjectsWithMissingRepoPath } from "../services/project-registration.js";
 import type * as agentServiceType from "../services/agent.service.js";
 import * as agentService from "../services/agent.service.js";import * as gitService from "../services/git.service.js";
 import { cleanupSiblingWorktrees } from "../services/workspace-repos.service.js";
@@ -167,6 +167,26 @@ export async function runMigrations(): Promise<void> {
     await deduplicateProjects();
   } catch (err) {
     console.warn("[startup] project deduplication failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
+
+  // #166: unregister leaked %TEMP% test/lab fixture projects (safe heuristic — repo path
+  // gone from disk AND under the OS temp dir), then report any OTHER missing-repoPath
+  // project so it stays visible instead of silently accumulating. Never auto-unregisters
+  // a non-temp path — a briefly-unmounted drive must not nuke a real project.
+  try {
+    const removed = await unregisterLeakedTempProjects();
+    if (removed.length > 0) {
+      console.log(`[startup] Unregistered ${removed.length} leaked temp-fixture project(s): ${removed.map((p) => p.name).join(", ")}`);
+    }
+    const stillMissing = await findProjectsWithMissingRepoPath();
+    if (stillMissing.length > 0) {
+      console.warn(`[startup] ${stillMissing.length} registered project(s) have a missing repoPath (not auto-removed — outside the temp dir):`);
+      for (const p of stillMissing) {
+        console.warn(`[startup]   "${p.name}" -> ${p.repoPath}`);
+      }
+    }
+  } catch (err) {
+    console.warn("[startup] leaked temp-project cleanup failed (non-fatal):", err instanceof Error ? err.message : String(err));
   }
 
   // Disable auto_monitor on every startup — prevents mass agent spawns from idle workspaces
