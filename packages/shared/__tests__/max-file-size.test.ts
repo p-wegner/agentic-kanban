@@ -69,7 +69,7 @@ const COHESION_BASELINE: Record<string, number> = {
   // session.repository.ts decomposed into ./session/* sub-modules (#45); the facade
   // barrel re-exports only, so its baseline entry is removed.
   // stack-profile.service.ts decomposed behind a facade barrel (#911) — entry removed.
-  "packages/server/src/services/agent.service.ts": 27,
+  "packages/server/src/services/agent.service.ts": 28, // #167 added a legitimate write site
   "packages/server/src/services/insights.service.ts": 23,
   // agent-questions.service.ts decomposed into ./agent-questions/* sub-modules (#912);
   // the facade barrel re-exports only, so its baseline entry is removed.
@@ -86,7 +86,8 @@ const COHESION_BASELINE: Record<string, number> = {
   // workspace.repository.ts decomposed into ./workspace-{reads,mutations,analytics,
   // project-resolution,issue-status}.repository.ts (#913); the facade barrel
   // re-exports only, so its baseline entry is removed.
-  "packages/server/src/repositories/session-lifecycle.repository.ts": 21,
+  "packages/server/src/repositories/session-lifecycle.repository.ts": 22, // #172 added updateSessionContainerId
+  "packages/server/src/services/stale-dev-processes.ts": 21, // #172 zombie-fleet sweep additions
   "packages/shared/src/lib/openspec.ts": 21,
 };
 

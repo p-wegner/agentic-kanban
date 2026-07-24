@@ -26,19 +26,38 @@
  * injected so the engine is unit-testable with a fake runner (no docker required).
  */
 
-import { mkdir, writeFile, readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { basename, dirname } from "node:path";
 import type { ServiceStackConfig, ServiceStackState } from "@agentic-kanban/shared";
-import {
-  composeProjectName,
-  isInstanceManagedComposeProject,
-  findSiblingComposeRelativePaths,
-  siblingComposeRelativePathWarning,
-  extractComposeFileReferences,
-} from "@agentic-kanban/shared";
+import { composeProjectName, isInstanceManagedComposeProject } from "@agentic-kanban/shared";
 import { dockerExec, dockerAvailable } from "@agentic-kanban/shared/lib/docker-exec";
 import { createStackPortAllocator, releaseStackPorts, type StackPortAllocator } from "./port-allocator.js";
+import {
+  ensureKanbanDirGitIgnored,
+  discoverComposePortNames,
+  lintSiblingComposeFiles,
+  buildServicesEnvFile,
+  resolveServiceHost,
+} from "./workspace-services-env.js";
+
+export { resolveServiceHost, buildServicesEnvFile } from "./workspace-services-env.js";
+
+/**
+ * Shared invocation context for the user-initiated lifecycle controls (#92) over an
+ * ALREADY-provisioned stack. The stored state's `composeProjectName`, `ports` and
+ * `envFilePath` are reused VERBATIM — no port is reallocated — so a stop→start or a
+ * restart keeps the workspace on the host ports the agent was told about.
+ *
+ * Exported at module scope so the exported factory's inferred return type does not
+ * leak a private name (TS4060/TS4025); hoisted from inside the factory in a
+ * post-merge fix (#92).
+ */
+export interface StackControlContext {
+  state: ServiceStackState;
+  config: ServiceStackConfig;
+  composeWorktreePath: string;
+  workspaceId: string;
+}
 
 /** Max chars of compose stderr preserved on an error state (keep DB rows bounded). */
 const MAX_ERROR_CHARS = 2000;
@@ -130,245 +149,6 @@ export interface ProvisionServicesArgs {
 
 /** Relative location (from a worktree root) of the generated compose env file. */
 const ENV_FILE_REL = join(".kanban", "services.env");
-
-/**
- * Make the generated `.kanban/` dir self-ignoring by dropping a `.gitignore` with `*`
- * into it (the cargo-target/npm-cache pattern; works identically in linked worktrees).
- * The env file carries allocated ports AND the project's servicesConfig secrets — an
- * un-ignored copy lands in every diff/review (getWorkingTreeDiff inlines untracked
- * content) and gets `git add -A`-committed by agents/auto-commit. Best-effort: a
- * sentinel write failure is warned loudly (secrets would leak into diffs), not fatal.
- */
-async function ensureKanbanDirGitIgnored(worktreePath: string): Promise<void> {
-  try {
-    await writeFile(join(worktreePath, ".kanban", ".gitignore"), "*\n", { encoding: "utf-8", flag: "wx" });
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "EEXIST") return;
-    console.warn(`[services] failed to write .kanban/.gitignore sentinel (services.env may show up in diffs): ${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-
-/** Uppercase + sanitize a port name into an env-var-safe token: KANBAN_SVC_<NAME>_PORT. */
-function portEnvVar(name: string): string {
-  return `KANBAN_SVC_${name.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_PORT`;
-}
-
-/**
- * Read a compose file and follow its `include:`/`extends: file:` references ONE level
- * deep (dev #162) — resolved relative to EACH referenced file's own directory, matching
- * how docker compose itself resolves those directives (unlike the `-f` multi-project-dir
- * quirk #109 targets). Returns the primary file's text plus every readable referenced
- * file's text. Best-effort: a missing/unreadable primary or reference contributes
- * nothing rather than throwing — a compose file appearing in multiple lists (e.g. a
- * shared base extended by two services) is naturally deduped by the caller's Map.
- */
-async function readComposeFileShallow(absPath: string): Promise<Array<{ path: string; text: string }>> {
-  const out: Array<{ path: string; text: string }> = [];
-  let text: string;
-  try {
-    text = await readFile(absPath, "utf-8");
-  } catch {
-    return out;
-  }
-  out.push({ path: absPath, text });
-  const fileDir = dirname(absPath);
-  for (const ref of extractComposeFileReferences(text)) {
-    const refAbs = join(fileDir, ref);
-    try {
-      const refText = await readFile(refAbs, "utf-8");
-      out.push({ path: refAbs, text: refText });
-    } catch {
-      continue;
-    }
-  }
-  return out;
-}
-
-/** Expand a list of compose files (primary + siblings) one level via `readComposeFileShallow`, deduped by resolved path. */
-async function expandComposeFilesShallow(composeFiles: string[]): Promise<Array<{ path: string; text: string }>> {
-  const seen = new Map<string, string>();
-  for (const file of composeFiles) {
-    for (const { path, text } of await readComposeFileShallow(file)) {
-      if (!seen.has(path)) seen.set(path, text);
-    }
-  }
-  return [...seen.entries()].map(([path, text]) => ({ path, text }));
-}
-
-/**
- * Discover host-port names referenced via `${KANBAN_SVC_<NAME>_PORT}` across a compose
- * file, its siblings, AND anything they pull in via `include:`/`extends:` (one level,
- * dev #162) that are NOT already declared in `existingNames` (#71 union port
- * allocation). Lets a sibling repo — or a file it includes/extends — ship its OWN
- * published ports (a broker, a second DB, …) and have them allocated + injected, instead
- * of being limited to the project's declared port block. Deduped by the canonical env
- * var so "db" (declared) and a compose's "DB" reference never double-allocate.
- * Best-effort text scan (not full YAML) — an unreadable file contributes nothing.
- */
-async function discoverComposePortNames(composeFiles: string[], existingNames: string[]): Promise<string[]> {
-  const seenEnv = new Set(existingNames.map(portEnvVar));
-  const discovered: string[] = [];
-  const re = /KANBAN_SVC_([A-Z0-9_]+?)_PORT/g;
-  const expanded = await expandComposeFilesShallow(composeFiles);
-  for (const { text } of expanded) {
-    for (const m of text.matchAll(re)) {
-      const name = m[1].toLowerCase();
-      const env = portEnvVar(name);
-      if (seenEnv.has(env)) continue;
-      seenEnv.add(env);
-      discovered.push(name);
-    }
-  }
-  return discovered;
-}
-
-/**
- * Host the agent should reach the stack's services on. Defaults to `localhost` (the
- * single-user, board-on-host case). When the board itself runs in a container the DB
- * lives elsewhere: DooD → `host.docker.internal`; DinD → the `dind` sidecar service
- * name. The deployment sets `KANBAN_SERVICE_HOST` accordingly. (F2)
- */
-/**
- * Shared invocation context for the user-initiated lifecycle controls (#92) over an
- * ALREADY-provisioned stack. The stored state's `composeProjectName`, `ports` and
- * `envFilePath` are reused VERBATIM — no port is reallocated — so a stop→start or a
- * restart keeps the workspace on the host ports the agent was told about.
- *
- * Exported at module scope so the exported factory's inferred return type does not
- * leak a private name (TS4060/TS4025); hoisted from inside the factory in a
- * post-merge fix (#92).
- */
-export interface StackControlContext {
-  state: ServiceStackState;
-  config: ServiceStackConfig;
-  composeWorktreePath: string;
-  workspaceId: string;
-}
-
-export function resolveServiceHost(env: NodeJS.ProcessEnv = process.env): string {
-  const v = env.KANBAN_SERVICE_HOST?.trim();
-  return v && v.length > 0 ? v : "localhost";
-}
-
-/** Keys must be valid POSIX shell identifiers or `. services.env` breaks mid-file. */
-const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
-/**
- * The generated file has TWO consumers with different parsers: docker's `--env-file`
- * format and the POSIX shell dot-source the ticket-context tells the agent to run
- * (`set -a; . .kanban/services.env; set +a`). Values are emitted SINGLE-QUOTED — the
- * one representation both parsers read back byte-identically (no `$` interpolation,
- * no ` #` inline-comment truncation, no word splitting) — so an entry is safe only if:
- *  - the key is a valid shell identifier (a `MY-VAR=…` line aborts the dot-source), and
- *  - the value carries no line break (would split one KEY=value into a bogus extra
- *    line, or inject an unintended var — F11) and no single quote (cannot be quoted
- *    identically for both parsers: shell needs `'\''`, compose ends the value there).
- * Unsafe entries are DROPPED with a loud warning, never emitted divergently (F12).
- */
-function isEnvLineSafe(key: string, value: string): boolean {
-  if (!ENV_KEY_RE.test(key)) {
-    console.warn(`[services] dropping env entry whose key is not a valid identifier: ${JSON.stringify(key)}`);
-    return false;
-  }
-  if (/[\r\n]/.test(value)) {
-    console.warn(`[services] dropping env entry with a line break in its value: ${JSON.stringify(key)}`);
-    return false;
-  }
-  if (value.includes("'")) {
-    console.warn(`[services] dropping env entry with a single quote in its value (cannot be represented identically for compose --env-file AND shell sourcing): ${JSON.stringify(key)}`);
-    return false;
-  }
-  return true;
-}
-
-/**
- * One `KEY='value'` line. Single quotes are literal for BOTH docker's env-file parser
- * and POSIX shell sourcing, so the containers and the agent see the same bytes (F12).
- */
-function envLine(key: string, value: string): string {
-  return `${key}='${value}'`;
-}
-
-/** Serialize the generated env file body (compose --env-file AND shell-sourceable). */
-export function buildServicesEnvFile(args: {
-  composeProjectName: string;
-  ports: Record<string, number>;
-  config: ServiceStackConfig;
-  extraEnv?: Record<string, string>;
-  /** Host the agent reaches services on; defaults to resolveServiceHost(). */
-  serviceHost?: string;
-}): string {
-  const serviceHost = args.serviceHost ?? resolveServiceHost();
-  const lines: string[] = [
-    envLine("COMPOSE_PROJECT_NAME", args.composeProjectName),
-    envLine("KANBAN_STACK", "1"),
-  ];
-  if (isEnvLineSafe("KANBAN_SERVICE_HOST", serviceHost)) {
-    lines.push(envLine("KANBAN_SERVICE_HOST", serviceHost));
-  }
-  // Activate declared compose profiles (services behind a `profiles:` key). `up` runs with
-  // NO `--profile` flag, so docker compose reads COMPOSE_PROFILES from this --env-file to
-  // decide which profiles to enable. A profile name is dropped (with a warning) if it is not
-  // a shell-safe env value; a comma is rejected here because it is the profile SEPARATOR
-  // (an embedded comma would silently split into extra profiles). Absent/empty => default
-  // (only unprofiled services start), so existing stacks are byte-identical to before.
-  const profileNames = (args.config.profiles ?? [])
-    .map((p) => p.trim())
-    .filter((p) => p.length > 0);
-  if (profileNames.length > 0) {
-    const bad = profileNames.find((p) => p.includes(",") || !isEnvLineSafe("COMPOSE_PROFILES", p));
-    if (bad !== undefined) {
-      console.warn(`[services] dropping COMPOSE_PROFILES — profile name is not shell/comma-safe: ${JSON.stringify(bad)}`);
-    } else {
-      lines.push(envLine("COMPOSE_PROFILES", profileNames.join(",")));
-    }
-  }
-  for (const [name, port] of Object.entries(args.ports)) {
-    lines.push(envLine(portEnvVar(name), String(port)));
-  }
-  for (const [key, value] of Object.entries(args.config.env ?? {})) {
-    if (isEnvLineSafe(key, value)) lines.push(envLine(key, value));
-  }
-  for (const [key, value] of Object.entries(args.extraEnv ?? {})) {
-    if (isEnvLineSafe(key, value)) lines.push(envLine(key, value));
-  }
-  return lines.join("\n") + "\n";
-}
-
-/**
- * Best-effort diagnostic for merged SIBLING compose files (dev #109): scan each extra
- * `-f` compose file for a relative env_file/build-context/dockerfile/secret-or-config-
- * file/volumes-bind-mount path, because `docker compose -f <leading> -f <sibling>`
- * resolves those against the LEADING worktree (project directory = first `-f`), not the
- * sibling's own dir — a cryptic "file not found under <leading>" `up` failure. Logged
- * to the server console AND returned so the caller can attach it to the persisted
- * ServiceStackState + ticket-context (dev #162) — previously console.warn-only, so a
- * failure was undiagnosable outside the server log. Never throws; returns [] when
- * siblings use absolute or `${VAR}` paths (the common, working case).
- */
-async function lintSiblingComposeFiles(leadingWorktreePath: string, extraComposeFiles: string[]): Promise<string[]> {
-  const warnings: string[] = [];
-  for (const abs of extraComposeFiles) {
-    let text: string;
-    try {
-      text = await readFile(abs, "utf-8");
-    } catch {
-      continue;
-    }
-    const issues = findSiblingComposeRelativePaths(text);
-    const warning = siblingComposeRelativePathWarning({
-      siblingName: basename(dirname(abs)),
-      siblingComposeAbsPath: abs,
-      leadingWorktreePath,
-      issues,
-    });
-    if (warning) {
-      console.warn(warning);
-      warnings.push(warning);
-    }
-  }
-  return warnings;
-}
 
 /**
  * Extract the stored compose project name from a persisted ServiceStackState JSON blob
