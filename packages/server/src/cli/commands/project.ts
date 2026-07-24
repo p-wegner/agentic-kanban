@@ -4,6 +4,7 @@ import { getProjectByName, getProjectById, getAllProjects, deleteProjectCascade 
 import { getClosedWorkspaces } from "../../repositories/workspace.repository.js";
 import { getPreference } from "../../repositories/preferences.repository.js";
 import { runMigrations, getActiveProjectId } from "../shared.js";
+import { unregisterLeakedTempProjects, findProjectsWithMissingRepoPath } from "../../services/project-registration.js";
 import { exportBacklogSnapshot, importBacklogSnapshot, validateBacklogSnapshot } from "../../services/backlog-snapshot.service.js";
 
 /** Resolve a project by name or id, defaulting to the active project when omitted. */
@@ -162,11 +163,11 @@ Examples:
 
   program
     .command("cleanup")
-    .description("Show stale worktrees for closed workspaces.\n\nLists git worktrees belonging to closed/merged workspaces. These worktrees are no longer needed and can be removed manually with 'git worktree remove --force <path>'.\n\nThis command does NOT auto-remove worktrees -- it only reports them.")
+    .description("Show stale worktrees for closed workspaces, and clean up leaked temp-fixture project registrations.\n\nLists git worktrees belonging to closed/merged workspaces (remove manually with 'git worktree remove --force <path>'). Also unregisters any project whose repoPath is both gone from disk and under the OS temp dir (leaked test/lab fixtures), and reports any OTHER registered project with a missing repoPath so it stays visible instead of silent -- non-temp paths are never auto-removed.")
     .addHelpText("after", `
 Example:
   $ agentic-kanban cleanup
-  # Then manually remove with:
+  # Then manually remove stale worktrees with:
   $ git worktree remove --force <path>
 `)
     .action(async () => {
@@ -174,20 +175,37 @@ Example:
         await runMigrations();
 
         const closedWorkspaces = await getClosedWorkspaces();
-
         const withWorktrees = closedWorkspaces.filter((ws) => ws.workingDir);
 
         if (withWorktrees.length === 0) {
           console.log("No stale worktrees found.");
-          process.exit(0);
+        } else {
+          console.log(`Found ${withWorktrees.length} closed workspace(s) with worktrees:`);
+          for (const ws of withWorktrees) {
+            console.log(`  ${ws.branch} -> ${ws.workingDir}`);
+          }
+          console.log("\nThese worktrees can be removed manually with:");
+          console.log("  git worktree remove --force <path>");
         }
 
-        console.log(`Found ${withWorktrees.length} closed workspace(s) with worktrees:`);
-        for (const ws of withWorktrees) {
-          console.log(`  ${ws.branch} -> ${ws.workingDir}`);
+        const removed = await unregisterLeakedTempProjects();
+        if (removed.length > 0) {
+          console.log(`\nUnregistered ${removed.length} leaked temp-fixture project(s):`);
+          for (const p of removed) {
+            console.log(`  "${p.name}" -> ${p.repoPath}`);
+          }
+        } else {
+          console.log("\nNo leaked temp-fixture projects found.");
         }
-        console.log("\nThese worktrees can be removed manually with:");
-        console.log("  git worktree remove --force <path>");
+
+        const stillMissing = await findProjectsWithMissingRepoPath();
+        if (stillMissing.length > 0) {
+          console.log(`\n${stillMissing.length} registered project(s) have a missing repoPath (NOT auto-removed -- outside the temp dir, verify before unregistering manually):`);
+          for (const p of stillMissing) {
+            console.log(`  "${p.name}" -> ${p.repoPath}`);
+          }
+        }
+
         process.exit(0);
       } catch (err) {
         console.error("Error:", err instanceof Error ? err.message : String(err));
