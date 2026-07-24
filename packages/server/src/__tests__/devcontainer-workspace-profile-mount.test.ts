@@ -100,6 +100,21 @@ describe("provisionContainerForWorkspace — profile mount parity (#155)", () =>
     expect(mounts.some((m) => m.source === "/profiles/myprofile")).toBe(true);
   });
 
+  it("passes the workspaceId through so concurrent workspaces on one profile get separate copies (#157)", async () => {
+    mockNoExistingContainers();
+
+    await provisionContainerForWorkspace({
+      enabled: true,
+      worktreePath: WORKTREE,
+      workspaceId: "ws1",
+      claudeProfile: "myprofile",
+    });
+
+    expect(provisionContainerProfileMock).toHaveBeenCalledWith(
+      expect.objectContaining({ profileKey: "myprofile", workspaceId: "ws1" }),
+    );
+  });
+
   it("no profile passed: falls back to the default profile dir (the pre-fix behavior for comparison)", async () => {
     mockNoExistingContainers();
 
