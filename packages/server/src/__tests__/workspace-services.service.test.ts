@@ -22,11 +22,13 @@ function makeFakeRunner(overrides: Partial<ComposeRunner> = {}): {
   downs: Array<Parameters<ComposeRunner["down"]>[0]>;
   restarts: Array<Parameters<ComposeRunner["restart"]>[0]>;
   logsCalls: Array<Parameters<ComposeRunner["logs"]>[0]>;
+  residualRemovals: string[];
 } {
   const ups: Array<Parameters<ComposeRunner["up"]>[0]> = [];
   const downs: Array<Parameters<ComposeRunner["down"]>[0]> = [];
   const restarts: Array<Parameters<ComposeRunner["restart"]>[0]> = [];
   const logsCalls: Array<Parameters<ComposeRunner["logs"]>[0]> = [];
+  const residualRemovals: string[] = [];
   const runner: ComposeRunner = {
     up: async (args) => {
       ups.push(args);
@@ -45,9 +47,14 @@ function makeFakeRunner(overrides: Partial<ComposeRunner> = {}): {
       return { ok: true, stdout: "db-1  | ready to accept connections\n", stderr: "" };
     },
     list: async () => [],
+    listResidualProjects: async () => [],
+    removeResidualProjectResources: async (projectName) => {
+      residualRemovals.push(projectName);
+      return { ok: true, stderr: "" };
+    },
     ...overrides,
   };
-  return { runner, ups, downs, restarts, logsCalls };
+  return { runner, ups, downs, restarts, logsCalls, residualRemovals };
 }
 
 const INSTANCE = "testinst";
@@ -749,6 +756,49 @@ describe("reapOrphanServiceStacks", () => {
     const { reaped } = await svc.reapOrphanServiceStacks({ knownComposeProjectNames: new Set() });
     expect(reaped).toEqual([]);
     expect(downs).toHaveLength(0);
+  });
+
+  it("#163: reaps container-less residue (labeled volumes/networks with no container) that compose ls can never see", async () => {
+    const containerOnly = composeProjectName("container-ws-0001", INSTANCE);
+    const residueOnly = composeProjectName("residue-ws-0002", INSTANCE); // containers already gone
+    const { runner, downs, residualRemovals } = makeFakeRunner({
+      list: async () => [containerOnly],
+      listResidualProjects: async () => [containerOnly, residueOnly],
+    });
+    const { svc } = makeService({ runner });
+    const { reaped } = await svc.reapOrphanServiceStacks({ knownComposeProjectNames: new Set() });
+    expect(reaped.sort()).toEqual([containerOnly, residueOnly].sort());
+    // A name WITH a live container still goes through compose down (resolves via labels).
+    expect(downs.map((d) => d.projectName)).toEqual([containerOnly]);
+    // A residue-only name (no container) is reaped via direct label-based removal instead.
+    expect(residualRemovals).toEqual([residueOnly]);
+  });
+
+  it("#163: a container-less stack still owned by a live workspace is untouched", async () => {
+    const known = composeProjectName("known-ws-0003", INSTANCE);
+    const { runner, downs, residualRemovals } = makeFakeRunner({
+      list: async () => [],
+      listResidualProjects: async () => [known],
+    });
+    const { svc } = makeService({ runner });
+    const { reaped } = await svc.reapOrphanServiceStacks({ knownComposeProjectNames: new Set([known]) });
+    expect(reaped).toEqual([]);
+    expect(downs).toHaveLength(0);
+    expect(residualRemovals).toHaveLength(0);
+  });
+
+  it("#163: a container-less FOREIGN-instance/legacy stack is untouched (cross-instance safety holds for residue too)", async () => {
+    const foreignResidue = composeProjectName("foreign-ws-0004", "otherbrd");
+    const legacyResidue = "ak-ws-legacyresidue1";
+    const { runner, downs, residualRemovals } = makeFakeRunner({
+      list: async () => [],
+      listResidualProjects: async () => [foreignResidue, legacyResidue],
+    });
+    const { svc } = makeService({ runner });
+    const { reaped } = await svc.reapOrphanServiceStacks({ knownComposeProjectNames: new Set() });
+    expect(reaped).toEqual([]);
+    expect(downs).toHaveLength(0);
+    expect(residualRemovals).toHaveLength(0);
   });
 });
 

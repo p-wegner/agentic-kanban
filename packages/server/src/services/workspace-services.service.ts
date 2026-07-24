@@ -43,6 +43,11 @@ import { createStackPortAllocator, releaseStackPorts, type StackPortAllocator } 
 /** Max chars of compose stderr preserved on an error state (keep DB rows bounded). */
 const MAX_ERROR_CHARS = 2000;
 
+/** The label compose stamps on every resource (container, volume, network, image) it
+ *  creates, carrying the compose project name — the join key for label-based inventory
+ *  of container-less residue (#163). */
+const COMPOSE_PROJECT_LABEL = "com.docker.compose.project";
+
 /**
  * The compose driver, injected for testability. The default implementation shells out
  * to `docker compose` via the docker-exec adapter; tests pass a fake.
@@ -96,6 +101,20 @@ export interface ComposeRunner {
   }): Promise<{ ok: boolean; stdout: string; stderr: string }>;
   /** Compose project names currently known to the daemon (running or stopped). */
   list(env?: NodeJS.ProcessEnv): Promise<string[]>;
+  /**
+   * Compose project names carried by LABELED volumes/networks/images on the daemon —
+   * container-less residue `list()` (container-derived `compose ls`) can never see: a
+   * failed compensating down that removed containers but errored on the volume, or
+   * containers pruned externally, leaves named volumes/networks/`--rmi local` images
+   * behind with no container left to report the project (#163).
+   */
+  listResidualProjects(env?: NodeJS.ProcessEnv): Promise<string[]>;
+  /**
+   * Remove every volume/network/image labeled `com.docker.compose.project=<projectName>`
+   * directly (not via `compose down -p`, which resolves the project from CONTAINER
+   * labels — a project with no containers left cannot be downed by name at all, #163).
+   */
+  removeResidualProjectResources(projectName: string, env?: NodeJS.ProcessEnv): Promise<{ ok: boolean; stderr: string }>;
 }
 
 /** Arguments for provisioning a workspace's stack. */
@@ -503,6 +522,51 @@ export function createDefaultComposeRunner(): ComposeRunner {
         return [];
       }
     },
+    async listResidualProjects(env) {
+      if (!(await dockerAvailable(env))) return [];
+      const names = new Set<string>();
+      const queries: string[][] = [
+        ["volume", "ls", "--filter", `label=${COMPOSE_PROJECT_LABEL}`, "--format", `{{ index .Labels "${COMPOSE_PROJECT_LABEL}" }}`],
+        ["network", "ls", "--filter", `label=${COMPOSE_PROJECT_LABEL}`, "--format", `{{ index .Labels "${COMPOSE_PROJECT_LABEL}" }}`],
+        ["images", "--filter", `label=${COMPOSE_PROJECT_LABEL}`, "--format", `{{ index .Labels "${COMPOSE_PROJECT_LABEL}" }}`],
+      ];
+      for (const args of queries) {
+        const res = await dockerExec(args, { env });
+        if (res.code !== 0) continue;
+        for (const line of res.stdout.split("\n")) {
+          const name = line.trim();
+          if (name) names.add(name);
+        }
+      }
+      return [...names];
+    },
+    async removeResidualProjectResources(projectName, env) {
+      if (!(await dockerAvailable(env))) {
+        return { ok: false, stderr: "docker is not available on this host" };
+      }
+      const filter = `label=${COMPOSE_PROJECT_LABEL}=${projectName}`;
+      let ok = true;
+      const stderrParts: string[] = [];
+      const removeByKind = async (listArgs: string[], removeCmd: (ids: string[]) => string[]) => {
+        const listRes = await dockerExec(listArgs, { env });
+        if (listRes.code !== 0) {
+          ok = false;
+          stderrParts.push(listRes.stderr || listRes.error || "");
+          return;
+        }
+        const ids = listRes.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+        if (ids.length === 0) return;
+        const removeRes = await dockerExec(removeCmd(ids), { env });
+        if (removeRes.code !== 0) {
+          ok = false;
+          stderrParts.push(removeRes.stderr || removeRes.error || "");
+        }
+      };
+      await removeByKind(["volume", "ls", "-q", "--filter", filter], (ids) => ["volume", "rm", "-f", ...ids]);
+      await removeByKind(["network", "ls", "-q", "--filter", filter], (ids) => ["network", "rm", ...ids]);
+      await removeByKind(["images", "-q", "--filter", filter], (ids) => ["rmi", "-f", ...ids]);
+      return { ok, stderr: stderrParts.filter(Boolean).join("; ") };
+    },
   };
 }
 
@@ -768,6 +832,13 @@ export function createWorkspaceServicesService(deps: {
    * downed. Names of OTHER instances sharing the daemon (`ak-<otherId>-ws-…`) and
    * legacy unscoped names (`ak-ws-…`, pre-instance-id stacks whose owner is unknowable)
    * are NEVER touched. Best-effort per stack.
+   *
+   * The inventory is the UNION of `runner.list()` (container-derived, `compose ls`) and
+   * `runner.listResidualProjects()` (label-derived, sees volumes/networks/images with no
+   * live container, #163). A name with containers still goes through `compose down -p`
+   * (which resolves the project via container labels); a name that is residue-only
+   * (containers already gone) is reaped via `removeResidualProjectResources` instead,
+   * since `compose down -p` cannot resolve a project with no containers left at all.
    */
   async function reapOrphanServiceStacks(args: {
     knownComposeProjectNames: Set<string>;
@@ -781,18 +852,30 @@ export function createWorkspaceServicesService(deps: {
       console.warn(`[services] reaper skipped — could not resolve this instance's id: ${err instanceof Error ? err.message : String(err)}`);
       return { reaped };
     }
-    let names: string[] = [];
+    let containerNames: string[] = [];
     try {
-      names = await runner.list();
+      containerNames = await runner.list();
     } catch (err) {
       console.warn(`[services] reaper list failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
       return { reaped };
     }
-    for (const name of names) {
+    let residualNames: string[] = [];
+    try {
+      residualNames = await runner.listResidualProjects();
+    } catch (err) {
+      console.warn(`[services] reaper residual-inventory query failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    }
+    const containerSet = new Set(containerNames);
+    const allNames = new Set([...containerNames, ...residualNames]);
+    for (const name of allNames) {
       if (!isInstanceManagedComposeProject(name, instanceId)) continue;
       if (args.knownComposeProjectNames.has(name)) continue;
       try {
-        await runner.down({ projectName: name, cwd: process.cwd() });
+        if (containerSet.has(name)) {
+          await runner.down({ projectName: name, cwd: process.cwd() });
+        } else {
+          await runner.removeResidualProjectResources(name);
+        }
         // A matching row can only be a terminal (closed) workspace's stale blob; mark
         // it down so it stops reporting a reaped stack as up. Best-effort.
         await markServiceStateDown(name).catch(() => {});
