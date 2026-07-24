@@ -133,6 +133,19 @@ function isDevTreeProcess(proc: ProcessRecord): boolean {
   );
 }
 
+// Vitest worker-pool processes (and their `pnpm test`/`vitest` launchers) never held a
+// listener port and never matched isDevTreeProcess, so treeRoots() never surfaced them
+// as candidates at all — the sweep counted them (isRelevantProcess matches "vite"/"node")
+// but silently ignored them (#172: 150+ leaked vitest workers, cleanedCount stayed 0).
+function isTestTreeProcess(proc: ProcessRecord): boolean {
+  const cmd = proc.commandLine.toLowerCase().replace(/\\/g, "/");
+  return (cmd.includes("pnpm") && /\stest\b/.test(cmd)) || cmd.includes("vitest");
+}
+
+function isReapableTreeProcess(proc: ProcessRecord): boolean {
+  return isDevTreeProcess(proc) || isTestTreeProcess(proc);
+}
+
 function buildChildren(processes: ProcessRecord[]): Map<number, ProcessRecord[]> {
   const children = new Map<number, ProcessRecord[]>();
   for (const proc of processes) {
@@ -162,11 +175,11 @@ function descendants(root: ProcessRecord, children: Map<number, ProcessRecord[]>
 function treeRoots(processes: ProcessRecord[]): ProcessRecord[] {
   const byPid = new Map(processes.map((proc) => [proc.pid, proc]));
   return processes
-    .filter(isDevTreeProcess)
+    .filter(isReapableTreeProcess)
     .filter((proc) => {
       let parent = byPid.get(proc.ppid);
       for (let i = 0; parent && i < 20; i++) {
-        if (isDevTreeProcess(parent)) return false;
+        if (isReapableTreeProcess(parent)) return false;
         parent = byPid.get(parent.ppid);
       }
       return true;
