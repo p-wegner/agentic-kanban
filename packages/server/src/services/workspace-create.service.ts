@@ -149,6 +149,8 @@ export function createWorkspaceCreateService(deps: {
     latestSymlink: LatestSymlinkRun;
     now: string;
     database?: Database | TransactionClient;
+    /** Defaults to "active" — pass "blocked" when a blocking setup script failed (#169). */
+    status?: string;
   }): Promise<void> {
     await crudRepo.insertWorkspaceRecordRow({
       id: params.id,
@@ -164,7 +166,7 @@ export function createWorkspaceCreateService(deps: {
       tddMode: params.tddMode,
       includeVisualProof: params.includeVisualProof,
       skillId: params.skillId,
-      status: "active",
+      status: params.status ?? "active",
       claudeProfile: params.claudeProfile ?? null,
       agentCommand: params.agentCommand ?? null,
       provider: params.resolvedProvider,
@@ -602,6 +604,15 @@ export function createWorkspaceCreateService(deps: {
         issue, input, includeVisualProof, workspaceId: id, worktreePath, project, skillId,
       });
 
+      // #169: a BLOCKING setup script that failed must not proceed silently — the
+      // agent would otherwise launch into a worktree missing its dependencies and
+      // fail opaquely hours later at the merge verify gate. Mark the workspace
+      // "blocked" (the established "automation paused; needs recovery" status) and
+      // skip the deferred agent launch below instead of just logging a warning.
+      // (agentConfig/claudeProfile/agentCommand/resolvedProvider already resolved
+      // above — #155 moved that resolution before setupWorktree.)
+      const setupFailedBlocking = !isDirect && setupConfig.setupBlocking && latestSetup.state === "failed";
+
       t = Date.now();
       await withTransaction(database, async (tx) => {
         await insertWorkspaceRecord({
@@ -610,6 +621,7 @@ export function createWorkspaceCreateService(deps: {
           skillId: effectiveSkillId, claudeProfile, agentCommand, resolvedProvider, model: agentConfig.model,
           contextPrimer, serviceState: null,
           latestSetup, latestSymlink, now, database: tx,
+          status: setupFailedBlocking ? "blocked" : "active",
         });
 
         // Multi-repo: per-repo worktree records ride the same transaction as the
@@ -642,37 +654,50 @@ export function createWorkspaceCreateService(deps: {
 
       boardEvents?.broadcast(issue.projectId, "workspace_created");
 
-      // Defer service-stack provisioning + agent launch off the hot path so the HTTP
-      // response is sent before any long-running work begins. setImmediate ensures the
-      // Hono response write (including the JSON body flush) happens before the first tick
-      // — the same pattern as the merge endpoint fix (#578). Provisioning lives here (not
-      // pre-insert) so `up --wait` doesn't block the 201, and so the compose name is keyed
-      // on the now-persisted workspace id (#F1).
-      const agentLaunchArgs = {
-        workspaceId: id, branch, isDirect, agentPrompt,
-        agentCommand, agentArgs: agentConfig.agentArgs,
-        resolvedProfile: agentConfig.resolvedProfile,
-        permissionPromptTool: agentConfig.permissionPromptTool,
-        planMode, resolvedProvider,
-        resolvedProfileSelection: agentConfig.resolvedProfileSelection,
-        model: agentConfig.model,
-        systemInstructions: agentConfig.systemInstructions,
-        contextFiles: ticketContextPath ? [ticketContextPath] : undefined,
-        skillName,
-      };
-      scheduleDeferredProvisionAndLaunch(agentLaunchArgs, {
-        workspaceId: id,
-        projectId: issue.projectId,
-        isDirect,
-        worktreePath,
-        servicesConfigRaw: project.servicesConfig,
-        branch,
-        createdAt: now,
-        siblings: siblingWorktrees,
-        issue: { issueNumber: issue.issueNumber, title: issue.title, description: issue.description, projectId: issue.projectId },
-        contextPrimer,
-        timing,
-      });
+      if (setupFailedBlocking) {
+        // Do NOT schedule the deferred provision/launch — an agent must never start
+        // in a worktree whose blocking setup script failed. Surface it loudly instead
+        // of the previous silent proceed.
+        console.warn(`[workspaces] blocking setup script failed for workspace ${id} (branch ${branch}) — workspace marked blocked, agent launch skipped`);
+        emitButlerSystemEvent({
+          projectId: issue.projectId,
+          kind: "workspace_error",
+          workspaceId: id,
+          text: `Setup script failed for workspace ${id} (branch ${branch}, exit ${latestSetup.exitCode ?? "?"}) — workspace blocked, agent was not launched: ${(latestSetup.stderrTail || latestSetup.stdoutTail || "").slice(0, 200)}`,
+        });
+      } else {
+        // Defer service-stack provisioning + agent launch off the hot path so the HTTP
+        // response is sent before any long-running work begins. setImmediate ensures the
+        // Hono response write (including the JSON body flush) happens before the first tick
+        // — the same pattern as the merge endpoint fix (#578). Provisioning lives here (not
+        // pre-insert) so `up --wait` doesn't block the 201, and so the compose name is keyed
+        // on the now-persisted workspace id (#F1).
+        const agentLaunchArgs = {
+          workspaceId: id, branch, isDirect, agentPrompt,
+          agentCommand, agentArgs: agentConfig.agentArgs,
+          resolvedProfile: agentConfig.resolvedProfile,
+          permissionPromptTool: agentConfig.permissionPromptTool,
+          planMode, resolvedProvider,
+          resolvedProfileSelection: agentConfig.resolvedProfileSelection,
+          model: agentConfig.model,
+          systemInstructions: agentConfig.systemInstructions,
+          contextFiles: ticketContextPath ? [ticketContextPath] : undefined,
+          skillName,
+        };
+        scheduleDeferredProvisionAndLaunch(agentLaunchArgs, {
+          workspaceId: id,
+          projectId: issue.projectId,
+          isDirect,
+          worktreePath,
+          servicesConfigRaw: project.servicesConfig,
+          branch,
+          createdAt: now,
+          siblings: siblingWorktrees,
+          issue: { issueNumber: issue.issueNumber, title: issue.title, description: issue.description, projectId: issue.projectId },
+          contextPrimer,
+          timing,
+        });
+      }
 
       return {
         id,
@@ -683,7 +708,7 @@ export function createWorkspaceCreateService(deps: {
         isDirect,
         planMode,
         includeVisualProof,
-        status: "active",
+        status: setupFailedBlocking ? "blocked" : "active",
         provider: resolvedProvider,
         latestSetup,
         latestSymlink,

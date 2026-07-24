@@ -277,6 +277,47 @@ describe("Workspaces API", () => {
     expect(existsSync(join(repoPath, "setup-ran.txt"))).toBe(false);
   });
 
+  it("POST /api/workspaces marks the workspace blocked (not active) when a blocking setup script fails (#169)", async () => {
+    const repoParent = mkdtempSync(join(tmpdir(), "kanban-setup-fail-"));
+    const repoPath = join(repoParent, "test-repo");
+    mkdirSync(repoPath);
+    execFileSync("git", ["init", "-b", "main"], { cwd: repoPath });
+    execFileSync("git", ["config", "user.email", "test@test.com"], { cwd: repoPath });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: repoPath });
+    execFileSync("git", ["commit", "--allow-empty", "-m", "initial"], { cwd: repoPath });
+    const failProjectId = await createProjectDirectly(database, {
+      name: "Setup Fail Project",
+      repoPath,
+      setupScript: "exit 1",
+      setupBlocking: true,
+      setupEnabled: true,
+    });
+    const failStatusId = await createStatusDirectly(database, failProjectId, "Todo", 0);
+    await createStatusDirectly(database, failProjectId, "In Progress", 1);
+    const issueRes = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Setup fail test", statusId: failStatusId, projectId: failProjectId }),
+    });
+    const failIssueId = (await issueRes.json()).id;
+
+    const createRes = await app.request("/api/workspaces", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ issueId: failIssueId, branch: "feature/setup-fail" }),
+    });
+
+    expect(createRes.status).toBe(201);
+    const createBody = await createRes.json() as any;
+    expect(createBody.latestSetup.state).toBe("failed");
+    // The bug (#169): this used to stay "active" and the agent launched anyway.
+    expect(createBody.status).toBe("blocked");
+
+    const getRes = await app.request(`/api/workspaces/${createBody.id}`);
+    const getBody = await getRes.json() as any;
+    expect(getBody.status).toBe("blocked");
+  });
+
   it("GET /api/issues/:id/workspaces includes the latest setup script status", async () => {
     // Nest the repo one level inside the mkdtemp parent so the worktree the product
     // code creates (`dirname(repoPath)/.worktrees/<branch>`) lands in the throwaway
