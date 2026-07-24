@@ -53,7 +53,9 @@ const PYTHON = makeProfile({
 describe("deriveVerifyCommandPlan (#124)", () => {
   it("returns null when there is nothing to verify", () => {
     expect(deriveVerifyCommandPlan(null)).toBeNull();
-    expect(deriveVerifyCommandPlan(makeProfile({ testCommand: null, buildCommand: null }))).toBeNull();
+    expect(
+      deriveVerifyCommandPlan(makeProfile({ testCommand: null, buildCommand: null, quickTestCommand: null })),
+    ).toBeNull();
     expect(deriveVerifyCommand(null)).toBe("");
   });
 
@@ -123,13 +125,28 @@ describe("deriveVerifyCommandPlan (#124)", () => {
   });
 
   it("leaves node commands untouched — project-authored scripts reject injected flags", () => {
-    const plan = deriveVerifyCommandPlan(makeProfile())!;
+    const plan = deriveVerifyCommandPlan(makeProfile({ quickTestCommand: null }))!;
     expect(plan.stackKey).toBe("node");
     expect(plan.command).toBe("pnpm test && pnpm build");
   });
 
+  // #173: a full-suite node gate flaked red under CPU contention (single files timing out at
+  // 15-17min) even though every failing suite was green in isolation, and leaked a worker
+  // fleet on every retry — a self-amplifying stall. The gate now defaults to the profile's
+  // quick/affected-only command instead of the full suite.
+  it("prefers quickTestCommand over the full testCommand for the node gate (#173)", () => {
+    const plan = deriveVerifyCommandPlan(makeProfile())!;
+    expect(plan.stackKey).toBe("node");
+    expect(plan.command).toBe("pnpm test:mine && pnpm build");
+  });
+
+  it("falls back to the full testCommand when no quickTestCommand is set", () => {
+    const plan = deriveVerifyCommandPlan(makeProfile({ quickTestCommand: null }))!;
+    expect(plan.command).toBe("pnpm test && pnpm build");
+  });
+
   it("never merges a script runner's scripts — `pnpm test build` would pass 'build' as an arg", () => {
-    const plan = deriveVerifyCommandPlan(makeProfile({ buildCommand: "pnpm run build" }))!;
+    const plan = deriveVerifyCommandPlan(makeProfile({ quickTestCommand: null, buildCommand: "pnpm run build" }))!;
     expect(plan.command).toBe("pnpm test && pnpm run build");
   });
 

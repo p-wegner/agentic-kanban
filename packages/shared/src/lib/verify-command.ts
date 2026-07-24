@@ -151,9 +151,19 @@ function resolveStackKey(profile: StackProfile): VerifyStackKey {
  */
 export function deriveVerifyCommandPlan(profile: StackProfile | null | undefined): VerifyCommandPlan | null {
   if (!profile) return null;
-  const test = profile.testCommand?.trim() || null;
-  const build = profile.buildCommand?.trim() || null;
   const stackKey = resolveStackKey(profile);
+  // #173: a node/pnpm merge gate that runs the FULL suite at full parallelism flakes red
+  // under CPU contention (single files hitting 15-17min timeouts) even though every failing
+  // suite is green in isolation — and each red gate attempt leaks a worker fleet (#172),
+  // starving the machine further on retry. `quickTestCommand` (e.g. `pnpm test:mine`) exists
+  // precisely to skip the known-flaky-under-load suites, so prefer it for the gate on node.
+  // Other stacks (gradle/maven/pytest) keep the full testCommand — this project's flake is
+  // node/vitest-parallelism-specific, not observed there. A project that wants the full
+  // suite as its gate can still set a manual `verify_script_<id>` override (never clobbered
+  // by the derived default — see stack-profile/verify-script.ts).
+  const test =
+    (stackKey === "node" ? profile.quickTestCommand?.trim() : null) || profile.testCommand?.trim() || null;
+  const build = profile.buildCommand?.trim() || null;
   // Only gradle/maven can take both in one invocation; everything else must chain.
   const base =
     stackKey === "gradle" || stackKey === "maven" ? mergeTaskRunner(test, build) : chain(test, build);
