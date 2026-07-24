@@ -32,6 +32,10 @@
 //       auto-review-pref.test.ts (#173) — every one of these is green in isolation; under full
 //       parallelism a single file can hit CPU-contention timeouts of 15-17min, flaking the
 //       merge gate red and (via #172) leaking a vitest worker fleet on each retry.
+//     - compose-lifecycle-real-docker.test.ts (#164) — opt-in real-docker smoke test;
+//       shells out to a real daemon and pulls/builds real images, so it's excluded from
+//       the fast loop even on a machine with docker running. Run it via `pnpm test:docker`
+//       (or the full `pnpm test`, which does include it — self-skips when docker is absent).
 //   mcp-server:
 //     - mcp-tools.test.ts  spawn-based MCP integration; stale migration list FIXED (reads journal dynamically).
 //       Its catalog↔runtime parity gate has a fast NON-SPAWNING twin that DOES run here:
@@ -76,6 +80,7 @@ const PACKAGES = [
       "**/merge-service-edge-cases.test.ts",
       "**/preferences.test.ts",
       "**/auto-review-pref.test.ts",
+      "**/compose-lifecycle-real-docker.test.ts",
     ],
   },
   {
