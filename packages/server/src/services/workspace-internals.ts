@@ -343,30 +343,43 @@ export async function resolveMergeState(
 // ─── Multi-repo pending-sibling helpers ──────────────────────────────────────
 
 /**
- * A sibling repo with unmerged work. Structurally compatible with
- * `SiblingMergePlan` (workspace-repos.service.ts) so callers can hand the pending
- * set straight to `executeSiblingMerges`.
+ * A sibling repo with unmerged work, OR one whose pendency could not be verified at
+ * all (repo directory deleted/moved, base branch renamed, …). Structurally compatible
+ * with `SiblingMergePlan` (workspace-repos.service.ts) so callers can hand the pending
+ * set straight to `executeSiblingMerges` — an `unverifiable` row will simply fail that
+ * pipeline's own git operations rather than silently landing.
  */
 export interface PendingSiblingMerge {
   repo: RepoRow;
   uniqueCommits: number;
+  /**
+   * True when the repo's refs could not be resolved at all (fail-closed — see the
+   * function doc below). `uniqueCommits` is 0 and not meaningful in this case.
+   */
+  unverifiable?: boolean;
+  /** Human-readable reason, set only when `unverifiable` is true. */
+  unverifiableReason?: string;
 }
 
 /**
- * List the workspace's sibling repos that still have UNMERGED work: workspace-scoped
- * `repos` rows WITHOUT a stamped mergedHeadSha whose branch still exists and is ahead
- * of its base branch. Rows already landed (mergedHeadSha set), already cleaned (branch
- * ref gone) or with nothing to land (0 commits ahead) are not pending.
+ * List the workspace's sibling repos that still have UNMERGED work — OR whose pendency
+ * cannot be determined at all — so callers can never mistake "couldn't check" for
+ * "nothing pending". A row counts as pending when either:
+ *  - its branch still exists and is ahead of its base branch (genuinely unmerged work), or
+ *  - its refs could not be resolved (`unverifiable: true` — repo directory deleted/moved,
+ *    branch or base branch renamed/gone, or any other git error resolving them).
+ * Rows already landed (mergedHeadSha set) or with nothing to land (0 commits ahead of a
+ * VERIFIED base/branch pair) are not pending.
  *
  * This is the shared "is the workspace REALLY fully merged?" probe used by the merge
  * pre-flight, the already-merged reconciliations, and the stranded-sibling startup
- * reconciler. Deliberately DISTINCT from `prevalidateSiblingMerges`, which fails hard
- * on any unresolvable row — after a partial merge + cleanup, rows whose branch was
- * legitimately deleted are expected and must not read as failures.
- *
- * Best-effort reads: a git error on one repo skips it (reads as "not pending").
- * That is the safe direction — every deletion path re-verifies with its own
- * preserveUnmerged probe before destroying anything.
+ * reconciler. FAIL CLOSED is deliberate here: a git error must never read as "not
+ * pending", because callers like `checkAlreadyMerged`/`reconcileAlreadyMerged` treat an
+ * empty pending list as license to close the workspace and abandon the sibling's work.
+ * Deliberately DISTINCT from `prevalidateSiblingMerges`, which fails hard (throws) on
+ * any unresolvable row as part of an active merge — this function instead returns the
+ * unverifiable row so the caller can choose its own failure handling (block reconcile,
+ * surface a comment, etc.) without throwing out of a read-only probe.
  */
 export async function listPendingSiblingMerges(
   gitService: GitService,
@@ -386,14 +399,28 @@ export async function listPendingSiblingMerges(
   for (const repo of rows) {
     if (repo.mergedHeadSha) continue; // landed and stamped
     if (!repo.branch || !repo.baseBranch) continue;
+    // countUniqueCommits NEVER throws (returns 0 on any git error), which would read an
+    // unreachable repo as "nothing pending" — resolve both refs first (revParse throws).
+    // The two refs get DIFFERENT failure semantics:
+    //  - baseBranch unresolvable (repo directory deleted/moved so EVERY ref fails, or the
+    //    base branch itself renamed/gone) is a git-error-reads-as-"not pending" trap — fail
+    //    CLOSED, surfaced as `unverifiable`, never silently skipped.
+    //  - branch unresolvable while baseBranch DOES resolve is the legitimate "already landed
+    //    and cleaned up" case (the sibling merge pipeline force-deletes the branch after
+    //    landing) — genuinely nothing left to land, so it stays "not pending".
     try {
-      // countUniqueCommits NEVER throws (returns 0 on any git error), which would read
-      // an unreachable repo as "nothing pending" — resolve both refs first (revParse
-      // throws). A branch ref that is GONE genuinely has nothing left to land.
       await gitService.revParse(repo.path, repo.baseBranch);
+    } catch (err) {
+      const label = repo.name ?? repo.path;
+      const reason = `could not verify sibling repo '${label}' at '${repo.path}' (base branch '${repo.baseBranch}'): ${err instanceof Error ? err.message : String(err)}`;
+      console.warn(`[workspace-merge] pending-sibling scan: ${reason}`);
+      pending.push({ repo, uniqueCommits: 0, unverifiable: true, unverifiableReason: reason });
+      continue;
+    }
+    try {
       await gitService.revParse(repo.path, repo.branch);
     } catch {
-      continue;
+      continue; // branch ref gone → already landed and cleaned up, nothing left to land
     }
     const ahead = await gitService.countUniqueCommits(repo.path, repo.baseBranch, repo.branch).catch(() => 0);
     if (ahead > 0) pending.push({ repo, uniqueCommits: ahead });
@@ -413,8 +440,12 @@ export async function checkPendingSiblingMergeGuards(
   pending: PendingSiblingMerge[],
 ): Promise<string[]> {
   const failures: string[] = [];
-  for (const { repo } of pending) {
+  for (const { repo, unverifiable, unverifiableReason } of pending) {
     const label = repo.name ?? repo.path;
+    if (unverifiable) {
+      failures.push(unverifiableReason ?? `${label} (${repo.path}): sibling repo pendency could not be verified`);
+      continue;
+    }
     const dirty = await gitService.getUncommittedTrackedChanges(repo.path).catch(() => [] as string[]);
     if (dirty.length > 0) {
       failures.push(`${label}: main checkout has ${dirty.length} uncommitted tracked change(s)`);
