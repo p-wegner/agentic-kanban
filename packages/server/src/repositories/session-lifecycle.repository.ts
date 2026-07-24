@@ -127,6 +127,22 @@ export async function updateSessionPid(
     .where(eq(sessions.id, sessionId));
 }
 
+/**
+ * Persist the devcontainer this session's agent runs inside (#154), so a
+ * later stop/hang-kill/killAll — or a post-restart reattach — can reach the
+ * in-container process instead of only the host docker-exec client.
+ */
+export async function updateSessionContainerId(
+  sessionId: string,
+  containerId: string,
+  database: Database = db,
+): Promise<void> {
+  await database
+    .update(sessions)
+    .set({ containerId })
+    .where(eq(sessions.id, sessionId));
+}
+
 export async function updateSessionStoppedNoStats(
   sessionId: string,
   endedAt: string,

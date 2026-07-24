@@ -651,6 +651,15 @@ export function createSessionLifecycle(
       console.warn(`[devcontainer] provisioning threw for sessionId=${sessionId} — running on host`, err);
     }
 
+    // Persist the container id (#154) so stop/hang-kill/killAll — and a post-restart
+    // reattach — can reach the in-container process, not just the host docker-exec
+    // client. Best-effort: a write failure degrades to the host-only kill leg, same
+    // contract as the rest of provisioning.
+    if (containerProvision) {
+      lifecycleRepo.updateSessionContainerId(sessionId, containerProvision.handle.containerId, db)
+        .catch((err) => console.error(`Failed to store session containerId: sessionId=${sessionId}`, err));
+    }
+
     try {
       const proc = agentService.launch(effectiveWorkingDir, sessionId, effectivePrompt, effectiveAgentArgs, (event) => {
         if (event.type === "exit") {
