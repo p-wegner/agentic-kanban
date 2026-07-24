@@ -1,6 +1,7 @@
-import { and, eq, notInArray } from "drizzle-orm";
-import { issues, projectStatuses, projects } from "@agentic-kanban/shared/schema";
-import { getMergeCommitSubjects } from "@agentic-kanban/shared/lib/git-service";
+import { and, eq, inArray, ne, notInArray } from "drizzle-orm";
+import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
+import { getMergeCommits, getRevertedMergeCommitSubjects } from "@agentic-kanban/shared/lib/git-service";
+import type { MergeCommitSubject } from "@agentic-kanban/shared/lib/git-service";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { reconcileMergedIssue } from "../services/merge-cleanup.service.js";
@@ -15,32 +16,56 @@ import { logBoardHealthEvent } from "../repositories/board-health-events.reposit
  */
 const PROTECTED_STATUS_NAMES = ["Backlog", "Done", "Cancelled", "Closed"];
 
+/** The branch-naming convention this reconciler recognizes (`suggestBranchName`). */
+const BRANCH_AK_RE = /(?:feature\/)?ak-(\d+)\b/i;
+
 /**
- * Extract the issue numbers of merged `feature/ak-<N>` (or bare `ak-<N>`) branches from a
- * list of MERGE-commit subjects. A hand `--no-ff` merge of `feature/ak-113-slug` produces
- * a subject like `Merge branch 'feature/ak-113-slug'` (or `Merge feature/ak-113-slug`),
- * so the branch name — and thus the issue number — is recoverable even after the branch
- * is deleted. The match is anchored on the `ak-<N>` convention (`suggestBranchName`), so a
- * subject that merely mentions a number without the branch prefix is ignored.
+ * Extract the issue number of a merged `feature/ak-<N>` (or bare `ak-<N>`) branch from a
+ * single MERGE-commit subject — only the FIRST `ak-<N>` occurrence in the subject, i.e. the
+ * one anchored to the branch-name position (`Merge branch 'feature/ak-<N>-<slug>'`). A slug
+ * that happens to mention a second issue later in its text (e.g.
+ * `feature/ak-105-fix-ak-104-regression`) must not also match that second number (#146).
+ */
+function firstBranchIssueNumber(subject: string): number | null {
+  const m = BRANCH_AK_RE.exec(subject);
+  if (!m) return null;
+  const n = Number.parseInt(m[1], 10);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/**
+ * Extract the set of issue numbers whose `feature/ak-<N>` branch appears merged, from a
+ * list of MERGE-commit subjects. Exported standalone for unit testing the extraction logic.
  */
 export function parseMergedIssueNumbers(subjects: string[]): Set<number> {
   const nums = new Set<number>();
-  const re = /(?:feature\/)?ak-(\d+)\b/gi;
   for (const subject of subjects) {
-    re.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(subject)) !== null) {
-      const n = Number.parseInt(m[1], 10);
-      if (Number.isInteger(n) && n > 0) nums.add(n);
-    }
+    const n = firstBranchIssueNumber(subject);
+    if (n != null) nums.add(n);
   }
   return nums;
 }
 
+/**
+ * Map each merged issue number to the (newest) merge commit's author date. Commits are
+ * newest-first, so the first match for a given number is kept.
+ */
+function parseMergedBranchDates(commits: MergeCommitSubject[]): Map<number, string> {
+  const dates = new Map<number, string>();
+  for (const commit of commits) {
+    const n = firstBranchIssueNumber(commit.subject);
+    if (n == null || dates.has(n)) continue;
+    dates.set(n, commit.date);
+  }
+  return dates;
+}
+
 export interface HandMergedBranchReconcilerDeps {
   database?: Database;
-  /** Injectable for testing. Defaults to the real getMergeCommitSubjects from git-service. */
-  getMergeSubjects?: (repoPath: string, ref: string) => Promise<string[]>;
+  /** Injectable for testing. Defaults to the real getMergeCommits from git-service. */
+  getMergeCommits?: (repoPath: string, ref: string, sinceIso?: string) => Promise<MergeCommitSubject[]>;
+  /** Injectable for testing. Defaults to the real getRevertedMergeCommitSubjects from git-service. */
+  getRevertedMergeSubjects?: (repoPath: string, ref: string) => Promise<string[]>;
 }
 
 /**
@@ -54,12 +79,20 @@ export interface HandMergedBranchReconcilerDeps {
  * that gap: it scans the default branch's MERGE commits for merged `ak-<N>` branch names and
  * converges each still-open matching issue via the shared idempotent {@link reconcileMergedIssue}.
  *
- * Safety (never mass-transition on an ambiguous match):
+ * Safety (#146 — issue numbers RECYCLE, so a naive scan of all history can force-Done an
+ * in-flight issue whose number matches an old, unrelated merge):
  * - Only issues PAST Backlog and NOT terminal are candidates (a never-started Backlog ticket
  *   or a deliberately Cancelled/Closed one is never touched).
- * - Each candidate is transitioned only when its OWN issue number appears as a merged
- *   `ak-<N>` branch in a real merge commit on the default branch — positive evidence of an
- *   actual merge, surviving branch deletion.
+ * - Never transitions an issue that has a LIVE (non-closed) workspace — an issue actively
+ *   being worked cannot have been proven done by an old merge commit.
+ * - The matching merge commit's author date must be NEWER than the issue's `createdAt` — an
+ *   old merge cannot be evidence that a younger issue (a recycled number) was merged.
+ * - The match is anchored to the branch-name position in the subject (first `ak-<N>` only),
+ *   not any occurrence anywhere in the subject text.
+ * - The git scan window is bounded to merges since the earliest candidate issue's `createdAt`
+ *   (plus a 1000-commit hard ceiling), instead of the last 1000 merges of ALL history.
+ * - A branch whose merge was later reverted (`Revert "Merge ...'ak-<N>...'"` subject) is
+ *   skipped.
  * - Per project (issue numbers are per-project), so a branch name never maps across projects.
  * - Idempotent: reconcileMergedIssue is a no-op once the issue is already on the target status.
  *
@@ -70,7 +103,8 @@ export async function reconcileHandMergedBranches(
   deps: HandMergedBranchReconcilerDeps = {},
 ): Promise<number> {
   const database = deps.database ?? db;
-  const getSubjects = deps.getMergeSubjects ?? ((repoPath, ref) => getMergeCommitSubjects(repoPath, ref));
+  const getCommits = deps.getMergeCommits ?? ((repoPath, ref, sinceIso) => getMergeCommits(repoPath, ref, sinceIso));
+  const getReverts = deps.getRevertedMergeSubjects ?? ((repoPath, ref) => getRevertedMergeCommitSubjects(repoPath, ref));
   let reconciled = 0;
 
   try {
@@ -84,31 +118,67 @@ export async function reconcileHandMergedBranches(
       // Candidate issues: open (past Backlog, non-terminal) issues of THIS project. If none,
       // skip the git scan entirely — the common steady-state cost is a single cheap query.
       const candidates = await database
-        .select({ issueId: issues.id, issueNumber: issues.issueNumber, statusName: projectStatuses.name })
+        .select({
+          issueId: issues.id,
+          issueNumber: issues.issueNumber,
+          statusName: projectStatuses.name,
+          createdAt: issues.createdAt,
+        })
         .from(issues)
         .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
         .where(and(eq(issues.projectId, project.id), notInArray(projectStatuses.name, PROTECTED_STATUS_NAMES)));
 
-      const byNumber = new Map<number, { issueId: string; statusName: string | null }>();
+      const byNumber = new Map<number, { issueId: string; statusName: string | null; createdAt: string }>();
       for (const c of candidates) {
-        if (c.issueNumber != null) byNumber.set(c.issueNumber, { issueId: c.issueId, statusName: c.statusName });
+        if (c.issueNumber != null) byNumber.set(c.issueNumber, { issueId: c.issueId, statusName: c.statusName, createdAt: c.createdAt });
       }
       if (byNumber.size === 0) continue;
 
-      let subjects: string[];
+      // Guard: never Done an issue with a live (non-closed) workspace — active work cannot
+      // have been "proven done" by an old merge commit matching a recycled number.
+      const candidateIssueIds = [...byNumber.values()].map((c) => c.issueId);
+      const liveWorkspaceRows = await database
+        .select({ issueId: workspaces.issueId })
+        .from(workspaces)
+        .where(and(inArray(workspaces.issueId, candidateIssueIds), ne(workspaces.status, "closed")));
+      const liveWorkspaceIssueIds = new Set(liveWorkspaceRows.map((r) => r.issueId));
+      for (const [num, cand] of byNumber) {
+        if (liveWorkspaceIssueIds.has(cand.issueId)) byNumber.delete(num);
+      }
+      if (byNumber.size === 0) continue;
+
+      // Bound the scan window to merges since the earliest candidate issue was created.
+      const sinceIso = [...byNumber.values()]
+        .map((c) => c.createdAt)
+        .reduce((min, createdAt) => (min == null || createdAt < min ? createdAt : min), null as string | null);
+
+      let commits: MergeCommitSubject[];
       try {
-        subjects = await getSubjects(project.repoPath, project.defaultBranch);
+        commits = await getCommits(project.repoPath, project.defaultBranch, sinceIso ?? undefined);
       } catch (err) {
         console.warn(`[hand-merge-reconciler] merge-history scan failed for ${project.repoPath}:`, err instanceof Error ? err.message : String(err));
         continue;
       }
-      if (subjects.length === 0) continue;
-      const mergedNumbers = parseMergedIssueNumbers(subjects);
-      if (mergedNumbers.size === 0) continue;
+      if (commits.length === 0) continue;
+      const mergedDates = parseMergedBranchDates(commits);
+      if (mergedDates.size === 0) continue;
+
+      let revertedNumbers: Set<number>;
+      try {
+        revertedNumbers = parseMergedIssueNumbers(await getReverts(project.repoPath, project.defaultBranch));
+      } catch {
+        revertedNumbers = new Set();
+      }
 
       const now = new Date().toISOString();
       for (const [num, cand] of byNumber) {
-        if (!mergedNumbers.has(num)) continue;
+        const mergeDate = mergedDates.get(num);
+        if (!mergeDate) continue;
+        if (revertedNumbers.has(num)) continue;
+        // The merge must postdate the issue itself — an old merge cannot be evidence that a
+        // younger issue (a recycled issue number) was merged.
+        if (!(new Date(mergeDate).getTime() > new Date(cand.createdAt).getTime())) continue;
+
         try {
           const res = await reconcileMergedIssue({ database, issueId: cand.issueId, now, projectId: project.id });
           if (!res.issueTransitioned) continue;
