@@ -142,6 +142,8 @@ export async function getWorkspaceDetails(
       latestSymlinkFailed: workspaces.latestSymlinkFailed,
       latestSymlinkError: workspaces.latestSymlinkError,
       serviceState: workspaces.serviceState,
+      isolationDowngraded: workspaces.isolationDowngraded,
+      isolationDowngradeReason: workspaces.isolationDowngradeReason,
       createdAt: workspaces.createdAt,
       updatedAt: workspaces.updatedAt,
       issueTitle: issues.title,

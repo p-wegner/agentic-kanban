@@ -179,6 +179,18 @@ export function WorkspaceDiagnosticsPanel({ workspace, project }: { workspace: W
         );
       })()}
 
+      {workspace.isolationDowngraded && (
+        <div className="rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+          <div className="font-semibold">⚠️ Isolation downgrade</div>
+          <p className="mt-1">
+            Containerized isolation was requested for this workspace, but the builder ran on the HOST instead.
+          </p>
+          {workspace.isolationDowngradeReason && (
+            <p className="mt-1 font-mono break-all">{workspace.isolationDowngradeReason}</p>
+          )}
+        </div>
+      )}
+
       {failures.length > 0 && (
         <div className="rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
           <div className="font-semibold">Failure messages</div>
