@@ -4,13 +4,20 @@
  * Acceptance criteria: seed a workspace whose branch is already an ancestor of
  * base with issue=In Review; run the reconciler; issue becomes Done.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { execFile } from "node:child_process";
 import { eq } from "drizzle-orm";
-import { issues, preferences, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
+import { issueComments, issues, preferences, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { reconcileAncestorBranchWorkspaces } from "../startup/ancestor-branch-reconciler.js";
 import { buildWorkspaceSummaryMap } from "../services/workspace-summary.service.js";
+import * as realGitService from "../services/git.service.js";
+import { insertWorkspaceRepo, listWorkspaceRepos } from "../repositories/repo.repository.js";
 import type { BranchTipAncestryResult } from "@agentic-kanban/shared/lib/git-service";
 
 type CheckAncestor = (repoPath: string, branch: string, baseBranch: string, worktreeDir?: string) => Promise<BranchTipAncestryResult>;
@@ -476,4 +483,165 @@ describe("reconcileAncestorBranchWorkspaces", () => {
     const [status2] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue2.statusId));
     expect(status2.name).toBe("Done");
   });
+});
+
+// ─── Sibling-aware terminalization (#151) ────────────────────────────────────
+//
+// The leading branch alone becoming an ancestor of base does NOT mean the whole
+// multi-repo workspace is done — a sibling repo may still hold unlanded work.
+// These tests use a REAL temp git repo for the sibling (mirroring
+// stranded-sibling-reconciler.test.ts) while the leading repo stays fake/mocked
+// via checkAncestor, since no real git call ever touches the leading repoPath.
+
+function exec(cmd: string, args: string[], cwd: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, { cwd }, (err, stdout, stderr) => {
+      if (err) reject(new Error(stderr || err.message));
+      else resolve(stdout.toString());
+    });
+  });
+}
+
+async function createTempRepo(prefix: string): Promise<string> {
+  const parent = await mkdtemp(join(tmpdir(), prefix));
+  const dir = join(parent, "repo");
+  mkdirSync(dir);
+  await exec("git", ["init"], dir);
+  await exec("git", ["config", "user.email", "test@test.com"], dir);
+  await exec("git", ["config", "user.name", "Test"], dir);
+  await writeFile(join(dir, "README.md"), "# Test\n");
+  await exec("git", ["add", "."], dir);
+  await exec("git", ["commit", "-m", "Initial commit"], dir);
+  await exec("git", ["branch", "-M", "main"], dir);
+  return dir;
+}
+
+async function commitFile(dir: string, file: string, content: string, message: string): Promise<void> {
+  await writeFile(join(dir, file), content);
+  await exec("git", ["add", "."], dir);
+  await exec("git", ["commit", "-m", message], dir);
+}
+
+describe("reconcileAncestorBranchWorkspaces — sibling-aware terminalization (#151)", () => {
+  let db: ReturnType<typeof createTestDb>["db"];
+  let siblingRepo: string;
+  const cleanupDirs: string[] = [];
+  const SIBLING_BRANCH = "feature/ak-151-sibling";
+
+  beforeEach(async () => {
+    ({ db } = createTestDb());
+    siblingRepo = await createTempRepo("kanban-ancestor-sib-");
+    cleanupDirs.push(siblingRepo);
+  }, 60000);
+
+  afterEach(async () => {
+    while (cleanupDirs.length) {
+      const dir = cleanupDirs.pop()!;
+      try { await rm(join(dir, ".."), { recursive: true, force: true }); } catch { /* best effort */ }
+    }
+  });
+
+  async function seedLeadingWorkspace() {
+    const now = new Date().toISOString();
+    const projectId = randomUUID();
+    const statusId = randomUUID();
+    const doneStatusId = randomUUID();
+    const issueId = randomUUID();
+    const workspaceId = randomUUID();
+
+    await db.insert(projects).values({
+      id: projectId, name: "Test", repoPath: "/repo", repoName: "repo", defaultBranch: "master", createdAt: now, updatedAt: now,
+    });
+    await db.insert(projectStatuses).values([
+      { id: statusId, projectId, name: "In Review", sortOrder: 2, isDefault: false, createdAt: now },
+      { id: doneStatusId, projectId, name: "Done", sortOrder: 3, isDefault: false, createdAt: now },
+    ]);
+    await db.insert(issues).values({
+      id: issueId, issueNumber: 151, title: "Multi-repo issue", priority: "medium", sortOrder: 0, statusId, projectId, createdAt: now, updatedAt: now,
+    });
+    await db.insert(workspaces).values({
+      id: workspaceId, issueId, branch: "feature/ak-151-lead", workingDir: "/repo/.worktrees/ws", baseBranch: "master",
+      isDirect: false, status: "idle", readyForMerge: false, mergedAt: null, provider: "claude", createdAt: now, updatedAt: now,
+    });
+
+    return { projectId, issueId, workspaceId };
+  }
+
+  async function insertPendingSibling(workspaceId: string, projectId: string): Promise<string> {
+    const worktreePath = await realGitService.createWorktree(siblingRepo, SIBLING_BRANCH, "main");
+    await commitFile(worktreePath, "change.txt", "sibling work\n", "feat: sibling change");
+    await insertWorkspaceRepo({
+      workspaceId, projectId, path: siblingRepo, name: "sibling",
+      worktreePath, branch: SIBLING_BRANCH, baseBranch: "main",
+    }, db);
+    return worktreePath;
+  }
+
+  async function commentsForIssue(issueId: string): Promise<{ body: string }[]> {
+    return db.select({ body: issueComments.body }).from(issueComments).where(eq(issueComments.issueId, issueId));
+  }
+
+  it("does NOT Done the issue when a sibling repo still has unmerged commits, and lands the sibling instead", async () => {
+    const { projectId, issueId, workspaceId } = await seedLeadingWorkspace();
+    await insertPendingSibling(workspaceId, projectId);
+
+    const checkAncestor = makeCheckAncestor(true);
+    const countCommits = makeCountCommits(1);
+
+    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor, countCommits, gitService: realGitService });
+
+    expect(count).toBe(1);
+
+    // The issue converged to Done — the sibling's work landed first.
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("Done");
+
+    const [ws] = await db.select({ status: workspaces.status, mergedAt: workspaces.mergedAt }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.status).toBe("closed");
+    expect(ws.mergedAt).toBeTruthy();
+
+    // Sibling mergedHeadSha stamped, its work is on the sibling's main, and its worktree/branch cleaned up.
+    const [repoRow] = await listWorkspaceRepos(workspaceId, db);
+    expect(repoRow.mergedHeadSha).toMatch(/^[0-9a-f]{40}$/);
+    const log = await exec("git", ["log", "--oneline", "main"], siblingRepo);
+    expect(log).toContain("sibling change");
+    const branches = await exec("git", ["branch", "--list", SIBLING_BRANCH], siblingRepo);
+    expect(branches.trim()).toBe("");
+
+    const comments = await commentsForIssue(issueId);
+    expect(comments.some((c) => /landed 1 sibling repo merge/i.test(c.body))).toBe(true);
+  }, 90000);
+
+  it("leaves the issue open (not Done) when the pending sibling cannot land cleanly", async () => {
+    const { projectId, issueId, workspaceId } = await seedLeadingWorkspace();
+    const worktreePath = await insertPendingSibling(workspaceId, projectId);
+    // Conflicting edits so the sibling merge cannot land cleanly.
+    await commitFile(worktreePath, "README.md", "# branch version\n", "feat: branch edit");
+    await commitFile(siblingRepo, "README.md", "# main version\n", "feat: main edit");
+
+    const checkAncestor = makeCheckAncestor(true);
+    const countCommits = makeCountCommits(1);
+
+    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor, countCommits, gitService: realGitService });
+
+    expect(count).toBe(0);
+
+    // The issue and workspace are left untouched — NOT false-Done.
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("In Review");
+    const [ws] = await db.select({ status: workspaces.status, mergedAt: workspaces.mergedAt }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.status).toBe("idle");
+    expect(ws.mergedAt).toBeNull();
+
+    // Nothing destroyed — the sibling branch is preserved.
+    const branches = await exec("git", ["branch", "--list", SIBLING_BRANCH], siblingRepo);
+    expect(branches.trim()).not.toBe("");
+    const mainLog = await exec("git", ["log", "--oneline", "main"], siblingRepo);
+    expect(mainLog).not.toContain("branch edit");
+
+    const comments = await commentsForIssue(issueId);
+    expect(comments.some((c) => /Ancestor-branch reconciliation found the leading branch/.test(c.body))).toBe(true);
+  }, 90000);
 });
