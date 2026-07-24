@@ -1,5 +1,8 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
@@ -14,6 +17,7 @@ function makeGitService(overrides: Partial<{
   isAncestor: (repo: string, ancestor: string, descendant: string) => Promise<boolean>;
   checkBranchTipIsAncestor: (repo: string, branch: string, base: string, worktree?: string) => Promise<{ isAncestor: true; branchSha: string; baseSha: string } | { isAncestor: false; branchSha: string; baseSha: string } | { isAncestor: false; branchSha: null; reason: string }>;
   removeWorktree: (repo: string, worktree: string) => Promise<void>;
+  getWorkingTreeDiff: (dir: string) => Promise<string>;
 }> = {}) {
   const defaultRevParse = overrides.revParse ?? (async (_repo: string, ref: string) => ref === "HEAD" ? "abc123" : "abc123");
   const defaultIsAncestor = overrides.isAncestor ?? (async () => true);
@@ -43,6 +47,7 @@ function makeGitService(overrides: Partial<{
     autoRenumberMigrations: vi.fn(async () => ({ renumbered: false, renames: [] })),
     countUniqueCommits: vi.fn(async () => 1),
     getUncommittedTrackedChanges: vi.fn(async () => []),
+    getWorkingTreeDiff: vi.fn(overrides.getWorkingTreeDiff ?? (async () => "")),
   };
 }
 
@@ -472,13 +477,13 @@ describe("already-merged reconciliation — multi-repo siblings (#16)", () => {
     };
   }
 
-  async function insertSibling(db2: ReturnType<typeof createTestDb>["db"], ids: { workspaceId: string; projectId: string }, opts: { mergedHeadSha?: string } = {}) {
+  async function insertSibling(db2: ReturnType<typeof createTestDb>["db"], ids: { workspaceId: string; projectId: string }, opts: { mergedHeadSha?: string; worktreePath?: string } = {}) {
     await insertWorkspaceRepo({
       workspaceId: ids.workspaceId,
       projectId: ids.projectId,
       path: SIBLING_PATH,
       name: "extra",
-      worktreePath: `${SIBLING_PATH}/.worktrees/ws`,
+      worktreePath: opts.worktreePath ?? `${SIBLING_PATH}/.worktrees/ws`,
       branch: "feature/ak-42-test",
       baseBranch: "master",
     }, db2);
@@ -615,6 +620,62 @@ describe("already-merged reconciliation — multi-repo siblings (#16)", () => {
 
     expect(git.removeWorktree).toHaveBeenCalledWith(SIBLING_PATH, `${SIBLING_PATH}/.worktrees/ws`);
     expect(git.deleteBranch).toHaveBeenCalledWith(SIBLING_PATH, "feature/ak-42-test", { force: true });
+  });
+
+  // #153: a sibling worktree with UNCOMMITTED edits (never landed as a commit) is
+  // invisible to the pending-commit probe above — checkAlreadyMerged must refuse to
+  // report "already merged", and reconcileAlreadyMerged must never force-remove it.
+  describe("dirty sibling worktree guard (#153)", () => {
+    let dirtyWorktreePath: string;
+    beforeEach(() => {
+      dirtyWorktreePath = mkdtempSync(join(tmpdir(), "kanban-dirty-sibling-"));
+    });
+    afterEach(() => {
+      rmSync(dirtyWorktreePath, { recursive: true, force: true });
+    });
+
+    it("checkAlreadyMerged refuses when a sibling worktree has uncommitted changes, even though its commits already landed", async () => {
+      const ids = await seedScenario(db, {});
+      await insertSibling(db, ids, { mergedHeadSha: "landed-sha", worktreePath: dirtyWorktreePath });
+      const git = {
+        ...makeGitService({
+          getDiff: async () => "",
+          isAncestor: async () => true,
+          getWorkingTreeDiff: async (dir: string) =>
+            dir === dirtyWorktreePath ? "diff --git a/foo.ts b/foo.ts\n+uncommitted edit" : "",
+        }),
+        countUniqueCommits: vi.fn(async () => 1),
+        getCurrentBranch: vi.fn(async () => "master"),
+      };
+
+      const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+      const result = await svc.checkAlreadyMerged(ids.workspaceId);
+
+      expect(result.isAlreadyMerged).toBe(false);
+      expect(result.reason).toMatch(/uncommitted/i);
+      expect(result.reason).toContain("extra");
+    });
+
+    it("reconcileAlreadyMerged refuses (throws) and never force-removes a dirty sibling worktree", async () => {
+      const ids = await seedScenario(db, {});
+      await insertSibling(db, ids, { mergedHeadSha: "landed-sha", worktreePath: dirtyWorktreePath });
+      const git = {
+        ...makeGitService({
+          getDiff: async () => "",
+          isAncestor: async () => true,
+          getWorkingTreeDiff: async (dir: string) =>
+            dir === dirtyWorktreePath ? "diff --git a/foo.ts b/foo.ts\n+uncommitted edit" : "",
+        }),
+        countUniqueCommits: vi.fn(async () => 1),
+        getCurrentBranch: vi.fn(async () => "master"),
+      };
+
+      const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+      await expect(svc.reconcileAlreadyMerged(ids.workspaceId)).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+      expect(git.removeWorktree).not.toHaveBeenCalledWith(SIBLING_PATH, dirtyWorktreePath);
+      expect(git.deleteBranch).not.toHaveBeenCalledWith(SIBLING_PATH, "feature/ak-42-test", expect.anything());
+    });
   });
 
   // #70: per-repo merge status makes a partial multi-repo merge visible.

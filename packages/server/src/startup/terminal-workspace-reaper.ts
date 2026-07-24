@@ -6,6 +6,8 @@ import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
 import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
+import { listWorkspaceRepos, type RepoRow } from "../repositories/repo.repository.js";
+import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 
 const REAPABLE_WORKSPACE_STATUSES = ["idle", "reviewing", "blocked"];
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
@@ -46,6 +48,46 @@ type Candidate = {
 type Verification =
   | { safe: true; reason: "ancestor" | "zero-ahead"; branchSha: string; baseSha: string; markMerged: boolean }
   | { safe: false; reason: "ahead" | "missing-ref" | "git-error"; aheadCommits?: number; message?: string };
+
+/**
+ * List sibling repos of a multi-repo workspace that still have unmerged commits
+ * (branch ahead of its base, not yet stamped mergedHeadSha) — a no-op ([]) for a
+ * single-repo workspace. `verifyNoAheadWork` only judges the LEADING repo, so a
+ * multi-repo workspace could otherwise be reaped closed while sibling commits sit
+ * orphaned with nothing surfacing that fact (#153). Best-effort: any git error
+ * resolving a row is treated as "nothing to report" here (unlike the fail-closed
+ * `listPendingSiblingMerges` used on the merge path) since the reaper's worst case
+ * on a false negative is a missed comment, not data loss — the workspace row stays
+ * closed either way and the worktree is never removed by this path.
+ */
+async function findUnmergedSiblingBranches(
+  workspaceId: string,
+  database: Database,
+  deps: { countCommits: typeof countUniqueCommits; revParseRef: typeof revParse },
+): Promise<Array<{ label: string; branch: string; ahead: number }>> {
+  let rows: RepoRow[];
+  try {
+    rows = await listWorkspaceRepos(workspaceId, database);
+  } catch {
+    return [];
+  }
+  const unmerged: Array<{ label: string; branch: string; ahead: number }> = [];
+  for (const repo of rows) {
+    if (repo.mergedHeadSha) continue;
+    if (!repo.branch || !repo.baseBranch) continue;
+    try {
+      await deps.revParseRef(repo.path, repo.baseBranch);
+      await deps.revParseRef(repo.path, repo.branch);
+    } catch {
+      continue; // ref unresolvable — already cleaned up or repo gone, nothing to report
+    }
+    const ahead = await deps.countCommits(repo.path, repo.baseBranch, repo.branch).catch(() => 0);
+    if (ahead > 0) {
+      unmerged.push({ label: repo.name ?? repo.path, branch: repo.branch, ahead });
+    }
+  }
+  return unmerged;
+}
 
 async function hasRunningSession(database: Database, workspaceId: string): Promise<boolean> {
   const rows = await database
@@ -162,6 +204,34 @@ export async function reapTerminalWorkspaces(
         );
       }
       continue;
+    }
+
+    // Multi-repo audit (#153): the ancestry verification above only judges the
+    // LEADING repo. A sibling repo can still hold unmerged commits at reap time —
+    // this workspace row is being closed (issue already terminal) without ever
+    // running the sibling merge/cleanup pipeline, so those commits would otherwise
+    // strand invisibly. clearWorkingDir stays false below (worktrees are left
+    // alone), so nothing is destroyed here; at minimum, surface it as a comment.
+    const unmergedSiblings = await findUnmergedSiblingBranches(c.wsId, database, gitDeps);
+    if (unmergedSiblings.length > 0) {
+      console.warn(
+        `[terminal-workspace-reaper] closing workspace ${c.wsId} for terminal issue #${c.issueNumber ?? "?"} with ${unmergedSiblings.length} sibling repo(s) still unmerged: ` +
+          unmergedSiblings.map((s) => `${s.label} (${s.branch}, ${s.ahead} ahead)`).join(", "),
+      );
+      try {
+        await insertIssueComment({
+          issueId: c.issueId,
+          workspaceId: c.wsId,
+          kind: "note",
+          author: "system",
+          body: `Closed stale ${c.wsStatus} workspace for terminal issue #${c.issueNumber ?? "?"}, but ${unmergedSiblings.length} sibling repo(s) still have unmerged commits and were left untouched:\n` +
+            unmergedSiblings.map((s) => `- ${s.label} (${s.branch}): ${s.ahead} unmerged commit(s)`).join("\n"),
+          payload: { unmergedSiblings, reapedAt: now },
+          createdAt: now,
+        }, database);
+      } catch (err) {
+        console.warn(`[terminal-workspace-reaper] failed to record unmerged-sibling comment for ${c.wsId}:`, err instanceof Error ? err.message : String(err));
+      }
     }
 
     try {
