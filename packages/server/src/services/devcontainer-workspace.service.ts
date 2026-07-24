@@ -246,6 +246,14 @@ export async function provisionContainerForWorkspace(
     })),
   ];
 
+  // `devcontainer up` reuses an existing container for this worktree, and a
+  // creation-time mount cannot be changed by a later `up` call (#155) — so if a
+  // container is already running here with a DIFFERENT Claude profile mounted
+  // (a prior provision resolved a different profile, or defaulted because it was
+  // never told one), reusing it would silently keep the STALE profile's
+  // credentials for the container's whole lifetime. Recreate rather than reuse.
+  await recreateStaleProfileContainers(worktreePath, narrowProfile.hostDir);
+
   const handle = await devcontainerUp(worktreePath, { mounts });
   if (!handle) {
     console.warn(
@@ -344,6 +352,73 @@ async function warnIfBoardUnreachable(handle: DevcontainerHandle, port: number):
       "`--add-host=host.docker.internal:host-gateway`, which the devcontainer CLI cannot " +
       "pass through — declare it in the repo's devcontainer.json `runArgs` instead.",
   );
+}
+
+/**
+ * Find containers already up for this worktree whose mounted `.claude` profile
+ * directory does NOT match `expectedProfileHostDir` (#155).
+ *
+ * `devcontainer up` reports success for an existing container without re-applying
+ * `--mount`, so the only way to tell whether a stale container is about to be
+ * silently reused is to inspect what is ACTUALLY mounted right now.
+ */
+export async function findStaleProfileContainers(
+  worktreePath: string,
+  expectedProfileHostDir: string,
+): Promise<string[]> {
+  const containers = await findWorkspaceContainers(worktreePath);
+  if (containers.length === 0) return [];
+
+  const stale: string[] = [];
+  for (const containerId of containers) {
+    const inspect = await dockerExec(["inspect", "--format", "{{json .Mounts}}", containerId]);
+    if (inspect.code !== 0) continue;
+    let mounts: Array<{ Destination?: string; Source?: string }>;
+    try {
+      mounts = JSON.parse(inspect.stdout.trim());
+    } catch {
+      continue;
+    }
+    const claudeMount = mounts.find((m) => m.Destination?.endsWith("/.claude"));
+    // No `.claude` mount at all (host-run pre-#133 container, or inspect shape
+    // changed) — nothing to compare against, so don't treat it as stale.
+    if (!claudeMount?.Source) continue;
+    if (!sameHostPath(claudeMount.Source, expectedProfileHostDir)) {
+      stale.push(containerId);
+    }
+  }
+  return stale;
+}
+
+/**
+ * Remove any container already up for this worktree that is mounted with a
+ * DIFFERENT profile than `expectedProfileHostDir` resolves to, so the following
+ * `devcontainer up` creates a fresh container with the correct mount instead of
+ * silently reusing stale credentials (#155). Best-effort, like the rest of
+ * provisioning: a removal failure is logged and provisioning proceeds — worst
+ * case is the pre-existing stale-reuse bug, not a failed workspace.
+ */
+async function recreateStaleProfileContainers(
+  worktreePath: string,
+  expectedProfileHostDir: string,
+): Promise<void> {
+  const stale = await findStaleProfileContainers(worktreePath, expectedProfileHostDir);
+  if (stale.length === 0) return;
+
+  console.warn(
+    `[devcontainer] container(s) for ${worktreePath} are mounted with a DIFFERENT Claude ` +
+      `profile than this launch resolved (expected ${expectedProfileHostDir}) — recreating ` +
+      `rather than silently reusing the stale profile mount (#155): ${stale.map((id) => id.slice(0, 12)).join(", ")}`,
+  );
+  for (const containerId of stale) {
+    const removed = await dockerExec(["rm", "-f", containerId]);
+    if (removed.code !== 0) {
+      console.warn(
+        `[devcontainer] could not remove stale-profile container ${containerId.slice(0, 12)}: ` +
+          `${removed.stderr.trim() || removed.error} — the next 'up' may reuse it with the wrong profile.`,
+      );
+    }
+  }
 }
 
 /**
