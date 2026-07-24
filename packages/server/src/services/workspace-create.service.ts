@@ -535,9 +535,29 @@ export function createWorkspaceCreateService(deps: {
       const isHighPriority = issue.priority === "high" || issue.priority === "critical";
       planMode = input.planMode !== undefined ? input.planMode === true : isHighPriority;
 
+      // Resolve the effective agent profile BEFORE provisioning the worktree/devcontainer
+      // (#155): setupWorktree's devcontainer provision call and the launch-time call in
+      // session-lifecycle.ts must agree on the profile, because `devcontainer up` reuses an
+      // existing container and its creation-time mounts win — a setup-path call that
+      // provisions with a different (or no) profile freezes the WRONG profile mount for the
+      // container's whole lifetime, regardless of what the later launch resolves to.
+      t = Date.now();
+      const agentConfig = await buildAgentConfig(input, issue.projectId);
+      claudeProfile = agentConfig.claudeProfile;
+      agentCommand = agentConfig.agentCommand;
+      resolvedProvider = agentConfig.resolvedProvider;
+      timing("agent-config", t);
+
       t = Date.now();
       ({ branch, worktreePath, baseBranch, baseCommitSha, latestSetup, setupCompletion, symlinkRun: latestSymlink } = await setupWorktree(
-        isDirect, project.repoPath, project.defaultBranch, input, setupConfig, symlinkConfig, id, issue,
+        isDirect, project.repoPath, project.defaultBranch, input, setupConfig, symlinkConfig, id,
+        {
+          claudeProfile: agentConfig.claudeProfile,
+          settingsProfile: agentConfig.claudeProfile && agentConfig.claudeProfile !== "default"
+            ? agentConfig.claudeProfile
+            : undefined,
+        },
+        issue,
       ));
       timing("worktree-setup", t);
 
@@ -581,11 +601,6 @@ export function createWorkspaceCreateService(deps: {
       const { agentPrompt, skillName, effectiveSkillId, hasWorkflowStart } = await resolveAgentPromptAndSkill({
         issue, input, includeVisualProof, workspaceId: id, worktreePath, project, skillId,
       });
-
-      const agentConfig = await buildAgentConfig(input, issue.projectId);
-      claudeProfile = agentConfig.claudeProfile;
-      agentCommand = agentConfig.agentCommand;
-      resolvedProvider = agentConfig.resolvedProvider;
 
       t = Date.now();
       await withTransaction(database, async (tx) => {

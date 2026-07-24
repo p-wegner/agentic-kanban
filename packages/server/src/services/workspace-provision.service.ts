@@ -56,6 +56,11 @@ export function createWorkspaceProvisionService(deps: {
     setupConfig: { setupScript: string | null; setupBlocking: boolean; setupEnabled: boolean },
     symlinkConfig: { enabled: boolean; dirs: string[] },
     workspaceId: string,
+    // The profile this workspace's agent will actually launch under (#155). Passed
+    // in from buildAgentConfig, resolved BEFORE this call, so the setup-path
+    // devcontainer provision below mounts the SAME profile the launch-time call in
+    // session-lifecycle.ts will use — not the default profile it used to fall back to.
+    agentProfile: { claudeProfile?: string; settingsProfile?: string },
     issue?: { issueNumber?: number | null; title: string },
   ): Promise<{
     branch: string;
@@ -117,10 +122,14 @@ export function createWorkspaceProvisionService(deps: {
     // install produces node_modules that cannot resolve inside the container, so
     // when the builder is containerized the install has to happen in there.
     //
-    // Provisioning here does not conflict with the launch-time call in
-    // session-lifecycle: `devcontainer up` is idempotent, so the later call
-    // simply re-derives the same handle. That keeps the two call sites
-    // independent — no container state has to be threaded or persisted.
+    // `devcontainer up` reuses an existing container and its CREATION-TIME mounts
+    // win — it is idempotent about bringing a container up, NOT about which
+    // profile is mounted into it. So this call MUST pass the same resolved
+    // `agentProfile` the launch-time call in session-lifecycle.ts will use (#155);
+    // passing none here used to freeze the container on the DEFAULT profile mount
+    // regardless of what the agent actually launches under. devcontainer-workspace
+    // service also detects and recreates a container whose existing mount
+    // disagrees with the profile requested here, as a second line of defense.
     let setupContainer: SetupScriptContainer | undefined;
     if (!isDirect && setupScript && setupEnabled && !input.skipSetup) {
       try {
@@ -132,6 +141,8 @@ export function createWorkspaceProvisionService(deps: {
           worktreePath,
           workspaceId,
           symlinkDirs: symlinkConfig.dirs,
+          claudeProfile: agentProfile.claudeProfile,
+          settingsProfile: agentProfile.settingsProfile,
         });
         setupContainer = provision?.handle;
       } catch (err) {
