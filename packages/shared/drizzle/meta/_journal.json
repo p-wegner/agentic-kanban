@@ -722,6 +722,13 @@
       "when": 1780906860000,
       "tag": "0102_repo_setup_and_compose",
       "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "6",
+      "when": 1780906861000,
+      "tag": "0103_session_container_id",
+      "breakpoints": true
     }
   ]
 }
