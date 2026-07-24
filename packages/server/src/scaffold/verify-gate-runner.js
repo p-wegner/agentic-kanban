@@ -196,6 +196,15 @@ function killDirDescendants(cwd) {
   const dirNormalized = cwd.replace(/\\/g, "/").toLowerCase();
   for (const proc of processes) {
     if (ancestors.has(proc.pid)) continue;
+    // Path match alone is not enough — that would kill ANY live process anywhere
+    // on the machine that happens to reference this cwd (a manually-started `pnpm
+    // dev` server for this same worktree, another agent's session, etc.), which is
+    // exactly the "kill other agents' worktree servers" hazard this project's hard
+    // constraints forbid. By the time this runs, the verify command's own launching
+    // shell has already exited (execFileSync is synchronous) — so a genuine leaked
+    // worker is always an ORPHAN: its recorded parent PID is no longer alive. A live
+    // dev server or agent session still has a live parent and is skipped.
+    if (byPid.has(proc.ppid)) continue;
     const cmdNormalized = proc.commandLine.replace(/\\/g, "/").toLowerCase();
     if (commandReferencesDir(cmdNormalized, dirNormalized)) killPidTree(proc.pid);
   }
