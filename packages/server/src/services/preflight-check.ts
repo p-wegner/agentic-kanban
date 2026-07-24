@@ -82,6 +82,42 @@ async function findStaleSafetyFiles(opts: Required<Pick<WorkspaceLaunchPreflight
   return stale;
 }
 
+/**
+ * Files the branch's OWN commits modified (relative to baseBranch), via a three-dot diff
+ * from the merge-base. These are intentional changes, not drift — the reconcile step must
+ * never treat them as stale/needing a reset from base, or it will clobber the ticket's own
+ * work (e.g. a ticket whose whole point is changing hook behavior).
+ */
+async function getBranchOwnedFiles(
+  git: (args: string[], cwd: string) => Promise<string>,
+  worktreePath: string,
+  baseBranch: string,
+): Promise<Set<SafetyPolicyFile>> {
+  try {
+    const output = await git(["diff", "--name-only", `${baseBranch}...HEAD`], worktreePath);
+    return new Set(parsePorcelainFiles(output) as SafetyPolicyFile[]);
+  } catch {
+    return new Set();
+  }
+}
+
+/** How many times a [preflight] reconcile commit already touched this file on this branch. */
+async function countPriorReconcileCommits(
+  git: (args: string[], cwd: string) => Promise<string>,
+  worktreePath: string,
+  file: SafetyPolicyFile,
+): Promise<number> {
+  try {
+    const output = await git(
+      ["log", "--oneline", "-E", "--grep=reconcile safety files.*\\[preflight\\]", "--", file],
+      worktreePath,
+    );
+    return parsePorcelainFiles(output).length;
+  } catch {
+    return 0;
+  }
+}
+
 function parsePorcelainFiles(output: string): string[] {
   return output
     .split("\n")
@@ -120,8 +156,15 @@ export async function workspaceLaunchPreflight(
   const git = options.execGit ?? execGit;
   const errors: string[] = [];
   const expectedBranch = options.branch.trim();
+  const baseBranch = options.baseBranch?.trim();
   let dirtyFiles = parsePorcelainFiles(await git(["status", "--porcelain"], options.worktreePath));
   let repairedSymlinks: string[] = [];
+
+  // Files the branch's own commits intentionally modified are never "stale drift" —
+  // exclude them from every staleness check below so reconcile never clobbers them.
+  const branchOwnedFiles = baseBranch
+    ? await getBranchOwnedFiles(git, options.worktreePath, baseBranch)
+    : new Set<SafetyPolicyFile>();
 
   if (expectedBranch) {
     const currentBranch = await getCurrentBranch(git, options.worktreePath);
@@ -147,12 +190,12 @@ export async function workspaceLaunchPreflight(
     }
   }
 
-  const staleBefore = await findStaleSafetyFiles({
+  const staleBefore = (await findStaleSafetyFiles({
     repoPath: options.repoPath,
     worktreePath: options.worktreePath,
     readFile: readPolicyFile,
     exists: policyExists,
-  });
+  })).filter((f) => !branchOwnedFiles.has(f));
 
   if (dirtyFiles.length > 0 && staleBefore.length > 0) {
     errors.push(
@@ -181,7 +224,6 @@ export async function workspaceLaunchPreflight(
     }
   }
 
-  const baseBranch = options.baseBranch?.trim();
   if (dirtyFiles.length === 0 && baseBranch) {
     try {
       await git(["fetch", "origin", baseBranch], options.worktreePath).catch(() => "");
@@ -208,19 +250,29 @@ export async function workspaceLaunchPreflight(
     }
   }
 
-  const staleAfter = await findStaleSafetyFiles({
+  const staleAfter = (await findStaleSafetyFiles({
     repoPath: options.repoPath,
     worktreePath: options.worktreePath,
     readFile: readPolicyFile,
     exists: policyExists,
-  });
+  })).filter((f) => !branchOwnedFiles.has(f));
 
   if (staleAfter.length > 0 && dirtyFiles.length === 0 && baseBranch) {
     // Worktree is clean but safety files diverge from main (e.g. branch pre-dates a hooks
     // change). Pull each stale file directly from the base branch so the agent launches safely.
+    // Files the branch's own commits touched were already excluded from staleAfter above.
     const reconciled: SafetyPolicyFile[] = [];
     const failed: SafetyPolicyFile[] = [];
+    const pingPong: SafetyPolicyFile[] = [];
     for (const file of staleAfter) {
+      const priorReconciles = await countPriorReconcileCommits(git, options.worktreePath, file);
+      if (priorReconciles > 0) {
+        // This exact file was already force-reset from base by a prior [preflight] reconcile
+        // commit and has gone stale again — reconciling it again would silently loop
+        // (reconcile/restore ping-pong). Abort loudly instead of repeating the reset.
+        pingPong.push(file);
+        continue;
+      }
       try {
         await git(["checkout", baseBranch, "--", file], options.worktreePath);
         reconciled.push(file);
@@ -243,7 +295,14 @@ export async function workspaceLaunchPreflight(
           "Refresh these files from the main checkout manually before relaunching.",
       );
     }
-    return { ok: errors.length === 0, errors, staleFiles: failed, refreshed: refreshed || reconciled.length > 0, dirtyFiles, repairedSymlinks };
+    if (pingPong.length > 0) {
+      errors.push(
+        `Workspace safety policy for ${pingPong.join(", ")} was already reconciled from ${baseBranch} once before ` +
+          "and has gone stale again (reconcile/restore ping-pong). Refusing to reconcile it again automatically — " +
+          "resolve manually: either keep this branch's change to the file, or drop the prior [preflight] reconcile commit.",
+      );
+    }
+    return { ok: errors.length === 0, errors, staleFiles: [...failed, ...pingPong], refreshed: refreshed || reconciled.length > 0, dirtyFiles, repairedSymlinks };
   }
 
   if (staleAfter.length > 0) {
