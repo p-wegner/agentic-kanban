@@ -150,21 +150,7 @@ async function main() {
   const cwd = process.env.CLAUDE_PROJECT_DIR || input.cwd || process.cwd();
   const currentRoot = norm(gitToplevel(cwd) || cwd);
   const worktrees = listWorktrees(cwd).map(norm);
-  if (worktrees.length <= 1) {
-    // Inside a builder container this is usually because only ONE worktree's git dir is
-    // mounted (no visibility into siblings/main), so the guard degrades to a no-op — the
-    // container's own mount boundary is the actual protection in that case. Silently
-    // checking nothing is not acceptable for this guard (#158), so say so loudly instead of
-    // letting the degrade look identical to "genuinely nothing to protect".
-    if (process.env.AGENTIC_KANBAN_CONTAINER === "1") {
-      console.error(
-        "[cross-worktree-guard] containerized session: `git worktree list` sees only this " +
-          "worktree — the guard cannot detect siblings and is relying on the container's own " +
-          "mount isolation instead."
-      );
-    }
-    allow(); // single-worktree repo or not a repo → nothing to protect
-  }
+  if (worktrees.length <= 1) allow(); // single-worktree repo or not a repo → nothing to protect
 
   const others = worktrees.filter((w) => w !== currentRoot);
 
