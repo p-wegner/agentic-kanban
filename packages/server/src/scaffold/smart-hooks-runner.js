@@ -21,6 +21,16 @@ const readline = require("readline");
 
 let hookInput = {};
 
+// Set by the container wrap (containerEnv in devcontainer-workspace.service.ts) on every
+// containerized builder launch — the ONLY reliable signal this process has that it's running
+// inside a builder image rather than on the host. Host-shaped checks (stack quick-checks
+// generated from the HOST toolchain profile) assume host binaries/paths that may not exist
+// in the image, so they degrade to a skip-with-visible-log instead of exec'ing and failing
+// closed on every Stop (#158).
+function isContainerized() {
+  return process.env.AGENTIC_KANBAN_CONTAINER === "1";
+}
+
 // See validate-command-safety.js: these are constant per start directory but were
 // re-spawning `git` on every call. Cache on startDir rather than unconditionally,
 // since hookInput.cwd is filled in asynchronously from stdin.
@@ -89,6 +99,9 @@ function loadGeneratedRules(projectDir) {
       filePatterns: Array.isArray(r.filePatterns) ? r.filePatterns : [],
       blocking: r.blocking !== false,
       timeout: typeof r.timeout === "number" ? r.timeout : 120,
+      // Generated rules are always derived from the HOST stack profile (host pnpm/tsc/etc
+      // paths) — never safe to trust verbatim inside a builder container (#158).
+      containerSkippable: true,
     }));
 }
 
@@ -376,6 +389,12 @@ function handlePostToolUse(input) {
   for (const check of checks) {
     if (!check.enabled) continue;
     if (!matchesPatterns(rel, check.filePatterns)) continue;
+    if (check.containerSkippable && isContainerized()) {
+      console.error(
+        `[smart-hooks] Skipping host-toolchain check "${check.name}" — containerized builder (#158).`
+      );
+      continue;
+    }
 
     const command = check.command.replace(/\{file\}/g, rel);
     const result = runCheck({ ...check, command }, input, state.editedFiles);
@@ -408,6 +427,7 @@ function handleStop(input) {
   }
 
   const blockReasons = [];
+  const skippedContainerChecks = [];
   const isFirstStop = input.stop_hook_active !== true;
   // On re-prompt (stop_hook_active=true), only run checks marked alwaysRun.
   // File-dependent hooks (tests, tsc, playwright) are skipped on re-prompt.
@@ -422,6 +442,15 @@ function handleStop(input) {
       if (!state.editedFiles.some((f) => matchesPatterns(f, check.filePatterns))) continue;
     } else if (!check.alwaysRun && !isFirstStop) {
       // Checks without filePatterns that aren't marked alwaysRun: skip on re-prompt
+      continue;
+    }
+
+    // Host-shaped check (host toolchain paths/binaries) run inside a builder container:
+    // skip with a visible, logged downgrade rather than exec'ing and failing closed on a
+    // host assumption the image doesn't meet (#158) — this is what caused a stop-hook-error
+    // on every turn for containerized builders.
+    if (check.containerSkippable && isContainerized()) {
+      skippedContainerChecks.push(check.name || check.command);
       continue;
     }
 
@@ -441,6 +470,13 @@ function handleStop(input) {
   }
 
   clearState();
+
+  if (skippedContainerChecks.length > 0) {
+    console.error(
+      `[smart-hooks] Skipped ${skippedContainerChecks.length} host-toolchain check(s) inside a ` +
+        `containerized builder (safety downgrade, #158): ${skippedContainerChecks.join(", ")}`
+    );
+  }
 
   if (blockReasons.length > 0) {
     process.stdout.write(
@@ -482,4 +518,5 @@ if (require.main === module) {
 
 module.exports = {
   wrongCheckoutVitestReason,
+  isContainerized,
 };
