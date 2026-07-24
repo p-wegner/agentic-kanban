@@ -39,6 +39,11 @@ vi.mock("../services/stale-dev-processes.js", () => ({
   })),
 }));
 
+const reconcileStrandedSiblingMergesMock = vi.fn(() => Promise.resolve({ landed: 0, preserved: 0 }));
+vi.mock("../startup/merge-workflow.js", () => ({
+  reconcileStrandedSiblingMerges: reconcileStrandedSiblingMergesMock,
+}));
+
 interface TimerTestState {
   clearInterval: ReturnType<typeof vi.spyOn>;
   clearTimeout: ReturnType<typeof vi.spyOn>;
@@ -52,6 +57,7 @@ describe("startup timers are restart-safe for HMR-style reloads", () => {
     vi.useFakeTimers();
     clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
     clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");
+    reconcileStrandedSiblingMergesMock.mockClear();
   });
 
   afterEach(() => {
@@ -117,6 +123,28 @@ describe("startup timers are restart-safe for HMR-style reloads", () => {
     vi.advanceTimersByTime(60_000);
 
     expect(tick).not.toHaveBeenCalled();
+  });
+
+  it("ancestor-branch reconciler's default tick also runs the stranded-sibling compensator on the same cadence (#151)", async () => {
+    // Long interval (100s) so the initial 35s boot timeout and the recurring interval
+    // fire at clearly separate points instead of overlapping in the assertion window.
+    startAncestorBranchReconciler({ enabled: false }, 100_000);
+
+    await vi.advanceTimersByTimeAsync(35_000); // fires the initial boot timeout only
+    expect(reconcileStrandedSiblingMergesMock).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(100_000); // fires the recurring interval once
+    expect(reconcileStrandedSiblingMergesMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("stranded-sibling compensator does NOT run when a custom onTick is supplied (tick fully overridden)", async () => {
+    const tick = vi.fn();
+    startAncestorBranchReconciler({ onTick: tick }, 100_000);
+
+    await vi.advanceTimersByTimeAsync(35_000);
+
+    expect(tick).toHaveBeenCalledTimes(1);
+    expect(reconcileStrandedSiblingMergesMock).not.toHaveBeenCalled();
   });
 
   it("done-unmerged scanner stops firing ticks after cleanup", () => {
