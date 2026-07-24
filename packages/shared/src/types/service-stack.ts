@@ -54,6 +54,15 @@ export interface ServiceStackState {
    * provisioning attempt once capacity frees up.
    */
   deferred?: boolean;
+  /**
+   * Human-readable relative-path lint warnings (dev #162) found while scanning the
+   * primary + sibling compose files for `env_file`/`build`/`volumes`/`secrets`/`configs`
+   * directives that will misresolve against the leading worktree (#109). Present
+   * regardless of `status` — a stack can come up "up" while still carrying a lint
+   * warning about a directive that happens not to matter yet. Persisted so the finding
+   * survives past the fire-and-forget server log and reaches the ticket-context.
+   */
+  lintWarnings?: string[];
   updatedAt: string;
 }
 

@@ -24,8 +24,8 @@
 
 /** One relative-path directive found in a sibling compose that will misresolve. */
 export interface SiblingComposeRelativePath {
-  /** The directive keyword: `env_file`, `context`, or `file`. */
-  directive: "env_file" | "context" | "file";
+  /** The directive keyword: `env_file`, `context`, `file`, `volume`, or `dockerfile`. */
+  directive: "env_file" | "context" | "file" | "volume" | "dockerfile";
   /** The relative path value as written in the compose file. */
   value: string;
 }
@@ -51,19 +51,45 @@ function isRelativePathValue(raw: string): boolean {
 }
 
 /**
- * Scan a sibling compose file's text for relative `env_file:`, `build:` context, and
- * top-level/service `secrets:`/`configs:` `file:` directives that compose will resolve
- * against the LEADING worktree instead of the sibling's own dir. Best-effort, line-based.
+ * A relative bind-mount SOURCE from a `volumes:` list item, or null when the item is a
+ * named-volume reference (`dbdata:/var/lib/...`, no leading `.`) or an absolute path —
+ * neither of which compose resolves against the project directory.
+ */
+function extractVolumeBindSource(item: string): string | null {
+  let v = item.trim();
+  if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+    v = v.slice(1, -1).trim();
+  }
+  if (v.length === 0) return null;
+  // Windows-absolute drive source (`C:\x:/target`) — not relative, and its own colon
+  // would otherwise be mistaken for the source/target separator.
+  if (/^[A-Za-z]:[\\/]/.test(v)) return null;
+  const idx = v.indexOf(":");
+  if (idx === -1) return null; // a bare path with no target — not the SOURCE:TARGET form
+  const source = v.slice(0, idx);
+  // Only `./x` / `../x` is unambiguously a relative bind-mount source. A bare name
+  // (`dbdata`) is a named volume — flagging it would be a false positive.
+  return source.startsWith("./") || source.startsWith("../") ? source : null;
+}
+
+/**
+ * Scan a sibling compose file's text for relative `env_file:`, `build:` context,
+ * top-level/service `secrets:`/`configs:` `file:`, `volumes:` bind-mount sources, and
+ * `dockerfile:` directives that compose will resolve against the LEADING worktree
+ * instead of the sibling's own dir. Best-effort, line-based.
  *
  * Handles the common shapes:
- *  - `env_file: ./x` and `env_file:` followed by a `- ./x` list
- *  - `build: ./x` (shorthand) and `context: ./x`
+ *  - `env_file: ./x`, `env_file:` followed by a `- ./x` list, and the long mapping form
+ *    (`- path: ./x` \+ optional `required:`/other keys on following lines)
+ *  - `build: ./x` (shorthand), `context: ./x`, and `dockerfile: ../x`
  *  - `file: ./secret.txt` (secrets/configs source)
+ *  - `volumes:` list bind mounts, short form (`- ./seed:/target[:ro]`) and long form
+ *    (`- type: bind` \+ `source: ./seed`) — named-volume references are never flagged
  */
 export function findSiblingComposeRelativePaths(composeText: string): SiblingComposeRelativePath[] {
   const found: SiblingComposeRelativePath[] = [];
   const lines = composeText.split(/\r?\n/);
-  let pendingListDirective: "env_file" | null = null;
+  let pendingListDirective: "env_file" | "volumes" | null = null;
   let pendingListIndent = -1;
 
   for (const line of lines) {
@@ -73,24 +99,57 @@ export function findSiblingComposeRelativePaths(composeText: string): SiblingCom
     if (trimmed.length === 0 || trimmed.startsWith("#")) continue;
     const indent = noComment.length - noComment.trimStart().length;
 
-    // Continuation of an `env_file:` block list (`- ./x`).
-    if (pendingListDirective && trimmed.startsWith("-") && indent > pendingListIndent) {
-      const item = trimmed.replace(/^-\s*/, "");
-      if (isRelativePathValue(item)) found.push({ directive: pendingListDirective, value: stripQuotes(item) });
-      continue;
+    if (pendingListDirective !== null) {
+      if (indent > pendingListIndent) {
+        if (pendingListDirective === "volumes") {
+          // Long form: a `source:` key nested under a `- type: bind` item.
+          const sourceMatch = /^-?\s*source\s*:\s*(.*)$/.exec(trimmed);
+          if (sourceMatch) {
+            const val = sourceMatch[1].trim();
+            if (isRelativePathValue(val)) found.push({ directive: "volume", value: stripQuotes(val) });
+            continue;
+          }
+          // Short form: `- ./seed:/target[:ro]` (named volumes like `- dbdata:/x` skip).
+          if (trimmed.startsWith("-")) {
+            const item = trimmed.replace(/^-\s*/, "");
+            const source = extractVolumeBindSource(item);
+            if (source) found.push({ directive: "volume", value: stripQuotes(source) });
+          }
+          continue;
+        }
+        // env_file: plain list item (`- ./x`) or mapping form (`- path: ./x`, with any
+        // following `required:`/other keys on their own indented line ignored).
+        if (trimmed.startsWith("-")) {
+          const item = trimmed.replace(/^-\s*/, "");
+          const pathMatch = /^path\s*:\s*(.*)$/.exec(item);
+          const rawValue = (pathMatch ? pathMatch[1] : item).trim();
+          if (isRelativePathValue(rawValue)) found.push({ directive: "env_file", value: stripQuotes(rawValue) });
+        }
+        continue;
+      }
+      // Dedented out of the list — fall through to re-evaluate this line as a new key.
+      pendingListDirective = null;
     }
-    pendingListDirective = null;
 
-    const inline = /^(env_file|context|file|build)\s*:\s*(.*)$/.exec(trimmed);
+    const inline = /^(env_file|context|file|build|dockerfile|volumes)\s*:\s*(.*)$/.exec(trimmed);
     if (!inline) continue;
     const key = inline[1];
     const rest = inline[2].trim();
 
     if (key === "build") {
-      // `build: ./x` shorthand only; the `build:`-block `context:` is caught by the
-      // `context` case on its own line.
+      // `build: ./x` shorthand only; the `build:`-block `context:`/`dockerfile:` are
+      // caught by their own cases on their own lines.
       if (rest.length > 0 && !rest.startsWith("#") && isRelativePathValue(rest)) {
         found.push({ directive: "context", value: stripQuotes(rest) });
+      }
+      continue;
+    }
+    if (key === "volumes") {
+      // Block-list form: subsequent `- ./x` lines belong to this directive. An inline
+      // value (`volumes: []`) is never a path — nothing to flag.
+      if (rest.length === 0) {
+        pendingListDirective = "volumes";
+        pendingListIndent = indent;
       }
       continue;
     }
@@ -100,9 +159,9 @@ export function findSiblingComposeRelativePaths(composeText: string): SiblingCom
       pendingListIndent = indent;
       continue;
     }
-    // Inline scalar (`env_file: ./x`, `context: ./x`, `file: ./x`).
+    // Inline scalar (`env_file: ./x`, `context: ./x`, `file: ./x`, `dockerfile: ../x`).
     if (rest.length > 0 && isRelativePathValue(rest)) {
-      found.push({ directive: key as "env_file" | "context" | "file", value: stripQuotes(rest) });
+      found.push({ directive: key as "env_file" | "context" | "file" | "dockerfile", value: stripQuotes(rest) });
     }
   }
   return found;
@@ -112,6 +171,74 @@ function stripQuotes(v: string): string {
   const t = v.trim();
   if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) return t.slice(1, -1);
   return t;
+}
+
+/**
+ * Extract `include:`/`extends: file:` file references from a compose file's text —
+ * relative to the file's OWN directory (compose resolves both directives that way,
+ * unlike the `-f` multi-project-directory quirk #109 targets). Pure text scan; the
+ * caller resolves+reads the referenced file (one level, no further recursion).
+ */
+export function extractComposeFileReferences(composeText: string): string[] {
+  const refs: string[] = [];
+  const lines = composeText.split(/\r?\n/);
+  let inIncludeList = false;
+  let includeListIndent = -1;
+  let inExtendsBlock = false;
+  let extendsBlockIndent = -1;
+
+  const pushRef = (raw: string) => {
+    const v = stripQuotes(raw.trim());
+    if (v.length > 0 && !v.includes("${")) refs.push(v);
+  };
+
+  for (const line of lines) {
+    const noComment = line.replace(/\s+#.*$/, "");
+    const trimmed = noComment.trim();
+    if (trimmed.length === 0 || trimmed.startsWith("#")) continue;
+    const indent = noComment.length - noComment.trimStart().length;
+
+    if (inIncludeList) {
+      if (indent > includeListIndent) {
+        if (trimmed.startsWith("-")) {
+          const item = trimmed.replace(/^-\s*/, "");
+          const pathMatch = /^path\s*:\s*(.*)$/.exec(item);
+          pushRef(pathMatch ? pathMatch[1] : item);
+        } else {
+          const pathMatch = /^path\s*:\s*(.*)$/.exec(trimmed);
+          if (pathMatch) pushRef(pathMatch[1]);
+        }
+        continue;
+      }
+      inIncludeList = false;
+    }
+    if (inExtendsBlock) {
+      if (indent > extendsBlockIndent) {
+        const fileMatch = /^file\s*:\s*(.*)$/.exec(trimmed);
+        if (fileMatch) pushRef(fileMatch[1]);
+        continue;
+      }
+      inExtendsBlock = false;
+    }
+
+    if (/^include\s*:\s*$/.test(trimmed)) {
+      inIncludeList = true;
+      includeListIndent = indent;
+      continue;
+    }
+    if (/^extends\s*:\s*$/.test(trimmed)) {
+      inExtendsBlock = true;
+      extendsBlockIndent = indent;
+      continue;
+    }
+    // Inline extends: `extends: { file: ./base.yml, service: x }`
+    const inlineExtends = /^extends\s*:\s*\{(.*)\}\s*$/.exec(trimmed);
+    if (inlineExtends) {
+      const fileMatch = /file\s*:\s*([^,}]+)/.exec(inlineExtends[1]);
+      if (fileMatch) pushRef(fileMatch[1]);
+    }
+  }
+  return [...new Set(refs)];
 }
 
 /**

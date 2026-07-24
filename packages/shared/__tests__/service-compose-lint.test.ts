@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   findSiblingComposeRelativePaths,
   siblingComposeRelativePathWarning,
+  extractComposeFileReferences,
 } from "../src/lib/service-compose-lint.js";
 
 describe("findSiblingComposeRelativePaths (dev #109)", () => {
@@ -66,6 +67,97 @@ describe("findSiblingComposeRelativePaths (dev #109)", () => {
     expect(findSiblingComposeRelativePaths('    env_file: "./quoted.env"')).toEqual([
       { directive: "env_file", value: "./quoted.env" },
     ]);
+  });
+
+  it("flags a relative volumes bind-mount source in short form (dev #162)", () => {
+    const issues = findSiblingComposeRelativePaths(
+      ["services:", "  db:", "    image: postgres", "    volumes:", "      - ./seed:/docker-entrypoint-initdb.d"].join("\n"),
+    );
+    expect(issues).toEqual([{ directive: "volume", value: "./seed" }]);
+  });
+
+  it("does NOT flag a named volume reference in the volumes list", () => {
+    const issues = findSiblingComposeRelativePaths(
+      ["services:", "  db:", "    volumes:", "      - dbdata:/var/lib/postgresql/data"].join("\n"),
+    );
+    expect(issues).toEqual([]);
+  });
+
+  it("flags a relative volumes bind-mount source in long (type: bind) form", () => {
+    const issues = findSiblingComposeRelativePaths(
+      [
+        "services:",
+        "  db:",
+        "    volumes:",
+        "      - type: bind",
+        "        source: ../db-init",
+        "        target: /docker-entrypoint-initdb.d",
+      ].join("\n"),
+    );
+    expect(issues).toEqual([{ directive: "volume", value: "../db-init" }]);
+  });
+
+  it("flags a relative dockerfile path outside a flagged build context", () => {
+    const issues = findSiblingComposeRelativePaths(
+      ["services:", "  app:", "    build:", "      context: /abs/app", "      dockerfile: ../shared/Dockerfile"].join(
+        "\n",
+      ),
+    );
+    expect(issues).toEqual([{ directive: "dockerfile", value: "../shared/Dockerfile" }]);
+  });
+
+  it("does not mangle multiple long-form (mapping) env_file list entries (dev #162 fix)", () => {
+    const issues = findSiblingComposeRelativePaths(
+      [
+        "services:",
+        "  svc:",
+        "    env_file:",
+        "      - path: ./a.env",
+        "        required: false",
+        "      - path: ./b.env",
+        "        required: true",
+      ].join("\n"),
+    );
+    expect(issues).toEqual([
+      { directive: "env_file", value: "./a.env" },
+      { directive: "env_file", value: "./b.env" },
+    ]);
+  });
+});
+
+describe("extractComposeFileReferences (dev #162)", () => {
+  it("extracts an include: list in dash form", () => {
+    expect(
+      extractComposeFileReferences(["include:", "  - ./base.yml", "  - ../shared/other.yml"].join("\n")),
+    ).toEqual(["./base.yml", "../shared/other.yml"]);
+  });
+
+  it("extracts an include: list in path: mapping form", () => {
+    expect(
+      extractComposeFileReferences(["include:", "  - path: ./base.yml"].join("\n")),
+    ).toEqual(["./base.yml"]);
+  });
+
+  it("extracts an extends: block file reference", () => {
+    expect(
+      extractComposeFileReferences(
+        ["services:", "  svc:", "    extends:", "      file: ./base.yml", "      service: base"].join("\n"),
+      ),
+    ).toEqual(["./base.yml"]);
+  });
+
+  it("extracts an inline extends: file reference", () => {
+    expect(
+      extractComposeFileReferences("    extends: { file: ./base.yml, service: base }"),
+    ).toEqual(["./base.yml"]);
+  });
+
+  it("ignores ${VAR} interpolated references and dedupes", () => {
+    expect(
+      extractComposeFileReferences(
+        ["include:", "  - ./base.yml", "  - ./base.yml", "  - ${DYNAMIC_INCLUDE}"].join("\n"),
+      ),
+    ).toEqual(["./base.yml"]);
   });
 });
 
