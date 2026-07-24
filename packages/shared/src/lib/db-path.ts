@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { existsSync as fsExistsSync } from "node:fs";
+import { existsSync as fsExistsSync, statSync as fsStatSync } from "node:fs";
 import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -53,8 +53,36 @@ export interface ResolveDbLocationOptions {
   env?: Record<string, string | undefined>;
   /** Injected for tests; defaults to `node:fs` `existsSync`. */
   existsSync?: (p: string) => boolean;
+  /** Injected for tests; defaults to `node:fs` `statSync`. */
+  statSync?: (p: string) => { size: number };
   /** Injected for tests; defaults to `node:os` `homedir()`. */
   homeDir?: string;
+}
+
+/**
+ * A `file:` URL is CREATED by the libsql client the moment something opens it —
+ * `resolveDbLocation` never opens anything itself, but returning a candidate as
+ * `local-checkout` is what makes a caller open (and thereby create) it. #165: a
+ * stray process once materialized an empty `packages/server/kanban.db` (a probe,
+ * a crashed migration run, a dev tool that deliberately targets the checkout
+ * path) and from then on `existsSync` alone made EVERY later process — including
+ * read-only CLI commands — permanently and silently pin to that empty shadow
+ * file instead of falling through to the real home-fallback DB. A present file is
+ * therefore not enough; it must also look like a real database. Table-level
+ * introspection would be the precise check but requires opening a DB connection
+ * (defeating the point), so this is a size floor: an accidental stub is at most a
+ * few KB, while a DB anyone has actually used is reliably larger. It is a
+ * heuristic, not a proof — the CLI's loud resolution-change warning (`db-warning.ts`
+ * / `cli/last-resolved-db.ts`) is the backstop for whatever this floor misses.
+ */
+const MIN_VALID_LOCAL_DB_BYTES = 12_288;
+
+function isValidLocalDb(candidate: string, stat: (p: string) => { size: number }): boolean {
+  try {
+    return stat(candidate).size >= MIN_VALID_LOCAL_DB_BYTES;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -83,6 +111,7 @@ function fileUrl(path: string): DbLocation {
 export function resolveDbLocation(opts: ResolveDbLocationOptions = {}): DbLocation {
   const env = opts.env ?? process.env;
   const exists = opts.existsSync ?? fsExistsSync;
+  const stat = opts.statSync ?? fsStatSync;
   const home = opts.homeDir ?? homedir();
   const candidates = opts.localDbCandidates ?? [];
 
@@ -101,9 +130,12 @@ export function resolveDbLocation(opts: ResolveDbLocationOptions = {}): DbLocati
     return { ...fileUrl(resolve(envDir, "kanban.db")), source: "AGENTIC_KANBAN_DIR" };
   }
 
-  // 3. In-checkout dev DB — only when one actually exists on disk.
+  // 3. In-checkout dev DB — only when one actually exists on disk AND looks like
+  //    a real database (see isValidLocalDb above). A present-but-empty/stub file
+  //    falls through to the home-dir fallback rather than being opened (and so
+  //    permanently adopted) as-is.
   for (const candidate of candidates) {
-    if (exists(candidate)) {
+    if (exists(candidate) && isValidLocalDb(candidate, stat)) {
       return { ...fileUrl(candidate), source: "local-checkout" };
     }
   }
