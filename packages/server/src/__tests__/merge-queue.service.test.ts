@@ -361,4 +361,44 @@ describe("merge queue service", () => {
       workspaceId: second.workspaceId,
     }));
   });
+
+  // #170: a pre-merge-gate withhold (verify_script/smoke failed) carries the WorkspaceError
+  // "CONFLICT" code (for HTTP purposes) but is tagged with data.mergeReason "pre_merge_gate_failed".
+  // It must NOT be classified as a merge conflict — a batch reconciler agent can't fix a red verify
+  // script, and routing a gate failure there wastes attempts. The orchestrator's strandedIds check
+  // only matches reasons starting with "rebase conflict"/"merge conflict", so the "verify_failed:"
+  // prefix here keeps it out of that escalation path.
+  it("classifies a pre-merge-gate withhold as verify_failed, never as a merge conflict", async () => {
+    const { db } = createTestDb();
+    const { projectId, statusId } = await seedProject(db);
+    const { workspaceId } = await seedWorkspace(db, {
+      projectId,
+      statusId,
+      issueNumber: 61,
+      issueTitle: "Gate-failed workspace",
+      workingDir: "/repo/.worktrees/gate",
+      branch: "feature/gate",
+    });
+
+    const gateError = Object.assign(
+      new Error("Pre-merge gate failed (verify) — merge withheld. verify_script failed (exit 1): boom"),
+      { code: "CONFLICT", data: { mergeReason: "pre_merge_gate_failed", gateStage: "verify" } },
+    );
+    mocks.mergeWorkspace.mockRejectedValue(gateError);
+
+    const service = createMergeQueueService({ database: db });
+    const events = [];
+    for await (const event of service.executeQueue([workspaceId], { skipOnConflict: true })) {
+      events.push(event);
+    }
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "skipped",
+      workspaceId,
+      reason: expect.stringContaining("verify_failed:"),
+    }));
+    expect(events.some((e) => e.type === "conflict")).toBe(false);
+    const done = events.find((e) => e.type === "done");
+    expect(done).toMatchObject({ merged: [], failed: [], skipped: [workspaceId] });
+  });
 });

@@ -625,6 +625,24 @@ export function createMergeQueueService(deps: {
         };
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
+        // A pre-merge-gate withhold (verify_script/smoke check failed) is NOT a merge conflict —
+        // it carries the same WorkspaceError "CONFLICT" code (for HTTP-status purposes) but is
+        // tagged with `data.mergeReason: "pre_merge_gate_failed"`. Classify it separately so it
+        // never enters the conflict→reconciler escalation path: a batch reconciler agent can't
+        // fix a red verify script, and routing it there just burns attempts/tokens (#170).
+        const gateReason = err instanceof Error ? (err as unknown as { data?: { mergeReason?: string } }).data?.mergeReason : undefined;
+        if (gateReason === "pre_merge_gate_failed") {
+          skipped.push(ws.id);
+          yield {
+            type: "skipped",
+            workspaceId: ws.id,
+            issueNumber: ws.issueNumber,
+            issueTitle: ws.issueTitle,
+            reason: `verify_failed: ${error}`,
+          };
+          continue;
+        }
+
         const isConflict = error.toLowerCase().includes("conflict") || (err instanceof Error && (err as unknown as { code?: string }).code === "CONFLICT");
 
         if (isConflict) {
