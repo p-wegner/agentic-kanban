@@ -18,8 +18,10 @@ import { db } from "../db/index.js";
 import { createProjectService } from "../services/project.service.js";
 import { setPreference } from "../repositories/preferences.repository.js";
 import { commitProjectScaffoldArtifacts } from "../services/project-scaffold.js";
+import { deleteProjectCascade } from "../repositories/project.repository.js";
 
 const dirs: string[] = [];
+const registeredProjectIds: string[] = [];
 
 function makeBaseDir(prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), `kanban-${prefix}-`));
@@ -34,6 +36,7 @@ async function createFreshProject(prefix: string, body: Record<string, unknown> 
   const targetPath = join(makeBaseDir(prefix), "app");
   const service = createProjectService({ database: db });
   const result = await service.createProject({ name: `p-${prefix}`, path: targetPath, ...body });
+  registeredProjectIds.push(result.id);
   return { result, repoPath: targetPath };
 }
 
@@ -41,7 +44,13 @@ beforeAll(async () => {
   await setPreference("export_skills_on_registration", "false", db);
 });
 
-afterAll(() => {
+afterAll(async () => {
+  // #166: createProject registers a project row, not just a temp dir — leaving it
+  // registered leaks a "p-<prefix>" fixture pointing at a %TEMP% dir this cleanup then
+  // deletes, so future startups (or `pnpm cli -- cleanup`) would report it as broken.
+  for (const id of registeredProjectIds) {
+    try { await deleteProjectCascade(id, db); } catch { /* best effort */ }
+  }
   for (const d of dirs) {
     try { rmSync(d, { recursive: true, force: true }); } catch { /* best effort */ }
   }
