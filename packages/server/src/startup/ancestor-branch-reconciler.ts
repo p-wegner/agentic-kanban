@@ -4,8 +4,18 @@ import { checkBranchTipIsAncestor, countUniqueCommits } from "@agentic-kanban/sh
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
+import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 import { PREF_RECONCILER_ANCESTOR_BRANCH_ENABLED } from "../constants/preference-keys.js";
 import { finalizeMergeCleanup } from "../services/merge-cleanup.service.js";
+import * as realGitService from "../services/git.service.js";
+import {
+  listPendingSiblingMerges,
+  checkPendingSiblingMergeGuards,
+  type GitService,
+  type PendingSiblingMerge,
+} from "../services/workspace-internals.js";
+import { executeSiblingMerges, cleanupSiblingWorktrees } from "../services/workspace-repos.service.js";
+import { createBackup } from "../db/backup.js";
 
 /** Issue status names that are already terminal; skip these workspaces. */
 const TERMINAL_STATUS_NAMES = ["Done", "AI Reviewed", "Closed", "Cancelled"];
@@ -28,6 +38,32 @@ export interface AncestorBranchReconcilerDeps {
    * stops firing without needing a real DB or git setup.
    */
   onTick?: () => void;
+  /**
+   * Injectable full git-service module (sibling checks need more surface than the
+   * ancestor/commit-count functions alone). Defaults to the real server git.service.
+   */
+  gitService?: GitService;
+}
+
+/** Record a merge-attempt comment on the issue, mirroring reconcileStrandedSiblingMerges. */
+async function recordSiblingComment(
+  database: Database,
+  candidate: { wsId: string; issueId: string; branch: string },
+  eventType: "merged" | "conflict",
+  body: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  await insertIssueComment({
+    issueId: candidate.issueId,
+    workspaceId: candidate.wsId,
+    kind: "merge-attempt",
+    author: "system",
+    body,
+    payload: { eventType, workspaceId: candidate.wsId, branch: candidate.branch, ...payload },
+    createdAt: new Date().toISOString(),
+  }, database).catch((err) => {
+    console.warn("[ancestor-reconciler] failed to record issue comment:", err instanceof Error ? err.message : String(err));
+  });
 }
 
 /**
@@ -53,6 +89,7 @@ export async function reconcileAncestorBranchWorkspaces(
   const database = deps.database ?? db;
   const ancestorCheck = deps.checkAncestor ?? checkBranchTipIsAncestor;
   const commitCounter = deps.countCommits ?? countUniqueCommits;
+  const gitSvc = deps.gitService ?? realGitService;
 
   // Live pref read at every tick so disabling via pref takes effect without a restart.
   // The `enabled` override in deps lets tests inject the state directly.
@@ -144,6 +181,56 @@ export async function reconcileAncestorBranchWorkspaces(
       `[ancestor-reconciler] workspace ${c.wsId} (issue #${c.issueNumber ?? "?"}, branch=${c.branch}) — branch tip is ancestor of ${c.baseBranch} but issue is '${c.statusName}'; reconciling`,
     );
 
+    // Sibling-aware terminalization (#151): the leading branch alone converging to an
+    // ancestor of base does NOT mean the whole multi-repo workspace is done — a sibling
+    // repo may still hold unlanded work. Consult listPendingSiblingMerges (the shared
+    // "is the workspace REALLY fully merged?" probe) before terminalizing; if any sibling
+    // is pending, land it through the same guarded pipeline reconcileStrandedSiblingMerges
+    // uses instead of Done-ing the issue with the sibling stranded.
+    let pendingSiblings: PendingSiblingMerge[] = [];
+    try {
+      pendingSiblings = await listPendingSiblingMerges(gitSvc, database, c.wsId);
+    } catch (err) {
+      console.warn(
+        `[ancestor-reconciler] pending-sibling scan failed for workspace ${c.wsId} (proceeding as no-siblings):`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+
+    if (pendingSiblings.length > 0) {
+      console.warn(
+        `[ancestor-reconciler] workspace ${c.wsId} leading branch is an ancestor of ${c.baseBranch}, but ${pendingSiblings.length} sibling repo(s) still have unmerged commits — landing siblings before terminalizing`,
+      );
+      const guardFailures = await checkPendingSiblingMergeGuards(gitSvc, pendingSiblings);
+      if (guardFailures.length > 0) {
+        console.warn(`[ancestor-reconciler] cannot land sibling merge(s) for workspace ${c.wsId}: ${guardFailures.join("; ")}`);
+        await recordSiblingComment(database, c, "conflict",
+          `Ancestor-branch reconciliation found the leading branch ${c.branch} already merged into ${c.baseBranch}, but ${pendingSiblings.length} sibling repo(s) still have unmerged commits and could not be landed automatically: ` +
+            guardFailures.join("; ") +
+            ". Leaving the issue open — resolve the blockers and merge the siblings manually, or retry the workspace merge.",
+          { mergeReason: "sibling_merge_pending", failures: guardFailures, detectedAt: now });
+        continue;
+      }
+
+      const siblingResults = await executeSiblingMerges({ gitService: gitSvc, database, createBackup, workspaceId: c.wsId, plans: pendingSiblings });
+      const failedSiblings = siblingResults.filter((r) => !r.merged);
+      if (failedSiblings.length > 0) {
+        console.warn(`[ancestor-reconciler] ${failedSiblings.length} sibling merge(s) failed for workspace ${c.wsId}`);
+        await recordSiblingComment(database, c, "conflict",
+          `Ancestor-branch reconciliation: leading branch ${c.branch} was already merged into ${c.baseBranch}, but ${failedSiblings.length} sibling repo merge(s) failed: ` +
+            failedSiblings.map((f) => `${f.name ?? f.path}: ${f.error}`).join("; ") +
+            ". Leaving the issue open — the unmerged sibling branches were preserved.",
+          { mergeReason: "sibling_merge_failed", siblingResults, detectedAt: now });
+        continue;
+      }
+
+      console.log(`[ancestor-reconciler] landed ${siblingResults.length} sibling merge(s) for workspace ${c.wsId} before finalizing`);
+      await recordSiblingComment(database, c, "merged",
+        `Ancestor-branch reconciliation: landed ${siblingResults.length} sibling repo merge(s) alongside the already-merged leading branch ${c.branch}: ` +
+          siblingResults.map((r) => r.name ?? r.path).join(", ") + ".",
+        { siblingResults, reconciledAt: now });
+    }
+
     try {
       const mergedAt = now;
       await finalizeMergeCleanup({
@@ -156,6 +243,12 @@ export async function reconcileAncestorBranchWorkspaces(
         workingDir: null,
         projectId: c.projectId,
       });
+
+      if (pendingSiblings.length > 0) {
+        // Sibling worktrees + branches can now be dropped; preserveUnmerged re-verifies
+        // per repo so a merge that failed post-guard-check is never destroyed.
+        await cleanupSiblingWorktrees(gitSvc, c.wsId, database, { preserveUnmerged: true });
+      }
 
       console.log(
         `[ancestor-reconciler] auto-Done audit: issue=${c.issueNumber ?? "?"} ws=${c.wsId} baseSha=${result.baseSha} branchSha=${result.branchSha} uniqueCommits=${uniqueCommits} reconciledAt=${now}`,
@@ -201,7 +294,27 @@ export function stopAncestorBranchReconciler(): void {
 }
 
 /**
+ * Run the stranded-sibling compensator (merge-workflow.ts's reconcileStrandedSiblingMerges)
+ * once. Previously wired ONLY into startup (startup-tasks.ts) — recovery from a partial
+ * sibling merge (doMerge/autoMerge close the workspace even when sibling merges fail
+ * post-prevalidation) only happened on server restart. Shared onto the ancestor-branch
+ * reconciler's periodic cadence (#151) so it self-heals within one tick instead of waiting
+ * for the next boot. Dynamically imported: merge-workflow pulls in the whole merge
+ * pipeline, which the ancestor reconciler otherwise doesn't need at module load.
+ */
+export async function runStrandedSiblingCompensatorTick(database?: Database): Promise<void> {
+  try {
+    const { reconcileStrandedSiblingMerges } = await import("./merge-workflow.js");
+    await reconcileStrandedSiblingMerges(database);
+  } catch (err) {
+    console.warn("[ancestor-reconciler] periodic stranded-sibling compensator tick error:", err instanceof Error ? err.message : err);
+  }
+}
+
+/**
  * Schedule the ancestor-branch reconciler to run shortly after boot and then periodically.
+ * The stranded-sibling compensator (see {@link runStrandedSiblingCompensatorTick}) runs on
+ * the SAME tick/cadence (#151) rather than only at startup.
  *
  * Both handles are unref'd so they don't prevent the process from exiting cleanly.
  * Returns both handles so callers can clearTimeout/clearInterval them if needed.
@@ -220,6 +333,7 @@ export function startAncestorBranchReconciler(
     reconcileAncestorBranchWorkspaces(deps).catch((err) =>
       console.warn("[ancestor-reconciler] periodic tick error:", err instanceof Error ? err.message : err),
     );
+    void runStrandedSiblingCompensatorTick(deps.database);
   });
   const timer = setTimeout(tick, 35_000);
   const interval = setInterval(tick, intervalMs);
