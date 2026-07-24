@@ -1,8 +1,11 @@
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { randomUUID } from "node:crypto";
-import { resolve, basename } from "node:path";
+import { resolve, basename, normalize, sep } from "node:path";
+import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
 import type { StackProfile } from "@agentic-kanban/shared";
+import { deleteProjectCascade } from "../repositories/project.repository.js";
 import { detectRepoInfo } from "./git-info.service.js";
 import { initializeProjectStatuses } from "../repositories/issue.repository.js";
 import { getCurrentBranch } from "./git.service.js";
@@ -170,6 +173,47 @@ export async function deduplicateProjects(): Promise<void> {
       await updateProjectRepoPath(keep.id, gitRoot, basename(gitRoot), new Date().toISOString());
     }
   }
+}
+
+/** True when `path` sits inside the OS temp directory (e.g. a test fixture or lab run). */
+function isUnderTempDir(path: string): boolean {
+  const tempPrefix = normalize(tmpdir()) + sep;
+  return normalize(path).startsWith(tempPrefix);
+}
+
+/**
+ * Registered projects whose repoPath no longer exists on disk (a deleted git repo, an
+ * unregistered worktree, or — most commonly — a %TEMP% test/lab fixture that never got
+ * unregistered in teardown). Read-only; callers decide what to do with each entry.
+ */
+export async function findProjectsWithMissingRepoPath(): Promise<
+  Array<{ id: string; name: string; repoPath: string; isTemp: boolean }>
+> {
+  const allProjects = await getAllProjects();
+  return allProjects
+    .filter((p) => !!p.repoPath && !existsSync(p.repoPath))
+    .map((p) => ({ id: p.id, name: p.name, repoPath: p.repoPath, isTemp: isUnderTempDir(p.repoPath) }));
+}
+
+/**
+ * Unregisters (#166) projects whose repoPath is BOTH gone from disk AND under the OS temp
+ * dir — a safe heuristic that only ever fires for leaked test/lab fixtures, never for a real
+ * project on a briefly-unmounted drive (those live outside %TEMP%/`os.tmpdir()` and are left
+ * alone, matching `findProjectsWithMissingRepoPath`'s report for anyone to investigate).
+ *
+ * Full cascade delete (not the dedup transaction's reassign-to-survivor) since a leaked temp
+ * fixture has no survivor to move its issues/workspaces/sessions to.
+ */
+export async function unregisterLeakedTempProjects(): Promise<
+  Array<{ id: string; name: string; repoPath: string }>
+> {
+  const missing = await findProjectsWithMissingRepoPath();
+  const leaked = missing.filter((p) => p.isTemp);
+  for (const project of leaked) {
+    console.log(`[startup] Unregistering leaked temp-fixture project "${project.name}" (${project.repoPath}) — repo path no longer exists`);
+    await deleteProjectCascade(project.id, db);
+  }
+  return leaked;
 }
 
 // ---------------------------------------------------------------------------
