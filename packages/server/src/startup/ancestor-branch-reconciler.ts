@@ -14,7 +14,7 @@ import {
   type GitService,
   type PendingSiblingMerge,
 } from "../services/workspace-internals.js";
-import { executeSiblingMerges, cleanupSiblingWorktrees } from "../services/workspace-repos.service.js";
+import { executeSiblingMerges, cleanupSiblingWorktrees, stampReconciledLeadingMerge } from "../services/workspace-repos.service.js";
 import { createBackup } from "../db/backup.js";
 
 /** Issue status names that are already terminal; skip these workspaces. */
@@ -243,6 +243,18 @@ export async function reconcileAncestorBranchWorkspaces(
         workingDir: null,
         projectId: c.projectId,
       });
+
+      // Mirror of the sibling stamp above (#114/#115 pattern): the leading branch
+      // converged to an ancestor of base on its own (hand-merged / interrupted-response
+      // path), so closeWorkspace stamped mergedAt but never mergedHeadSha. Record the
+      // landed leading tip now — before any later cleanup — so getRepoMergeStatus reads
+      // the leading repo as merged instead of falsely `hasWork:false / merged:false`.
+      // No-op for a sibling-only ticket (0 leading historic commits) or an already-stamped row.
+      try {
+        await stampReconciledLeadingMerge({ gitService: gitSvc, database, workspaceId: c.wsId, now });
+      } catch (err) {
+        console.warn(`[ancestor-reconciler] leading mergedHeadSha stamp failed (non-fatal) for workspace ${c.wsId}:`, err instanceof Error ? err.message : String(err));
+      }
 
       if (pendingSiblings.length > 0) {
         // Sibling worktrees + branches can now be dropped; preserveUnmerged re-verifies
