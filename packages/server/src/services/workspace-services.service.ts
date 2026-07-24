@@ -345,6 +345,27 @@ export function parseStoredServiceStackState(serviceStateJson: string | null | u
   }
 }
 
+/**
+ * Thrown by the user-initiated Stop/Restart controls (#92) when the last-reference
+ * guard (finding 12) finds another LIVE workspace still referencing the same compose
+ * project — the adopted-stack case (shared worktree) where downing/bouncing the
+ * containers would pull them out from under that other workspace's running agent.
+ * The sharer check having FAILED (can't prove it's safe) also throws this, with an
+ * empty `otherSharers` — refuse rather than silently risk a live shared stack.
+ */
+export class StackSharedInUseError extends Error {
+  constructor(
+    public readonly composeProjectName: string,
+    public readonly otherSharers: string[],
+  ) {
+    super(
+      otherSharers.length > 0
+        ? `stack ${composeProjectName} is still referenced by ${otherSharers.length} other live workspace(s) (${otherSharers.join(", ")})`
+        : `could not verify stack ${composeProjectName} has no other live sharers — refusing to be safe`,
+    );
+  }
+}
+
 /** Heuristic: does a compose `up` stderr indicate a host/namespace port collision? */
 function isPortInUseError(stderr: string): boolean {
   return /port is already allocated|address already in use|bind for .* failed|ports are not available|failed to bind|Only one usage of each socket address/i.test(stderr);
@@ -613,23 +634,42 @@ export function createWorkspaceServicesService(deps: {
   }
 
   /**
+   * The LAST-REFERENCE GUARD (shared worktrees, finding 12), factored out so every
+   * path that can take a shared compose project down or bounce it (merge/delete/close
+   * teardown AND the user-initiated Stop/Restart controls, #92/#161) consults the SAME
+   * check instead of each re-deriving it. Co-resident workspaces (worktree reuse / fork
+   * children) ADOPT one shared stack — several live rows can reference the same compose
+   * project — so an action only proceeds when the ACTING workspace is the last live
+   * referent. Returns the OTHER live sharers' ids (empty when none), or `null` when the
+   * check itself failed (treated as "can't prove it's safe" by every caller).
+   */
+  async function findOtherLiveSharers(composeProjectName: string, actingWorkspaceId: string): Promise<string[] | null> {
+    try {
+      const refs = await findLiveStackReferences(composeProjectName);
+      return refs.filter((r) => r.id !== actingWorkspaceId).map((r) => r.id);
+    } catch (err) {
+      console.warn(
+        `[services] sharer check failed for ${composeProjectName} — treating as unsafe: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
+  }
+
+  /**
    * Tear a workspace's stack down (`docker compose -p <name> down -v --remove-orphans`).
    * Best-effort and never throws — teardown runs on merge/delete/close paths that must
    * not be blocked by a docker hiccup. Takes the STORED compose project name (from the
    * persisted ServiceStackState) — NEVER a recomputed one — so it can never target the
    * wrong (or a sibling workspace's) stack (F1).
    *
-   * LAST-REFERENCE GUARD (shared worktrees, finding 12): co-resident workspaces
-   * (worktree reuse / fork children) ADOPT one shared stack — several live rows can
-   * reference the same compose project. The down only runs when the RELEASING
-   * workspace is the last live referent; otherwise it is skipped (and the state stays
-   * "up", because the stack IS up). `releasedByWorkspaceId` is REQUIRED and is the only
-   * way the releaser is identified — an earlier fallback inferred it from the compose
+   * Guarded by `findOtherLiveSharers`: the down only runs when the RELEASING workspace
+   * is the last live referent; otherwise it is skipped (and the state stays "up",
+   * because the stack IS up). `releasedByWorkspaceId` is REQUIRED and is the only way
+   * the releaser is identified — an earlier fallback inferred it from the compose
    * name's owner token, which inverted the guard exactly for the adoption case it was
    * meant to protect (an adopter merging would `down -v` the live owner's stack and its
-   * volumes). Mirrors the findLiveSiblingSharers guard for sibling worktrees — on a
-   * failed sharer check the down is skipped too (a leaked stack beats downing a live
-   * shared one; the startup reaper reclaims true orphans).
+   * volumes). On a failed sharer check the down is skipped too (a leaked stack beats
+   * downing a live shared one; the startup reaper reclaims true orphans).
    */
   async function teardownWorkspaceServices(args: {
     composeProjectName: string;
@@ -637,18 +677,11 @@ export function createWorkspaceServicesService(deps: {
     /** The workspace releasing the stack (excluded from the live-sharer count). */
     releasedByWorkspaceId: string;
   }): Promise<void> {
-    try {
-      const refs = await findLiveStackReferences(args.composeProjectName);
-      const otherSharers = refs.filter((r) => r.id !== args.releasedByWorkspaceId);
-      if (otherSharers.length > 0) {
-        console.log(
-          `[services] stack ${args.composeProjectName} is still referenced by ${otherSharers.length} other live workspace(s) (${otherSharers.map((r) => r.id).join(", ")}) — skipping the down (last sharer releases it)`,
-        );
-        return;
-      }
-    } catch (err) {
-      console.warn(
-        `[services] teardown sharer check failed for ${args.composeProjectName} — skipping the down to be safe (the startup reaper reclaims true orphans): ${err instanceof Error ? err.message : String(err)}`,
+    const otherSharers = await findOtherLiveSharers(args.composeProjectName, args.releasedByWorkspaceId);
+    if (otherSharers === null) return;
+    if (otherSharers.length > 0) {
+      console.log(
+        `[services] stack ${args.composeProjectName} is still referenced by ${otherSharers.length} other live workspace(s) (${otherSharers.join(", ")}) — skipping the down (last sharer releases it)`,
       );
       return;
     }
@@ -658,9 +691,10 @@ export function createWorkspaceServicesService(deps: {
       if (!ok && stderr) {
         console.warn(`[services] teardown down for ${args.composeProjectName} reported failure (non-fatal): ${stderr}`);
       }
-      // Persist status "down" onto the owning row so the workspace DTO stops reporting
-      // a downed stack as up (with ports that may get reassigned). Only after a
-      // SUCCESSFUL down — a failed down may have left containers running.
+      // Persist status "down" onto EVERY row referencing this compose project (not just
+      // the releaser's) so the workspace DTO stops reporting a downed stack as up (with
+      // ports that may get reassigned). Only after a SUCCESSFUL down — a failed down may
+      // have left containers running.
       if (ok) {
         await markServiceStateDown(args.composeProjectName);
       }
@@ -759,18 +793,45 @@ export function createWorkspaceServicesService(deps: {
   /**
    * Stop a stack (`docker compose down` WITHOUT `-v`): remove the containers but keep the
    * named volumes, so a later START finds its data intact. Returns "down" on success.
+   *
+   * Guarded by `findOtherLiveSharers` (#161): the #92 control plane calls this directly
+   * with no guard of its own, so on an ADOPTED (shared-worktree) stack a Stop click on
+   * the adopter used to remove the donor's live containers out from under its running
+   * agent. Throws `StackSharedInUseError` when another live workspace still references
+   * the stack (or the sharer check itself failed) — the caller (the control service)
+   * turns that into a CONFLICT the UI can show, instead of silently downing it.
    */
   async function stopWorkspaceServices(ctx: StackControlContext): Promise<ServiceStackState> {
+    const otherSharers = await findOtherLiveSharers(ctx.state.composeProjectName, ctx.workspaceId);
+    if (otherSharers === null || otherSharers.length > 0) {
+      throw new StackSharedInUseError(ctx.state.composeProjectName, otherSharers ?? []);
+    }
     const { ok, stderr } = await runner.down({
       projectName: ctx.state.composeProjectName,
       cwd: ctx.composeWorktreePath,
       removeVolumes: false,
     });
+    // Stamp EVERY row referencing this compose project, not just the caller's — a
+    // genuinely-last-reference down still leaves other (terminal) rows' persisted state
+    // claiming "up" otherwise, which is what let the DTO/countLiveStacks/port exclusion
+    // keep counting a dead stack as live.
+    if (ok) await markServiceStateDown(ctx.state.composeProjectName);
     return reusedState(ctx, ok ? "down" : "error", ok ? undefined : stderr || "compose down failed");
   }
 
-  /** Restart a running stack (`docker compose restart`) — same containers, same ports. */
+  /**
+   * Restart a running stack (`docker compose restart`) — same containers, same ports.
+   *
+   * Guarded the same way as `stopWorkspaceServices` (#161): on an adopted stack a
+   * restart bounces the SAME containers a donor workspace's agent depends on, so it
+   * refuses (throws `StackSharedInUseError`) rather than restarting out from under a
+   * live sharer.
+   */
   async function restartWorkspaceServices(ctx: StackControlContext): Promise<ServiceStackState> {
+    const otherSharers = await findOtherLiveSharers(ctx.state.composeProjectName, ctx.workspaceId);
+    if (otherSharers === null || otherSharers.length > 0) {
+      throw new StackSharedInUseError(ctx.state.composeProjectName, otherSharers ?? []);
+    }
     const { composeFile, extraComposeFiles, timeoutMs } = await resolveComposeInvocation(ctx);
     const { ok, stderr } = await runner.restart({
       composeFile,

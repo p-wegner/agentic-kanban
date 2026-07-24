@@ -155,4 +155,55 @@ describe("workspace-service-state repository — shared-worktree queries", () =>
     await svc.teardownWorkspaceServices({ composeProjectName: STACK, composeWorktreePath: ".", releasedByWorkspaceId: b });
     expect(downs).toEqual([STACK]);
   });
+
+  it("stopWorkspaceServices (#161): refuses the user Stop control while another live workspace shares the stack, then downs it and stamps EVERY row 'down' once it's the last reference", async () => {
+    // Reproduces the adversarial-review scenario: workspace B adopted workspace A's
+    // stack (shared worktree). A Stop click on B must not remove A's live containers,
+    // and a genuine down must not leave A's row lying about the stack still being up.
+    const { createWorkspaceServicesService } = await import("../services/workspace-services.service.js");
+    const { markWorkspaceServiceStateDown } = await import("../repositories/workspace-service-state.repository.js");
+    const downs: string[] = [];
+    const svc = createWorkspaceServicesService({
+      runner: {
+        up: async () => ({ ok: true, stderr: "" }),
+        down: async ({ projectName }) => {
+          downs.push(projectName);
+          return { ok: true, stderr: "" };
+        },
+        list: async () => [],
+      },
+      getInstanceId: async () => "testinst",
+      markServiceStateDown: (name) => markWorkspaceServiceStateDown(name, undefined, database),
+      findLiveStackReferences: (name) => findLiveWorkspacesReferencingComposeProject(name, database),
+    });
+
+    const a = await insertWs({ serviceState: upStateJson(STACK) }); // donor/owner
+    const b = await insertWs({ serviceState: upStateJson(STACK) }); // adopter
+
+    const ctxFor = (workspaceId: string) => ({
+      state: { composeProjectName: STACK, ports: { db: 61000 }, envFilePath: `${SHARED_DIR}\\.kanban\\services.env`, status: "up" as const, updatedAt: new Date().toISOString() },
+      config: { enabled: true, composeFile: "docker-compose.yml" },
+      composeWorktreePath: SHARED_DIR,
+      workspaceId,
+    });
+
+    // B (adopter) clicks Stop while A (donor) is still live — refused, nothing downed.
+    await expect(svc.stopWorkspaceServices(ctxFor(b))).rejects.toThrow(/other live workspace/);
+    expect(downs).toEqual([]);
+    const [rowAStillUp] = await db.select().from(workspaces).where(eq(workspaces.id, a));
+    expect(rowAStillUp.serviceState).toContain('"status":"up"');
+
+    // A releases first (mirrors A closing) — now B is the only live referent, so its
+    // own Stop proceeds, and the down stamps EVERY row referencing the stack as down,
+    // not just B's — fixing the "A's row still claims up" DTO lie.
+    await db.update(workspaces).set({ status: "closed" }).where(eq(workspaces.id, a));
+    const state = await svc.stopWorkspaceServices(ctxFor(b));
+    expect(state.status).toBe("down");
+    expect(downs).toEqual([STACK]);
+
+    const [rowA] = await db.select().from(workspaces).where(eq(workspaces.id, a));
+    const [rowB] = await db.select().from(workspaces).where(eq(workspaces.id, b));
+    expect(rowA.serviceState).toContain('"status":"down"');
+    expect(rowB.serviceState).toContain('"status":"down"');
+  });
 });
