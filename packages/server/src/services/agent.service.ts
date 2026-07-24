@@ -10,6 +10,7 @@ import { shouldDetachAgent, resolveLaunchPorts, buildAgentSpawnEnv } from "../li
 import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
 import { wrapLaunchConfigForContainer } from "./agent-provider/container-wrap.js";
 import type { ContainerProvision } from "./devcontainer-workspace.service.js";
+import { dockerExec } from "@agentic-kanban/shared/lib/docker-exec";
 
 function resolveWorktreeDevPorts(worktreePath: string): { serverPort: string; clientPort: string } | null {
   const ports = resolveWorktreeDevPortsShared(worktreePath);
@@ -49,6 +50,15 @@ function resolveHangTimeoutMs(): number {
 export class AgentState {
   readonly activeProcesses = new Map<string, ChildProcess>();
   readonly activePids = new Map<string, number>();
+  /**
+   * The devcontainer a session's agent runs inside, keyed by sessionId (#154).
+   * `activePids` only tracks the HOST docker-exec client — killing that pid
+   * never reaches the exec'd process inside the container's own PID
+   * namespace, which is what orphaned it in the first place. Populated at
+   * launch when a `ContainerProvision` is passed in, and restored on reattach
+   * from the session row's persisted `containerId`.
+   */
+  readonly containerIds = new Map<string, string>();
   readonly stdinOpen = new Map<string, boolean>();
   readonly outputWatchers = new Map<string, { close(): void; drainNow(): void }>();
   readonly pidWatchers = new Map<string, { close(): void }>();
@@ -65,6 +75,7 @@ export class AgentState {
     this.hangWatchdogs.clear();
     this.activeProcesses.clear();
     this.activePids.clear();
+    this.containerIds.clear();
     this.stdinOpen.clear();
   }
 }
@@ -144,6 +155,32 @@ function killPid(pid: number, context: Record<string, unknown>): boolean {
     }
   }
   return true;
+}
+
+/**
+ * Terminate the agent running INSIDE a container (#154).
+ *
+ * The host-side `killPid()` above only reaches the `docker exec` CLIENT — the
+ * exec'd agent process lives in the container's own PID namespace and is not
+ * in that process tree, so killing the client orphans it: invisible (output
+ * conduit severed, board says "stopped"), still able to edit the bind-mounted
+ * worktree while review/merge proceeds. `docker kill` sends SIGKILL to the
+ * container's PID 1, which tears down every process in its namespace,
+ * including the exec'd one — a single call that doesn't require tracking the
+ * inner PID. Fire-and-forget: the docker CLI is a real executable so this
+ * never blocks the synchronous `kill()`/`killAll()` callers, and a failure
+ * here is logged, never thrown (matches the rest of the devcontainer
+ * best-effort contract).
+ */
+function killContainerAgent(sessionId: string, containerId: string): void {
+  console.log(`[agent] killing containerized agent: sessionId=${sessionId} containerId=${containerId.slice(0, 12)}`);
+  void dockerExec(["kill", containerId]).then((result) => {
+    if (result.code !== 0) {
+      console.warn(
+        `[agent] docker kill failed: sessionId=${sessionId} containerId=${containerId.slice(0, 12)}: ${result.stderr.trim() || result.error}`,
+      );
+    }
+  });
 }
 
 /**
@@ -369,6 +406,9 @@ function attachProcessHandlers(
     console.log(`[agent] exited: sessionId=${sessionId} code=${code} signal=${signal ?? "none"} pid=${proc.pid}`);
     agentState.activeProcesses.delete(sessionId);
     agentState.activePids.delete(sessionId);
+    // The container itself is NOT reaped here — it may be reused by a follow-up
+    // turn/resume — only this session's in-memory tracking entry goes away.
+    agentState.containerIds.delete(sessionId);
     agentState.stdinOpen.delete(sessionId);
     // Detached agents stream stdout via a 500ms file poll. A fast crash that writes
     // output and exits within one poll interval fires this exit handler before the
@@ -404,6 +444,7 @@ function attachProcessHandlers(
     }
     agentState.activeProcesses.delete(sessionId);
     agentState.activePids.delete(sessionId);
+    agentState.containerIds.delete(sessionId);
     closeSessionWatchers(sessionId);
     try {
       onOutput({ type: "exit", sessionId, exitCode: 1 });
@@ -579,6 +620,11 @@ export function launch(
   if (proc.pid) {
     agentState.activePids.set(sessionId, proc.pid);
   }
+  // Track the container this session runs inside (#154) so kill()/killAll() can
+  // reach the in-container agent, not just the host docker-exec client tracked above.
+  if (containerProvision) {
+    agentState.containerIds.set(sessionId, containerProvision.handle.containerId);
+  }
 
   // Arm the hang watchdog. On a hang we surface a diagnostic stderr (so the
   // launch-failure classifier has a reason to attribute) and kill the process —
@@ -617,13 +663,23 @@ function cleanupOutputFile(sessionId: string): void {
 export function kill(sessionId: string): boolean {
   const proc = agentState.activeProcesses.get(sessionId);
   const pid = proc?.pid ?? agentState.activePids.get(sessionId);
-  if (!pid) return false;
+  const containerId = agentState.containerIds.get(sessionId);
+  if (!pid && !containerId) return false;
 
-  console.log(`[agent] killing: sessionId=${sessionId} pid=${pid}`);
-  const killed = killPid(pid, { reason: "agent-session-stop", sessionId });
+  let killed = false;
+  if (pid) {
+    console.log(`[agent] killing: sessionId=${sessionId} pid=${pid}`);
+    killed = killPid(pid, { reason: "agent-session-stop", sessionId });
+  }
+  // The container leg (#154): the host pid above is only the docker-exec CLIENT
+  // for a containerized session — without this the exec'd agent inside the
+  // container keeps running, orphaned and invisible, after the board reports
+  // "stopped".
+  if (containerId) killContainerAgent(sessionId, containerId);
 
   agentState.activeProcesses.delete(sessionId);
   agentState.activePids.delete(sessionId);
+  agentState.containerIds.delete(sessionId);
   agentState.stdinOpen.delete(sessionId);
   const watcher = agentState.outputWatchers.get(sessionId);
   if (watcher) { watcher.close(); agentState.outputWatchers.delete(sessionId); }
@@ -632,7 +688,7 @@ export function kill(sessionId: string): boolean {
   const hangW = agentState.hangWatchdogs.get(sessionId);
   if (hangW) { hangW.close(); agentState.hangWatchdogs.delete(sessionId); }
   cleanupOutputFile(sessionId);
-  return killed;
+  return killed || Boolean(containerId);
 }
 
 /** Send a follow-up message to a running agent via stdin JSONL. */
@@ -666,14 +722,24 @@ export function isStdinOpen(sessionId: string): boolean {
 /** Kill all active agent processes (for graceful shutdown). */
 export function killAll(): number {
   const count = agentState.activePids.size;
-  if (count === 0) return 0;
-  console.log(`[agent] killAll: terminating ${count} active process(es)`);
+  const containerEntries = [...agentState.containerIds.entries()];
+  if (count === 0 && containerEntries.length === 0) return 0;
+  console.log(
+    `[agent] killAll: terminating ${count} active process(es)` +
+      (containerEntries.length > 0 ? ` (${containerEntries.length} containerized)` : ""),
+  );
   for (const [sessionId, pid] of agentState.activePids) {
     console.log(`[agent] killAll: sessionId=${sessionId} pid=${pid}`);
     killPid(pid, { reason: "agent-kill-all", sessionId });
   }
+  // The container leg (#154) — see kill()'s comment for why the host pid above
+  // isn't enough for a containerized session.
+  for (const [sessionId, containerId] of containerEntries) {
+    killContainerAgent(sessionId, containerId);
+  }
   agentState.activeProcesses.clear();
   agentState.activePids.clear();
+  agentState.containerIds.clear();
   agentState.stdinOpen.clear();
   for (const watcher of agentState.outputWatchers.values()) watcher.close();
   agentState.outputWatchers.clear();
@@ -718,14 +784,21 @@ export function isPidAlive(sessionId: string): boolean {
 /**
  * Reattach to a surviving agent process after server restart.
  * Starts watching the output file for new content and polls the PID for exit.
+ *
+ * `containerId` restores the in-memory tracking `kill()`/`killAll()` need for a
+ * containerized session (#154) — without it, a session reattached after a
+ * restart would lose its container leg and a later stop would re-introduce the
+ * exact orphaned-container leak this ticket fixes, just delayed by a restart.
  */
 export function reattachSession(
   sessionId: string,
   pid: number,
   onOutput: AgentOutputCallback,
   onExit: () => void,
+  containerId?: string,
 ): void {
   agentState.activePids.set(sessionId, pid);
+  if (containerId) agentState.containerIds.set(sessionId, containerId);
 
   // Resume streaming the output file from its current end. The file may have
   // rolled away (temp cleanup) between runs — recreate it so the watcher has
