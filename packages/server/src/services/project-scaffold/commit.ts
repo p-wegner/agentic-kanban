@@ -16,7 +16,9 @@ const DURABLE_CLAUDE_SCAFFOLD_PATHS = [
   ".claude/hooks/smart-hooks-config.json",
   ".claude/hooks/verify-gate-runner.js",
   ".claude/hooks/verify-gate.config.json",
-  ".claude/smart-hooks-rules.json",
+  // .claude/smart-hooks-rules.json is deliberately ABSENT: it is machine-regenerated
+  // per checkout and gitignored (ca79487c). Force-committing it here put a volatile
+  // file on master AND every branch, which made every merge conflict on it.
   // Written by the compounding "setup once" pass (#127). Committed for the same reason as
   // the rest: a builder only inherits it if it is on the branch its worktree forks from.
   ".claude/domain-map.md",
