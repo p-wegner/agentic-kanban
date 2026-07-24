@@ -176,11 +176,72 @@ function killPidTree(pid) {
   }
 }
 
+// A leaked test worker never holds a listening TCP socket. A dev server does — and a
+// dev server is routinely started DETACHED (this project's own dev-server workflow
+// spawns it with its launching shell exiting immediately), which makes it look
+// identical to an orphaned zombie worker under the orphan+path heuristic alone. This
+// hook fires on every passing Stop-hook cycle, not just true session end, so without
+// this check a `pnpm dev` left running for visual verification in the same worktree
+// would get torn down by the very next green verify pass. Skip any orphan whose tree
+// owns a listening port.
+function listListeningPids() {
+  try {
+    if (process.platform === "win32") {
+      const out = execFileSync("netstat", ["-ano", "-p", "TCP"], {
+        encoding: "utf8",
+        windowsHide: true,
+        timeout: 10000,
+      });
+      const pids = new Set();
+      for (const line of out.split("\n")) {
+        if (!line.includes("LISTENING")) continue;
+        const parts = line.trim().split(/\s+/);
+        const pid = Number(parts[parts.length - 1]);
+        if (Number.isInteger(pid) && pid > 0) pids.add(pid);
+      }
+      return pids;
+    }
+    const out = execFileSync("lsof", ["-iTCP", "-sTCP:LISTEN", "-P", "-n"], {
+      encoding: "utf8",
+      timeout: 10000,
+    });
+    const pids = new Set();
+    for (const line of out.split("\n").slice(1)) {
+      const parts = line.trim().split(/\s+/);
+      const pid = Number(parts[1]);
+      if (Number.isInteger(pid) && pid > 0) pids.add(pid);
+    }
+    return pids;
+  } catch {
+    return new Set();
+  }
+}
+
+function buildChildrenMap(processes) {
+  const children = new Map();
+  for (const proc of processes) {
+    if (!children.has(proc.ppid)) children.set(proc.ppid, []);
+    children.get(proc.ppid).push(proc);
+  }
+  return children;
+}
+
+function collectTreePids(rootPid, childrenMap, seen) {
+  if (seen.has(rootPid)) return seen;
+  seen.add(rootPid);
+  for (const child of childrenMap.get(rootPid) || []) {
+    collectTreePids(child.pid, childrenMap, seen);
+  }
+  return seen;
+}
+
 function killDirDescendants(cwd) {
   if (!cwd) return;
   const processes = listProcessesForSweep();
   if (processes.length === 0) return;
   const byPid = new Map(processes.map((p) => [p.pid, p]));
+  const childrenMap = buildChildrenMap(processes);
+  const listeningPids = listListeningPids();
 
   // Never kill this runner or anything in its own ancestor chain (the agent/session
   // process, the harness, etc.) even if their command line happens to reference cwd.
@@ -206,7 +267,17 @@ function killDirDescendants(cwd) {
     // dev server or agent session still has a live parent and is skipped.
     if (byPid.has(proc.ppid)) continue;
     const cmdNormalized = proc.commandLine.replace(/\\/g, "/").toLowerCase();
-    if (commandReferencesDir(cmdNormalized, dirNormalized)) killPidTree(proc.pid);
+    if (!commandReferencesDir(cmdNormalized, dirNormalized)) continue;
+    const treePids = collectTreePids(proc.pid, childrenMap, new Set());
+    let ownsListener = false;
+    for (const pid of treePids) {
+      if (listeningPids.has(pid)) {
+        ownsListener = true;
+        break;
+      }
+    }
+    if (ownsListener) continue;
+    killPidTree(proc.pid);
   }
 }
 

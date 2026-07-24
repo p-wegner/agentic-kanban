@@ -209,6 +209,57 @@ describe("verify-gate-runner — zombie process sweep (#172)", () => {
     expect(alive).toBe(false);
   }, 20_000);
 
+  it("does not kill an orphaned descendant under cwd that owns a listening TCP port (#172 regression)", async () => {
+    // Simulates a `pnpm dev` server left running for visual verification, per this
+    // project's dev-server workflow: it's routinely started DETACHED (so its
+    // launching shell exits immediately), making it look identical to an orphaned
+    // zombie test worker under the orphan+path heuristic ALONE. The only thing that
+    // actually distinguishes a leaked test worker (never listens) from a dev server
+    // (always listens) is whether it owns a listening socket — the sweep must check
+    // that before killing an orphan.
+    const listenerWorker = join(projectDir, "listener-worker.js");
+    await writeFile(
+      listenerWorker,
+      [
+        "const http = require('http');",
+        "const fs = require('fs');",
+        "const server = http.createServer((_req, res) => res.end('ok'));",
+        `server.listen(0, () => fs.writeFileSync(${JSON.stringify(join(projectDir, "listener.port"))}, String(server.address().port)));`,
+      ].join("\n"),
+    );
+    const lingerScript = join(projectDir, "linger-listener.js");
+    const pidFile = join(projectDir, "linger-listener.pid");
+    await writeFile(
+      lingerScript,
+      [
+        "const fs = require('fs');",
+        "const { spawn } = require('child_process');",
+        `const child = spawn(process.execPath, [${JSON.stringify(listenerWorker)}], { detached: true, stdio: 'ignore' });`,
+        `fs.writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));`,
+        "child.unref();",
+      ].join("\n"),
+    );
+
+    await writeFile(join(hookDir, "verify-gate.config.json"), JSON.stringify({ command: `node ${lingerScript}` }));
+    const result = runGate({ hookDir, stdin: JSON.stringify({ cwd: projectDir }) });
+    expect(result.status).toBe(0);
+
+    const pid = Number(await readFile(pidFile, "utf8"));
+    expect(Number.isInteger(pid)).toBe(true);
+
+    try {
+      // Give the background sweep the same window used elsewhere to do its (wrong) kill.
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+      expect(isPidAlive(pid)).toBe(true);
+    } finally {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        /* already gone */
+      }
+    }
+  }, 20_000);
+
   it("does not kill an unrelated live process whose parent is still alive, even if its command line references cwd (#172 regression)", async () => {
     // Simulates a legitimate `pnpm dev` server (or another agent's session) that is
     // still running in the SAME worktree cwd when this gate happens to fire. Its
