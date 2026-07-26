@@ -1,8 +1,8 @@
 import type { RepoMergeStatusResponse, RepoMergeStatusRepoEntry } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
-import { resolveProjectRepo, getWorkspaceById } from "../repositories/workspace.repository.js";
-import { listWorkspaceRepos } from "../repositories/repo.repository.js";
+import { getWorkspaceById } from "../repositories/workspace.repository.js";
 import { WorkspaceError, requireBaseBranch, type GitService } from "./workspace-internals.js";
+import { getAllWorkspaceRepos, type WorkspaceRepoRef } from "./workspace-all-repos.js";
 
 // The wire contract lives in @agentic-kanban/shared (types/api/workspace.ts) so the
 // client consumes the same shape (#79); these aliases keep existing importers working.
@@ -24,75 +24,61 @@ export async function getRepoMergeStatus(
   const workspace = await getWorkspaceById(id, database);
   if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
   if (workspace.isDirect) throw new WorkspaceError("Not applicable to direct workspaces", "BAD_REQUEST");
-  const { repoPath, defaultBranch } = await resolveProjectRepo(id, database);
-  const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
+
+  // One loop over the uniform repo view (#168): the leading repo (row 0) and each sibling run the
+  // SAME per-repo status computation, replacing the old hand-written leading block + sibling loop
+  // that drifted. `requireBaseBranch` still validates that the leading has a resolvable base.
+  const allRepos = await getAllWorkspaceRepos(id, database);
+  const leadingRef = allRepos.find((r) => r.kind === "leading");
+  const baseBranch = requireBaseBranch(leadingRef?.baseBranch ?? workspace.baseBranch);
 
   const repos: RepoMergeStatusEntry[] = [];
-
-  // Leading repo. "had work" = commits ahead of base now, OR (once merged and the feature
-  // branch is cleaned up) commits between the original base cut and the captured merge tip.
-  // The historic tip is the branch ref while it still exists, else `mergedHeadSha`, which is
-  // stamped at merge time and survives the post-merge branch deletion. Deliberately NOT keyed
-  // off the workspace scalar `mergedAt`: it is stamped even for a sibling-only merge (via
-  // closeWorkspace markMerged, #74), and ORing it in falsely attributed the merge to the
-  // LEADING repo when the leading repo had zero commits (#75). For a sibling-only merge the
-  // captured tip equals base → 0 historic commits → leading correctly reads as no-work.
-  let leadingAhead = 0;
-  if (workspace.branch) {
-    leadingAhead = await gitService.countUniqueCommits(repoPath, baseBranch, workspace.branch).catch(() => 0);
-  }
-  let leadingHistoric = 0;
-  if (leadingAhead === 0 && workspace.baseCommitSha) {
-    let tip: string | null = null;
-    if (workspace.branch && (await gitService.revParse(repoPath, workspace.branch).then(() => true).catch(() => false))) {
-      tip = workspace.branch;
-    } else if (workspace.mergedHeadSha) {
-      tip = workspace.mergedHeadSha;
-    }
-    if (tip) leadingHistoric = await gitService.countUniqueCommits(repoPath, workspace.baseCommitSha, tip).catch(() => 0);
-  }
-  const leadingHasWork = leadingAhead > 0 || leadingHistoric > 0;
-  repos.push({
-    name: null,
-    path: repoPath,
-    isLeading: true,
-    hasWork: leadingHasWork,
-    ahead: leadingAhead,
-    merged: leadingHasWork && leadingAhead === 0,
-    stranded: leadingHasWork && leadingAhead > 0,
-  });
-
-  // Sibling repos.
-  for (const repo of await listWorkspaceRepos(id, database)) {
-    if (repo.mergedHeadSha) {
-      repos.push({ name: repo.name, path: repo.path, isLeading: false, hasWork: true, ahead: 0, merged: true, stranded: false });
-      continue;
-    }
-    let ahead = 0;
-    if (repo.branch && repo.baseBranch) {
-      try {
-        await gitService.revParse(repo.path, repo.baseBranch);
-        await gitService.revParse(repo.path, repo.branch);
-        ahead = await gitService.countUniqueCommits(repo.path, repo.baseBranch, repo.branch).catch(() => 0);
-      } catch { /* branch/base ref gone (e.g. cleaned up) → no countable work */ }
-    }
-    const hasWork = ahead > 0;
-    repos.push({
-      name: repo.name,
-      path: repo.path,
-      isLeading: false,
-      hasWork,
-      ahead,
-      // A sibling is "merged" only on positive evidence — a stamped `mergedHeadSha`, handled
-      // above. A gone branch with no stamp is the no-work sibling (cleanup force-deletes EVERY
-      // sibling branch, worked or not — #75), not a silent landing, so it is "no changes", not
-      // merged. Every real sibling merge stamps mergedHeadSha (executeSiblingMerges /
-      // reconcile), so this path never hides genuinely-landed work.
-      merged: false,
-      stranded: hasWork,
-    });
+  for (const ref of allRepos) {
+    repos.push(await computeRepoMergeEntry(ref, gitService));
   }
 
   const allMerged = repos.every((r) => !r.hasWork || r.merged);
   return { branch: workspace.branch, baseBranch, allMerged, repos };
+}
+
+/**
+ * Per-repo merge status, identical for the leading repo and every sibling (#168 collapses the
+ * two divergent code paths). "had work" = commits ahead of base now, OR — once merged and the
+ * feature branch is cleaned up — commits between the original cut point and the captured merge tip.
+ *
+ * - A stamped `mergedHeadSha` is positive merge evidence (only ever set for genuinely-landed work
+ *   by executeSiblingMerges / the clean auto-merge / the reconcile stamp), so it short-circuits to
+ *   `merged`. This is what the sibling path always did; the leading path reaches the same verdict
+ *   via its historic-tip computation, so unifying on the short-circuit changes no tested/real case.
+ * - Otherwise: `ahead` = commits vs the base BRANCH (guarded revParse; gone refs → 0). When 0-ahead,
+ *   `historic` counts vs the original cut commit using the live branch tip, else the stamped tip.
+ * - Deliberately NOT keyed off the workspace scalar `mergedAt` (stamped even for a sibling-only
+ *   merge, #74/#75): for a sibling-only merge the leading's captured tip equals base → 0 historic →
+ *   leading correctly reads no-work.
+ */
+async function computeRepoMergeEntry(ref: WorkspaceRepoRef, gitService: GitService): Promise<RepoMergeStatusEntry> {
+  const base = { name: ref.kind === "leading" ? null : ref.name, path: ref.path, isLeading: ref.kind === "leading" };
+  if (ref.mergedHeadSha) {
+    return { ...base, hasWork: true, ahead: 0, merged: true, stranded: false };
+  }
+  let ahead = 0;
+  if (ref.branch && ref.baseBranch) {
+    try {
+      await gitService.revParse(ref.path, ref.baseBranch);
+      await gitService.revParse(ref.path, ref.branch);
+      ahead = await gitService.countUniqueCommits(ref.path, ref.baseBranch, ref.branch).catch(() => 0);
+    } catch { /* branch/base ref gone (e.g. cleaned up) → no countable work */ }
+  }
+  let historic = 0;
+  if (ahead === 0 && ref.baseCommitSha) {
+    let tip: string | null = null;
+    if (ref.branch && (await gitService.revParse(ref.path, ref.branch).then(() => true).catch(() => false))) {
+      tip = ref.branch;
+    } else if (ref.mergedHeadSha) {
+      tip = ref.mergedHeadSha;
+    }
+    if (tip) historic = await gitService.countUniqueCommits(ref.path, ref.baseCommitSha, tip).catch(() => 0);
+  }
+  const hasWork = ahead > 0 || historic > 0;
+  return { ...base, hasWork, ahead, merged: hasWork && ahead === 0, stranded: hasWork && ahead > 0 };
 }
