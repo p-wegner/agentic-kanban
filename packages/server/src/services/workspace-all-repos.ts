@@ -65,7 +65,11 @@ async function leadingRef(workspaceId: string, database: Database): Promise<Work
     name: null,
     worktreePath: workspace.workingDir ?? null,
     branch: workspace.branch ?? null,
-    baseBranch: workspace.baseBranch ?? null,
+    // The leading repo's base is its workspace baseBranch, falling back to the project's
+    // default branch (what it was cut from) — mirrors requireBaseBranch(baseBranch||defaultBranch)
+    // in the merge-status/rebase paths (|| so an empty string also falls back), so a uniform
+    // loop reads the same base a hand-written leading block did.
+    baseBranch: workspace.baseBranch || defaultBranch,
     baseCommitSha: workspace.baseCommitSha ?? null,
     mergedHeadSha: workspace.mergedHeadSha ?? null,
     defaultBranch,
