@@ -15,6 +15,42 @@ You are the **epic orchestrator** for a brand-new project. You are NOT done when
 2. You MUST leave a **resident watch** running (Step 4) before you stop. Setup-then-exit is a failed run even if the board looks healthy.
 3. After N/N Done + a clean integration pass, drive the meta-ticket all the way to **Done** (the terminal column), **not** Review, then write the run doc. Ending with the meta in Review has NOT met the contract (Space Invaders run #1 left all 10 children Done but the meta stuck in Review — the blind spot Step 6 closes).
 
+## Step 0 — Right-size the decomposition (cost tiers)
+
+**Before you seed any epic, decide the granularity — it dominates cost.** A 3-way board experiment
+(2026-07-26, `docs/board-runs/greenfield-bootstrap-strategy.md`) built three equivalent ~4k-LOC PHP
+apps with three strategies (same provider, same day). Result, cheapest signal = total $:
+
+| Strategy | $ | LOC | $/KLOC |
+|---|---|---|---|
+| 1 mega ticket, single builder | **3.87** | 3731 | **1.04** |
+| foundation → 2 parallel leaves | 10.73 | 4718 | 2.27 |
+| 6 fine layer-per-ticket tickets | 12.41 | 4354 | 2.85 |
+
+**A single mega ticket is ~2.7x cheaper per KLOC than fine-grained decomposition, with equal test
+coverage.** The non-obvious part: the cost driver is **NOT ticket count** — the 3-ticket run cost
+nearly as much as the 6-ticket run. Every extra ticket pays: (a) a fresh builder **cold-reading the
+growing codebase**, (b) its **own review session**, (c) its own worktree **setup** (`install`), and
+(d) **fix-and-merge conflict overhead** if parallel leaves touch a shared file. One mega ticket builds
+in ONE warm context: no re-reads, one review, one setup, no conflict. **Parallel fanout buys wall-clock,
+not tokens** — leaves run concurrently but each still pays the cold-read + conflict tax.
+
+So pick the SMALLEST number of tickets the work allows:
+
+- **≤ ~3-4k LOC / fits one agent context → ONE mega ticket + a thorough `SPEC.md`** at the repo root
+  (full architecture, entities, routes, conventions, "make the whole suite green"). Cheapest and fastest.
+  This overrides the fan-out advice below — don't manufacture a 10-ticket epic for a small app.
+- **Larger, optimizing tokens → a few sequential coarse chunks** (foundation = core+domain+persistence+
+  services in one ticket; then a couple of big slices). Accept the re-read cost; still far fewer reviews.
+- **Larger, optimizing wall-clock → foundation → parallel fanout** (the rest of this skill). Only here
+  does the fan-out epic pay off — and only if the leaves touch **disjoint files** (Step 2's hot-file rule);
+  otherwise you pay the fix-and-merge conflict tax (observed live: two leaves both created `FeedService`).
+- **Never fine-grained layer-per-ticket chains** — serial AND expensive, zero quality gain.
+
+The rest of this skill (fan-out epic, resident watch, close-out) applies to the **larger** tiers. For a
+small one-mega-ticket build you still do preflight (Step 1) + verify the merge landed on master + the
+completion contract, but you skip the fan-out seeding.
+
 ## Step 1 — Preflight (assert, don't assume)
 
 A new project drives hands-off only if ALL of these hold. Read `GET /api/preferences/settings`; fix wrong ones via **`PUT /api/preferences/settings` with `curl` (Bash)** — never `Invoke-RestMethod -Put` (silently no-ops; see CLAUDE.md PowerShell rules).
