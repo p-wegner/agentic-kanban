@@ -52,7 +52,6 @@ import { executeWorkspaceMerge } from "./workspace-merge-execution.service.js";
 import { runWorkspacePostMergeCleanup } from "./workspace-merge-cleanup.service.js";
 import { prevalidateSiblingMerges, executeSiblingMerges } from "./workspace-repos.service.js";
 import { getAllWorkspaceRepos } from "./workspace-all-repos.js";
-import { listWorkspaceRepos } from "../repositories/repo.repository.js";
 import { getRepoMergeStatus } from "./repo-merge-status.service.js";
 import { checkAlreadyMerged as checkAlreadyMergedImpl, reconcileAlreadyMerged as reconcileAlreadyMergedImpl } from "./workspace-already-merged.service.js";
 import { resolveMergeGate, RUN_GATE, type MergeGateToken } from "./pre-merge-gate.service.js";
@@ -484,7 +483,6 @@ export function createWorkspaceMergeService(deps: {
     // Multi-repo (#72): a cross-cutting ticket touches every repo, so update-base must
     // rebase/merge the leading repo AND every sibling worktree — otherwise a trailing
     // cross-cutting ticket stays behind base in the siblings and strands on merge.
-    const siblingRows = await listWorkspaceRepos(id, database);
 
     // Refuse if main checkout HEAD has drifted off the target branch (consistent with /merge guard).
     const currentHeadBranch = await gitService.getCurrentBranch(repoPath);
@@ -497,48 +495,50 @@ export function createWorkspaceMergeService(deps: {
       );
     }
 
-    // Stop any processes the agent left running in the worktree before we rewrite history.
-    await killWorktreeProcesses(workspace.workingDir, `update-base:pre`);
-
     const runUpdate = (worktree: string, branch: string | null, base: string) =>
       mode === "merge"
         ? gitService.mergeBaseIntoBranch(worktree, base)
         : gitService.rebaseOntoBase(worktree, base, branch ?? "", { preferLocalBase: true });
 
-    let result: { success: boolean; conflictingFiles?: string[]; error?: string } = await runUpdate(workspace.workingDir, workspace.branch, baseBranch);
-
-    // And again after - rebase/merge can spawn helpers (hook scripts, editors) that linger.
-    await killWorktreeProcesses(workspace.workingDir, `update-base:post`);
-
-    // Rebase/merge each sibling worktree onto its own base. Conflicts are namespaced by
-    // repo and aggregated; overall success requires every repo to succeed. A sibling whose
-    // worktree is gone (already landed/cleaned) is skipped. Best-effort per sibling so one
-    // unreachable repo doesn't abort the others — its failure surfaces in the result.
-    for (const repo of siblingRows) {
-      if (!repo.worktreePath || !repo.branch) continue;
-      const repoBase = requireBaseBranch(repo.baseBranch || baseBranch);
-      const ns = repo.name ?? repo.path;
-      await killWorktreeProcesses(repo.worktreePath, `update-base:sibling-pre:${ns}`);
+    // One loop over the uniform repo view (#168): rebase/merge the leading repo (row 0) AND every
+    // sibling worktree onto its own base — replacing the old "leading line, then sibling loop".
+    // Leading conflicts are reported bare and its errors PROPAGATE (unchanged); sibling conflicts
+    // are namespaced by repo and a sibling error is caught so one unreachable repo doesn't abort the
+    // others. A repo whose worktree/branch is gone (already landed/cleaned) is skipped. Overall
+    // success requires every repo. Processes are killed around each history rewrite.
+    const allRepos = await getAllWorkspaceRepos(id, database);
+    let result: { success: boolean; conflictingFiles?: string[]; error?: string } = { success: true };
+    for (const ref of allRepos) {
+      const isLeading = ref.kind === "leading";
+      const worktree = isLeading ? workspace.workingDir : ref.worktreePath;
+      if (!worktree || !ref.branch) continue;
+      const repoBase = isLeading ? baseBranch : requireBaseBranch(ref.baseBranch || baseBranch);
+      const ns = isLeading ? null : (ref.name ?? ref.path);
+      await killWorktreeProcesses(worktree, isLeading ? `update-base:pre` : `update-base:sibling-pre:${ns}`);
       let repoResult: { success: boolean; conflictingFiles?: string[]; error?: string };
-      try {
-        repoResult = await runUpdate(repo.worktreePath, repo.branch, repoBase);
-      } catch (err) {
-        repoResult = { success: false, error: `${ns}: ${err instanceof Error ? err.message : String(err)}` };
+      if (isLeading) {
+        repoResult = await runUpdate(worktree, ref.branch, repoBase); // leading errors propagate (as before)
+      } else {
+        try {
+          repoResult = await runUpdate(worktree, ref.branch, repoBase);
+        } catch (err) {
+          repoResult = { success: false, error: `${ns}: ${err instanceof Error ? err.message : String(err)}` };
+        }
       }
-      await killWorktreeProcesses(repo.worktreePath, `update-base:sibling-post:${ns}`);
+      await killWorktreeProcesses(worktree, isLeading ? `update-base:post` : `update-base:sibling-post:${ns}`);
       if (!repoResult.success) {
         result = {
           success: false,
           conflictingFiles: [
             ...(result.conflictingFiles ?? []),
-            ...(repoResult.conflictingFiles ?? []).map((f) => `${ns}::${f}`),
+            ...(repoResult.conflictingFiles ?? []).map((f) => (ns ? `${ns}::${f}` : f)),
           ],
           error: [result.error, repoResult.error].filter(Boolean).join("; ") || result.error,
         };
       }
     }
 
-    console.log(`[workspace-service] update-base: workspaceId=${id} mode=${mode} repos=${1 + siblingRows.length} success=${result.success} conflicts=${result.conflictingFiles?.length ?? 0}`);
+    console.log(`[workspace-service] update-base: workspaceId=${id} mode=${mode} repos=${allRepos.length} success=${result.success} conflicts=${result.conflictingFiles?.length ?? 0}`);
 
     if (result.success) {
       await computeWorkspaceCodeMetrics(id, database).catch(() => null);
