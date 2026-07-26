@@ -21,21 +21,30 @@ import { join } from "node:path";
  * read-only mount cannot work, and a single-file bind mount is fragile because the
  * refresh replaces the inode by atomic rename.
  *
- * The policy is: ONE board-owned directory PER SOURCE PROFILE, holding copies of
- * only the auth/config files, mounted read-write, and RESEEDED from the host
- * profile on every provision.
+ * The policy is: ONE board-owned directory PER (SOURCE PROFILE, WORKSPACE), holding
+ * copies of only the auth/config files, mounted read-write, and RESEEDED from the
+ * host profile on every provision.
  *
- *  - Per source profile, not per workspace: containers sharing a profile must share
- *    one credentials file, or each would refresh independently against the same
- *    upstream session. Different profiles (subscription rotation) stay isolated,
- *    which is what rotation requires.
+ *  - Per workspace, not just per source profile (#157): an earlier version of this
+ *    policy shared ONE directory across every concurrent container of a profile.
+ *    That directory is mounted read-write and RESEEDED on every provision, so
+ *    provisioning workspace B while workspace A's container is live copied the
+ *    HOST's `.credentials.json` over A's directory mid-session — clobbering the
+ *    refresh token A's container had just rotated and invalidating A's session.
+ *    Scoping the copy to `(profileKey, workspaceId)` means B's reseed writes its
+ *    own directory, never touching A's live mount. The copy is cheap (four small
+ *    files), so paying it per workspace instead of per profile is not a real cost.
  *  - Reseeded per provision: bounds divergence between the host profile and the
  *    container's copy to a single session's lifetime.
  *  - RESIDUAL RISK, stated plainly rather than papered over: the container refreshes
  *    against its COPY. If the upstream rotates refresh tokens on use, the host's
  *    copy can go stale and need a re-login. This is the accepted cost of not giving
  *    the agent write access to the live credential file; it is why the reseed exists
- *    and why this stays behind an off-by-default setting.
+ *    and why this stays behind an off-by-default setting. Because each workspace now
+ *    holds its OWN copy, two sibling workspaces on the same profile that both refresh
+ *    around the same time can each rotate the token independently against the same
+ *    upstream origin — the same class of race, just moved from "guaranteed on every
+ *    provision" to "only if both containers happen to refresh concurrently."
  */
 
 /** Files copied into the narrow profile. Everything else in `~/.claude` stays out. */
@@ -79,6 +88,13 @@ export function provisionContainerProfile(opts: {
   sourceDir: string;
   /** Names the target directory. Use the profile/subscription name, or "default". */
   profileKey: string;
+  /**
+   * Scopes the copy to one workspace (#157) so concurrent containers of the same
+   * profile each reseed their OWN directory instead of clobbering a sibling's live,
+   * just-rotated credentials. Omit only for legacy/test callers that intentionally
+   * want the old shared per-profile directory.
+   */
+  workspaceId?: string;
   /** When set, also seed `settings_<name>.json` for a settings-file profile. */
   settingsProfile?: string;
   /** Overridable for tests; defaults to the host user's home. */
@@ -86,9 +102,11 @@ export function provisionContainerProfile(opts: {
   /** Overridable for tests; defaults to `~/.agentic-kanban`. */
   stateDir?: string;
 }): ContainerProfile {
-  const { sourceDir, profileKey, settingsProfile, hostHome = homedir(), stateDir } = opts;
+  const { sourceDir, profileKey, workspaceId, settingsProfile, hostHome = homedir(), stateDir } = opts;
 
-  const hostDir = join(containerProfileRoot(stateDir), sanitizeProfileKey(profileKey));
+  const hostDir = workspaceId
+    ? join(containerProfileRoot(stateDir), sanitizeProfileKey(profileKey), sanitizeProfileKey(workspaceId))
+    : join(containerProfileRoot(stateDir), sanitizeProfileKey(profileKey));
   mkdirSync(hostDir, { recursive: true });
 
   const seeded: string[] = [];
