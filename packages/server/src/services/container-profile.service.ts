@@ -1,6 +1,7 @@
 import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { encodeTranscriptCwd } from "@agentic-kanban/shared/lib/transcript-cwd-encoding";
 
 /**
  * A minimal, board-owned Claude profile directory for containerized builders (#133),
@@ -189,13 +190,7 @@ export function writeContainerMcpConfig(opts: {
   return path;
 }
 
-/**
- * Claude's project-directory name encoding: `:`, `\` and `/` all become `-`.
- * Mirrors `butler-transcripts.service.ts`, which reads transcripts back out.
- */
-export function encodeTranscriptCwd(cwd: string): string {
-  return cwd.replace(/[:\\/]/g, "-");
-}
+export { encodeTranscriptCwd };
 
 /**
  * The host directory Claude would write this worktree's transcripts into, created if

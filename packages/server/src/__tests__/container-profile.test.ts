@@ -207,6 +207,14 @@ describe("transcriptMount — containerized sessions stay inspectable", () => {
     expect(encodeTranscriptCwd("/workspaces/app")).toBe("-workspaces-app");
   });
 
+  it("encodes dots too, matching a real dotted worktree path on disk (#159)", () => {
+    // Pinned against a real transcript dir name observed under ~/.claude/projects:
+    // C:\projects\andrena\.worktrees\ak-158-landing -> C--projects-andrena--worktrees-ak-158-landing
+    expect(encodeTranscriptCwd("C:\\projects\\andrena\\.worktrees\\ak-158-landing")).toBe(
+      "C--projects-andrena--worktrees-ak-158-landing"
+    );
+  });
+
   it("gives each worktree its OWN transcript dir, not the whole projects tree", () => {
     const a = transcriptMount({
       worktreePath: "C:/projects/a",
