@@ -17,9 +17,12 @@ You are the **epic orchestrator** for a brand-new project. You are NOT done when
 
 ## Step 0 — Right-size the decomposition (cost tiers)
 
-**Before you seed any epic, decide the granularity — it dominates cost.** A 3-way board experiment
-(2026-07-26, `docs/board-runs/greenfield-bootstrap-strategy.md`) built three equivalent ~4k-LOC PHP
-apps with three strategies (same provider, same day). Result, cheapest signal = total $:
+**Before you seed any epic, decide the granularity — it dominates cost.** Two board experiments
+(2026-07-26, `docs/board-runs/greenfield-bootstrap-strategy.md`) built equivalent apps with different
+decomposition strategies (same provider). Cheapest signal = total $ per KLOC; all runs ended green, so
+the gaps are pure strategy overhead, not quality.
+
+*Round 1 — three ~4k-LOC single-repo PHP apps:*
 
 | Strategy | $ | LOC | $/KLOC |
 |---|---|---|---|
@@ -27,25 +30,42 @@ apps with three strategies (same provider, same day). Result, cheapest signal = 
 | foundation → 2 parallel leaves | 10.73 | 4718 | 2.27 |
 | 6 fine layer-per-ticket tickets | 12.41 | 4354 | 2.85 |
 
-**A single mega ticket is ~2.7x cheaper per KLOC than fine-grained decomposition, with equal test
-coverage.** The non-obvious part: the cost driver is **NOT ticket count** — the 3-ticket run cost
-nearly as much as the 6-ticket run. Every extra ticket pays: (a) a fresh builder **cold-reading the
-growing codebase**, (b) its **own review session**, (c) its own worktree **setup** (`install`), and
-(d) **fix-and-merge conflict overhead** if parallel leaves touch a shared file. One mega ticket builds
-in ONE warm context: no re-reads, one review, one setup, no conflict. **Parallel fanout buys wall-clock,
-not tokens** — leaves run concurrently but each still pays the cold-read + conflict tax.
+*Round 2 — three multi-repo TS apps (Hono backend + React frontend), 5k-LOC target:*
 
-So pick the SMALLEST number of tickets the work allows:
+| Strategy | Tickets | $ | LOC | $/KLOC |
+|---|---|---|---|---|
+| repo-mega (1 mega ticket per repo) | 2 | **6.75** | 3377 | **2.00** |
+| coarse sequential (found → feat → FE) | 3 | 9.83 | 3761 | **2.61** |
+| contract-first fanout (contract → 3-wide wave → leaf) | 5 | 17.02 | 4095 | **4.16** |
 
-- **≤ ~3-4k LOC / fits one agent context → ONE mega ticket + a thorough `SPEC.md`** at the repo root
-  (full architecture, entities, routes, conventions, "make the whole suite green"). Cheapest and fastest.
-  This overrides the fan-out advice below — don't manufacture a 10-ticket epic for a small app.
-- **Larger, optimizing tokens → a few sequential coarse chunks** (foundation = core+domain+persistence+
-  services in one ticket; then a couple of big slices). Accept the re-read cost; still far fewer reviews.
-- **Larger, optimizing wall-clock → foundation → parallel fanout** (the rest of this skill). Only here
-  does the fan-out epic pay off — and only if the leaves touch **disjoint files** (Step 2's hot-file rule);
-  otherwise you pay the fix-and-merge conflict tax (observed live: two leaves both created `FeedService`).
+**$/KLOC rises steeply with ticket count — confirmed twice.** The cost driver is **NOT ticket count per
+se** but what each extra ticket pays: (a) a fresh builder **cold-reading the growing codebase**, (b) its
+**own review session**, (c) its own worktree **setup**, (d) **fix-and-merge conflict overhead** if
+parallel leaves touch a shared file. One mega ticket builds in ONE warm context and pays none of it.
+**Parallel fanout buys wall-clock, not tokens** (Round 2 fanout = 2x/KLOC vs minimal decomposition).
+
+**A single context builds to COHERENCE, not to a LOC target.** Round 2's per-repo megas plateaued at
+~1.7k LOC/repo (3377 vs a 5k goal); none of the three hit 5k, and the *more*-decomposed run got closest
+because each ticket adds its own slice. So the mega sweet spot is **per-context (~1.5–2k LOC/repo,
+~3–4k total)**; above that you MUST decompose and pay more $/KLOC.
+
+Pick the SMALLEST number of tickets the work allows:
+
+- **≤ ~3–4k LOC / fits one context → ONE mega ticket + a thorough `SPEC.md`** (or, multi-repo, **one mega
+  ticket per repo** — cheapest of all at $2.00/KLOC). Overrides the fan-out advice below; don't manufacture
+  a 10-ticket epic for a small app.
+- **Larger, optimizing tokens → a few COARSE sequential chunks** (foundation = core+domain+persistence+
+  services in one ticket; then a couple of big slices). This is the value sweet spot for big apps —
+  $2.61/KLOC, near the mega floor and far below fanout. **Prefer coarse-sequential over fanout by default.**
+- **Larger, and wall-clock is the priority → foundation → parallel fanout** (the rest of this skill). Only
+  then does the fan-out epic pay off, and only if the leaves touch **disjoint files** (Step 2's hot-file
+  rule) — else you pay the fix-and-merge conflict tax (seen live: two leaves both created `FeedService`).
 - **Never fine-grained layer-per-ticket chains** — serial AND expensive, zero quality gain.
+
+**Multi-repo (backend + frontend as separate repos):** register the backend as the leading repo (the
+verify gate runs there) + the frontend as a sibling (`POST /api/projects/:id/repos`, absolute path +
+per-repo `setupScript`); since separate repos can't share a TS package, carry the API contract as a
+`docs/api-contract.md` in the backend that frontend tickets read.
 
 The rest of this skill (fan-out epic, resident watch, close-out) applies to the **larger** tiers. For a
 small one-mega-ticket build you still do preflight (Step 1) + verify the merge landed on master + the
@@ -65,6 +85,7 @@ A new project drives hands-off only if ALL of these hold. Read `GET /api/prefere
 | **Tickets use an eligible issueType** | epic tickets are `task`/`bug` (NOT `feature`/`enhancement`) and titles don't start `feature:`/`enhancement:` | monitor auto-start skips feature/enhancement-typed issues (#773) → the whole epic is invisible. Seed as `task` (or convert via `PATCH /api/issues/<id> {"issueType":"task"}`). |
 | **Verify gate set** | `verify_script_<projectId>` is a real build/test cmd | `PUT {"verify_script_<projectId>":"pnpm install && pnpm build"}` — the #531 quality gate runs it in the worktree post-session and WITHHOLDS merge on non-zero. This is how the dev-board's verify-before-merge ports to the toy stack ([[project_timetracker_drive_and_autonomy_obstacles]]). |
 | Per-project autodrive ON | `board_autodrive_<projectId> == "true"` | PUT `{"board_autodrive_<projectId>":"true"}` |
+| **Post-merge cascade ON** | `dependency_auto_chain == "true"` | PUT `{"dependency_auto_chain":"true"}`. `resolveStartPolicy.postMergeCascade` gates on it — with it OFF, `start_mode=monitor` will NOT auto-start the next wave right after a blocker merges (the regular cycle is unreliable for Backlog too). Combined with the `issueType` row above, this is the #1 reason a monitor-mode project sits idle after a merge (hit live 2026-07-26 — the whole wave stalled in Backlog). If auto-start still won't fire, drive manually: launch each unblocked ticket via `POST /api/workspaces` as its deps reach Done (auto-review/auto-merge/fix-and-merge are event-driven and work regardless). |
 | Optional per-project Conductor ON | `board_conductor_<projectId> == "true"` or JSON config | PUT `{"board_conductor_<projectId>":"{\"enabled\":true,\"agent\":\"codex\",\"cadenceSeconds\":1800}"}` |
 | Auto-merge ON + monitor strategy | `auto_merge == "true"`, strategy resolves to `monitor`, `auto_merge_in_review == "true"` | PUT settings accordingly |
 | WIP target ≥ 2 (real parallelism) | `board_strategy_<projectId>` (`activeAgentsTarget`) or legacy `nudge_wip_limit` | set `board_strategy_<projectId>` `{activeAgentsTarget:3, maxNewStartsPerCycle:3, backlogFloor:0}` |
