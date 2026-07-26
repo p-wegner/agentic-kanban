@@ -11,8 +11,7 @@ import { basename } from "node:path";
 import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import type { Database, TransactionClient } from "../db/index.js";
 import { listProjectRepos, listWorkspaceRepos, insertWorkspaceRepo, setWorkspaceRepoMergedSha, findLiveSiblingSharers, findCrossProjectBranchHolders, type RepoRow } from "../repositories/repo.repository.js";
-import { getWorkspaceById, resolveProjectRepo } from "../repositories/workspace.repository.js";
-import { stampWorkspaceMergedHeadSha } from "../repositories/workspace-merge-execution.repository.js";
+import { getAllWorkspaceRepos, siblingRefFromRow, stampRepoMergedHeadSha, type WorkspaceRepoRef } from "./workspace-all-repos.js";
 import { WorkspaceError, acquireRepoMergeLock, type GitService } from "./workspace-internals.js";
 import { runMergeCore } from "./merge-executor.service.js";
 
@@ -349,68 +348,20 @@ export async function stampReconciledSiblingMerges(params: {
     console.warn(`[workspace-merge] reconcile stamp: failed to list repos for ${workspaceId}: ${err instanceof Error ? err.message : String(err)}`);
     return 0;
   }
+  const now = new Date().toISOString();
   let stamped = 0;
-  for (const repo of rows) {
-    if (repo.mergedHeadSha) continue; // already recorded by executeSiblingMerges
-    if (!repo.branch) continue;
-    // The commit that the (agent-performed) sibling merge landed. Captured from the
-    // branch ref while it still exists — this is what survives the upcoming cleanup.
-    let branchTip: string;
-    try {
-      branchTip = (await gitService.revParse(repo.path, repo.branch)).trim();
-    } catch {
-      continue; // branch ref gone → nothing to capture
-    }
-    if (!branchTip) continue;
-    // Only stamp repos that genuinely contributed commits. Post-landing the branch is an
-    // ancestor of base (0 commits AHEAD of base), so measure against the ORIGINAL cut
-    // point instead. countUniqueCommits never throws (0 on git error); resolve the base
-    // ref first so an unresolvable cut point does not read as "no work".
-    const base = repo.baseCommitSha ?? repo.baseBranch;
-    if (!base) continue;
-    let historic = 0;
-    try {
-      await gitService.revParse(repo.path, base);
-      historic = await gitService.countUniqueCommits(repo.path, base, branchTip);
-    } catch {
-      historic = 0;
-    }
-    if (historic === 0) continue;
-    await setWorkspaceRepoMergedSha(repo.id, branchTip, database);
-    stamped++;
-    console.log(`[workspace-merge] reconcile stamp: sibling ${repo.name ?? repo.path} mergedHeadSha=${branchTip} (${historic} commit(s) landed)`);
+  for (const row of rows) {
+    if (await stampReconciledRepoMerge(siblingRefFromRow(row), gitService, database, now)) stamped++;
   }
   return stamped;
 }
 
 /**
  * Stamp `mergedHeadSha` on the LEADING workspace row when its branch has ALREADY landed but
- * was never recorded — the fix-and-merge / reconcile-as-done close path (#115). This is the
- * symmetric mirror of {@link stampReconciledSiblingMerges}, which stamps the SIBLING rows.
- *
- * The clean auto-merge path (`executeMerge` → `stampMergedAtEarly`) stamps the workspace's
- * `mergedHeadSha` when the board itself runs the leading git merge. The reconcile-as-done path
- * (`reconcileAlreadyMerged`) instead accepts a leading branch the RECONCILER AGENT already
- * merged into base by hand, so nothing stamps `mergedHeadSha`. `closeWorkspace` sets `mergedAt`
- * but never `mergedHeadSha`. Without it, once the leading feature branch is cleaned up,
- * `getRepoMergeStatus` (#75) falls back to `workspace.mergedHeadSha` for the historic tip, finds
- * it null, and reads the leading repo as `hasWork:false / merged:false` — a false negative on a
- * fully-landed multi-repo merge (observed in multirepo-lab rounds 10/11/13).
- *
- * Records positive evidence from git ground truth: capture the leading branch tip while the ref
- * still exists and stamp it as the workspace `mergedHeadSha` (mergedAt is left to the close path).
- *
- * Safety / idempotency (mirrors the sibling stamp):
- * - Skips if `mergedHeadSha` is already set — never overwrites the clean auto-merge stamp.
- * - Skips if the branch ref is gone (can't capture a landed tip) or there is no `baseCommitSha`
- *   cut point to measure against.
- * - Only stamps when the branch introduced real commits relative to its ORIGINAL cut point
- *   (`baseCommitSha`); a sibling-only ticket whose leading branch has 0 historic commits stays
- *   unstamped, so the leading repo correctly reads no-work (preserving #75/#114).
- * - Callers gate on the workspace being genuinely already-merged (`checkAlreadyMerged`), so a
- *   branch 0-ahead of base but >0 vs its cut point has demonstrably landed.
- *
- * Returns true when a row was stamped. No-op (false) when not applicable.
+ * was never recorded — the fix-and-merge / reconcile-as-done close path (#115). Thin wrapper
+ * over the shared {@link stampReconciledRepoMerge} core (the leading/sibling algorithm is now
+ * ONE function, #168); kept as a named export because callers/tests reference it directly.
+ * Returns true when the leading row was stamped, false otherwise.
  */
 export async function stampReconciledLeadingMerge(params: {
   gitService: GitService;
@@ -420,45 +371,97 @@ export async function stampReconciledLeadingMerge(params: {
 }): Promise<boolean> {
   const { gitService, database, workspaceId } = params;
   const now = params.now ?? new Date().toISOString();
-  let workspace;
+  let repos: WorkspaceRepoRef[];
   try {
-    workspace = await getWorkspaceById(workspaceId, database);
+    repos = await getAllWorkspaceRepos(workspaceId, database);
   } catch (err) {
     console.warn(`[workspace-merge] reconcile leading stamp: failed to load workspace ${workspaceId}: ${err instanceof Error ? err.message : String(err)}`);
     return false;
   }
-  if (!workspace) return false;
-  if (workspace.mergedHeadSha) return false; // already recorded by the clean auto-merge path
-  if (!workspace.branch) return false;
-  if (!workspace.baseCommitSha) return false; // no cut point → cannot verify landed work
-  let repoPath: string;
+  const leading = repos.find((r) => r.kind === "leading");
+  if (!leading) return false;
+  return stampReconciledRepoMerge(leading, gitService, database, now);
+}
+
+/**
+ * Stamp EVERY repo the workspace spans (leading + siblings) in one pass over the uniform repo
+ * view (#168) — the single call that replaces the historical `stampReconciledSiblingMerges`
+ * + `stampReconciledLeadingMerge` back-to-back pair at reconcile close sites. Idempotent:
+ * already-stamped repos are skipped, so calling it after `executeSiblingMerges` re-stamps nothing.
+ */
+export async function stampReconciledMerges(params: {
+  gitService: GitService;
+  database: Database;
+  workspaceId: string;
+  now?: string;
+}): Promise<{ leading: boolean; siblings: number }> {
+  const { gitService, database, workspaceId } = params;
+  const now = params.now ?? new Date().toISOString();
+  let repos: WorkspaceRepoRef[];
   try {
-    ({ repoPath } = await resolveProjectRepo(workspaceId, database));
-  } catch {
-    return false;
+    repos = await getAllWorkspaceRepos(workspaceId, database);
+  } catch (err) {
+    console.warn(`[workspace-merge] reconcile stamp: failed to list repos for ${workspaceId}: ${err instanceof Error ? err.message : String(err)}`);
+    return { leading: false, siblings: 0 };
   }
-  // The commit the (agent-performed) leading merge landed. Captured from the branch ref while it
-  // still exists — this is what survives the upcoming branch cleanup and is read as the historic tip.
+  let leading = false;
+  let siblings = 0;
+  for (const ref of repos) {
+    const ok = await stampReconciledRepoMerge(ref, gitService, database, now);
+    if (ref.kind === "leading") leading = ok;
+    else if (ok) siblings++;
+  }
+  return { leading, siblings };
+}
+
+/**
+ * The single per-repo reconcile-stamp algorithm shared by leading and sibling (#168 — collapses
+ * the two near-identical 50-line mirrors `stampReconciledSiblingMerges` /
+ * `stampReconciledLeadingMerge`). Records positive git ground-truth evidence for a repo whose
+ * branch has ALREADY landed but was never stamped (agent-performed merge / reconcile-as-done),
+ * capturing the branch tip while the ref still exists so it survives the upcoming cleanup.
+ * MUST run BEFORE branch cleanup force-deletes the refs.
+ *
+ * Safety / idempotency (identical for both kinds):
+ * - Skips if `mergedHeadSha` is already set — never overwrites executeSiblingMerges / clean auto-merge.
+ * - Skips if the branch ref is gone or there is no cut point (`baseCommitSha ?? baseBranch`).
+ * - Only stamps when the branch introduced real commits vs its ORIGINAL cut point; a sibling-only
+ *   ticket's empty leading branch (0 historic commits) stays unstamped, preserving #75/#114.
+ * The write routes to the correct storage via {@link stampRepoMergedHeadSha} (workspace row vs repos row).
+ */
+async function stampReconciledRepoMerge(
+  ref: WorkspaceRepoRef,
+  gitService: GitService,
+  database: Database,
+  now: string,
+): Promise<boolean> {
+  if (ref.mergedHeadSha) return false; // already recorded
+  if (!ref.branch) return false;
+  // Post-landing the branch is an ancestor of base (0 commits AHEAD), so measure against the
+  // ORIGINAL cut point instead. Prefer the recorded cut commit; fall back to the base branch.
+  const base = ref.baseCommitSha ?? ref.baseBranch;
+  if (!base) return false; // no cut point → cannot verify landed work
+  // The commit the (agent-performed) merge landed. Captured from the branch ref while it still
+  // exists — this is what survives the upcoming branch cleanup and is read as the historic tip.
   let branchTip: string;
   try {
-    branchTip = (await gitService.revParse(repoPath, workspace.branch)).trim();
+    branchTip = (await gitService.revParse(ref.path, ref.branch)).trim();
   } catch {
     return false; // branch ref gone → nothing to capture
   }
   if (!branchTip) return false;
-  // Post-landing the branch is an ancestor of base (0 commits AHEAD), so measure against the
-  // ORIGINAL cut point. countUniqueCommits never throws (0 on git error); resolve the base ref
-  // first so an unresolvable cut point does not read as "no work".
+  // countUniqueCommits never throws (0 on git error); resolve the base ref first so an
+  // unresolvable cut point does not read as "no work".
   let historic = 0;
   try {
-    await gitService.revParse(repoPath, workspace.baseCommitSha);
-    historic = await gitService.countUniqueCommits(repoPath, workspace.baseCommitSha, branchTip);
+    await gitService.revParse(ref.path, base);
+    historic = await gitService.countUniqueCommits(ref.path, base, branchTip);
   } catch {
     historic = 0;
   }
-  if (historic === 0) return false; // leading contributed nothing (sibling-only ticket) — leave unstamped
-  await stampWorkspaceMergedHeadSha(workspaceId, branchTip, now, database);
-  console.log(`[workspace-merge] reconcile stamp: leading ${repoPath} mergedHeadSha=${branchTip} (${historic} commit(s) landed)`);
+  if (historic === 0) return false; // contributed nothing — leave unstamped
+  await stampRepoMergedHeadSha(ref, branchTip, now, database);
+  console.log(`[workspace-merge] reconcile stamp: ${ref.kind} ${ref.name ?? ref.path} mergedHeadSha=${branchTip} (${historic} commit(s) landed)`);
   return true;
 }
 
