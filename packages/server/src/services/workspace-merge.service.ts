@@ -51,6 +51,7 @@ import {
 import { executeWorkspaceMerge } from "./workspace-merge-execution.service.js";
 import { runWorkspacePostMergeCleanup } from "./workspace-merge-cleanup.service.js";
 import { prevalidateSiblingMerges, executeSiblingMerges } from "./workspace-repos.service.js";
+import { getAllWorkspaceRepos } from "./workspace-all-repos.js";
 import { listWorkspaceRepos } from "../repositories/repo.repository.js";
 import { getRepoMergeStatus } from "./repo-merge-status.service.js";
 import { checkAlreadyMerged as checkAlreadyMergedImpl, reconcileAlreadyMerged as reconcileAlreadyMergedImpl } from "./workspace-already-merged.service.js";
@@ -588,8 +589,12 @@ export function createWorkspaceMergeService(deps: {
       throw new WorkspaceError("Workspace is closed", "BAD_REQUEST");
     }
 
-    const { defaultBranch } = await resolveProjectRepo(id, database);
-    const workspaceBase = requireBaseBranch(workspace.baseBranch || defaultBranch);
+    // One uniform lookup (#168): the leading repo (addressed by the LEADING_REPO_KEY sentinel)
+    // and the siblings come from the same list, so this no longer hand-assembles the leading
+    // block separately from a sibling `.find`.
+    const allRepos = await getAllWorkspaceRepos(id, database);
+    const leadingRef = allRepos.find((r) => r.kind === "leading");
+    const workspaceBase = requireBaseBranch(leadingRef?.baseBranch ?? workspace.baseBranch);
 
     let worktree: string;
     let branch: string;
@@ -603,7 +608,7 @@ export function createWorkspaceMergeService(deps: {
       base = workspaceBase;
       label = "leading";
     } else {
-      const repo = (await listWorkspaceRepos(id, database)).find((r) => r.name === repoName);
+      const repo = allRepos.find((r) => r.kind === "sibling" && r.name === repoName);
       if (!repo) throw new WorkspaceError(`Repo '${repoName}' is not part of this workspace`, "NOT_FOUND");
       if (!repo.worktreePath || !repo.branch) {
         throw new WorkspaceError(`Repo '${repoName}' has no worktree to rebase`, "BAD_REQUEST");
@@ -783,15 +788,19 @@ export function createWorkspaceMergeService(deps: {
     // blocked by prevalidateSiblingMerges forever. Rebase the leading worktree AND every sibling
     // worktree onto its own base (mirroring updateBase's sibling loop), then hand the agent an
     // explicit per-worktree reconcile checklist.
-    const states = [await rebaseOneWorktreeForFixAndMerge(workspace.workingDir, workspace.branch, baseBranch, "leading repo")];
-    const siblingRows = await listWorkspaceRepos(id, database);
-    for (const repo of siblingRows) {
-      if (!repo.worktreePath || !repo.branch) continue;
-      const ns = repo.name ?? repo.path;
-      const repoBase = requireBaseBranch(repo.baseBranch || baseBranch);
-      await killWorktreeProcesses(repo.worktreePath, `fix-and-merge:sibling-pre:${ns}`);
-      states.push(await rebaseOneWorktreeForFixAndMerge(repo.worktreePath, repo.branch, repoBase, `sibling repo '${ns}'`, ns));
-      await killWorktreeProcesses(repo.worktreePath, `fix-and-merge:sibling-post:${ns}`);
+    const states: Awaited<ReturnType<typeof rebaseOneWorktreeForFixAndMerge>>[] = [];
+    for (const ref of await getAllWorkspaceRepos(id, database)) {
+      const isLeading = ref.kind === "leading";
+      const worktree = isLeading ? workspace.workingDir : ref.worktreePath;
+      if (!worktree || !ref.branch) continue;
+      const ns = isLeading ? undefined : (ref.name ?? ref.path);
+      const repoBase = isLeading ? baseBranch : requireBaseBranch(ref.baseBranch || baseBranch);
+      const label = isLeading ? "leading repo" : `sibling repo '${ns}'`;
+      // Siblings get their processes killed around the history rewrite; the leading worktree's
+      // are killed by the caller path (mirrors the pre-#168 split — no leading kill here).
+      if (ns) await killWorktreeProcesses(worktree, `fix-and-merge:sibling-pre:${ns}`);
+      states.push(await rebaseOneWorktreeForFixAndMerge(worktree, ref.branch, repoBase, label, ns));
+      if (ns) await killWorktreeProcesses(worktree, `fix-and-merge:sibling-post:${ns}`);
     }
 
     await computeWorkspaceCodeMetrics(id, database).catch(() => null);
