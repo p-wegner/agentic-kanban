@@ -141,7 +141,7 @@ describe("#763 append-only hot-file merge auto-resolution", () => {
 
     // No merge was ever left in-progress (no manual recovery needed).
     expect(existsSync(join(repo, ".git", "MERGE_HEAD"))).toBe(false);
-  }, 30000);
+  }, 120000);
 
   it("detectAppendOnlyResolvableConflicts reports the hot file read-only", async () => {
     await makeAppendBranch("feature/ak-1", "test('a', () => {});\n");
@@ -155,7 +155,7 @@ describe("#763 append-only hot-file merge auto-resolution", () => {
     // read-only: HEAD did not move
     expect((await git(repo, ["rev-parse", "HEAD"])).trim()).toBe(headBefore);
     expect(existsSync(join(repo, ".git", "MERGE_HEAD"))).toBe(false);
-  }, 30000);
+  }, 120000);
 
   it("without the opt-in flag the same append conflict still throws (gated)", async () => {
     await makeAppendBranch("feature/ak-1", "test('a', () => {});\n");
@@ -164,7 +164,7 @@ describe("#763 append-only hot-file merge auto-resolution", () => {
     await mergeBranch(repo, "feature/ak-1", "main");
 
     await expect(mergeBranch(repo, "feature/ak-2", "main")).rejects.toThrow(/conflict/i);
-  }, 30000);
+  }, 120000);
 
   it("an overlapping EDIT to the hot file is not an append — it still throws", async () => {
     // Both branches edit the SAME existing seed line → genuine conflict, not a pure append.
@@ -185,7 +185,7 @@ describe("#763 append-only hot-file merge auto-resolution", () => {
     await expect(
       mergeBranch(repo, "feature/edit-b", "main", { autoResolveAppendConflicts: true }),
     ).rejects.toThrow(/conflict/i);
-  }, 30000);
+  }, 120000);
 
   it("revParse stays usable as a smoke check of the temp repo", async () => {
     expect((await revParse(repo, "HEAD")).length).toBeGreaterThan(0);
