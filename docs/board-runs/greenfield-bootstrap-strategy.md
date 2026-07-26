@@ -51,6 +51,31 @@ linkstash 140 tests.
   setup / verify land null. Bites because on this box the running server serves the home-fallback DB while
   the CLI writes the local-checkout DB, so REST is the only registration path that reaches the live board.
 
+## Round 2 — multi-repo TypeScript, 5k-LOC target
+
+Three projects, each **backend Hono repo (leading, verify-gated) + frontend React/Vite repo (sibling)**,
+in-memory repos, Vitest. **All 6 repos ended green** (typecheck+test). Cost per KLOC (total $):
+
+| Project | Strategy | Tickets | $ | LOC | $/KLOC |
+|---|---|---|---|---|---|
+| habithub | repo-mega (1 mega ticket per repo) | 2 | 6.75 | 3377 | **2.00** |
+| bugtrack | coarse sequential (found → feat → FE) | 3 | 9.83 | 3761 | **2.61** |
+| pantry | contract-first fanout (contract → 3-wide wave → leaf) | 5 | 17.02 | 4095 | **4.16** |
+
+Replicates Round 1: **$/KLOC rises steeply with ticket count** (fanout = 2×/KLOC vs minimal). New at scale:
+a single context **builds to coherence, not a LOC target** — per-repo megas plateaued ~1.7k LOC/repo, none
+of the three reached 5k, and the *more*-decomposed run got closest. So the mega sweet spot is per-context;
+above it, **coarse sequential** (near the mega floor, far below fanout) is the value pick — fanout only when
+wall-clock matters. Rules folded into `drive-new-project` Step 0.
+
+**Driving gap:** the in-process monitor would not auto-start Backlog wave tickets for a `start_mode=monitor`
+project — tickets were `issueType:feature` (monitor skips those, #773) and `dependency_auto_chain` was off
+(gates the post-merge cascade). Drove via a manual stateful loop instead; auto-review/auto-merge/fix-and-merge
+were event-driven and worked. Both gates added as blocking preflight rows in `drive-new-project` Step 1.
+
+Fixtures kept: `{habithub,pantry,bugtrack}-{backend,frontend}` at `C:\projects\andrena\exp\` — multi-repo TS
+refactor fixtures.
+
 ## Artifacts
 
 Fixtures kept at `C:\projects\andrena\exp\{quillcms,notekeep,linkstash}` (registered) — realistic ~4k-LOC
