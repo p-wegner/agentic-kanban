@@ -46,6 +46,7 @@
     "check:full": "pnpm check:arch && pnpm typecheck && pnpm lint && pnpm test && pnpm test:e2e && pnpm build",
     "test": "pnpm --filter agentic-kanban test",
     "test:mine": "node scripts/test-mine.mjs",
+    "test:docker": "pnpm --filter agentic-kanban test:docker",
     "test:unit": "pnpm test",
     "test:server": "pnpm --filter agentic-kanban test",
     "test:client": "pnpm --filter client test",
