@@ -249,10 +249,13 @@ export async function provisionContainerForWorkspace(
     : [];
 
   // Seed the narrow profile (#133) — credentials/settings/.claude.json only,
-  // reseeded every provision so the container's copy tracks the host's.
+  // reseeded every provision so the container's copy tracks the host's. Scoped to
+  // this workspace (#157) so provisioning a sibling workspace on the same profile
+  // never reseeds over a live container's just-rotated credentials.
   const narrowProfile = provisionContainerProfile({
     sourceDir: claudeConfigDir ?? join(hostHome, ".claude"),
     profileKey: claudeProfile ?? "default",
+    workspaceId,
     settingsProfile,
     hostHome,
   });
