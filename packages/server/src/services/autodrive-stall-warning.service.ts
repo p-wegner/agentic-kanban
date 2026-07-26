@@ -25,7 +25,8 @@ export type AutodriveStallCause =
   | "provider_usage_limit"
   | "fix_and_merge_zombie"
   | "in_review_auto_merge_stalled"
-  | "no_progress";
+  | "no_progress"
+  | "unblocked_backlog_not_started";
 
 export interface AutodriveStallWarning {
   type: "autodrive_stall";
@@ -154,7 +155,56 @@ function causeLabel(cause: AutodriveStallCause): string {
     case "fix_and_merge_zombie": return "fix-and-merge appears to be looping";
     case "in_review_auto_merge_stalled": return "In-Review work is eligible for auto-merge but has not landed";
     case "no_progress": return "no recent status, workspace, session, or merge progress";
+    case "unblocked_backlog_not_started": return "unblocked Backlog/Todo work is queued but was not auto-started this cycle";
   }
+}
+
+const SKIP_REASON_LABEL: Record<string, string> = {
+  wip_cap: "WIP cap reached",
+  no_auto_start_tag: "opted out via no-auto-start tag",
+  contention_gate: "deferred by file-contention gate",
+  cycle_start_cap: "hit this cycle's max-new-starts cap",
+  feature_type_excluded: "excluded by feature/enhancement type filter",
+};
+
+/**
+ * Turns the per-project skip tallies `runAutoStart` collects while declining to start
+ * otherwise-unblocked Backlog/Todo issues into `autodrive_stall`-shaped warnings, so a
+ * monitor-mode project that looks idle (#179 — `monitor-status` showed
+ * `merged:0, relaunched:0, nudged:0` with zero explanation) gets a named reason instead
+ * of silence. Reuses the `autodrive_stall` warning type/UI rather than inventing a new
+ * one, per the existing "Monitor warnings" rendering.
+ */
+export function buildAutoStartSkipWarnings(
+  skipByProject: Map<string, { issueNumbers: number[]; reasonCounts: Partial<Record<string, number>> }>,
+  projectNames: Map<string, string>,
+  now: Date,
+): AutodriveStallWarning[] {
+  const warnings: AutodriveStallWarning[] = [];
+  for (const [projectId, info] of skipByProject) {
+    const reasonParts = Object.entries(info.reasonCounts)
+      .filter(([, count]) => (count ?? 0) > 0)
+      .map(([reason, count]) => `${SKIP_REASON_LABEL[reason] ?? reason} (${count})`);
+    if (reasonParts.length === 0) continue;
+    const projectName = projectNames.get(projectId) ?? projectId;
+    const issueNumbers = [...info.issueNumbers].sort((a, b) => a - b);
+    const issuePreview = issueNumbers.length > 0 ? ` issue(s) #${issueNumbers.slice(0, 5).join(", #")}` : "";
+    warnings.push({
+      type: "autodrive_stall",
+      projectId,
+      projectName,
+      detectedAt: now.toISOString(),
+      thresholdMin: 0,
+      stalledForMin: 0,
+      lastProgressAt: now.toISOString(),
+      activeIssueCount: issueNumbers.length,
+      workspaceIds: [],
+      issueNumbers,
+      cause: "unblocked_backlog_not_started",
+      message: `Monitor-mode project "${projectName}" had unblocked work not auto-started this cycle for${issuePreview}: ${reasonParts.join(", ")}.`,
+    });
+  }
+  return warnings;
 }
 
 async function attachSessions(database: Database, rows: ActiveWorkspaceRow[]): Promise<ActiveWorkspaceWithSessions[]> {

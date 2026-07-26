@@ -109,6 +109,20 @@ export function notDriveOrEpicMetaSql() {
     AND NOT EXISTS (SELECT 1 FROM ${issueDependencies} WHERE (${issueDependencies.issueId} = ${issues.id} AND ${issueDependencies.type} = 'parent_of') OR (${issueDependencies.dependsOnId} = ${issues.id} AND ${issueDependencies.type} = 'child_of'))`;
 }
 
+/**
+ * Reasons the Backlog/Todo pull loop declined to start an otherwise-unblocked issue this
+ * cycle. Tallied per project so a monitor-mode project that looks idle (#179) gets an
+ * explained cause instead of silence — `dependency_unresolved` and "workspace already
+ * open" are NOT tallied here because they are expected, self-explanatory states, not
+ * surprises.
+ */
+export type AutoStartSkipReason = "wip_cap" | "no_auto_start_tag" | "contention_gate" | "cycle_start_cap" | "feature_type_excluded";
+
+export interface AutoStartSkipInfo {
+  issueNumbers: number[];
+  reasonCounts: Partial<Record<AutoStartSkipReason, number>>;
+}
+
 export interface AutoStartDeps {
   serverPort: number;
   boardEvents: ReturnType<typeof createBoardEvents>;
@@ -137,12 +151,20 @@ export interface AutoStartDeps {
   buildContentionGate?: BuildFileContentionGate;
 }
 
-export async function runAutoStart(prefMap: Map<string, string>, { serverPort, boardEvents, logMonitorAction, allowProject, isAutoDrivenProject = () => false, buildContentionGate = buildFileContentionGate }: AutoStartDeps) {
+export async function runAutoStart(prefMap: Map<string, string>, { serverPort, boardEvents, logMonitorAction, allowProject, isAutoDrivenProject = () => false, buildContentionGate = buildFileContentionGate }: AutoStartDeps): Promise<Map<string, AutoStartSkipInfo>> {
+  const skipInfo = new Map<string, AutoStartSkipInfo>();
+  const noteSkip = (projectId: string, issueNumber: number | null | undefined, reason: AutoStartSkipReason, count = 1) => {
+    let info = skipInfo.get(projectId);
+    if (!info) { info = { issueNumbers: [], reasonCounts: {} }; skipInfo.set(projectId, info); }
+    if (issueNumber != null && !info.issueNumbers.includes(issueNumber)) info.issueNumbers.push(issueNumber);
+    info.reasonCounts[reason] = (info.reasonCounts[reason] ?? 0) + count;
+  };
+
   const baseUrl = `http://127.0.0.1:${serverPort}`;
   const inProgressStatuses = (await db.select({ id: projectStatuses.id, projectId: projectStatuses.projectId }).from(projectStatuses)
     .where(sql`${projectStatuses.name} = 'In Progress'`))
     .filter((s) => allowProject(s.projectId));
-  if (inProgressStatuses.length === 0) return;
+  if (inProgressStatuses.length === 0) return skipInfo;
 
   // Per-project effective tunables (Strategy Bullseye when configured, else legacy
   // nudge prefs). `activeAgentsTarget` is the WIP target; `maxNewStartsPerCycle`
@@ -219,7 +241,26 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
     if (capacity.inactiveStale > 0) {
       console.log(`[monitor] Auto-start pull capacity for project ${inProgressSt.projectId}: active=${capacity.active}/${wipLimit} inactiveStale=${capacity.inactiveStale}`);
     }
-    if (currentWip >= wipLimit) continue;
+
+    if (currentWip >= wipLimit) {
+      // #179: WIP is full — but only worth surfacing as a "skipped" cause if there is
+      // actually queued Todo/Backlog work waiting behind it, not on every idle project.
+      const waitingTodoStatus = await db.select({ id: projectStatuses.id }).from(projectStatuses)
+        .where(sql`${projectStatuses.name} = 'Todo' AND ${projectStatuses.projectId} = ${inProgressSt.projectId}`).limit(1);
+      if (waitingTodoStatus.length > 0) {
+        const waitingStatusIds = [waitingTodoStatus[0].id];
+        if (allowFeatureTypes) {
+          const backlogStatus = await db.select({ id: projectStatuses.id }).from(projectStatuses)
+            .where(sql`${projectStatuses.name} = 'Backlog' AND ${projectStatuses.projectId} = ${inProgressSt.projectId}`).limit(1);
+          if (backlogStatus.length > 0) waitingStatusIds.push(backlogStatus[0].id);
+        }
+        const waitingCount = await db.select({ count: sql<number>`count(*)` }).from(issues)
+          .where(and(inArray(issues.statusId, waitingStatusIds), monitorEligibleIssueSql(allowFeatureTypes), notDriveOrEpicMetaSql()));
+        const waiting = Number(waitingCount[0]?.count ?? 0);
+        if (waiting > 0) noteSkip(inProgressSt.projectId, null, "wip_cap", waiting);
+      }
+      continue;
+    }
 
     const todoStatus = await db.select({ id: projectStatuses.id }).from(projectStatuses)
       .where(sql`${projectStatuses.name} = 'Todo' AND ${projectStatuses.projectId} = ${inProgressSt.projectId}`).limit(1);
@@ -259,13 +300,16 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
     let started = 0;
     for (const issue of todoIssues) {
       if (started >= slotsAvailable) break;
-      if (startsRemaining(inProgressSt.projectId) <= 0) break;
+      if (startsRemaining(inProgressSt.projectId) <= 0) {
+        noteSkip(inProgressSt.projectId, issue.issueNumber, "cycle_start_cap");
+        break;
+      }
       const existingWs = await db.select({ id: workspaces.id }).from(workspaces)
         .where(sql`${workspaces.issueId} = ${issue.id} AND ${workspaces.status} != 'closed'`).limit(1);
       if (existingWs.length > 0) continue;
-      if (!isMonitorEligibleIssue(issue, allowFeatureTypes)) continue;
-      if (await hasSkipAutoStartTag(issue.id)) continue;
-      if (shouldDeferForContention(contentionGate, issue.id, issue.issueNumber)) continue;
+      if (!isMonitorEligibleIssue(issue, allowFeatureTypes)) { noteSkip(inProgressSt.projectId, issue.issueNumber, "feature_type_excluded"); continue; }
+      if (await hasSkipAutoStartTag(issue.id)) { noteSkip(inProgressSt.projectId, issue.issueNumber, "no_auto_start_tag"); continue; }
+      if (shouldDeferForContention(contentionGate, issue.id, issue.issueNumber)) { noteSkip(inProgressSt.projectId, issue.issueNumber, "contention_gate"); continue; }
 
       const deps = await db.select({ dependsOnId: issueDependencies.dependsOnId }).from(issueDependencies)
         .where(sql`${issueDependencies.issueId} = ${issue.id} AND (${issueDependencies.type} = 'depends_on' OR ${issueDependencies.type} = 'blocked_by')`);
@@ -335,4 +379,6 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       }
     }
   }
+
+  return skipInfo;
 }
