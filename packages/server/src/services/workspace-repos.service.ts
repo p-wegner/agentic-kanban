@@ -6,6 +6,7 @@
  * which is the zero-regression mechanism.
  */
 
+import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import type { Database, TransactionClient } from "../db/index.js";
@@ -489,6 +490,11 @@ export async function cleanupSiblingWorktrees(
      * this so sibling semantics mirror the leading repo's, which those paths never
      * force-delete either. deleteWorkspace leaves it off: the workspace is being
      * destroyed outright, force-delete everything (stale-branch reuse guard).
+     *
+     * Also gates a DIRTY-WORKTREE guard (#153), independent of mergedHeadSha: a
+     * sibling worktree with uncommitted (tracked or untracked) changes is preserved
+     * even if its commits already landed, since `git worktree remove --force` would
+     * silently destroy that uncommitted work.
      */
     preserveUnmerged?: boolean;
   } = {},
@@ -515,6 +521,26 @@ export async function cleanupSiblingWorktrees(
       console.warn(`[workspaces] sibling cleanup: sharer check failed for ${repo.path}: ${err instanceof Error ? err.message : String(err)} — skipping removal to be safe`);
       continue;
     }
+    // Dirty-worktree guard (#153): a sibling worktree may carry UNCOMMITTED edits —
+    // tracked or untracked — that the pending-commit probe below never sees (it only
+    // reads landed commits). `git worktree remove --force` would silently destroy
+    // that work, so this check runs regardless of mergedHeadSha, ahead of the
+    // commit-based preserve logic. Skipped when the worktree directory is already
+    // gone (nothing left to lose); a git failure to read status is fail-closed
+    // (kept) since we cannot prove the worktree is safe to force-remove.
+    if (opts.preserveUnmerged === true && repo.worktreePath && existsSync(repo.worktreePath)) {
+      try {
+        const diff = await gitService.getWorkingTreeDiff(repo.worktreePath);
+        if (diff.trim() !== "") {
+          console.warn(`[workspaces] sibling cleanup: preserving ${repo.worktreePath} in ${repo.path} — uncommitted changes would be destroyed by worktree remove --force`);
+          continue;
+        }
+      } catch (err) {
+        console.warn(`[workspaces] sibling cleanup: preserving ${repo.worktreePath} in ${repo.path} — could not verify working-tree status: ${err instanceof Error ? err.message : String(err)}`);
+        continue;
+      }
+    }
+
     const mustPreserveCheck = opts.preserveUnmerged === true && !repo.mergedHeadSha;
     if (mustPreserveCheck && repo.branch && repo.worktreePath) {
       // Safe-delete probe requires the worktree gone first (the branch is checked

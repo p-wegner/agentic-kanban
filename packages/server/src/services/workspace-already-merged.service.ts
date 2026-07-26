@@ -14,6 +14,7 @@ import {
   WorkspaceError,
   requireBaseBranch,
   listPendingSiblingMerges,
+  listDirtySiblingWorktrees,
   type GitService,
 } from "./workspace-internals.js";
 
@@ -137,6 +138,23 @@ export async function checkAlreadyMerged(
       mergeCommitSha: null,
       issueNumber,
       reason,
+    };
+  }
+
+  // Sibling worktrees may hold UNCOMMITTED edits an agent never got around to
+  // committing — invisible to the pending-commit check above (#153). Reconciling
+  // as merged here would let `cleanupSiblingWorktrees`'s `git worktree remove
+  // --force` silently destroy that work. Refuse until it's committed or discarded.
+  const dirtySiblings = await listDirtySiblingWorktrees(gitService, database, id);
+  if (dirtySiblings.length > 0) {
+    return {
+      isAlreadyMerged: false,
+      branch: workspace.branch,
+      baseBranch,
+      mergeCommitSha: null,
+      issueNumber,
+      reason: "Sibling worktree(s) have uncommitted changes — refusing to reconcile as merged: " +
+        dirtySiblings.map((d) => `${d.repo.name ?? d.repo.path}${d.detail ? ` (unverifiable: ${d.detail})` : ""}`).join(", "),
     };
   }
 

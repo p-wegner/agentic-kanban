@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { eq } from "drizzle-orm";
-import { issues, projectStatuses, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { issueComments, issues, projectStatuses, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import type { BranchTipAncestryResult } from "@agentic-kanban/shared/lib/git-service";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { reapTerminalWorkspaces } from "../startup/terminal-workspace-reaper.js";
+import { insertWorkspaceRepo, listWorkspaceRepos } from "../repositories/repo.repository.js";
 
 type CheckAncestor = (repoPath: string, branch: string, baseBranch: string, worktreeDir?: string) => Promise<BranchTipAncestryResult>;
 type CountCommits = (repoPath: string, baseSha: string, branchSha: string) => Promise<number>;
@@ -86,7 +87,7 @@ async function seedWorkspace(opts: {
     });
   }
 
-  return { issueId, workspaceId };
+  return { issueId, workspaceId, projectId };
 }
 
 async function getWorkspace(workspaceId: string) {
@@ -186,5 +187,72 @@ describe("terminal workspace reaper", () => {
     expect(result.reaped).toBe(0);
     expect(checkAncestor).not.toHaveBeenCalled();
     expect((await getWorkspace(workspaceId)).status).toBe("idle");
+  });
+
+  // #153: verifyNoAheadWork only judges the LEADING repo. A multi-repo workspace with an
+  // unmerged sibling must still be closeable (issue is terminal, worktrees are never
+  // touched here), but the reap must not silently orphan the sibling's commits — it has
+  // to surface them via an issue comment, and must leave the sibling row untouched.
+  describe("multi-repo sibling audit", () => {
+    const SIBLING_PATH = "/extra";
+
+    it("closes the workspace but leaves an issue comment enumerating an unmerged sibling", async () => {
+      const { issueId, workspaceId, projectId } = await seedWorkspace({ issueStatus: "Done", wsStatus: "idle" });
+      await insertWorkspaceRepo({
+        workspaceId,
+        projectId,
+        path: SIBLING_PATH,
+        name: "extra",
+        worktreePath: `${SIBLING_PATH}/.worktrees/ws`,
+        branch: "feature/ak-816-sibling",
+        baseBranch: "master",
+      }, db);
+
+      const checkAncestor = makeCheckAncestor(true); // leading repo reads fully merged
+      const revParseRef = vi.fn(async (_repo: string, ref: string) => `sha-${ref}`);
+      const countCommits = vi.fn(async (repoPath: string) => (repoPath === SIBLING_PATH ? 3 : 0));
+
+      const result = await reapTerminalWorkspaces({ database: db, checkAncestor, countCommits, revParseRef });
+
+      expect(result.reaped).toBe(1);
+      const ws = await getWorkspace(workspaceId);
+      expect(ws.status).toBe("closed");
+
+      // Sibling row/worktree untouched by the reaper — it never calls removeWorktree.
+      const siblingRows = await listWorkspaceRepos(workspaceId, db);
+      expect(siblingRows).toHaveLength(1);
+      expect(siblingRows[0].mergedHeadSha).toBeNull();
+
+      const comments = await db.select().from(issueComments).where(eq(issueComments.issueId, issueId));
+      expect(comments).toHaveLength(1);
+      expect(comments[0].kind).toBe("note");
+      expect(comments[0].body).toContain("extra");
+      expect(comments[0].body).toContain("feature/ak-816-sibling");
+      expect(comments[0].body).toContain("unmerged");
+    });
+
+    it("does not comment when every sibling has already landed (mergedHeadSha stamped)", async () => {
+      const { issueId, workspaceId, projectId } = await seedWorkspace({ issueStatus: "Done", wsStatus: "idle" });
+      await insertWorkspaceRepo({
+        workspaceId,
+        projectId,
+        path: SIBLING_PATH,
+        name: "extra",
+        worktreePath: `${SIBLING_PATH}/.worktrees/ws`,
+        branch: "feature/ak-816-sibling",
+        baseBranch: "master",
+      }, db);
+      const [row] = await listWorkspaceRepos(workspaceId, db);
+      const { setWorkspaceRepoMergedSha } = await import("../repositories/repo.repository.js");
+      await setWorkspaceRepoMergedSha(row.id, "landed-sha", db);
+
+      const checkAncestor = makeCheckAncestor(true);
+
+      const result = await reapTerminalWorkspaces({ database: db, checkAncestor });
+
+      expect(result.reaped).toBe(1);
+      const comments = await db.select().from(issueComments).where(eq(issueComments.issueId, issueId));
+      expect(comments).toHaveLength(0);
+    });
   });
 });
