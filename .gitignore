@@ -1,4 +1,8 @@
 node_modules/
+# Worktree dependency-isolation rename artifact (symlink-era) + vitest cache — never track (#175)
+*.stale-locked/
+node_modules.stale-locked/
+.vite/
 dist/
 *.db
 *.db-journal
