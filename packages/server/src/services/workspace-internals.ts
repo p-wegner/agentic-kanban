@@ -428,6 +428,58 @@ export async function listPendingSiblingMerges(
   return pending;
 }
 
+/** A sibling worktree that carries uncommitted (tracked or untracked) changes. */
+export interface DirtySiblingWorktree {
+  repo: RepoRow;
+  /** Set when the worktree could not be verified (git error) — treated as dirty (fail-closed). */
+  detail?: string;
+}
+
+/**
+ * Detect sibling worktrees carrying UNCOMMITTED changes — tracked or untracked —
+ * that `git worktree remove --force` (`cleanupSiblingWorktrees`/`removeWorktree`)
+ * would silently destroy. This is the dirty-WORKING-TREE counterpart to
+ * `listPendingSiblingMerges`, which only sees COMMITTED-but-unmerged work: an agent
+ * that edited a sibling worktree but never committed is invisible to that check and
+ * would previously be force-deleted the moment the leading branch (and every OTHER
+ * sibling) read as fully merged (#153).
+ *
+ * A worktree whose directory no longer exists is not dirty (nothing left to lose —
+ * the removal below is already a no-op there). Any OTHER failure to read the
+ * worktree's status fails CLOSED (reported as dirty with `detail`): we cannot prove
+ * the worktree is safe to force-remove, so callers must treat it as blocking rather
+ * than silently proceeding.
+ */
+export async function listDirtySiblingWorktrees(
+  gitService: GitService,
+  database: Database,
+  workspaceId: string,
+): Promise<DirtySiblingWorktree[]> {
+  let rows: RepoRow[];
+  try {
+    rows = await listWorkspaceRepos(workspaceId, database);
+  } catch (err) {
+    console.warn(
+      `[workspace-merge] dirty-sibling scan: failed to list repos for ${workspaceId}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return [];
+  }
+  const dirty: DirtySiblingWorktree[] = [];
+  for (const repo of rows) {
+    if (!repo.worktreePath) continue;
+    if (!existsSync(repo.worktreePath)) continue; // gone — nothing to destroy
+    try {
+      const diff = await gitService.getWorkingTreeDiff(repo.worktreePath);
+      if (diff.trim() !== "") {
+        dirty.push({ repo });
+      }
+    } catch (err) {
+      dirty.push({ repo, detail: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return dirty;
+}
+
 /**
  * The same per-repo guards `prevalidateSiblingMerges` runs (dirty main checkout,
  * HEAD-on-baseBranch, read-only conflict check), applied to an already-detected

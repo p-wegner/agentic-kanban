@@ -318,4 +318,38 @@ describe("multi-repo sibling worktrees", () => {
     expect(existsSync(siblings[0].worktreePath)).toBe(false);
     expect((await exec("git", ["branch", "--list", "feature/guarded"], extraRepo)).trim()).toBe("");
   }, 60000);
+
+  // #153: a sibling worktree an agent edited but never committed carries no landed
+  // commits (mergedHeadSha stays null) AND 0 commits ahead of base — the exact shape
+  // the pre-existing preserveUnmerged probe reads as "safe to clean". Without a
+  // dedicated dirty-worktree check, `git worktree remove --force` would silently
+  // destroy the uncommitted edit.
+  it("preserves a sibling worktree with uncommitted changes instead of force-removing it (#153)", async () => {
+    const wsDirty = randomUUID();
+    await db.insert(workspaces).values({ id: wsDirty, issueId, branch: "feature/dirty-sibling" });
+
+    const siblings = await provisionSiblingWorktrees({
+      gitService,
+      database: db as unknown as Database,
+      projectId,
+      branch: "feature/dirty-sibling",
+    });
+    expect(siblings).toHaveLength(1);
+    await insertSiblingWorktreeRecords(wsDirty, projectId, siblings, db);
+
+    // Agent edits a tracked file in the sibling worktree but never commits.
+    await writeFile(join(siblings[0].worktreePath, "extra.txt"), "uncommitted edit\n");
+
+    await cleanupSiblingWorktrees(gitService, wsDirty, db as unknown as Database, { preserveUnmerged: true });
+
+    // Preserved: worktree still on disk, branch still exists, uncommitted edit intact.
+    expect(existsSync(siblings[0].worktreePath)).toBe(true);
+    expect(existsSync(join(siblings[0].worktreePath, "extra.txt"))).toBe(true);
+    expect((await exec("git", ["branch", "--list", "feature/dirty-sibling"], extraRepo)).trim()).not.toBe("");
+
+    // Once the working tree is clean again (edit discarded), cleanup proceeds.
+    await exec("git", ["clean", "-fd"], siblings[0].worktreePath);
+    await cleanupSiblingWorktrees(gitService, wsDirty, db as unknown as Database, { preserveUnmerged: true });
+    expect(existsSync(siblings[0].worktreePath)).toBe(false);
+  }, 60000);
 });
