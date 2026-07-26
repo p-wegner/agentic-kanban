@@ -5,7 +5,8 @@
  * The Claude Agent SDK writes per-session JSONL files to:
  *   ~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl
  *
- * Encoding scheme: replace all `:`, `\`, and `/` characters in the cwd with `-`.
+ * Encoding scheme: replace every character in the cwd that isn't alphanumeric
+ * or `-` with `-` (see `@agentic-kanban/shared/lib/transcript-cwd-encoding`).
  * E.g. `C:\code\my-app` → `C--code-my-app`
  *
  * Parsing is delegated to the SHARED offline transcript reader
@@ -20,6 +21,7 @@ import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { readOfflineTranscript } from "@agentic-kanban/shared/lib/offline-transcript";
+import { encodeTranscriptCwd } from "@agentic-kanban/shared/lib/transcript-cwd-encoding";
 
 export interface ButlerSessionSummary {
   sessionId: string;
@@ -36,15 +38,9 @@ export interface ButlerSessionMessage {
   ts: number;
 }
 
-/** Convert a filesystem path to Claude's project directory name encoding. */
-function encodeCwd(cwd: string): string {
-  // Claude replaces `:`, `\`, and `/` all with `-`
-  return cwd.replace(/[:\\/]/g, "-");
-}
-
 /** Resolve the Claude projects transcript directory for the given repo path. */
 export function resolveTranscriptDir(repoPath: string): string {
-  const encoded = encodeCwd(repoPath);
+  const encoded = encodeTranscriptCwd(repoPath);
   return join(homedir(), ".claude", "projects", encoded);
 }
 
