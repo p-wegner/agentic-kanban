@@ -49,6 +49,17 @@ parallel leaves touch a shared file. One mega ticket builds in ONE warm context 
 because each ticket adds its own slice. So the mega sweet spot is **per-context (~1.5–2k LOC/repo,
 ~3–4k total)**; above that you MUST decompose and pay more $/KLOC.
 
+**To actually HIT a size/complexity target, run a metric-gated loop — not a bigger prompt.** An LOC ask
+in a SPEC is not a lever an agent optimizes (habithub's SPEC asked ~5k; `code-metrics` measured 1878
+prod SLOC delivered). Reaching a target is a closed loop: *measure the metric (`code-metrics analyze`
+→ `loc_split.prod_sloc`) → if under target, create the next grounded **requirement** ticket (a real
+feature, never "write N lines") → build+merge it → re-measure → repeat until met.* Each requirement
+ticket adds a measured, roughly fixed increment (~200 prod SLOC here). Build the generated tickets
+**sequentially/chained** (conflict-free), and — critically — point `code-metrics --output` at a scratch
+dir OUTSIDE the repo and never `npm install` in the registered main checkout, or the metrics/`node_modules`
+output dirties main and the pre-merge gate refuses every merge with `dirty_main`. See board #180 (a
+proposed first-class "grow to a metric target" backlog mode).
+
 Pick the SMALLEST number of tickets the work allows:
 
 - **≤ ~3–4k LOC / fits one context → ONE mega ticket + a thorough `SPEC.md`** (or, multi-repo, **one mega
