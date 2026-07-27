@@ -60,6 +60,32 @@ dir OUTSIDE the repo and never `npm install` in the registered main checkout, or
 output dirties main and the pre-merge gate refuses every merge with `dirty_main`. See board #180 (a
 proposed first-class "grow to a metric target" backlog mode).
 
+> **Running the metric-gated loop hands-off (validated 2026-07-27, 3× Kotlin/Ktor → ~5.3k lines each):**
+> - **Set `verify_script` to the Windows-correct command form.** The pre-merge/verify gate spawns the script
+>   via `cmd.exe /d /s /c "<script>"` on Windows (`setup-script.ts` / `verify-gate-runner.js`), so a POSIX
+>   `./gradlew build` gate DIES with `Der Befehl "." … konnte nicht gefunden werden` → the gate fails, the
+>   workspace never gets `readyForMerge`, and `POST /workspaces/:id/merge` returns `pre_merge_gate_failed`.
+>   Use **`gradlew.bat build`** (gradle) / `mvnw.cmd verify` (maven) — a cmd-valid wrapper — so the gate
+>   actually RUNS and PASSES. (Board bugs filed: win-unaware `deriveVerifyCommand` + cmd.exe-only spawn.)
+> - **Merge stuck low-score reviews via `ready-for-merge`, not by looping.** Reviews scoring ≥~85 auto-merge;
+>   ~80–90 sit `In Review` with `readyForMerge=false`. `POST /workspaces/:id/ready-for-merge` and the monitor
+>   lands it on its next cycle. Only fall back to `POST .../merge` if the monitor is idle — and only once the
+>   verify_script is cmd-valid (above), else it fails the gate.
+> - **Size gate = TOTAL non-blank source lines (prod+test), not prod-only**, unless the ask literally says
+>   "prod SLOC". Foundation megas plateau ~1.5–2k prod; each grounded growth feature adds ~250–450 total
+>   (prod+test); a ~10-feature plan reaches a 5k *total* target around feature 6–8. Cheap proxy per repo:
+>   `find src -name '<ext>' | xargs cat | grep -cve '^\s*$'`.
+> - **COLD-VERIFY the target build on master before declaring a project done.** The board's verify gate can
+>   report GREEN off a *cached per-session* build while a fresh cold full build is RED — a test that passes
+>   in isolation but fails in the full suite (order/state-dependent). Run the real build task on master
+>   (`./gradlew build`, `pnpm build && pnpm test`, …) at closeout; if red, file a fix ticket and let the
+>   board fix it before closing out. Do not trust the board's Done flag as build-green proof.
+> - **Kotlin/Ktor + Exposed + H2 scaffold trap:** a single shared in-memory DB URL
+>   (`jdbc:h2:mem:<name>;DB_CLOSE_DELAY=-1`) in `DatabaseFactory.init()` is shared across ALL test files →
+>   state/auto-increment-id leakage → order-dependent failures the per-test-file run never sees. Put in the
+>   scaffold/SPEC from day one: **each test gets an isolated DB** (unique `mem:` name per test, or
+>   drop+recreate tables in a shared `@BeforeTest`). Reuse the shopcart template but fix this first.
+
 Pick the SMALLEST number of tickets the work allows:
 
 - **≤ ~3–4k LOC / fits one context → ONE mega ticket + a thorough `SPEC.md`** (or, multi-repo, **one mega
