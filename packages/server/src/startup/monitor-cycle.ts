@@ -13,7 +13,7 @@ import { startManualReview } from "../services/review.service.js";
 import { isCodexUsageLimitStats } from "../services/codex-rate-limit.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { getStackProfile, verifyScriptPrefKey } from "../services/stack-profile.service.js";
-import { runPreMergeGate, gateAlreadyPassed, type MergeGateToken } from "../services/pre-merge-gate.service.js";
+import { runPreMergeGate, gateAlreadyPassed, RUN_GATE, type MergeGateToken, type MergeGateEvidence } from "../services/pre-merge-gate.service.js";
 import {
   MAX_SESSIONS,
   NON_TRIVIAL_WORKTREE_DIFF_CHARS,
@@ -52,6 +52,26 @@ export interface WorkspaceCandidate {
   diffStatCacheFilesChanged?: number | null;
   diffStatCacheInsertions?: number | null;
   diffStatCacheDeletions?: number | null;
+  /** Real evidence of when/how the pre-merge gate last ACTUALLY ran and passed (persisted by
+   *  exit-workflow at review-exit alongside `readyForMerge`). Null when `readyForMerge` was set
+   *  with no gate run (e.g. manual ready-for-merge) — the monitor must then re-run the gate. */
+  mergeGateRanAt?: string | null;
+  mergeGateStage?: string | null;
+  mergeGateSource?: string | null;
+}
+
+/**
+ * Build the merge-gate DECISION token for a `readyForMerge` workspace from the REAL evidence
+ * persisted when the gate last ran (exit-workflow, at review-exit) — NOT a freshly fabricated
+ * `ranAt: new Date()` (#182), which would make `resolveMergeGate`'s 15-min staleness guard
+ * unable to ever fire on this path. No persisted evidence (never gated, e.g. a manual
+ * `POST /workspaces/:id/ready-for-merge`) forces a real gate run via `RUN_GATE`.
+ */
+function gateTokenFromWorkspaceEvidence(ws: WorkspaceCandidate, source: string): MergeGateToken {
+  if (ws.mergeGateRanAt && ws.mergeGateStage) {
+    return gateAlreadyPassed({ ranAt: ws.mergeGateRanAt, stage: ws.mergeGateStage as MergeGateEvidence["stage"], source });
+  }
+  return RUN_GATE;
 }
 
 export interface ProcessWorkspaceDeps {
@@ -216,11 +236,13 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
     }
     if (!canStartMerge(ws)) return;
     // readyForMerge is only set by the review-exit handler AFTER its verify/smoke gate passed,
-    // so hand the merge that PROOF (arch-review §1.2) rather than a bare "trust me".
+    // so hand the merge that PROOF (arch-review §1.2) rather than a bare "trust me" — built from
+    // the REAL ranAt/stage persisted at that gate run (#182), not a freshly fabricated timestamp
+    // that could never go stale.
     await mergeWorkspaceWithFixFallback(ws, deps.workspaceActions, logAction, {
       conflictMsg: `[monitor] Merge conflict for idle+readyForMerge workspace ${ws.wsId}  triggered fix-and-merge`,
       successMsg: `[monitor] Triggered merge for idle+readyForMerge workspace ${ws.wsId}`,
-    }, gateAlreadyPassed({ ranAt: new Date().toISOString(), stage: "none", source: "review-exit gate (readyForMerge, idle)" }));
+    }, gateTokenFromWorkspaceEvidence(ws, "review-exit gate (readyForMerge, idle)"));
     stats.merged++;
     deps.boardEvents.broadcast(ws.projectId, "board_changed");
   } else if (sessionCount >= MAX_SESSIONS) {
@@ -247,7 +269,7 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
       // — readyForMerge=true — has passed the gate at review-exit, so skip the re-run for it.)
       // Build the explicit merge-gate PROOF token (arch-review §1.2): either the gate we run
       // right here for un-ready work, or the review-exit gate that set readyForMerge.
-      let gateToken: MergeGateToken = gateAlreadyPassed({ ranAt: new Date().toISOString(), stage: "none", source: "review-exit gate (readyForMerge, auto_merge_in_review)" });
+      let gateToken: MergeGateToken = gateTokenFromWorkspaceEvidence(ws, "review-exit gate (readyForMerge, auto_merge_in_review)");
       if (!ws.readyForMerge) {
         const gate = await runPreMergeGate({ id: ws.wsId, workingDir: ws.workingDir }, ws.projectId, db);
         if (!gate.passed) {
@@ -327,7 +349,7 @@ async function handleReviewingWorkspace(ws: WorkspaceCandidate, sess: LatestSess
     // approved (readyForMerge=true) passed the gate at review-exit, so skip the re-run for it.
     // Build the explicit merge-gate PROOF token (arch-review §1.2): either the gate we run right
     // here for un-ready work, or the review-exit gate that set readyForMerge.
-    let gateToken: MergeGateToken = gateAlreadyPassed({ ranAt: new Date().toISOString(), stage: "none", source: "review-exit gate (readyForMerge, reviewing+stopped)" });
+    let gateToken: MergeGateToken = gateTokenFromWorkspaceEvidence(ws, "review-exit gate (readyForMerge, reviewing+stopped)");
     if (!ws.readyForMerge) {
       const gate = await runPreMergeGate({ id: ws.wsId, workingDir: ws.workingDir }, ws.projectId, db);
       if (!gate.passed) {

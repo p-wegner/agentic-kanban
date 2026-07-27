@@ -736,6 +736,13 @@
       "when": 1780906862000,
       "tag": "0104_isolation_downgrade",
       "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "6",
+      "when": 1780906863000,
+      "tag": "0105_merge_gate_evidence",
+      "breakpoints": true
     }
   ]
 }
