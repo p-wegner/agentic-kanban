@@ -168,6 +168,50 @@ function detectNodeProfile(repoPath: string, markers: Set<string>): Partial<Stac
   };
 }
 
+interface ComposerJson {
+  "require-dev"?: Record<string, string>;
+  require?: Record<string, string>;
+  config?: { "bin-dir"?: string };
+}
+
+/**
+ * Build a PHP/composer stack profile. On Windows, cmd cannot exec the extensionless
+ * Composer bin shim (`vendor/bin/phpunit` would need `vendor\bin\phpunit.bat`); running it
+ * through the interpreter (`php vendor/bin/phpunit`) works on every platform, since the
+ * shim is itself a valid PHP script (#177).
+ */
+function detectPhpProfile(repoPath: string): Partial<StackProfile> {
+  const composer = readJson<ComposerJson>(join(repoPath, "composer.json"));
+  const binDir = composer?.config?.["bin-dir"] || "vendor/bin";
+  const deps = { ...(composer?.["require-dev"] ?? {}), ...(composer?.require ?? {}) };
+  const runTool = (bin: string, args = "") => `php ${binDir}/${bin}${args ? ` ${args}` : ""}`;
+
+  const hasPhpunit = "phpunit/phpunit" in deps;
+  const testCommand = hasPhpunit ? runTool("phpunit") : null;
+
+  const hasPhpstan = "phpstan/phpstan" in deps;
+  const hasPsalm = "vimeo/psalm" in deps;
+  const typecheckCommand = hasPhpstan ? runTool("phpstan", "analyse") : hasPsalm ? runTool("psalm") : null;
+
+  const hasCsFixer = "friendsofphp/php-cs-fixer" in deps;
+  const hasPhpcs = "squizlabs/php_codesniffer" in deps;
+  const lintCommand = hasCsFixer
+    ? runTool("php-cs-fixer", "fix --dry-run --diff")
+    : hasPhpcs
+      ? runTool("phpcs")
+      : null;
+
+  return {
+    stack: "php", packageManager: "composer", isMonorepo: false, workspaces: [],
+    installCommand: "composer install", buildCommand: null,
+    testCommand, quickTestCommand: testCommand,
+    lintCommand, typecheckCommand, devCommand: null, isWeb: false,
+    devHealthUrl: null, devPort: null,
+    testDir: firstExistingDir(repoPath, ["tests", "test"]),
+    testRunner: hasPhpunit ? "phpunit" : null,
+  };
+}
+
 /**
  * Rule-based stack detection for the non-Node ecosystems the acceptance criteria call out
  * ({cargo, go, python, java/gradle}). Each returns as much as the marker files reveal.
@@ -240,6 +284,9 @@ function detectOtherProfile(repoPath: string, markers: Set<string>): Partial<Sta
       typecheckCommand: "mvn compile", devCommand: "mvn spring-boot:run", isWeb: false,
       devHealthUrl: null, devPort: null, testDir: firstExistingDir(repoPath, ["src/test/java", "src/test"]), testRunner: "maven",
     };
+  }
+  if (markers.has("composer.json")) {
+    return detectPhpProfile(repoPath);
   }
   if (markers.has("pyproject.toml") || markers.has("Pipfile") || markers.has("requirements.txt")) {
     // uv first: a uv project installs into a project-local .venv, so the global interpreter

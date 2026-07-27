@@ -9,6 +9,7 @@ const PROJECT_MARKER_FILES = [
   "package.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock",
   "Cargo.toml", "go.mod", "requirements.txt", "Pipfile", "pyproject.toml", "uv.lock",
   "pom.xml", "build.gradle", "build.gradle.kts", "Gemfile", "mix.exs",
+  "composer.json", "composer.lock",
   "Makefile", "justfile", "Taskfile.yml",
 ];
 
