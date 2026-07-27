@@ -235,7 +235,8 @@ describe("runAutoStart URL construction", () => {
       .mockReturnValueOnce(makeSelectChain([{ id: "issue-1", title: "Ready", description: "", issueNumber: 7 }]) as ReturnType<typeof db.select>)
       .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>)
       .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // no-auto-start tag check (none)
-      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]) as ReturnType<typeof db.select>);
+      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]) as ReturnType<typeof db.select>) // loop2 capacity: now at cap (limit 1) after loop1's start
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>); // loop2 wip_cap diagnostic: no Todo status → nothing to tally
     vi.mocked(fetch).mockResolvedValue({ ok: true } as Response);
 
     await runAutoStart(new Map([
@@ -359,12 +360,15 @@ describe("runAutoStart Backlog promotion for auto-driven projects", () => {
       .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // existingWs (none)
       .mockReturnValueOnce(makeSelectChain([{ id: "tag-1" }]) as ReturnType<typeof db.select>); // no-auto-start tag PRESENT
 
-    await runAutoStart(
+    const skips = await runAutoStart(
       new Map([["nudge_wip_limit", "5"]]),
       makeDeps({ isAutoDrivenProject: () => true }),
     );
 
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    // #179: a tag-driven skip is tallied so the reason is visible, not silent.
+    expect(skips.get("proj-1")?.reasonCounts.no_auto_start_tag).toBe(1);
+    expect(skips.get("proj-1")?.issueNumbers).toEqual([6]);
   });
 
   it("does NOT start a dep-blocked Backlog issue for an auto-driven project", async () => {
@@ -550,5 +554,69 @@ describe("runAutoStart planMode override for auto-driven projects (#666)", () =>
     const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
     // planMode must NOT be in the body — the route-level default should apply
     expect(body).not.toHaveProperty("planMode");
+  });
+});
+
+// #179: a monitor-mode project whose WIP is full or whose contention gate defers a
+// candidate must not go silent — runAutoStart tallies WHY so a monitor cycle that
+// starts nothing still explains itself instead of `monitor-status` showing zero
+// actions with no warning.
+describe("runAutoStart skip-reason tallies (#179 observability)", () => {
+  it("tallies wip_cap when WIP is full but Todo work is waiting", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof db.select>) // inProgressStatuses
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop1 activeWip
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // loop1 inProgressIssues (none)
+      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]) as ReturnType<typeof db.select>) // loop2 capacity: active=1, at cap (limit 1)
+      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]) as ReturnType<typeof db.select>) // todoStatus
+      .mockReturnValueOnce(makeSelectChain([{ count: 3 }]) as ReturnType<typeof db.select>); // waiting-count query
+
+    const skips = await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "1"]]), makeDeps());
+
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    expect(skips.get("proj-1")?.reasonCounts.wip_cap).toBe(3);
+  });
+
+  it("does NOT tally wip_cap when WIP is full but no Todo/Backlog work is waiting", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof db.select>) // inProgressStatuses
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop1 activeWip
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // loop1 inProgressIssues (none)
+      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]) as ReturnType<typeof db.select>) // loop2 capacity: at cap
+      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]) as ReturnType<typeof db.select>) // todoStatus
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>); // waiting-count query: nothing queued
+
+    const skips = await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "1"]]), makeDeps());
+
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    expect(skips.size).toBe(0);
+  });
+
+  it("tallies contention_gate when the file-contention gate defers a candidate", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof db.select>) // inProgressStatuses
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop1 activeWip
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // loop1 inProgressIssues (none)
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop2 inProgressCount
+      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]) as ReturnType<typeof db.select>) // todoStatus
+      .mockReturnValueOnce(makeSelectChain([{ id: "issue-1", title: "Contended", projectId: "proj-1", issueNumber: 11 }]) as ReturnType<typeof db.select>) // todoIssues
+      .mockReturnValueOnce(makeSelectChain([{ id: "done-1" }]) as ReturnType<typeof db.select>) // doneStatuses
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // existingWs (none)
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>); // no-auto-start tag (none)
+
+    const deferringGate = {
+      mode: "serialize" as const,
+      check: () => ({ hotFiles: ["src/app.ts"], blockingIssueIds: ["other-issue"], serialize: true }),
+      noteStarted: () => {},
+    };
+
+    const skips = await runAutoStart(
+      new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]),
+      makeDeps({ buildContentionGate: async () => deferringGate }),
+    );
+
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    expect(skips.get("proj-1")?.reasonCounts.contention_gate).toBe(1);
+    expect(skips.get("proj-1")?.issueNumbers).toEqual([11]);
   });
 });
