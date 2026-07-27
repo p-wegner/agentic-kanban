@@ -103,6 +103,40 @@ describe("stack-detector.service detectStackProfile", () => {
     expect(p.testCommand).toBe("poetry run python -m pytest");
   });
 
+  // #177: on Windows cmd cannot exec the extensionless composer bin shim
+  // (`vendor/bin/phpunit` needs `vendor\bin\phpunit.bat`); the portable form runs it
+  // through the interpreter (`php vendor/bin/phpunit`), which works on every platform.
+  it("detects a PHP/composer project and emits `php vendor/bin/phpunit`, not the bare shim", async () => {
+    await writeFile(
+      join(dir, "composer.json"),
+      JSON.stringify({ "require-dev": { "phpunit/phpunit": "^10.0" } }),
+    );
+    const p = detectStackProfile(dir);
+    expect(p.stack).toBe("php");
+    expect(p.packageManager).toBe("composer");
+    expect(p.installCommand).toBe("composer install");
+    expect(p.testCommand).toBe("php vendor/bin/phpunit");
+    expect(p.quickTestCommand).toBe("php vendor/bin/phpunit");
+    expect(p.testCommand).not.toMatch(/^vendor\/bin/);
+  });
+
+  it("detects PHP static analysis/lint tools and honors a custom composer bin-dir", async () => {
+    await writeFile(
+      join(dir, "composer.json"),
+      JSON.stringify({
+        "require-dev": {
+          "phpunit/phpunit": "^10.0",
+          "phpstan/phpstan": "^1.0",
+          "friendsofphp/php-cs-fixer": "^3.0",
+        },
+        config: { "bin-dir": "bin" },
+      }),
+    );
+    const p = detectStackProfile(dir);
+    expect(p.typecheckCommand).toBe("php bin/phpstan analyse");
+    expect(p.lintCommand).toBe("php bin/php-cs-fixer fix --dry-run --diff");
+  });
+
   it("returns a sparse 'detected' profile (stack null) for an unknown/empty repo", async () => {
     const p = detectStackProfile(dir);
     expect(p.stack).toBeNull();
