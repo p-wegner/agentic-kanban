@@ -304,7 +304,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       // Not landed: keep the workspace OPEN + idle and retryable. Clear readyForMerge so a
       // conflicted branch is not silently re-queued as "ready". Surface a clear signal.
       const now = new Date().toISOString();
-      await setWorkspaceStatus(db, workspace.id, "idle", { now, set: { readyForMerge: false } });
+      await setWorkspaceStatus(db, workspace.id, "idle", { now, set: { readyForMerge: false, mergeGateRanAt: null, mergeGateStage: null, mergeGateSource: null } });
       boardEvents.broadcast(projectId, "workspace_idle");
       boardEvents.broadcast(projectId, "workflow_error");
       emitButlerSystemEvent({
@@ -711,7 +711,17 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       boardEvents.broadcast(projectId, "issue_updated");
       return;
     }
-    await db.update(workspaces).set({ readyForMerge: true, updatedAt: now }).where(eq(workspaces.id, workspaceId));
+    // Persist the REAL gate evidence (ranAt/stage) alongside readyForMerge — this is what the
+    // monitor's later auto-merge trigger reads to build honest `MergeGateEvidence` instead of
+    // fabricating `ranAt: new Date()` at merge time (#182). `ranAt` is stamped NOW, when the gate
+    // actually ran, not whenever a monitor cycle happens to notice the workspace idle.
+    await db.update(workspaces).set({
+      readyForMerge: true,
+      updatedAt: now,
+      mergeGateRanAt: now,
+      mergeGateStage: preMergeGate.stage,
+      mergeGateSource: "review-exit gate",
+    }).where(eq(workspaces.id, workspaceId));
     boardEvents.broadcast(projectId, "workspace_ready_for_merge");
     const learningAfterReview = getBool(prefMap, "learning_step_after_review") && workspace.workingDir ? launchLearningStep(db, sessionManager, learningSessionIds, workspace, prefMap, "after review", true) : Promise.resolve();
     if (autoMergeEnabled) {
@@ -735,7 +745,13 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         console.log(`[workflow] review session ${sessionId} completed  queued for scheduled auto-merge`);
       }
     } else {
-      await db.update(workspaces).set({ readyForMerge: true, updatedAt: now }).where(eq(workspaces.id, workspaceId));
+      await db.update(workspaces).set({
+        readyForMerge: true,
+        updatedAt: now,
+        mergeGateRanAt: now,
+        mergeGateStage: preMergeGate.stage,
+        mergeGateSource: "review-exit gate",
+      }).where(eq(workspaces.id, workspaceId));
       boardEvents.broadcast(projectId, "workspace_ready_for_merge");
       console.log(`[workflow] review session ${sessionId} completed  auto-merge disabled, marked ready_for_merge and left in In Review`);
       await learningAfterReview;

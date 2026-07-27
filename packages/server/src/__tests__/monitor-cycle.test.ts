@@ -102,6 +102,11 @@ const baseCandidate: WorkspaceCandidate = {
   issueStatusName: "In Review",
   baseBranch: "main",
   readyForMerge: true,
+  // Real gate evidence persisted by exit-workflow at review-exit — the monitor now builds its
+  // merge-gate token from THIS, not a fabricated `new Date()` (#182).
+  mergeGateRanAt: new Date().toISOString(),
+  mergeGateStage: "verify",
+  mergeGateSource: "review-exit gate",
 };
 
 beforeEach(() => {
@@ -156,6 +161,43 @@ describe("processWorkspaceCandidates — idle + readyForMerge", () => {
 
     expect(vi.mocked(deps.workspaceActions.fixAndMerge)).toHaveBeenCalledWith("ws-1", "network error");
     expect(vi.mocked(deps.workspaceActions.launch)).not.toHaveBeenCalled();
+  });
+
+  // #182 regression: the monitor used to fabricate `ranAt: new Date()` / `stage: "none"` for
+  // every idle+readyForMerge merge, so `resolveMergeGate`'s 15-min staleness window could NEVER
+  // reject it — a `readyForMerge` set hours ago (or never actually gated) was trusted forever.
+  // The monitor now carries the REAL evidence persisted on the workspace through unmodified, so a
+  // stale `ranAt` stays stale and `resolveMergeGate` (the downstream owner of the freshness check)
+  // can actually reject it and re-run the gate.
+  it("passes through the real (stale) persisted ranAt instead of fabricating a fresh one", async () => {
+    const deps = makeDeps();
+    const staleRanAt = new Date(Date.now() - 20 * 60 * 1000).toISOString(); // 20 min old > 15 min window
+    const staleCandidate: WorkspaceCandidate = {
+      ...baseCandidate,
+      mergeGateRanAt: staleRanAt,
+      mergeGateStage: "verify",
+    };
+    const stats = await processWorkspaceCandidates([staleCandidate], deps);
+
+    expect(stats.merged).toBe(1);
+    expect(vi.mocked(deps.workspaceActions.merge)).toHaveBeenCalledWith(
+      "ws-1",
+      expect.objectContaining({ kind: "already-passed", evidence: expect.objectContaining({ ranAt: staleRanAt }) }),
+    );
+  });
+
+  it("hands over a run-gate token when the workspace has no persisted gate evidence at all (e.g. manual ready-for-merge)", async () => {
+    const deps = makeDeps();
+    const noEvidenceCandidate: WorkspaceCandidate = {
+      ...baseCandidate,
+      mergeGateRanAt: null,
+      mergeGateStage: null,
+      mergeGateSource: null,
+    };
+    const stats = await processWorkspaceCandidates([noEvidenceCandidate], deps);
+
+    expect(stats.merged).toBe(1);
+    expect(vi.mocked(deps.workspaceActions.merge)).toHaveBeenCalledWith("ws-1", { kind: "run-gate" });
   });
 });
 
