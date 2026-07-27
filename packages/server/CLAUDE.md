@@ -92,6 +92,8 @@ and merge preparation still detect dirty worktrees before landing.
 ## Workspace setup scripts
 Projects have `setup_script` (nullable text) and `setup_blocking` (boolean, default true) columns. `runSetupScript()` in `@agentic-kanban/shared/lib/setup-script.ts`. Blocking: await script then launch. Parallel: fire-and-forget. Non-fatal. PATCH `/api/projects/:id` updates setup script config.
 
+**Windows shell gotcha — `setup_script` AND `verify_script` are POSIX-hostile.** `runSetupScript` spawns the script via `cmd.exe /d /s /c "<script>"` on Windows (`setup-script.ts:74`; the scaffold verify hook `scaffold/verify-gate-runner.js:334` does the same). A POSIX `./gradlew build` / `./mvnw verify` fails there — `cmd.exe` parses `./gradlew` as command `.` → `"Der Befehl ." ... nicht gefunden` (exit 1) → the pre-merge verify gate fails and the merge is silently withheld (`pre_merge_gate_failed`). Use the cmd-valid wrapper: **`gradlew.bat build`**, `mvnw.cmd verify`. `deriveVerifyCommand` (`@agentic-kanban/shared/lib/verify-command.ts`) is NOT yet win32-aware and emits `./gradlew` — tracked as a board bug; until fixed, set `verify_script_<projectId>` to the `.bat`/`.cmd` form by hand for JVM-wrapper projects on Windows.
+
 ## Issue numbers
 Auto-incrementing per project via `MAX(issue_number) + 1` in `POST /api/issues`. `issue_number` added in migration 0006. The `MIGRATION_FILES` export in `packages/server/src/__tests__/helpers/migrations.ts` is now computed dynamically from the drizzle journal — no manual maintenance needed when adding new migrations.
 
