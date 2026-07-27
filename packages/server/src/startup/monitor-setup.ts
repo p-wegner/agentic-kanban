@@ -1,6 +1,6 @@
-import { issues, preferences, projectStatuses, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, preferences, projectStatuses, projects, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import type { Hono } from "hono";
 import { db } from "../db/index.js";
 import { createBoardEvents } from "../services/board-events.js";
@@ -16,7 +16,7 @@ import { buildMonitorNudgePrompt } from "./review-helpers.js";
 import { snapshotAndCleanStaleDevProcesses, type BoardMonitorResourceSnapshot } from "../services/stale-dev-processes.js";
 import { resolveStartPolicy } from "../services/start-policy.service.js";
 import { scanDirtyMainCheckouts, type DirtyMainCheckoutWarning } from "../services/dirty-main-checkout.js";
-import { scanAutodriveStallWarnings, type AutodriveStallWarning } from "../services/autodrive-stall-warning.service.js";
+import { scanAutodriveStallWarnings, buildAutoStartSkipWarnings, type AutodriveStallWarning } from "../services/autodrive-stall-warning.service.js";
 import { resolveMergeStrategy } from "./merge-strategy.js";
 import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
 
@@ -308,7 +308,18 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       // inherits it instead of re-discovering the environment. Runs BEFORE the fan-out so a
       // workspace started this cycle already forks from the branch the pass committed to.
       await runCompoundingSetup(prefMap, { allowProject: shouldAutoStartProject });
-      await runAutoStart(prefMap, { serverPort, boardEvents, allowProject: shouldAutoStartProject, isAutoDrivenProject: (projectId) => resolveStartPolicy(prefMap, projectId).mode !== "manual", logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
+      const autoStartSkips = await runAutoStart(prefMap, { serverPort, boardEvents, allowProject: shouldAutoStartProject, isAutoDrivenProject: (projectId) => resolveStartPolicy(prefMap, projectId).mode !== "manual", logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
+      if (autoStartSkips.size > 0) {
+        const projectRows = await db.select({ id: projects.id, name: projects.name }).from(projects)
+          .where(inArray(projects.id, [...autoStartSkips.keys()]));
+        const projectNames = new Map(projectRows.map((p) => [p.id, p.name]));
+        const skipWarnings = buildAutoStartSkipWarnings(autoStartSkips, projectNames, new Date());
+        if (skipWarnings.length > 0) {
+          monitorState.warnings = [...monitorState.warnings, ...skipWarnings];
+          warningCount = monitorState.warnings.length;
+          for (const warning of skipWarnings) console.warn(`[monitor] ${warning.message}`);
+        }
+      }
       await runBacklogEmptyStrategy(prefMap, { serverPort, boardEvents, allowProject: allowBacklogRefill, logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
     } catch (err) {
       console.warn("[monitor] Cycle error:", err);
