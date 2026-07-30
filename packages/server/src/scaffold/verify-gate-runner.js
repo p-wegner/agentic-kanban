@@ -329,10 +329,22 @@ function spawnBackgroundSweep(cwd) {
   }
 }
 
+// Mirrors translatePosixWrapperForWindows in @agentic-kanban/shared/lib/setup-script.ts
+// (#181) — cmd.exe parses `./gradlew` as the command `.` and fails outright, so a
+// `./gradlew`/`./mvnw`-style verify command must be rewritten to the `.bat`/`.cmd` form
+// before it reaches cmd.exe. Duplicated here because this file is a standalone scaffold
+// copy shipped into scaffolded repos, not an importer of the shared package.
+function translatePosixWrapperForWindows(command) {
+  return command
+    .replace(/(^|&&\s*)\.\/gradlew\b/g, "$1.\\gradlew.bat")
+    .replace(/(^|&&\s*)\.\/mvnw\b/g, "$1.\\mvnw.cmd");
+}
+
 function runVerifyCommand(command, cwd) {
   const isWindows = process.platform === "win32";
   const shell = isWindows ? "cmd.exe" : "/bin/sh";
-  const shellArgs = isWindows ? ["/c", command] : ["-c", command];
+  const shellCommand = isWindows ? translatePosixWrapperForWindows(command) : command;
+  const shellArgs = isWindows ? ["/c", shellCommand] : ["-c", command];
 
   let exitCode = 0;
   let cmdOutput = "";

@@ -142,6 +142,23 @@ describe("verify-gate-runner", () => {
     const result = runGate({ hookDir });
     expect(result.status).toBe(0);
   });
+
+  // #181: cmd.exe parses `./gradlew` as the command `.` and fails outright, so a
+  // `./gradlew`-style verify_script/hook command must resolve through the translated
+  // `.\gradlew.bat` form instead of being handed to cmd.exe verbatim.
+  it.runIf(process.platform === "win32")(
+    "resolves a ./gradlew-style command via the translated .bat form on win32",
+    async () => {
+      await writeFile(
+        join(hookDir, "gradlew.bat"),
+        "@echo off\r\nexit /b 0\r\n",
+      );
+      await writeFile(join(hookDir, "verify-gate.config.json"), JSON.stringify({ command: "./gradlew build" }));
+      const result = runGate({ hookDir });
+      expect(result.status).toBe(0);
+      expect(result.stderr).toContain("[verify-gate] Passed.");
+    },
+  );
 });
 
 function isPidAlive(pid: number): boolean {

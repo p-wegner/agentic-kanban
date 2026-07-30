@@ -17,6 +17,25 @@ export interface SetupScriptContainer {
   remoteWorkspaceFolder: string;
 }
 
+/**
+ * Rewrite a leading/chained POSIX wrapper invocation (`./gradlew`, `./mvnw`) into the
+ * form cmd.exe can actually run (#181).
+ *
+ * `cmd.exe` parses `./gradlew` as the command `.` (a Windows drive-relative path
+ * separator, not "current directory" like POSIX shells) and fails with "'.' is not
+ * recognized" — so a `verify_script`/`setup_script` of `./gradlew build` (the profile's
+ * own testCommand/buildCommand text, or a hand-set override, or an older project
+ * predating the platform-aware wrapper detection in gradle-detect.service.ts) fails the
+ * merge gate outright on Windows, regardless of where that POSIX-style text came from.
+ * The explicit `.\` prefix is required too — a bare `gradlew.bat`/`mvnw.cmd` is not
+ * resolved from the cwd under `cmd /c`.
+ */
+export function translatePosixWrapperForWindows(script: string): string {
+  return script
+    .replace(/(^|&&\s*)\.\/gradlew\b/g, "$1.\\gradlew.bat")
+    .replace(/(^|&&\s*)\.\/mvnw\b/g, "$1.\\mvnw.cmd");
+}
+
 export interface RunSetupScriptOptions {
   /**
    * When present, the script runs INSIDE this container instead of on the host.
@@ -72,7 +91,8 @@ export function runSetupScript(
     // legitimately-quoted setupScript (e.g. `node -e "..."`) silently no-ops (#111).
     // The `/d /s /c` + verbatim form matches process-exec.ts `shellCommandSpec`.
     const hostShell = isWindows ? "cmd.exe" : "/bin/sh";
-    const hostArgs = isWindows ? ["/d", "/s", "/c", script] : ["-c", script];
+    const hostScript = isWindows ? translatePosixWrapperForWindows(script) : script;
+    const hostArgs = isWindows ? ["/d", "/s", "/c", hostScript] : ["-c", script];
     const spec = container
       ? buildContainerSetupSpec(script, container)
       : { command: hostShell, args: hostArgs };
