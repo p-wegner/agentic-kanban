@@ -51,7 +51,8 @@ export type ViewMode =
   | "provider-cost"
   | "agent-throughput"
   | "calendar"
-  | "burndown";
+  | "burndown"
+  | "garden";
 
 export interface ViewDescriptor {
   /** Stable view id — matches BoardPage's `viewMode` state. */
@@ -241,6 +242,14 @@ const ICON = {
       <circle cx="9" cy="6" r="1.5" fill="currentColor" stroke="none" />
       <circle cx="13" cy="12" r="1.5" fill="currentColor" stroke="none" />
       <circle cx="19" cy="18" r="1.5" fill="currentColor" stroke="none" />
+    </svg>
+  ),
+  garden: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 21V11" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 11C12 8 14 6 17 6C17 9 15 11 12 11Z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 14C12 11 10 9 7 9C7 12 9 14 12 14Z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 21h18" />
     </svg>
   ),
   fireworks: (
@@ -641,6 +650,17 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteIcon: "FW",
     paletteDescription: "Fancy launch-sky view: issues as animated fireworks across status rails",
     activeClass: "bg-rose-600 text-white",
+    group: "secondary",
+  },
+  {
+    id: "garden",
+    toolbarLabel: "Garden",
+    label: "Garden",
+    tooltip: "Garden — issues as plants growing through status beds",
+    icon: ICON.garden,
+    paletteIcon: "\u{1F33F}",
+    paletteDescription: "Calming garden view: issues as plants that grow from seedling to bloom by status",
+    activeClass: "bg-emerald-600 text-white",
     group: "secondary",
   },
   {
