@@ -14,6 +14,18 @@ export const workspaces = sqliteTable("workspaces", {
   requiresReview: integer("requires_review", { mode: "boolean" }).notNull().default(false),
   thoroughReview: integer("thorough_review", { mode: "boolean" }).notNull().default(false),
   readyForMerge: integer("ready_for_merge", { mode: "boolean" }).notNull().default(false),
+  /**
+   * Real evidence of when/how the pre-merge gate last ACTUALLY ran and passed for this
+   * workspace, persisted at the moment `readyForMerge` is set from a real gate run
+   * (review-exit). Distinct from `updatedAt`/`readyForMerge` themselves, which say nothing
+   * about whether or when a gate ran — a monitor merge trigger reads THESE to build honest
+   * `MergeGateEvidence` instead of fabricating `ranAt: new Date()` (#182). Null when
+   * `readyForMerge` was set with no gate run (e.g. manual `POST .../ready-for-merge`), which
+   * correctly forces `resolveMergeGate` to re-run the gate before merging.
+   */
+  mergeGateRanAt: text("merge_gate_ran_at"),
+  mergeGateStage: text("merge_gate_stage"),
+  mergeGateSource: text("merge_gate_source"),
   planMode: integer("plan_mode", { mode: "boolean" }).notNull().default(false),
   tddMode: integer("tdd_mode", { mode: "boolean" }).notNull().default(false),
   status: text("status").notNull().default("active"),
