@@ -12,7 +12,7 @@ import {
   BoardHealthNotificationCenter, RunbooksView, SprintCapacityPlanner, ConstellationView,
   MomentumView, FireworksView, StaleWorkDashboard, ThroughputChart, ProviderMixChart,
   LeadTimeTrendChart, ScorecardDistributionChart, ProviderCostOverTimeChart, CalendarView,
-  AgentThroughputLeaderboard, BurndownChart, DriveDashboard,
+  AgentThroughputLeaderboard, BurndownChart, DriveDashboard, GardenView,
 } from "./boardLazyViews.js";
 
 interface BoardSecondaryViewsProps {
@@ -393,6 +393,15 @@ export function BoardSecondaryViews({
       {viewMode === "fireworks" && (
         <BoardErrorBoundary columnName="Fireworks View">
           <FireworksView
+            columns={columns}
+            onIssueClick={onIssueClick}
+            searchQuery={searchQuery}
+          />
+        </BoardErrorBoundary>
+      )}
+      {viewMode === "garden" && (
+        <BoardErrorBoundary columnName="Garden View">
+          <GardenView
             columns={columns}
             onIssueClick={onIssueClick}
             searchQuery={searchQuery}
