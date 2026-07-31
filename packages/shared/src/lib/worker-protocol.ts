@@ -6,6 +6,15 @@
 // so the board-side remote execution service can feed them straight into the
 // normal session broadcast/exit machinery.
 
+/**
+ * A worker carrying this label shares the board's filesystem, so its assignments
+ * skip git transport and run directly in the board-side worktree. Lives here —
+ * in the dependency-free protocol module — because BOTH the board's placement
+ * policy and the worker CLI need it, and the CLI must not pull in the server's
+ * service graph (db/drizzle/hono) just to name a label.
+ */
+export const SHARES_FILESYSTEM_LABEL = "shares-filesystem";
+
 /** Everything a worker needs to spawn one agent process. Fully serializable. */
 export interface WorkerLaunchSpec {
   command: string;

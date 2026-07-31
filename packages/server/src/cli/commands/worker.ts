@@ -1,6 +1,6 @@
 import type { Command } from "commander";
 import { startWorkerDaemon, defaultWorkerStateFile } from "../../worker/worker-daemon.js";
-import { SHARES_FILESYSTEM_LABEL } from "../../services/worker-fleet.service.js";
+import { SHARES_FILESYSTEM_LABEL } from "@agentic-kanban/shared/lib/worker-protocol";
 
 const DEFAULT_BOARD_URL = "http://127.0.0.1:3001";
 
