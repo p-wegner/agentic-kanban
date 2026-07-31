@@ -35,6 +35,8 @@ export interface WorkerDaemonOptions {
   maxConcurrency?: number;
   /** Defaults to ~/.agentic-kanban/worker-state.json. */
   stateFile?: string;
+  /** Root for git-transport clones/checkouts. Defaults to ~/.agentic-kanban/worker. */
+  workRoot?: string;
   heartbeatIntervalMs?: number;
   log?: (line: string) => void;
 }
@@ -141,7 +143,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     }
   };
 
-  const runner = createWorkerAgentRunner(sendToBoard);
+  const runner = createWorkerAgentRunner(sendToBoard, { boardUrl, workRoot: opts.workRoot });
 
   let resolveConnected!: () => void;
   const connected = new Promise<void>((resolve) => { resolveConnected = resolve; });
@@ -176,7 +178,8 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       }
       switch (message.type) {
         case "assign":
-          runner.assign(message.sessionId, message.spec);
+          if (message.repo) runner.assignWithRepo(message.sessionId, message.spec, message.repo);
+          else runner.assign(message.sessionId, message.spec);
           break;
         case "input":
           runner.input(message.sessionId, message.data);

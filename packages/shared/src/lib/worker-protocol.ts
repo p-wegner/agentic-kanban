@@ -21,6 +21,26 @@ export interface WorkerLaunchSpec {
   useShell?: boolean;
 }
 
+/**
+ * Git-transport spec for TRUE remote execution (phase 2): the worker clones
+ * the project from the board's git smart-HTTP listener, works in its own
+ * checkout, and pushes the result to `incomingRef` (refs/kanban/incoming/*)
+ * before reporting exit. The worker composes the full git URL from the board
+ * host it already dials plus `gitPort`/`gitToken` — the board never needs to
+ * know its own externally-visible hostname.
+ */
+export interface WorkerRepoTransport {
+  projectId: string;
+  gitPort: number;
+  gitToken: string;
+  branch: string;
+  baseBranch: string;
+  incomingRef: string;
+  setupScript?: string;
+  /** Agent skills to materialize into the checkout's .claude/skills/. */
+  skills?: Array<{ name: string; content: string }>;
+}
+
 /** Mirrors agent.service's AgentOutputEvent so events plug into broadcast as-is. */
 export interface WorkerAgentEvent {
   type: "stdout" | "stderr" | "exit";
@@ -30,7 +50,7 @@ export interface WorkerAgentEvent {
 }
 
 export type BoardToWorkerMessage =
-  | { type: "assign"; sessionId: string; spec: WorkerLaunchSpec }
+  | { type: "assign"; sessionId: string; spec: WorkerLaunchSpec; repo?: WorkerRepoTransport }
   | { type: "input"; sessionId: string; data: string }
   | { type: "close_stdin"; sessionId: string }
   | { type: "stop"; sessionId: string };
@@ -91,6 +111,38 @@ export function parseWorkerToBoardMessage(raw: unknown): WorkerToBoardMessage | 
   }
 }
 
+function parseRepoTransport(raw: unknown): WorkerRepoTransport | null {
+  const repo = asRecord(raw);
+  if (!repo) return null;
+  if (
+    typeof repo.projectId !== "string" ||
+    typeof repo.gitPort !== "number" ||
+    typeof repo.gitToken !== "string" ||
+    typeof repo.branch !== "string" ||
+    typeof repo.baseBranch !== "string" ||
+    typeof repo.incomingRef !== "string"
+  ) {
+    return null;
+  }
+  const skills = Array.isArray(repo.skills)
+    ? repo.skills
+        .map((s) => asRecord(s))
+        .filter((s): s is Record<string, unknown> => Boolean(s))
+        .filter((s) => typeof s.name === "string" && typeof s.content === "string")
+        .map((s) => ({ name: s.name as string, content: s.content as string }))
+    : undefined;
+  return {
+    projectId: repo.projectId,
+    gitPort: repo.gitPort,
+    gitToken: repo.gitToken,
+    branch: repo.branch,
+    baseBranch: repo.baseBranch,
+    incomingRef: repo.incomingRef,
+    setupScript: typeof repo.setupScript === "string" ? repo.setupScript : undefined,
+    ...(skills && skills.length > 0 ? { skills } : {}),
+  };
+}
+
 /** Parse + shape-check a message arriving at a worker. Null = drop it. */
 export function parseBoardToWorkerMessage(raw: unknown): BoardToWorkerMessage | null {
   const msg = parseJson(raw);
@@ -101,9 +153,11 @@ export function parseBoardToWorkerMessage(raw: unknown): BoardToWorkerMessage | 
       if (!spec) return null;
       if (typeof spec.command !== "string" || typeof spec.cwd !== "string") return null;
       if (!Array.isArray(spec.args)) return null;
+      const repo = parseRepoTransport(msg.repo);
       return {
         type: "assign",
         sessionId: msg.sessionId,
+        ...(repo ? { repo } : {}),
         spec: {
           command: spec.command,
           args: spec.args.filter((a): a is string => typeof a === "string"),

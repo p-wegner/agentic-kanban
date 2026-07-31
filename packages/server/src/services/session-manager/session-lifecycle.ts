@@ -652,7 +652,13 @@ export function createSessionLifecycle(
     // host. Containerized launches keep the container path untouched.
     let effectivePlacement = placement;
     if (!effectivePlacement && !containerProvision && projectId) {
-      effectivePlacement = await resolveWorkerPlacement({ database: db, projectId, providerName });
+      effectivePlacement = await resolveWorkerPlacement({
+        database: db,
+        projectId,
+        providerName,
+        branch: workspace.isDirect ? undefined : workspace.branch,
+        baseBranch: workspace.baseBranch ?? undefined,
+      });
     }
 
     try {

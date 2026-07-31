@@ -1,5 +1,6 @@
 import type { Command } from "commander";
 import { startWorkerDaemon, defaultWorkerStateFile } from "../../worker/worker-daemon.js";
+import { SHARES_FILESYSTEM_LABEL } from "../../services/worker-fleet.service.js";
 
 const DEFAULT_BOARD_URL = "http://127.0.0.1:3001";
 
@@ -51,9 +52,15 @@ export function registerWorkerCommand(program: Command) {
     .option("--token <pairingToken>", "Pairing token for first registration (ignored once paired)")
     .option("--name <name>", "Worker display name (default: hostname)")
     .option("--labels <csv>", "Capability labels, e.g. docker,windows")
+    .option(
+      "--shares-filesystem",
+      "This worker sees the board's filesystem (same machine): run agents directly in the board's worktrees " +
+        "instead of cloning over git transport. Only correct when board and worker share a disk.",
+    )
     .option("--providers <csv>", "Agent providers available here, e.g. claude,codex")
     .option("--max-concurrency <n>", "Max parallel agent sessions", (v) => parseInt(v, 10))
     .option("--state-file <path>", `Pairing state file (default: ${defaultWorkerStateFile()})`)
+    .option("--work-root <path>", "Root for git-transport clones/checkouts (default: ~/.agentic-kanban/worker)")
     .option("--leave-agents", "On Ctrl+C, leave running agent processes alive instead of killing them")
     .action(async (options: {
       board: string;
@@ -63,17 +70,24 @@ export function registerWorkerCommand(program: Command) {
       providers?: string;
       maxConcurrency?: number;
       stateFile?: string;
+      workRoot?: string;
+      sharesFilesystem?: boolean;
       leaveAgents?: boolean;
     }) => {
       try {
+        const labels = splitList(options.labels) ?? [];
+        if (options.sharesFilesystem && !labels.includes(SHARES_FILESYSTEM_LABEL)) {
+          labels.push(SHARES_FILESYSTEM_LABEL);
+        }
         const daemon = await startWorkerDaemon({
           boardUrl: options.board,
           pairingToken: options.token,
           name: options.name,
-          labels: splitList(options.labels),
+          labels: labels.length > 0 ? labels : undefined,
           providers: splitList(options.providers),
           maxConcurrency: options.maxConcurrency,
           stateFile: options.stateFile,
+          workRoot: options.workRoot,
         });
         // The reconnect timers are unref'd; this keeps the CLI process alive.
         const keepAlive = setInterval(() => {}, 60_000);
