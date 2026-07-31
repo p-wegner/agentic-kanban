@@ -40,8 +40,10 @@ describe("worker-registry (worker fleet phase 1a)", () => {
       expect(worker.name).toBe("builder-1");
       expect(worker.effectiveStatus).toBe("online");
       expect(worker.maxConcurrency).toBe(2);
-      // The token itself is never stored — only its hash.
-      expect(worker.tokenHash).not.toBe(result.workerToken);
+      // The credential digest never leaves the service — the view has no tokenHash
+      // at all, so no client can brute-force a worker token offline.
+      expect("tokenHash" in worker).toBe(false);
+      expect(JSON.stringify(worker)).not.toContain(result.workerToken);
     });
 
     it("rejects an unknown pairing token", async () => {

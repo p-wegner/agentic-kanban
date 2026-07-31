@@ -36,7 +36,12 @@ export interface RegisterWorkerInput {
   now?: string;
 }
 
-export interface WorkerView extends WorkerRow {
+/**
+ * A worker as exposed to callers. `tokenHash` is deliberately OMITTED — it is a
+ * credential digest, and shipping it to the UI/CLI would hand every board client
+ * material to brute-force a worker token offline. It stays inside this service.
+ */
+export interface WorkerView extends Omit<WorkerRow, "tokenHash"> {
   /** Stored status downgraded to "offline" when the heartbeat is stale/absent. */
   effectiveStatus: WorkerStatus;
 }
@@ -145,7 +150,10 @@ export function createWorkerRegistry(database: Database = realDb) {
   async function listWorkersView(now?: string): Promise<WorkerView[]> {
     const nowMs = now ? new Date(now).getTime() : Date.now();
     const rows = await workerRepo.listWorkers(database);
-    return rows.map((row) => ({ ...row, effectiveStatus: effectiveStatus(row, nowMs) }));
+    return rows.map((row) => {
+      const { tokenHash: _tokenHash, ...safe } = row;
+      return { ...safe, effectiveStatus: effectiveStatus(row, nowMs) };
+    });
   }
 
   /**
