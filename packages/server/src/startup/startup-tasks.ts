@@ -565,6 +565,16 @@ export async function runStartupTasks(sessionManager: SessionManager, _deps?: { 
   await abortStaleMerges();
   await abortStaleRebases();
   await cleanupStaleSessions(sessionManager);
+  try {
+    // Worker fleet (epic #184): land any remote-worker pushes that arrived while
+    // the board was down. Must run AFTER cleanupStaleSessions — that sweep
+    // finalizes the pid-less remote session rows, and this recovers their work
+    // from the incoming ref so a restart mid-flight does not lose it.
+    const { sweepIncomingWorkerRefs } = await import("./worker-incoming-sweep.js");
+    await sweepIncomingWorkerRefs();
+  } catch (err) {
+    console.warn("[startup] sweepIncomingWorkerRefs failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
   await reconcileSilentlyMergedWorkspaces();
   try {
     // Multi-repo crash gap: a crash between the leading merge and the sibling merges

@@ -6,7 +6,7 @@ import * as lifecycleRepo from "../../repositories/session-lifecycle.repository.
 import * as agentSkillRepo from "../../repositories/agent-skill.repository.js";
 import * as realAgentService from "../agent.service.js";
 import { createAgentDispatch, type AgentExecutionService } from "../agent-dispatch.service.js";
-import { getWorkerFleet, resolveWorkerPlacement } from "../worker-fleet.service.js";
+import { getWorkerFleet, resolveWorkerPlacement, WorkerDispatchUnavailableError } from "../worker-fleet.service.js";
 import { extractPlanFromMessages } from "../plan-mode.service.js";
 import { computeScorecard } from "../workspace-scorecard.service.js";
 import { computeWorkspaceCodeMetrics } from "../workspace-code-metrics.service.js";
@@ -650,6 +650,9 @@ export function createSessionLifecycle(
     // Worker-fleet placement (epic #1): an explicit placement wins; otherwise a
     // project opted into worker dispatch gets an eligible remote worker, else
     // host. Containerized launches keep the container path untouched.
+    // Strict worker dispatch (epic #184) refuses the host fallback: surface it as
+    // a CONFLICT the caller can act on, the same shape devcontainer strict mode
+    // uses for ISOLATION_REFUSED, rather than silently running on the board.
     let effectivePlacement = placement;
     if (!effectivePlacement && !containerProvision && projectId) {
       effectivePlacement = await resolveWorkerPlacement({
@@ -658,6 +661,11 @@ export function createSessionLifecycle(
         providerName,
         branch: workspace.isDirect ? undefined : workspace.branch,
         baseBranch: workspace.baseBranch ?? undefined,
+      }).catch((err) => {
+        if (err instanceof WorkerDispatchUnavailableError) {
+          throw new WorkspaceError(err.message, "CONFLICT", { code: "NO_AVAILABLE_WORKER" });
+        }
+        throw err;
       });
     }
 

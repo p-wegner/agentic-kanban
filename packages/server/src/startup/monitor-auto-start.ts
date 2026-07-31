@@ -5,6 +5,8 @@ import { db } from "../db/index.js";
 import { createBoardEvents } from "../services/board-events.js";
 import type { MonitorActionName } from "../services/monitor-nudge.js";
 import { resolveMonitorTunables } from "../services/strategy-objective.service.js";
+import { narrowProviderName } from "../services/agent-provider.js";
+import { projectCanDispatch } from "../services/worker-fleet.service.js";
 import { isMonitorEligibleIssue, monitorEligibleIssueSql } from "./monitor-eligibility.js";
 import { buildFileContentionGate, shouldDeferForContention, type BuildFileContentionGate } from "./monitor-file-contention.js";
 
@@ -116,7 +118,19 @@ export function notDriveOrEpicMetaSql() {
  * open" are NOT tallied here because they are expected, self-explanatory states, not
  * surprises.
  */
-export type AutoStartSkipReason = "wip_cap" | "no_auto_start_tag" | "contention_gate" | "cycle_start_cap" | "feature_type_excluded";
+export type AutoStartSkipReason =
+  | "wip_cap"
+  | "no_auto_start_tag"
+  | "contention_gate"
+  | "cycle_start_cap"
+  | "feature_type_excluded"
+  /**
+   * The project dispatches builders to fleet workers in STRICT mode (epic #184)
+   * and no connected worker has free capacity. Skipping keeps the ticket queued
+   * for a later cycle instead of quietly running it on the board host, which is
+   * exactly what strict mode exists to prevent.
+   */
+  | "no_available_worker";
 
 export interface AutoStartSkipInfo {
   issueNumbers: number[];
@@ -189,6 +203,19 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       console.log(`[monitor] Auto-start capacity for project ${inProgressSt.projectId}: active=${capacity.active}/${wipLimit} inactiveStale=${capacity.inactiveStale}`);
     }
     if (currentWip >= wipLimit) continue;
+
+    // Fleet gate (epic #184): a strict worker-dispatch project must not start
+    // work the fleet cannot take — one check per project per cycle.
+    const dispatch = await projectCanDispatch({
+      database: db,
+      projectId: inProgressSt.projectId,
+      providerName: narrowProviderName(prefMap.get("provider")),
+    });
+    if (!dispatch.available) {
+      console.log(`[monitor] auto-start held for project ${inProgressSt.projectId}: ${dispatch.reason}`);
+      noteSkip(inProgressSt.projectId, null, "no_available_worker");
+      continue;
+    }
 
     // #119: one snapshot per project per loop, then a cheap synchronous check per candidate.
     const contentionGate = await buildContentionGate(prefMap, inProgressSt.projectId);

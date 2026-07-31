@@ -46,9 +46,13 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   "compounding_setup",
   "compounding_setup_state",
   "file_contention",
-  // Worker fleet (epic #1): `worker_dispatch_<projectId>` opts a project's builder
-  // sessions into remote execution on connected fleet workers ("true"/"false").
+  // Worker fleet (epic #184): `worker_dispatch_<projectId>` opts a project's builder
+  // sessions into remote execution on connected fleet workers ("true"/"false");
+  // `worker_labels_<id>` is a CSV of labels a worker must carry; `worker_dispatch_
+  // strict_<id>` refuses the host fallback (the monitor then skips the start).
   "worker_dispatch",
+  "worker_labels",
+  "worker_dispatch_strict",
 ] as const;
 
 /**
