@@ -114,12 +114,28 @@ export function createAgentDispatch(implementations: AgentDispatchImplementation
         if (event.type === "exit") bySession.delete(sessionId);
         onOutput(event);
       };
-      return impl.launch(
-        worktreePath, sessionId, prompt, agentArgs, onOutputWithCleanup,
-        providerSessionId, agentCommand, claudeProfile, keepAlive, permissionPromptTool,
-        planMode, provider, profile, extraEnv, skipPermissions,
-        model, contextFiles, systemInstructions, containerProvision, placement,
-      );
+      try {
+        return impl.launch(
+          worktreePath, sessionId, prompt, agentArgs, onOutputWithCleanup,
+          providerSessionId, agentCommand, claudeProfile, keepAlive, permissionPromptTool,
+          planMode, provider, profile, extraEnv, skipPermissions,
+          model, contextFiles, systemInstructions, containerProvision, placement,
+        );
+      } catch (err) {
+        // A remote launch can race the worker disconnecting between placement
+        // and assign. Degrade to host rather than failing the session.
+        if (impl === implementations.host) throw err;
+        console.warn(
+          `[agent-dispatch] non-host launch failed (${err instanceof Error ? err.message : String(err)}); falling back to host: sessionId=${sessionId}`,
+        );
+        bySession.set(sessionId, implementations.host);
+        return implementations.host.launch(
+          worktreePath, sessionId, prompt, agentArgs, onOutputWithCleanup,
+          providerSessionId, agentCommand, claudeProfile, keepAlive, permissionPromptTool,
+          planMode, provider, profile, extraEnv, skipPermissions,
+          model, contextFiles, systemInstructions, containerProvision, { kind: "host" },
+        );
+      }
     },
     kill(sessionId) {
       const impl = forSession(sessionId);

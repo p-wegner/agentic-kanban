@@ -46,6 +46,9 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   "compounding_setup",
   "compounding_setup_state",
   "file_contention",
+  // Worker fleet (epic #1): `worker_dispatch_<projectId>` opts a project's builder
+  // sessions into remote execution on connected fleet workers ("true"/"false").
+  "worker_dispatch",
 ] as const;
 
 /**

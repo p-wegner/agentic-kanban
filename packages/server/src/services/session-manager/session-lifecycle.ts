@@ -6,6 +6,7 @@ import * as lifecycleRepo from "../../repositories/session-lifecycle.repository.
 import * as agentSkillRepo from "../../repositories/agent-skill.repository.js";
 import * as realAgentService from "../agent.service.js";
 import { createAgentDispatch, type AgentExecutionService } from "../agent-dispatch.service.js";
+import { getWorkerFleet, resolveWorkerPlacement } from "../worker-fleet.service.js";
 import { extractPlanFromMessages } from "../plan-mode.service.js";
 import { computeScorecard } from "../workspace-scorecard.service.js";
 import { computeWorkspaceCodeMetrics } from "../workspace-code-metrics.service.js";
@@ -76,7 +77,8 @@ export function createSessionLifecycle(
   deps: SessionLifecycleDeps = {},
 ) {
   const db = deps.db ?? realDb;
-  const agentService = deps.agentService ?? createAgentDispatch({ host: realAgentService });
+  const agentService = deps.agentService
+    ?? createAgentDispatch({ host: realAgentService, remote: getWorkerFleet().remoteAgentService });
   const launchPreflight = deps.preflight ?? workspaceLaunchPreflight;
   /** Create a session DB row and launch the agent process. */
   async function startSession(opts: StartSessionOptions): Promise<string> {
@@ -645,6 +647,14 @@ export function createSessionLifecycle(
       wasAlreadyDowngraded: workspace.isolationDowngraded,
     });
 
+    // Worker-fleet placement (epic #1): an explicit placement wins; otherwise a
+    // project opted into worker dispatch gets an eligible remote worker, else
+    // host. Containerized launches keep the container path untouched.
+    let effectivePlacement = placement;
+    if (!effectivePlacement && !containerProvision && projectId) {
+      effectivePlacement = await resolveWorkerPlacement({ database: db, projectId, providerName });
+    }
+
     try {
       const proc = agentService.launch(effectiveWorkingDir, sessionId, effectivePrompt, effectiveAgentArgs, (event) => {
         if (event.type === "exit") {
@@ -662,7 +672,7 @@ export function createSessionLifecycle(
           handleExitEvent(event.exitCode ?? null);
         }
       // When resumeWithNewModel is true, omit --resume so the new profile/provider is used instead
-      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider, launchProfile, effectiveExtraEnv, skipPermissions, effectiveModel, contextFiles, (effectiveSystemInstructions ?? "").trim() || undefined, containerProvision, placement);
+      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider, launchProfile, effectiveExtraEnv, skipPermissions, effectiveModel, contextFiles, (effectiveSystemInstructions ?? "").trim() || undefined, containerProvision, effectivePlacement);
 
       // Persist PID so hot-reload can detect surviving processes
       if (proc.pid) {
