@@ -208,7 +208,13 @@ export function bucketScorecardScores(scores: number[]): Record<ScorecardBucket,
 export function classifyReviewVerdictText(text: string): "approve" | "changesRequested" | "unclear" {
   const t = text.toLowerCase();
   const approve = /ready for merge|marking .*ready|approved|no critical or major|lgtm/.test(t);
-  const changes = /request changes|moving .*back to in progress|moved .*to in progress|needs fixes|requires changes|back to the agent|critical issue|major issue/.test(t);
+  // The `code-review` skill's output contract emits findings as a leading
+  // `CRITICAL <path>:<line> — …` / `MAJOR …` line rather than prose like "critical
+  // issue", so match that structured form too — otherwise a terse (and correct)
+  // changes-requested review reads as "unclear".
+  const structuredFinding = /^\s*(critical|major)\b[^\n]*[:\s]/m.test(t);
+  const changes = structuredFinding
+    || /request changes|moving .*back to in progress|moved .*to in progress|needs fixes|requires changes|back to the agent|critical issue|major issue/.test(t);
   if (changes && !approve) return "changesRequested";
   if (approve && !changes) return "approve";
   if (approve && changes) return "approve";

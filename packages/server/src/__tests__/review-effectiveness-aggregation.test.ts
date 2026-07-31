@@ -114,6 +114,22 @@ describe("classifyReviewVerdictText", () => {
   it("is case-insensitive (lower-cases internally)", () => {
     expect(classifyReviewVerdictText("READY FOR MERGE")).toBe("approve");
   });
+
+  // The code-review skill's output contract emits a structured finding line instead
+  // of prose like "critical issue"; without the structured match these read "unclear".
+  it("reads the skill's structured finding line as changesRequested", () => {
+    const terse = [
+      "CRITICAL src/foo.ts:12 — off-by-one drops the last row",
+      "Fails when: n=0 → negative slice index",
+      "Fixed: clamped the lower bound",
+    ].join("\n");
+    expect(classifyReviewVerdictText(terse)).toBe("changesRequested");
+    expect(classifyReviewVerdictText("MAJOR src/bar.ts:8 — unhandled rejection")).toBe("changesRequested");
+  });
+
+  it("does not read the skill's one-line clean verdict as a finding", () => {
+    expect(classifyReviewVerdictText("No critical or major issues.")).toBe("approve");
+  });
 });
 
 describe("aggregateReviewWorkspaceStats", () => {
