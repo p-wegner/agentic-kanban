@@ -65,7 +65,11 @@ pnpm cli -- register <path>     # register a git repo as a project
 pnpm cli -- list                # list registered projects
 pnpm cli -- unregister <name>   # remove a project by name or ID
 pnpm cli -- cleanup             # show stale worktrees for closed workspaces
+pnpm cli -- worker pair         # mint a pairing token for a compute worker
+pnpm cli -- worker list         # show connected workers and their capacity
 ```
+
+Agent skills ship with the CLI and can be installed into any project — `npx agentic-kanban install-skill --list` to see them, `npx agentic-kanban install-skill <path> -n <name>` to write them as `.claude/skills/<name>/SKILL.md`.
 
 ## Core Workflow
 
@@ -91,6 +95,43 @@ pnpm cli -- cleanup             # show stale worktrees for closed workspaces
 Add and manage repos under **Settings → Repos** (or `POST /api/projects/:id/repos`).
 
 **Service stacks (Docker Compose).** A workspace can bring up a real dependency stack from a Docker Compose file — databases, queues, sibling services — so agents build and test against the real thing instead of mocks. Ports are allocated per workspace (no collisions between parallel worktrees) and the board health-checks the stack before handing off to the agent. It runs under **Docker-in-Docker (DinD)** too, so a containerized agent can drive its own Compose stack. Configure it per project under **Settings → Service stack**. See [docs/decisions/011-per-workspace-service-stacks.md](docs/decisions/011-per-workspace-service-stacks.md).
+
+## Worker Fleet (remote compute)
+
+Agent sessions don't have to run on the board's machine. Pair other machines as **workers** and the board schedules ticket work onto them — capacity becomes "the machines you've paired" instead of "this laptop". Workers dial the board (like CI runners), so a worker behind NAT needs no inbound access; only the board does.
+
+**Connect a machine** — the CLI prints the full runbook with your board URL filled in, so you can follow it (or hand it to an agent) without prior context:
+
+```bash
+agentic-kanban worker instructions --board http://<board-host>:3001
+agentic-kanban worker instructions --board http://<board-host>:3001 --json   # machine-readable
+```
+
+The short version:
+
+```bash
+# On the BOARD machine — single-use, expires in 10 minutes
+agentic-kanban worker pair
+
+# On the WORKER machine — no board checkout, no board database, HTTP/WS only
+agentic-kanban worker start --board http://<board-host>:3001 --token <pairing-token>   --labels docker,linux --providers claude --max-concurrency 2
+
+agentic-kanban worker list --board http://<board-host>:3001   # should read "online"
+```
+
+Registration alone routes nothing — opt a project in with `worker_dispatch_<projectId>=true`. Optionally require capabilities with `worker_labels_<projectId>=docker,linux`, and set `worker_dispatch_strict_<projectId>=true` to forbid the silent fallback to running on the board host (the monitor then reports a `no_available_worker` skip instead of quietly running it locally). Manage the fleet in the UI via the command palette → **Worker Fleet** (pair, revoke, status, capacity, labels).
+
+**How work travels.** The board serves each project's repo over token-authed git-over-HTTP. A worker clones it, runs the agent in its own checkout, and pushes to a staging namespace (`refs/kanban/incoming/<branch>`); the board then **fast-forwards** the real branch from there, after which the normal diff / review / merge flow applies unchanged. Divergence is held and reported, never force-landed. A worker on the *same* machine as the board can skip all of that with `--shares-filesystem`.
+
+**Credentials never travel.** A worker authenticates its agent with its own local provider login — the board sends a launch spec, never an API key or profile.
+
+**Networking.** For a cross-machine fleet the board must listen externally and expose two ports — the API/WebSocket port and the git-transport port, which is OS-assigned per boot unless you pin it:
+
+```bash
+KANBAN_HOST=0.0.0.0 KANBAN_GIT_HTTP_PORT=3002 pnpm dev
+```
+
+Both worker-facing surfaces are bearer-token authenticated (single-use pairing token → per-worker token, stored hashed), but the rest of the board API is not — keep an exposed board on a trusted network (LAN/VPN/Tailscale), never the open internet. Design rationale: [docs/decisions/012-worker-fleet-compute-model.md](docs/decisions/012-worker-fleet-compute-model.md).
 
 ## MCP Server
 
