@@ -184,6 +184,26 @@ function handleServiceRpc(req: IncomingMessage, res: ServerResponse, service: st
   });
 }
 
+/**
+ * Fixed port for the git listener, from `KANBAN_GIT_HTTP_PORT`.
+ *
+ * Default is an OS-assigned port (0), which is right for a same-host fleet.
+ * A worker on ANOTHER machine has to reach this port through a firewall/NAT
+ * rule, and you cannot open a rule for a port that changes every board boot —
+ * so a cross-machine deployment pins it. Invalid values fall back to 0 with a
+ * warning rather than crashing the board on a typo.
+ */
+export function resolveConfiguredGitPort(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.KANBAN_GIT_HTTP_PORT;
+  if (raw === undefined || raw.trim() === "") return 0;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 65535) {
+    console.warn(`[git-http] ignoring invalid KANBAN_GIT_HTTP_PORT=${raw}; using an OS-assigned port`);
+    return 0;
+  }
+  return parsed;
+}
+
 export async function startGitHttpServer(opts?: {
   database?: Database;
   port?: number;
@@ -247,7 +267,7 @@ export async function startGitHttpServer(opts?: {
 
   const port = await new Promise<number>((resolve, rejectListen) => {
     http.once("error", rejectListen);
-    http.listen(opts?.port ?? 0, opts?.host ?? "0.0.0.0", () => {
+    http.listen(opts?.port ?? resolveConfiguredGitPort(), opts?.host ?? "0.0.0.0", () => {
       const address = http.address();
       resolve(typeof address === "object" && address ? address.port : 0);
     });

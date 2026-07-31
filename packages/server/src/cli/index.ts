@@ -75,7 +75,15 @@ registerWorkerCommand(program);
 //   kept off stdout so it never corrupts `--json` output, see its own comment).
 // preAction only fires for action subcommands — never for --help/--version —
 // and both checks are non-fatal.
-program.hook("preAction", async () => {
+program.hook("preAction", async (_thisCommand, actionCommand) => {
+  // `worker` commands are pure HTTP/WebSocket clients — a worker machine has no
+  // board checkout and no board database. Probing DB resolution there would
+  // print the split-brain warning ("this CLI may be reading/writing a DIFFERENT
+  // database") on a machine where no database is involved at all, which reads
+  // as a real problem during the documented worker-connect flow. Skip it.
+  for (let cmd: typeof actionCommand | null = actionCommand; cmd; cmd = cmd.parent) {
+    if (cmd.name() === "worker") return;
+  }
   try {
     const { DB_LOCATION } = await import("../db/data-dir.js");
     const homeFallback = homeFallbackDbWarning(DB_LOCATION);

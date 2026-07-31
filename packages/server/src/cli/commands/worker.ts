@@ -10,6 +10,154 @@ function splitList(value?: string): string[] | undefined {
   return items.length > 0 ? items : undefined;
 }
 
+export interface WorkerConnectStep {
+  title: string;
+  detail: string;
+  /** Commands to run for this step, in order. Empty for check-only steps. */
+  commands: string[];
+  /** Where the step runs — worker machine, board machine, or either. */
+  where: "worker" | "board" | "either";
+}
+
+/**
+ * The connect runbook, as data. Exported so `worker instructions --json`, the
+ * `fleet-worker` agent skill and the docs all render the SAME steps instead of
+ * three copies that drift.
+ */
+export function buildWorkerConnectSteps(boardUrl: string, pairingToken: string): WorkerConnectStep[] {
+  return [
+    {
+      title: "Verify the prerequisites on this machine",
+      where: "worker",
+      detail:
+        "A worker runs agents with ITS OWN credentials — the board never sends any. So the provider CLI must be " +
+        "installed here and already logged in, and git must be on PATH. No board checkout is needed and the " +
+        "board's database is never accessed: the worker speaks only HTTP/WebSocket.",
+      commands: ["git --version", "claude --version   # or: codex --version / copilot --version"],
+    },
+    {
+      title: "Confirm the board is reachable from here",
+      where: "worker",
+      detail:
+        `Anything other than a connection error means the board is reachable. A board only listening on loopback ` +
+        `is NOT reachable from another machine — it must be started with KANBAN_HOST=0.0.0.0 (see the board-side ` +
+        `note below).`,
+      commands: [`curl -s -o /dev/null -w "%{http_code}\\n" ${boardUrl}/api/health`],
+    },
+    {
+      title: "Mint a pairing token (on the board machine)",
+      where: "board",
+      detail:
+        "Pairing tokens are single-use and expire in 10 minutes. Mint one on the board host (the mint endpoint " +
+        "rides the board's loopback trust), or use the Workers UI panel: command palette → \"Worker Fleet\" → " +
+        "Mint token. Copy the token to this machine.",
+      commands: ["agentic-kanban worker pair"],
+    },
+    {
+      title: "Start the worker daemon",
+      where: "worker",
+      detail:
+        "Registers with the board, then holds a WebSocket open for assignments. The pairing token is exchanged for " +
+        "a per-worker token saved in ~/.agentic-kanban/worker-state.json, so later runs need no --token. Set " +
+        "--labels to advertise capabilities a project can require, --providers to declare which agent CLIs work " +
+        "here, and --max-concurrency for how many sessions this machine should take. Runs in the foreground until " +
+        "Ctrl+C.",
+      commands: [
+        `agentic-kanban worker start --board ${boardUrl} --token ${pairingToken} \\`,
+        `  --name "$(hostname)" --labels docker,linux --providers claude --max-concurrency 2`,
+      ],
+    },
+    {
+      title: "Verify the board sees this worker",
+      where: "either",
+      detail:
+        "The worker should be listed as `online` with the labels and capacity you passed. It reads `offline` if its " +
+        "heartbeat is older than 90s — that means the daemon died or lost the connection.",
+      commands: [`agentic-kanban worker list --board ${boardUrl}`],
+    },
+    {
+      title: "Opt a project into dispatching work here",
+      where: "board",
+      detail:
+        "Registration alone does not route work. A project opts in with worker_dispatch_<projectId>; it can require " +
+        "capabilities with worker_labels_<projectId>, and worker_dispatch_strict_<projectId> forbids the silent " +
+        "fallback to running on the board host (the monitor then reports the no_available_worker skip reason " +
+        "instead). Get the project id from `agentic-kanban list`.",
+      commands: [
+        "agentic-kanban preferences set worker_dispatch_<projectId> true",
+        "agentic-kanban preferences set worker_labels_<projectId> docker,linux    # optional",
+        "agentic-kanban preferences set worker_dispatch_strict_<projectId> true   # optional",
+      ],
+    },
+  ];
+}
+
+export function renderWorkerConnectMarkdown(
+  boardUrl: string,
+  pairingToken: string,
+  steps: WorkerConnectStep[],
+): string {
+  const lines: string[] = [];
+  lines.push(`# Connect this machine to ${boardUrl} as a fleet worker`);
+  lines.push("");
+  lines.push(
+    "The board schedules agent sessions onto connected workers. This machine clones the repo from the board over " +
+      "git-over-HTTP, runs the agent in its own checkout, and pushes the result back — the board then lands the " +
+      "branch and its normal review/merge flow takes over.",
+  );
+  lines.push("");
+  steps.forEach((step, index) => {
+    const scope = step.where === "board" ? " *(run on the BOARD machine)*" : step.where === "either" ? " *(either machine)*" : "";
+    lines.push(`## ${index + 1}. ${step.title}${scope}`);
+    lines.push("");
+    lines.push(step.detail);
+    if (step.commands.length > 0) {
+      lines.push("");
+      lines.push("```bash");
+      lines.push(...step.commands);
+      lines.push("```");
+    }
+    lines.push("");
+  });
+  lines.push("## Board-side networking (cross-machine only)");
+  lines.push("");
+  lines.push(
+    "A default board binds to 127.0.0.1 and is unreachable from other machines. For a real fleet the board must " +
+      "listen on an external interface AND expose two ports: the board API/WebSocket port (3001 by default) and the " +
+      "git-transport port. The git port is OS-assigned per boot unless you pin it — pin it, or you cannot write a " +
+      "stable firewall rule:",
+  );
+  lines.push("");
+  lines.push("```bash");
+  lines.push("KANBAN_HOST=0.0.0.0 KANBAN_GIT_HTTP_PORT=3002 pnpm dev   # board machine");
+  lines.push("```");
+  lines.push("");
+  lines.push(
+    "Both ports are bearer-token authenticated, but the rest of the board API is NOT — treat an exposed board as " +
+      "trusted-network only (VPN/Tailscale/LAN), never the open internet.",
+  );
+  lines.push("");
+  lines.push("## Notes");
+  lines.push("");
+  lines.push(
+    "- **Same machine as the board?** Add `--shares-filesystem` to `worker start`. The worker then runs agents " +
+      "directly in the board's worktrees and skips git transport entirely.",
+  );
+  lines.push(
+    "- **Stopping**: Ctrl+C kills the running agents too; `--leave-agents` leaves them alive. Losing the connection " +
+      "does NOT kill agents — the daemon reconnects with backoff and keeps their exit events queued.",
+  );
+  lines.push(
+    "- **Revoking**: `agentic-kanban worker list` then the Workers UI panel's Revoke button (or " +
+      "`DELETE /api/workers/:id`). The worker's token stops working immediately.",
+  );
+  lines.push(
+    "- **Disk**: the worker keeps one clone per project plus a per-session worktree under `~/.agentic-kanban/worker` " +
+      "(override with `--work-root`).",
+  );
+  return lines.join("\n");
+}
+
 /**
  * `worker` — run this machine as a fleet worker for a (possibly remote) board
  * (epic #1, phase 1b #4). Unlike the rest of the CLI, these commands talk to
@@ -103,6 +251,27 @@ export function registerWorkerCommand(program: Command) {
         console.error(err instanceof Error ? err.message : String(err));
         process.exit(1);
       }
+    });
+
+  workerCmd
+    .command("instructions")
+    .description(
+      "Print a step-by-step runbook for connecting THIS machine to a remote board as a worker. " +
+        "Written to be followed by an agent (or a human) with no prior context — pass --board to " +
+        "get the commands pre-filled, and --token if you already minted a pairing token.",
+    )
+    .option("--board <url>", "Board base URL to embed in the instructions", DEFAULT_BOARD_URL)
+    .option("--token <pairingToken>", "Pairing token to embed, if you already have one")
+    .option("--json", "Emit the steps as JSON instead of Markdown")
+    .action((options: { board: string; token?: string; json?: boolean }) => {
+      const board = options.board.replace(/\/+$/, "");
+      const token = options.token ?? "<pairing-token>";
+      const steps = buildWorkerConnectSteps(board, token);
+      if (options.json) {
+        console.log(JSON.stringify({ boardUrl: board, steps }, null, 2));
+        return;
+      }
+      console.log(renderWorkerConnectMarkdown(board, token, steps));
     });
 
   workerCmd
