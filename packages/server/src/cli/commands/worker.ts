@@ -61,9 +61,11 @@ export function buildWorkerConnectSteps(boardUrl: string, pairingToken: string):
         "a per-worker token saved in ~/.agentic-kanban/worker-state.json, so later runs need no --token. Set " +
         "--labels to advertise capabilities a project can require, --providers to declare which agent CLIs work " +
         "here, and --max-concurrency for how many sessions this machine should take. Runs in the foreground until " +
-        "Ctrl+C.",
+        "Ctrl+C. `agentic-kanban-worker` is the standalone binary for worker machines — it loads only the " +
+        "daemon and never touches a database; on a machine that also runs the board, `agentic-kanban " +
+        "worker start` is equivalent.",
       commands: [
-        `agentic-kanban worker start --board ${boardUrl} --token ${pairingToken} \\`,
+        `agentic-kanban-worker start --board ${boardUrl} --token ${pairingToken} \\`,
         `  --name "$(hostname)" --labels docker,linux --providers claude --max-concurrency 2`,
       ],
     },
@@ -73,7 +75,7 @@ export function buildWorkerConnectSteps(boardUrl: string, pairingToken: string):
       detail:
         "The worker should be listed as `online` with the labels and capacity you passed. It reads `offline` if its " +
         "heartbeat is older than 90s — that means the daemon died or lost the connection.",
-      commands: [`agentic-kanban worker list --board ${boardUrl}`],
+      commands: [`agentic-kanban-worker list --board ${boardUrl}`],
     },
     {
       title: "Opt a project into dispatching work here",
@@ -167,8 +169,21 @@ export function renderWorkerConnectMarkdown(
 export function registerWorkerCommand(program: Command) {
   const workerCmd = program
     .command("worker")
-    .description("Fleet worker: connect this machine to a board and execute assigned agent sessions.\n\nSubcommands: pair, start, list");
+    .description("Fleet worker: connect this machine to a board and execute assigned agent sessions.\n\nSubcommands: pair, start, instructions, list");
+  registerWorkerSubcommands(workerCmd);
+}
 
+/**
+ * Attach pair/start/instructions/list to `parent`.
+ *
+ * Split from registerWorkerCommand so the SAME commands can hang off the
+ * `worker` subcommand of the main CLI *and* off the root of the standalone
+ * `agentic-kanban-worker` binary — which exists so a worker machine can run
+ * the daemon without loading the board CLI's command tree (and with it the
+ * database layer). Everything reachable from here must stay free of
+ * board-server imports; see worker/worker-cli.ts.
+ */
+export function registerWorkerSubcommands(workerCmd: Command) {
   workerCmd
     .command("pair")
     .description(
@@ -186,7 +201,7 @@ export function registerWorkerCommand(program: Command) {
       console.log(`Pairing token (single-use, expires ${body.expiresAt}):`);
       console.log(`  ${body.pairingToken}`);
       console.log(`\nOn the worker machine:`);
-      console.log(`  agentic-kanban worker start --board <board-url> --token ${body.pairingToken}`);
+      console.log(`  agentic-kanban-worker start --board <board-url> --token ${body.pairingToken}`);
     });
 
   workerCmd

@@ -114,10 +114,13 @@ The short version:
 agentic-kanban worker pair
 
 # On the WORKER machine — no board checkout, no board database, HTTP/WS only
-agentic-kanban worker start --board http://<board-host>:3001 --token <pairing-token>   --labels docker,linux --providers claude --max-concurrency 2
+agentic-kanban-worker start --board http://<board-host>:3001 --token <pairing-token> \
+  --labels docker,linux --providers claude --max-concurrency 2
 
-agentic-kanban worker list --board http://<board-host>:3001   # should read "online"
+agentic-kanban-worker list --board http://<board-host>:3001   # should read "online"
 ```
+
+`agentic-kanban-worker` is a **standalone binary** for worker machines: it loads only the daemon (a ~36 KB bundle) instead of the board's command tree, so it starts in ~0.25s instead of ~1.5s and never opens or creates a database. The same commands are also available as `agentic-kanban worker <cmd>` on a machine that already runs the board.
 
 Registration alone routes nothing — opt a project in with `worker_dispatch_<projectId>=true`. Optionally require capabilities with `worker_labels_<projectId>=docker,linux`, and set `worker_dispatch_strict_<projectId>=true` to forbid the silent fallback to running on the board host (the monitor then reports a `no_available_worker` skip instead of quietly running it locally). Manage the fleet in the UI via the command palette → **Worker Fleet** (pair, revoke, status, capacity, labels).
 

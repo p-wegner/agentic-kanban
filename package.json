@@ -1,7 +1,7 @@
 {
   "name": "agentic-kanban",
   "private": false,
-  "description": "Kanban board for managing AI-driven coding tasks — each card is a Claude Code session with built-in diff review and merge",
+  "description": "Kanban board for managing AI-driven coding tasks \u2014 each card is a Claude Code session with built-in diff review and merge",
   "keywords": [
     "kanban",
     "ai",
@@ -26,7 +26,7 @@
     "dev:server": "pnpm --filter agentic-kanban dev",
     "dev:client": "pnpm --filter client dev",
     "dev:mcp": "pnpm --filter @agentic-kanban/mcp-server dev",
-    "build": "pnpm --filter shared build && node scripts/build-server.mjs && node scripts/build-mcp.mjs && pnpm --filter client build && node scripts/copy-assets.mjs",
+    "build": "pnpm --filter shared build && node scripts/build-server.mjs && node scripts/build-mcp.mjs && node scripts/build-worker.mjs && pnpm --filter client build && node scripts/copy-assets.mjs",
     "build:shared": "pnpm --filter shared build",
     "build:server": "node scripts/build-server.mjs",
     "build:client": "pnpm --filter client build",
@@ -68,7 +68,8 @@
     "openapi:generate": "pnpm --filter agentic-kanban openapi:generate",
     "dev:desktop": "concurrently \"pnpm --filter agentic-kanban dev\" \"pnpm --filter client dev\" \"pnpm --filter @agentic-kanban/desktop dev\"",
     "version": "changeset version",
-    "release": "pnpm build && changeset publish"
+    "release": "pnpm build && changeset publish",
+    "build:worker": "node scripts/build-worker.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.0",
