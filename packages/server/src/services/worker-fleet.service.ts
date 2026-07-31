@@ -12,6 +12,8 @@ import type { AgentExecutionService } from "./agent-dispatch.service.js";
 import { createWorkerConnectionManager, type WorkerConnectionManager } from "./worker-connection.service.js";
 import { getWorkerRegistry, type WorkerRegistry } from "./worker-registry.service.js";
 import type { ProviderName } from "./agent-provider.js";
+import { projects as projectsTable } from "@agentic-kanban/shared/schema";
+import { eq } from "drizzle-orm";
 
 export interface WorkerFleet {
   registry: WorkerRegistry;
@@ -38,6 +40,29 @@ export function getWorkerFleet(database: Database = realDb): WorkerFleet {
 
 export function workerDispatchPrefKey(projectId: string): string {
   return `worker_dispatch_${projectId}`;
+}
+
+/**
+ * A worker carrying this label shares the board's filesystem, so its
+ * assignments skip git transport and run directly in the board-side worktree
+ * (the phase-1c same-machine path). Absent = a true remote worker that must
+ * clone from the board and push its result back.
+ */
+export const SHARES_FILESYSTEM_LABEL = "shares-filesystem";
+
+function parseLabels(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((l): l is string => typeof l === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function workerSharesFilesystem(fleet: WorkerFleet, workerId: string, now?: string): Promise<boolean> {
+  const worker = (await fleet.registry.listWorkersView(now)).find((w) => w.id === workerId);
+  return parseLabels(worker?.labels ?? null).includes(SHARES_FILESYSTEM_LABEL);
 }
 
 /**
@@ -79,9 +104,12 @@ export async function resolveWorkerPlacement(params: {
   database: Database;
   projectId: string;
   providerName: ProviderName;
+  /** Workspace branch info — required to give a true remote worker git transport. */
+  branch?: string;
+  baseBranch?: string;
   now?: string;
 }): Promise<Placement> {
-  const { database, projectId, providerName, now } = params;
+  const { database, projectId, providerName, branch, baseBranch, now } = params;
   try {
     const pref = await getPreferenceValue(workerDispatchPrefKey(projectId), database);
     if (pref !== "true") return { kind: "host" };
@@ -93,7 +121,38 @@ export async function resolveWorkerPlacement(params: {
       );
       return { kind: "host" };
     }
-    return { kind: "remote", workerId };
+    if (await workerSharesFilesystem(fleet, workerId, now)) {
+      return { kind: "remote", workerId };
+    }
+
+    // True remote worker: it needs the repo over git transport. Without a
+    // branch to push back (e.g. a direct workspace with no feature branch)
+    // there is nothing safe to dispatch remotely — stay on the host.
+    if (!branch) {
+      console.warn(`[worker-fleet] remote worker ${workerId} needs a branch for git transport; launching on host`);
+      return { kind: "host" };
+    }
+    const rows = await database
+      .select({ repoPath: projectsTable.repoPath, defaultBranch: projectsTable.defaultBranch, setupScript: projectsTable.setupScript })
+      .from(projectsTable)
+      .where(eq(projectsTable.id, projectId))
+      .limit(1);
+    const project = rows[0];
+    if (!project?.repoPath) {
+      console.warn(`[worker-fleet] project ${projectId} has no repoPath; launching on host`);
+      return { kind: "host" };
+    }
+    return {
+      kind: "remote",
+      workerId,
+      repo: {
+        projectId,
+        repoPath: project.repoPath,
+        branch,
+        baseBranch: baseBranch || project.defaultBranch || "master",
+        setupScript: project.setupScript ?? undefined,
+      },
+    };
   } catch (err) {
     console.error(`[worker-fleet] placement resolution failed; launching on host`, err);
     return { kind: "host" };

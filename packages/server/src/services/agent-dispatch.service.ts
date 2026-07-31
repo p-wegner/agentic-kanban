@@ -23,7 +23,22 @@ import type { ContainerProvision } from "./devcontainer-workspace.service.js";
 export type Placement =
   | { kind: "host" }
   | { kind: "container" }
-  | { kind: "remote"; workerId: string };
+  | {
+      kind: "remote";
+      workerId: string;
+      /**
+       * Git transport for a TRUE remote worker (phase 2): the worker clones the
+       * project from the board and pushes results back. Absent = same-machine
+       * dispatch, where the worker shares the board's filesystem (phase 1c).
+       */
+      repo?: {
+        projectId: string;
+        repoPath: string;
+        branch: string;
+        baseBranch: string;
+        setupScript?: string;
+      };
+    };
 
 /**
  * Opaque handle to a launched agent. A host launch returns a real ChildProcess

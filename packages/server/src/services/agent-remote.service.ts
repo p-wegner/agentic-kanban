@@ -27,6 +27,9 @@ import type { AgentExecutionService, AgentHandle, Placement } from "./agent-disp
 import type { AgentOutputCallback } from "./agent.service.js";
 import type { ContainerProvision } from "./devcontainer-workspace.service.js";
 import type { WorkerConnectionManager } from "./worker-connection.service.js";
+import { ensureGitHttpServer } from "./git-http.service.js";
+import { syncIncomingBranch, clearIncomingRef, incomingRefFor } from "./worker-remote-sync.service.js";
+import { listAgentSkills } from "../repositories/agent-skill.repository.js";
 
 /** How long a disconnected worker may take to reconnect before its sessions are failed. */
 export const WORKER_RECONNECT_GRACE_MS = 60 * 1000;
@@ -35,6 +38,8 @@ interface RemoteSession {
   workerId: string;
   onOutput: AgentOutputCallback;
   stdinOpen: boolean;
+  /** Set for git-transport sessions: sync the pushed branch back before exit. */
+  repo?: { repoPath: string; branch: string };
 }
 
 export function createRemoteAgentService(
@@ -60,12 +65,59 @@ export function createRemoteAgentService(
     if (message.type === "event") {
       const session = sessions.get(message.event.sessionId);
       if (!session || session.workerId !== workerId) return;
-      if (message.event.type === "exit") sessions.delete(message.event.sessionId);
-      try {
-        session.onOutput(message.event);
-      } catch (err) {
-        console.error(`[agent-remote] output callback error: sessionId=${message.event.sessionId}`, err);
+      if (message.event.type !== "exit") {
+        try {
+          session.onOutput(message.event);
+        } catch (err) {
+          console.error(`[agent-remote] output callback error: sessionId=${message.event.sessionId}`, err);
+        }
+        return;
       }
+      // Exit: for a git-transport session the worker has already pushed to the
+      // incoming ref, so land it on the real branch BEFORE the board's exit
+      // handling runs — review/merge must never see a branch that has not
+      // arrived. A sync failure downgrades the exit code so a session whose
+      // work did not land is never recorded as a clean success.
+      const sessionId = message.event.sessionId;
+      const exitEvent = message.event;
+      sessions.delete(sessionId);
+      if (!session.repo) {
+        try {
+          session.onOutput(exitEvent);
+        } catch (err) {
+          console.error(`[agent-remote] output callback error: sessionId=${sessionId}`, err);
+        }
+        return;
+      }
+      void (async () => {
+        let exitCode = exitEvent.exitCode ?? null;
+        try {
+          const result = await syncIncomingBranch(session.repo!.repoPath, session.repo!.branch);
+          if (result.ok) {
+            console.log(`[agent-remote] synced ${session.repo!.branch} (${result.status}) for session ${sessionId}`);
+            await clearIncomingRef(session.repo!.repoPath, session.repo!.branch).catch(() => {});
+          } else if (result.status === "missing" && exitCode !== 0) {
+            // The agent failed before producing anything to push — nothing to sync.
+            console.warn(`[agent-remote] no incoming ref for failed session ${sessionId}; nothing to sync`);
+          } else {
+            session.onOutput({
+              type: "stderr",
+              sessionId,
+              data: `Worker result could not be landed on ${session.repo!.branch}: ${result.error}`,
+            });
+            exitCode = exitCode === 0 || exitCode === null ? 1 : exitCode;
+          }
+        } catch (err) {
+          const text = err instanceof Error ? err.message : String(err);
+          session.onOutput({ type: "stderr", sessionId, data: `Branch sync failed: ${text}` });
+          exitCode = exitCode === 0 || exitCode === null ? 1 : exitCode;
+        }
+        try {
+          session.onOutput({ type: "exit", sessionId, exitCode });
+        } catch (err) {
+          console.error(`[agent-remote] exit callback error: sessionId=${sessionId}`, err);
+        }
+      })();
       return;
     }
     if (message.type === "assign_failed") {
@@ -171,28 +223,64 @@ export function createRemoteAgentService(
     }
     const stdinPrompt = config.promptPrefix ? `${config.promptPrefix}\n\n${prompt}` : prompt;
 
-    const sent = manager.send(workerId, {
-      type: "assign",
-      sessionId,
-      spec: {
-        command: config.command,
-        args: config.args,
-        env,
-        cwd: worktreePath,
-        stdinPrompt,
-        keepStdinOpen: config.keepStdinOpen,
-        suppressStdinPrompt: config.suppressStdinPrompt,
-        useShell: config.useShell,
-      },
-    });
-    if (!sent) {
-      throw new Error(`fleet worker ${workerId} is not connected`);
+    const spec = {
+      command: config.command,
+      args: config.args,
+      env,
+      cwd: worktreePath,
+      stdinPrompt,
+      keepStdinOpen: config.keepStdinOpen,
+      suppressStdinPrompt: config.suppressStdinPrompt,
+      useShell: config.useShell,
+    };
+
+    // Same-machine dispatch (no repo in the placement): the worker shares this
+    // filesystem, so assign directly. Git transport needs the git-http listener
+    // and the skill payload, which are async — assign after they resolve, and
+    // report a failure the way an unreachable worker would.
+    if (!placement.repo) {
+      if (!manager.send(workerId, { type: "assign", sessionId, spec })) {
+        throw new Error(`fleet worker ${workerId} is not connected`);
+      }
+    } else {
+      const repo = placement.repo;
+      void (async () => {
+        try {
+          const git = await ensureGitHttpServer(database);
+          const skillRows = await listAgentSkills(repo.projectId, false, database).catch(() => []);
+          const delivered = manager.send(workerId, {
+            type: "assign",
+            sessionId,
+            spec,
+            repo: {
+              projectId: repo.projectId,
+              gitPort: git.port,
+              gitToken: git.token,
+              branch: repo.branch,
+              baseBranch: repo.baseBranch,
+              incomingRef: incomingRefFor(repo.branch),
+              setupScript: repo.setupScript,
+              skills: skillRows
+                .filter((s) => typeof s.prompt === "string" && s.prompt.trim().length > 0)
+                .map((s) => ({ name: s.name, content: s.prompt })),
+            },
+          });
+          if (!delivered) throw new Error(`fleet worker ${workerId} is not connected`);
+          console.log(`[agent-remote] git-transport assignment sent: sessionId=${sessionId} branch=${repo.branch}`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          console.error(`[agent-remote] git-transport assignment failed: sessionId=${sessionId}: ${message}`);
+          const session = sessions.get(sessionId);
+          if (session) finishSession(sessionId, session, `Could not dispatch to worker: ${message}`, 1);
+        }
+      })();
     }
     console.log(`[agent-remote] assigned session ${sessionId} to worker ${workerId} (command=${config.command})`);
     sessions.set(sessionId, {
       workerId,
       onOutput,
       stdinOpen: Boolean(config.keepStdinOpen && !config.suppressStdinPrompt),
+      repo: placement.repo ? { repoPath: placement.repo.repoPath, branch: placement.repo.branch } : undefined,
     });
     updateSessionWorkerId(sessionId, workerId, database)
       .catch((err) => console.error(`[agent-remote] failed to stamp session workerId: sessionId=${sessionId}`, err));

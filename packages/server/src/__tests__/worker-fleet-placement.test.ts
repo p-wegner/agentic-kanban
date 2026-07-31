@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { preferences } from "@agentic-kanban/shared/schema";
+import { preferences, projects as projectsTable } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import type { Database } from "../db/index.js";
 import type { WSContext } from "hono/ws";
@@ -8,6 +8,7 @@ import {
   resolveWorkerPlacement,
   selectWorkerForLaunch,
   workerDispatchPrefKey,
+  SHARES_FILESYSTEM_LABEL,
   type WorkerFleet,
 } from "../services/worker-fleet.service.js";
 
@@ -30,16 +31,35 @@ describe("worker-fleet placement (phase 1c)", () => {
     await db.insert(preferences).values({ key: workerDispatchPrefKey(PROJECT_ID), value: "true" });
   }
 
-  async function registerWorker(overrides?: { providers?: string[]; maxConcurrency?: number; name?: string }) {
+  async function registerWorker(overrides?: {
+    providers?: string[];
+    maxConcurrency?: number;
+    name?: string;
+    labels?: string[];
+  }) {
     const { pairingToken } = fleet.registry.mintPairingToken();
     const result = await fleet.registry.registerWorker({
       pairingToken,
       name: overrides?.name ?? "w",
       providers: overrides?.providers,
       maxConcurrency: overrides?.maxConcurrency,
+      labels: overrides?.labels,
     });
     if (!result.ok) throw new Error(result.error);
     return result.workerId;
+  }
+
+  /** A worker that shares the board's filesystem — the phase-1c direct path. */
+  const registerLocalWorker = (overrides?: Parameters<typeof registerWorker>[0]) =>
+    registerWorker({ ...overrides, labels: [...(overrides?.labels ?? []), SHARES_FILESYSTEM_LABEL] });
+
+  async function seedProject(repoPath = "C:/some/repo") {
+    await db.insert(projectsTable).values({
+      id: PROJECT_ID,
+      name: "placement-fixture",
+      repoPath,
+      defaultBranch: "master",
+    } as typeof projectsTable.$inferInsert);
   }
 
   it("defaults to host when the project has not opted in", async () => {
@@ -54,25 +74,56 @@ describe("worker-fleet placement (phase 1c)", () => {
     expect(placement).toEqual({ kind: "host" });
   });
 
-  it("places on a connected, online, provider-matching worker", async () => {
+  it("places a filesystem-sharing worker without git transport", async () => {
     await optIn();
-    const workerId = await registerWorker({ providers: ["claude"] });
+    const workerId = await registerLocalWorker({ providers: ["claude"] });
     fleet.connections.handleOpen(workerId, fakeWs());
     const placement = await resolveWorkerPlacement({ database: db, projectId: PROJECT_ID, providerName: "claude" });
     expect(placement).toEqual({ kind: "remote", workerId });
   });
 
+  it("gives a TRUE remote worker git transport with the branch and repo", async () => {
+    await optIn();
+    await seedProject("C:/repos/fixture");
+    const workerId = await registerWorker({ providers: ["claude"] });
+    fleet.connections.handleOpen(workerId, fakeWs());
+    const placement = await resolveWorkerPlacement({
+      database: db, projectId: PROJECT_ID, providerName: "claude",
+      branch: "feature/ak-9-x", baseBranch: "master",
+    });
+    expect(placement).toEqual({
+      kind: "remote",
+      workerId,
+      repo: {
+        projectId: PROJECT_ID,
+        repoPath: "C:/repos/fixture",
+        branch: "feature/ak-9-x",
+        baseBranch: "master",
+        setupScript: undefined,
+      },
+    });
+  });
+
+  it("keeps a branchless (direct) workspace on the host for a true remote worker", async () => {
+    await optIn();
+    await seedProject();
+    const workerId = await registerWorker({ providers: ["claude"] });
+    fleet.connections.handleOpen(workerId, fakeWs());
+    const placement = await resolveWorkerPlacement({ database: db, projectId: PROJECT_ID, providerName: "claude" });
+    expect(placement).toEqual({ kind: "host" });
+  });
+
   it("filters by provider", async () => {
     await optIn();
-    const codexOnly = await registerWorker({ providers: ["codex"] });
+    const codexOnly = await registerLocalWorker({ providers: ["codex"] });
     fleet.connections.handleOpen(codexOnly, fakeWs());
     const placement = await resolveWorkerPlacement({ database: db, projectId: PROJECT_ID, providerName: "claude" });
     expect(placement).toEqual({ kind: "host" });
   });
 
   it("respects capacity and prefers the least-loaded worker", async () => {
-    const busy = await registerWorker({ name: "busy", maxConcurrency: 1 });
-    const idle = await registerWorker({ name: "idle", maxConcurrency: 1 });
+    const busy = await registerLocalWorker({ name: "busy", maxConcurrency: 1 });
+    const idle = await registerLocalWorker({ name: "idle", maxConcurrency: 1 });
     fleet.connections.handleOpen(busy, fakeWs());
     fleet.connections.handleOpen(idle, fakeWs());
     // The busy worker announces one running session — at capacity.
