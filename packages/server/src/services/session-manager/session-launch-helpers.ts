@@ -3,6 +3,7 @@ import * as lifecycleRepo from "../../repositories/session-lifecycle.repository.
 import type { Database } from "../../db/index.js";
 import type { ProviderName } from "../agent-provider.js";
 import { narrowProviderName } from "../agent-provider.js";
+import type { RotationRings } from "../agent-provider/provider-exit-behavior.js";
 
 /** Pure helpers for session launch that don't need the createSessionLifecycle closure. */
 
@@ -49,4 +50,58 @@ export function lifecycleProviderName(provider: string | undefined, profile?: { 
   const fromProfile = profile?.provider;
   if (fromProfile === "codex" || fromProfile === "copilot" || fromProfile === "claude" || fromProfile === "pi") return fromProfile;
   return narrowProviderName(provider);
+}
+
+/**
+ * Resolve a provider's rotation-ring config directory for a launch.
+ *
+ * A Codex ChatGPT-plan license is a separate CODEX_HOME with its own auth.json;
+ * a Claude Max/Pro login is a separate CLAUDE_CONFIG_DIR with its own
+ * .credentials.json — each selected by an auto-discovered `~/.<provider>-<name>`
+ * dir or a rotation-ring entry. When one resolves, point the env var at it and
+ * DROP the profile name from the launch: a separate home/config dir has no
+ * `[profiles.<name>]` / `settings_<name>.json`, so passing `--profile`/`--settings`
+ * would make the CLI exit non-zero. Plain toml / settings-file / API-key profiles
+ * resolve to nothing and keep their profile name.
+ *
+ * Best-effort by contract: a ring that fails to load is logged and ignored, never
+ * thrown — a launch must not die because a rotation ring is unreadable.
+ */
+export async function resolveProviderRotation(
+  database: Database,
+  profile: { provider: ProviderName; name: string } | undefined,
+  extraEnv: Record<string, string> | undefined,
+  deps: {
+    loadCodexLicenseRing: (db: Database) => Promise<unknown>;
+    loadClaudeSubscriptionRing: (db: Database) => Promise<unknown>;
+    getProviderExitBehavior: (provider: ProviderName) => {
+      resolveConfigDir: (name: string, rings: RotationRings) => { envVar: string; dir: string } | null | undefined;
+    };
+  },
+): Promise<{ extraEnv: Record<string, string> | undefined; profile: typeof profile }> {
+  const name = profile?.name;
+  if (!name || name === "default" || name === "mock") return { extraEnv, profile };
+
+  const provider = profile!.provider;
+  if (provider !== "codex" && provider !== "claude") return { extraEnv, profile };
+
+  try {
+    const rings: RotationRings = provider === "codex"
+      ? { codex: (await deps.loadCodexLicenseRing(database)) as RotationRings["codex"] }
+      : { claude: (await deps.loadClaudeSubscriptionRing(database)) as RotationRings["claude"] };
+    const rotation = deps.getProviderExitBehavior(provider).resolveConfigDir(name, rings);
+    if (!rotation) return { extraEnv, profile };
+    const suppressed = provider === "codex" ? "--profile" : "--settings";
+    console.log(`[session] ${provider} '${name}' -> ${rotation.envVar}=${rotation.dir} (${suppressed} suppressed)`);
+    return {
+      extraEnv: { ...extraEnv, [rotation.envVar]: rotation.dir },
+      profile: { provider, name: "default" },
+    };
+  } catch (err) {
+    console.warn(
+      `[session] ${provider} rotation-ring resolution failed (non-fatal):`,
+      err instanceof Error ? err.message : String(err),
+    );
+    return { extraEnv, profile };
+  }
 }

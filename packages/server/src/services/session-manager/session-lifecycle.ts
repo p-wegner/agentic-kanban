@@ -15,7 +15,6 @@ import { emitButlerSystemEvent } from "../butler-event-feed.js";
 import type { ProviderName } from "../agent-provider.js";
 import { narrowProviderName } from "../agent-provider.js";
 import { getProviderExitBehavior } from "../agent-provider/provider-exit-behavior.js";
-import type { RotationRings } from "../agent-provider/provider-exit-behavior.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import { modelBelongsToProvider } from "@agentic-kanban/shared";
 import type { SessionManagerOptions, SessionState, StartSessionOptions } from "./types.js";
@@ -47,6 +46,7 @@ import {
   instructionFingerprint,
   mergeExistingSessionStats,
   lifecycleProviderName,
+  resolveProviderRotation,
 } from "./session-launch-helpers.js";
 import { finalizePlanModeExit } from "./plan-mode-exit.js";
 
@@ -291,47 +291,17 @@ export function createSessionLifecycle(
       } catch { /* handoff not available — proceed without it */ }
     }
 
-    // Codex OAuth licenses: a ChatGPT-plan license is a separate CODEX_HOME directory
-    // with its own auth.json — selected by an auto-discovered `~/.codex-<name>` dir or
-    // a rotation-ring entry. Point CODEX_HOME at it and DROP the profile name from the
-    // launch (a separate home has no `[profiles.<name>]`, so `--profile` would make
-    // codex exit code 2). Plain toml / API-key (configToml) profiles resolve to no
-    // home and keep `--profile`.
-    let effectiveExtraEnv = extraEnv;
-    let launchProfile = profile;
-    if (profile?.provider === "codex" && profile.name && profile.name !== "default") {
-      try {
-        const rings: RotationRings = { codex: await loadCodexLicenseRing(db) };
-        const rotation = getProviderExitBehavior("codex").resolveConfigDir(profile.name, rings);
-        if (rotation) {
-          effectiveExtraEnv = { ...effectiveExtraEnv, [rotation.envVar]: rotation.dir };
-          launchProfile = { provider: "codex", name: "default" };
-          console.log(`[session] codex license '${profile.name}' -> ${rotation.envVar}=${rotation.dir} (--profile suppressed)`);
-        }
-      } catch (err) {
-        console.warn("[session] codex license ring resolution failed (non-fatal):", err instanceof Error ? err.message : String(err));
-      }
-    }
-    // Claude OAuth subscriptions: a Max/Pro-plan login is a separate CLAUDE_CONFIG_DIR
-    // directory with its own `.credentials.json` — selected by an auto-discovered
-    // `~/.claude-<name>` dir or a rotation-ring entry. Point CLAUDE_CONFIG_DIR at it and
-    // DROP the settings-profile name from the launch (a separate config dir has no
-    // `settings_<name>.json`, and it authenticates via its own login). Plain
-    // settings-file / API-key (settingsProfile) profiles resolve to no dir and keep
-    // `--settings`. Mirrors the codex CODEX_HOME path above.
-    if (profile?.provider === "claude" && profile.name && profile.name !== "default" && profile.name !== "mock") {
-      try {
-        const rings: RotationRings = { claude: await loadClaudeSubscriptionRing(db) };
-        const rotation = getProviderExitBehavior("claude").resolveConfigDir(profile.name, rings);
-        if (rotation) {
-          effectiveExtraEnv = { ...effectiveExtraEnv, [rotation.envVar]: rotation.dir };
-          launchProfile = { provider: "claude", name: "default" };
-          console.log(`[session] claude subscription '${profile.name}' -> ${rotation.envVar}=${rotation.dir} (--settings suppressed)`);
-        }
-      } catch (err) {
-        console.warn("[session] claude subscription ring resolution failed (non-fatal):", err instanceof Error ? err.message : String(err));
-      }
-    }
+    // Provider rotation rings (codex license / claude subscription): when the
+    // profile resolves to a separate CODEX_HOME / CLAUDE_CONFIG_DIR, point the env
+    // var at it and drop the profile name from the launch. Best-effort — see
+    // resolveProviderRotation for why a failure must never block a launch.
+    const rotation = await resolveProviderRotation(db, profile, extraEnv, {
+      loadCodexLicenseRing,
+      loadClaudeSubscriptionRing,
+      getProviderExitBehavior,
+    });
+    const effectiveExtraEnv = rotation.extraEnv;
+    const launchProfile = rotation.profile;
 
     // ── Exit state-machine terminal handlers ──────────────────────────────────
     // The drain → classify → finalize → continue machine. `drain` (output-to-EOF,
