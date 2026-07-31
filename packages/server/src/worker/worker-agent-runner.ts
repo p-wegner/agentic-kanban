@@ -11,6 +11,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
+import { resolveAgentHangTimeoutMs, startHangWatchdog } from "../lib/agent-launch-env.js";
 import type { WorkerLaunchSpec, WorkerRepoTransport, WorkerToBoardMessage } from "@agentic-kanban/shared/lib/worker-protocol";
 import {
   provisionWorkerCheckout,
@@ -34,12 +35,23 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   const checkouts = new Map<string, { checkout: WorkerCheckout; repo: WorkerRepoTransport }>();
   /** Sessions provisioning a checkout — running for bookkeeping before a pid exists. */
   const provisioning = new Set<string>();
+  /** Per-session silence watchdogs; reset on every byte of agent output. */
+  const hangWatchdogs = new Map<string, { reset(): void; close(): void }>();
+
+  function closeWatchdog(sessionId: string): void {
+    const watchdog = hangWatchdogs.get(sessionId);
+    if (watchdog) {
+      watchdog.close();
+      hangWatchdogs.delete(sessionId);
+    }
+  }
 
   function emitExit(sessionId: string, exitCode: number | null): void {
     if (exited.has(sessionId)) return;
     exited.add(sessionId);
     processes.delete(sessionId);
     provisioning.delete(sessionId);
+    closeWatchdog(sessionId);
     const pending = checkouts.get(sessionId);
     if (!pending) {
       send({ type: "event", event: { type: "exit", sessionId, exitCode } });
@@ -129,14 +141,16 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     processes.set(sessionId, proc);
     console.log(`[worker] launched agent: sessionId=${sessionId} pid=${proc.pid} command=${spec.command}`);
 
-    proc.stdout?.on("data", (chunk: Buffer) => {
+    // Every byte of agent output proves liveness, so it resets the silence
+    // watchdog armed below.
+    const emitOutput = (type: "stdout" | "stderr", chunk: Buffer) => {
       const data = sanitizeUtf8(chunk.toString());
-      if (data) send({ type: "event", event: { type: "stdout", sessionId, data } });
-    });
-    proc.stderr?.on("data", (chunk: Buffer) => {
-      const data = sanitizeUtf8(chunk.toString());
-      if (data) send({ type: "event", event: { type: "stderr", sessionId, data } });
-    });
+      if (!data) return;
+      hangWatchdogs.get(sessionId)?.reset();
+      send({ type: "event", event: { type, sessionId, data } });
+    };
+    proc.stdout?.on("data", (chunk: Buffer) => emitOutput("stdout", chunk));
+    proc.stderr?.on("data", (chunk: Buffer) => emitOutput("stderr", chunk));
     proc.on("error", (err) => {
       send({ type: "event", event: { type: "stderr", sessionId, data: `Process error: ${err.message}` } });
       emitExit(sessionId, 1);
@@ -145,6 +159,30 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
       console.log(`[worker] agent exited: sessionId=${sessionId} code=${code}`);
       emitExit(sessionId, code);
     });
+
+    // Hang watchdog, mirroring the host spawn site: an agent that produces NO
+    // output for the timeout is killed, and the kill drives the normal exit path
+    // (push-back, then the exit event) so the board classifies it instead of the
+    // session hanging "running" until a human notices. The board sets the policy
+    // per assignment (0 for mock agents); absent, fall back to this machine's own
+    // setting. Without this a remote session silently lost the protection its
+    // host twin has.
+    const hangTimeoutMs = spec.hangTimeoutMs ?? resolveAgentHangTimeoutMs();
+    if (hangTimeoutMs > 0) {
+      hangWatchdogs.set(sessionId, startHangWatchdog(`sessionId=${sessionId}`, hangTimeoutMs, () => {
+        const seconds = Math.round(hangTimeoutMs / 1000);
+        console.warn(`[worker] hang watchdog fired: sessionId=${sessionId} pid=${proc.pid} — no output for ${seconds}s; killing`);
+        send({
+          type: "event",
+          event: {
+            type: "stderr",
+            sessionId,
+            data: `Agent hang watchdog: no output for ${seconds}s — process killed on worker.`,
+          },
+        });
+        stop(sessionId);
+      }));
+    }
 
     // Same stdin contract as agent.service.writeInitialStdin: argv-prompt agents
     // get stdin closed untouched; multi-turn keeps it open; default is
@@ -180,6 +218,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     const proc = processes.get(sessionId);
     if (!proc?.pid) {
       // Stop during repo provisioning: cancel before the agent is launched.
+      closeWatchdog(sessionId);
       if (provisioning.delete(sessionId)) {
         console.log(`[worker] cancelled provisioning session: sessionId=${sessionId}`);
         emitExit(sessionId, null);

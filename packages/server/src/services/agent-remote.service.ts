@@ -18,7 +18,7 @@
 //    a synthesized stderr + exit(1) so it never hangs "running" forever.
 
 import { buildAgentLaunchConfig, type ProviderId, type ProviderName } from "./agent-provider.js";
-import { resolveLaunchPorts, buildAgentSpawnEnv } from "../lib/agent-launch-env.js";
+import { resolveLaunchPorts, buildAgentSpawnEnv, resolveAgentHangTimeoutMs } from "../lib/agent-launch-env.js";
 import { resolveWorktreeDevPorts } from "./worktree-ports.js";
 import { db as realDb } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -246,6 +246,9 @@ export function createRemoteAgentService(
       keepStdinOpen: config.keepStdinOpen,
       suppressStdinPrompt: config.suppressStdinPrompt,
       useShell: config.useShell,
+      // Same policy as a host launch: mock agents are deterministic and
+      // short-lived, everything else gets the silence watchdog.
+      hangTimeoutMs: config.isMockAgent ? 0 : resolveAgentHangTimeoutMs(),
     };
 
     // Same-machine dispatch (no repo in the placement): the worker shares this

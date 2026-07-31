@@ -82,3 +82,66 @@ export function buildAgentSpawnEnv(params: AgentSpawnEnvParams): Record<string, 
     ...extraEnv,
   };
 }
+
+/**
+ * Spawn-layer hang watchdog timeout. If a launched agent produces NO stdout/stderr
+ * activity for this long, the watchdog kills it — a hang at the spawn layer
+ * (provider deadlocked on a prompt, stuck on a network call, waiting on stdin that
+ * was never closed) is otherwise invisible until a monitor cycle notices. Resets on
+ * every output event; only fires on true silence.
+ *
+ * Lives here (not in agent.service) because BOTH execution paths need the same
+ * rule: the host spawn site and the fleet worker's runner. A remote session that
+ * resolved this differently would silently lose the protection its host twin has.
+ * Override with KANBAN_AGENT_HANG_TIMEOUT_MS (0 disables).
+ */
+export const DEFAULT_AGENT_HANG_TIMEOUT_MS = 15 * 60 * 1000;
+
+export function resolveAgentHangTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.KANBAN_AGENT_HANG_TIMEOUT_MS;
+  if (raw === undefined) return DEFAULT_AGENT_HANG_TIMEOUT_MS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_AGENT_HANG_TIMEOUT_MS;
+  return parsed;
+}
+
+/**
+ * Start an inactivity watchdog: after `timeoutMs` with no reset() call, `onHang`
+ * fires exactly once. timeoutMs <= 0 disables it (inert handles). Shared by the
+ * host spawn site and the worker runner so both behave identically.
+ */
+export function startHangWatchdog(
+  label: string,
+  timeoutMs: number,
+  onHang: () => void,
+): { reset(): void; close(): void } {
+  if (timeoutMs <= 0) return { reset() {}, close() {} };
+  let closed = false;
+  let fired = false;
+  let timer: NodeJS.Timeout | undefined;
+  const arm = () => {
+    if (closed) return;
+    timer = setTimeout(() => {
+      if (closed || fired) return;
+      fired = true;
+      try {
+        onHang();
+      } catch (err) {
+        console.error(`[agent] hang-watchdog callback error: ${label}`, err);
+      }
+    }, timeoutMs);
+    if (timer.unref) timer.unref();
+  };
+  arm();
+  return {
+    reset() {
+      if (closed || fired) return;
+      if (timer) clearTimeout(timer);
+      arm();
+    },
+    close() {
+      closed = true;
+      if (timer) clearTimeout(timer);
+    },
+  };
+}

@@ -28,6 +28,13 @@ export interface WorkerLaunchSpec {
   /** The prompt travels via argv; close stdin immediately without writing. */
   suppressStdinPrompt?: boolean;
   useShell?: boolean;
+  /**
+   * Kill the agent after this many ms with no stdout/stderr. The BOARD decides
+   * the policy (same rule as a host launch, 0 for mock agents) and the worker
+   * enforces it, so a remote session keeps the hang protection a host session
+   * has. Omitted = the worker falls back to its own default.
+   */
+  hangTimeoutMs?: number;
 }
 
 /**
@@ -178,6 +185,9 @@ export function parseBoardToWorkerMessage(raw: unknown): BoardToWorkerMessage | 
           keepStdinOpen: spec.keepStdinOpen === true,
           suppressStdinPrompt: spec.suppressStdinPrompt === true,
           useShell: spec.useShell === true,
+          hangTimeoutMs: typeof spec.hangTimeoutMs === "number" && Number.isFinite(spec.hangTimeoutMs)
+            ? spec.hangTimeoutMs
+            : undefined,
         },
       };
     }
