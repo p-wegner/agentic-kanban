@@ -23,7 +23,7 @@ Follow that output. The rest of this skill is the context you need to follow it 
 
 ## Steps at a glance
 1. **Prerequisites (here):** \`git\` on PATH; the provider CLI (\`claude\` / \`codex\` / \`copilot\`) installed AND logged in.
-2. **Reachability (here):** \`curl <board-url>/api/health\` must answer. A board on 127.0.0.1 is unreachable from another machine — it must run with \`KANBAN_HOST=0.0.0.0\`.
+2. **Reachability (here):** \`curl <board-url>/health\` must answer. Use the board's FLEET port (\`KANBAN_FLEET_PORT\`), not its API port — a remote worker never talks to the board API, which stays loopback-only because it has no authentication.
 3. **Pairing token (board machine):** \`agentic-kanban worker pair\` — single-use, expires in 10 minutes. Or the Workers UI panel (command palette → "Worker Fleet" → Mint token).
 4. **Start (here):** \`agentic-kanban worker start --board <url> --token <pairing-token> --labels <caps> --providers <clis> --max-concurrency <n>\`. Runs in the foreground. The pairing token becomes a per-worker token stored in \`~/.agentic-kanban/worker-state.json\`, so later runs need no \`--token\`.
 5. **Verify:** \`agentic-kanban worker list --board <url>\` — this worker must read \`online\`.
@@ -34,7 +34,7 @@ State plainly: the worker id and name, its effective status from \`worker list\`
 
 ## Troubleshooting
 - **\`invalid or expired pairing token\`** — tokens are single-use and 10-minute-lived. Mint a fresh one; do not reuse the old one.
-- **Registration connection refused** — the board is loopback-only or firewalled. It needs \`KANBAN_HOST=0.0.0.0\` and its API port (3001 by default) open to this machine.
+- **Registration connection refused** — the board is not exposing a fleet listener, or it is firewalled. It needs \`KANBAN_FLEET_PORT=<port>\` set and that port open to this machine. Never \`KANBAN_HOST=0.0.0.0\` — that would publish the unauthenticated board API to the network.
 - **Registered but reads \`offline\`** — heartbeats stop after 90s of silence. The daemon exited or lost its socket; check it is still running in the foreground.
 - **Online but nothing is ever assigned** — the project has not opted in (\`worker_dispatch_<projectId>\`), OR its \`worker_labels_<projectId>\` require labels this worker did not advertise, OR every slot is busy (\`--max-concurrency\`), OR its provider is not in this worker's \`--providers\` list.
 - **Sessions start then fail immediately** — almost always the provider CLI here is missing or not logged in. Run it manually once on this machine.
@@ -43,5 +43,5 @@ State plainly: the worker id and name, its effective status from \`worker list\`
 
 ## Do not
 - Do not copy board credentials, \`~/.claude\` directories, or API keys onto this machine to "make auth work" — log the provider CLI in here instead.
-- Do not expose the board to the open internet. The worker endpoints are token-authed, but the rest of the board API is not; keep it on a trusted network (LAN/VPN/Tailscale).
+- Do not expose the board API. Only the fleet and git-transport listeners belong on the network (both bearer-token authed, each serving one narrow surface); the board API has no auth and must stay on loopback. Keep even the exposed ports on a trusted network (LAN/VPN/Tailscale).
 - Do not hand-edit \`~/.agentic-kanban/worker-state.json\`. To re-pair, revoke the worker on the board and start again with a fresh token.`;

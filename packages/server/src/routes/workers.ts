@@ -1,4 +1,4 @@
-import type { Context } from "hono";
+import type { Context, Hono } from "hono";
 import { createRouter } from "../middleware/create-router.js";
 import { parseOptionalJsonBody } from "../middleware/parse-body.js";
 import type { Database } from "../db/index.js";
@@ -26,11 +26,13 @@ function extractBearer(c: Context): string | null {
  *    bearer token afterwards — so it stays safe when the listener is opened
  *    beyond loopback for the fleet.
  */
-export function createWorkersRoute(database: Database, registry?: WorkerRegistry) {
-  const router = createRouter();
-  const reg = registry ?? getWorkerRegistry(database);
-
-  // ── Owner surface (loopback UI/CLI) ────────────────────────────────────────
+/**
+ * Owner-only endpoints. These stay on the LOOPBACK app forever: minting a
+ * pairing token, listing the fleet and revoking a worker are administrative
+ * actions with no credential of their own — they ride the board's
+ * "only reachable from this machine" trust, exactly like the rest of /api.
+ */
+function registerOwnerRoutes(router: Hono, reg: WorkerRegistry): void {
   router.post("/pairing-token", (c) => c.json(reg.mintPairingToken(), 201));
 
   router.get("/", async (c) => {
@@ -42,8 +44,15 @@ export function createWorkersRoute(database: Database, registry?: WorkerRegistry
     if (!ok) return c.json({ error: "worker not found" }, 404);
     return c.json({ ok: true });
   });
+}
 
-  // ── Worker surface (token-authed) ──────────────────────────────────────────
+/**
+ * Worker-called endpoints. Every one authenticates for itself — a pairing token
+ * at registration, the per-worker bearer token afterwards — so this is the ONLY
+ * HTTP surface safe to expose off-loopback, and the fleet listener serves
+ * exactly this and nothing else.
+ */
+function registerWorkerFacingRoutes(router: Hono, reg: WorkerRegistry): void {
   router.post("/register", async (c) => {
     const body = await parseOptionalJsonBody<{
       pairingToken?: string;
@@ -79,6 +88,27 @@ export function createWorkersRoute(database: Database, registry?: WorkerRegistry
     }
     return c.json({ ok: true });
   });
+}
 
+/** The full surface, mounted on the main (loopback) app at /api/workers. */
+export function createWorkersRoute(database: Database, registry?: WorkerRegistry) {
+  const router = createRouter();
+  const reg = registry ?? getWorkerRegistry(database);
+  registerOwnerRoutes(router, reg);
+  registerWorkerFacingRoutes(router, reg);
+  return router;
+}
+
+/**
+ * The worker-called subset ONLY — for the off-loopback fleet listener.
+ *
+ * Splitting by AUDIENCE rather than by URL prefix is the point: it makes
+ * "the board API is not reachable from the network" a property of what is
+ * mounted where, instead of a warning in the docs that a misconfiguration can
+ * quietly violate.
+ */
+export function createFleetWorkersRoute(database: Database, registry?: WorkerRegistry) {
+  const router = createRouter();
+  registerWorkerFacingRoutes(router, registry ?? getWorkerRegistry(database));
   return router;
 }

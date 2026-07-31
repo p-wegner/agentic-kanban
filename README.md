@@ -128,13 +128,13 @@ Registration alone routes nothing — opt a project in with `worker_dispatch_<pr
 
 **Credentials never travel.** A worker authenticates its agent with its own local provider login — the board sends a launch spec, never an API key or profile.
 
-**Networking.** For a cross-machine fleet the board must listen externally and expose two ports — the API/WebSocket port and the git-transport port, which is OS-assigned per boot unless you pin it:
+**Networking.** The board API has no authentication — its defense is that it listens only on 127.0.0.1, and it stays there. A cross-machine fleet instead opens two purpose-built listeners, each serving one narrow, bearer-token-authenticated surface:
 
 ```bash
-KANBAN_HOST=0.0.0.0 KANBAN_GIT_HTTP_PORT=3002 pnpm dev
+KANBAN_FLEET_PORT=3003 KANBAN_GIT_HTTP_PORT=3002 pnpm dev
 ```
 
-Both worker-facing surfaces are bearer-token authenticated (single-use pairing token → per-worker token, stored hashed), but the rest of the board API is not — keep an exposed board on a trusted network (LAN/VPN/Tailscale), never the open internet. Design rationale: [docs/decisions/012-worker-fleet-compute-model.md](docs/decisions/012-worker-fleet-compute-model.md).
+`KANBAN_FLEET_PORT` serves only worker register/heartbeat/WebSocket; `KANBAN_GIT_HTTP_PORT` serves only the git transport (pin it, or it moves every boot and no firewall rule can match). Both are opt-in: unset means nothing is exposed. A remote worker points `--board` at the **fleet** port. Because the board API is never mounted on either listener, it is unreachable from the network by construction rather than by convention — though a fleet still belongs on a trusted network (LAN/VPN/Tailscale), not the open internet. Design rationale: [docs/decisions/012-worker-fleet-compute-model.md](docs/decisions/012-worker-fleet-compute-model.md).
 
 ## MCP Server
 

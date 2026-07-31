@@ -39,9 +39,9 @@ export function buildWorkerConnectSteps(boardUrl: string, pairingToken: string):
       title: "Confirm the board is reachable from here",
       where: "worker",
       detail:
-        `Anything other than a connection error means the board is reachable. A board only listening on loopback ` +
-        `is NOT reachable from another machine — it must be started with KANBAN_HOST=0.0.0.0 (see the board-side ` +
-        `note below).`,
+        `Anything other than a connection error means the board is reachable. Use the board's FLEET port here, not ` +
+        `its API port — a remote worker never talks to the board API. If this refuses to connect, the board is ` +
+        `not exposing a fleet listener yet (see the board-side note below).`,
       commands: [`curl -s -o /dev/null -w "%{http_code}\\n" ${boardUrl}/api/health`],
     },
     {
@@ -124,19 +124,21 @@ export function renderWorkerConnectMarkdown(
   lines.push("## Board-side networking (cross-machine only)");
   lines.push("");
   lines.push(
-    "A default board binds to 127.0.0.1 and is unreachable from other machines. For a real fleet the board must " +
-      "listen on an external interface AND expose two ports: the board API/WebSocket port (3001 by default) and the " +
-      "git-transport port. The git port is OS-assigned per boot unless you pin it — pin it, or you cannot write a " +
-      "stable firewall rule:",
+    "A default board is loopback-only and unreachable from other machines. Do NOT open it with KANBAN_HOST — the " +
+      "board API has no authentication, so binding it to 0.0.0.0 would publish every issue, transcript and merge " +
+      "endpoint to the network. Instead open the two purpose-built listeners, each of which authenticates every " +
+      "request with a bearer token:",
   );
   lines.push("");
   lines.push("```bash");
-  lines.push("KANBAN_HOST=0.0.0.0 KANBAN_GIT_HTTP_PORT=3002 pnpm dev   # board machine");
+  lines.push("KANBAN_FLEET_PORT=3003 KANBAN_GIT_HTTP_PORT=3002 pnpm dev   # board machine");
   lines.push("```");
   lines.push("");
   lines.push(
-    "Both ports are bearer-token authenticated, but the rest of the board API is NOT — treat an exposed board as " +
-      "trusted-network only (VPN/Tailscale/LAN), never the open internet.",
+    "`KANBAN_FLEET_PORT` serves ONLY worker register/heartbeat/WebSocket; `KANBAN_GIT_HTTP_PORT` serves ONLY the " +
+      "git transport (pin it — otherwise it moves every boot and no firewall rule can match). The board API itself " +
+      "stays on 127.0.0.1 and is not reachable from the network at all. Point a remote worker's --board at the " +
+      "FLEET port. Still keep the board on a trusted network (LAN/VPN/Tailscale) rather than the open internet.",
   );
   lines.push("");
   lines.push("## Notes");
