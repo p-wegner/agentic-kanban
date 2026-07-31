@@ -743,6 +743,13 @@
       "when": 1780906863000,
       "tag": "0105_merge_gate_evidence",
       "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "6",
+      "when": 1780906864000,
+      "tag": "0106_workers",
+      "breakpoints": true
     }
   ]
 }
