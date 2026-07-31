@@ -43,3 +43,4 @@ export const CalendarView = lazy(() => import("./CalendarView.js").then((m) => (
 export const AgentThroughputLeaderboard = lazy(() => import("./AgentThroughputLeaderboard.js").then((m) => ({ default: m.AgentThroughputLeaderboard })));
 export const BurndownChart = lazy(() => import("./BurndownChart.js").then((m) => ({ default: m.BurndownChart })));
 export const DriveDashboard = lazy(() => import("./DriveDashboard.js").then((m) => ({ default: m.DriveDashboard })));
+export const GardenView = lazy(() => import("./GardenView.js").then((m) => ({ default: m.GardenView })));
