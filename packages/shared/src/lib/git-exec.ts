@@ -1,4 +1,4 @@
-import { execFile, execFileSync, type ExecFileException, type StdioOptions } from "node:child_process";
+import { execFile, execFileSync, spawn, type ChildProcess, type ExecFileException, type StdioOptions } from "node:child_process";
 
 /**
  * The single sanctioned adapter for spawning the `git` CLI.
@@ -98,4 +98,21 @@ export function gitExecSync(args: string[], opts: GitExecSyncOptions): string {
   const { cwd, timeout, maxBuffer = DEFAULT_MAX_BUFFER, stdio } = opts;
   const out = execFileSync("git", args, { cwd, timeout, maxBuffer, windowsHide: true, encoding: "utf8", stdio });
   return (out ?? "").toString();
+}
+
+/**
+ * Streaming git for protocol plumbing (`upload-pack`/`receive-pack`
+ * `--stateless-rpc`, used by the worker-fleet git smart-HTTP service). Returns
+ * the raw ChildProcess with piped stdio so the caller can pipe an HTTP request
+ * body into stdin and stream stdout back out — the buffered variants above
+ * cannot carry multi-hundred-MB packfiles. Still the ONE sanctioned spawn site:
+ * callers get a process handle, not the right to spawn git themselves.
+ */
+export function gitStream(args: string[], opts: Pick<GitExecOptions, "cwd" | "env"> = {}): ChildProcess {
+  return spawn("git", args, {
+    cwd: opts.cwd,
+    env: opts.env,
+    windowsHide: true,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
 }
