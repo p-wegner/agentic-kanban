@@ -96,6 +96,14 @@ The control plane for THIS board is the out-of-process loop `scripts/board-monit
 - Strategy Bullseye still feeds tunables via `resolveMonitorTunables` (no `objective.md` needed; `writeStrategyObjective` no-ops for non-Conductor repos). Legacy fallback: WIP = `nudge_wip_limit`, `backlogFloor=3`, `maxNewStartsPerCycle=3`.
 - Tag an issue `no-auto-start` to keep the monitor from launching it.
 
+## Worker Fleet (remote compute)
+Agents can execute on OTHER machines. Workers dial the board (`agentic-kanban worker start --board <url> --token <pairing-token>`), hold a WebSocket for assignments, and stream output back — the board's broadcast/persistence/exit-classification are untouched, because only PLACEMENT moved (`Placement = host | container | remote`, dispatched in `agent-dispatch.service.ts`). Decision 012.
+- **Opt in per project**: `worker_dispatch_<projectId>=true`; require capabilities with `worker_labels_<projectId>=docker,linux`; `worker_dispatch_strict_<projectId>=true` forbids the host fallback (the monitor then skips with `no_available_worker` instead of running locally).
+- **Git transport**: the board serves its repos over token-authed git smart HTTP; a worker clones, works in its OWN checkout, and pushes to `refs/kanban/incoming/<branch>` (pushes to `refs/heads/*` are refused — those are checked out in board worktrees). The board fast-forwards the real branch from there, so diff/review/merge are unchanged. **Fast-forward only** — divergence is held and reported, never forced.
+- A worker on the SAME machine can skip git transport with `worker start --shares-filesystem`.
+- **Credentials never leave their machine**: a worker authenticates its agent with its own local login; the board sends none.
+- UI: command palette → "Worker Fleet" (pair/revoke, status, capacity, labels).
+
 ## Server Resilience
 Agent subprocess callbacks wrapped in try/catch in `agent.service.ts`; `uncaughtException`/`unhandledRejection` log `[fatal]`; stale sessions cleaned on startup in `index.ts` after migrations. `auto_monitor` force-disabled on every boot.
 
@@ -140,7 +148,7 @@ Full symptom→cause→fix in `docs/install.md` (“Clean-clone / first-start go
 ## Documentation Map
 - `.llm/workflows.md` — clean-start, DB reset, registration, migration diagnosis
 - `docs/prd/` — `00` vision, `05` MVP scope/stages, `03` data model, `04` agent integration, `06` testability
-- `docs/decisions/` — numbered decision records (`003` Butler, `006` board-monitor, `008` Start Mode)
+- `docs/decisions/` — numbered decision records (`003` Butler, `006` board-monitor, `008` Start Mode, `012` worker fleet)
 - `docs/state.md` — progress
 - `packages/server/CLAUDE.md` — server-package detail (incl. Butler ops)
 - `scripts/board-monitor/README.md` — run/stop/observe the loop
