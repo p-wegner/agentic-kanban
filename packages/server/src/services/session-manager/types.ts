@@ -1,5 +1,6 @@
 import type { WSContext } from "hono/ws";
 import type { ProviderName } from "../agent-provider.js";
+import type { Placement } from "../agent-dispatch.service.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import type { TodoItem } from "../board-events.js";
 
@@ -45,6 +46,11 @@ export interface StartSessionOptions {
   /** Skip the generic launch preflight when the caller already prepared the worktree. */
   skipLaunchPreflight?: boolean;
   skipPermissions?: boolean;
+  /**
+   * Where this session's agent should execute (worker-fleet seam, epic #1).
+   * Omitted = host. Routed by the agent dispatch proxy; only host exists today.
+   */
+  placement?: Placement;
 }
 
 export interface DbWriteBufferEntry {

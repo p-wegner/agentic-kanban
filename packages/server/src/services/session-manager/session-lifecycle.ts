@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import * as lifecycleRepo from "../../repositories/session-lifecycle.repository.js";
 import * as agentSkillRepo from "../../repositories/agent-skill.repository.js";
 import * as realAgentService from "../agent.service.js";
+import { createAgentDispatch, type AgentExecutionService } from "../agent-dispatch.service.js";
 import { extractPlanFromMessages } from "../plan-mode.service.js";
 import { computeScorecard } from "../workspace-scorecard.service.js";
 import { computeWorkspaceCodeMetrics } from "../workspace-code-metrics.service.js";
@@ -51,8 +52,12 @@ import { finalizePlanModeExit } from "./plan-mode-exit.js";
 /** Bounds the missing-transcript fallback (#26) to one automatic retry per workspace. */
 const MAX_STALE_RESUME_RECOVERIES = 1;
 
-/** Subset of agent.service that the lifecycle depends on. Injectable for tests. */
-export type AgentService = typeof realAgentService;
+/**
+ * The execution surface the lifecycle depends on. The default is the dispatch
+ * proxy over the real host agent.service; tests inject mocks, and the worker
+ * fleet (epic #1) injects a proxy with a remote implementation registered.
+ */
+export type AgentService = AgentExecutionService;
 
 /** Injectable dependencies for the session lifecycle (default to the real singletons). */
 export interface SessionLifecycleDeps {
@@ -71,7 +76,7 @@ export function createSessionLifecycle(
   deps: SessionLifecycleDeps = {},
 ) {
   const db = deps.db ?? realDb;
-  const agentService = deps.agentService ?? realAgentService;
+  const agentService = deps.agentService ?? createAgentDispatch({ host: realAgentService });
   const launchPreflight = deps.preflight ?? workspaceLaunchPreflight;
   /** Create a session DB row and launch the agent process. */
   async function startSession(opts: StartSessionOptions): Promise<string> {
@@ -96,6 +101,7 @@ export function createSessionLifecycle(
       skipLaunchPreflight,
       skipPermissions: skipPermissionsOpt,
       systemInstructions,
+      placement,
     } = opts;
 
     // Look up workspace to get workingDir
@@ -656,7 +662,7 @@ export function createSessionLifecycle(
           handleExitEvent(event.exitCode ?? null);
         }
       // When resumeWithNewModel is true, omit --resume so the new profile/provider is used instead
-      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider, launchProfile, effectiveExtraEnv, skipPermissions, effectiveModel, contextFiles, (effectiveSystemInstructions ?? "").trim() || undefined, containerProvision);
+      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider, launchProfile, effectiveExtraEnv, skipPermissions, effectiveModel, contextFiles, (effectiveSystemInstructions ?? "").trim() || undefined, containerProvision, placement);
 
       // Persist PID so hot-reload can detect surviving processes
       if (proc.pid) {
