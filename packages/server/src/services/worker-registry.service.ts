@@ -148,6 +148,14 @@ export function createWorkerRegistry(database: Database = realDb) {
     return rows.map((row) => ({ ...row, effectiveStatus: effectiveStatus(row, nowMs) }));
   }
 
+  /**
+   * Internal heartbeat refresh for callers that have ALREADY authenticated the
+   * worker (e.g. traffic on its upgraded WebSocket). Never exposed to routes.
+   */
+  async function touchHeartbeat(workerId: string, now?: string): Promise<void> {
+    await workerRepo.updateWorkerHeartbeat(workerId, now ?? new Date().toISOString(), undefined, database);
+  }
+
   async function revokeWorker(workerId: string): Promise<boolean> {
     const row = await workerRepo.getWorkerById(workerId, database);
     if (!row) return false;
@@ -156,7 +164,23 @@ export function createWorkerRegistry(database: Database = realDb) {
     return true;
   }
 
-  return { mintPairingToken, registerWorker, authenticateWorker, heartbeat, listWorkersView, revokeWorker };
+  return { mintPairingToken, registerWorker, authenticateWorker, heartbeat, touchHeartbeat, listWorkersView, revokeWorker };
 }
 
 export type WorkerRegistry = ReturnType<typeof createWorkerRegistry>;
+
+/**
+ * Per-database registry instances, so the REST route and the WS route share
+ * ONE pairing-token pool for a given board process while tests with their own
+ * DBs stay isolated.
+ */
+const registryByDb = new WeakMap<object, WorkerRegistry>();
+
+export function getWorkerRegistry(database: Database = realDb): WorkerRegistry {
+  let registry = registryByDb.get(database as object);
+  if (!registry) {
+    registry = createWorkerRegistry(database);
+    registryByDb.set(database as object, registry);
+  }
+  return registry;
+}
