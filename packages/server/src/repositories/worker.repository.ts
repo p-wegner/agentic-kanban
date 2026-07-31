@@ -1,4 +1,4 @@
-import { workers } from "@agentic-kanban/shared/schema";
+import { workers, sessions } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -41,4 +41,13 @@ export async function updateWorkerStatus(
 
 export async function deleteWorker(id: string, database: Database = db): Promise<void> {
   await database.delete(workers).where(eq(workers.id, id));
+}
+
+/** Stamp which fleet worker a session runs on (mirrors sessions.containerId). */
+export async function updateSessionWorkerId(
+  sessionId: string,
+  workerId: string,
+  database: Database = db,
+): Promise<void> {
+  await database.update(sessions).set({ workerId }).where(eq(sessions.id, sessionId));
 }

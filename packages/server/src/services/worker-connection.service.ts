@@ -27,6 +27,8 @@ interface WorkerConnection {
 export function createWorkerConnectionManager(registry: WorkerRegistry) {
   const connections = new Map<string, WorkerConnection>();
   const listeners = new Set<WorkerMessageListener>();
+  const connectListeners = new Set<(workerId: string) => void>();
+  const disconnectListeners = new Set<(workerId: string) => void>();
 
   function handleOpen(workerId: string, ws: WSContext): void {
     // A reconnect replaces the previous socket (stale after e.g. a NAT rebind).
@@ -36,6 +38,9 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
     }
     connections.set(workerId, { ws, runningSessionIds: new Set() });
     console.log(`[worker-connection] worker connected: id=${workerId}`);
+    for (const listener of connectListeners) {
+      try { listener(workerId); } catch (err) { console.error(`[worker-connection] connect-listener error`, err); }
+    }
   }
 
   function handleMessage(workerId: string, raw: unknown): void {
@@ -70,6 +75,9 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
     if (connections.get(workerId)?.ws === ws) {
       connections.delete(workerId);
       console.log(`[worker-connection] worker disconnected: id=${workerId}`);
+      for (const listener of disconnectListeners) {
+        try { listener(workerId); } catch (err) { console.error(`[worker-connection] disconnect-listener error`, err); }
+      }
     }
   }
 
@@ -104,6 +112,16 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
     return () => listeners.delete(listener);
   }
 
+  function onConnect(listener: (workerId: string) => void): () => void {
+    connectListeners.add(listener);
+    return () => connectListeners.delete(listener);
+  }
+
+  function onDisconnect(listener: (workerId: string) => void): () => void {
+    disconnectListeners.add(listener);
+    return () => disconnectListeners.delete(listener);
+  }
+
   return {
     handleOpen,
     handleMessage,
@@ -113,6 +131,8 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
     connectedWorkerIds,
     runningSessionIds,
     onMessage,
+    onConnect,
+    onDisconnect,
   };
 }
 
