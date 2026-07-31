@@ -301,6 +301,7 @@ export function useBoardKeyboardShortcuts(
     unregisters.push(registerAction({ id: "view-all-workspaces", label: "All Workspaces", description: "View all workspaces with status, diff stats, and session activity", icon: "⊞", category: "navigation", handler: () => actions.panels.setShowAllWorkspaces(true) }));
     unregisters.push(registerAction({ id: "view-cleanup-queue", label: "Cleanup Queue", description: "View closed workspaces with failed worktree cleanup warnings", icon: "🧹", category: "navigation", handler: () => actions.panels.setShowCleanupQueue(true) }));
     unregisters.push(registerAction({ id: "view-file-contention", label: "File Contention Heatmap", description: "Show which active workspaces touch the same files (merge-risk clusters)", icon: "⚡", category: "navigation", handler: () => actions.panels.setShowFileContention(true) }));
+    unregisters.push(registerAction({ id: "view-worker-fleet", label: "Worker Fleet", description: "Connected compute workers: status, capacity, labels; pair or revoke", icon: "⧉", category: "navigation", handler: () => actions.panels.setShowWorkerFleet(true) }));
     if (state.hasAdditionalRepos) {
       unregisters.push(registerAction({ id: "view-multi-repo-monitor", label: "Multi-Repo Monitor", description: "Repo × workspace matrix: per-repo merge state of active workspaces", icon: "⊞", category: "navigation", handler: () => actions.panels.setShowMultiRepoMonitor(true) }));
     }
