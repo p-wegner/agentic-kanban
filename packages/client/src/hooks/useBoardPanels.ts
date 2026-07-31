@@ -10,6 +10,7 @@ export interface BoardOverlayPanelProps {
   showLaunchFailures: boolean;
   showCleanupQueue: boolean;
   showFileContention: boolean;
+  showWorkerFleet: boolean;
   showMultiRepoMonitor: boolean;
   showTranscriptSearch: boolean;
   showMergeQueue: boolean;
@@ -27,6 +28,7 @@ export interface BoardOverlayPanelProps {
   onCloseLaunchFailures: () => void;
   onCloseCleanupQueue: () => void;
   onCloseFileContention: () => void;
+  onCloseWorkerFleet: () => void;
   onCloseMultiRepoMonitor: () => void;
   onCloseTranscriptSearch: () => void;
   onCloseMergeQueue: () => void;
@@ -52,6 +54,7 @@ export interface BoardPanelState {
   showLaunchFailures: boolean;
   showCleanupQueue: boolean;
   showFileContention: boolean;
+  showWorkerFleet: boolean;
   showMultiRepoMonitor: boolean;
   showTranscriptSearch: boolean;
   showProjectHealth: boolean;
@@ -71,6 +74,7 @@ export interface BoardPanelState {
   setShowLaunchFailures: Dispatch<SetStateAction<boolean>>;
   setShowCleanupQueue: Dispatch<SetStateAction<boolean>>;
   setShowFileContention: Dispatch<SetStateAction<boolean>>;
+  setShowWorkerFleet: Dispatch<SetStateAction<boolean>>;
   setShowMultiRepoMonitor: Dispatch<SetStateAction<boolean>>;
   setShowTranscriptSearch: Dispatch<SetStateAction<boolean>>;
   setShowProjectHealth: Dispatch<SetStateAction<boolean>>;
@@ -97,6 +101,7 @@ export function useBoardPanels(): BoardPanelState {
   const [showLaunchFailures, setShowLaunchFailures] = useState(false);
   const [showCleanupQueue, setShowCleanupQueue] = useState(false);
   const [showFileContention, setShowFileContention] = useState(false);
+  const [showWorkerFleet, setShowWorkerFleet] = useState(false);
   const [showMultiRepoMonitor, setShowMultiRepoMonitor] = useState(false);
   const [showTranscriptSearch, setShowTranscriptSearch] = useState(false);
   const [showProjectHealth, setShowProjectHealth] = useState(false);
@@ -114,6 +119,7 @@ export function useBoardPanels(): BoardPanelState {
     if (showLaunchFailures) { setShowLaunchFailures(false); return true; }
     if (showCleanupQueue) { setShowCleanupQueue(false); return true; }
     if (showFileContention) { setShowFileContention(false); return true; }
+    if (showWorkerFleet) { setShowWorkerFleet(false); return true; }
     if (showMultiRepoMonitor) { setShowMultiRepoMonitor(false); return true; }
     if (showWorktreeOverview) { setShowWorktreeOverview(false); return true; }
     if (showShortcutHelp) { setShowShortcutHelp(false); return true; }
@@ -129,6 +135,7 @@ export function useBoardPanels(): BoardPanelState {
     showCodemod,
     showCommandPalette,
     showFileContention,
+    showWorkerFleet,
     showLaunchFailures,
     showLiveActivityTicker,
     showMultiRepoMonitor,
@@ -151,6 +158,7 @@ export function useBoardPanels(): BoardPanelState {
     showLaunchFailures,
     showCleanupQueue,
     showFileContention,
+    showWorkerFleet,
     showMultiRepoMonitor,
     showTranscriptSearch,
     showMergeQueue,
@@ -168,6 +176,7 @@ export function useBoardPanels(): BoardPanelState {
     onCloseLaunchFailures: () => setShowLaunchFailures(false),
     onCloseCleanupQueue: () => setShowCleanupQueue(false),
     onCloseFileContention: () => setShowFileContention(false),
+    onCloseWorkerFleet: () => setShowWorkerFleet(false),
     onCloseMultiRepoMonitor: () => setShowMultiRepoMonitor(false),
     onCloseTranscriptSearch: () => setShowTranscriptSearch(false),
     onCloseMergeQueue: () => setShowMergeQueue(false),
@@ -188,6 +197,7 @@ export function useBoardPanels(): BoardPanelState {
     showCodemod,
     showCommandPalette,
     showFileContention,
+    showWorkerFleet,
     showLaunchFailures,
     showMergeQueue,
     showMultiRepoMonitor,
@@ -213,6 +223,7 @@ export function useBoardPanels(): BoardPanelState {
     showLaunchFailures,
     showCleanupQueue,
     showFileContention,
+    showWorkerFleet,
     showMultiRepoMonitor,
     showTranscriptSearch,
     showProjectHealth,
@@ -232,6 +243,7 @@ export function useBoardPanels(): BoardPanelState {
     setShowLaunchFailures,
     setShowCleanupQueue,
     setShowFileContention,
+    setShowWorkerFleet,
     setShowMultiRepoMonitor,
     setShowTranscriptSearch,
     setShowProjectHealth,
