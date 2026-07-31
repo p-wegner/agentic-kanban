@@ -14,6 +14,11 @@ import { getWorkerRegistry, type WorkerRegistry } from "./worker-registry.servic
 import type { ProviderName } from "./agent-provider.js";
 import { projects as projectsTable } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
+// Canonical home is the dependency-free protocol module, so the worker CLI can
+// name the label without importing this service's graph. Re-exported here for
+// existing importers.
+import { SHARES_FILESYSTEM_LABEL } from "@agentic-kanban/shared/lib/worker-protocol";
+export { SHARES_FILESYSTEM_LABEL };
 
 /** Strict-mode refusal: dispatch was required but no worker could take the work. */
 export class WorkerDispatchUnavailableError extends Error {
@@ -89,14 +94,6 @@ export async function resolveFleetCapacity(
     freeSlots: candidates.reduce((sum, w) => sum + Math.max(0, w.cap - w.load), 0),
   };
 }
-
-/**
- * A worker carrying this label shares the board's filesystem, so its
- * assignments skip git transport and run directly in the board-side worktree
- * (the phase-1c same-machine path). Absent = a true remote worker that must
- * clone from the board and push its result back.
- */
-export const SHARES_FILESYSTEM_LABEL = "shares-filesystem";
 
 function parseLabels(raw: string | null): string[] {
   if (!raw) return [];
