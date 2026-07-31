@@ -6,7 +6,14 @@ import { warnIfCliVersionRisky } from "./agent-cli-version.service.js";
 import { sessionOutputPath, sessionErrorPath } from "../lib/session-paths.js";
 import { guardProcessKill, auditProcessEvent } from "./process-guard.js";
 import { resolveWorktreeDevPorts as resolveWorktreeDevPortsShared } from "./worktree-ports.js";
-import { shouldDetachAgent, resolveLaunchPorts, buildAgentSpawnEnv } from "../lib/agent-launch-env.js";
+import {
+  shouldDetachAgent,
+  resolveLaunchPorts,
+  buildAgentSpawnEnv,
+  resolveAgentHangTimeoutMs,
+  startHangWatchdog as startSharedHangWatchdog,
+  DEFAULT_AGENT_HANG_TIMEOUT_MS as SHARED_DEFAULT_HANG_TIMEOUT_MS,
+} from "../lib/agent-launch-env.js";
 import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
 import { wrapLaunchConfigForContainer } from "./agent-provider/container-wrap.js";
 import type { ContainerProvision } from "./devcontainer-workspace.service.js";
@@ -28,23 +35,11 @@ export interface AgentOutputEvent {
 export type AgentOutputCallback = (event: AgentOutputEvent) => void;
 
 /**
- * Spawn-layer hang watchdog timeout. If a launched agent produces NO stdout/stderr
- * activity for this long, the watchdog kills it — a hang at the spawn layer
- * (provider deadlocked on a prompt, stuck on a network call, waiting on stdin that
- * was never closed) used to be invisible to the server and was punted entirely to
- * the out-of-process monitor's ~30-min cycle. This catches it directly, independent
- * of any monitor. Resets on every output event; only fires on true silence.
- * Override with KANBAN_AGENT_HANG_TIMEOUT_MS (0 disables).
+ * Re-exported from lib/agent-launch-env, which owns the policy so the fleet
+ * worker resolves the identical timeout (a remote session must not silently
+ * lose the hang protection its host twin has).
  */
-export const DEFAULT_AGENT_HANG_TIMEOUT_MS = 15 * 60 * 1000;
-
-function resolveHangTimeoutMs(): number {
-  const raw = process.env.KANBAN_AGENT_HANG_TIMEOUT_MS;
-  if (raw === undefined) return DEFAULT_AGENT_HANG_TIMEOUT_MS;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_AGENT_HANG_TIMEOUT_MS;
-  return parsed;
-}
+export const DEFAULT_AGENT_HANG_TIMEOUT_MS = SHARED_DEFAULT_HANG_TIMEOUT_MS;
 
 /** Encapsulates all runtime state for active agent processes. Injectable for testing. */
 export class AgentState {
@@ -280,50 +275,6 @@ function startPidWatcher(
   };
 }
 
-/**
- * Start a per-session inactivity watchdog. After `timeoutMs` of NO reset() call
- * (i.e. no agent output), `onHang` fires once. The caller resets it on every
- * output event, so it only fires on genuine silence. timeoutMs <= 0 disables it
- * (returns inert handles).
- */
-function startHangWatchdog(
-  sessionId: string,
-  timeoutMs: number,
-  onHang: () => void,
-): { reset(): void; close(): void } {
-  if (timeoutMs <= 0) {
-    return { reset() {}, close() {} };
-  }
-  let closed = false;
-  let timer: NodeJS.Timeout | undefined;
-  let fired = false;
-  const arm = () => {
-    if (closed) return;
-    timer = setTimeout(() => {
-      if (closed || fired) return;
-      fired = true;
-      try {
-        onHang();
-      } catch (err) {
-        console.error(`[agent] hang-watchdog callback error: sessionId=${sessionId}`, err);
-      }
-    }, timeoutMs);
-    if (timer.unref) timer.unref();
-  };
-  arm();
-  return {
-    reset() {
-      if (closed || fired) return;
-      if (timer) clearTimeout(timer);
-      arm();
-    },
-    close() {
-      closed = true;
-      if (timer) clearTimeout(timer);
-    },
-  };
-}
-
 /** Close + forget this session's output/pid/hang watchers (shared by the exit/error handlers). */
 function closeSessionWatchers(sessionId: string): void {
   const watcher = agentState.outputWatchers.get(sessionId);
@@ -539,7 +490,7 @@ export function launch(
   // Spawn-layer hang watchdog: reset on every output event; fire on prolonged
   // silence. Disabled for the mock agent (deterministic, short-lived) so tests
   // aren't held open. The wrapped callback below feeds resets.
-  const hangTimeoutMs = isMockAgent ? 0 : resolveHangTimeoutMs();
+  const hangTimeoutMs = isMockAgent ? 0 : resolveAgentHangTimeoutMs();
   const onOutputWithWatchdog: AgentOutputCallback = (event) => {
     const wd = agentState.hangWatchdogs.get(sessionId);
     if (wd) wd.reset();
@@ -653,7 +604,7 @@ export function launch(
   // the kill drives the normal exit path, which finalizes the session. Independent
   // of the out-of-process monitor.
   if (hangTimeoutMs > 0) {
-    const watchdog = startHangWatchdog(sessionId, hangTimeoutMs, () => {
+    const watchdog = startSharedHangWatchdog(`sessionId=${sessionId}`, hangTimeoutMs, () => {
       console.warn(`[agent] hang watchdog fired: sessionId=${sessionId} pid=${proc.pid} — no output for ${Math.round(hangTimeoutMs / 1000)}s; killing`);
       try {
         onOutput({

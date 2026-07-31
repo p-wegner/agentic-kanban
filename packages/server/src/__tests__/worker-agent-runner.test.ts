@@ -109,3 +109,45 @@ describe("worker-agent-runner (worker fleet phase 1b)", () => {
     }
   });
 });
+
+describe("worker hang watchdog (parity with the host spawn site)", () => {
+  it("kills an agent that produces no output at all", async () => {
+    const { runner, eventsOf, exitOf } = collector();
+    // Silent forever: keepStdinOpen so it never sees EOF and never prints.
+    runner.assign("s1", nodeSpec("setInterval(()=>{},1000)", { keepStdinOpen: true, hangTimeoutMs: 1500 }));
+
+    await vi.waitFor(() => expect(exitOf("s1")).toBeTruthy(), { timeout: 20000 });
+    const stderr = eventsOf("s1").filter((e) => e.type === "stderr").map((e) => e.data).join("");
+    expect(stderr).toContain("hang watchdog");
+    expect(runner.runningSessionIds()).toEqual([]);
+  }, 30000);
+
+  it("does NOT kill an agent that keeps producing output", async () => {
+    const { runner, eventsOf, exitOf } = collector();
+    // Prints every 200ms for ~2.5s — each byte must reset a 1s watchdog.
+    const chatty =
+      "let n=0;const t=setInterval(()=>{console.log('tick'+(++n));if(n>=12){clearInterval(t);process.exit(0);}},200);";
+    runner.assign("s1", nodeSpec(chatty, { keepStdinOpen: true, hangTimeoutMs: 1000 }));
+
+    await vi.waitFor(() => expect(exitOf("s1")).toBeTruthy(), { timeout: 25000 });
+    const stderr = eventsOf("s1").filter((e) => e.type === "stderr").map((e) => e.data).join("");
+    expect(stderr).not.toContain("hang watchdog");
+    // Survived to a clean, self-chosen exit rather than being killed mid-run.
+    expect(exitOf("s1")!.exitCode).toBe(0);
+    const stdout = eventsOf("s1").filter((e) => e.type === "stdout").map((e) => e.data).join("");
+    expect(stdout).toContain("tick12");
+  }, 35000);
+
+  it("is disabled when the board sends hangTimeoutMs=0 (mock agents)", async () => {
+    const { runner, eventsOf, exitOf } = collector();
+    runner.assign("s1", nodeSpec("setTimeout(()=>{console.log('late');process.exit(0);},2500)", {
+      keepStdinOpen: true,
+      hangTimeoutMs: 0,
+    }));
+
+    await vi.waitFor(() => expect(exitOf("s1")).toBeTruthy(), { timeout: 25000 });
+    const stderr = eventsOf("s1").filter((e) => e.type === "stderr").map((e) => e.data).join("");
+    expect(stderr).not.toContain("hang watchdog");
+    expect(eventsOf("s1").filter((e) => e.type === "stdout").map((e) => e.data).join("")).toContain("late");
+  }, 35000);
+});
