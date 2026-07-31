@@ -32,6 +32,7 @@ import { createIssueExportImportRoute } from "./issue-export-import.js";
 import { createBacklogSnapshotRoute } from "./backlog-snapshot.js";
 import { createConfigExportImportRoute } from "./config-export-import.js";
 import { createMetricsRoute } from "./metrics.js";
+import { createWorkersRoute } from "./workers.js";
 import { createHealthRoute } from "./health.js";
 import { createMilestonesRoute } from "./milestones.js";
 import { createDrivesRoute } from "./drives.js";
@@ -103,6 +104,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/merge-queue", createMergeQueueRoute(database, getSessionManager, options));
   routes.route("/showdowns", createShowdownsRoute(database, getSessionManager, options));
   routes.route("/metrics", createMetricsRoute());
+  routes.route("/workers", createWorkersRoute(database));
   routes.route("/health", createHealthRoute());
   if (options?.boardEvents) {
     routes.route("/approvals", createApprovalsRoute(options.boardEvents));
