@@ -62,7 +62,7 @@ completely unchanged.
 Fast-forward ONLY. A diverged branch is reported and held, never force-updated — the
 staging ref keeps the work recoverable instead of silently discarding one side.
 
-### Security
+### Security: separate listeners, not a defended API
 The board's REST API has no auth; its defense is loopback binding. The fleet surfaces are
 the exception because they must be reachable off-loopback, so they follow the existing
 MCP-HTTP-bridge pattern rather than inventing one: a single-use, short-lived **pairing
@@ -70,6 +70,21 @@ token** mints a per-worker **bearer token**, stored only as a sha-256 hash and c
 with `timingSafeEqual`; the WS upgrade authenticates before upgrading. Board agent
 credentials are NEVER sent to a worker — a worker authenticates its agent with its own
 machine-local login.
+
+**The worker-facing endpoints therefore live on their OWN listener** (`KANBAN_FLEET_PORT`),
+serving `POST /api/workers/register`, `POST /api/workers/:id/heartbeat`, `GET
+/ws/workers/:id` and health — and nothing else. The main app stays on `127.0.0.1`
+permanently.
+
+This was a correction. The first cut kept everything on one app and told operators to set
+`KANBAN_HOST=0.0.0.0`, which does not defend anything — it publishes `delete_issue`,
+`merge_workspace` and every transcript to the network with no credential, mitigated only
+by a "trusted network only" note in the docs. A warning is not a control. Splitting by
+**audience** (owner-only mint/list/revoke stay inward; worker-called endpoints go outward)
+makes "the board API is not reachable from the network" a property of what is mounted
+where, which a misconfiguration cannot quietly violate. The split is opt-in and additive:
+the main app still serves the full surface on loopback, so same-machine workers are
+unaffected.
 
 ## Consequences
 
@@ -80,8 +95,9 @@ machine-local login.
   remote work with no changes, because only placement moved.
 
 **Costs / risks accepted**
-- A second network surface exists. It is token-authed from day one, but it is real
-  attack surface that the loopback-only rest of the API does not have.
+- Two network surfaces exist (fleet + git). Both are token-authed and each serves one
+  narrow purpose, but they are real attack surface the loopback-only API does not have.
+  Both are opt-in — an unconfigured board opens nothing.
 - Live stdout during a socket gap is dropped (exit events are queued and delivered);
   full replay is deliberately out of scope.
 - The worker keeps a per-project clone, trading disk for clone time.
@@ -94,6 +110,11 @@ machine-local login.
 
 - **Board dials workers (Swarm-like).** Requires inbound reachability and discovery;
   hostile to laptops and NAT for no gain at this scale.
+- **A global API token enforced whenever the bind is non-loopback.** Simpler to implement
+  than a second listener, but every consumer — the client UI, the CLI, the MCP server —
+  would have to carry and rotate that token, which is a large surface to get wrong for a
+  single-user local tool. Splitting listeners keeps all of them talking to an
+  unauthenticated loopback API exactly as before.
 - **Share a filesystem (SMB/NFS) instead of git transport.** Would avoid the git plumbing
   but re-introduces Windows path/permission fragility, is slow over a real network, and
   makes the board's worktree state remotely mutable. Git is already the app's transfer
@@ -116,15 +137,21 @@ Epic #184, delivered in four phases:
 | 1c | #5 | `RemoteAgentService` + placement policy (same-machine dispatch e2e) |
 | 2 | #188 | Git smart-HTTP serving, worker checkouts, incoming-ref sync |
 | 3 | #189 | Labels/capacity matching, strict mode + monitor gate, restart recovery, Workers UI |
+| 3+ | — | Hang-watchdog parity for remote sessions; standalone `agentic-kanban-worker` binary; the fleet-listener split above |
 
 Key modules: `services/agent-dispatch.service.ts`, `services/agent-remote.service.ts`,
 `services/worker-{registry,connection,fleet}.service.ts`, `services/git-http.service.ts`,
-`services/worker-remote-sync.service.ts`, `worker/worker-{daemon,agent-runner,repo}.ts`,
-`startup/worker-incoming-sweep.ts`, `components/WorkerFleetPanel.tsx`.
+`services/worker-remote-sync.service.ts`, `services/fleet-listener.service.ts`,
+`worker/worker-{daemon,agent-runner,repo,cli}.ts`, `startup/worker-incoming-sweep.ts`,
+`components/WorkerFleetPanel.tsx`.
 
 ## Operating it
 
 ```bash
+# Board machine, cross-machine fleet only: expose the two token-authed listeners.
+# NEVER KANBAN_HOST=0.0.0.0 — that publishes the unauthenticated board API.
+KANBAN_FLEET_PORT=3003 KANBAN_GIT_HTTP_PORT=3002 pnpm dev
+
 # On the board machine: mint a single-use pairing token (or use the Workers UI panel)
 pnpm cli -- worker pair
 

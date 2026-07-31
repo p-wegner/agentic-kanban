@@ -64,7 +64,10 @@ describe("worker connect instructions", () => {
   });
 
   it("documents the networking a cross-machine fleet actually needs", () => {
-    expect(markdown).toContain("KANBAN_HOST=0.0.0.0");
+    // The board API must NEVER be the thing you expose — it has no auth.
+    expect(markdown).toContain("KANBAN_FLEET_PORT");
+    expect(markdown).not.toMatch(/KANBAN_HOST=0\.0\.0\.0/);
+    expect(markdown).toMatch(/no authentication|not reachable from the network/i);
     // The git port must be pinnable or a firewall rule is impossible.
     expect(markdown).toContain("KANBAN_GIT_HTTP_PORT");
     expect(resolveConfiguredGitPort({ KANBAN_GIT_HTTP_PORT: "3002" })).toBe(3002);

@@ -13,6 +13,7 @@ import { createWorkflowEngine } from "./startup/exit-workflow.js";
 import { createAutoMerge } from "./startup/merge-workflow.js";
 import { createMonitorSetup } from "./startup/monitor-setup.js";
 import { setupProcessHandlers } from "./startup/process-handlers.js";
+import { resolveFleetPort, startFleetListener } from "./services/fleet-listener.service.js";
 import { setupRoutes } from "./startup/route-setup.js";
 import { BACKGROUND_SERVICES } from "./startup/background-services.js";
 import { runStartupTasks } from "./startup/startup-tasks.js";
@@ -192,6 +193,25 @@ export async function startServer(port?: number, hostname?: string) {
   for (const service of BACKGROUND_SERVICES) {
     const cleanup = await service.start(backgroundServiceContext);
     if (cleanup) cleanupCallbacks.push(cleanup);
+  }
+
+  // Fleet listener (epic #184): the ONLY surface exposed off-loopback, and only
+  // when KANBAN_FLEET_PORT says so. It serves the worker-called endpoints, each
+  // of which authenticates for itself; the main app above stays on 127.0.0.1 so
+  // the unauthenticated board API is unreachable from the network by
+  // construction rather than by convention. A failure here is non-fatal — the
+  // board keeps running locally, just without remote workers.
+  const fleetPort = resolveFleetPort();
+  if (fleetPort !== null) {
+    try {
+      const fleetListener = await startFleetListener({ database: db, port: fleetPort });
+      cleanupCallbacks.push(() => { void fleetListener.close(); });
+    } catch (err) {
+      console.error(
+        `[fleet-listener] failed to bind KANBAN_FLEET_PORT=${fleetPort}; remote workers cannot connect:`,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
   }
 
   setupProcessHandlers(server, agentService, { cleanupStartupTimers });

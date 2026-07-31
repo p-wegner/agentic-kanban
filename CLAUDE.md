@@ -102,6 +102,7 @@ Agents can execute on OTHER machines. Workers dial the board (`agentic-kanban wo
 - **Git transport**: the board serves its repos over token-authed git smart HTTP; a worker clones, works in its OWN checkout, and pushes to `refs/kanban/incoming/<branch>` (pushes to `refs/heads/*` are refused — those are checked out in board worktrees). The board fast-forwards the real branch from there, so diff/review/merge are unchanged. **Fast-forward only** — divergence is held and reported, never forced.
 - A worker on the SAME machine can skip git transport with `worker start --shares-filesystem`.
 - **Credentials never leave their machine**: a worker authenticates its agent with its own local login; the board sends none.
+- **Never `KANBAN_HOST=0.0.0.0` for a fleet** — the board API has no auth. Expose `KANBAN_FLEET_PORT` (worker register/heartbeat/ws only) and `KANBAN_GIT_HTTP_PORT` (git transport only) instead; both are opt-in, bearer-token authed, and the board API is never mounted on them. Remote workers point `--board` at the FLEET port.
 - UI: command palette → "Worker Fleet" (pair/revoke, status, capacity, labels).
 
 ## Server Resilience
