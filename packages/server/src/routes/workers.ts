@@ -3,7 +3,7 @@ import { createRouter } from "../middleware/create-router.js";
 import { parseOptionalJsonBody } from "../middleware/parse-body.js";
 import type { Database } from "../db/index.js";
 import {
-  createWorkerRegistry,
+  getWorkerRegistry,
   type WorkerRegistry,
   type WorkerStatus,
 } from "../services/worker-registry.service.js";
@@ -28,7 +28,7 @@ function extractBearer(c: Context): string | null {
  */
 export function createWorkersRoute(database: Database, registry?: WorkerRegistry) {
   const router = createRouter();
-  const reg = registry ?? createWorkerRegistry(database);
+  const reg = registry ?? getWorkerRegistry(database);
 
   // ── Owner surface (loopback UI/CLI) ────────────────────────────────────────
   router.post("/pairing-token", (c) => c.json(reg.mintPairingToken(), 201));

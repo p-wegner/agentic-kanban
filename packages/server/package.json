@@ -48,15 +48,17 @@
     "drizzle-orm": "0.45.2",
     "hono": "4.12.31",
     "ts-morph": "^24.0.0",
+    "ws": "8.21.1",
     "zod": "3.25.76"
   },
   "devDependencies": {
     "@agentic-kanban/shared": "workspace:*",
+    "@types/ws": "^8.18.1",
     "drizzle-kit": "0.31.10",
     "esbuild": "^0.25.0",
     "tsx": "^4.19.0",
-    "yaml": "^2.6.0",
     "typescript": "^5.8.3",
-    "vitest": "^4.0.0"
+    "vitest": "^4.0.0",
+    "yaml": "^2.6.0"
   }
 }
