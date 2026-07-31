@@ -15,6 +15,15 @@ import type { ProviderName } from "./agent-provider.js";
 import { projects as projectsTable } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 
+/** Strict-mode refusal: dispatch was required but no worker could take the work. */
+export class WorkerDispatchUnavailableError extends Error {
+  readonly code = "NO_AVAILABLE_WORKER";
+  constructor(message: string) {
+    super(message);
+    this.name = "WorkerDispatchUnavailableError";
+  }
+}
+
 export interface WorkerFleet {
   registry: WorkerRegistry;
   connections: WorkerConnectionManager;
@@ -40,6 +49,45 @@ export function getWorkerFleet(database: Database = realDb): WorkerFleet {
 
 export function workerDispatchPrefKey(projectId: string): string {
   return `worker_dispatch_${projectId}`;
+}
+
+/** CSV of labels a worker must carry to run this project's work (e.g. "docker,linux"). */
+export function workerLabelsPrefKey(projectId: string): string {
+  return `worker_labels_${projectId}`;
+}
+
+/**
+ * When "true", the project REFUSES to fall back to the board host: with no
+ * eligible worker the monitor skips the start (reason `no_available_worker`)
+ * instead of running the agent locally. Mirrors devcontainer_strict.
+ */
+export function workerStrictPrefKey(projectId: string): string {
+  return `worker_dispatch_strict_${projectId}`;
+}
+
+export function parseRequiredLabels(pref: string | undefined): string[] {
+  return (pref ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+export interface FleetCapacity {
+  /** Workers connected, online and matching the filters. */
+  eligibleWorkers: number;
+  /** Sum of their remaining concurrency — how many more sessions the fleet can take. */
+  freeSlots: number;
+}
+
+/** Aggregate free capacity for a provider + label requirement. */
+export async function resolveFleetCapacity(
+  fleet: WorkerFleet,
+  providerName: ProviderName,
+  requiredLabels: string[] = [],
+  now?: string,
+): Promise<FleetCapacity> {
+  const candidates = await eligibleWorkers(fleet, providerName, requiredLabels, now);
+  return {
+    eligibleWorkers: candidates.length,
+    freeSlots: candidates.reduce((sum, w) => sum + Math.max(0, w.cap - w.load), 0),
+  };
 }
 
 /**
@@ -70,13 +118,14 @@ export async function workerSharesFilesystem(fleet: WorkerFleet, workerId: strin
  * draining), provider available (an empty/absent provider list means "any"),
  * free capacity — least-loaded first. Null = no eligible worker.
  */
-export async function selectWorkerForLaunch(
+async function eligibleWorkers(
   fleet: WorkerFleet,
   providerName: ProviderName,
+  requiredLabels: string[],
   now?: string,
-): Promise<string | null> {
+): Promise<Array<{ id: string; load: number; cap: number }>> {
   const workers = await fleet.registry.listWorkersView(now);
-  const candidates = workers
+  return workers
     .filter((w) => w.effectiveStatus === "online")
     .filter((w) => fleet.connections.isConnected(w.id))
     .filter((w) => {
@@ -88,9 +137,23 @@ export async function selectWorkerForLaunch(
         return true;
       }
     })
+    .filter((w) => {
+      if (requiredLabels.length === 0) return true;
+      const labels = parseLabels(w.labels);
+      return requiredLabels.every((required) => labels.includes(required));
+    })
     .map((w) => ({ id: w.id, load: fleet.connections.runningSessionIds(w.id).length, cap: w.maxConcurrency }))
     .filter((w) => w.load < w.cap)
     .sort((a, b) => a.load - b.load);
+}
+
+export async function selectWorkerForLaunch(
+  fleet: WorkerFleet,
+  providerName: ProviderName,
+  requiredLabels: string[] = [],
+  now?: string,
+): Promise<string | null> {
+  const candidates = await eligibleWorkers(fleet, providerName, requiredLabels, now);
   return candidates[0]?.id ?? null;
 }
 
@@ -114,10 +177,18 @@ export async function resolveWorkerPlacement(params: {
     const pref = await getPreferenceValue(workerDispatchPrefKey(projectId), database);
     if (pref !== "true") return { kind: "host" };
     const fleet = getWorkerFleet(database);
-    const workerId = await selectWorkerForLaunch(fleet, providerName, now);
+    const requiredLabels = parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(projectId), database));
+    const workerId = await selectWorkerForLaunch(fleet, providerName, requiredLabels, now);
     if (!workerId) {
+      const detail = requiredLabels.length > 0 ? ` with labels [${requiredLabels.join(",")}]` : "";
+      const strict = (await getPreferenceValue(workerStrictPrefKey(projectId), database)) === "true";
+      if (strict) {
+        throw new WorkerDispatchUnavailableError(
+          `no eligible ${providerName} worker${detail} for project ${projectId} and worker dispatch is strict`,
+        );
+      }
       console.warn(
-        `[worker-fleet] project ${projectId} wants worker dispatch but no eligible ${providerName} worker is available; launching on host`,
+        `[worker-fleet] project ${projectId} wants worker dispatch but no eligible ${providerName} worker${detail} is available; launching on host`,
       );
       return { kind: "host" };
     }
@@ -154,7 +225,38 @@ export async function resolveWorkerPlacement(params: {
       },
     };
   } catch (err) {
+    // Strict mode is a deliberate refusal, not a resolution failure — propagate it
+    // so the caller surfaces "no worker" instead of silently running on the host.
+    if (err instanceof WorkerDispatchUnavailableError) throw err;
     console.error(`[worker-fleet] placement resolution failed; launching on host`, err);
     return { kind: "host" };
+  }
+}
+
+/**
+ * Would this project's next launch find a worker? Used by the monitor to skip a
+ * start (reason `no_available_worker`) instead of queuing work that strict-mode
+ * placement would refuse. Non-strict projects always report available (they can
+ * fall back to the host).
+ */
+export async function projectCanDispatch(params: {
+  database: Database;
+  projectId: string;
+  providerName: ProviderName;
+  now?: string;
+}): Promise<{ available: true } | { available: false; reason: string }> {
+  const { database, projectId, providerName, now } = params;
+  try {
+    if ((await getPreferenceValue(workerDispatchPrefKey(projectId), database)) !== "true") return { available: true };
+    if ((await getPreferenceValue(workerStrictPrefKey(projectId), database)) !== "true") return { available: true };
+    const fleet = getWorkerFleet(database);
+    const requiredLabels = parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(projectId), database));
+    const capacity = await resolveFleetCapacity(fleet, providerName, requiredLabels, now);
+    if (capacity.freeSlots > 0) return { available: true };
+    const detail = requiredLabels.length > 0 ? ` matching [${requiredLabels.join(",")}]` : "";
+    return { available: false, reason: `no fleet worker${detail} has free capacity` };
+  } catch (err) {
+    console.error(`[worker-fleet] dispatch availability check failed; treating as available`, err);
+    return { available: true };
   }
 }

@@ -120,6 +120,20 @@ export function createRemoteAgentService(
       })();
       return;
     }
+    if (message.type === "hello") {
+      // Orphan reconciliation (phase 3): a worker that reconnects after a board
+      // restart announces sessions this process knows nothing about. Their
+      // board-side session rows were already finalized by the startup sweep, so
+      // the agents are unreachable zombies still able to write to a checkout —
+      // stop them. Their pushed work, if any, is recovered from the incoming ref
+      // by the startup sweep, not by leaving the agent running.
+      const orphans = message.runningSessionIds.filter((id) => !sessions.has(id));
+      for (const sessionId of orphans) {
+        console.warn(`[agent-remote] worker ${workerId} reports unknown session ${sessionId}; stopping the orphan`);
+        manager.send(workerId, { type: "stop", sessionId });
+      }
+      return;
+    }
     if (message.type === "assign_failed") {
       const session = sessions.get(message.sessionId);
       if (!session || session.workerId !== workerId) return;
