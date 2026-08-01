@@ -1,6 +1,8 @@
 import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { runSmokeCheck } from "@agentic-kanban/shared/lib/smoke-check";
 import { gradleUserHomeForWorktree } from "@agentic-kanban/shared/lib/gradle-env";
+import { isDocsOnlyDiff } from "@agentic-kanban/shared";
+import { getChangedFileNames } from "./git.service.js";
 import type { Database } from "../db/index.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
@@ -52,6 +54,12 @@ function looksLikeMissingDepsFailure(output: string): boolean {
 export interface PreMergeGateWorkspace {
   id: string;
   workingDir: string | null;
+  /**
+   * The branch this workspace merges into. Optional (older callers omit it) — when absent,
+   * the docs-only smoke skip (#198) simply can't be evaluated and the smoke gate runs as
+   * before; this never widens what the gate blocks, only what it can additionally skip.
+   */
+  baseBranch?: string | null;
 }
 
 export interface PreMergeGateResult {
@@ -190,14 +198,27 @@ export async function runPreMergeGate(
     const profile = await getStackProfile(projectId, database);
     const smokeCheck = buildSmokeCheck(profile);
     if (smokeCheck) {
-      smokeApplies = true;
       if (!workspace.workingDir) {
         // Fail-closed: smoke (UI) gate applies but can't run without a worktree (#826).
         return { passed: false, skipped: false, stage: "smoke", message: "smoke/UI gate applies (web project) but workspace has no worktree — cannot verify" };
       }
-      const smoke = await runUnderBuildGate(() => runSmokeCheck(workspace.workingDir!, smokeCheck));
-      if (!smoke.passed) {
-        return { passed: false, skipped: false, stage: "smoke", message: `smoke check failed: ${smoke.message}` };
+      // #198: a docs-only diff can never change boot/render behavior, so skip the (expensive,
+      // cold-JVM-hostile) smoke boot entirely rather than pay for a check whose outcome can't
+      // have changed. Only skip when we can actually SEE the diff (a baseBranch was provided);
+      // otherwise fall through and run the smoke check as before.
+      let docsOnly = false;
+      if (workspace.baseBranch) {
+        const changedFiles = await getChangedFileNames(workspace.workingDir, workspace.baseBranch).catch(() => []);
+        docsOnly = isDocsOnlyDiff(changedFiles);
+      }
+      if (docsOnly) {
+        console.log(`[pre-merge-gate] skipping smoke check for workspace ${workspace.id} — diff touches only docs (#198)`);
+      } else {
+        smokeApplies = true;
+        const smoke = await runUnderBuildGate(() => runSmokeCheck(workspace.workingDir!, smokeCheck));
+        if (!smoke.passed) {
+          return { passed: false, skipped: false, stage: "smoke", message: `smoke check failed: ${smoke.message}` };
+        }
       }
     }
   } catch (smokeErr) {

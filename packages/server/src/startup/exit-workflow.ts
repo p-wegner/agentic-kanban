@@ -694,7 +694,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     // still runs FIRST (it must commit its fix onto the branch before the verify build); the #792
     // cold-clone check stays a separate opt-in gate. Any failure WITHHOLDS readyForMerge.
     await applyBuildApprovalRepair(ctx);
-    const preMergeGate = await runPreMergeGate({ id: workspaceId, workingDir: workspace.workingDir }, projectId, db);
+    const preMergeGate = await runPreMergeGate({ id: workspaceId, workingDir: workspace.workingDir, baseBranch: workspace.baseBranch || defaultBranch }, projectId, db);
     if (!preMergeGate.passed) {
       console.log(`[workflow] pre-merge gate failed (${preMergeGate.stage}) for workspace ${workspaceId} — withholding readyForMerge: ${preMergeGate.message}`);
       boardEvents.broadcast(projectId, "workflow_error");

@@ -43,3 +43,5 @@ export type * from "./devcontainer-exec.js";
 // the deep path (@agentic-kanban/shared/lib/container-dep-volumes) server-side.
 export type * from "./container-dep-volumes.js";
 export * from "./butler-scope.js";
+// Docs-only diff detection (#198) — pure string logic, no Node builtins.
+export * from "./docs-only-diff.js";

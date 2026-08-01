@@ -20,6 +20,21 @@ function resolveHealthUrl(profile: StackProfile): { url: string; explicit: boole
 }
 
 /**
+ * JVM/Gradle (and Maven) boot in a FRESH worktree is cold — daemon start + full compile +
+ * framework boot (Ktor/Spring) — and reliably exceeds the generic 60s smoke window (#198),
+ * failing the merge gate on a boot path that a retry then passes purely because the retry
+ * warmed the build. Hardcoded per-stack (a physical toolchain property, not a per-project
+ * tuning knob) rather than a preference.
+ */
+const JVM_SMOKE_TIMEOUT_SECONDS = 240;
+
+/** Per-stack override of the smoke boot-poll budget, or `undefined` for the generic default. */
+function smokeTimeoutSecondsFor(profile: StackProfile): number | undefined {
+  const pm = (profile.packageManager ?? "").toLowerCase();
+  return pm === "gradle" || pm === "maven" ? JVM_SMOKE_TIMEOUT_SECONDS : undefined;
+}
+
+/**
  * Build the generalized "does it boot and respond/render" smoke check from a stack profile (#791).
  *
  * This is the project-agnostic successor to the hand-rolled `frontend-smoke.ps1`: the WHAT
@@ -55,6 +70,7 @@ export function buildSmokeCheck(profile: StackProfile | null): SmokeCheck | null
     // only without render assertions — an explicit health route, or a browser stack whose 404
     // page still contains <html>, must keep the strict 200 bar.
     acceptNon5xx: !health.explicit && expectBodyContains.length === 0,
+    timeoutSeconds: smokeTimeoutSecondsFor(profile),
   };
 }
 

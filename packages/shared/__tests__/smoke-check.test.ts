@@ -146,6 +146,38 @@ describe("runSmokeCheck", () => {
     expect(result.message.toLowerCase()).toContain("missing expected content");
   }, 15000);
 
+  // #198: a check-level timeout (set by buildSmokeCheck for cold-boot stacks like gradle/maven)
+  // is honored when the caller doesn't pass an explicit options.timeoutSeconds override.
+  it("honors the check's own timeoutSeconds when options doesn't override it", async () => {
+    const p = await port();
+    const check: SmokeCheck = {
+      devCommand: process.platform === "win32" ? "cmd /c echo noserver" : "true",
+      healthUrl: `http://127.0.0.1:${p}`,
+      expectBodyContains: [],
+      timeoutSeconds: 3,
+    };
+    const start = Date.now();
+    const result = await runSmokeCheck(tmpdir(), check, { pollIntervalSeconds: 1, requestTimeoutMs: 1000 });
+    const elapsedMs = Date.now() - start;
+    expect(result.passed).toBe(false);
+    expect(elapsedMs).toBeLessThan(8000);
+  }, 15000);
+
+  it("an explicit options.timeoutSeconds still wins over the check's own timeoutSeconds", async () => {
+    const p = await port();
+    const check: SmokeCheck = {
+      devCommand: process.platform === "win32" ? "cmd /c echo noserver" : "true",
+      healthUrl: `http://127.0.0.1:${p}`,
+      expectBodyContains: [],
+      timeoutSeconds: 999,
+    };
+    const start = Date.now();
+    const result = await runSmokeCheck(tmpdir(), check, { timeoutSeconds: 3, pollIntervalSeconds: 1, requestTimeoutMs: 1000 });
+    const elapsedMs = Date.now() - start;
+    expect(result.passed).toBe(false);
+    expect(elapsedMs).toBeLessThan(8000);
+  }, 15000);
+
   it("fails (does not hang) when the server never becomes reachable", async () => {
     // Bind nothing — poll an unused port until the short timeout elapses.
     const p = await port();
