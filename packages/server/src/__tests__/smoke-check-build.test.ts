@@ -86,4 +86,22 @@ describe("buildSmokeCheck", () => {
       expect(buildSmokeCheck(p)?.expectBodyContains).toEqual(["<html", "<body"]);
     }
   });
+
+  // #198: a fresh worktree's JVM boot (gradle daemon start + full compile + Ktor/Spring boot)
+  // reliably exceeds the generic 60s smoke window, failing the gate on a build that a retry
+  // then passes purely because the retry warmed the build.
+  it("scales the smoke timeout up for a gradle project (cold JVM boot, #198)", () => {
+    const p = profile({ isWeb: true, packageManager: "gradle", devCommand: "./gradlew run", devHealthUrl: null, devPort: 8080 });
+    expect(buildSmokeCheck(p)?.timeoutSeconds).toBe(240);
+  });
+
+  it("scales the smoke timeout up for a maven project (cold JVM boot, #198)", () => {
+    const p = profile({ isWeb: true, packageManager: "maven", devCommand: "mvn spring-boot:run", devHealthUrl: "http://localhost:8080" });
+    expect(buildSmokeCheck(p)?.timeoutSeconds).toBe(240);
+  });
+
+  it("leaves the smoke timeout at the generic default for a non-JVM stack", () => {
+    const p = profile({ isWeb: true, packageManager: "pnpm", devCommand: "pnpm vite dev", devHealthUrl: "http://localhost:5173" });
+    expect(buildSmokeCheck(p)?.timeoutSeconds).toBeUndefined();
+  });
 });
