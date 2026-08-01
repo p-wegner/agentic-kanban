@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, rmSync, lstatSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -248,6 +248,46 @@ describe("plugin.service", () => {
     const plugin = await service.installPlugin({ source: makePluginDir() });
     const projectId = await insertProject(db, makeProjectRepo());
     await expect(service.runScript(plugin.id, "nope", projectId)).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("runSkill creates a ticket and launches a workspace against the named skill", async () => {
+    const plugin = await service.installPlugin({ source: makePluginDir() });
+    const projectId = await insertProject(db, makeProjectRepo());
+
+    const createIssue = vi.fn().mockResolvedValue({ id: "issue-1", issueNumber: 42 });
+    const createWorkspace = vi.fn().mockResolvedValue({ id: "ws-1", branch: "feature/ak-42-run-skill" });
+    const withDeps = createPluginService({ database: db as unknown as Database, createIssue, createWorkspace });
+
+    const result = await withDeps.runSkill(plugin.id, "requirement-extraction", projectId, {
+      title: "Custom title",
+      description: "Custom description",
+    });
+
+    expect(createIssue).toHaveBeenCalledWith(expect.objectContaining({
+      projectId,
+      title: "Custom title",
+      description: "Custom description",
+      skipAutoReview: true,
+    }));
+    expect(createWorkspace).toHaveBeenCalledWith({ issueId: "issue-1", skillName: "requirement-extraction" });
+    expect(result).toEqual({ issueId: "issue-1", issueNumber: 42, workspaceId: "ws-1", branch: "feature/ak-42-run-skill" });
+  });
+
+  it("runSkill rejects an unknown skill name with NOT_FOUND", async () => {
+    const plugin = await service.installPlugin({ source: makePluginDir() });
+    const projectId = await insertProject(db, makeProjectRepo());
+    const withDeps = createPluginService({
+      database: db as unknown as Database,
+      createIssue: vi.fn(),
+      createWorkspace: vi.fn(),
+    });
+    await expect(withDeps.runSkill(plugin.id, "nope", projectId)).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("runSkill rejects when createIssue/createWorkspace were not injected (script-only route)", async () => {
+    const plugin = await service.installPlugin({ source: makePluginDir() });
+    const projectId = await insertProject(db, makeProjectRepo());
+    await expect(service.runSkill(plugin.id, "requirement-extraction", projectId)).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("removePlugin drops the row and flips enable prefs off, keeping files on disk", async () => {

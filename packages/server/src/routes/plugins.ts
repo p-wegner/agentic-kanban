@@ -1,8 +1,13 @@
 import type { Context } from "hono";
 import type { Database } from "../db/index.js";
+import type { SessionManager } from "../services/session.manager.js";
+import type { BoardEvents } from "../services/board-events.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.js";
 import { getPluginService, PluginError } from "../services/plugin.service.js";
+import { createIssueService } from "../services/issue.service.js";
+import { createWorkspaceService } from "../services/workspace.service.js";
+import { createWebhookSender } from "../services/outbound-webhook.service.js";
 
 /**
  * Plugin-system REST surface, mounted at `/plugins` (routes/index.ts):
@@ -16,15 +21,34 @@ import { getPluginService, PluginError } from "../services/plugin.service.js";
  *   POST   /api/plugins/:id/views/:viewId/start { projectId } → { url, port, pid }
  *   POST   /api/plugins/:id/views/:viewId/stop  { projectId }
  *   POST   /api/plugins/:id/scripts/:name/run   { projectId } → { code, stdout, stderr, timedOut }
+ *   POST   /api/plugins/:id/skills/:name/run    { projectId, title?, description? } →
+ *            { issueId, issueNumber, workspaceId, branch } (creates a ticket + launches a
+ *            workspace against the skill — the agentic counterpart to scripts/:name/run)
  *
  * The client view host's flat listing lives under the `/projects` prefix
  * (convention: per-project reads hang off /projects/:projectId/...):
  *
  *   GET    /api/projects/:projectId/plugin-views
  */
-export function createPluginsRoute(database: Database) {
+export function createPluginsRoute(
+  database: Database,
+  options?: { getSessionManager?: () => SessionManager; boardEvents?: BoardEvents },
+) {
   const router = createRouter();
-  const service = getPluginService(database);
+  const issueService = createIssueService({
+    database,
+    boardEvents: options?.boardEvents,
+    sendWebhook: createWebhookSender(database),
+  });
+  const workspaceService = createWorkspaceService({
+    database,
+    getSessionManager: options?.getSessionManager,
+    boardEvents: options?.boardEvents,
+  });
+  const service = getPluginService(database, {
+    createIssue: issueService.createIssue,
+    createWorkspace: workspaceService.createWorkspace,
+  });
 
   router.get("/", async (c) => {
     const projectId = c.req.query("projectId") || undefined;
@@ -78,6 +102,17 @@ export function createPluginsRoute(database: Database) {
   router.post("/:id/scripts/:name/run", async (c) => {
     const projectId = await requireProjectId(c);
     return c.json(await service.runScript(c.req.param("id"), c.req.param("name"), projectId));
+  });
+
+  router.post("/:id/skills/:name/run", async (c) => {
+    const body = await parseOptionalJsonBody<{ projectId?: string; title?: string; description?: string }>(c);
+    const projectId = typeof body.projectId === "string" ? body.projectId.trim() : "";
+    if (!projectId) throw new PluginError("projectId is required", "BAD_REQUEST");
+    const result = await service.runSkill(c.req.param("id"), c.req.param("name"), projectId, {
+      title: body.title,
+      description: body.description,
+    });
+    return c.json(result, 201);
   });
 
   return router;
