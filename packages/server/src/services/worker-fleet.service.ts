@@ -12,7 +12,7 @@ import type { AgentExecutionService } from "./agent-dispatch.service.js";
 import { createWorkerConnectionManager, type WorkerConnectionManager } from "./worker-connection.service.js";
 import { getWorkerRegistry, type WorkerRegistry } from "./worker-registry.service.js";
 import type { ProviderName } from "./agent-provider.js";
-import { getProjectRepoFields } from "../repositories/worker-fleet.repository.js";
+import { getProjectById } from "../repositories/project.repository.js";
 // Canonical home is the dependency-free protocol module, so the worker CLI can
 // name the label without importing this service's graph. Re-exported here for
 // existing importers.
@@ -199,7 +199,7 @@ export async function resolveWorkerPlacement(params: {
       console.warn(`[worker-fleet] remote worker ${workerId} needs a branch for git transport; launching on host`);
       return { kind: "host" };
     }
-    const project = await getProjectRepoFields(projectId, database);
+    const project = await getProjectById(projectId, database);
     if (!project?.repoPath) {
       console.warn(`[worker-fleet] project ${projectId} has no repoPath; launching on host`);
       return { kind: "host" };
