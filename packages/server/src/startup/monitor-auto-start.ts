@@ -3,6 +3,7 @@ import { drives, issueDependencies, issues, issueTags, projectStatuses, tags, wo
 import { and, eq, sql, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { createBoardEvents } from "../services/board-events.js";
+import { reconcileMergedIssue } from "../services/merge-cleanup.service.js";
 import type { MonitorActionName } from "../services/monitor-nudge.js";
 import { resolveMonitorTunables } from "../services/strategy-objective.service.js";
 import { narrowProviderName } from "../services/agent-provider.js";
@@ -130,7 +131,14 @@ export type AutoStartSkipReason =
    * for a later cycle instead of quietly running it on the board host, which is
    * exactly what strict mode exists to prevent.
    */
-  | "no_available_worker";
+  | "no_available_worker"
+  /**
+   * The issue already has a workspace with `mergedAt` set (its work landed on the base
+   * branch) but the issue status never reached Done — the drift that let a hand-off drive
+   * spawn a SECOND workspace for already-merged work (#190). Instead of starting a
+   * duplicate, the issue is reconciled to Done here and no launch happens this cycle.
+   */
+  | "already_merged";
 
 export interface AutoStartSkipInfo {
   issueNumbers: number[];
@@ -163,6 +171,32 @@ export interface AutoStartDeps {
    * instead of modelling this module's queries.
    */
   buildContentionGate?: BuildFileContentionGate;
+}
+
+/**
+ * Reconcile an issue whose work already landed (some workspace has `mergedAt` set) but
+ * whose status is still non-terminal — instead of treating it as unstarted/backfillable
+ * work and spawning a duplicate builder workspace for it (#190). Best-effort: a failure
+ * here must not block the auto-start loop, so it only warns.
+ */
+async function reconcileStaleMergedIssue(
+  projectId: string,
+  issueId: string,
+  issueNumber: number | null | undefined,
+  boardEvents: ReturnType<typeof createBoardEvents>,
+  noteSkip: (projectId: string, issueNumber: number | null | undefined, reason: AutoStartSkipReason) => void,
+): Promise<void> {
+  const label = issueNumber != null ? `#${issueNumber}` : issueId;
+  try {
+    const { issueTransitioned } = await reconcileMergedIssue({ database: db, issueId, projectId });
+    if (issueTransitioned) {
+      console.log(`[monitor] Reconciled issue ${label} to Done — its workspace was already merged but the issue status had not caught up; skipped starting a duplicate workspace (#190)`);
+      boardEvents.broadcast(projectId, "board_changed");
+    }
+  } catch (err) {
+    console.warn(`[monitor] Failed to reconcile already-merged issue ${label}:`, err instanceof Error ? err.message : String(err));
+  }
+  noteSkip(projectId, issueNumber, "already_merged");
 }
 
 export async function runAutoStart(prefMap: Map<string, string>, { serverPort, boardEvents, logMonitorAction, allowProject, isAutoDrivenProject = () => false, buildContentionGate = buildFileContentionGate }: AutoStartDeps): Promise<Map<string, AutoStartSkipInfo>> {
@@ -225,9 +259,14 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
     for (const issue of inProgressIssues) {
       if (currentWip >= wipLimit) break;
       if (startsRemaining(inProgressSt.projectId) <= 0) break;
-      const openWs = await db.select({ id: workspaces.id }).from(workspaces)
-        .where(sql`${workspaces.issueId} = ${issue.id} AND ${workspaces.status} != 'closed'`).limit(1);
-      if (openWs.length > 0) continue;
+      const issueWorkspaces = await db.select({ id: workspaces.id, status: workspaces.status, mergedAt: workspaces.mergedAt }).from(workspaces)
+        .where(sql`${workspaces.issueId} = ${issue.id}`);
+      if (issueWorkspaces.some((w) => w.status !== "closed")) continue;
+      const mergedWs = issueWorkspaces.find((w) => w.mergedAt != null);
+      if (mergedWs) {
+        await reconcileStaleMergedIssue(inProgressSt.projectId, issue.id, issue.issueNumber, boardEvents, noteSkip);
+        continue;
+      }
       if (!isMonitorEligibleIssue(issue, allowFeatureTypes)) continue;
       if (await hasSkipAutoStartTag(issue.id)) continue;
       if (shouldDeferForContention(contentionGate, issue.id, issue.issueNumber)) continue;
@@ -331,9 +370,14 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
         noteSkip(inProgressSt.projectId, issue.issueNumber, "cycle_start_cap");
         break;
       }
-      const existingWs = await db.select({ id: workspaces.id }).from(workspaces)
-        .where(sql`${workspaces.issueId} = ${issue.id} AND ${workspaces.status} != 'closed'`).limit(1);
-      if (existingWs.length > 0) continue;
+      const issueWorkspaces = await db.select({ id: workspaces.id, status: workspaces.status, mergedAt: workspaces.mergedAt }).from(workspaces)
+        .where(sql`${workspaces.issueId} = ${issue.id}`);
+      if (issueWorkspaces.some((w) => w.status !== "closed")) continue;
+      const mergedWs = issueWorkspaces.find((w) => w.mergedAt != null);
+      if (mergedWs) {
+        await reconcileStaleMergedIssue(issue.projectId, issue.id, issue.issueNumber, boardEvents, noteSkip);
+        continue;
+      }
       if (!isMonitorEligibleIssue(issue, allowFeatureTypes)) { noteSkip(inProgressSt.projectId, issue.issueNumber, "feature_type_excluded"); continue; }
       if (await hasSkipAutoStartTag(issue.id)) { noteSkip(inProgressSt.projectId, issue.issueNumber, "no_auto_start_tag"); continue; }
       if (shouldDeferForContention(contentionGate, issue.id, issue.issueNumber)) { noteSkip(inProgressSt.projectId, issue.issueNumber, "contention_gate"); continue; }
