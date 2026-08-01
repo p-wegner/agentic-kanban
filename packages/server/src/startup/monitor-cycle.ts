@@ -8,7 +8,7 @@ import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
 import type { createSessionManager } from "../services/session.manager.js";
 import type { MonitorAction } from "./monitor-helpers.js";
 import { NOISE_TRIGGER_TYPES } from "../services/session-filter.js";
-import { commitLeftoverChanges, getCommitCountAhead, getWorkingTreeDiff } from "../services/git.service.js";
+import { commitLeftoverChanges, countBehindCommits, getCommitCountAhead, getWorkingTreeDiff } from "../services/git.service.js";
 import { startManualReview } from "../services/review.service.js";
 import { isCodexUsageLimitStats } from "../services/codex-rate-limit.js";
 import { getPreference } from "../repositories/preferences.repository.js";
@@ -118,6 +118,7 @@ export interface ProcessWorkspaceDeps {
   maxMergesPerCycle?: number;
   stuckBuilderTimeoutMs?: number;
   getCommitCountAhead?: typeof getCommitCountAhead;
+  countBehindCommits?: typeof countBehindCommits;
   getWorkingTreeDiff?: typeof getWorkingTreeDiff;
   commitLeftoverChanges?: typeof commitLeftoverChanges;
   startReview?: typeof startManualReview;
@@ -209,6 +210,24 @@ async function recoverStuckBuilder(
   return true;
 }
 
+/**
+ * #191: an idle, non-`readyForMerge` builder can hold a COMPLETE, committed implementation
+ * whose base branch simply moved out from under it (a sibling ticket merged after this
+ * branch was cut). Left alone it is silently indistinguishable from an idle-empty
+ * workspace — the catch-all relaunch just re-runs an agent that has nothing left to do.
+ * Detects that specific shape: real commits ahead of base (`ahead > 0`) AND base has moved
+ * (`behind > 0`, i.e. base is NOT an ancestor of this worktree's HEAD). Best-effort: any git
+ * failure (missing worktree, non-repo path in tests) is treated as "not stale" so callers
+ * fall through to the existing behavior unchanged.
+ */
+async function hasStaleBaseWithCommits(ws: WorkspaceCandidate, deps: ProcessWorkspaceDeps): Promise<boolean> {
+  if (ws.isDirect || !ws.workingDir || !ws.baseBranch) return false;
+  const ahead = await (deps.getCommitCountAhead ?? getCommitCountAhead)(ws.workingDir, ws.baseBranch).catch(() => null);
+  if (!ahead || ahead <= 0) return false;
+  const behind = await (deps.countBehindCommits ?? countBehindCommits)(ws.workingDir, "HEAD", ws.baseBranch).catch(() => 0);
+  return behind > 0;
+}
+
 async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession | undefined, sessionCount: number, ctx: CycleContext): Promise<void> {
   const { deps, stats, logAction, canStartRelaunch, canStartMerge } = ctx;
   if (isCodexUsageLimitStats(sess?.stats)) {
@@ -243,6 +262,35 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
       conflictMsg: `[monitor] Merge conflict for idle+readyForMerge workspace ${ws.wsId}  triggered fix-and-merge`,
       successMsg: `[monitor] Triggered merge for idle+readyForMerge workspace ${ws.wsId}`,
     }, gateTokenFromWorkspaceEvidence(ws, "review-exit gate (readyForMerge, idle)"));
+    stats.merged++;
+    deps.boardEvents.broadcast(ws.projectId, "board_changed");
+  } else if (await hasStaleBaseWithCommits(ws, deps)) {
+    // #191: finished-but-stuck — real committed work, blocked only by a stale base. Recover it
+    // the same way a human would (update-base then land), rather than falling into the
+    // catch-all relaunch (which just wakes an agent with nothing left to do) or the
+    // stuck-session flag/close path (which would strand the finished work as "closed").
+    if (!deps.autoMergeEnabled || deps.autoMergeDisabledProjectIds?.has(ws.projectId)) {
+      logAction("mark_idle", ws.wsId, ws.issueId, {
+        responseSummary: "Idle workspace has committed work but its base branch has moved (stale base); auto_merge is disabled so it was flagged instead of auto-recovered",
+        verificationResult: "failed",
+      });
+      console.log(`[monitor] Needs attention: idle workspace ${ws.wsId} for issue #${ws.issueNumber ?? "?"} has committed work on a stale base  auto_merge disabled, flagging instead of recovering`);
+      emitButlerSystemEvent({
+        projectId: ws.projectId,
+        kind: "workspace_error",
+        workspaceId: ws.wsId,
+        issueNumber: ws.issueNumber ?? undefined,
+        text: `Idle workspace ${ws.wsId} (issue #${ws.issueNumber ?? "?"}) holds committed work but its base branch has moved. Run update-base then fix-and-merge to land it.`,
+      });
+      deps.boardEvents.broadcast(ws.projectId, "board_changed");
+      return;
+    }
+    if (!canStartMerge(ws)) return;
+    console.log(`[monitor] Idle workspace ${ws.wsId} for issue #${ws.issueNumber ?? "?"} has committed work on a stale base  attempting merge (falls back to fix-and-merge)`);
+    await mergeWorkspaceWithFixFallback(ws, deps.workspaceActions, logAction, {
+      conflictMsg: `[monitor] Stale-base workspace ${ws.wsId} could not merge cleanly  triggered fix-and-merge`,
+      successMsg: `[monitor] Auto-recovered stale-base workspace ${ws.wsId} via merge`,
+    }, RUN_GATE);
     stats.merged++;
     deps.boardEvents.broadcast(ws.projectId, "board_changed");
   } else if (sessionCount >= MAX_SESSIONS) {
