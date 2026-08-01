@@ -143,6 +143,23 @@ export async function updateSessionContainerId(
     .where(eq(sessions.id, sessionId));
 }
 
+/**
+ * Stamp which fleet worker a session runs on (#957: the exact mirror of
+ * `updateSessionContainerId` above, so it belongs to the `sessions`-owning
+ * repository rather than to worker.repository.ts, which may not write this
+ * table directly).
+ */
+export async function updateSessionWorkerId(
+  sessionId: string,
+  workerId: string,
+  database: Database = db,
+): Promise<void> {
+  await database
+    .update(sessions)
+    .set({ workerId })
+    .where(eq(sessions.id, sessionId));
+}
+
 export async function updateSessionStoppedNoStats(
   sessionId: string,
   endedAt: string,

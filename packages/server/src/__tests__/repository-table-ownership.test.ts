@@ -79,7 +79,11 @@ const BASELINE: Record<string, number> = {
   "bisect.repository.ts::sessions-write": 2,
   "broadcast.repository.ts::sessions-write": 2,
   // #172 added updateSessionContainerId's write site (still in the correct owning file).
-  "session-lifecycle.repository.ts::sessions-write": 6,
+  // #957 follow-up: updateSessionWorkerId — its exact mirror — MOVED here out of
+  // worker.repository.ts, which the ratchet correctly flagged for writing `sessions`
+  // directly. Net writes across the codebase are unchanged; this one just landed in the
+  // owning file, so the baseline goes 6 -> 7 while worker.repository.ts returns to zero.
+  "session-lifecycle.repository.ts::sessions-write": 7,
   "workspace-lifecycle-reconcile.repository.ts::sessions-write": 1,
   "workspace-merge.repository.ts::sessions-write": 1,
   // projects writes — registration/dedup + per-project column updates. Reads are
