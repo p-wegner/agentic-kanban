@@ -35,6 +35,24 @@ export async function listWorktrees(
 }
 
 /**
+ * Worktree directory prefixes eat deeply into the Windows MAX_PATH (260 char) budget:
+ * `.worktrees/<full-branch-slug>` runs ~50 chars longer than the main checkout's own
+ * `<repoName>` leaf, which is enough to tip a JVM/compiled-stack build's generated
+ * paths (deep nested class files, backtick test names) over the limit even though the
+ * identical commit builds green in the main checkout (#193). The branch itself keeps
+ * its full descriptive slug (readability, `git branch -a`) — only the ON-DISK leaf is
+ * shortened, and only when an issue number can be recovered from it, since that alone
+ * identifies the work uniquely and is what every other identifier already anchors on.
+ */
+function shortenWorktreeLeaf(safeName: string): string {
+  // Sanitized branch names replace '/' with '_', which is itself a \w character,
+  // so a plain \b before "ak" never matches (e.g. "feature_ak-1-..." has no
+  // word-boundary between '_' and 'a'). Use an explicit non-alnum/start lookbehind.
+  const match = safeName.match(/(?:^|[^a-z0-9])ak-(\d+)(?:[^a-z0-9]|$)/i);
+  return match ? `ak-${match[1]}` : safeName;
+}
+
+/**
  * Create a git worktree for a branch. The worktree is created in a
  * `.worktrees/<branch>` directory sibling to the repo root — or, when
  * `opts.pathNamespace` is given, in `.worktrees/<namespace>/<branch>`.
@@ -97,7 +115,8 @@ export async function createWorktree(
   const worktreesDir = safeNamespace && safeNamespace !== "." && safeNamespace !== ".."
     ? join(dirname(repoPath), ".worktrees", safeNamespace)
     : join(dirname(repoPath), ".worktrees");
-  let worktreePath = join(worktreesDir, safeName);
+  const dirLeaf = shortenWorktreeLeaf(safeName);
+  let worktreePath = join(worktreesDir, dirLeaf);
 
   await mkdir(worktreesDir, { recursive: true });
 
@@ -127,7 +146,7 @@ export async function createWorktree(
     }
     if (!removed) {
       for (let suffix = 2; suffix <= 10; suffix++) {
-        const altPath = join(worktreesDir, `${safeName}-${suffix}`);
+        const altPath = join(worktreesDir, `${dirLeaf}-${suffix}`);
         try {
           await stat(altPath);
           // Alt dir also exists — skip
