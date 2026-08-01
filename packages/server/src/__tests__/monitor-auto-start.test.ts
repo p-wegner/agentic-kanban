@@ -32,6 +32,11 @@ function makeDeps(overrides: Partial<AutoStartDeps> = {}): AutoStartDeps {
     // contention. Inject an open gate so they don't have to model its queries in
     // their ordered db.select mock chains; contention has its own suite.
     buildContentionGate: async () => openFileContentionGate(),
+    // Same reason as the contention gate above: the fleet dispatch check (epic #184)
+    // reads preferences through `db.select`, and these suites model `db.select` as an
+    // ORDERED mockReturnValueOnce chain. Letting the real one run consumes an entry and
+    // shifts every subsequent mock, which silently breaks the launch assertions.
+    canDispatch: async () => ({ available: true }) as const,
     ...overrides,
   };
 }
