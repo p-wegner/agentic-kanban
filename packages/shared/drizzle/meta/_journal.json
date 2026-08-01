@@ -750,6 +750,13 @@
       "when": 1780906864000,
       "tag": "0106_workers",
       "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "6",
+      "when": 1780906865000,
+      "tag": "0107_plugins",
+      "breakpoints": true
     }
   ]
 }
