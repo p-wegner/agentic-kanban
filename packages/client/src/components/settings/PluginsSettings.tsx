@@ -24,6 +24,13 @@ type ScriptRunResult = {
   timedOut: boolean;
 };
 
+type SkillRunResult = {
+  issueId: string;
+  issueNumber: number | null;
+  workspaceId: string;
+  branch: string;
+};
+
 type PluginsSettingsProps = {
   activeProjectId?: string | null;
 };
@@ -39,6 +46,9 @@ export function PluginsSettings({ activeProjectId }: PluginsSettingsProps) {
   // Script runs keyed `${pluginRowId}:${scriptName}`.
   const [runningScript, setRunningScript] = useState<string | null>(null);
   const [scriptResults, setScriptResults] = useState<Record<string, ScriptRunResult>>({});
+  // Skill runs keyed `${pluginRowId}:${skillName}`.
+  const [runningSkill, setRunningSkill] = useState<string | null>(null);
+  const [skillResults, setSkillResults] = useState<Record<string, SkillRunResult>>({});
 
   const refetch = useCallback(async () => {
     try {
@@ -119,12 +129,34 @@ export function PluginsSettings({ activeProjectId }: PluginsSettingsProps) {
     }
   }
 
+  async function handleRunSkill(plugin: PluginListItem, skillName: string) {
+    if (!activeProjectId || runningSkill) return;
+    const key = `${plugin.id}:${skillName}`;
+    setRunningSkill(key);
+    try {
+      const result = await apiPost<SkillRunResult>(
+        `/api/plugins/${plugin.id}/skills/${encodeURIComponent(skillName)}/run`,
+        { projectId: activeProjectId },
+      );
+      setSkillResults((r) => ({ ...r, [key]: result }));
+      showToast(
+        `Launched #${result.issueNumber ?? "?"} on branch ${result.branch}`,
+        "success",
+      );
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Skill run failed", "error");
+    } finally {
+      setRunningSkill(null);
+    }
+  }
+
   return (
     <div className="space-y-4">
       <p className="text-xs text-gray-500 dark:text-gray-400">
         Plugins are git repos (or local directories) carrying a <span className="font-mono">kanban-plugin.json</span> manifest
         that declares agent skills, embeddable iframe views, runnable scripts, and butler prompt fragments.
-        Install once, then enable per project.
+        Install once, then enable per project. Scripts run as one-shot subprocesses; skills need judgment,
+        so "Run" launches a ticket + workspace against them instead.
       </p>
 
       {/* Install form */}
@@ -163,6 +195,7 @@ export function PluginsSettings({ activeProjectId }: PluginsSettingsProps) {
           {plugins.map((plugin) => {
             const scripts = plugin.manifest?.scripts ?? [];
             const views = plugin.manifest?.views ?? [];
+            const skills = (plugin.manifest?.skills ?? []).map((s) => s.dir.split("/").pop() || s.dir);
             return (
               <div key={plugin.id} className="border border-gray-200 dark:border-gray-700 rounded-md p-3 space-y-2">
                 <div className="flex items-start justify-between gap-2">
@@ -187,11 +220,13 @@ export function PluginsSettings({ activeProjectId }: PluginsSettingsProps) {
                     {plugin.manifestError && (
                       <p className="text-xs text-red-600 dark:text-red-400 mt-0.5">Manifest error: {plugin.manifestError}</p>
                     )}
-                    {(views.length > 0 || scripts.length > 0) && (
+                    {(views.length > 0 || scripts.length > 0 || skills.length > 0) && (
                       <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">
-                        {views.length > 0 && `${views.length} view${views.length === 1 ? "" : "s"}`}
-                        {views.length > 0 && scripts.length > 0 && " · "}
-                        {scripts.length > 0 && `${scripts.length} script${scripts.length === 1 ? "" : "s"}`}
+                        {[
+                          views.length > 0 && `${views.length} view${views.length === 1 ? "" : "s"}`,
+                          scripts.length > 0 && `${scripts.length} script${scripts.length === 1 ? "" : "s"}`,
+                          skills.length > 0 && `${skills.length} skill${skills.length === 1 ? "" : "s"}`,
+                        ].filter(Boolean).join(" · ")}
                       </p>
                     )}
                   </div>
@@ -261,6 +296,40 @@ export function PluginsSettings({ activeProjectId }: PluginsSettingsProps) {
                     })}
                     {!activeProjectId && (
                       <p className="text-[11px] text-gray-400 dark:text-gray-500">Open a project to run scripts and toggle per-project enablement.</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Skills — agentic (judgment-requiring) work, launched as a workspace rather than a subprocess */}
+                {skills.length > 0 && (
+                  <div className="border-t border-gray-100 dark:border-gray-800 pt-2 space-y-1.5">
+                    <div className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide">Skills</div>
+                    {skills.map((skillName) => {
+                      const key = `${plugin.id}:${skillName}`;
+                      const result = skillResults[key];
+                      return (
+                        <div key={skillName} className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-mono text-gray-700 dark:text-gray-300">{skillName}</span>
+                            <button
+                              onClick={() => void handleRunSkill(plugin, skillName)}
+                              disabled={!activeProjectId || runningSkill !== null}
+                              title={activeProjectId ? "Create a ticket and launch a workspace against this skill" : "Select a project to run skills"}
+                              className="ml-auto text-xs px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 shrink-0"
+                            >
+                              {runningSkill === key ? "Launching…" : "Run"}
+                            </button>
+                          </div>
+                          {result && (
+                            <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                              Launched issue #{result.issueNumber ?? "?"} on <span className="font-mono">{result.branch}</span>
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {!activeProjectId && (
+                      <p className="text-[11px] text-gray-400 dark:text-gray-500">Open a project to run skills.</p>
                     )}
                   </div>
                 )}

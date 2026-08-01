@@ -39,6 +39,8 @@ import {
   upsertPluginRow,
   type PluginRow,
 } from "../repositories/plugins.repository.js";
+import type { CreateIssueInput, CreateIssueResult } from "./issue.service.js";
+import type { CreateWorkspaceInput, CreateWorkspaceResult } from "./workspace-internals.js";
 
 /**
  * Plugin system core (server side).
@@ -211,8 +213,20 @@ export interface EnableReport {
   warnings: string[];
 }
 
-export function createPluginService(deps: { database: Database }) {
-  const { database } = deps;
+export interface PluginSkillRunResult {
+  issueId: string;
+  issueNumber: number | null;
+  workspaceId: string;
+  branch: string;
+}
+
+export function createPluginService(deps: {
+  database: Database;
+  /** Injected rather than self-HTTP'd (see server/CLAUDE.md "Self-HTTP calls are an anti-pattern"). */
+  createIssue?: (input: CreateIssueInput) => Promise<CreateIssueResult>;
+  createWorkspace?: (input: CreateWorkspaceInput) => Promise<CreateWorkspaceResult>;
+}) {
+  const { database, createIssue, createWorkspace } = deps;
 
   async function requirePlugin(id: string): Promise<PluginRow & { manifest: PluginManifest }> {
     const row = await getPluginRowById(id, database);
@@ -624,6 +638,50 @@ export function createPluginService(deps: { database: Database }) {
     });
   }
 
+  /**
+   * Launch an agentic (judgment-requiring) plugin skill against a project — the
+   * counterpart to `runScript` for the manifest's `skills` entries, which cannot be
+   * a deterministic subprocess (e.g. `prd-consolidation` reads/translates analysis
+   * docs, it doesn't just shell out). Creates a ticket carrying the skill's brief,
+   * then launches a workspace against it exactly like the board's own "New
+   * Workspace" flow — so it inherits the project's Strategy Bullseye provider
+   * selection, review, and merge gates, same as any other ticket.
+   */
+  async function runSkill(
+    pluginRowId: string,
+    skillName: string,
+    projectId: string,
+    opts?: { title?: string; description?: string },
+  ): Promise<PluginSkillRunResult> {
+    if (!createIssue || !createWorkspace) {
+      throw new PluginError("Skill execution is not available on this route", "BAD_REQUEST");
+    }
+    const plugin = await requirePlugin(pluginRowId);
+    await requireProject(projectId);
+    const known = (plugin.manifest.skills ?? []).some((s) => s.dir.split("/").pop() === skillName);
+    if (!known) throw new PluginError(`Skill "${skillName}" not found in plugin manifest`, "NOT_FOUND");
+
+    const title = opts?.title?.trim() || `${plugin.name}: run ${skillName}`;
+    const description = opts?.description?.trim()
+      || `Run the \`${skillName}\` skill from the "${plugin.name}" plugin against this project.`;
+
+    const issue = await createIssue({
+      projectId,
+      title,
+      description,
+      issueType: "task",
+      priority: "medium",
+      skipAutoReview: true,
+    });
+    const workspace = await createWorkspace({ issueId: issue.id, skillName });
+    return {
+      issueId: issue.id,
+      issueNumber: issue.issueNumber,
+      workspaceId: workspace.id,
+      branch: workspace.branch,
+    };
+  }
+
   return {
     installPlugin,
     listPlugins,
@@ -637,6 +695,7 @@ export function createPluginService(deps: { database: Database }) {
     stopView,
     getViewStatus,
     runScript,
+    runSkill,
   };
 }
 
@@ -644,11 +703,23 @@ export type PluginService = ReturnType<typeof createPluginService>;
 
 const singletons = new Map<Database, PluginService>();
 
-/** Memoized per-database singleton, like sibling services' lazy accessors. */
-export function getPluginService(database: Database): PluginService {
+/**
+ * Memoized per-database singleton, like sibling services' lazy accessors.
+ * `skillDeps` (createIssue/createWorkspace) only take effect on the FIRST call
+ * that constructs the singleton for a given `database` — later calls reuse the
+ * already-built instance. Routes that need `runSkill` must pass them; routes
+ * that don't (e.g. the plugin-views host) can omit them.
+ */
+export function getPluginService(
+  database: Database,
+  skillDeps?: {
+    createIssue?: (input: CreateIssueInput) => Promise<CreateIssueResult>;
+    createWorkspace?: (input: CreateWorkspaceInput) => Promise<CreateWorkspaceResult>;
+  },
+): PluginService {
   let service = singletons.get(database);
   if (!service) {
-    service = createPluginService({ database });
+    service = createPluginService({ database, ...skillDeps });
     singletons.set(database, service);
   }
   return service;

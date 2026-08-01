@@ -106,7 +106,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/showdowns", createShowdownsRoute(database, getSessionManager, options));
   routes.route("/metrics", createMetricsRoute());
   routes.route("/workers", createWorkersRoute(database));
-  routes.route("/plugins", createPluginsRoute(database));
+  routes.route("/plugins", createPluginsRoute(database, { ...options, getSessionManager }));
   routes.route("/projects", createPluginProjectViewsRoute(database));
   routes.route("/health", createHealthRoute());
   if (options?.boardEvents) {
