@@ -66,9 +66,16 @@ describe("createWorktree collision safety (repos sharing a parent directory)", (
   });
 
   it("keeps the single-repo path scheme unchanged: <parent>/.worktrees/<sanitized-branch>", async () => {
-    const wt = await createWorktree(appRepo, "feature/ak-1-solo", "main");
+    const wt = await createWorktree(appRepo, "feature/solo", "main");
 
-    expect(resolve(wt)).toBe(resolve(join(parent, ".worktrees", "feature_ak-1-solo")));
+    expect(resolve(wt)).toBe(resolve(join(parent, ".worktrees", "feature_solo")));
+    expect(existsSync(join(wt, "app.txt"))).toBe(true);
+  }, 30000);
+
+  it("shortens the on-disk leaf to just ak-<N> for a branch carrying an issue number (#193)", async () => {
+    const wt = await createWorktree(appRepo, "feature/ak-1-a-very-long-descriptive-slug-goes-here", "main");
+
+    expect(resolve(wt)).toBe(resolve(join(parent, ".worktrees", "ak-1")));
     expect(existsSync(join(wt, "app.txt"))).toBe(true);
   }, 30000);
 
