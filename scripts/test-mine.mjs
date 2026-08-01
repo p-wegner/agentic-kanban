@@ -32,6 +32,12 @@
 //       auto-review-pref.test.ts (#173) — every one of these is green in isolation; under full
 //       parallelism a single file can hit CPU-contention timeouts of 15-17min, flaking the
 //       merge gate red and (via #172) leaking a vitest worker fleet on each retry.
+//     - worker-git-transport-e2e.test.ts — same #173 shape, arrived with the worker-fleet
+//       epic (#188) and was never added here. It stands up TWO http listeners (board +
+//       git-http) and does real `git clone`/`push` over the wire, so it is the heaviest
+//       file in the package. Measured: 2/2 green in isolation on three consecutive runs
+//       (~24s), but it failed the merge gate three times in a row under full-suite load
+//       with `repo provisioning failed: git clone ...`. Still runs in the full `pnpm test`.
 //     - compose-lifecycle-real-docker.test.ts (#164) — opt-in real-docker smoke test;
 //       shells out to a real daemon and pulls/builds real images, so it's excluded from
 //       the fast loop even on a machine with docker running. Run it via `pnpm test:docker`
@@ -80,6 +86,7 @@ const PACKAGES = [
       "**/merge-service-edge-cases.test.ts",
       "**/preferences.test.ts",
       "**/auto-review-pref.test.ts",
+      "**/worker-git-transport-e2e.test.ts",
       "**/compose-lifecycle-real-docker.test.ts",
     ],
   },
