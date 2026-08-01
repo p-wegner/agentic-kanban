@@ -12,8 +12,7 @@ import type { AgentExecutionService } from "./agent-dispatch.service.js";
 import { createWorkerConnectionManager, type WorkerConnectionManager } from "./worker-connection.service.js";
 import { getWorkerRegistry, type WorkerRegistry } from "./worker-registry.service.js";
 import type { ProviderName } from "./agent-provider.js";
-import { projects as projectsTable } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
+import { getProjectRepoFields } from "../repositories/worker-fleet.repository.js";
 // Canonical home is the dependency-free protocol module, so the worker CLI can
 // name the label without importing this service's graph. Re-exported here for
 // existing importers.
@@ -200,12 +199,7 @@ export async function resolveWorkerPlacement(params: {
       console.warn(`[worker-fleet] remote worker ${workerId} needs a branch for git transport; launching on host`);
       return { kind: "host" };
     }
-    const rows = await database
-      .select({ repoPath: projectsTable.repoPath, defaultBranch: projectsTable.defaultBranch, setupScript: projectsTable.setupScript })
-      .from(projectsTable)
-      .where(eq(projectsTable.id, projectId))
-      .limit(1);
-    const project = rows[0];
+    const project = await getProjectRepoFields(projectId, database);
     if (!project?.repoPath) {
       console.warn(`[worker-fleet] project ${projectId} has no repoPath; launching on host`);
       return { kind: "host" };
