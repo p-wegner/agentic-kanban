@@ -24,11 +24,15 @@ import { createWebhookSender } from "../services/outbound-webhook.service.js";
  *   POST   /api/plugins/:id/skills/:name/run    { projectId, title?, description? } →
  *            { issueId, issueNumber, workspaceId, branch } (creates a ticket + launches a
  *            workspace against the skill — the agentic counterpart to scripts/:name/run)
+ *   GET    /api/plugins/:id/loops?projectId=    per-loop ticket counts (planner NOT run)
+ *   POST   /api/plugins/:id/loops/:name/advance { projectId } → one advance of a converging
+ *            loop: plan, then a ticket per outstanding unit for the board's monitor to start
  *
- * The client view host's flat listing lives under the `/projects` prefix
+ * The client's flat per-project listings live under the `/projects` prefix
  * (convention: per-project reads hang off /projects/:projectId/...):
  *
- *   GET    /api/projects/:projectId/plugin-views
+ *   GET    /api/projects/:projectId/plugin-views     (view host — views only)
+ *   GET    /api/projects/:projectId/plugin-surface   (Plugins panel — views+loops+scripts+skills)
  */
 export function createPluginsRoute(
   database: Database,
@@ -99,6 +103,17 @@ export function createPluginsRoute(
     return c.json(await service.stopView(c.req.param("id"), c.req.param("viewId"), projectId));
   });
 
+  router.get("/:id/loops", async (c) => {
+    const projectId = c.req.query("projectId")?.trim();
+    if (!projectId) throw new PluginError("projectId query param is required", "BAD_REQUEST");
+    return c.json(await service.listLoops(c.req.param("id"), projectId));
+  });
+
+  router.post("/:id/loops/:name/advance", async (c) => {
+    const projectId = await requireProjectId(c);
+    return c.json(await service.advanceLoop(c.req.param("id"), c.req.param("name"), projectId));
+  });
+
   router.post("/:id/scripts/:name/run", async (c) => {
     const projectId = await requireProjectId(c);
     return c.json(await service.runScript(c.req.param("id"), c.req.param("name"), projectId));
@@ -118,13 +133,17 @@ export function createPluginsRoute(
   return router;
 }
 
-/** Mounted at `/projects` — the flat enabled-views listing for the client view host. */
+/** Mounted at `/projects` — the flat enabled-plugin listings the client panels read. */
 export function createPluginProjectViewsRoute(database: Database) {
   const router = createRouter();
   const service = getPluginService(database);
 
   router.get("/:projectId/plugin-views", async (c) => {
     return c.json(await service.listProjectViews(c.req.param("projectId")));
+  });
+
+  router.get("/:projectId/plugin-surface", async (c) => {
+    return c.json(await service.listProjectSurface(c.req.param("projectId")));
   });
 
   return router;

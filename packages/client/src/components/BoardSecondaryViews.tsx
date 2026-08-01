@@ -400,7 +400,7 @@ export function BoardSecondaryViews({
         </BoardErrorBoundary>
       )}
       {viewMode === "plugin-views" && activeProjectId && (
-        <BoardErrorBoundary columnName="Plugin Views">
+        <BoardErrorBoundary columnName="Plugins">
           <PluginViewsPanel projectId={activeProjectId} />
         </BoardErrorBoundary>
       )}
