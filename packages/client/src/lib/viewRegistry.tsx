@@ -52,7 +52,8 @@ export type ViewMode =
   | "agent-throughput"
   | "calendar"
   | "burndown"
-  | "garden";
+  | "garden"
+  | "plugin-views";
 
 export interface ViewDescriptor {
   /** Stable view id — matches BoardPage's `viewMode` state. */
@@ -339,6 +340,12 @@ const ICON = {
   drive: (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+    </svg>
+  ),
+  "plugin-views": (
+    // Puzzle piece — plugin-provided embedded views.
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M14 7h3a1 1 0 011 1v3h-1.5a1.5 1.5 0 000 3H18v3a1 1 0 01-1 1h-3v-1.5a1.5 1.5 0 00-3 0V18H8a1 1 0 01-1-1v-3H5.5a1.5 1.5 0 010-3H7V8a1 1 0 011-1h3V5.5a1.5 1.5 0 013 0V7z" />
     </svg>
   ),
 } as const;
@@ -783,6 +790,17 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteIcon: "BD",
     paletteDescription: "Burndown chart of remaining open issues per day with an ideal target trend line",
     activeClass: "bg-emerald-600 text-white",
+    group: "secondary",
+  },
+  {
+    id: "plugin-views",
+    toolbarLabel: "Plugins",
+    label: "Plugin Views",
+    tooltip: "Plugin Views — embedded views served by the project's enabled plugins",
+    icon: ICON["plugin-views"],
+    paletteIcon: "🧩",
+    paletteDescription: "Embed the views declared by this project's enabled plugins (start, refresh, stop their servers)",
+    activeClass: "bg-violet-600 text-white",
     group: "secondary",
   },
 ];

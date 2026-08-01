@@ -44,3 +44,4 @@ export const AgentThroughputLeaderboard = lazy(() => import("./AgentThroughputLe
 export const BurndownChart = lazy(() => import("./BurndownChart.js").then((m) => ({ default: m.BurndownChart })));
 export const DriveDashboard = lazy(() => import("./DriveDashboard.js").then((m) => ({ default: m.DriveDashboard })));
 export const GardenView = lazy(() => import("./GardenView.js").then((m) => ({ default: m.GardenView })));
+export const PluginViewsPanel = lazy(() => import("./PluginViewsPanel.js").then((m) => ({ default: m.PluginViewsPanel })));
