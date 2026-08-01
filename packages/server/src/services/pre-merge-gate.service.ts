@@ -1,5 +1,6 @@
 import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { runSmokeCheck } from "@agentic-kanban/shared/lib/smoke-check";
+import { gradleUserHomeForWorktree } from "@agentic-kanban/shared/lib/gradle-env";
 import type { Database } from "../db/index.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
@@ -110,9 +111,14 @@ export async function runPreMergeGate(
   if (verifyConfigured && workspace.workingDir) {
     const workingDir = workspace.workingDir;
     const verifyTimeoutMs = await resolveVerifyTimeoutMs(projectId, database);
+    // #194: pin this worktree's backend-spawned gradle to the SAME per-worktree
+    // GRADLE_USER_HOME the builder itself used, so the verify gate's daemon and the
+    // builder's own daemon cooperate instead of landing in the shared default home
+    // where a different worktree's build can kill them out from under each other.
+    const gradleEnv = { GRADLE_USER_HOME: gradleUserHomeForWorktree(workingDir) };
     const runVerify = () =>
       runUnderBuildGate(() =>
-        runSetupScript(workingDir, verifyScript!, { timeoutMs: verifyTimeoutMs }).catch((e) => ({
+        runSetupScript(workingDir, verifyScript!, { timeoutMs: verifyTimeoutMs, env: gradleEnv }).catch((e) => ({
           exitCode: 1,
           stdout: "",
           stderr: String(e),
@@ -145,7 +151,7 @@ export async function runPreMergeGate(
         if (installCommand && installCommand.trim()) {
           console.warn(`[pre-merge-gate] verify_script failed with a missing-deps signature for workspace ${workspace.id} — retrying once after running the project's install command`);
           await runUnderBuildGate(() =>
-            runSetupScript(workingDir, installCommand, { timeoutMs: DEFAULT_SETUP_SCRIPT_TIMEOUT_MS }).catch((e) => ({
+            runSetupScript(workingDir, installCommand, { timeoutMs: DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, env: gradleEnv }).catch((e) => ({
               exitCode: 1,
               stdout: "",
               stderr: String(e),

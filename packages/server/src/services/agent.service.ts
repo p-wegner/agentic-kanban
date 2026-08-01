@@ -471,6 +471,7 @@ export function launch(
     serverPid: String(process.pid),
     protectedPidsEnv: process.env.KANBAN_PROTECTED_PIDS,
     sessionId,
+    worktreePath,
     extraEnv,
   });
   const fullEnv: Record<string, string> = {};

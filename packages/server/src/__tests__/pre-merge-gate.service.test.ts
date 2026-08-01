@@ -82,7 +82,18 @@ describe("runPreMergeGate (#821) — shared verify+smoke gate the monitor's auto
     await setPreference("verify_timeout_ms_p", "600000", db);
     runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "", timedOut: false });
     await runPreMergeGate({ id: "ws", workingDir: "/tmp/wt" }, "p", db);
-    expect(runSetupScript).toHaveBeenCalledWith("/tmp/wt", ".\\gradlew.bat test", { timeoutMs: 600000 });
+    expect(runSetupScript).toHaveBeenCalledWith("/tmp/wt", ".\\gradlew.bat test", { timeoutMs: 600000, env: expect.objectContaining({ GRADLE_USER_HOME: expect.any(String) }) });
+  });
+
+  // #194: the verify gate's gradle must land in the SAME per-worktree home the builder's
+  // own gradle used, so they cooperate on one daemon instead of a shared global default.
+  it("#194: verify_script runs with a GRADLE_USER_HOME derived from the workspace's worktree", async () => {
+    await setPreference(verifyScriptPrefKey("p"), ".\\gradlew.bat test", db);
+    runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "" });
+    await runPreMergeGate({ id: "ws", workingDir: "/tmp/wt" }, "p", db);
+    const call = runSetupScript.mock.calls[0];
+    expect(call[2].env.GRADLE_USER_HOME).toContain("kanban-gradle-homes");
+    expect(call[2].env.GRADLE_USER_HOME).toContain("wt");
   });
 
   it("fail-closed: verify_script configured but NO worktree → fails, doesn't approve unverifiable work", async () => {
