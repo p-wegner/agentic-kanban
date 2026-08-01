@@ -139,7 +139,12 @@ function readManifestFromDir(dir: string): { manifest: PluginManifest; raw: stri
     throw new PluginError(`No ${PLUGIN_MANIFEST_FILENAME} found at ${dir}`, "BAD_REQUEST");
   }
   const raw = readFileSync(manifestPath, "utf8");
-  return { manifest: parsePluginManifest(raw), raw };
+  try {
+    return { manifest: parsePluginManifest(raw), raw };
+  } catch (err) {
+    // Re-tag as a domain error so the route layer answers 400, not 500.
+    throw new PluginError(err instanceof Error ? err.message : String(err), "BAD_REQUEST");
+  }
 }
 
 /** Resolve a manifest-relative path inside `root`, refusing escapes (defense in depth). */

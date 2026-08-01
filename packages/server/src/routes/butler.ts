@@ -20,6 +20,7 @@ import {
 import { preferenceService } from "../services/preference.service.js";
 import { scanLocalSkills } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { ensureBoardGuideFile } from "../butler/board-guide.js";
+import { getPluginService } from "../services/plugin.service.js";
 import {
   ensureButlerSession,
   sendButlerTurn,
@@ -247,12 +248,22 @@ export function createButlerRoute(
     const appPort = process.env.KANBAN_CLIENT_PORT || serverPort;
     const appBaseUrl = `http://localhost:${appPort}`;
     const boardGuidePath = ensureBoardGuideFile();
-    return (prompt ?? DEFAULT_BUTLER_PROMPT)
+    const resolved = (prompt ?? DEFAULT_BUTLER_PROMPT)
       .replace(/\{\{projectName}}/g, projectName)
       .replace(/\{\{repoPath}}/g, repoPath)
       .replace(/\{\{serverPort}}/g, serverPort)
       .replace(/\{\{appBaseUrl}}/g, appBaseUrl)
       .replace(/\{\{boardGuidePath}}/g, boardGuidePath);
+    // Append the butler prompt fragments of the plugins enabled for this project,
+    // each as a clearly delimited "## Plugin: <name>" section. Best-effort: a
+    // broken plugin must never keep the butler from starting.
+    try {
+      const fragments = await getPluginService(database).getButlerFragments(projectId);
+      if (fragments.length > 0) return `${resolved}\n\n${fragments.join("\n\n")}`;
+    } catch (err) {
+      console.warn("[butler] plugin fragment resolution failed (ignored):", err instanceof Error ? err.message : err);
+    }
+    return resolved;
   }
 
   /** Resolve the Butler's backend/profile.
