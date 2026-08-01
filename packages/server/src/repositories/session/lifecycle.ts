@@ -11,6 +11,20 @@ export async function clearSessionProviderSessionId(
   await database.update(sessions).set({ providerSessionId: null }).where(eq(sessions.id, sessionId));
 }
 
+/**
+ * Stamp which fleet worker a session runs on (#957). Lives here — the `sessions`
+ * lifecycle module behind the session.repository facade — rather than in
+ * worker.repository.ts, which the table-ownership ratchet correctly flagged for
+ * writing `sessions` directly.
+ */
+export async function updateSessionWorkerId(
+  sessionId: string,
+  workerId: string,
+  database: Database = db,
+): Promise<void> {
+  await database.update(sessions).set({ workerId }).where(eq(sessions.id, sessionId));
+}
+
 export async function getSessionWorkspaceId(
   sessionId: string,
   database: Database = db,

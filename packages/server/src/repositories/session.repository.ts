@@ -18,6 +18,7 @@
 // --- Session lifecycle + identity reads (sessions table) ---
 export {
   clearSessionProviderSessionId,
+  updateSessionWorkerId,
   getSessionWorkspaceId,
   findRunningSession,
   findResumableSession,
