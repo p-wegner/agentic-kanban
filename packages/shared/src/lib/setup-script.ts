@@ -4,7 +4,17 @@ export interface SetupScriptResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+  /**
+   * True when the process was killed for exceeding its timeout budget rather than
+   * exiting on its own. Callers MUST check this before treating a non-zero exit as a
+   * verdict (#192) — a timeout means "didn't finish in time" (cache-temperature-
+   * dependent, retryable), not "the build/tests are broken".
+   */
+  timedOut?: boolean;
 }
+
+/** Fallback timeout when a caller doesn't pass `timeoutMs` (#192 — was a non-configurable constant). */
+export const DEFAULT_SETUP_SCRIPT_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
  * The container a setup script must run inside, when the workspace's builder is
@@ -48,6 +58,13 @@ export interface RunSetupScriptOptions {
    * native module or platform-specific binary.
    */
   container?: SetupScriptContainer;
+  /**
+   * Wall-clock budget in ms before the process is killed. Defaults to
+   * {@link DEFAULT_SETUP_SCRIPT_TIMEOUT_MS} (#192 — was hardcoded to exactly 5 minutes with
+   * no override, which became a hard ceiling on project size: any compiled-stack build that
+   * exceeds it from a cold cache gets killed and misreported as a failure).
+   */
+  timeoutMs?: number;
 }
 
 /**
@@ -114,14 +131,18 @@ export function runSetupScript(
     proc.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
     proc.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
 
+    const timeoutMs = options.timeoutMs ?? DEFAULT_SETUP_SCRIPT_TIMEOUT_MS;
     const timeout = setTimeout(() => {
       proc.kill();
-      reject(new Error("Setup script timed out after 5 minutes"));
-    }, 5 * 60 * 1000);
+      // Resolve (never reject) on timeout — a kill is NOT the same verdict as a
+      // script that ran to completion and failed (#192). `timedOut: true` lets
+      // callers report "didn't finish in time" instead of "failed (exit 1)".
+      resolve({ exitCode: 124, stdout, stderr, timedOut: true });
+    }, timeoutMs);
 
     proc.on("exit", (code: number | null) => {
       clearTimeout(timeout);
-      resolve({ exitCode: code ?? 1, stdout, stderr });
+      resolve({ exitCode: code ?? 1, stdout, stderr, timedOut: false });
     });
 
     proc.on("error", (err: Error) => {

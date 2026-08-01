@@ -53,6 +53,10 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   "worker_dispatch",
   "worker_labels",
   "worker_dispatch_strict",
+  // Pre-merge verify-gate timeout override (#192): the runner's wall-clock budget was
+  // a hardcoded 5 minutes with no per-project knob, which becomes a hard ceiling as a
+  // compiled-stack project's clean build grows past it.
+  "verify_timeout_ms",
 ] as const;
 
 /**

@@ -1,10 +1,35 @@
-import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
+import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { runSmokeCheck } from "@agentic-kanban/shared/lib/smoke-check";
 import type { Database } from "../db/index.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
 import { buildSmokeCheck, getStackProfile, verifyScriptPrefKey } from "./stack-profile.service.js";
 import { runUnderBuildGate } from "./jvm-build-gate.js";
+
+/**
+ * Default verify-gate timeout (#192). The verify gate runs a full build+test suite in a
+ * fresh worktree (cold daemon/cache), a materially heavier job than the setup/install
+ * script `DEFAULT_SETUP_SCRIPT_TIMEOUT_MS` budgets — so it gets its own, larger default
+ * budget rather than sharing the 5-minute setup-script constant. Still overridable per
+ * project via `verify_timeout_ms_<projectId>`.
+ */
+export const DEFAULT_VERIFY_TIMEOUT_MS = 20 * 60 * 1000;
+
+/** Preference key for a per-project override of the verify-gate timeout (ms). */
+export function verifyTimeoutPrefKey(projectId: string): string {
+  return `verify_timeout_ms_${projectId}`;
+}
+
+/** Bounds a parsed timeout override to something sane: at least 30s, at most 3 hours. */
+const MIN_TIMEOUT_MS = 30 * 1000;
+const MAX_TIMEOUT_MS = 3 * 60 * 60 * 1000;
+
+async function resolveVerifyTimeoutMs(projectId: string, database: Database): Promise<number> {
+  const raw = await getPreference(verifyTimeoutPrefKey(projectId), database).catch(() => null);
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  if (Number.isFinite(parsed) && parsed >= MIN_TIMEOUT_MS && parsed <= MAX_TIMEOUT_MS) return parsed;
+  return DEFAULT_VERIFY_TIMEOUT_MS;
+}
 
 /**
  * Failure-message signature of a verify_script that couldn't even resolve its own
@@ -37,6 +62,13 @@ export interface PreMergeGateResult {
   stage: "verify" | "smoke" | "none";
   /** Human-readable outcome, suitable for a board comment / log line. */
   message: string;
+  /**
+   * True when the gate's verdict came from a wall-clock kill, not a completed run
+   * (#192). A timed-out verify_script is inconclusive/retryable, NOT proof the code is
+   * broken — callers should avoid treating it the same as a genuine red gate (e.g. when
+   * deciding whether to surface a "fix the failing build" nudge to an autonomous monitor).
+   */
+  timedOut?: boolean;
 }
 
 /**
@@ -77,12 +109,31 @@ export async function runPreMergeGate(
   }
   if (verifyConfigured && workspace.workingDir) {
     const workingDir = workspace.workingDir;
+    const verifyTimeoutMs = await resolveVerifyTimeoutMs(projectId, database);
     const runVerify = () =>
       runUnderBuildGate(() =>
-        runSetupScript(workingDir, verifyScript!).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e) })),
+        runSetupScript(workingDir, verifyScript!, { timeoutMs: verifyTimeoutMs }).catch((e) => ({
+          exitCode: 1,
+          stdout: "",
+          stderr: String(e),
+          timedOut: false,
+        })),
       );
     let result = await runVerify();
     if (result.exitCode !== 0) {
+      // A wall-clock kill is NOT a build/test failure (#192) — the same commit can be killed
+      // now and pass minutes later purely because the build cache warmed up in the meantime.
+      // Report it as inconclusive/retryable instead of a red gate, and skip the missing-deps
+      // auto-retry below (a timeout carries no signal about missing dependencies).
+      if (result.timedOut) {
+        return {
+          passed: false,
+          skipped: false,
+          stage: "verify",
+          timedOut: true,
+          message: `verify_script timed out after ${verifyTimeoutMs}ms — inconclusive (not a build/test failure); merge withheld pending a retry. Increase verify_timeout_ms_${projectId} if this stack's clean build genuinely needs longer.`,
+        };
+      }
       // #169: a failure that LOOKS like missing dependencies (rather than a real test/build
       // regression) is worth one automatic install+retry before withholding the merge — this
       // is exactly the failure mode a silently-failed worktree setup script produces hours
@@ -94,13 +145,27 @@ export async function runPreMergeGate(
         if (installCommand && installCommand.trim()) {
           console.warn(`[pre-merge-gate] verify_script failed with a missing-deps signature for workspace ${workspace.id} — retrying once after running the project's install command`);
           await runUnderBuildGate(() =>
-            runSetupScript(workingDir, installCommand).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e) })),
+            runSetupScript(workingDir, installCommand, { timeoutMs: DEFAULT_SETUP_SCRIPT_TIMEOUT_MS }).catch((e) => ({
+              exitCode: 1,
+              stdout: "",
+              stderr: String(e),
+              timedOut: false,
+            })),
           );
           retried = true;
           result = await runVerify();
         }
       }
       if (result.exitCode !== 0) {
+        if (result.timedOut) {
+          return {
+            passed: false,
+            skipped: false,
+            stage: "verify",
+            timedOut: true,
+            message: `verify_script timed out after ${verifyTimeoutMs}ms${retried ? " (after an auto-install retry)" : ""} — inconclusive (not a build/test failure); merge withheld pending a retry. Increase verify_timeout_ms_${projectId} if this stack's clean build genuinely needs longer.`,
+          };
+        }
         const suffix = retried ? " (retried once after an auto-install; still failing)" : "";
         return {
           passed: false,
