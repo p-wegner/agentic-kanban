@@ -15,6 +15,7 @@ import { createMonitorWorkspaceActions } from "./monitor-workspace-actions.js";
 import { buildMonitorNudgePrompt } from "./review-helpers.js";
 import { snapshotAndCleanStaleDevProcesses, type BoardMonitorResourceSnapshot } from "../services/stale-dev-processes.js";
 import { resolveStartPolicy } from "../services/start-policy.service.js";
+import { advanceDuePluginLoops } from "../services/plugin-loop-monitor.js";
 import { scanDirtyMainCheckouts, type DirtyMainCheckoutWarning } from "../services/dirty-main-checkout.js";
 import { scanAutodriveStallWarnings, buildAutoStartSkipWarnings, type AutodriveStallWarning } from "../services/autodrive-stall-warning.service.js";
 import { resolveMergeStrategy } from "./merge-strategy.js";
@@ -321,6 +322,12 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
         }
       }
       await runBacklogEmptyStrategy(prefMap, { serverPort, boardEvents, allowProject: allowBacklogRefill, logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
+      // Board-owned plugin loops (manifest `loops`): plan the next round of a
+      // converging analysis loop once the previous round's tickets are all
+      // terminal, so the tickets it creates are picked up by the auto-start pass
+      // above on the NEXT cycle — same WIP limit, same provider selection, same
+      // auth-rotation-on-quota as any other ticket.
+      await advanceDuePluginLoops(db, { allowProject: shouldAutoStartProject });
     } catch (err) {
       console.warn("[monitor] Cycle error:", err);
     } finally {

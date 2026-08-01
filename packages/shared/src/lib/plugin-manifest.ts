@@ -18,6 +18,9 @@
  *                          "env": { "COVERAGE_ROOT": "{{repoPath}}" } } }],
  *   "scripts": [{ "name": "coverage", "command": "npm run coverage", "cwd": "plugin",
  *                 "env": { "COVERAGE_ROOT": "{{repoPath}}" } }],
+ *   "loops": [{ "name": "requirement-extraction", "skill": "requirement-extraction",
+ *               "plan": { "command": "node tools/loop-plan.mjs --json", "cwd": "plugin",
+ *                         "env": { "COVERAGE_ROOT": "{{repoPath}}" } } }],
  *   "butler": { "promptFragment": "butler-fragment.md" },
  *   "scaffold": { "profileTemplate": "profile-template.md",
  *                 "targetPath": "docs/analysis/_project-profile.md" }
@@ -31,14 +34,21 @@ export const PLUGIN_MANIFEST_FILENAME = "kanban-plugin.json";
 /** Valid plugin slug: lowercase alphanumerics and dashes. */
 export const PLUGIN_ID_PATTERN = /^[a-z0-9-]+$/;
 
+/** Where a manifest command runs: the plugin's own checkout or the project repo. */
+export type PluginCwd = "plugin" | "repo";
+
 export interface PluginSkillDef {
   /** Directory inside the plugin repo containing a SKILL.md (e.g. ".claude/skills/x"). */
   dir: string;
+  /** One-line "what this skill does", surfaced next to its Run button. */
+  description?: string;
 }
 
 export interface PluginViewServeDef {
-  /** Shell command that starts the view's HTTP server, run with cwd = plugin dir. */
+  /** Shell command that starts the view's HTTP server. */
   command: string;
+  /** Where the command runs. Default "plugin" — a view server ships with the plugin. */
+  cwd?: PluginCwd;
   /** Env var name the server reads its port from (e.g. "PORT"). */
   portEnv?: string;
   /** Extra env vars; values support {{repoPath}}/{{projectName}}/{{pluginPath}}/{{port}}. */
@@ -50,6 +60,7 @@ export interface PluginViewDef {
   label: string;
   /** Only "iframe" is supported in this slice. */
   kind: "iframe";
+  description?: string;
   serve: PluginViewServeDef;
 }
 
@@ -57,20 +68,93 @@ export interface PluginScriptDef {
   name: string;
   /** Shell command. */
   command: string;
+  /** Human-facing name for the UI; falls back to `name`. */
+  label?: string;
+  description?: string;
   /** Where the command runs: the plugin's own checkout or the project repo. Default "repo". */
-  cwd?: "plugin" | "repo";
+  cwd?: PluginCwd;
   /** Extra env vars; values support the same placeholders as view env. */
   env?: Record<string, string>;
 }
+
+/**
+ * A converging, board-OWNED analysis loop.
+ *
+ * The plugin contributes only judgment-free state: `plan` is a deterministic
+ * command that prints the work units still outstanding (JSON). The BOARD owns
+ * everything else — it turns each unit into a ticket carrying the loop's skill,
+ * and its own monitor starts them within the project's WIP limit, under the
+ * Strategy Bullseye's provider selection and the auth-rotation ring (so a
+ * quota-exhausted profile rotates mid-loop), through the normal review/merge
+ * gates. An empty `plan` output means converged and the loop stops.
+ *
+ * This is deliberately NOT a plugin-side agent runner: work that spawns agents
+ * belongs on the board, where it is visible, governed, and resumable.
+ */
+export interface PluginLoopDef {
+  name: string;
+  /** Human-facing name for the UI; falls back to `name`. */
+  label?: string;
+  description?: string;
+  /** Skill (a `skills[].dir` basename) each generated ticket is launched with. */
+  skill: string;
+  /** Deterministic command printing the outstanding work units as JSON. */
+  plan: PluginLoopPlanDef;
+  /**
+   * Safety stop: refuse to create more than this many tickets for one advance.
+   * Defaults to `DEFAULT_LOOP_MAX_UNITS_PER_ADVANCE`.
+   */
+  maxUnitsPerAdvance?: number;
+}
+
+export interface PluginLoopPlanDef {
+  /** Shell command whose stdout is the plan JSON (see `parsePluginLoopPlan`). */
+  command: string;
+  /** Where the command runs. Default "plugin" — a planner ships with the plugin. */
+  cwd?: PluginCwd;
+  /** Extra env vars; values support the same placeholders as script env. */
+  env?: Record<string, string>;
+}
+
+/** One outstanding piece of loop work, as printed by a loop's `plan` command. */
+export interface PluginLoopUnit {
+  /**
+   * Stable identity of the unit WITHIN the loop (e.g. "billing:round-3"). The
+   * board derives the ticket's dedupe key from it, so a re-plan that still names
+   * the same unit must reuse the same id or the loop will duplicate tickets.
+   */
+  id: string;
+  title: string;
+  /** The ticket body — the brief the skill runs against. */
+  description?: string;
+}
+
+export interface PluginLoopPlan {
+  units: PluginLoopUnit[];
+  /**
+   * The planner's own convergence verdict. Optional: an empty `units` list
+   * already means converged, but a planner may report it explicitly (and may
+   * report `converged: false` with no units to mean "blocked, not done").
+   */
+  converged?: boolean;
+  /** Free-text note surfaced in the UI (e.g. "3/19 modules converged"). */
+  note?: string;
+}
+
+/** Cap on tickets one loop advance may create when the loop declares none. */
+export const DEFAULT_LOOP_MAX_UNITS_PER_ADVANCE = 10;
 
 export interface PluginManifest {
   /** Unique slug ([a-z0-9-]+); doubles as the install directory name and pref-key segment. */
   id: string;
   name: string;
   version?: string;
+  /** One-paragraph "what this plugin is for", shown in Settings → Plugins. */
+  description?: string;
   skills?: PluginSkillDef[];
   views?: PluginViewDef[];
   scripts?: PluginScriptDef[];
+  loops?: PluginLoopDef[];
   butler?: {
     /** Path (relative to the plugin root) of a markdown fragment appended to the butler prompt. */
     promptFragment: string;
@@ -116,6 +200,14 @@ function optionalEnv(value: unknown, field: string): Record<string, string> | un
   return out;
 }
 
+function optionalCwd(value: unknown, field: string): PluginCwd | undefined {
+  if (value == null) return undefined;
+  if (value !== "plugin" && value !== "repo") {
+    fail(`"${field}" must be "plugin" or "repo" (got ${JSON.stringify(value)})`);
+  }
+  return value;
+}
+
 function requireArray(value: unknown, field: string): unknown[] {
   if (!Array.isArray(value)) fail(`"${field}" must be an array`);
   return value;
@@ -159,10 +251,14 @@ export function parsePluginManifest(input: string | unknown): PluginManifest {
   if (!PLUGIN_ID_PATTERN.test(id)) fail(`"id" must match ${PLUGIN_ID_PATTERN} (got "${id}")`);
   const name = requireString(obj.name, "name");
   const version = optionalString(obj.version, "version");
+  const description = optionalString(obj.description, "description");
 
   const skills = obj.skills == null ? undefined : requireArray(obj.skills, "skills").map((entry, i) => {
     const rec = asRecord(entry, `skills[${i}]`);
-    return { dir: requireRelativePath(rec.dir, `skills[${i}].dir`) };
+    return {
+      dir: requireRelativePath(rec.dir, `skills[${i}].dir`),
+      description: optionalString(rec.description, `skills[${i}].description`),
+    };
   });
 
   const seenViewIds = new Set<string>();
@@ -177,8 +273,10 @@ export function parsePluginManifest(input: string | unknown): PluginManifest {
       id: viewId,
       label: requireString(rec.label, `views[${i}].label`),
       kind: "iframe" as const,
+      description: optionalString(rec.description, `views[${i}].description`),
       serve: {
         command: requireString(serve.command, `views[${i}].serve.command`),
+        cwd: optionalCwd(serve.cwd, `views[${i}].serve.cwd`),
         portEnv: optionalString(serve.portEnv, `views[${i}].serve.portEnv`),
         env: optionalEnv(serve.env, `views[${i}].serve.env`),
       },
@@ -191,15 +289,48 @@ export function parsePluginManifest(input: string | unknown): PluginManifest {
     const scriptName = requireString(rec.name, `scripts[${i}].name`);
     if (seenScriptNames.has(scriptName)) fail(`duplicate script name "${scriptName}"`);
     seenScriptNames.add(scriptName);
-    const cwd = rec.cwd == null ? undefined : rec.cwd;
-    if (cwd !== undefined && cwd !== "plugin" && cwd !== "repo") {
-      fail(`scripts[${i}].cwd must be "plugin" or "repo" (got ${JSON.stringify(cwd)})`);
-    }
     return {
       name: scriptName,
       command: requireString(rec.command, `scripts[${i}].command`),
-      cwd: cwd as "plugin" | "repo" | undefined,
+      label: optionalString(rec.label, `scripts[${i}].label`),
+      description: optionalString(rec.description, `scripts[${i}].description`),
+      cwd: optionalCwd(rec.cwd, `scripts[${i}].cwd`),
       env: optionalEnv(rec.env, `scripts[${i}].env`),
+    };
+  });
+
+  const skillNames = new Set((skills ?? []).map((s) => s.dir.split("/").pop()!));
+  const seenLoopNames = new Set<string>();
+  const loops = obj.loops == null ? undefined : requireArray(obj.loops, "loops").map((entry, i) => {
+    const rec = asRecord(entry, `loops[${i}]`);
+    const loopName = requireString(rec.name, `loops[${i}].name`);
+    if (seenLoopNames.has(loopName)) fail(`duplicate loop name "${loopName}"`);
+    seenLoopNames.add(loopName);
+    const skill = requireString(rec.skill, `loops[${i}].skill`);
+    // A loop that names a skill the manifest doesn't declare would create tickets
+    // whose skill never materializes into the worktree — fail at parse time.
+    if (!skillNames.has(skill)) {
+      fail(`loops[${i}].skill "${skill}" is not one of the manifest's skills`);
+    }
+    const plan = asRecord(rec.plan, `loops[${i}].plan`);
+    let maxUnits: number | undefined;
+    if (rec.maxUnitsPerAdvance != null) {
+      if (typeof rec.maxUnitsPerAdvance !== "number" || !Number.isInteger(rec.maxUnitsPerAdvance) || rec.maxUnitsPerAdvance < 1) {
+        fail(`"loops[${i}].maxUnitsPerAdvance" must be a positive integer`);
+      }
+      maxUnits = rec.maxUnitsPerAdvance;
+    }
+    return {
+      name: loopName,
+      label: optionalString(rec.label, `loops[${i}].label`),
+      description: optionalString(rec.description, `loops[${i}].description`),
+      skill,
+      maxUnitsPerAdvance: maxUnits,
+      plan: {
+        command: requireString(plan.command, `loops[${i}].plan.command`),
+        cwd: optionalCwd(plan.cwd, `loops[${i}].plan.cwd`),
+        env: optionalEnv(plan.env, `loops[${i}].plan.env`),
+      },
     };
   });
 
@@ -216,7 +347,67 @@ export function parsePluginManifest(input: string | unknown): PluginManifest {
     };
   })();
 
-  return { id, name, version, skills, views, scripts, butler, scaffold };
+  return { id, name, version, description, skills, views, scripts, loops, butler, scaffold };
+}
+
+/**
+ * Parse a loop `plan` command's stdout.
+ *
+ * Tolerant on purpose: a planner is a third-party script, and the shell it runs
+ * under happily prepends banners (npm notices, tsx warnings), so the LAST JSON
+ * value in the output wins rather than requiring the whole stream to be JSON. A
+ * bare array is accepted as `{ units: [...] }`. Anything else throws
+ * `PluginManifestError` so the route answers 400 with the offending output.
+ */
+export function parsePluginLoopPlan(stdout: string): PluginLoopPlan {
+  const text = stdout.trim();
+  if (!text) fail("loop plan command printed no output");
+
+  // Scan back from the end for the last balanced JSON object/array.
+  let raw: unknown;
+  let parsed = false;
+  for (let start = text.length - 1; start >= 0 && !parsed; start--) {
+    const ch = text[start];
+    if (ch !== "{" && ch !== "[") continue;
+    try {
+      raw = JSON.parse(text.slice(start));
+      parsed = true;
+    } catch {
+      /* not a complete value at this offset — keep scanning left */
+    }
+  }
+  if (!parsed) fail(`loop plan output is not JSON: ${text.slice(-400)}`);
+
+  const obj = Array.isArray(raw) ? { units: raw } : asRecord(raw, "loop plan");
+  const seen = new Set<string>();
+  const units = requireArray(obj.units ?? [], "loop plan units").map((entry, i) => {
+    const rec = asRecord(entry, `units[${i}]`);
+    const unitId = requireString(rec.id, `units[${i}].id`);
+    if (seen.has(unitId)) fail(`loop plan repeats unit id "${unitId}"`);
+    seen.add(unitId);
+    return {
+      id: unitId,
+      title: requireString(rec.title, `units[${i}].title`),
+      description: optionalString(rec.description, `units[${i}].description`),
+    };
+  });
+
+  if (obj.converged != null && typeof obj.converged !== "boolean") fail(`"converged" must be a boolean`);
+  return {
+    units,
+    converged: (obj.converged as boolean | undefined) ?? units.length === 0,
+    note: optionalString(obj.note, "note"),
+  };
+}
+
+/**
+ * Dedupe key stamped onto every ticket a loop advance creates, and matched
+ * against on the next advance so a still-outstanding unit is never re-ticketed.
+ * Kept in the shared lib so the server (which writes it) and any consumer that
+ * needs to recognise loop tickets derive it identically.
+ */
+export function pluginLoopUnitKey(pluginSlug: string, loopName: string, unitId: string): string {
+  return `plugin-loop:${pluginSlug}:${loopName}:${unitId}`;
 }
 
 export interface PluginPlaceholderVars {

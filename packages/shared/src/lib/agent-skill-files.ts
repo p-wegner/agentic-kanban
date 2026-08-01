@@ -1,5 +1,21 @@
-import { access, lstat, mkdir, readFile, readdir, symlink, unlink, writeFile } from "node:fs/promises";
+import { access, cp, lstat, mkdir, readFile, readdir, symlink, unlink, writeFile } from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import { join, relative } from "node:path";
+
+/**
+ * True for a directory entry that may hold a skill.
+ *
+ * `isDirectory()` alone is NOT enough: the plugin system installs a plugin's
+ * skills into `.claude/skills/<name>` as a **junction/symlink** into the plugin
+ * checkout (`plugin.service.ts` `fanOutSkills`), and `readdir(withFileTypes)`
+ * does not follow links — such an entry reports `isSymbolicLink()`, not
+ * `isDirectory()`. Scanning for directories only therefore made every plugin
+ * skill invisible to the board (skill lists, butler slash-commands, the launch
+ * path), while the same skill was plainly there on disk.
+ */
+function couldHoldSkill(entry: Dirent): boolean {
+  return entry.isDirectory() || entry.isSymbolicLink();
+}
 
 export type AgentSkillFile = {
   name: string;
@@ -183,7 +199,7 @@ export async function scanLocalSkills(repoPath: string): Promise<DiskSkillEntry[
   if (!entries) return [];
   const skills: DiskSkillEntry[] = [];
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
+    if (!couldHoldSkill(entry)) continue;
     if (!isSafeSkillName(entry.name)) continue;
     try {
       const content = await readFile(join(skillsDir, entry.name, "SKILL.md"), "utf-8");
@@ -206,29 +222,58 @@ export async function listLocalSkillNames(repoPath: string): Promise<string[]> {
   const entries = await readdir(skillsDir, { withFileTypes: true }).catch(() => null);
   if (!entries) return [];
   return entries
-    .filter((entry) => entry.isDirectory() && isSafeSkillName(entry.name))
+    .filter((entry) => couldHoldSkill(entry) && isSafeSkillName(entry.name))
     .map((entry) => entry.name);
 }
 
 /**
- * Copy a SKILL.md verbatim from the project repo to the worktree.
- * Used when launching a disk-only skill that has no DB entry.
+ * Copy a disk-only skill from the project repo into a worktree.
+ *
+ * Copies the WHOLE skill directory, not just `SKILL.md`. A skill bundle routinely
+ * carries the executables its own instructions tell the agent to run — plugin
+ * skills like `ui-sdk` (`tools/ui-sdk.mjs`) or `requirement-grounding`
+ * (`tools/ground.mjs`) are useless without them. Materializing the prose alone
+ * produced a skill that documented commands which did not exist in the worktree,
+ * and the agent's failure looked like a bad skill rather than a missing file.
+ *
+ * `dereference` matters on this path: the source may itself be a junction into a
+ * plugin checkout (see `fanOutSkills`), and the worktree must end up with real
+ * files, not a link back into a directory the agent may not be allowed to write.
+ * `SKILL.md` is copied first and is the success criterion — a skill whose extra
+ * assets fail to copy still launches (degraded), whereas a missing SKILL.md is a
+ * genuine "skill not found".
  */
 export async function copySkillToWorktree(repoPath: string, skillName: string, worktreePath: string): Promise<boolean> {
   // Reject names that could escape the skills directory via path traversal
   if (!isSafeSkillName(skillName)) {
     return false;
   }
-  const src = localSkillFilePath(repoPath, skillName);
+  const srcDir = join(repoPath, ".claude", "skills", skillName);
   const destDir = join(worktreePath, ".claude", "skills", skillName);
   try {
-    const content = await readFile(src, "utf-8");
+    const content = await readFile(localSkillFilePath(repoPath, skillName), "utf-8");
     await mkdir(destDir, { recursive: true });
     await writeFile(join(destDir, "SKILL.md"), content, "utf-8");
-    return true;
   } catch {
     return false;
   }
+
+  try {
+    for (const entry of await readdir(srcDir, { withFileTypes: true })) {
+      if (entry.name === "SKILL.md") continue;
+      await cp(join(srcDir, entry.name), join(destDir, entry.name), {
+        recursive: true,
+        dereference: true,
+        force: true,
+      });
+    }
+  } catch (err) {
+    console.warn(
+      `[skills] copied SKILL.md for "${skillName}" but not its bundled assets: `
+      + `${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  return true;
 }
 
 /**
@@ -241,7 +286,7 @@ export async function isSkillsDirAbsentOrEmpty(repoPath: string): Promise<boolea
   const entries = await readdir(skillsDir, { withFileTypes: true }).catch(() => null);
   if (!entries) return true;
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
+    if (!couldHoldSkill(entry)) continue;
     try {
       await access(join(skillsDir, entry.name, "SKILL.md"));
       return false;

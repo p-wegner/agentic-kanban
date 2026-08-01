@@ -5,6 +5,8 @@ import {
   substitutePluginPlaceholders,
   substitutePluginEnv,
   pluginEnabledPreferenceKey,
+  parsePluginLoopPlan,
+  pluginLoopUnitKey,
 } from "../src/lib/plugin-manifest.js";
 import { isPluginEnabledPreferenceKey, isProjectScopedDynamicKey } from "../src/lib/dynamic-preference-keys.js";
 
@@ -82,7 +84,7 @@ describe("parsePluginManifest", () => {
   it("rejects a bad script cwd", () => {
     expect(() =>
       parsePluginManifest({ id: "p", name: "P", scripts: [{ name: "s", command: "x", cwd: "elsewhere" }] }),
-    ).toThrow(/cwd must be "plugin" or "repo"/);
+    ).toThrow(/cwd" must be "plugin" or "repo"/);
   });
 
   it("rejects absolute and parent-escaping manifest paths", () => {
@@ -129,5 +131,89 @@ describe("plugin enable preference key", () => {
     expect(isPluginEnabledPreferenceKey(`plugin_enabled_Bad!_${projectId}`)).toBe(false);
     expect(isPluginEnabledPreferenceKey("plugin_enabled_slug_not-a-uuid")).toBe(false);
     expect(isPluginEnabledPreferenceKey(`plugin_enabled_${projectId}`)).toBe(false);
+  });
+});
+
+describe("plugin manifest — converging loops", () => {
+  const LOOP_MANIFEST = {
+    id: "refactor-safety-net",
+    name: "Refactor Safety Net",
+    skills: [{ dir: ".claude/skills/requirement-extraction" }],
+    loops: [
+      {
+        name: "requirement-extraction",
+        label: "Requirement extraction",
+        skill: "requirement-extraction",
+        plan: { command: "node tools/loop-plan.mjs --json", cwd: "plugin", env: { ROOT: "{{repoPath}}" } },
+      },
+    ],
+  };
+
+  it("parses a loop with its plan command, cwd and env", () => {
+    const manifest = parsePluginManifest(LOOP_MANIFEST);
+    expect(manifest.loops).toHaveLength(1);
+    expect(manifest.loops?.[0]).toMatchObject({
+      name: "requirement-extraction",
+      skill: "requirement-extraction",
+      plan: { command: "node tools/loop-plan.mjs --json", cwd: "plugin" },
+    });
+  });
+
+  it("rejects a loop whose skill the manifest never declares", () => {
+    const broken = { ...LOOP_MANIFEST, loops: [{ ...LOOP_MANIFEST.loops[0], skill: "nope" }] };
+    expect(() => parsePluginManifest(broken)).toThrow(PluginManifestError);
+    expect(() => parsePluginManifest(broken)).toThrow(/not one of the manifest's skills/);
+  });
+
+  it("rejects duplicate loop names and a non-positive unit cap", () => {
+    expect(() => parsePluginManifest({ ...LOOP_MANIFEST, loops: [LOOP_MANIFEST.loops[0], LOOP_MANIFEST.loops[0]] }))
+      .toThrow(/duplicate loop name/);
+    expect(() => parsePluginManifest({
+      ...LOOP_MANIFEST,
+      loops: [{ ...LOOP_MANIFEST.loops[0], maxUnitsPerAdvance: 0 }],
+    })).toThrow(/positive integer/);
+  });
+
+  it("rejects an unknown cwd on a script, a view serve, and a loop plan alike", () => {
+    expect(() => parsePluginManifest({
+      ...LOOP_MANIFEST,
+      loops: [{ ...LOOP_MANIFEST.loops[0], plan: { command: "x", cwd: "elsewhere" } }],
+    })).toThrow(/must be "plugin" or "repo"/);
+  });
+});
+
+describe("parsePluginLoopPlan", () => {
+  it("reads the last JSON value, so a shell banner ahead of the plan is tolerated", () => {
+    const plan = parsePluginLoopPlan(
+      'npm notice something\n{"units":[{"id":"billing:r1","title":"Mine billing"}],"note":"1/4 converged"}\n',
+    );
+    expect(plan.units).toEqual([{ id: "billing:r1", title: "Mine billing", description: undefined }]);
+    expect(plan.note).toBe("1/4 converged");
+    expect(plan.converged).toBe(false);
+  });
+
+  it("accepts a bare array and treats an empty plan as converged", () => {
+    expect(parsePluginLoopPlan("[]")).toMatchObject({ units: [], converged: true });
+    expect(parsePluginLoopPlan('[{"id":"a","title":"A"}]').units).toHaveLength(1);
+  });
+
+  it("lets a planner report 'not converged, but nothing to do' explicitly", () => {
+    expect(parsePluginLoopPlan('{"units":[],"converged":false}')).toMatchObject({ units: [], converged: false });
+  });
+
+  it("rejects empty output, non-JSON output, and repeated unit ids", () => {
+    expect(() => parsePluginLoopPlan("   ")).toThrow(/printed no output/);
+    expect(() => parsePluginLoopPlan("boom: command not found")).toThrow(/not JSON/);
+    expect(() => parsePluginLoopPlan('{"units":[{"id":"a","title":"A"},{"id":"a","title":"B"}]}'))
+      .toThrow(/repeats unit id/);
+  });
+});
+
+describe("pluginLoopUnitKey", () => {
+  it("namespaces by plugin and loop so one project can run several loops", () => {
+    expect(pluginLoopUnitKey("refactor-safety-net", "requirement-extraction", "billing:r1"))
+      .toBe("plugin-loop:refactor-safety-net:requirement-extraction:billing:r1");
+    // The empty-unit form is the prefix the loop engine dedupes on.
+    expect(pluginLoopUnitKey("a", "b", "").endsWith(":")).toBe(true);
   });
 });

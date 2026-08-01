@@ -30,6 +30,8 @@ import {
 import { isPluginEnabledPreferenceKey } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import type { Database } from "../db/index.js";
 import { spawnShellCommand, taskkillTree } from "./process-exec.js";
+import { runPluginCommand, tailOutput as tail, type PluginCommandResult } from "./plugin-exec.js";
+import { createPluginLoopEngine, type LoopAdvanceResult, type LoopStatus } from "./plugin-loop.service.js";
 import { getProjectById } from "../repositories/project.repository.js";
 import {
   deletePluginRow,
@@ -192,19 +194,7 @@ function removeLink(path: string): void {
   }
 }
 
-const OUTPUT_TAIL_CAP = 16_384;
-const SCRIPT_TIMEOUT_MS = 5 * 60 * 1000;
-
-function tail(text: string): string {
-  return text.length > OUTPUT_TAIL_CAP ? text.slice(text.length - OUTPUT_TAIL_CAP) : text;
-}
-
-export interface PluginScriptResult {
-  code: number | null;
-  stdout: string;
-  stderr: string;
-  timedOut: boolean;
-}
+export type PluginScriptResult = PluginCommandResult;
 
 export interface EnableReport {
   prefKey: string;
@@ -227,6 +217,7 @@ export function createPluginService(deps: {
   createWorkspace?: (input: CreateWorkspaceInput) => Promise<CreateWorkspaceResult>;
 }) {
   const { database, createIssue, createWorkspace } = deps;
+  const loops = createPluginLoopEngine({ database, createIssue });
 
   async function requirePlugin(id: string): Promise<PluginRow & { manifest: PluginManifest }> {
     const row = await getPluginRowById(id, database);
@@ -604,37 +595,9 @@ export function createPluginService(deps: {
       projectName: project.name,
       pluginPath: plugin.localPath,
     };
-    const cwd = script.cwd === "plugin" ? plugin.localPath : project.repoPath;
-    const command = substitutePluginPlaceholders(script.command, vars);
-    const env = substitutePluginEnv(script.env, vars);
-
-    return new Promise<PluginScriptResult>((resolveRun, rejectRun) => {
-      const child = spawnShellCommand(command, { cwd, stdio: ["ignore", "pipe", "pipe"], mergeEnv: env });
-      let stdout = "";
-      let stderr = "";
-      child.stdout?.on("data", (c: Buffer) => { stdout = tail(stdout + c.toString("utf8")); });
-      child.stderr?.on("data", (c: Buffer) => { stderr = tail(stderr + c.toString("utf8")); });
-      let settled = false;
-      const timer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        if (process.platform === "win32" && child.pid) void taskkillTree(child.pid).catch(() => {});
-        try { child.kill(); } catch { /* already gone */ }
-        resolveRun({ code: null, stdout, stderr, timedOut: true });
-      }, SCRIPT_TIMEOUT_MS);
-      timer.unref();
-      child.on("error", (err) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        rejectRun(err);
-      });
-      child.on("close", (code) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolveRun({ code, stdout, stderr, timedOut: false });
-      });
+    return runPluginCommand(substitutePluginPlaceholders(script.command, vars), {
+      cwd: script.cwd === "plugin" ? plugin.localPath : project.repoPath,
+      env: substitutePluginEnv(script.env, vars),
     });
   }
 
@@ -682,9 +645,108 @@ export function createPluginService(deps: {
     };
   }
 
+  /** Per-loop ticket counts for one plugin (cheap — does not run the planner). */
+  async function listLoops(pluginRowId: string, projectId: string): Promise<LoopStatus[]> {
+    const plugin = await requirePlugin(pluginRowId);
+    await requireProject(projectId);
+    return loops.loopStatuses(plugin.manifest, plugin.pluginId, projectId);
+  }
+
+  /**
+   * Advance one converging loop: plan, then create a ticket per outstanding unit.
+   * The board's monitor is what STARTS those tickets — see plugin-loop.service.
+   */
+  async function advanceLoop(pluginRowId: string, loopName: string, projectId: string): Promise<LoopAdvanceResult> {
+    const plugin = await requirePlugin(pluginRowId);
+    const project = await requireProject(projectId);
+    return loops.advanceLoop({
+      manifest: plugin.manifest,
+      pluginSlug: plugin.pluginId,
+      pluginLocalPath: plugin.localPath,
+      loopName,
+      projectId,
+      projectName: project.name,
+      repoPath: project.repoPath,
+    });
+  }
+
+  /**
+   * Everything the ENABLED plugins offer this project, in one read: the board's
+   * Plugins panel renders views, loops, scripts and skills side by side, and
+   * four round-trips for one panel would just be four chances to disagree.
+   */
+  async function listProjectSurface(projectId: string) {
+    await requireProject(projectId);
+    const enabled = (await enabledSlugsByProject()).get(projectId) ?? new Set<string>();
+    const views = [];
+    const projectLoops = [];
+    const scripts = [];
+    const skills = [];
+    for (const row of await listPluginRows(database)) {
+      if (!enabled.has(row.pluginId)) continue;
+      let manifest: PluginManifest;
+      try {
+        manifest = parsePluginManifest(row.manifestJson);
+      } catch {
+        continue; // a broken cached manifest must not blank the whole panel
+      }
+      const owner = { pluginId: row.id, pluginSlug: row.pluginId, pluginName: row.name };
+      for (const view of manifest.views ?? []) {
+        views.push({
+          ...owner,
+          id: view.id,
+          label: view.label,
+          kind: view.kind,
+          description: view.description ?? null,
+          ...(await getViewStatus(row.id, view.id, projectId)),
+        });
+      }
+      for (const status of await loops.loopStatuses(manifest, row.pluginId, projectId)) {
+        projectLoops.push({ ...owner, ...status });
+      }
+      for (const script of manifest.scripts ?? []) {
+        scripts.push({
+          ...owner,
+          name: script.name,
+          label: script.label ?? script.name,
+          description: script.description ?? null,
+          command: script.command,
+        });
+      }
+      for (const skill of manifest.skills ?? []) {
+        const name = skill.dir.split("/").pop() || skill.dir;
+        skills.push({ ...owner, name, description: skill.description ?? null });
+      }
+    }
+    return { views, loops: projectLoops, scripts, skills };
+  }
+
+  /** Flat list of the ENABLED plugins' loops for a project (the board Plugins panel). */
+  async function listProjectLoops(projectId: string) {
+    await requireProject(projectId);
+    const enabled = (await enabledSlugsByProject()).get(projectId) ?? new Set<string>();
+    const out = [];
+    for (const row of await listPluginRows(database)) {
+      if (!enabled.has(row.pluginId)) continue;
+      try {
+        const manifest = parsePluginManifest(row.manifestJson);
+        for (const status of await loops.loopStatuses(manifest, row.pluginId, projectId)) {
+          out.push({ pluginId: row.id, pluginSlug: row.pluginId, pluginName: row.name, ...status });
+        }
+      } catch {
+        /* skip plugins with a broken cached manifest */
+      }
+    }
+    return out;
+  }
+
   return {
     installPlugin,
     listPlugins,
+    listLoops,
+    listProjectLoops,
+    listProjectSurface,
+    advanceLoop,
     removePlugin,
     enableForProject,
     disableForProject,
@@ -702,25 +764,38 @@ export function createPluginService(deps: {
 export type PluginService = ReturnType<typeof createPluginService>;
 
 const singletons = new Map<Database, PluginService>();
+const singletonDeps = new Map<Database, PluginServiceSkillDeps>();
+
+export interface PluginServiceSkillDeps {
+  createIssue?: (input: CreateIssueInput) => Promise<CreateIssueResult>;
+  createWorkspace?: (input: CreateWorkspaceInput) => Promise<CreateWorkspaceResult>;
+}
 
 /**
  * Memoized per-database singleton, like sibling services' lazy accessors.
- * `skillDeps` (createIssue/createWorkspace) only take effect on the FIRST call
- * that constructs the singleton for a given `database` — later calls reuse the
- * already-built instance. Routes that need `runSkill` must pass them; routes
- * that don't (e.g. the plugin-views host) can omit them.
+ *
+ * `skillDeps` (createIssue/createWorkspace) are ACCUMULATED rather than bound to
+ * whichever caller happened to construct the instance first. Several composition
+ * points reach for this service — the plugins route (which has the deps), the
+ * plugin-views route and the monitor's loop pass (which don't) — and binding on
+ * first call meant that if a dep-less caller won the race, `runSkill` and
+ * `advanceLoop` were permanently dead with "not available on this route" for the
+ * whole process lifetime, depending only on module import order. So a later call
+ * that supplies a missing dep rebuilds the instance with the union.
  */
-export function getPluginService(
-  database: Database,
-  skillDeps?: {
-    createIssue?: (input: CreateIssueInput) => Promise<CreateIssueResult>;
-    createWorkspace?: (input: CreateWorkspaceInput) => Promise<CreateWorkspaceResult>;
-  },
-): PluginService {
+export function getPluginService(database: Database, skillDeps?: PluginServiceSkillDeps): PluginService {
+  const known = singletonDeps.get(database) ?? {};
+  const merged: PluginServiceSkillDeps = {
+    createIssue: known.createIssue ?? skillDeps?.createIssue,
+    createWorkspace: known.createWorkspace ?? skillDeps?.createWorkspace,
+  };
+  const gainedDeps = merged.createIssue !== known.createIssue || merged.createWorkspace !== known.createWorkspace;
+
   let service = singletons.get(database);
-  if (!service) {
-    service = createPluginService({ database, ...skillDeps });
+  if (!service || gainedDeps) {
+    service = createPluginService({ database, ...merged });
     singletons.set(database, service);
+    singletonDeps.set(database, merged);
   }
   return service;
 }

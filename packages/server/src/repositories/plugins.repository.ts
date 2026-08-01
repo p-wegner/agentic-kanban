@@ -1,5 +1,5 @@
-import { plugins, preferences } from "@agentic-kanban/shared/schema";
-import { eq, like } from "drizzle-orm";
+import { issues, plugins, preferences, projectStatuses } from "@agentic-kanban/shared/schema";
+import { and, eq, like } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
@@ -46,6 +46,41 @@ export async function upsertPluginRow(
 
 export async function deletePluginRow(id: string, database: Database = db): Promise<void> {
   await database.delete(plugins).where(eq(plugins.id, id));
+}
+
+export interface LoopIssueRow {
+  id: string;
+  issueNumber: number | null;
+  externalKey: string;
+  statusName: string;
+}
+
+/**
+ * Every issue in a project whose `external_key` marks it as a plugin-loop unit.
+ *
+ * The loop engine dedupes against this: a unit the planner still reports but that
+ * already has a ticket must NOT be re-ticketed, and a unit whose ticket reached a
+ * terminal status is what lets the planner's next round move on. Scoped by the
+ * `plugin-loop:<slug>:<loop>:` prefix so one project can run several loops.
+ */
+export async function listPluginLoopIssues(
+  projectId: string,
+  keyPrefix: string,
+  database: Database = db,
+): Promise<LoopIssueRow[]> {
+  const rows = await database
+    .select({
+      id: issues.id,
+      issueNumber: issues.issueNumber,
+      externalKey: issues.externalKey,
+      statusName: projectStatuses.name,
+    })
+    .from(issues)
+    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+    .where(and(eq(issues.projectId, projectId), like(issues.externalKey, `${keyPrefix}%`)));
+  return rows.flatMap((row) =>
+    row.externalKey ? [{ ...row, externalKey: row.externalKey }] : [],
+  );
 }
 
 /**
