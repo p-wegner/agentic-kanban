@@ -55,6 +55,27 @@ const NO_RAW_REPORT_RULE =
   "names what failed.";
 
 /**
+ * The fleet's single worst friction cluster (#195): a `--tests` filter that matches
+ * nothing fails the WHOLE gradle build with exit 1, and the output — a wall of
+ * `compileKotlin`/`test FAILED` task lines — reads exactly like a compile or test
+ * failure. Agents conclude they broke the build and retry with `--rerun`/`--info`,
+ * which cannot fix a non-matching filter; one session burned 7 consecutive tool
+ * errors on this before abandoning the filter. 67 failures across 39 sessions
+ * fleet-wide share this shape.
+ */
+const GRADLE_TEST_FILTER_RULES = [
+  "A `--tests` filter that matches nothing **fails the whole build** with exit 1 and " +
+    "output that looks like a compile or test failure. Read for the " +
+    "`No tests found for given includes` line before concluding anything broke — and do " +
+    "not retry the same filter with `--rerun`/`--info`, neither can fix a non-matching filter.",
+  "Prefer a wildcard filter (`--tests '*ClassName'`) over a fully-qualified name — the FQN " +
+    "must match the package exactly, and a guessed package silently matches nothing. Confirm " +
+    "the test class exists (glob the test dir) before filtering.",
+  "`build` already depends on `test` — never run `gradlew test` then `gradlew build` as two " +
+    "invocations; one `gradlew test build` invocation is the canonical form.",
+];
+
+/**
  * Append flags the command does not already carry — to EACH `&&`-chained segment, since a
  * flag tacked onto the end of `a && b` would only reach `b`. `applies` gates which segments
  * get them (pytest flags must not land on a non-pytest build step).
@@ -178,10 +199,10 @@ export function deriveVerifyCommandPlan(profile: StackProfile | null | undefined
         // dead end that pushes an agent into opening the XML.
         command: withFlags(base, ["--console=plain"]),
         stackKey,
-        rules: [...POWERSHELL_RULES, NO_RAW_REPORT_RULE],
+        rules: [...POWERSHELL_RULES, NO_RAW_REPORT_RULE, ...GRADLE_TEST_FILTER_RULES],
         onFailure:
           "Re-run only the failing test for its stack trace: " +
-          "`" + (base.split(/\s+/)[0] ?? "./gradlew") + " test --tests '<Class>.<method>' --console=plain`.",
+          "`" + (base.split(/\s+/)[0] ?? "./gradlew") + " test --tests '*ClassName' --console=plain`.",
       };
     case "maven":
       return {
