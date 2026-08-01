@@ -113,6 +113,14 @@ Prompt templates in the `agent_skills` table, written to `.claude/skills/<name>/
 - **Built-in** (`packages/server/src/builtin-skills.ts`, `isBuiltin: true`, `pnpm db:seed`): `board-navigator`, `code-review`, `code-review-thorough`, `dependency-analyzer`, `ticket-enhancer`, `orchestrator`, `monitor-nudge`, `kanban-workflow`. Generic, shipped in npm.
 - **Project-specific** live only in `.claude/skills/` (e.g. `publish`, `cleanup`, `session-inspector`, `board-monitor`, `dev-server`, `db-doctor`) — **do NOT add to `builtin-skills.ts`**.
 - The review prompt uses built-in `code-review`; override per-project with a project-scoped `code-review` skill. Placeholders: `{{branch}}`, `{{baseBranch}}`, `{{issueId}}`, `{{autoFixInstructions}}`.
+- A **plugin** skill is junctioned into `.claude/skills/<name>` on enable, so it is a *disk* skill with a whole bundle (`tools/`, `references/`), not a DB row. Both the scanners and `copySkillToWorktree` handle that now — junctions are followed (`readdir` reports them as symlinks, never directories) and the FULL directory is copied into the worktree, since a skill whose `tools/` is missing documents commands that don't exist.
+
+## Plugins
+A plugin is a repo with a `kanban-plugin.json` manifest (`packages/shared/src/lib/plugin-manifest.ts` is the contract). It declares `skills`, iframe `views` (supervised child servers), one-shot `scripts`, `loops`, a butler `promptFragment`, and a `scaffold` template. Install once (Settings → Plugins), enable per project (`plugin_enabled_<slug>_<projectId>`); the **Plugins board view** is where all four kinds are started.
+
+**`loops` = board-owned converging analysis.** The plugin contributes only a deterministic `plan` command printing the outstanding work units as JSON; the BOARD does everything that spawns an agent — a ticket per unit carrying the loop's skill, started by the monitor within the project's WIP limit, under the Strategy Bullseye's provider selection and the auth-rotation ring (a quota-exhausted profile rotates mid-loop). Loop state IS the tickets, so it survives a restart with no private run-log.
+- **Unit ids are the planner's contract.** Each ticket stores `pluginLoopUnitKey(slug, loop, unitId)` in `external_key`, and an advance skips any unit already ticketed — terminal or not. A planner wanting another pass must mint a FRESH id (`billing:r3`), which is what makes an infinite ticket loop impossible.
+- A round is only replanned once its tickets are all terminal, and only for a loop that already has tickets — so `advanceDuePluginLoops` (monitor pass) *continues* loops a human started and never starts one itself.
 
 ## Skill Map
 | Need | Skill |
