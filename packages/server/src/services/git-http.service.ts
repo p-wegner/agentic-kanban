@@ -27,7 +27,7 @@ import { Transform } from "node:stream";
 import { gitStream } from "@agentic-kanban/shared/lib/git-exec";
 import { db as realDb } from "../db/index.js";
 import type { Database } from "../db/index.js";
-import { getProjectRepoPath } from "../repositories/git-http.repository.js";
+import { getProjectRepoPath } from "../repositories/project.repository.js";
 
 export const KANBAN_INCOMING_REF_PREFIX = "refs/kanban/incoming/";
 
