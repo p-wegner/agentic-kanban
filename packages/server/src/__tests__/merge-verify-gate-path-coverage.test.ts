@@ -30,6 +30,7 @@ const runSetupScript = vi.fn();
 const runSmokeCheck = vi.fn();
 vi.mock("@agentic-kanban/shared/lib/setup-script", () => ({
   runSetupScript: (...args: unknown[]) => runSetupScript(...args),
+  DEFAULT_SETUP_SCRIPT_TIMEOUT_MS: 5 * 60 * 1000,
 }));
 vi.mock("@agentic-kanban/shared/lib/smoke-check", () => ({
   runSmokeCheck: (...args: unknown[]) => runSmokeCheck(...args),
@@ -457,8 +458,8 @@ describe("runPreMergeGate — missing-deps signature triggers one install+retry 
     const result = await runPreMergeGate({ id: workspaceId, workingDir: "/repo/.worktrees/feature_ak-821-test" }, projectId, db);
 
     expect(runSetupScript).toHaveBeenCalledTimes(3);
-    expect(runSetupScript).toHaveBeenNthCalledWith(2, "/repo/.worktrees/feature_ak-821-test", "pnpm install -r");
-    expect(runSetupScript).toHaveBeenNthCalledWith(3, "/repo/.worktrees/feature_ak-821-test", "pnpm test");
+    expect(runSetupScript).toHaveBeenNthCalledWith(2, "/repo/.worktrees/feature_ak-821-test", "pnpm install -r", expect.objectContaining({ timeoutMs: expect.any(Number) }));
+    expect(runSetupScript).toHaveBeenNthCalledWith(3, "/repo/.worktrees/feature_ak-821-test", "pnpm test", expect.objectContaining({ timeoutMs: expect.any(Number) }));
     expect(result.passed).toBe(true);
   });
 
