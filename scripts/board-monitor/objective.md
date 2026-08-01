@@ -31,14 +31,12 @@ This is a FRESH session every run — you have NO memory of previous runs. The k
 - **REFILL_FOCUS = balanced** - derived from work-type marker weights; `bugfix-only` emphasizes reproducible bugs, `balanced` allows feature/quality mix.
 
 ## STRATEGY WEIGHTS (generated - do not hand-edit)
-- No bullseye markers configured yet.
-
-## PROVIDER POLICY (generated - do not hand-edit)
-When selecting a provider for a new workspace, apply these rules in priority order:
-1. **FILL** profiles should always have capacity — start work on them first.
-2. **THROTTLE** profiles are preferred for main work. Respect their headroom percentage.
-3. **FALLBACK-ONLY** profiles are last resort — only use if all others are exhausted or the user explicitly selects them.
-- **Claude anth** [claude:anth]: FILL — use aggressively, keep busy at all times
+- Frontend: weight 5/5, area, provider claude
+- Feature: weight 3/5, work-type
+- Quality: weight 3/5, work-type
+- Bugfix: weight 2/5, work-type
+- UX: weight 2/5, work-type
+- Backend: weight 2/5, area, provider codex
 <!-- STRATEGY_BULLSEYE_GENERATED_END -->
 
 ## FOCUS POLICY (operator directive 2026-06-14 — authoritative; overrides the REFILL_FOCUS wording above)
