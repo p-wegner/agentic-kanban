@@ -85,7 +85,18 @@ function matchesScopedKey(key: string, prefixes: readonly string[], suffixIsVali
  */
 export function isProjectScopedDynamicKey(key: string): boolean {
   return matchesScopedKey(key, PROJECT_SCOPED_KEY_PREFIXES, (rest) => PROJECT_ID_SUFFIX.test(rest))
-    || matchesScopedKey(key, FREEFORM_SUFFIX_KEY_PREFIXES, (rest) => rest.length > 0);
+    || matchesScopedKey(key, FREEFORM_SUFFIX_KEY_PREFIXES, (rest) => rest.length > 0)
+    || isPluginEnabledPreferenceKey(key);
+}
+
+/**
+ * True for the per-project plugin enable key (`plugin_enabled_<pluginSlug>_<projectId>`).
+ * Two dynamic segments, so it can't ride the single-suffix prefix tables above: the
+ * slug is [a-z0-9-]+ (the manifest `id`), the project id the usual UUID shape. The
+ * UUID's fixed 8-4-4-4-12 length disambiguates it from the dash-bearing slug.
+ */
+export function isPluginEnabledPreferenceKey(key: string): boolean {
+  return /^plugin_enabled_[a-z0-9-]+_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(key);
 }
 
 /**
