@@ -58,6 +58,7 @@ import { AgentSettings } from "./settings/AgentSettings.js";
 import { WorkflowSettings } from "./settings/WorkflowSettings.js";
 import { SkillsSettings } from "./settings/SkillsSettings.js";
 import { McpSettings } from "./settings/McpSettings.js";
+import { PluginsSettings } from "./settings/PluginsSettings.js";
 import { AppearanceSettings } from "./settings/AppearanceSettings.js";
 import { ProjectSettings } from "./settings/ProjectSettings.js";
 import { TagsSettings } from "./settings/TagsSettings.js";
@@ -483,6 +484,11 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
                   installingSkill={installingSkill}
                   setInstallingSkill={setInstallingSkill}
                 />
+              )}
+
+              {/* Plugins tab */}
+              {tab === "plugins" && (
+                <PluginsSettings activeProjectId={activeProjectId} />
               )}
 
               {/* MCP Tools tab */}

@@ -22,12 +22,13 @@ export type MonitorTunables = {
   refillFocus: "bugfix-only" | "balanced";
 };
 
-export type Tab = "agent" | "workflow" | "skills" | "mcp" | "ui" | "project" | "tags" | "templates" | "advanced" | "schedule";
+export type Tab = "agent" | "workflow" | "skills" | "plugins" | "mcp" | "ui" | "project" | "tags" | "templates" | "advanced" | "schedule";
 
 export const TABS: { id: Tab; label: string }[] = [
   { id: "agent", label: "Agent" },
   { id: "workflow", label: "Workflow" },
   { id: "skills", label: "Skills" },
+  { id: "plugins", label: "Plugins" },
   { id: "mcp", label: "MCP Tools" },
   { id: "ui", label: "UI" },
   { id: "project", label: "Project" },
