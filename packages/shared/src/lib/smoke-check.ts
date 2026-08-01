@@ -30,6 +30,14 @@ export interface SmokeCheck {
    * `<html>`, so relaxing there would mask a genuinely broken UI).
    */
   acceptNon5xx?: boolean;
+  /**
+   * Per-check override of the boot-poll budget in seconds, in place of the generic 60s
+   * default (#198). Set by `buildSmokeCheck` for stacks with a known-cold boot path (JVM/
+   * Gradle: daemon start + full compile + framework boot reliably exceeds 60s in a FRESH
+   * worktree). `RunSmokeCheckOptions.timeoutSeconds` still wins when a caller passes one
+   * explicitly (e.g. tests wanting a short bound regardless of the check's own budget).
+   */
+  timeoutSeconds?: number;
 }
 
 export interface SmokeCheckResult {
@@ -172,7 +180,7 @@ async function runSmokeCheckInner(
   check: SmokeCheck,
   options?: RunSmokeCheckOptions,
 ): Promise<SmokeCheckResult> {
-  const timeoutSeconds = options?.timeoutSeconds ?? 60;
+  const timeoutSeconds = options?.timeoutSeconds ?? check.timeoutSeconds ?? 60;
   const pollIntervalSeconds = options?.pollIntervalSeconds ?? 2;
   const requestTimeoutMs = options?.requestTimeoutMs ?? 4000;
   const snippetLength = options?.snippetLength ?? 600;

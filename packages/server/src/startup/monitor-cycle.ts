@@ -271,7 +271,7 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
       // right here for un-ready work, or the review-exit gate that set readyForMerge.
       let gateToken: MergeGateToken = gateTokenFromWorkspaceEvidence(ws, "review-exit gate (readyForMerge, auto_merge_in_review)");
       if (!ws.readyForMerge) {
-        const gate = await runPreMergeGate({ id: ws.wsId, workingDir: ws.workingDir }, ws.projectId, db);
+        const gate = await runPreMergeGate({ id: ws.wsId, workingDir: ws.workingDir, baseBranch: ws.baseBranch }, ws.projectId, db);
         if (!gate.passed) {
           console.log(`[monitor] Withholding auto_merge_in_review for idle In-Review workspace ${ws.wsId}  pre-merge gate failed (${gate.stage}): ${gate.message}`);
           emitButlerSystemEvent({

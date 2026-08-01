@@ -9,12 +9,16 @@ import type { StackProfile } from "@agentic-kanban/shared";
 // (#821) without spawning real processes / dev servers.
 const runSetupScript = vi.fn();
 const runSmokeCheck = vi.fn();
+const getChangedFileNames = vi.fn();
 vi.mock("@agentic-kanban/shared/lib/setup-script", () => ({
   runSetupScript: (...args: unknown[]) => runSetupScript(...args),
   DEFAULT_SETUP_SCRIPT_TIMEOUT_MS: 5 * 60 * 1000,
 }));
 vi.mock("@agentic-kanban/shared/lib/smoke-check", () => ({
   runSmokeCheck: (...args: unknown[]) => runSmokeCheck(...args),
+}));
+vi.mock("../services/git.service.js", () => ({
+  getChangedFileNames: (...args: unknown[]) => getChangedFileNames(...args),
 }));
 
 const { runPreMergeGate } = await import("../services/pre-merge-gate.service.js");
@@ -36,6 +40,8 @@ describe("runPreMergeGate (#821) — shared verify+smoke gate the monitor's auto
     ({ db } = createTestDb());
     runSetupScript.mockReset();
     runSmokeCheck.mockReset();
+    getChangedFileNames.mockReset();
+    getChangedFileNames.mockResolvedValue([]);
   });
 
   it("no-op (skipped, passed) when neither a verify_script nor a web profile is configured", async () => {
@@ -135,6 +141,39 @@ describe("runPreMergeGate (#821) — shared verify+smoke gate the monitor's auto
     expect(res.passed).toBe(false);
     expect(res.stage).toBe("smoke");
     expect(runSmokeCheck).not.toHaveBeenCalled();
+  });
+
+  // #198: a docs-only diff can never change boot/render behavior, so the smoke check is
+  // skipped entirely rather than paying for a cold-JVM-hostile boot poll whose outcome
+  // can't have changed.
+  it("#198: skips the smoke check entirely for a docs-only diff (baseBranch provided)", async () => {
+    await saveStackProfile("p", webProfile(), db);
+    getChangedFileNames.mockResolvedValue(["docs/state.md", "README.md"]);
+    const res = await runPreMergeGate({ id: "ws", workingDir: "/tmp/wt", baseBranch: "master" }, "p", db);
+    expect(res.passed).toBe(true);
+    expect(res.skipped).toBe(true);
+    expect(res.stage).toBe("none");
+    expect(runSmokeCheck).not.toHaveBeenCalled();
+  });
+
+  it("#198: still runs the smoke check when the diff touches a source file alongside docs", async () => {
+    await saveStackProfile("p", webProfile(), db);
+    getChangedFileNames.mockResolvedValue(["docs/state.md", "src/Main.kt"]);
+    runSmokeCheck.mockResolvedValue({ passed: true, skipped: false, status: 200, message: "ok", bodySnippet: "" });
+    const res = await runPreMergeGate({ id: "ws", workingDir: "/tmp/wt", baseBranch: "master" }, "p", db);
+    expect(res.passed).toBe(true);
+    expect(res.stage).toBe("smoke");
+    expect(runSmokeCheck).toHaveBeenCalledTimes(1);
+  });
+
+  it("#198: runs the smoke check as before when no baseBranch is provided (can't evaluate the diff)", async () => {
+    await saveStackProfile("p", webProfile(), db);
+    runSmokeCheck.mockResolvedValue({ passed: true, skipped: false, status: 200, message: "ok", bodySnippet: "" });
+    const res = await runPreMergeGate({ id: "ws", workingDir: "/tmp/wt" }, "p", db);
+    expect(res.passed).toBe(true);
+    expect(res.stage).toBe("smoke");
+    expect(runSmokeCheck).toHaveBeenCalledTimes(1);
+    expect(getChangedFileNames).not.toHaveBeenCalled();
   });
 
   it("runs verify THEN smoke when both are configured (both must pass)", async () => {
