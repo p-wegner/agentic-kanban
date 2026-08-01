@@ -210,6 +210,12 @@
       "import": "./dist/lib/settings-registry.js",
       "default": "./src/lib/settings-registry.ts"
     },
+    "./lib/plugin-manifest": {
+      "development": "./src/lib/plugin-manifest.ts",
+      "types": "./dist/lib/plugin-manifest.d.ts",
+      "import": "./dist/lib/plugin-manifest.js",
+      "default": "./src/lib/plugin-manifest.ts"
+    },
     "./lib/dynamic-preference-keys": {
       "development": "./src/lib/dynamic-preference-keys.ts",
       "types": "./dist/lib/dynamic-preference-keys.d.ts",

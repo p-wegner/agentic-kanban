@@ -21,6 +21,9 @@ export * from "./transcript-cwd-encoding.js";
 // Pure text linter for sibling compose relative-path resolution (dev #109) — no Node
 // builtins, safe as a value export for the client bundle.
 export * from "./service-compose-lint.js";
+// Plugin manifest contract (parse/validate + placeholder substitution) — pure
+// JSON/string logic, no Node builtins, safe as a value export for the client bundle.
+export * from "./plugin-manifest.js";
 // Type-only: smoke-check.ts imports node:child_process (runSmokeCheck), which crashes
 // the browser bundle if pulled into the client via this barrel. The sole runtime consumer
 // (server exit-workflow) imports runSmokeCheck from the deep path; only the SmokeCheck type
