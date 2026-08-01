@@ -10,6 +10,7 @@ describe("appRoutes", () => {
     expect(getViewRoutePath("crime-scene")).toBe("/crime-scene");
     expect(getViewRoutePath("milestones")).toBe("/milestones");
     expect(getViewRoutePath("fireworks")).toBe("/fireworks");
+    expect(getViewRoutePath("plugin-views")).toBe("/plugin-views");
   });
 
   it("parses direct links for key views", () => {
@@ -21,6 +22,7 @@ describe("appRoutes", () => {
     expect(getAppRouteView("/crime-scene")).toBe("crime-scene");
     expect(getAppRouteView("/milestones")).toBe("milestones");
     expect(getAppRouteView("/fireworks")).toBe("fireworks");
+    expect(getAppRouteView("/plugin-views")).toBe("plugin-views");
   });
 
   it("supports friendly aliases for workspace-oriented links", () => {

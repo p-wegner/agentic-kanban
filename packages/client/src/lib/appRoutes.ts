@@ -41,6 +41,7 @@ const VIEW_ROUTE_PATHS: Record<ViewMode, string> = {
   calendar: "/calendar",
   burndown: "/burndown",
   garden: "/garden",
+  "plugin-views": "/plugin-views",
 };
 
 const ROUTE_ALIASES: Record<string, ViewMode> = {
