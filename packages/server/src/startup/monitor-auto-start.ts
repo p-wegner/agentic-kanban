@@ -171,6 +171,15 @@ export interface AutoStartDeps {
    * instead of modelling this module's queries.
    */
   buildContentionGate?: BuildFileContentionGate;
+  /**
+   * Checks whether a strict worker-dispatch project has fleet capacity (epic #184).
+   * Defaults to the real implementation, so production needs no wiring; injectable
+   * for the same reason as `buildContentionGate` above — it reads preferences from
+   * the DB, and suites that model `db.select` as an ORDERED mock chain would other-
+   * wise have their sequence shifted by its reads. That desync is silent: it makes
+   * "starts X" tests fail AND "does NOT start X" tests pass vacuously.
+   */
+  canDispatch?: typeof projectCanDispatch;
 }
 
 /**
@@ -199,7 +208,7 @@ async function reconcileStaleMergedIssue(
   noteSkip(projectId, issueNumber, "already_merged");
 }
 
-export async function runAutoStart(prefMap: Map<string, string>, { serverPort, boardEvents, logMonitorAction, allowProject, isAutoDrivenProject = () => false, buildContentionGate = buildFileContentionGate }: AutoStartDeps): Promise<Map<string, AutoStartSkipInfo>> {
+export async function runAutoStart(prefMap: Map<string, string>, { serverPort, boardEvents, logMonitorAction, allowProject, isAutoDrivenProject = () => false, buildContentionGate = buildFileContentionGate, canDispatch = projectCanDispatch }: AutoStartDeps): Promise<Map<string, AutoStartSkipInfo>> {
   const skipInfo = new Map<string, AutoStartSkipInfo>();
   const noteSkip = (projectId: string, issueNumber: number | null | undefined, reason: AutoStartSkipReason, count = 1) => {
     let info = skipInfo.get(projectId);
@@ -240,7 +249,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
 
     // Fleet gate (epic #184): a strict worker-dispatch project must not start
     // work the fleet cannot take — one check per project per cycle.
-    const dispatch = await projectCanDispatch({
+    const dispatch = await canDispatch({
       database: db,
       projectId: inProgressSt.projectId,
       providerName: narrowProviderName(prefMap.get("provider")),
