@@ -50,4 +50,4 @@ export async function deleteWorker(id: string, database: Database = db): Promise
  * here — same rule `updateSessionContainerId` already follows. Re-exported from this
  * module so fleet callers keep importing it from the worker repository.
  */
-export { updateSessionWorkerId } from "./session-lifecycle.repository.js";
+export { updateSessionWorkerId } from "./session.repository.js";
