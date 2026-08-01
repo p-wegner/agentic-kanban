@@ -15,6 +15,99 @@ You are the **epic orchestrator** for a brand-new project. You are NOT done when
 2. You MUST leave a **resident watch** running (Step 4) before you stop. Setup-then-exit is a failed run even if the board looks healthy.
 3. After N/N Done + a clean integration pass, drive the meta-ticket all the way to **Done** (the terminal column), **not** Review, then write the run doc. Ending with the meta in Review has NOT met the contract (Space Invaders run #1 left all 10 children Done but the meta stuck in Review — the blind spot Step 6 closes).
 
+## Step 0 — Right-size the decomposition (cost tiers)
+
+**Before you seed any epic, decide the granularity — it dominates cost.** Two board experiments
+(2026-07-26, `docs/board-runs/greenfield-bootstrap-strategy.md`) built equivalent apps with different
+decomposition strategies (same provider). Cheapest signal = total $ per KLOC; all runs ended green, so
+the gaps are pure strategy overhead, not quality.
+
+*Round 1 — three ~4k-LOC single-repo PHP apps:*
+
+| Strategy | $ | LOC | $/KLOC |
+|---|---|---|---|
+| 1 mega ticket, single builder | **3.87** | 3731 | **1.04** |
+| foundation → 2 parallel leaves | 10.73 | 4718 | 2.27 |
+| 6 fine layer-per-ticket tickets | 12.41 | 4354 | 2.85 |
+
+*Round 2 — three multi-repo TS apps (Hono backend + React frontend), 5k-LOC target:*
+
+| Strategy | Tickets | $ | LOC | $/KLOC |
+|---|---|---|---|---|
+| repo-mega (1 mega ticket per repo) | 2 | **6.75** | 3377 | **2.00** |
+| coarse sequential (found → feat → FE) | 3 | 9.83 | 3761 | **2.61** |
+| contract-first fanout (contract → 3-wide wave → leaf) | 5 | 17.02 | 4095 | **4.16** |
+
+**$/KLOC rises steeply with ticket count — confirmed twice.** The cost driver is **NOT ticket count per
+se** but what each extra ticket pays: (a) a fresh builder **cold-reading the growing codebase**, (b) its
+**own review session**, (c) its own worktree **setup**, (d) **fix-and-merge conflict overhead** if
+parallel leaves touch a shared file. One mega ticket builds in ONE warm context and pays none of it.
+**Parallel fanout buys wall-clock, not tokens** (Round 2 fanout = 2x/KLOC vs minimal decomposition).
+
+**A single context builds to COHERENCE, not to a LOC target.** Round 2's per-repo megas plateaued at
+~1.7k LOC/repo (3377 vs a 5k goal); none of the three hit 5k, and the *more*-decomposed run got closest
+because each ticket adds its own slice. So the mega sweet spot is **per-context (~1.5–2k LOC/repo,
+~3–4k total)**; above that you MUST decompose and pay more $/KLOC.
+
+**To actually HIT a size/complexity target, run a metric-gated loop — not a bigger prompt.** An LOC ask
+in a SPEC is not a lever an agent optimizes (habithub's SPEC asked ~5k; `code-metrics` measured 1878
+prod SLOC delivered). Reaching a target is a closed loop: *measure the metric (`code-metrics analyze`
+→ `loc_split.prod_sloc`) → if under target, create the next grounded **requirement** ticket (a real
+feature, never "write N lines") → build+merge it → re-measure → repeat until met.* Each requirement
+ticket adds a measured, roughly fixed increment (~200 prod SLOC here). Build the generated tickets
+**sequentially/chained** (conflict-free), and — critically — point `code-metrics --output` at a scratch
+dir OUTSIDE the repo and never `npm install` in the registered main checkout, or the metrics/`node_modules`
+output dirties main and the pre-merge gate refuses every merge with `dirty_main`. See board #180 (a
+proposed first-class "grow to a metric target" backlog mode).
+
+> **Running the metric-gated loop hands-off (validated 2026-07-27, 3× Kotlin/Ktor → ~5.3k lines each):**
+> - **Set `verify_script` to the Windows-correct command form.** The pre-merge/verify gate spawns the script
+>   via `cmd.exe /d /s /c "<script>"` on Windows (`setup-script.ts` / `verify-gate-runner.js`), so a POSIX
+>   `./gradlew build` gate DIES with `Der Befehl "." … konnte nicht gefunden werden` → the gate fails, the
+>   workspace never gets `readyForMerge`, and `POST /workspaces/:id/merge` returns `pre_merge_gate_failed`.
+>   Use **`gradlew.bat build`** (gradle) / `mvnw.cmd verify` (maven) — a cmd-valid wrapper — so the gate
+>   actually RUNS and PASSES. (Board bugs filed: win-unaware `deriveVerifyCommand` + cmd.exe-only spawn.)
+> - **Merge stuck low-score reviews via `ready-for-merge`, not by looping.** Reviews scoring ≥~85 auto-merge;
+>   ~80–90 sit `In Review` with `readyForMerge=false`. `POST /workspaces/:id/ready-for-merge` and the monitor
+>   lands it on its next cycle. Only fall back to `POST .../merge` if the monitor is idle — and only once the
+>   verify_script is cmd-valid (above), else it fails the gate.
+> - **Size gate = TOTAL non-blank source lines (prod+test), not prod-only**, unless the ask literally says
+>   "prod SLOC". Foundation megas plateau ~1.5–2k prod; each grounded growth feature adds ~250–450 total
+>   (prod+test); a ~10-feature plan reaches a 5k *total* target around feature 6–8. Cheap proxy per repo:
+>   `find src -name '<ext>' | xargs cat | grep -cve '^\s*$'`.
+> - **COLD-VERIFY the target build on master before declaring a project done.** The board's verify gate can
+>   report GREEN off a *cached per-session* build while a fresh cold full build is RED — a test that passes
+>   in isolation but fails in the full suite (order/state-dependent). Run the real build task on master
+>   (`./gradlew build`, `pnpm build && pnpm test`, …) at closeout; if red, file a fix ticket and let the
+>   board fix it before closing out. Do not trust the board's Done flag as build-green proof.
+> - **Kotlin/Ktor + Exposed + H2 scaffold trap:** a single shared in-memory DB URL
+>   (`jdbc:h2:mem:<name>;DB_CLOSE_DELAY=-1`) in `DatabaseFactory.init()` is shared across ALL test files →
+>   state/auto-increment-id leakage → order-dependent failures the per-test-file run never sees. Put in the
+>   scaffold/SPEC from day one: **each test gets an isolated DB** (unique `mem:` name per test, or
+>   drop+recreate tables in a shared `@BeforeTest`). Reuse the shopcart template but fix this first.
+
+Pick the SMALLEST number of tickets the work allows:
+
+- **≤ ~3–4k LOC / fits one context → ONE mega ticket + a thorough `SPEC.md`** (or, multi-repo, **one mega
+  ticket per repo** — cheapest of all at $2.00/KLOC). Overrides the fan-out advice below; don't manufacture
+  a 10-ticket epic for a small app.
+- **Larger, optimizing tokens → a few COARSE sequential chunks** (foundation = core+domain+persistence+
+  services in one ticket; then a couple of big slices). This is the value sweet spot for big apps —
+  $2.61/KLOC, near the mega floor and far below fanout. **Prefer coarse-sequential over fanout by default.**
+- **Larger, and wall-clock is the priority → foundation → parallel fanout** (the rest of this skill). Only
+  then does the fan-out epic pay off, and only if the leaves touch **disjoint files** (Step 2's hot-file
+  rule) — else you pay the fix-and-merge conflict tax (seen live: two leaves both created `FeedService`).
+- **Never fine-grained layer-per-ticket chains** — serial AND expensive, zero quality gain.
+
+**Multi-repo (backend + frontend as separate repos):** register the backend as the leading repo (the
+verify gate runs there) + the frontend as a sibling (`POST /api/projects/:id/repos`, absolute path +
+per-repo `setupScript`); since separate repos can't share a TS package, carry the API contract as a
+`docs/api-contract.md` in the backend that frontend tickets read.
+
+The rest of this skill (fan-out epic, resident watch, close-out) applies to the **larger** tiers. For a
+small one-mega-ticket build you still do preflight (Step 1) + verify the merge landed on master + the
+completion contract, but you skip the fan-out seeding.
+
 ## Step 1 — Preflight (assert, don't assume)
 
 A new project drives hands-off only if ALL of these hold. Read `GET /api/preferences/settings`; fix wrong ones via **`PUT /api/preferences/settings` with `curl` (Bash)** — never `Invoke-RestMethod -Put` (silently no-ops; see CLAUDE.md PowerShell rules).
@@ -29,6 +122,7 @@ A new project drives hands-off only if ALL of these hold. Read `GET /api/prefere
 | **Tickets use an eligible issueType** | epic tickets are `task`/`bug` (NOT `feature`/`enhancement`) and titles don't start `feature:`/`enhancement:` | monitor auto-start skips feature/enhancement-typed issues (#773) → the whole epic is invisible. Seed as `task` (or convert via `PATCH /api/issues/<id> {"issueType":"task"}`). |
 | **Verify gate set** | `verify_script_<projectId>` is a real build/test cmd | `PUT {"verify_script_<projectId>":"pnpm install && pnpm build"}` — the #531 quality gate runs it in the worktree post-session and WITHHOLDS merge on non-zero. This is how the dev-board's verify-before-merge ports to the toy stack ([[project_timetracker_drive_and_autonomy_obstacles]]). |
 | Per-project autodrive ON | `board_autodrive_<projectId> == "true"` | PUT `{"board_autodrive_<projectId>":"true"}` |
+| **Post-merge cascade ON** | `dependency_auto_chain == "true"` | PUT `{"dependency_auto_chain":"true"}`. `resolveStartPolicy.postMergeCascade` gates on it — with it OFF, `start_mode=monitor` will NOT auto-start the next wave right after a blocker merges (the regular cycle is unreliable for Backlog too). Combined with the `issueType` row above, this is the #1 reason a monitor-mode project sits idle after a merge (hit live 2026-07-26 — the whole wave stalled in Backlog). If auto-start still won't fire, drive manually: launch each unblocked ticket via `POST /api/workspaces` as its deps reach Done (auto-review/auto-merge/fix-and-merge are event-driven and work regardless). |
 | Optional per-project Conductor ON | `board_conductor_<projectId> == "true"` or JSON config | PUT `{"board_conductor_<projectId>":"{\"enabled\":true,\"agent\":\"codex\",\"cadenceSeconds\":1800}"}` |
 | Auto-merge ON + monitor strategy | `auto_merge == "true"`, strategy resolves to `monitor`, `auto_merge_in_review == "true"` | PUT settings accordingly |
 | WIP target ≥ 2 (real parallelism) | `board_strategy_<projectId>` (`activeAgentsTarget`) or legacy `nudge_wip_limit` | set `board_strategy_<projectId>` `{activeAgentsTarget:3, maxNewStartsPerCycle:3, backlogFloor:0}` |

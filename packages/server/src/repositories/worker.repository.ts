@@ -1,4 +1,4 @@
-import { workers, sessions } from "@agentic-kanban/shared/schema";
+import { workers } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -43,11 +43,11 @@ export async function deleteWorker(id: string, database: Database = db): Promise
   await database.delete(workers).where(eq(workers.id, id));
 }
 
-/** Stamp which fleet worker a session runs on (mirrors sessions.containerId). */
-export async function updateSessionWorkerId(
-  sessionId: string,
-  workerId: string,
-  database: Database = db,
-): Promise<void> {
-  await database.update(sessions).set({ workerId }).where(eq(sessions.id, sessionId));
-}
+/**
+ * Stamp which fleet worker a session runs on (mirrors sessions.containerId).
+ *
+ * Delegates to the `sessions`-owning repository (#957) instead of writing the table
+ * here — same rule `updateSessionContainerId` already follows. Re-exported from this
+ * module so fleet callers keep importing it from the worker repository.
+ */
+export { updateSessionWorkerId } from "./session-lifecycle.repository.js";
