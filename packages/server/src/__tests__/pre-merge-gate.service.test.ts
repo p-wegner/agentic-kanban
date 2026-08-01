@@ -11,6 +11,7 @@ const runSetupScript = vi.fn();
 const runSmokeCheck = vi.fn();
 vi.mock("@agentic-kanban/shared/lib/setup-script", () => ({
   runSetupScript: (...args: unknown[]) => runSetupScript(...args),
+  DEFAULT_SETUP_SCRIPT_TIMEOUT_MS: 5 * 60 * 1000,
 }));
 vi.mock("@agentic-kanban/shared/lib/smoke-check", () => ({
   runSmokeCheck: (...args: unknown[]) => runSmokeCheck(...args),
@@ -61,6 +62,27 @@ describe("runPreMergeGate (#821) — shared verify+smoke gate the monitor's auto
     expect(res.stage).toBe("verify");
     expect(res.message).toContain("compile error");
     expect(runSmokeCheck).not.toHaveBeenCalled(); // short-circuits before smoke
+  });
+
+  it("#192: a timed-out verify_script is reported as inconclusive/retryable, NOT a build/test failure", async () => {
+    await setPreference(verifyScriptPrefKey("p"), ".\\gradlew.bat test", db);
+    runSetupScript.mockResolvedValue({ exitCode: 124, stdout: "", stderr: "", timedOut: true });
+    const res = await runPreMergeGate({ id: "ws", workingDir: "/tmp/wt" }, "p", db);
+    expect(res.passed).toBe(false);
+    expect(res.stage).toBe("verify");
+    expect(res.timedOut).toBe(true);
+    expect(res.message).toContain("timed out");
+    expect(res.message).not.toContain("failed (exit");
+    // runSetupScript is called with an explicit timeoutMs budget, not the bare (script) form.
+    expect(runSetupScript).toHaveBeenCalledWith("/tmp/wt", ".\\gradlew.bat test", expect.objectContaining({ timeoutMs: expect.any(Number) }));
+  });
+
+  it("#192: a per-project verify_timeout_ms_<projectId> override is passed through to runSetupScript", async () => {
+    await setPreference(verifyScriptPrefKey("p"), ".\\gradlew.bat test", db);
+    await setPreference("verify_timeout_ms_p", "600000", db);
+    runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "", timedOut: false });
+    await runPreMergeGate({ id: "ws", workingDir: "/tmp/wt" }, "p", db);
+    expect(runSetupScript).toHaveBeenCalledWith("/tmp/wt", ".\\gradlew.bat test", { timeoutMs: 600000 });
   });
 
   it("fail-closed: verify_script configured but NO worktree → fails, doesn't approve unverifiable work", async () => {
