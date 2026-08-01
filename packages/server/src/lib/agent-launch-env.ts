@@ -5,6 +5,8 @@
 // extraEnv precedence) become directly unit-testable. The actual spawn, fd setup,
 // and watcher wiring stay in agent.service.
 
+import { gradleUserHomeForWorktree } from "@agentic-kanban/shared/lib/gradle-env";
+
 export const DEFAULT_BOARD_SERVER_PORT = "3001";
 export const DEFAULT_BOARD_CLIENT_PORT = "5173";
 
@@ -51,6 +53,12 @@ export interface AgentSpawnEnvParams {
   /** process.env.KANBAN_PROTECTED_PIDS (already-protected pids), if any. */
   protectedPidsEnv: string | undefined;
   sessionId: string;
+  /**
+   * Absolute path of the worktree the agent runs in. Used to derive a per-worktree
+   * `GRADLE_USER_HOME` (#194) so JVM builders in different worktrees never share a
+   * daemon registry — set unconditionally; it is inert for non-Gradle projects.
+   */
+  worktreePath: string;
   /** Per-launch overrides; applied LAST so they win. */
   extraEnv: Record<string, string> | undefined;
 }
@@ -58,10 +66,11 @@ export interface AgentSpawnEnvParams {
 /**
  * Build the full child-process env: base provider env, color-off flags, board +
  * worktree port wiring, the protected-pid list (board pid appended), session id
- * markers, then the per-launch extraEnv overrides last.
+ * markers, the per-worktree Gradle isolation default, then the per-launch extraEnv
+ * overrides last.
  */
 export function buildAgentSpawnEnv(params: AgentSpawnEnvParams): Record<string, string | undefined> {
-  const { spawnEnv, ports, serverPid, protectedPidsEnv, sessionId, extraEnv } = params;
+  const { spawnEnv, ports, serverPid, protectedPidsEnv, sessionId, worktreePath, extraEnv } = params;
   return {
     ...spawnEnv,
     FORCE_COLOR: "0",
@@ -79,6 +88,7 @@ export function buildAgentSpawnEnv(params: AgentSpawnEnvParams): Record<string, 
     SERVER_PORT: ports.worktreeServerPort,
     PORT: ports.worktreeServerPort,
     VITE_PORT: ports.worktreeClientPort,
+    GRADLE_USER_HOME: gradleUserHomeForWorktree(worktreePath),
     ...extraEnv,
   };
 }

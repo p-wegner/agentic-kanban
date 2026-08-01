@@ -52,9 +52,10 @@ describe("resolveLaunchPorts", () => {
 
 describe("buildAgentSpawnEnv", () => {
   const ports = { boardServerPort: "3001", boardClientPort: "5173", worktreeServerPort: "3007", worktreeClientPort: "5179" };
+  const worktreePath = "/repos/proj/.worktrees/ak-42";
 
   it("wires board + worktree ports onto the documented keys", () => {
-    const env = buildAgentSpawnEnv({ spawnEnv: {}, ports, serverPid: "100", protectedPidsEnv: undefined, sessionId: "s1", extraEnv: undefined });
+    const env = buildAgentSpawnEnv({ spawnEnv: {}, ports, serverPid: "100", protectedPidsEnv: undefined, sessionId: "s1", worktreePath, extraEnv: undefined });
     expect(env.KANBAN_BOARD_SERVER_PORT).toBe("3001");
     expect(env.KANBAN_SERVER_PORT).toBe("3007");
     expect(env.PORT).toBe("3007");
@@ -66,22 +67,38 @@ describe("buildAgentSpawnEnv", () => {
   });
 
   it("appends the board pid to the existing protected-pid list", () => {
-    expect(buildAgentSpawnEnv({ spawnEnv: {}, ports, serverPid: "100", protectedPidsEnv: "55,66", sessionId: "s1", extraEnv: undefined }).KANBAN_PROTECTED_PIDS).toBe("55,66,100");
+    expect(buildAgentSpawnEnv({ spawnEnv: {}, ports, serverPid: "100", protectedPidsEnv: "55,66", sessionId: "s1", worktreePath, extraEnv: undefined }).KANBAN_PROTECTED_PIDS).toBe("55,66,100");
   });
 
   it("uses just the board pid when none were protected", () => {
-    expect(buildAgentSpawnEnv({ spawnEnv: {}, ports, serverPid: "100", protectedPidsEnv: undefined, sessionId: "s1", extraEnv: undefined }).KANBAN_PROTECTED_PIDS).toBe("100");
+    expect(buildAgentSpawnEnv({ spawnEnv: {}, ports, serverPid: "100", protectedPidsEnv: undefined, sessionId: "s1", worktreePath, extraEnv: undefined }).KANBAN_PROTECTED_PIDS).toBe("100");
   });
 
   it("lets extraEnv override later, but never the session id markers", () => {
-    const env = buildAgentSpawnEnv({ spawnEnv: { FOO: "base" }, ports, serverPid: "100", protectedPidsEnv: undefined, sessionId: "s1", extraEnv: { FOO: "override", BAR: "x" } });
+    const env = buildAgentSpawnEnv({ spawnEnv: { FOO: "base" }, ports, serverPid: "100", protectedPidsEnv: undefined, sessionId: "s1", worktreePath, extraEnv: { FOO: "override", BAR: "x" } });
     expect(env.FOO).toBe("override");
     expect(env.BAR).toBe("x");
     expect(env.KANBAN_SESSION_ID).toBe("s1");
   });
 
   it("keeps base spawnEnv values that aren't overridden", () => {
-    const env = buildAgentSpawnEnv({ spawnEnv: { ANTHROPIC_API_KEY: "sk-x" }, ports, serverPid: "1", protectedPidsEnv: undefined, sessionId: "s", extraEnv: undefined });
+    const env = buildAgentSpawnEnv({ spawnEnv: { ANTHROPIC_API_KEY: "sk-x" }, ports, serverPid: "1", protectedPidsEnv: undefined, sessionId: "s", worktreePath, extraEnv: undefined });
     expect(env.ANTHROPIC_API_KEY).toBe("sk-x");
+  });
+
+  // #194: JVM builders in different worktrees used to share one GRADLE_USER_HOME
+  // (unset everywhere), so their gradle daemons fought over the same registry.
+  it("derives a distinct GRADLE_USER_HOME from the worktree path", () => {
+    const envA = buildAgentSpawnEnv({ spawnEnv: {}, ports, serverPid: "100", protectedPidsEnv: undefined, sessionId: "s1", worktreePath: "/repos/proj/.worktrees/ak-1", extraEnv: undefined });
+    const envB = buildAgentSpawnEnv({ spawnEnv: {}, ports, serverPid: "100", protectedPidsEnv: undefined, sessionId: "s2", worktreePath: "/repos/proj/.worktrees/ak-2", extraEnv: undefined });
+    expect(envA.GRADLE_USER_HOME).toBeTruthy();
+    expect(envA.GRADLE_USER_HOME).not.toBe(envB.GRADLE_USER_HOME);
+    expect(envA.GRADLE_USER_HOME).toContain("ak-1");
+    expect(envB.GRADLE_USER_HOME).toContain("ak-2");
+  });
+
+  it("lets extraEnv override GRADLE_USER_HOME when a caller needs to", () => {
+    const env = buildAgentSpawnEnv({ spawnEnv: {}, ports, serverPid: "100", protectedPidsEnv: undefined, sessionId: "s1", worktreePath, extraEnv: { GRADLE_USER_HOME: "/custom/home" } });
+    expect(env.GRADLE_USER_HOME).toBe("/custom/home");
   });
 });

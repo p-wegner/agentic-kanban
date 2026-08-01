@@ -234,6 +234,12 @@
       "import": "./dist/lib/setup-script.js",
       "default": "./src/lib/setup-script.ts"
     },
+    "./lib/gradle-env": {
+      "development": "./src/lib/gradle-env.ts",
+      "types": "./dist/lib/gradle-env.d.ts",
+      "import": "./dist/lib/gradle-env.js",
+      "default": "./src/lib/gradle-env.ts"
+    },
     "./lib/ticket-context": {
       "development": "./src/lib/ticket-context.ts",
       "types": "./dist/lib/ticket-context.d.ts",
