@@ -40,6 +40,7 @@ const VIEW_ROUTE_PATHS: Record<ViewMode, string> = {
   "agent-throughput": "/agent-throughput",
   calendar: "/calendar",
   burndown: "/burndown",
+  garden: "/garden",
 };
 
 const ROUTE_ALIASES: Record<string, ViewMode> = {
