@@ -65,6 +65,11 @@ export interface RunSetupScriptOptions {
    * exceeds it from a cold cache gets killed and misreported as a failure).
    */
   timeoutMs?: number;
+  /**
+   * Extra env vars layered onto `process.env` for this invocation (e.g. a per-worktree
+   * `GRADLE_USER_HOME`, #194) — applied AFTER the process env copy so a caller's value wins.
+   */
+  env?: Record<string, string>;
 }
 
 /**
@@ -116,7 +121,7 @@ export function runSetupScript(
 
     const proc = spawn(spec.command, spec.args, {
       cwd: worktreePath,
-      env: { ...process.env },
+      env: { ...process.env, ...options.env },
       windowsHide: true,
       // Verbatim quoting is a cmd.exe concern only. `docker` is a real
       // executable receiving a normal argv, so re-quoting must stay OFF for it
