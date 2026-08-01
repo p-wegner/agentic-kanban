@@ -18,7 +18,13 @@ import {
 // entry). These tests pin the single correct protocol: acquireRepoMergeLock
 // serializes all acquisitions per repoPath, strictly one-after-the-other.
 
-const REPO = "/tmp/serialization-test-repo";
+// A REAL directory containing a `.git` entry, not a synthetic path. `acquireRepoMergeLock`
+// fails fast when `<repoPath>/.git` is missing (a752363421, "repo-lock fails fast instead of
+// fabricating .git for a missing repoPath") — correct production behaviour, but it silently
+// turned every acquisition here into a refusal, so the lock body never ran and this file had
+// been red on master since 2026-07-15. Materialize the repo so the guard passes and these
+// tests exercise the serialization protocol they were written for.
+let REPO: string;
 
 function deferred<T = void>() {
   let resolve!: (v: T) => void;
@@ -33,6 +39,12 @@ function deferred<T = void>() {
 describe("acquireRepoMergeLock serialization (#944)", () => {
   beforeEach(() => {
     activeMerges.clear();
+    REPO = mkdtempSync(join(tmpdir(), "serialization-test-repo-"));
+    mkdirSync(join(REPO, ".git"), { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(REPO, { recursive: true, force: true });
   });
 
   it("runs two concurrent acquisitions strictly one-after-the-other", async () => {
@@ -301,11 +313,17 @@ describe("acquireRepoMergeLock serialization (#944)", () => {
     const gate = deferred();
     const events: string[] = [];
 
-    const a = acquireRepoMergeLock("/tmp/repo-one", "ws-a", async () => {
+    // Two DISTINCT real repos — same `.git`-must-exist guard as REPO above.
+    const repoOne = mkdtempSync(join(tmpdir(), "repo-one-"));
+    const repoTwo = mkdtempSync(join(tmpdir(), "repo-two-"));
+    mkdirSync(join(repoOne, ".git"), { recursive: true });
+    mkdirSync(join(repoTwo, ".git"), { recursive: true });
+
+    const a = acquireRepoMergeLock(repoOne, "ws-a", async () => {
       events.push("one-start");
       await gate.promise;
     });
-    const b = acquireRepoMergeLock("/tmp/repo-two", "ws-b", async () => {
+    const b = acquireRepoMergeLock(repoTwo, "ws-b", async () => {
       events.push("two-start");
     });
 
@@ -313,5 +331,7 @@ describe("acquireRepoMergeLock serialization (#944)", () => {
     expect(events).toContain("two-start");
     gate.resolve();
     await a;
+    rmSync(repoOne, { recursive: true, force: true });
+    rmSync(repoTwo, { recursive: true, force: true });
   });
 });
