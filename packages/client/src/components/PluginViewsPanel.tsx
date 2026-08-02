@@ -313,6 +313,11 @@ export function PluginViewsPanel({ projectId }: PluginViewsPanelProps) {
                 title={`${activeView.pluginName} — ${activeView.label}`}
                 className="flex-1 w-full bg-white"
                 sandbox="allow-forms allow-modals allow-popups allow-same-origin allow-scripts"
+                // A view is a whole tool inside a panel — a graph, a dashboard — and the panel is
+                // the smallest part of the screen. Without this, requestFullscreen() REJECTS in
+                // here (permissions policy, nothing to do with sandbox), so a view offering a
+                // fullscreen control can only ever fall back to filling its own frame.
+                allow="fullscreen"
               />
             ) : (
               <div className="flex-1 flex items-center justify-center">
