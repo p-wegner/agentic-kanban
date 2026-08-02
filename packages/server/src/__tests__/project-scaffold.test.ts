@@ -300,34 +300,40 @@ describe("project-scaffold", () => {
       }
     });
 
-    it("skips the worktree guard when repo has no worktrees", async () => {
+    it("includes the worktree guard by default even when the repo has no worktrees yet (#216)", async () => {
       const dir = await tmp();
       try {
         await gitInit(dir);
-        // Single-worktree repo — guard must not be installed automatically
+        // Single-worktree repo at scaffold time — the guard must STILL be installed, since it
+        // no-ops at runtime until a second worktree exists. Gating this on repoHasWorktrees()
+        // meant a freshly registered project never got the guard, and never revisited scaffolding
+        // once its first workspace worktree was created (#216).
         ensureHookScaffold(dir); // no includeWorktreeGuard override
 
         const settings = JSON.parse(await readFile(join(dir, ".claude", "settings.json"), "utf8"));
         const allCmds = (settings.hooks?.PreToolUse ?? []).flatMap(
           (e: { hooks?: { command: string }[] }) => (e.hooks ?? []).map((h: { command: string }) => h.command)
         );
-        expect(allCmds.some((c: string) => c.includes("prevent-cross-worktree-writes.js"))).toBe(false);
+        expect(allCmds.some((c: string) => c.includes("prevent-cross-worktree-writes.js"))).toBe(true);
+
+        const { existsSync } = await import("node:fs");
+        expect(existsSync(join(dir, ".claude", "hooks", "prevent-cross-worktree-writes.js"))).toBe(true);
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
     });
 
-    it("includes the worktree guard when includeWorktreeGuard is forced to true", async () => {
+    it("skips the worktree guard when includeWorktreeGuard is forced to false", async () => {
       const dir = await tmp();
       try {
         await gitInit(dir);
-        ensureHookScaffold(dir, { includeWorktreeGuard: true });
+        ensureHookScaffold(dir, { includeWorktreeGuard: false });
 
         const settings = JSON.parse(await readFile(join(dir, ".claude", "settings.json"), "utf8"));
         const allCmds = (settings.hooks?.PreToolUse ?? []).flatMap(
           (e: { hooks?: { command: string }[] }) => (e.hooks ?? []).map((h: { command: string }) => h.command)
         );
-        expect(allCmds.some((c: string) => c.includes("prevent-cross-worktree-writes.js"))).toBe(true);
+        expect(allCmds.some((c: string) => c.includes("prevent-cross-worktree-writes.js"))).toBe(false);
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
