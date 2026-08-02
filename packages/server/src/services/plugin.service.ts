@@ -644,14 +644,22 @@ export function createPluginService(deps: {
     return { stopped: true };
   }
 
-  /** Single HTTP probe — never polls in a loop. */
-  async function probeHealth(port: number): Promise<boolean> {
+  /**
+   * Single HTTP probe — never polls in a loop. Tries `healthPath` (default "/health") first;
+   * a 404 there falls back to "/" so a plugin with no dedicated health endpoint still works.
+   */
+  async function probeHealth(port: number, healthPath = "/health"): Promise<boolean> {
+    // readiness probe against a PLUGIN's supervised child view-server process
+    // (spawnShellCommand, above), not this board server — a genuinely separate process
+    // on a dynamically allocated port with no in-process function to inject.
+    // SELF-HTTP OK: see server/CLAUDE.md "Self-HTTP calls are an anti-pattern".
+    const path = healthPath.startsWith("/") ? healthPath : `/${healthPath}`;
     try {
-      // readiness probe against a PLUGIN's supervised child view-server process
-      // (spawnShellCommand, above), not this board server — a genuinely separate process
-      // on a dynamically allocated port with no in-process function to inject.
-      // SELF-HTTP OK: see server/CLAUDE.md "Self-HTTP calls are an anti-pattern".
-      const res = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(1500) });
+      const res = await fetch(`http://127.0.0.1:${port}${path}`, { signal: AbortSignal.timeout(1500) });
+      if (res.status === 404 && path !== "/") {
+        const fallback = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(1500) });
+        return fallback.status < 500;
+      }
       return res.status < 500;
     } catch {
       return false;
@@ -663,13 +671,15 @@ export function createPluginService(deps: {
     if (!entry || entry.child.exitCode !== null) {
       return { running: false as const };
     }
+    const plugin = await requirePlugin(pluginRowId);
+    const view = findView(plugin.manifest, viewId);
     return {
       running: true as const,
       port: entry.port,
       pid: entry.pid,
       startedAt: entry.startedAt,
       url: `http://localhost:${entry.port}`,
-      healthy: await probeHealth(entry.port),
+      healthy: await probeHealth(entry.port, view.serve.healthPath),
     };
   }
 

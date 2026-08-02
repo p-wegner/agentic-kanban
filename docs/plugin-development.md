@@ -131,6 +131,7 @@ A supervised child process serving HTTP, framed as a board view.
   { "id": "coverage", "label": "Coverage", "kind": "iframe",
     "description": "What this panel shows.",
     "serve": { "command": "node tools/serve.mjs", "cwd": "plugin", "portEnv": "PORT",
+               "healthPath": "/health",
                "env": { "MY_ROOT": "{{repoPath}}" } } }
 ]
 ```
@@ -142,8 +143,14 @@ A supervised child process serving HTTP, framed as a board view.
   default to `"plugin"`**, matching the doc comment. If your server ships with the plugin but
   needs to run against the output repo, set `"cwd": "repo"` and reference the script via
   `{{pluginPath}}` in `command` (relative paths otherwise resolve into `cwd`, not the plugin).
-- The readiness probe is `GET /` with any status below 500. You do not need a `/health` route,
-  though one is convenient for your own tests.
+- The readiness probe requests `serve.healthPath` (default `/health`) with any status below 500
+  counting as healthy. If that path 404s, the probe falls back to `GET /` — so an existing plugin
+  with no dedicated endpoint keeps working unchanged. Prefer adding a cheap, dependency-free
+  `/health` route (or set a custom `healthPath`) over relying on the fallback: the probe runs on
+  every status check, so for a view that renders a large register or hits a data source per
+  request, `/` is the single most expensive request your server gets. A route that only your
+  index serves is also the one place a legitimately-erroring index (e.g. a data source mid-write)
+  can't be mistaken for the server being down.
 - Read your state **fresh per request**. The process is long-lived; a page built at startup shows
   a snapshot of whenever the panel was first opened, which is worse than no panel.
 - Be self-contained: inline CSS and JS, no CDN, no external fonts, no remote images.
@@ -415,8 +422,8 @@ no agents. Cover, at minimum:
 - [ ] every `skills[].dir` exists and contains `SKILL.md`, with a one-line `description`
 - [ ] every `loops[].skill` is one of those skill basenames
 - [ ] `scripts[].cwd` set explicitly (it defaults to `"repo"`)
-- [ ] `views[].serve.portEnv` set; the server binds it, answers `GET /`, and re-reads state per
-      request
+- [ ] `views[].serve.portEnv` set; the server binds it, answers `/health` (or `serve.healthPath`),
+      and re-reads state per request
 - [ ] the planner never throws, reports preconditions as notes, and returns `converged: false`
       when blocked
 - [ ] unit ids are fresh per pass
@@ -461,5 +468,3 @@ Useful endpoints while developing: `POST /api/plugins` (install),
   set `externalUrl`; a second "machine-created, dedupe on re-run" feature should get its own
   column.
 - **`views[].kind` is `"iframe"` only.**
-- **The view readiness probe hits `GET /`**, so a server that returns 5xx on its index (but is
-  otherwise healthy) reads as down.

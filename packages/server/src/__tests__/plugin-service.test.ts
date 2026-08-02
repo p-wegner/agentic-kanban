@@ -423,6 +423,70 @@ describe("plugin.service", () => {
     expect(after.running).toBe(false);
   });
 
+  /** Child server processes can take a moment to bind under load; poll instead of asserting on the first check. */
+  async function waitForHealthy(pluginRowId: string, viewId: string, projectId: string) {
+    let status: Awaited<ReturnType<typeof service.getViewStatus>> | undefined;
+    for (let attempt = 0; attempt < 20; attempt++) {
+      status = await service.getViewStatus(pluginRowId, viewId, projectId);
+      if (status.running && status.healthy) return status;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return status;
+  }
+
+  it("getViewStatus falls back to \"/\" when the default \"/health\" 404s (no dedicated endpoint)", async () => {
+    const pluginDir = makePluginDir();
+    // Realistic router: only "/" is handled, anything else 404s — as a plugin with no
+    // dedicated health endpoint would behave.
+    writeFileSync(
+      join(pluginDir, "serve.mjs"),
+      "import http from 'node:http';" +
+        "http.createServer((req, res) => {" +
+        "  if (req.url === '/') { res.end('ok'); return; }" +
+        "  res.writeHead(404); res.end();" +
+        "}).listen(process.env.PORT, '127.0.0.1');",
+    );
+    const repo = makeProjectRepo();
+    const plugin = await service.installPlugin({ source: pluginDir });
+    const projectId = await insertProject(db, repo);
+
+    await service.startView(plugin.id, "coverage", projectId);
+    const status = await waitForHealthy(plugin.id, "coverage", projectId);
+    expect(status).toMatchObject({ running: true, healthy: true });
+  });
+
+  it("getViewStatus honors a manifest healthPath and reports unhealthy on a 500 index page", async () => {
+    const manifest = {
+      ...MANIFEST,
+      views: [
+        {
+          id: "coverage",
+          label: "Coverage",
+          kind: "iframe",
+          serve: { command: "node serve.mjs", portEnv: "PORT", healthPath: "/health" },
+        },
+      ],
+    };
+    const pluginDir = makePluginDir(manifest);
+    // Index legitimately 5xxs while the server is otherwise up — the dedicated
+    // /health endpoint is the source of truth, not the (expensive/erroring) index.
+    writeFileSync(
+      join(pluginDir, "serve.mjs"),
+      "import http from 'node:http';" +
+        "http.createServer((req, res) => {" +
+        "  if (req.url === '/health') { res.end('ok'); return; }" +
+        "  res.writeHead(500); res.end();" +
+        "}).listen(process.env.PORT, '127.0.0.1');",
+    );
+    const repo = makeProjectRepo();
+    const plugin = await service.installPlugin({ source: pluginDir });
+    const projectId = await insertProject(db, repo);
+
+    await service.startView(plugin.id, "coverage", projectId);
+    const status = await waitForHealthy(plugin.id, "coverage", projectId);
+    expect(status).toMatchObject({ running: true, healthy: true });
+  });
+
   it("startView honors serve.cwd: 'repo' — the view process runs in the project repo, not the plugin checkout", async () => {
     const manifest = {
       ...MANIFEST,

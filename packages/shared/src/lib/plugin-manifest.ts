@@ -15,6 +15,7 @@
  *   "skills": [{ "dir": ".claude/skills/requirement-extraction" }],
  *   "views": [{ "id": "coverage", "label": "Coverage", "kind": "iframe",
  *               "serve": { "command": "node tools/coverage/serve.mjs", "portEnv": "PORT",
+ *                          "healthPath": "/health",
  *                          "env": { "COVERAGE_ROOT": "{{repoPath}}" } } }],
  *   "scripts": [{ "name": "coverage", "command": "npm run coverage", "cwd": "plugin",
  *                 "env": { "SOURCE_ROOT": "{{leadingRepoPath}}", "COVERAGE_ROOT": "{{repoPath}}" } }],
@@ -51,6 +52,12 @@ export interface PluginViewServeDef {
   cwd?: PluginCwd;
   /** Env var name the server reads its port from (e.g. "PORT"). */
   portEnv?: string;
+  /**
+   * Path the readiness probe requests instead of "/". Default "/health"; a 404 there falls
+   * back to probing "/" (so existing plugins with no dedicated endpoint keep working).
+   * Prefer a cheap, dependency-free endpoint — the probe runs on every status check.
+   */
+  healthPath?: string;
   /** Extra env vars; values support {{repoPath}}/{{leadingRepoPath}}/{{projectName}}/{{pluginPath}}/{{port}}. */
   env?: Record<string, string>;
 }
@@ -278,6 +285,7 @@ export function parsePluginManifest(input: string | unknown): PluginManifest {
         command: requireString(serve.command, `views[${i}].serve.command`),
         cwd: optionalCwd(serve.cwd, `views[${i}].serve.cwd`),
         portEnv: optionalString(serve.portEnv, `views[${i}].serve.portEnv`),
+        healthPath: optionalString(serve.healthPath, `views[${i}].serve.healthPath`),
         env: optionalEnv(serve.env, `views[${i}].serve.env`),
       },
     };
