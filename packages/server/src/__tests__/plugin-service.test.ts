@@ -9,6 +9,7 @@ import { gitExecSync } from "@agentic-kanban/shared/lib/git-exec";
 import { pluginEnabledPreferenceKey } from "@agentic-kanban/shared/lib/plugin-manifest";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createPluginService, PluginError, stopAllPluginViews } from "../services/plugin.service.js";
+import type { PluginSkillRunProgress } from "../services/plugin.service.js";
 import type { Database } from "../db/index.js";
 
 /**
@@ -359,6 +360,66 @@ describe("plugin.service", () => {
     }));
     expect(createWorkspace).toHaveBeenCalledWith({ issueId: "issue-1", skillName: "requirement-extraction" });
     expect(result).toEqual({ issueId: "issue-1", issueNumber: 42, workspaceId: "ws-1", branch: "feature/ak-42-run-skill" });
+  });
+
+  it("runSkill appends the launcher's prompt to the skill brief instead of replacing it", async () => {
+    const plugin = await service.installPlugin({ source: makePluginDir() });
+    const projectId = await insertProject(db, makeProjectRepo());
+    const createIssue = vi.fn().mockResolvedValue({ id: "issue-1", issueNumber: 42 });
+    const createWorkspace = vi.fn().mockResolvedValue({ id: "ws-1", branch: "b" });
+    const withDeps = createPluginService({ database: db as unknown as Database, createIssue, createWorkspace });
+
+    await withDeps.runSkill(plugin.id, "requirement-extraction", projectId, {
+      prompt: "Only the billing module, and skip the UI lenses.",
+    });
+
+    const description = createIssue.mock.calls[0][0].description as string;
+    // The brief names the skill to run — dropping it would leave the agent guessing.
+    expect(description).toContain("requirement-extraction");
+    expect(description).toContain("Only the billing module, and skip the UI lenses.");
+  });
+
+  it("runSkill reports the ticket BEFORE the slow workspace provisioning", async () => {
+    const plugin = await service.installPlugin({ source: makePluginDir() });
+    const projectId = await insertProject(db, makeProjectRepo());
+    const seen: string[] = [];
+    const createIssue = vi.fn().mockResolvedValue({ id: "issue-1", issueNumber: 42 });
+    // Provisioning is the minutes-long part (worktree + setup script + agent launch); the
+    // launcher must have the ticket number long before it finishes.
+    const createWorkspace = vi.fn().mockImplementation(async () => {
+      seen.push("provisioning");
+      return { id: "ws-1", branch: "feature/ak-42" };
+    });
+    const withDeps = createPluginService({ database: db as unknown as Database, createIssue, createWorkspace });
+
+    const events: string[] = [];
+    await withDeps.runSkill(plugin.id, "requirement-extraction", projectId, {
+      onProgress: (e) => { events.push(e.stage); seen.push(e.stage); },
+    });
+
+    expect(events).toEqual(["ticket", "workspace", "done"]);
+    expect(seen.indexOf("ticket")).toBeLessThan(seen.indexOf("provisioning"));
+    expect(seen.indexOf("done")).toBeGreaterThan(seen.indexOf("provisioning"));
+  });
+
+  it("runSkill's workspace stage names the setup script, the usual reason a launch is slow", async () => {
+    const plugin = await service.installPlugin({ source: makePluginDir() });
+    const projectId = await insertProject(db, makeProjectRepo());
+    await db.update(schema.projects).set({ setupScript: "npm install", setupEnabled: true })
+      .where(eq(schema.projects.id, projectId));
+    const withDeps = createPluginService({
+      database: db as unknown as Database,
+      createIssue: vi.fn().mockResolvedValue({ id: "issue-1", issueNumber: 42 }),
+      createWorkspace: vi.fn().mockResolvedValue({ id: "ws-1", branch: "b" }),
+    });
+
+    const events: PluginSkillRunProgress[] = [];
+    await withDeps.runSkill(plugin.id, "requirement-extraction", projectId, {
+      onProgress: (e) => events.push(e),
+    });
+
+    const workspaceStage = events.find((e) => e.stage === "workspace");
+    expect(workspaceStage).toMatchObject({ setupScript: "npm install" });
   });
 
   it("runSkill rejects an unknown skill name with NOT_FOUND", async () => {

@@ -224,6 +224,17 @@ export interface PluginSkillRunResult {
   branch: string;
 }
 
+/**
+ * Stages of a skill launch, in order. The ticket lands in milliseconds and the workspace behind
+ * it takes minutes (worktree → the project's setup script → agent launch), so a launcher that
+ * only sees the final result stares at a spinner with no evidence anything happened — while the
+ * ticket has in fact been on the board the whole time.
+ */
+export type PluginSkillRunProgress =
+  | { stage: "ticket"; issueId: string; issueNumber: number | null; title: string }
+  | { stage: "workspace"; issueId: string; issueNumber: number | null; setupScript: string | null }
+  | ({ stage: "done" } & PluginSkillRunResult);
+
 export function createPluginService(deps: {
   database: Database;
   /** Injected rather than self-HTTP'd (see server/CLAUDE.md "Self-HTTP calls are an anti-pattern"). */
@@ -754,19 +765,29 @@ export function createPluginService(deps: {
     pluginRowId: string,
     skillName: string,
     projectId: string,
-    opts?: { title?: string; description?: string },
+    opts?: {
+      title?: string;
+      description?: string;
+      prompt?: string;
+      onProgress?: (event: PluginSkillRunProgress) => void;
+    },
   ): Promise<PluginSkillRunResult> {
     if (!createIssue || !createWorkspace) {
       throw new PluginError("Skill execution is not available on this route", "BAD_REQUEST");
     }
     const plugin = await requirePlugin(pluginRowId);
-    await requireProject(projectId);
+    const project = await requireProject(projectId);
     const known = (plugin.manifest.skills ?? []).some((s) => s.dir.split("/").pop() === skillName);
     if (!known) throw new PluginError(`Skill "${skillName}" not found in plugin manifest`, "NOT_FOUND");
 
     const title = opts?.title?.trim() || `${plugin.name}: run ${skillName}`;
-    const description = opts?.description?.trim()
+    const base = opts?.description?.trim()
       || `Run the \`${skillName}\` skill from the "${plugin.name}" plugin against this project.`;
+    // `prompt` is what the launcher typed: extra context for THIS run ("only the billing
+    // module", "focus on the error paths"). It is APPENDED rather than substituted, because a
+    // description that replaced the base would drop the one sentence naming the skill to run.
+    const extra = opts?.prompt?.trim();
+    const description = extra ? `${base}\n\n## Additional context for this run\n\n${extra}` : base;
 
     const issue = await createIssue({
       projectId,
@@ -776,13 +797,27 @@ export function createPluginService(deps: {
       priority: "medium",
       skipAutoReview: true,
     });
+    // The ticket exists within milliseconds; provisioning the workspace behind it takes MINUTES
+    // (worktree, then the project's setup script, then the agent launch). Reporting the ticket
+    // now is the difference between "nothing happened" and "it is running" — see the route's
+    // streaming mode, which forwards these to the launcher.
+    opts?.onProgress?.({ stage: "ticket", issueId: issue.id, issueNumber: issue.issueNumber, title });
+    opts?.onProgress?.({
+      stage: "workspace",
+      issueId: issue.id,
+      issueNumber: issue.issueNumber,
+      setupScript: project.setupEnabled === false ? null : project.setupScript ?? null,
+    });
+
     const workspace = await createWorkspace({ issueId: issue.id, skillName });
-    return {
+    const result = {
       issueId: issue.id,
       issueNumber: issue.issueNumber,
       workspaceId: workspace.id,
       branch: workspace.branch,
     };
+    opts?.onProgress?.({ stage: "done", ...result });
+    return result;
   }
 
   /** Per-loop ticket counts for one plugin (cheap — does not run the planner). */

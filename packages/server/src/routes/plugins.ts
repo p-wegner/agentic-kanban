@@ -25,9 +25,14 @@ import { createWebhookSender } from "../services/outbound-webhook.service.js";
  *   POST   /api/plugins/:id/views/:viewId/start { projectId } → { url, port, pid }
  *   POST   /api/plugins/:id/views/:viewId/stop  { projectId }
  *   POST   /api/plugins/:id/scripts/:name/run   { projectId } → { code, stdout, stderr, timedOut }
- *   POST   /api/plugins/:id/skills/:name/run    { projectId, title?, description? } →
+ *   POST   /api/plugins/:id/skills/:name/run    { projectId, title?, description?, prompt? } →
  *            { issueId, issueNumber, workspaceId, branch } (creates a ticket + launches a
- *            workspace against the skill — the agentic counterpart to scripts/:name/run)
+ *            workspace against the skill — the agentic counterpart to scripts/:name/run).
+ *            `prompt` is extra context for this run, appended to the skill's brief.
+ *            With `?stream=1` (or Accept: text/event-stream) the same call streams SSE progress
+ *            events instead — `ticket` the moment the ticket exists, `workspace` while the
+ *            worktree + setup script run, then `done`/`error`. The launch takes MINUTES; without
+ *            this a caller has no evidence it started until the very end.
  *   GET    /api/plugins/:id/loops?projectId=    per-loop ticket counts (planner NOT run)
  *   POST   /api/plugins/:id/loops/:name/advance { projectId } → one advance of a converging
  *            loop: plan, then a ticket per outstanding unit for the board's monitor to start
@@ -151,14 +156,50 @@ export function createPluginsRoute(
   });
 
   router.post("/:id/skills/:name/run", async (c) => {
-    const body = await parseOptionalJsonBody<{ projectId?: string; title?: string; description?: string }>(c);
+    const body = await parseOptionalJsonBody<{
+      projectId?: string; title?: string; description?: string; prompt?: string;
+    }>(c);
     const projectId = typeof body.projectId === "string" ? body.projectId.trim() : "";
     if (!projectId) throw new PluginError("projectId is required", "BAD_REQUEST");
-    const result = await service.runSkill(c.req.param("id"), c.req.param("name"), projectId, {
-      title: body.title,
-      description: body.description,
+    const pluginId = c.req.param("id");
+    const skillName = c.req.param("name");
+    const opts = { title: body.title, description: body.description, prompt: body.prompt };
+
+    const wantsStream = c.req.query("stream") === "1"
+      || (c.req.header("accept") ?? "").includes("text/event-stream");
+    if (!wantsStream) {
+      const result = await service.runSkill(pluginId, skillName, projectId, opts);
+      return c.json(result, 201);
+    }
+
+    // SSE from a POST — consumed with fetch + ReadableStream, never EventSource (which is
+    // GET-only); same pattern as the merge queue. The response opens immediately, so the caller
+    // can show the ticket long before the workspace behind it is provisioned.
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const send = (event: unknown) => {
+          try { controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`)); }
+          catch { /* client went away mid-launch; the launch itself carries on */ }
+        };
+        try {
+          await service.runSkill(pluginId, skillName, projectId, { ...opts, onProgress: send });
+        } catch (err) {
+          send({ stage: "error", message: err instanceof Error ? err.message : String(err) });
+        } finally {
+          try { controller.close(); } catch { /* already closed */ }
+        }
+      },
     });
-    return c.json(result, 201);
+    return new Response(stream, {
+      status: 200,
+      headers: {
+        "content-type": "text/event-stream; charset=utf-8",
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+        "x-accel-buffering": "no",
+      },
+    });
   });
 
   return router;
