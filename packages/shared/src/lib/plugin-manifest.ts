@@ -464,5 +464,12 @@ export function pluginEnabledPreferenceKey(pluginSlug: string, projectId: string
  * one shared signal both the enable report and the pre-run gate key off.
  */
 export function countScaffoldPlaceholders(content: string): number {
-  return (content.match(/TODO:/g) ?? []).length;
+  // Ignore `TODO:` inside inline-code spans. A scaffold template explains itself
+  // ("Fill in every `TODO:` marker before running the pipeline"), and counting
+  // that sentence made a FULLY filled-in profile report a leftover placeholder
+  // forever — the loop gate then refused to run against a correct scaffold, which
+  // is worse than the confusing failure the gate exists to prevent. A marker shown
+  // as code is documentation ABOUT the marker; a real placeholder is a value
+  // (`"language": "TODO: ts|js|..."`), which is never wrapped in backticks.
+  return (content.replace(/`[^`\n]*`/g, "").match(/TODO:/g) ?? []).length;
 }
