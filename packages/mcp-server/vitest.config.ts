@@ -24,9 +24,12 @@ import os from "node:os";
 //
 // `maxWorkers`/`minWorkers` are TOP-LEVEL in vitest 4 — see the note in
 // packages/server/vitest.config.ts. The v3 `poolOptions.forks` form is ignored with a warning.
+// #206: raised 20s -> 60s in lockstep with packages/server and packages/shared. `pnpm test:mine`
+// doubles as the merge verify_script, so a budget that trips under machine load turns a green
+// codebase into a red merge gate board-wide. Keep the three packages in sync.
 const cpuCount = os.cpus().length || 4;
 const maxWorkers = Number(process.env.VITEST_MAX_WORKERS) || Math.max(2, Math.floor(cpuCount / 2));
-const testTimeout = Number(process.env.VITEST_TEST_TIMEOUT) || 20_000;
+const testTimeout = Number(process.env.VITEST_TEST_TIMEOUT) || 60_000;
 
 export default defineConfig({
   test: {
