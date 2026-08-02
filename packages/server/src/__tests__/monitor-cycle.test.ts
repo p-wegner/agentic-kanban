@@ -558,3 +558,116 @@ describe("processWorkspaceCandidates — per-project auto_merge_disabled", () =>
     expectNoWorkspaceAction(deps);
   });
 });
+
+// #191: a builder can COMMIT a complete implementation, then go idle with readyForMerge=false —
+// silently stuck only because its base branch moved after the branch was cut (a sibling ticket
+// merged first). Left undetected this is indistinguishable from an idle-empty workspace and just
+// gets relaunched into a no-op. These tests cover detection + the auto-recover/flag split.
+describe("processWorkspaceCandidates — idle workspace with committed work on a stale base (#191)", () => {
+  const staleBaseCandidate: WorkspaceCandidate = {
+    ...baseCandidate,
+    readyForMerge: false,
+    issueStatusName: "In Progress",
+  };
+
+  it("auto-recovers via merge (falling back to fix-and-merge) when the base has moved and there are real commits", async () => {
+    const deps = {
+      ...makeDeps(),
+      autoMergeEnabled: true,
+      getCommitCountAhead: vi.fn().mockResolvedValue(3),
+      countBehindCommits: vi.fn().mockResolvedValue(2),
+    } satisfies ProcessWorkspaceDeps;
+
+    const stats = await processWorkspaceCandidates([staleBaseCandidate], deps);
+
+    expect(deps.getCommitCountAhead).toHaveBeenCalledWith("/path/to/dir", "main");
+    expect(deps.countBehindCommits).toHaveBeenCalledWith("/path/to/dir", "HEAD", "main");
+    expect(stats.merged).toBe(1);
+    expect(stats.relaunched).toBe(0);
+    expect(vi.mocked(deps.workspaceActions.merge)).toHaveBeenCalledWith("ws-1", { kind: "run-gate" });
+    expect(vi.mocked(deps.workspaceActions.launch)).not.toHaveBeenCalled();
+  });
+
+  it("falls back to fix-and-merge when the recovery merge conflicts", async () => {
+    const deps = {
+      ...makeDeps(),
+      autoMergeEnabled: true,
+      getCommitCountAhead: vi.fn().mockResolvedValue(3),
+      countBehindCommits: vi.fn().mockResolvedValue(2),
+    } satisfies ProcessWorkspaceDeps;
+    vi.mocked(deps.workspaceActions.merge).mockRejectedValueOnce(new Error("Merge conflicts detected"));
+
+    const stats = await processWorkspaceCandidates([staleBaseCandidate], deps);
+
+    expect(stats.merged).toBe(1);
+    expect(vi.mocked(deps.workspaceActions.fixAndMerge)).toHaveBeenCalledWith("ws-1", "Merge conflicts detected");
+  });
+
+  it("flags instead of auto-recovering when auto_merge is disabled", async () => {
+    const deps = {
+      ...makeDeps(),
+      autoMergeEnabled: false,
+      getCommitCountAhead: vi.fn().mockResolvedValue(3),
+      countBehindCommits: vi.fn().mockResolvedValue(2),
+    } satisfies ProcessWorkspaceDeps;
+
+    const stats = await processWorkspaceCandidates([staleBaseCandidate], deps);
+
+    expect(stats.merged).toBe(0);
+    expect(stats.relaunched).toBe(0);
+    expectNoWorkspaceAction(deps);
+    const logCalls = vi.mocked(deps.logMonitorAction).mock.calls;
+    expect(logCalls.some(([, action, wsId, issueId, extra]) =>
+      action === "mark_idle"
+      && wsId === "ws-1"
+      && issueId === "issue-1"
+      && extra?.verificationResult === "failed",
+    )).toBe(true);
+  });
+
+  it("flags instead of auto-recovering when the project has auto_merge_disabled", async () => {
+    const deps = {
+      ...makeDeps(),
+      autoMergeEnabled: true,
+      autoMergeDisabledProjectIds: new Set(["proj-1"]),
+      getCommitCountAhead: vi.fn().mockResolvedValue(3),
+      countBehindCommits: vi.fn().mockResolvedValue(2),
+    } satisfies ProcessWorkspaceDeps;
+
+    const stats = await processWorkspaceCandidates([staleBaseCandidate], deps);
+
+    expect(stats.merged).toBe(0);
+    expectNoWorkspaceAction(deps);
+  });
+
+  it("does NOT treat an idle workspace with no commits ahead as a stale-base recovery case", async () => {
+    const deps = {
+      ...makeDeps(),
+      autoMergeEnabled: true,
+      getCommitCountAhead: vi.fn().mockResolvedValue(0),
+      countBehindCommits: vi.fn().mockResolvedValue(2),
+    } satisfies ProcessWorkspaceDeps;
+
+    const stats = await processWorkspaceCandidates([staleBaseCandidate], deps);
+
+    // Falls through to the ordinary idle+not-ready relaunch path.
+    expect(stats.relaunched).toBe(1);
+    expect(stats.merged).toBe(0);
+    expect(vi.mocked(deps.countBehindCommits)).not.toHaveBeenCalled();
+  });
+
+  it("does NOT treat an idle workspace with commits but a NON-stale (up to date) base as a recovery case", async () => {
+    const deps = {
+      ...makeDeps(),
+      autoMergeEnabled: true,
+      getCommitCountAhead: vi.fn().mockResolvedValue(3),
+      countBehindCommits: vi.fn().mockResolvedValue(0),
+    } satisfies ProcessWorkspaceDeps;
+
+    const stats = await processWorkspaceCandidates([staleBaseCandidate], deps);
+
+    // Falls through to the ordinary idle+not-ready relaunch path.
+    expect(stats.relaunched).toBe(1);
+    expect(stats.merged).toBe(0);
+  });
+});
