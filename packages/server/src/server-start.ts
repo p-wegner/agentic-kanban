@@ -14,6 +14,7 @@ import { createAutoMerge } from "./startup/merge-workflow.js";
 import { createMonitorSetup } from "./startup/monitor-setup.js";
 import { setupProcessHandlers } from "./startup/process-handlers.js";
 import { resolveFleetPort, startFleetListener } from "./services/fleet-listener.service.js";
+import { createFleetWorkersRoute } from "./routes/workers.js";
 import { setupRoutes } from "./startup/route-setup.js";
 import { BACKGROUND_SERVICES } from "./startup/background-services.js";
 import { runStartupTasks } from "./startup/startup-tasks.js";
@@ -204,7 +205,11 @@ export async function startServer(port?: number, hostname?: string) {
   const fleetPort = resolveFleetPort();
   if (fleetPort !== null) {
     try {
-      const fleetListener = await startFleetListener({ database: db, port: fleetPort });
+      const fleetListener = await startFleetListener({
+        database: db,
+        port: fleetPort,
+        createWorkersRoute: createFleetWorkersRoute,
+      });
       cleanupCallbacks.push(() => { void fleetListener.close(); });
     } catch (err) {
       console.error(

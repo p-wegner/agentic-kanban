@@ -24,9 +24,17 @@ import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
 import type { Database } from "../db/index.js";
-import { createFleetWorkersRoute } from "../routes/workers.js";
 import { createWorkerWsRoute } from "./worker-connection.service.js";
 import { getWorkerFleet } from "./worker-fleet.service.js";
+import type { WorkerRegistry } from "./worker-registry.service.js";
+
+/**
+ * Factory for the owner+worker-facing `/api/workers` router. Injected by the
+ * caller (server-start.ts) instead of imported directly — services must not
+ * depend on the transport layer (routes/), so this stays a parameter, not an
+ * import, per the routes<-services layering rule.
+ */
+export type CreateWorkersRoute = (database: Database, registry: WorkerRegistry) => Hono;
 
 export interface FleetListenerHandle {
   port: number;
@@ -52,10 +60,11 @@ export function resolveFleetPort(env: NodeJS.ProcessEnv = process.env): number |
 export async function startFleetListener(opts: {
   database: Database;
   port: number;
+  createWorkersRoute: CreateWorkersRoute;
   /** Defaults to all interfaces — the whole point of this listener. */
   host?: string;
 }): Promise<FleetListenerHandle> {
-  const { database, port, host = "0.0.0.0" } = opts;
+  const { database, port, createWorkersRoute, host = "0.0.0.0" } = opts;
   const fleet = getWorkerFleet(database);
 
   const app = new Hono();
@@ -65,7 +74,7 @@ export async function startFleetListener(opts: {
   // means one reachability instruction works against either port.
   app.get("/health", (c) => c.json({ ok: true }));
   app.get("/api/health", (c) => c.json({ ok: true }));
-  app.route("/api/workers", createFleetWorkersRoute(database, fleet.registry));
+  app.route("/api/workers", createWorkersRoute(database, fleet.registry));
   app.get("/ws/workers/:id", createWorkerWsRoute(upgradeWebSocket, fleet.registry, fleet.connections));
 
   const listening = await new Promise<{ port: number; server: ReturnType<typeof serve> }>((resolve, reject) => {
