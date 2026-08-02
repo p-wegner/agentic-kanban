@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { apiPost } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 
@@ -57,6 +57,13 @@ type LoopAdvanceResult = {
 
 type ScriptRunResult = { code: number | null; stdout: string; stderr: string; timedOut: boolean };
 type SkillRunResult = { issueId: string; issueNumber: number | null; workspaceId: string; branch: string };
+
+/** Mirrors the server's PluginSkillRunProgress (plugin.service.ts). */
+type SkillRunProgress =
+  | { stage: "ticket"; issueId: string; issueNumber: number | null; title: string }
+  | { stage: "workspace"; issueId: string; issueNumber: number | null; setupScript: string | null }
+  | ({ stage: "done" } & SkillRunResult)
+  | { stage: "error"; message: string };
 
 function PaneHeading({ title, subtitle, mono }: { title: string; subtitle?: string | null; mono?: boolean }) {
   return (
@@ -261,35 +268,134 @@ export function PluginScriptPane({ script, projectId }: { script: PluginScript; 
   );
 }
 
-/** Judgment-requiring work — launched as a ticket + workspace, not a subprocess. */
+/** Seconds since a start timestamp, ticking once a second while a launch is in flight. */
+function useElapsed(since: number | null): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (since === null) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [since]);
+  return since === null ? 0 : Math.max(0, Math.round((now - since) / 1000));
+}
+
+/**
+ * Judgment-requiring work — launched as a ticket + workspace, not a subprocess.
+ *
+ * Two things this pane has to get right, both learned the hard way:
+ *
+ * 1. **Most skills need more than their name.** "Run requirement-extraction" is rarely the whole
+ *    instruction; the launcher usually knows which module, which lens, which constraint. That text
+ *    has nowhere to go unless the launch offers it, so the pane takes a title and a free-text
+ *    prompt and the server appends the prompt to the skill's brief.
+ *
+ * 2. **The launch takes MINUTES and the ticket appears in MILLISECONDS.** Provisioning is worktree
+ *    → the project's setup script (`npm install`, often the bulk of it) → agent launch, all inside
+ *    one request. The old pane awaited that single request behind a "Launching…" label, so for
+ *    minutes there was no ticket number, no stage, no error surface — indistinguishable from a
+ *    dead button, while the ticket had in fact been on the board since the first second. It now
+ *    streams the server's progress and shows each stage as it lands.
+ */
 export function PluginSkillPane({ skill, projectId }: { skill: PluginSkill; projectId: string }) {
   const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<SkillRunResult | null>(null);
+  const [title, setTitle] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [progress, setProgress] = useState<SkillRunProgress[]>([]);
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const elapsed = useElapsed(running ? startedAt : null);
+
+  const ticket = progress.find((p) => p.stage === "ticket");
+  const workspaceStage = progress.find((p) => p.stage === "workspace");
+  const done = progress.find((p) => p.stage === "done");
+  const failed = progress.find((p) => p.stage === "error");
 
   async function run() {
     if (running) return;
     setRunning(true);
+    setProgress([]);
+    setStartedAt(Date.now());
     try {
-      const res = await apiPost<SkillRunResult>(
-        `/api/plugins/${skill.pluginId}/skills/${encodeURIComponent(skill.name)}/run`,
-        { projectId },
+      // SSE over POST must be read with fetch + ReadableStream — EventSource is GET-only
+      // (client/CLAUDE.md). Each `data:` line is one stage of the launch.
+      const resp = await fetch(
+        `/api/plugins/${skill.pluginId}/skills/${encodeURIComponent(skill.name)}/run?stream=1`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectId, title: title.trim() || undefined, prompt: prompt.trim() || undefined }),
+        },
       );
-      setResult(res);
-      showToast(`Launched #${res.issueNumber ?? "?"} on ${res.branch}`, "success");
+      if (!resp.ok || !resp.body) throw new Error(`Launch failed (${resp.status})`);
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      for (;;) {
+        const { done: streamDone, value } = await reader.read();
+        if (streamDone) break;
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop() ?? "";
+        for (const chunk of chunks) {
+          const line = chunk.split("\n").find((l) => l.startsWith("data:"));
+          if (!line) continue;
+          const event = JSON.parse(line.slice(5).trim()) as SkillRunProgress;
+          setProgress((prev) => [...prev, event]);
+          if (event.stage === "done") {
+            showToast(`Launched #${event.issueNumber ?? "?"} on ${event.branch}`, "success");
+            setPrompt("");
+            setTitle("");
+          }
+          if (event.stage === "error") showToast(event.message, "error");
+        }
+      }
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Skill run failed", "error");
+      const message = err instanceof Error ? err.message : "Skill run failed";
+      setProgress((prev) => [...prev, { stage: "error", message }]);
+      showToast(message, "error");
     } finally {
       setRunning(false);
     }
   }
 
   return (
-    <div className="p-6 space-y-4" data-testid="plugin-skill-pane">
+    <div className="p-6 space-y-4 overflow-auto" data-testid="plugin-skill-pane">
       <PaneHeading title={skill.name} subtitle={skill.description} mono />
       <p className="text-xs text-gray-500 dark:text-gray-400 max-w-2xl">
         Skills need judgment, so running one creates a ticket and launches a workspace against it — the same
         path as any other board work, with the project&apos;s provider selection, review and merge gates.
       </p>
+
+      <div className="space-y-3 max-w-2xl">
+        <label className="block space-y-1">
+          <span className="text-xs font-medium text-gray-700 dark:text-gray-300">Ticket title</span>
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            disabled={running}
+            placeholder={`${skill.pluginName}: run ${skill.name}`}
+            className="w-full text-sm px-2 py-1.5 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 disabled:opacity-50"
+            data-testid="plugin-skill-title"
+          />
+        </label>
+        <label className="block space-y-1">
+          <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
+            Additional context <span className="font-normal text-gray-500 dark:text-gray-400">(optional)</span>
+          </span>
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            disabled={running}
+            rows={5}
+            placeholder="What should this run focus on? e.g. which module, which lens, which constraint — anything the skill's own brief cannot know."
+            className="w-full text-sm px-2 py-1.5 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 font-mono text-[12px] disabled:opacity-50"
+            data-testid="plugin-skill-prompt"
+          />
+          <span className="text-[11px] text-gray-500 dark:text-gray-400">
+            Appended to the skill&apos;s brief in the ticket the agent reads.
+          </span>
+        </label>
+      </div>
+
       <button
         onClick={() => void run()}
         disabled={running}
@@ -298,10 +404,40 @@ export function PluginSkillPane({ skill, projectId }: { skill: PluginSkill; proj
       >
         {running ? "Launching…" : "Run as a ticket"}
       </button>
-      {result && (
-        <p className="text-xs text-gray-600 dark:text-gray-300">
-          Launched issue #{result.issueNumber ?? "?"} on <span className="font-mono">{result.branch}</span>
-        </p>
+
+      {progress.length > 0 && (
+        <div
+          className="max-w-2xl text-xs rounded border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 p-3 space-y-1.5"
+          data-testid="plugin-skill-progress"
+        >
+          <div className="flex items-center justify-between text-gray-500 dark:text-gray-400">
+            <span>{failed ? "Launch failed" : done ? "Launched" : "Launching…"}</span>
+            {running && <span className="tabular-nums">{elapsed}s</span>}
+          </div>
+          {ticket && ticket.stage === "ticket" && (
+            <div className="text-gray-700 dark:text-gray-300">
+              ✓ Ticket <span className="font-medium">#{ticket.issueNumber ?? "?"}</span> created — it is on the
+              board now, even while the rest of this runs.
+            </div>
+          )}
+          {workspaceStage && workspaceStage.stage === "workspace" && (
+            <div className={done ? "text-gray-700 dark:text-gray-300" : "text-gray-600 dark:text-gray-400"}>
+              {done ? "✓" : "…"} Creating the worktree
+              {workspaceStage.setupScript
+                ? <> and running the project&apos;s setup script (<span className="font-mono">{workspaceStage.setupScript}</span>){done ? "" : " — this is usually the slow part, often a few minutes"}</>
+                : null}
+              , then launching the agent.
+            </div>
+          )}
+          {done && done.stage === "done" && (
+            <div className="text-gray-700 dark:text-gray-300">
+              ✓ Workspace ready on <span className="font-mono">{done.branch}</span> — the agent is running.
+            </div>
+          )}
+          {failed && failed.stage === "error" && (
+            <div className="text-red-600 dark:text-red-400">✕ {failed.message}</div>
+          )}
+        </div>
       )}
     </div>
   );
