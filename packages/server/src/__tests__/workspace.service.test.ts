@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { randomUUID } from "node:crypto";
+import { GIT_HEAVY_TEST_TIMEOUT_MS } from "./helpers/timeouts.js";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -488,7 +489,7 @@ describe("workspace.service", () => {
       return id;
     }
 
-    it("merges the branch, cleans up the worktree, closes the workspace, and moves the issue to Done", { timeout: 30000 }, async () => {
+    it("merges the branch, cleans up the worktree, closes the workspace, and moves the issue to Done", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, async () => {
       const { projectId, issueId } = await seedProjectAndIssue(db);
       const wsId = await seedWorkspaceForMerge(projectId, issueId);
       const gitService = createFakeGitService();
@@ -539,7 +540,7 @@ describe("workspace.service", () => {
       }));
     });
 
-    it("closes the workspace when a retry finds the branch is already merged", { timeout: 30000 }, async () => {
+    it("closes the workspace when a retry finds the branch is already merged", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, async () => {
       const { projectId, issueId } = await seedProjectAndIssue(db);
       const wsId = await seedWorkspaceForMerge(projectId, issueId);
       const gitService = createFakeGitService({
@@ -578,7 +579,7 @@ describe("workspace.service", () => {
       expect(statusRow[0].name).toBe("Done");
     });
 
-    it("reconciles a workspace that already has mergedAt even when the branch ref is missing", { timeout: 30000 }, async () => {
+    it("reconciles a workspace that already has mergedAt even when the branch ref is missing", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, async () => {
       const { issueId } = await seedProjectAndIssue(db);
       const now = new Date().toISOString();
       const wsId = randomUUID();
@@ -636,7 +637,7 @@ describe("workspace.service", () => {
       expect(statusRow[0].name).toBe("Done");
     });
 
-    it("closes the workspace and moves the issue to Done when post-merge changed-file detection fails", { timeout: 30000 }, async () => {
+    it("closes the workspace and moves the issue to Done when post-merge changed-file detection fails", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, async () => {
       const { projectId, issueId } = await seedProjectAndIssue(db);
       const wsId = await seedWorkspaceForMerge(projectId, issueId);
       const gitService = createFakeGitService({
@@ -668,7 +669,7 @@ describe("workspace.service", () => {
       expect(statusRow[0].name).toBe("Done");
     });
 
-    it("records the merge before post-merge cleanup runs (DB closed before removeWorktree is called)", { timeout: 30000 }, async () => {
+    it("records the merge before post-merge cleanup runs (DB closed before removeWorktree is called)", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, async () => {
       const { projectId, issueId } = await seedProjectAndIssue(db);
       const wsId = await seedWorkspaceForMerge(projectId, issueId);
 
@@ -721,7 +722,7 @@ describe("workspace.service", () => {
       expect(events[1].body).toContain("already merged before this response returned");
     });
 
-    it("returns success, closes the workspace, and moves the issue to Done when worktree removal fails after merge", { timeout: 30000 }, async () => {
+    it("returns success, closes the workspace, and moves the issue to Done when worktree removal fails after merge", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, async () => {
       const { projectId, issueId } = await seedProjectAndIssue(db);
       const wsId = await seedWorkspaceForMerge(projectId, issueId);
       const gitService = createFakeGitService({
@@ -753,7 +754,7 @@ describe("workspace.service", () => {
       expect(statusRow[0].name).toBe("Done");
     });
 
-    it("throws a BAD_REQUEST WorkspaceError with the conflicting files when merge conflicts are detected", { timeout: 30000 }, async () => {
+    it("throws a BAD_REQUEST WorkspaceError with the conflicting files when merge conflicts are detected", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, async () => {
       const { projectId, issueId } = await seedProjectAndIssue(db);
       const wsId = await seedWorkspaceForMerge(projectId, issueId);
       const gitService = createFakeGitService({
@@ -883,7 +884,7 @@ describe("workspace.service", () => {
       expect(activeMerges.has("/tmp/test-repo")).toBe(false);
     });
 
-    it("holds the repo merge lock until the deferred MAIN-checkout sync applies (#970), then releases while the cleanup long tail is still running", { timeout: 30000 }, async () => {
+    it("holds the repo merge lock until the deferred MAIN-checkout sync applies (#970), then releases while the cleanup long tail is still running", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, async () => {
       const { projectId, issueId } = await seedProjectAndIssue(db);
       const wsId = await seedWorkspaceForMerge(projectId, issueId);
       let releaseCleanup!: () => void;
@@ -942,7 +943,7 @@ describe("workspace.service", () => {
     // before returning to the client. The issue remains in "In Review". A retry
     // of the merge endpoint must reconcile without requiring manual intervention.
 
-    it("moves the issue from In Review to Done when mergedAt is already set (dropped-response reconciliation)", { timeout: 30000 }, async () => {
+    it("moves the issue from In Review to Done when mergedAt is already set (dropped-response reconciliation)", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, async () => {
       const { issueId } = await seedProjectAndIssueInReview(db);
       const now = new Date().toISOString();
       const wsId = randomUUID();
@@ -1000,7 +1001,7 @@ describe("workspace.service", () => {
       expect(alreadyMergedEvent?.body).toContain("Reconciled");
     });
 
-    it("moves issue from In Review to Done when git reports branch already merged (no mergedAt in DB yet)", { timeout: 30000 }, async () => {
+    it("moves issue from In Review to Done when git reports branch already merged (no mergedAt in DB yet)", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, async () => {
       // Scenario: git merge completed, master advanced, but the DB update was dropped.
       // mergedAt is null, issue is in In Review. git's mergeBranch returns "already merged".
       const { issueId } = await seedProjectAndIssueInReview(db);
@@ -1046,7 +1047,7 @@ describe("workspace.service", () => {
       expect(wsRows[0].mergedAt).toBeTruthy();
     });
 
-    it("preserves real conflict detection — conflicts still throw 409, not silently reconciled", { timeout: 30000 }, async () => {
+    it("preserves real conflict detection — conflicts still throw 409, not silently reconciled", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, async () => {
       // Regression guard: the reconciliation path must not swallow genuine conflicts.
       const { issueId } = await seedProjectAndIssueInReview(db);
       const now = new Date().toISOString();
@@ -1099,7 +1100,7 @@ describe("workspace.service", () => {
       ]);
     });
 
-    it("broadcasts workspace_merged when reconciling a dropped response", { timeout: 30000 }, async () => {
+    it("broadcasts workspace_merged when reconciling a dropped response", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, async () => {
       const { issueId } = await seedProjectAndIssueInReview(db);
       const now = new Date().toISOString();
       const wsId = randomUUID();
