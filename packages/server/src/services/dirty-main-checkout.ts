@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
@@ -37,6 +38,21 @@ export async function scanDirtyMainCheckouts(database: Database = db): Promise<D
 
   for (const project of projectRows) {
     if (!project.repoPath) continue;
+    // #208: a project whose repo directory no longer exists on disk (moved/deleted worktree,
+    // stale registration) surfaces as `spawn git ENOENT` from a missing cwd — repeatedly, every
+    // cycle, forever. Skip the spawn entirely and surface it as a warning instead.
+    if (!existsSync(project.repoPath)) {
+      warnings.push({
+        projectId: project.id,
+        projectName: project.name,
+        repoPath: project.repoPath,
+        detectedAt,
+        fileCount: 0,
+        files: [],
+        message: `Repo path no longer exists on disk — skipping dirty-checkout scan. Unregister the project or fix its repoPath.`,
+      });
+      continue;
+    }
     let files: string[];
     try {
       files = await getDirtyTrackedSourceFiles(project.repoPath);
