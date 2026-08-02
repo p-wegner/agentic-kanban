@@ -138,9 +138,10 @@ A supervised child process serving HTTP, framed as a board view.
 - `kind` must be `"iframe"`; it is the only kind so far.
 - `portEnv` names the variable the board sets — **without it the board cannot tell your server
   which port to use** and the view will not come up.
-- `serve.cwd` is **currently ignored**: a view server always runs in the plugin checkout. The
-  field parses, so writing `"plugin"` is harmless and future-proof; writing `"repo"` will not do
-  what it says.
+- `serve.cwd` is `"plugin"` (the plugin's own checkout) or `"repo"` (the output repo); **views
+  default to `"plugin"`**, matching the doc comment. If your server ships with the plugin but
+  needs to run against the output repo, set `"cwd": "repo"` and reference the script via
+  `{{pluginPath}}` in `command` (relative paths otherwise resolve into `cwd`, not the plugin).
 - The readiness probe is `GET /` with any status below 500. You do not need a `/health` route,
   though one is convenient for your own tests.
 - Read your state **fresh per request**. The process is long-lived; a page built at startup shows
@@ -459,8 +460,6 @@ Useful endpoints while developing: `POST /api/plugins` (install),
   genuine external-tracker link. Safe today because the key is namespaced and loop tickets never
   set `externalUrl`; a second "machine-created, dedupe on re-run" feature should get its own
   column.
-- **`views[].serve.cwd` is parsed but ignored** — `startView` always runs in the plugin checkout.
-  Either honour it or drop it from the type.
 - **`views[].kind` is `"iframe"` only.**
 - **The view readiness probe hits `GET /`**, so a server that returns 5xx on its index (but is
   otherwise healthy) reads as down.

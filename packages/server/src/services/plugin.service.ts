@@ -607,7 +607,7 @@ export function createPluginService(deps: {
     const command = substitutePluginPlaceholders(view.serve.command, vars);
 
     const child = spawnShellCommand(command, {
-      cwd: plugin.localPath,
+      cwd: view.serve.cwd === "repo" ? outputRepoPath : plugin.localPath,
       stdio: ["ignore", "ignore", "pipe"],
       mergeEnv: env,
     });
