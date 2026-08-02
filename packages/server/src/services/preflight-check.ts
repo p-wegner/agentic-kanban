@@ -125,6 +125,26 @@ function parsePorcelainFiles(output: string): string[] {
     .filter(Boolean);
 }
 
+/**
+ * Paths the board itself writes into every worktree (agent skill bundles, ticket context).
+ * A `git status --porcelain` line for one of these is never the agent's own work — at worst
+ * it is LF/CRLF normalization churn from materialization (#217) — so it must never count as
+ * "the worktree has uncommitted changes" for the relaunch guard. Without this, a workspace
+ * that lands in `error` for an unrelated reason can become permanently unrelaunchable.
+ */
+const BOARD_MATERIALIZED_PREFIXES = [".claude/skills/", ".codex/skills/"];
+
+function isBoardMaterializedPorcelainLine(line: string): boolean {
+  // Porcelain lines are "XY path" (rename lines are "XY from -> to"); strip the 2-char
+  // status + space before matching the path against materialized-artifact prefixes.
+  const path = line.slice(3).split(" -> ").pop() ?? "";
+  return BOARD_MATERIALIZED_PREFIXES.some((prefix) => path.startsWith(prefix));
+}
+
+function excludeBoardMaterializedFiles(files: string[]): string[] {
+  return files.filter((line) => !isBoardMaterializedPorcelainLine(line));
+}
+
 async function getCurrentBranch(
   git: (args: string[], cwd: string) => Promise<string>,
   cwd: string,
@@ -157,7 +177,9 @@ export async function workspaceLaunchPreflight(
   const errors: string[] = [];
   const expectedBranch = options.branch.trim();
   const baseBranch = options.baseBranch?.trim();
-  let dirtyFiles = parsePorcelainFiles(await git(["status", "--porcelain"], options.worktreePath));
+  let dirtyFiles = excludeBoardMaterializedFiles(
+    parsePorcelainFiles(await git(["status", "--porcelain"], options.worktreePath)),
+  );
   let repairedSymlinks: string[] = [];
 
   // Files the branch's own commits intentionally modified are never "stale drift" —
@@ -186,7 +208,9 @@ export async function workspaceLaunchPreflight(
         );
         return { ok: false, errors, staleFiles: [], refreshed: false, dirtyFiles, repairedSymlinks };
       }
-      dirtyFiles = parsePorcelainFiles(await git(["status", "--porcelain"], options.worktreePath));
+      dirtyFiles = excludeBoardMaterializedFiles(
+        parsePorcelainFiles(await git(["status", "--porcelain"], options.worktreePath)),
+      );
     }
   }
 

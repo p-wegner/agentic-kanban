@@ -417,6 +417,72 @@ describe("workspaceLaunchPreflight", () => {
     expect(calls).toContainEqual(["rebase", "main"]);
   });
 
+  it("does not treat a board-materialized skill file as uncommitted changes (#217)", async () => {
+    const files = new Map<string, string>([
+      ["main:.codex/hooks.json", "hooks"],
+      ["worktree:.codex/hooks.json", "hooks"],
+      ["main:.claude/hooks/smart-hooks-runner.js", "runner"],
+      ["worktree:.claude/hooks/smart-hooks-runner.js", "runner"],
+      ["main:.claude/hooks/validate-command-safety.js", "validator"],
+      ["worktree:.claude/hooks/validate-command-safety.js", "validator"],
+      ["main:.claude/hooks/prevent-cross-worktree-writes.js", "cross-worktree"],
+      ["worktree:.claude/hooks/prevent-cross-worktree-writes.js", "cross-worktree"],
+      ["main:CLAUDE.md", "old safety guidance"],
+      ["worktree:CLAUDE.md", "old safety guidance"],
+    ]);
+
+    const result = await workspaceLaunchPreflight({
+      repoPath: "main",
+      worktreePath: "worktree",
+      baseBranch: "main",
+      branch: "feature/test",
+      isDirect: false,
+      execGit: async (args) => {
+        if (args[0] === "status") return " M .claude/skills/board-navigator/SKILL.md\n";
+        if (args[0] === "rev-parse") return "feature/test\n";
+        return "";
+      },
+      readFile: async (root, path) => files.get(`${root}:${path}`) ?? "",
+      exists: async (root, path) => files.has(`${root}:${path}`),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.dirtyFiles).toEqual([]);
+  });
+
+  it("still blocks on a real dirty file alongside an ignored materialized skill file", async () => {
+    const files = new Map<string, string>([
+      ["main:.codex/hooks.json", "new codex hooks"],
+      ["worktree:.codex/hooks.json", "old codex hooks"],
+      ["main:.claude/hooks/smart-hooks-runner.js", "runner"],
+      ["worktree:.claude/hooks/smart-hooks-runner.js", "runner"],
+      ["main:.claude/hooks/validate-command-safety.js", "validator"],
+      ["worktree:.claude/hooks/validate-command-safety.js", "validator"],
+      ["main:.claude/hooks/prevent-cross-worktree-writes.js", "cross-worktree"],
+      ["worktree:.claude/hooks/prevent-cross-worktree-writes.js", "cross-worktree"],
+      ["main:CLAUDE.md", "current safety guidance"],
+      ["worktree:CLAUDE.md", "old safety guidance"],
+    ]);
+
+    const result = await workspaceLaunchPreflight({
+      repoPath: "main",
+      worktreePath: "worktree",
+      baseBranch: "main",
+      branch: "feature/test",
+      isDirect: false,
+      execGit: async (args) => {
+        if (args[0] === "status") return " M .claude/skills/board-navigator/SKILL.md\n M src/changed.ts\n";
+        if (args[0] === "rev-parse") return "feature/test\n";
+        return "";
+      },
+      readFile: async (root, path) => files.get(`${root}:${path}`) ?? "",
+      exists: async (root, path) => files.has(`${root}:${path}`),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.dirtyFiles).toEqual([" M src/changed.ts"]);
+  });
+
   it("repairs configured dependency symlinks before launch", async () => {
     const calls: Array<{ source: string; worktree: string; dirs: string[] }> = [];
     const files = new Map<string, string>([
