@@ -381,6 +381,7 @@ export function createPluginService(deps: {
   function fanOutScaffold(
     plugin: PluginRow & { manifest: PluginManifest },
     repoPath: string,
+    leadingRepoPath: string,
     projectName: string,
     report: EnableReport,
   ) {
@@ -395,6 +396,7 @@ export function createPluginService(deps: {
     }
     const content = substitutePluginPlaceholders(readFileSync(templatePath, "utf8"), {
       repoPath,
+      leadingRepoPath,
       projectName,
       pluginPath: plugin.localPath,
     });
@@ -510,7 +512,7 @@ export function createPluginService(deps: {
     const report: EnableReport = { prefKey, skills: [], scaffoldWritten: false, scaffoldPlaceholders: 0, warnings: [] };
     fanOutSkills(plugin, project.repoPath, report);
     const outputRepoPath = await resolveOutputRepoPath(plugin, project);
-    fanOutScaffold(plugin, outputRepoPath, project.name, report);
+    fanOutScaffold(plugin, outputRepoPath, project.repoPath, project.name, report);
     return report;
   }
 
@@ -559,6 +561,7 @@ export function createPluginService(deps: {
         if (!existsSync(fragmentPath)) continue;
         const text = substitutePluginPlaceholders(readFileSync(fragmentPath, "utf8"), {
           repoPath: project.repoPath,
+          leadingRepoPath: project.repoPath,
           projectName: project.name,
           pluginPath: row.localPath,
         }).trim();
@@ -594,6 +597,7 @@ export function createPluginService(deps: {
     const outputRepoPath = await resolveOutputRepoPath(plugin, project);
     const vars: PluginPlaceholderVars = {
       repoPath: outputRepoPath,
+      leadingRepoPath: project.repoPath,
       projectName: project.name,
       pluginPath: plugin.localPath,
       port,
@@ -717,6 +721,7 @@ export function createPluginService(deps: {
 
     const vars: PluginPlaceholderVars = {
       repoPath: outputRepoPath,
+      leadingRepoPath: project.repoPath,
       projectName: project.name,
       pluginPath: plugin.localPath,
     };
@@ -794,6 +799,7 @@ export function createPluginService(deps: {
       projectId,
       projectName: project.name,
       repoPath: outputRepoPath,
+      leadingRepoPath: project.repoPath,
     });
   }
 

@@ -47,6 +47,7 @@ const MANIFEST = {
   ],
   scripts: [
     { name: "print-env", command: "node print-env.mjs", cwd: "plugin", env: { COVERAGE_ROOT: "{{repoPath}}", PLUGIN_HOME: "{{pluginPath}}" } },
+    { name: "print-roots", command: "node print-roots.mjs", cwd: "plugin", env: { LEADING: "{{leadingRepoPath}}", OUTPUT: "{{repoPath}}" } },
   ],
   butler: { promptFragment: "butler-fragment.md" },
   scaffold: { profileTemplate: "profile-template.md", targetPath: "docs/analysis/_project-profile.md" },
@@ -61,6 +62,7 @@ function makePluginDir(manifest: Record<string, unknown> = MANIFEST): string {
   writeFileSync(join(dir, "butler-fragment.md"), "Coverage docs live in {{repoPath}}/docs/analysis.");
   writeFileSync(join(dir, "profile-template.md"), "# Profile for {{projectName}}\nRepo: {{repoPath}}\nPlugin: {{pluginPath}}");
   writeFileSync(join(dir, "print-env.mjs"), "console.log(process.env.COVERAGE_ROOT + '|' + process.env.PLUGIN_HOME);");
+  writeFileSync(join(dir, "print-roots.mjs"), "console.log(process.env.LEADING + '|' + process.env.OUTPUT);");
   return dir;
 }
 
@@ -261,6 +263,24 @@ describe("plugin.service", () => {
     expect(result.timedOut).toBe(false);
     expect(result.code).toBe(0);
     expect(result.stdout.trim()).toBe(`${repo}|${pluginDir}`);
+  });
+
+  it("runScript in sidecar output mode still exposes the product repo via {{leadingRepoPath}}", async () => {
+    const pluginDir = makePluginDir();
+    const repo = makeProjectRepo();
+    const plugin = await service.installPlugin({ source: pluginDir });
+    const projectId = await insertProject(db, repo);
+
+    await service.setOutputLocation(plugin.id, projectId, "sidecar");
+    const result = await service.runScript(plugin.id, "print-roots", projectId);
+    expect(result.timedOut).toBe(false);
+    expect(result.code).toBe(0);
+    const [leading, output] = result.stdout.trim().split("|");
+    // {{leadingRepoPath}} must still name the product repo...
+    expect(leading).toBe(repo);
+    // ...even though {{repoPath}} (output) now points at the sidecar, not the product repo.
+    expect(output).not.toBe(repo);
+    expect(existsSync(output)).toBe(true);
   });
 
   it("runScript rejects an unknown script name with NOT_FOUND", async () => {
