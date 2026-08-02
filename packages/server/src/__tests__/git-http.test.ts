@@ -3,6 +3,7 @@
 // namespace, refusal of refs/heads pushes, token auth.
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { GIT_HEAVY_TEST_TIMEOUT_MS } from "./helpers/timeouts.js";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -57,7 +58,7 @@ describe("git-http service (worker fleet phase 2)", () => {
 
   it("clones over authed smart HTTP", async () => {
     const cloneDir = join(workDir, "clone");
-    const result = await gitExec(["clone", authedUrl(), cloneDir], { timeout: 30000 });
+    const result = await gitExec(["clone", authedUrl(), cloneDir], { timeout: GIT_HEAVY_TEST_TIMEOUT_MS });
     expect(result.code).toBe(0);
     const head = await gitExecOrThrow(["log", "-1", "--format=%s"], { cwd: cloneDir });
     expect(head.trim()).toBe("init");

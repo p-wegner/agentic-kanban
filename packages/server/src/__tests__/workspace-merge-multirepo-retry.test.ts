@@ -27,6 +27,7 @@ vi.mock("../services/merge-helpers.service.js", async (importOriginal) => {
 });
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { GIT_HEAVY_TEST_TIMEOUT_MS } from "./helpers/timeouts.js";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -221,6 +222,6 @@ describe("sibling-only workspace merges through the normal pipeline (#3)", () =>
     // before the temp repos are removed.
     await vi.waitFor(() => {
       expect(activeMerges.size).toBe(0);
-    }, { timeout: 30000 });
+    }, { timeout: GIT_HEAVY_TEST_TIMEOUT_MS });
   }, 120000);
 });

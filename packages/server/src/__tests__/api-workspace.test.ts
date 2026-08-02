@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import * as schema from "@agentic-kanban/shared/schema";
+import { GIT_HEAVY_TEST_TIMEOUT_MS } from "./helpers/timeouts.js";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { eq } from "drizzle-orm";
@@ -93,7 +94,7 @@ describe("Workspaces API", () => {
     }
   });
 
-  it("GET /api/projects/:id/board reflects Done counts immediately after workspace merge", { timeout: 30000 }, async () => {
+  it("GET /api/projects/:id/board reflects Done counts immediately after workspace merge", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, async () => {
     const { app, db } = createTestAppWithBoardEvents();
     const repoPath = mkdtempSync(join(tmpdir(), "kanban-board-merge-"));
     try {
