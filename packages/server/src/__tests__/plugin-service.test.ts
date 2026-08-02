@@ -422,4 +422,42 @@ describe("plugin.service", () => {
     const after = await service.getViewStatus(plugin.id, "coverage", projectId);
     expect(after.running).toBe(false);
   });
+
+  it("startView honors serve.cwd: 'repo' — the view process runs in the project repo, not the plugin checkout", async () => {
+    const manifest = {
+      ...MANIFEST,
+      views: [
+        {
+          id: "coverage",
+          label: "Coverage",
+          kind: "iframe",
+          serve: { command: "node {{pluginPath}}/serve.mjs", portEnv: "PORT", cwd: "repo" },
+        },
+      ],
+    };
+    const pluginDir = makePluginDir(manifest);
+    // Writes a marker into ITS OWN cwd, then serves — proves which directory it actually ran in.
+    writeFileSync(
+      join(pluginDir, "serve.mjs"),
+      "import http from 'node:http'; import fs from 'node:fs'; " +
+        "fs.writeFileSync('cwd-marker.txt', process.cwd()); " +
+        "http.createServer((req, res) => res.end('ok')).listen(process.env.PORT, '127.0.0.1');",
+    );
+    const repo = makeProjectRepo();
+    const plugin = await service.installPlugin({ source: pluginDir });
+    const projectId = await insertProject(db, repo);
+
+    await service.startView(plugin.id, "coverage", projectId);
+
+    // Small poll: the child needs a moment to write its marker after spawn.
+    const deadline = Date.now() + 2000;
+    while (!existsSync(join(repo, "cwd-marker.txt")) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+
+    expect(existsSync(join(repo, "cwd-marker.txt"))).toBe(true);
+    expect(existsSync(join(pluginDir, "cwd-marker.txt"))).toBe(false);
+
+    await service.stopView(plugin.id, "coverage", projectId);
+  });
 });
