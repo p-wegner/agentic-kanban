@@ -19,13 +19,19 @@ import type { ChildProcess } from "node:child_process";
 import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-preference-write";
 import {
+  DEFAULT_PLUGIN_OUTPUT_LOCATION,
   PLUGIN_MANIFEST_FILENAME,
+  PLUGIN_OUTPUT_LOCATIONS,
   countScaffoldPlaceholders,
+  isPluginOutputLocation,
   parsePluginManifest,
   pluginEnabledPreferenceKey,
+  pluginOutputLocationPreferenceKey,
+  pluginSidecarRepoName,
   substitutePluginEnv,
   substitutePluginPlaceholders,
   type PluginManifest,
+  type PluginOutputLocation,
   type PluginPlaceholderVars,
 } from "@agentic-kanban/shared/lib/plugin-manifest";
 import { isPluginEnabledPreferenceKey } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
@@ -34,6 +40,10 @@ import { spawnShellCommand, taskkillTree } from "./process-exec.js";
 import { runPluginCommand, tailOutput as tail, type PluginCommandResult } from "./plugin-exec.js";
 import { createPluginLoopEngine, type LoopAdvanceResult, type LoopStatus } from "./plugin-loop.service.js";
 import { getProjectById } from "../repositories/project.repository.js";
+import { getPreference } from "../repositories/preferences.repository.js";
+import { insertProjectRepo, listProjectRepos } from "../repositories/repo.repository.js";
+import { createSiblingRepoDir } from "./project-repos.service.js";
+import { detectRepoInfo } from "./git-info.service.js";
 import {
   deletePluginRow,
   getPluginRowById,
@@ -291,7 +301,7 @@ export function createPluginService(deps: {
     const rows = await listPluginRows(database);
     const enabledMap = projectId ? await enabledSlugsByProject() : null;
     const enabledSlugs = enabledMap?.get(projectId!) ?? new Set<string>();
-    return rows.map((row) => {
+    return Promise.all(rows.map(async (row) => {
       let manifest: PluginManifest | null = null;
       let manifestError: string | null = null;
       try {
@@ -299,13 +309,15 @@ export function createPluginService(deps: {
       } catch (err) {
         manifestError = err instanceof Error ? err.message : String(err);
       }
+      // A peek only — never creates the sidecar repo (that happens on enable/run/setOutputLocation).
+      const outputLocation = projectId ? await readOutputLocationPref(row.pluginId, projectId) : undefined;
       return {
         ...row,
         manifest,
         manifestError,
-        ...(projectId ? { enabled: enabledSlugs.has(row.pluginId) } : {}),
+        ...(projectId ? { enabled: enabledSlugs.has(row.pluginId), outputLocation } : {}),
       };
-    });
+    }));
   }
 
   /** Delete the row + running views. Never deletes cloned files on disk. */
@@ -426,6 +438,65 @@ export function createPluginService(deps: {
     );
   }
 
+  async function readOutputLocationPref(pluginSlug: string, projectId: string): Promise<PluginOutputLocation> {
+    const raw = await getPreference(pluginOutputLocationPreferenceKey(pluginSlug, projectId), database);
+    return isPluginOutputLocation(raw) ? raw : DEFAULT_PLUGIN_OUTPUT_LOCATION;
+  }
+
+  /** Find (never creates) the sidecar repo row for a plugin, by its naming convention. */
+  async function findSidecarRepo(pluginSlug: string, projectId: string) {
+    const sidecarName = pluginSidecarRepoName(pluginSlug);
+    const siblings = await listProjectRepos(projectId, database);
+    return siblings.find((r) => (r.name ?? "") === sidecarName) ?? null;
+  }
+
+  /**
+   * Where this plugin's scaffold/script/loop output goes for a project — the
+   * project's leading repo (default), or a dedicated sidecar repo, CREATED on
+   * first use if `"sidecar"` is selected and no such repo exists yet.
+   */
+  async function resolveOutputRepoPath(
+    plugin: PluginRow & { manifest: PluginManifest },
+    project: { id: string; repoPath: string },
+  ): Promise<string> {
+    const location = await readOutputLocationPref(plugin.pluginId, project.id);
+    if (location === "leading") return project.repoPath;
+
+    const existing = await findSidecarRepo(plugin.pluginId, project.id);
+    if (existing) return existing.path;
+
+    const sidecarName = pluginSidecarRepoName(plugin.pluginId);
+    const path = await createSiblingRepoDir(database, project.id, { name: sidecarName, generateReadme: true });
+    const repoInfo = await detectRepoInfo(path);
+    await insertProjectRepo(
+      { projectId: project.id, path: repoInfo.repoPath, name: sidecarName, defaultBranch: repoInfo.defaultBranch },
+      database,
+    );
+    return repoInfo.repoPath;
+  }
+
+  /** Current output-location choice + its resolved repo path (`null` = sidecar chosen but not created yet). */
+  async function getOutputLocation(pluginRowId: string, projectId: string) {
+    const plugin = await requirePlugin(pluginRowId);
+    const project = await requireProject(projectId);
+    const location = await readOutputLocationPref(plugin.pluginId, projectId);
+    const repoPath = location === "leading" ? project.repoPath : (await findSidecarRepo(plugin.pluginId, projectId))?.path ?? null;
+    return { location, repoPath, sidecarRepoName: pluginSidecarRepoName(plugin.pluginId) };
+  }
+
+  /** Set the output-location choice and eagerly materialize a sidecar repo if picked. */
+  async function setOutputLocation(pluginRowId: string, projectId: string, location: string) {
+    if (!isPluginOutputLocation(location)) {
+      throw new PluginError(`location must be one of: ${PLUGIN_OUTPUT_LOCATIONS.join(", ")}`, "BAD_REQUEST");
+    }
+    const plugin = await requirePlugin(pluginRowId);
+    const project = await requireProject(projectId);
+    const prefKey = pluginOutputLocationPreferenceKey(plugin.pluginId, projectId);
+    await setPreferenceChecked(database, [{ key: prefKey, value: location }]);
+    const repoPath = await resolveOutputRepoPath(plugin, project);
+    return { location, repoPath, sidecarRepoName: pluginSidecarRepoName(plugin.pluginId) };
+  }
+
   async function enableForProject(pluginRowId: string, projectId: string): Promise<EnableReport> {
     const plugin = await requirePlugin(pluginRowId);
     const project = await requireProject(projectId);
@@ -434,7 +505,8 @@ export function createPluginService(deps: {
 
     const report: EnableReport = { prefKey, skills: [], scaffoldWritten: false, scaffoldPlaceholders: 0, warnings: [] };
     fanOutSkills(plugin, project.repoPath, report);
-    fanOutScaffold(plugin, project.repoPath, project.name, report);
+    const outputRepoPath = await resolveOutputRepoPath(plugin, project);
+    fanOutScaffold(plugin, outputRepoPath, project.name, report);
     return report;
   }
 
@@ -515,8 +587,9 @@ export function createPluginService(deps: {
     }
 
     const port = await allocateFreePort();
+    const outputRepoPath = await resolveOutputRepoPath(plugin, project);
     const vars: PluginPlaceholderVars = {
-      repoPath: project.repoPath,
+      repoPath: outputRepoPath,
       projectName: project.name,
       pluginPath: plugin.localPath,
       port,
@@ -631,15 +704,16 @@ export function createPluginService(deps: {
     const project = await requireProject(projectId);
     const script = (plugin.manifest.scripts ?? []).find((s) => s.name === scriptName);
     if (!script) throw new PluginError(`Script "${scriptName}" not found in plugin manifest`, "NOT_FOUND");
-    requireScaffoldReady(plugin, project.repoPath, "scripts");
+    const outputRepoPath = await resolveOutputRepoPath(plugin, project);
+    requireScaffoldReady(plugin, outputRepoPath, "scripts");
 
     const vars: PluginPlaceholderVars = {
-      repoPath: project.repoPath,
+      repoPath: outputRepoPath,
       projectName: project.name,
       pluginPath: plugin.localPath,
     };
     return runPluginCommand(substitutePluginPlaceholders(script.command, vars), {
-      cwd: script.cwd === "plugin" ? plugin.localPath : project.repoPath,
+      cwd: script.cwd === "plugin" ? plugin.localPath : outputRepoPath,
       env: substitutePluginEnv(script.env, vars),
     });
   }
@@ -702,7 +776,8 @@ export function createPluginService(deps: {
   async function advanceLoop(pluginRowId: string, loopName: string, projectId: string): Promise<LoopAdvanceResult> {
     const plugin = await requirePlugin(pluginRowId);
     const project = await requireProject(projectId);
-    requireScaffoldReady(plugin, project.repoPath, "loops");
+    const outputRepoPath = await resolveOutputRepoPath(plugin, project);
+    requireScaffoldReady(plugin, outputRepoPath, "loops");
     return loops.advanceLoop({
       manifest: plugin.manifest,
       pluginSlug: plugin.pluginId,
@@ -710,7 +785,7 @@ export function createPluginService(deps: {
       loopName,
       projectId,
       projectName: project.name,
-      repoPath: project.repoPath,
+      repoPath: outputRepoPath,
     });
   }
 
@@ -802,6 +877,8 @@ export function createPluginService(deps: {
     getViewStatus,
     runScript,
     runSkill,
+    getOutputLocation,
+    setOutputLocation,
   };
 }
 
