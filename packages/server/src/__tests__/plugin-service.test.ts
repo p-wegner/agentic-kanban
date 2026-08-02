@@ -27,7 +27,16 @@ function makeTempDir(prefix: string): string {
 }
 
 function makeProjectRepo(): string {
-  const repo = makeTempDir("plugin-test-repo-");
+  // Give every product repo its OWN parent directory. `setOutputLocation(..., "sidecar")`
+  // creates the output repo as a SIBLING of this one, and that sibling's name is derived
+  // from the manifest id — so it is FIXED, not randomized. With the repo sitting directly
+  // in the OS temp root, the sibling landed in a shared parent, survived the run, and every
+  // later run then died in createSiblingRepoDir with "Directory already exists" — a one-shot
+  // test that permanently reddened `pnpm test:mine`, i.e. the merge gate, for everyone.
+  // Nesting under a unique parent keeps the sibling per-run and lets afterEach reap both.
+  const parent = makeTempDir("plugin-test-parent-");
+  const repo = join(parent, "product-repo");
+  mkdirSync(repo, { recursive: true });
   gitExecSync(["init"], { cwd: repo });
   return repo;
 }
