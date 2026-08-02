@@ -88,6 +88,10 @@ export interface ProjectGitStats {
 }
 
 const METRICS_CACHE_TTL_MS = 60_000;
+// Generous enough that a loaded machine's git spawn doesn't blow this budget while the
+// sibling (sync or async) call's spawn stays under it — an asymmetric timeout here used
+// to make the two paths key the shared metrics cache under different HEAD values.
+const HEAD_RESOLVE_TIMEOUT_MS = 5_000;
 const HISTORY_WEEKS = 12;
 const MAX_SOURCE_FILES = 6000;
 const MAX_SOURCE_BYTES = 750_000;
@@ -419,21 +423,26 @@ async function collectHistoryMetricsAsync(repoPath: string, branch: string): Pro
 }
 
 function collectProjectCodeAndHistory(repoPath: string, branch: string): CachedMetrics {
-  const head = (() => {
-    try {
-      return gitExecSync(["rev-parse", branch], { cwd: repoPath, timeout: 2000 }).trim();
-    } catch {
-      return branch;
-    }
-  })();
-  const cacheKey = `${repoPath}:${head}`;
-  const cached = metricsCache.get(cacheKey);
+  // Returns null (never a fallback value like the branch name) when rev-parse fails, so a
+  // transient timeout can't silently key the cache on something other than the true commit —
+  // that would let the sync and async paths (whichever one happens to time out) diverge onto
+  // two different cache keys for the same repo+branch and defeat the shared cache entirely.
+  let head: string | null;
+  try {
+    head = gitExecSync(["rev-parse", branch], { cwd: repoPath, timeout: HEAD_RESOLVE_TIMEOUT_MS }).trim();
+  } catch {
+    head = null;
+  }
+  const cacheKey = head != null ? `${repoPath}:${head}` : null;
+  const cached = cacheKey != null ? metricsCache.get(cacheKey) : undefined;
   if (cached && Date.now() - cached.timestamp < METRICS_CACHE_TTL_MS) return cached.metrics;
 
   const codeMetrics = collectCurrentCodeMetrics(repoPath);
   const { history, hotspots } = collectHistoryMetrics(repoPath, branch);
   const metrics = { codeMetrics, history, hotspots };
-  metricsCache.set(cacheKey, { timestamp: Date.now(), metrics });
+  // Only a reliably-resolved head is safe to cache under; an unresolved head means
+  // this result must not be stored (there's no trustworthy key to store it under).
+  if (cacheKey != null) metricsCache.set(cacheKey, { timestamp: Date.now(), metrics });
   return metrics;
 }
 
@@ -443,26 +452,29 @@ function collectProjectCodeAndHistory(repoPath: string, branch: string): CachedM
  * of each spawning the full source walk + git history scan.
  */
 async function collectProjectCodeAndHistoryAsync(repoPath: string, branch: string): Promise<CachedMetrics> {
-  let head: string;
+  let head: string | null;
   try {
-    head = (await execGitCapture(["rev-parse", branch], repoPath, 2000)).trim();
+    head = (await execGitCapture(["rev-parse", branch], repoPath, HEAD_RESOLVE_TIMEOUT_MS)).trim();
   } catch {
-    head = branch;
+    head = null;
   }
-  const cacheKey = `${repoPath}:${head}`;
-  const cached = metricsCache.get(cacheKey);
+  const cacheKey = head != null ? `${repoPath}:${head}` : null;
+  const cached = cacheKey != null ? metricsCache.get(cacheKey) : undefined;
   if (cached && Date.now() - cached.timestamp < METRICS_CACHE_TTL_MS) return cached.metrics;
 
-  const inflight = inflightMetrics.get(cacheKey);
+  const inflight = cacheKey != null ? inflightMetrics.get(cacheKey) : undefined;
   if (inflight) return inflight;
 
   const compute = (async () => {
     const codeMetrics = await collectCurrentCodeMetricsAsync(repoPath);
     const { history, hotspots } = await collectHistoryMetricsAsync(repoPath, branch);
     const metrics = { codeMetrics, history, hotspots };
-    metricsCache.set(cacheKey, { timestamp: Date.now(), metrics });
+    // Only a reliably-resolved head is safe to cache under; an unresolved head means
+    // this result must not be stored (there's no trustworthy key to store it under).
+    if (cacheKey != null) metricsCache.set(cacheKey, { timestamp: Date.now(), metrics });
     return metrics;
   })();
+  if (cacheKey == null) return compute;
   // Clear the in-flight slot regardless of outcome; the cache write above is the success path.
   const tracked = compute.finally(() => {
     inflightMetrics.delete(cacheKey);

@@ -195,5 +195,13 @@ describe("getProjectGitStatsAsync", () => {
     expect(asyncStats.codeMetrics).toBe(syncStats.codeMetrics);
     expect(asyncStats.history).toBe(syncStats.history);
     expect(asyncStats.hotspots).toBe(syncStats.hotspots);
+
+    // Regression: a THIRD call (async again) must still be served from cache — its
+    // generatedAt must not move. An equal-but-freshly-recomputed object would pass an
+    // `.toEqual()` check but must fail this: `generatedAt` would advance to "now".
+    const generatedAtBefore = asyncStats.codeMetrics.generatedAt;
+    const rewarmedStats = await getProjectGitStatsAsync(repoDir, branchName);
+    expect(rewarmedStats.codeMetrics.generatedAt).toBe(generatedAtBefore);
+    expect(rewarmedStats.codeMetrics).toBe(asyncStats.codeMetrics);
   });
 });
