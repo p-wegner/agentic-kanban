@@ -7,6 +7,7 @@ import {
   pluginEnabledPreferenceKey,
   parsePluginLoopPlan,
   pluginLoopUnitKey,
+  countScaffoldPlaceholders,
 } from "../src/lib/plugin-manifest.js";
 import { isPluginEnabledPreferenceKey, isProjectScopedDynamicKey } from "../src/lib/dynamic-preference-keys.js";
 
@@ -215,5 +216,33 @@ describe("pluginLoopUnitKey", () => {
       .toBe("plugin-loop:refactor-safety-net:requirement-extraction:billing:r1");
     // The empty-unit form is the prefix the loop engine dedupes on.
     expect(pluginLoopUnitKey("a", "b", "").endsWith(":")).toBe(true);
+  });
+});
+
+describe("countScaffoldPlaceholders", () => {
+  it("counts unfilled TODO: values", () => {
+    expect(countScaffoldPlaceholders('{"language": "TODO: ts|py", "dir": "TODO: src"}')).toBe(2);
+    expect(countScaffoldPlaceholders('{"language": "ts"}')).toBe(0);
+  });
+
+  it("does NOT count a TODO: shown as inline code in the template's own instructions", () => {
+    // Regression: a scaffold explains itself, and counting that sentence made a
+    // fully filled-in profile report a leftover placeholder forever, so the loop
+    // gate refused to run against a CORRECT scaffold.
+    const filledIn = [
+      "Fill in every `TODO:` marker for this target before running the pipeline.",
+      "```json",
+      '{ "language": "ts", "source_roots": ["src"] }',
+      "```",
+    ].join("\n");
+    expect(countScaffoldPlaceholders(filledIn)).toBe(0);
+  });
+
+  it("still counts real placeholders in a template that also documents the marker", () => {
+    const template = [
+      "Fill in every `TODO:` marker for this target.",
+      '{ "language": "TODO: ts|py" }',
+    ].join("\n");
+    expect(countScaffoldPlaceholders(template)).toBe(1);
   });
 });
