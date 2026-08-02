@@ -1,0 +1,130 @@
+import { describe, expect, it, afterEach } from "vitest";
+import { randomUUID } from "node:crypto";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import * as schema from "@agentic-kanban/shared/schema";
+import {
+  pluginEnabledPreferenceKey,
+  pluginLoopPausedPreferenceKey,
+  pluginLoopUnitKey,
+} from "@agentic-kanban/shared/lib/plugin-manifest";
+import { createTestDb, type TestDb } from "./helpers/test-db.js";
+import { seedProject, seedIssue } from "./helpers/workflow-test-helpers.js";
+import { advanceDuePluginLoops } from "../services/plugin-loop-monitor.js";
+import { createPluginService } from "../services/plugin.service.js";
+import type { Database } from "../db/index.js";
+
+/**
+ * A paused loop is the one direct way a human can stop a converging loop early
+ * (#200) — the monitor's auto-advance pass must skip it entirely, leaving its
+ * already-closed round alone rather than planning another one.
+ */
+
+const tempDirs: string[] = [];
+
+function makeTempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
+
+const MANIFEST = {
+  id: "loop-plugin",
+  name: "Loop Plugin",
+  version: "0.1.0",
+  skills: [{ dir: "skills/analysis" }],
+  loops: [
+    {
+      name: "sweep",
+      skill: "analysis",
+      // Never expected to run in this test — a paused loop must not reach it,
+      // and asserting it does NOT exit 0 makes an accidental invocation loud
+      // (it would show up as an "advance failed" log line instead of silently
+      // creating a ticket).
+      plan: { command: "exit 1", cwd: "plugin" },
+    },
+  ],
+};
+
+function makePluginDir(): string {
+  const dir = makeTempDir("loop-monitor-plugin-");
+  writeFileSync(join(dir, "kanban-plugin.json"), JSON.stringify(MANIFEST, null, 2));
+  return dir;
+}
+
+async function setupLoopWithOneClosedRound(db: TestDb) {
+  const { projectId } = await seedProject(db, "Loop Project");
+  const doneStatusId = randomUUID();
+  await db.insert(schema.projectStatuses).values({
+    id: doneStatusId,
+    projectId,
+    name: "Done",
+    sortOrder: 1,
+    isDefault: false,
+    createdAt: new Date().toISOString(),
+  });
+  await seedIssue(db, projectId, doneStatusId, 1, "round 1 unit", {
+    externalKey: pluginLoopUnitKey("loop-plugin", "sweep", "unit-1"),
+  });
+
+  const service = createPluginService({ database: db as unknown as Database });
+  const pluginDir = makePluginDir();
+  const plugin = await service.installPlugin({ source: pluginDir });
+  await db.insert(schema.preferences).values({
+    key: pluginEnabledPreferenceKey("loop-plugin", projectId),
+    value: "true",
+    updatedAt: new Date().toISOString(),
+  });
+
+  return { projectId, plugin, service };
+}
+
+describe("advanceDuePluginLoops — pause", () => {
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {
+        /* Windows file locks — best-effort cleanup */
+      }
+    }
+  });
+
+  it("skips a paused loop entirely, without running its plan command", async () => {
+    const { db } = createTestDb();
+    const { projectId } = await setupLoopWithOneClosedRound(db);
+    await db.insert(schema.preferences).values({
+      key: pluginLoopPausedPreferenceKey("loop-plugin", "sweep", projectId),
+      value: "true",
+      updatedAt: new Date().toISOString(),
+    });
+
+    const logs: string[] = [];
+    const advanced = await advanceDuePluginLoops(db as unknown as Database, {
+      allowProject: () => true,
+      log: (message) => logs.push(message),
+    });
+
+    expect(advanced).toBe(0);
+    expect(logs).toEqual([]);
+  });
+
+  it("advances (attempts) an unpaused loop whose round is closed", async () => {
+    const { db } = createTestDb();
+    const { projectId } = await setupLoopWithOneClosedRound(db);
+    // No pause pref written — the loop is unpaused by default.
+
+    const logs: string[] = [];
+    const advanced = await advanceDuePluginLoops(db as unknown as Database, {
+      allowProject: () => true,
+      log: (message) => logs.push(message),
+    });
+
+    // The plan command deliberately fails (exit 1), so this proves the loop WAS
+    // reached (unlike the paused case, which logs nothing at all).
+    expect(advanced).toBe(0);
+    expect(logs.some((m) => m.includes("loop-plugin:sweep advance failed"))).toBe(true);
+    void projectId;
+  });
+});

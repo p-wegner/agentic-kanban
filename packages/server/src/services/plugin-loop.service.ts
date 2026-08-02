@@ -2,6 +2,7 @@ import { isTerminalStatusName } from "@agentic-kanban/shared";
 import {
   DEFAULT_LOOP_MAX_UNITS_PER_ADVANCE,
   parsePluginLoopPlan,
+  pluginLoopPausedPreferenceKey,
   pluginLoopUnitKey,
   substitutePluginEnv,
   substitutePluginPlaceholders,
@@ -11,7 +12,7 @@ import {
 } from "@agentic-kanban/shared/lib/plugin-manifest";
 import type { Database } from "../db/index.js";
 import { listPluginLoopIssues } from "../repositories/plugins.repository.js";
-import { getAllPreferences } from "../repositories/preferences.repository.js";
+import { getAllPreferences, getPreference, setPreference } from "../repositories/preferences.repository.js";
 import { resolveStartPolicy } from "./start-policy.service.js";
 import { runPluginCommand } from "./plugin-exec.js";
 import type { CreateIssueInput, CreateIssueResult } from "./issue.service.js";
@@ -86,6 +87,8 @@ export interface LoopStatus {
   openTickets: number;
   /** Terminal (Done/Cancelled) tickets this loop has created. */
   closedTickets: number;
+  /** True when a human has paused this loop's monitor-driven auto-advance. */
+  paused: boolean;
 }
 
 export interface PluginLoopDeps {
@@ -117,6 +120,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
     const out: LoopStatus[] = [];
     for (const loop of manifest.loops ?? []) {
       const rows = await listPluginLoopIssues(projectId, keyPrefix(pluginSlug, loop.name), database);
+      const pausedValue = await getPreference(pluginLoopPausedPreferenceKey(pluginSlug, loop.name, projectId), database);
       out.push({
         name: loop.name,
         label: loop.label ?? loop.name,
@@ -124,9 +128,22 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
         skill: loop.skill,
         openTickets: rows.filter((r) => !isTerminalStatusName(r.statusName)).length,
         closedTickets: rows.filter((r) => isTerminalStatusName(r.statusName)).length,
+        paused: pausedValue === "true",
       });
     }
     return out;
+  }
+
+  /** Pause/resume a loop's monitor-driven auto-advance (`advanceDuePluginLoops`). */
+  async function setLoopPaused(
+    manifest: PluginManifest,
+    pluginSlug: string,
+    loopName: string,
+    projectId: string,
+    paused: boolean,
+  ): Promise<void> {
+    findLoop(manifest, loopName); // throws NOT_FOUND for an unknown loop name
+    await setPreference(pluginLoopPausedPreferenceKey(pluginSlug, loopName, projectId), paused ? "true" : "false", database);
   }
 
   /**
@@ -239,7 +256,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
     };
   }
 
-  return { advanceLoop, loopStatuses };
+  return { advanceLoop, loopStatuses, setLoopPaused };
 }
 
 export type PluginLoopEngine = ReturnType<typeof createPluginLoopEngine>;
