@@ -166,6 +166,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
     projectId: string;
     projectName: string;
     repoPath: string;
+    leadingRepoPath: string;
   }): Promise<LoopAdvanceResult> {
     if (!createIssue) {
       throw new PluginLoopError("Loop advance is not available on this route", "BAD_REQUEST");
@@ -173,6 +174,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
     const loop = findLoop(args.manifest, args.loopName);
     const vars: PluginPlaceholderVars = {
       repoPath: args.repoPath,
+      leadingRepoPath: args.leadingRepoPath,
       projectName: args.projectName,
       pluginPath: args.pluginLocalPath,
     };

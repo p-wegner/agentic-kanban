@@ -17,7 +17,7 @@
  *               "serve": { "command": "node tools/coverage/serve.mjs", "portEnv": "PORT",
  *                          "env": { "COVERAGE_ROOT": "{{repoPath}}" } } }],
  *   "scripts": [{ "name": "coverage", "command": "npm run coverage", "cwd": "plugin",
- *                 "env": { "COVERAGE_ROOT": "{{repoPath}}" } }],
+ *                 "env": { "SOURCE_ROOT": "{{leadingRepoPath}}", "COVERAGE_ROOT": "{{repoPath}}" } }],
  *   "loops": [{ "name": "requirement-extraction", "skill": "requirement-extraction",
  *               "plan": { "command": "node tools/loop-plan.mjs --json", "cwd": "plugin",
  *                         "env": { "COVERAGE_ROOT": "{{repoPath}}" } } }],
@@ -51,7 +51,7 @@ export interface PluginViewServeDef {
   cwd?: PluginCwd;
   /** Env var name the server reads its port from (e.g. "PORT"). */
   portEnv?: string;
-  /** Extra env vars; values support {{repoPath}}/{{projectName}}/{{pluginPath}}/{{port}}. */
+  /** Extra env vars; values support {{repoPath}}/{{leadingRepoPath}}/{{projectName}}/{{pluginPath}}/{{port}}. */
   env?: Record<string, string>;
 }
 
@@ -418,7 +418,11 @@ export function pluginLoopUnitKey(pluginSlug: string, loopName: string, unitId: 
 }
 
 export interface PluginPlaceholderVars {
+  /** Where this plugin's output goes — the project's leading repo, or a sidecar repo. */
   repoPath?: string;
+  /** The project's leading (product) repo, regardless of output location. Lets a manifest
+   *  read the source from `{{leadingRepoPath}}` while writing output to `{{repoPath}}`. */
+  leadingRepoPath?: string;
   projectName?: string;
   pluginPath?: string;
   port?: number | string;
@@ -433,6 +437,7 @@ export interface PluginPlaceholderVars {
 export function substitutePluginPlaceholders(text: string, vars: PluginPlaceholderVars): string {
   let out = text;
   if (vars.repoPath !== undefined) out = out.replace(/\{\{repoPath}}/g, vars.repoPath);
+  if (vars.leadingRepoPath !== undefined) out = out.replace(/\{\{leadingRepoPath}}/g, vars.leadingRepoPath);
   if (vars.projectName !== undefined) out = out.replace(/\{\{projectName}}/g, vars.projectName);
   if (vars.pluginPath !== undefined) out = out.replace(/\{\{pluginPath}}/g, vars.pluginPath);
   if (vars.port !== undefined) out = out.replace(/\{\{port}}/g, String(vars.port));
