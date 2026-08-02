@@ -1,5 +1,6 @@
 import { parsePluginManifest } from "@agentic-kanban/shared/lib/plugin-manifest";
 import { isPluginEnabledPreferenceKey } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
+import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
 import type { Database } from "../db/index.js";
 import { listPluginEnabledPreferences, listPluginRows } from "../repositories/plugins.repository.js";
 import { getPluginService } from "./plugin.service.js";
@@ -28,7 +29,10 @@ export async function advanceDuePluginLoops(
   // plugin_enabled_<slug>_<projectId> — the projectId is the fixed-length uuid tail.
   const enabled = new Map<string, Set<string>>();
   for (const row of await listPluginEnabledPreferences(database)) {
-    if (!isPluginEnabledPreferenceKey(row.key) || row.value !== "true") continue;
+    // plugin_enabled_* has no SETTINGS_REGISTRY entry (dynamic per-plugin-per-project key),
+    // so parseBoolSetting falls back to the explicit `false` default below — same polarity
+    // as the raw `!== "true"` check this replaces, but routed through the #947 accessor.
+    if (!isPluginEnabledPreferenceKey(row.key) || !parseBoolSetting(row.key, row.value, false)) continue;
     const rest = row.key.slice("plugin_enabled_".length);
     const projectId = rest.slice(-36);
     if (!options.allowProject(projectId)) continue;
