@@ -11,11 +11,13 @@
  */
 
 import { mkdirSync, writeFileSync, chmodSync } from "node:fs";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { buildAgentPrompt } from "./workspace-create/policy.js";
 import type { Database } from "../db/index.js";
 import * as crudRepo from "../repositories/workspace-crud.repository.js";
+import { listPluginRows } from "../repositories/plugins.repository.js";
+import { parsePluginManifest, pluginEnabledPreferenceKey } from "@agentic-kanban/shared/lib/plugin-manifest";
 import type { ProviderName } from "./agent-provider.js";
 import { runSetupScript } from "./setup-script.js";
 import type { SetupScriptContainer } from "@agentic-kanban/shared/lib/setup-script";
@@ -228,6 +230,46 @@ export function createWorkspaceProvisionService(deps: {
     return null;
   }
 
+  /**
+   * Copy every skill declared by a plugin ENABLED for this project into the
+   * worktree — not just the one skill `resolveSkillFile` resolves for the
+   * workspace's own skill/workflow selection.
+   *
+   * `enableForProject` only fans a plugin's skills out into the project's
+   * LEADING repo (`fanOutSkills`, junctioned + excluded via `.git/info/exclude`
+   * so it never lands in git). A worktree is a separate checkout that never
+   * sees a gitignored path, so a plugin-loop ticket (or any other ticket for a
+   * project with a safety-net-style plugin enabled) launched with only
+   * `board-navigator` present — the agent could read the skill's NAME in the
+   * ticket prose but had no bundle to actually run (#204). `copySkillToWorktree`
+   * already handles dereferencing the junction into real files, so this reuses
+   * it per enabled plugin's skill list instead of materializing only one.
+   *
+   * Best-effort: a broken plugin manifest or a missing skill source must not
+   * block workspace creation.
+   */
+  async function materializeEnabledPluginSkills(worktreePath: string, repoPath: string, projectId: string): Promise<void> {
+    try {
+      const rows = await listPluginRows(database);
+      for (const row of rows) {
+        const enabled = await getPreference(pluginEnabledPreferenceKey(row.pluginId, projectId), database);
+        if (enabled !== "true") continue;
+        let manifest;
+        try {
+          manifest = parsePluginManifest(row.manifestJson);
+        } catch {
+          continue;
+        }
+        for (const skill of manifest.skills ?? []) {
+          const name = basename(skill.dir.replace(/\\/g, "/"));
+          await copySkillToWorktree(repoPath, name, worktreePath);
+        }
+      }
+    } catch (err) {
+      console.warn(`[workspaces] plugin-skill materialization failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   async function buildAgentConfig(
     input: Pick<CreateWorkspaceInput, "profile" | "claudeProfile" | "model">,
     projectId?: string,
@@ -418,6 +460,14 @@ exit 1
       ? await resolveSkillFile(effectiveSkillId, effectiveDiskSkill, worktreePath, project.repoPath)
       : null;
 
+    // Every skill an ENABLED plugin declares (not just the one resolved above) —
+    // a plugin-loop ticket's skill, and any other safety-net skill a plugin
+    // offers, must be readable in this worktree regardless of which agent
+    // provider/machine launches it (#204).
+    if (worktreePath) {
+      await materializeEnabledPluginSkills(worktreePath, project.repoPath, issue.projectId);
+    }
+
     // #129: a skill nobody invokes is a per-turn context tax for nothing — over
     // 200 builder sessions, 0/47 materialized skills were ever fired. Name the
     // ones this worktree actually has so the agent knows to reach for them.
@@ -442,6 +492,7 @@ exit 1
     buildAgentConfig,
     installTddHook,
     packContextPrimer,
+    materializeEnabledPluginSkills,
     writeWorktreeTicketContext,
     resolveAgentPromptAndSkill,
   };
