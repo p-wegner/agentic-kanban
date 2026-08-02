@@ -19,9 +19,15 @@ import os from "node:os";
 // headroom this file describes only actually took effect in #49. Keep these top-level: the
 // failure mode is invisible (a passing config that does nothing), so re-nesting them would
 // quietly undo it again.
+// #206: 20s was still not enough headroom, and this suite is where it hurt most. `pnpm test:mine`
+// is ALSO the merge verify_script, so when a loaded machine (several agent sessions at once) pushed
+// 89 of 4165 server tests past their budget — every one a TIMEOUT, not an assertion — master's gate
+// went red and withheld EVERY merge board-wide, including diffs touching none of this. The budget
+// was measuring CPU contention rather than correctness, which is the one thing a merge gate must
+// never do. 60s restores real headroom without hiding a hang (a hang still never finishes).
 const cpuCount = os.cpus().length || 4;
 const maxWorkers = Number(process.env.VITEST_MAX_WORKERS) || Math.max(2, Math.floor(cpuCount / 2));
-const testTimeout = Number(process.env.VITEST_TEST_TIMEOUT) || 20_000;
+const testTimeout = Number(process.env.VITEST_TEST_TIMEOUT) || 60_000;
 
 export default defineConfig({
   test: {
