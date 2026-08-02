@@ -446,3 +446,16 @@ export function substitutePluginEnv(
 export function pluginEnabledPreferenceKey(pluginSlug: string, projectId: string): string {
   return `plugin_enabled_${pluginSlug}_${projectId}`;
 }
+
+/**
+ * Count unfilled `TODO:` markers left in a scaffold file's content.
+ *
+ * A plugin's `scaffold.profileTemplate` ships with `TODO:` markers for a human
+ * to fill in; a script or loop `plan` command that reads the scaffold before
+ * that happens fails with a confusing stack (or its own domain-specific "no
+ * source files under TODO: e.g. src" error) instead of saying why. This is the
+ * one shared signal both the enable report and the pre-run gate key off.
+ */
+export function countScaffoldPlaceholders(content: string): number {
+  return (content.match(/TODO:/g) ?? []).length;
+}
