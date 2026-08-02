@@ -17,6 +17,10 @@ import { createWebhookSender } from "../services/outbound-webhook.service.js";
  *   DELETE /api/plugins/:id                   remove row + disable (files kept)
  *   POST   /api/plugins/:id/enable  { projectId }
  *   POST   /api/plugins/:id/disable { projectId }
+ *   GET    /api/plugins/:id/output-location?projectId=   where scaffold/script/loop output goes
+ *   POST   /api/plugins/:id/output-location { projectId, location: "leading" | "sidecar" } —
+ *            "leading" (default) writes into the project's leading repo; "sidecar" writes into
+ *            a dedicated repo (created on first use) named "<pluginSlug>-requirements"
  *   GET    /api/plugins/:id/views?projectId=  view descriptors + running state + url
  *   POST   /api/plugins/:id/views/:viewId/start { projectId } → { url, port, pid }
  *   POST   /api/plugins/:id/views/:viewId/stop  { projectId }
@@ -88,6 +92,20 @@ export function createPluginsRoute(
   router.post("/:id/disable", async (c) => {
     const projectId = await requireProjectId(c);
     return c.json(await service.disableForProject(c.req.param("id"), projectId));
+  });
+
+  router.get("/:id/output-location", async (c) => {
+    const projectId = c.req.query("projectId")?.trim();
+    if (!projectId) throw new PluginError("projectId query param is required", "BAD_REQUEST");
+    return c.json(await service.getOutputLocation(c.req.param("id"), projectId));
+  });
+
+  router.post("/:id/output-location", async (c) => {
+    const body = await parseJsonBody<{ projectId?: string; location?: string }>(c);
+    const projectId = typeof body.projectId === "string" ? body.projectId.trim() : "";
+    if (!projectId) throw new PluginError("projectId is required", "BAD_REQUEST");
+    const location = typeof body.location === "string" ? body.location : "";
+    return c.json(await service.setOutputLocation(c.req.param("id"), projectId, location));
   });
 
   router.get("/:id/views", async (c) => {
