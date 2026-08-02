@@ -31,6 +31,7 @@ Each task card on the board is backed by a git worktree and a live Claude Code s
 - **Session history** — browse past agent sessions per workspace without leaving context
 - **Worktree overview** — see all git worktrees across workspaces with diff stats and status badges
 - **Butler assistant** — a warm, persistent Claude (Agent SDK) per project (press `i`): chat for board/codebase guidance, per-project model & profile pickers, slash-command autocomplete, a Stop button, and it can orchestrate board work for you
+- **Plugins** — install a repo with a `kanban-plugin.json` and it contributes agent skills, one-shot scripts, framed dashboards, and **board-owned converging loops**: the plugin prints the outstanding work units, the board turns each into a ticket and runs it under the project's WIP limit, provider selection and quota rotation, so an open-ended analysis is resumable and visible instead of hidden in a private run-log. See [docs/plugin-development.md](docs/plugin-development.md)
 
 ## Tech Stack
 
@@ -182,6 +183,11 @@ Key patterns:
 - **Board events** — dual-path: WebSocket push for instant updates + 30s polling fallback
 - **One-step workspace creation** — single POST creates DB record, git worktree, and launches agent
 - **Session resume chains** — Claude's internal session ID captured for `--resume` on relaunch
+- **Plugins contribute commands, never agents** — a plugin's whole interface to the board is
+  deterministic: a `plan` command that prints outstanding work. Everything that spawns an agent
+  is a board ticket, so it is governed and resumable by construction. Contract:
+  `packages/shared/src/lib/plugin-manifest.ts`; guide:
+  [docs/plugin-development.md](docs/plugin-development.md)
 
 ## License
 
