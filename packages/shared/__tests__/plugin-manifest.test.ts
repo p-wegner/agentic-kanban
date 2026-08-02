@@ -114,6 +114,15 @@ describe("substitutePluginPlaceholders", () => {
     expect(substitutePluginPlaceholders("{{port}} {{mystery}}", { repoPath: "r" })).toBe("{{port}} {{mystery}}");
   });
 
+  it("substitutes {{leadingRepoPath}} independently of {{repoPath}} — reads source, writes output elsewhere", () => {
+    expect(
+      substitutePluginPlaceholders("{{leadingRepoPath}} -> {{repoPath}}", {
+        repoPath: "C:/sidecar",
+        leadingRepoPath: "C:/product",
+      }),
+    ).toBe("C:/product -> C:/sidecar");
+  });
+
   it("substitutes env maps value-wise", () => {
     expect(substitutePluginEnv({ A: "{{repoPath}}/x", B: "static" }, { repoPath: "C:/r" })).toEqual({
       A: "C:/r/x",
