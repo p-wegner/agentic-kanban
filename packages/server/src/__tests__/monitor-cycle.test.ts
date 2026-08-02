@@ -243,7 +243,7 @@ index 1111111..2222222 100644
 
     const stats = await processWorkspaceCandidates([candidate], deps);
 
-    expect(stats).toEqual({ relaunched: 0, merged: 0, nudged: 0 });
+    expect(stats).toEqual({ relaunched: 0, merged: 0, nudged: 0, deferredProjectIds: [] });
     expect(deps.sessionManager.stopSession).toHaveBeenCalledWith("sess-1");
     expect(deps.getCommitCountAhead).toHaveBeenCalledWith("/path/to/dir", "main");
     expect(deps.commitLeftoverChanges).toHaveBeenCalledWith("/path/to/dir");
@@ -313,7 +313,7 @@ describe("processWorkspaceCandidates — idle + readyForMerge=false", () => {
     const candidate: WorkspaceCandidate = { ...baseCandidate, readyForMerge: false, issueStatusName: "In Progress" };
     const stats = await processWorkspaceCandidates([candidate], deps);
 
-    expect(stats).toEqual({ relaunched: 1, merged: 0, nudged: 0 });
+    expect(stats).toEqual({ relaunched: 1, merged: 0, nudged: 0, deferredProjectIds: [] });
     expect(vi.mocked(deps.workspaceActions.launch)).toHaveBeenCalledWith("ws-1");
     expect(vi.mocked(deps.workspaceActions.fixAndMerge)).not.toHaveBeenCalled();
     expect(vi.mocked(deps.workspaceActions.merge)).not.toHaveBeenCalled();
@@ -669,5 +669,53 @@ describe("processWorkspaceCandidates — idle workspace with committed work on a
     // Falls through to the ordinary idle+not-ready relaunch path.
     expect(stats.relaunched).toBe(1);
     expect(stats.merged).toBe(0);
+  });
+});
+
+// #208: one stalled/slow project must not starve every other project's auto-start/auto-merge
+// pass within a single cycle — a per-project time budget defers its REMAINING candidates to
+// the next cycle instead of blocking the walk indefinitely.
+describe("processWorkspaceCandidates — per-project time budget (#208)", () => {
+  it("defers a project's remaining candidates once its time budget is exceeded, without blocking other projects", async () => {
+    vi.mocked(db.select).mockReset();
+    // 3 candidates total: 2 in the slow project, 1 in a healthy project. Each candidate
+    // consumes 2 db.select calls (sessions + session count).
+    for (let i = 0; i < 3; i++) {
+      vi.mocked(db.select)
+        .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>)
+        .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>);
+    }
+
+    const deps = makeDeps();
+    const slowCandidate1: WorkspaceCandidate = { ...baseCandidate, wsId: "slow-1", issueId: "issue-slow-1", projectId: "proj-slow", readyForMerge: false, issueStatusName: "In Progress" };
+    const slowCandidate2: WorkspaceCandidate = { ...baseCandidate, wsId: "slow-2", issueId: "issue-slow-2", projectId: "proj-slow", readyForMerge: false, issueStatusName: "In Progress" };
+    const healthyCandidate: WorkspaceCandidate = { ...baseCandidate, wsId: "healthy-1", issueId: "issue-healthy-1", projectId: "proj-healthy", readyForMerge: false, issueStatusName: "In Progress" };
+
+    // Fake clock: the budget expires the instant the slow project's first candidate is done,
+    // so its second candidate must be deferred. The healthy project's single candidate never
+    // sees an expired deadline (its own budget window starts fresh).
+    let calls = 0;
+    const now = () => {
+      calls++;
+      // First deadline check for each project group happens before any candidate runs
+      // (calls 1 and, depending on scheduling order, an early call for the other group) —
+      // return a small, non-expiring value for those, then jump forward for later checks
+      // against the SLOW project so its 2nd candidate is seen as past budget.
+      return calls <= 2 ? 0 : 1_000_000;
+    };
+
+    const stats = await processWorkspaceCandidates([slowCandidate1, slowCandidate2, healthyCandidate], {
+      ...deps,
+      projectTimeBudgetMs: 1,
+      projectConcurrency: 1,
+      now,
+    });
+
+    expect(vi.mocked(deps.workspaceActions.launch)).toHaveBeenCalledWith("healthy-1");
+    expect(stats.deferredProjectIds).toContain("proj-slow");
+    // The slow project's SECOND candidate never launched — only the first (before the budget
+    // check tripped) and the healthy project's candidate did.
+    const launchedIds = vi.mocked(deps.workspaceActions.launch).mock.calls.map(([id]) => id);
+    expect(launchedIds).not.toContain("slow-2");
   });
 });

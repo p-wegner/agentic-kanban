@@ -81,12 +81,19 @@ export function monitorShouldRun(prefMap: Map<string, string>): boolean {
 export interface MonitorState {
   timer: ReturnType<typeof setTimeout> | null;
   nextRunAt: string | null;
-  lastRun: { at: string; relaunched: number; merged: number; nudged: number; resources: MonitorResourceSummary | null; warnings: number } | null;
+  lastRun: { at: string; relaunched: number; merged: number; nudged: number; resources: MonitorResourceSummary | null; warnings: number; deferredProjectIds?: string[] } | null;
   currentIntervalMin: number | null;
   recentActions: MonitorAction[];
   lastResourceSnapshot: BoardMonitorResourceSnapshot | null;
   warnings: MonitorWarning[];
   lastHealthCheckAt: string | null;
+  /**
+   * Progress marker for the cycle IN FLIGHT (null when no cycle is running). Written as the
+   * cycle advances through its phases, not only once at the end in `finally` — so a long or
+   * wedged cycle is observable via `GET /api/internal/monitor-status` instead of looking
+   * identical to "never ran" (#208; `lastRun` only reflects the last COMPLETED cycle).
+   */
+  currentCycle: { startedAt: string; phase: string } | null;
 }
 
 export type MonitorWarning = DirtyMainCheckoutWarning | AutodriveStallWarning;
@@ -141,12 +148,12 @@ export function setupMonitorRoutes(app: Hono, monitorState: MonitorState, runMon
     const maintenanceEnabled = getBool(prefMap, "monitor_maintenance_window_enabled");
     const maintenanceEnd = prefMap.get("monitor_maintenance_window_end") || null;
     const maintenanceActive = maintenanceEnabled && (!maintenanceEnd || new Date(maintenanceEnd).getTime() > Date.now());
-    return c.json({ enabled: getBool(prefMap, "auto_monitor"), intervalMin: parseInt(prefMap.get("auto_monitor_interval") || "4", 10), active: monitorState.timer !== null, lastRun: monitorState.lastRun, nextRunAt: monitorState.nextRunAt, recentActions: monitorState.recentActions, resourceSnapshot: monitorState.lastResourceSnapshot, warnings: monitorState.warnings, lastHealthCheckAt: monitorState.lastHealthCheckAt, maintenanceActive, maintenanceEnd });
+    return c.json({ enabled: getBool(prefMap, "auto_monitor"), intervalMin: parseInt(prefMap.get("auto_monitor_interval") || "4", 10), active: monitorState.timer !== null, lastRun: monitorState.lastRun, currentCycle: monitorState.currentCycle, nextRunAt: monitorState.nextRunAt, recentActions: monitorState.recentActions, resourceSnapshot: monitorState.lastResourceSnapshot, warnings: monitorState.warnings, lastHealthCheckAt: monitorState.lastHealthCheckAt, maintenanceActive, maintenanceEnd });
   });
 }
 
 export function createMonitorSetup({ sessionManager, boardEvents, serverPort, reviewSessionIds, fixAndMergeSessionIds }: MonitorSetupDeps) {
-  const monitorState: MonitorState = { timer: null, nextRunAt: null, lastRun: null, currentIntervalMin: null, recentActions: [], lastResourceSnapshot: null, warnings: [], lastHealthCheckAt: null };
+  const monitorState: MonitorState = { timer: null, nextRunAt: null, lastRun: null, currentIntervalMin: null, recentActions: [], lastResourceSnapshot: null, warnings: [], lastHealthCheckAt: null, currentCycle: null };
   // One workspace-actions port for the monitor's relaunch/merge/fix/delete drives,
   // wired here in the composition root so the cycle calls the application service
   // directly instead of self-HTTP. (serverPort is still used by auto-start/backlog.)
@@ -221,10 +228,16 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
     // and run exactly one more pass at the end so freshly-unblocked work isn't missed.
     if (cycleRunning) { rerunRequested = true; return; }
     cycleRunning = true;
+    monitorState.currentCycle = { startedAt: new Date().toISOString(), phase: "starting" };
+    const setPhase = (phase: string) => {
+      if (monitorState.currentCycle) monitorState.currentCycle = { ...monitorState.currentCycle, phase };
+    };
     const cycleStats = { relaunched: 0, merged: 0, nudged: 0 };
+    let deferredProjectIds: string[] = [];
     let resourceSummary: MonitorResourceSummary | null = null;
     let warningCount = monitorState.warnings.length;
     try {
+      setPhase("loading-preferences");
       const prefRows = await db.select().from(preferences);
       const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
       if (!force && !monitorShouldRun(prefMap)) return;
@@ -244,13 +257,16 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       const shouldAutoStartProject = (projectId: string) => resolveStartPolicy(prefMap, projectId).autoStartUnblocked;
       const allowBacklogRefill = (projectId: string) => resolveStartPolicy(prefMap, projectId).backlogRefill;
       if (isInMaintenanceWindow(prefMap)) {
+        setPhase("maintenance-window");
         warningCount = (await refreshMonitorWarnings(prefMap)).length;
         const endTime = prefMap.get("monitor_maintenance_window_end");
         console.log(`[monitor] Maintenance window active — skipping disruptive actions${endTime ? ` until ${endTime}` : ""}`);
         return;
       }
       const mergeStrategy = resolveMergeStrategy(prefMap);
+      setPhase("refreshing-warnings");
       warningCount = (await refreshMonitorWarnings(prefMap)).length;
+      setPhase("resource-sweep");
       const resourceSnapshot = await snapshotAndCleanStaleDevProcesses(db);
       monitorState.lastResourceSnapshot = resourceSnapshot;
       resourceSummary = {
@@ -265,6 +281,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
         `[monitor] Resource snapshot: processes=${resourceSummary.processCount} listeners=${resourceSummary.listenerCount} ` +
         `activeWorkspaces=${resourceSummary.activeWorkspaceCount} kept=${resourceSummary.keptCount} cleaned=${resourceSummary.cleanedCount} failed=${resourceSummary.cleanupFailedCount}`,
       );
+      setPhase("loading-candidates");
       const activeStatuses = await db.select({ id: projectStatuses.id }).from(projectStatuses).where(sql`${projectStatuses.name} NOT IN ('Done', 'Cancelled')`);
       const activeStatusIds = activeStatuses.map((s) => s.id);
       if (activeStatusIds.length === 0) return;
@@ -281,7 +298,8 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
           .filter(([key, value]) => /^auto_merge_disabled_[0-9a-f-]+$/.test(key) && value === "true")
           .map(([key]) => key.replace("auto_merge_disabled_", "")),
       );
-      Object.assign(cycleStats, await processWorkspaceCandidates(allowedCandidates, {
+      setPhase("processing-candidates");
+      const candidateResult = await processWorkspaceCandidates(allowedCandidates, {
         sessionManager,
         boardEvents,
         workspaceActions,
@@ -298,17 +316,28 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
           const minutes = Number(prefMap.get("monitor_stuck_builder_timeout_min"));
           return Number.isFinite(minutes) && minutes > 0 ? minutes * 60 * 1000 : undefined;
         })(),
-      }));
+        projectTimeBudgetMs: (() => {
+          const ms = Number(prefMap.get("monitor_project_time_budget_ms"));
+          return Number.isFinite(ms) && ms > 0 ? ms : undefined;
+        })(),
+      });
+      cycleStats.relaunched = candidateResult.relaunched;
+      cycleStats.merged = candidateResult.merged;
+      cycleStats.nudged = candidateResult.nudged;
+      deferredProjectIds = candidateResult.deferredProjectIds;
       // Gated auto-contract (#918): BEFORE fan-out, contract (or suggest contracting) coupled
       // components so coupled tickets never start as separate conflicting workspaces. Off by
       // default — only projects with `auto_contract_coupled_<id>` set act, and only those the
       // monitor would otherwise auto-start work for (same gate as runAutoStart below).
+      setPhase("auto-contract");
       await runAutoContract(prefMap, { boardEvents, allowProject: shouldAutoStartProject, logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
       // Compounding "setup once" pass (#127): a project that has accumulated enough merged
       // work gets its harness scaffolded ONCE, between tickets, so every later builder
       // inherits it instead of re-discovering the environment. Runs BEFORE the fan-out so a
       // workspace started this cycle already forks from the branch the pass committed to.
+      setPhase("compounding-setup");
       await runCompoundingSetup(prefMap, { allowProject: shouldAutoStartProject });
+      setPhase("auto-start");
       const autoStartSkips = await runAutoStart(prefMap, { serverPort, boardEvents, allowProject: shouldAutoStartProject, isAutoDrivenProject: (projectId) => resolveStartPolicy(prefMap, projectId).mode !== "manual", logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
       if (autoStartSkips.size > 0) {
         const projectRows = await db.select({ id: projects.id, name: projects.name }).from(projects)
@@ -321,18 +350,21 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
           for (const warning of skipWarnings) console.warn(`[monitor] ${warning.message}`);
         }
       }
+      setPhase("backlog-refill");
       await runBacklogEmptyStrategy(prefMap, { serverPort, boardEvents, allowProject: allowBacklogRefill, logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
       // Board-owned plugin loops (manifest `loops`): plan the next round of a
       // converging analysis loop once the previous round's tickets are all
       // terminal, so the tickets it creates are picked up by the auto-start pass
       // above on the NEXT cycle — same WIP limit, same provider selection, same
       // auth-rotation-on-quota as any other ticket.
+      setPhase("plugin-loops");
       await advanceDuePluginLoops(db, { allowProject: shouldAutoStartProject });
     } catch (err) {
       console.warn("[monitor] Cycle error:", err);
     } finally {
       cycleRunning = false;
-      monitorState.lastRun = { at: new Date().toISOString(), ...cycleStats, resources: resourceSummary, warnings: warningCount };
+      monitorState.currentCycle = null;
+      monitorState.lastRun = { at: new Date().toISOString(), ...cycleStats, resources: resourceSummary, warnings: warningCount, ...(deferredProjectIds.length > 0 ? { deferredProjectIds } : {}) };
       const prefRows = await db.select().from(preferences).catch(() => []);
       const prefMap = new Map(prefRows.map((r: { key: string; value: string }) => [r.key, r.value]));
       if (monitorShouldRun(prefMap)) {

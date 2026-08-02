@@ -36,6 +36,17 @@ export { DEFAULT_STUCK_BUILDER_TIMEOUT_MS } from "./monitor-cycle-rules.js";
 
 export const MAX_MONITOR_RELAUNCHES_PER_CYCLE = 2;
 export const MAX_MONITOR_MERGES_PER_CYCLE = 2;
+/**
+ * Per-project ceiling on how long a single project's candidate walk may run within
+ * one cycle before its REMAINING candidates are deferred to the next cycle (#208).
+ * Protects the shared cycle from one slow/unhealthy project (repeated failing verify
+ * gates, missing worktrees, etc.) starving every other project's auto-start/auto-merge
+ * pass — previously a single sequential walk with no per-project ceiling.
+ */
+export const DEFAULT_MONITOR_PROJECT_TIME_BUDGET_MS = 30_000;
+/** Bounded concurrency across DIFFERENT projects' candidate walks — the pass is I/O
+ *  and subprocess bound, so unrelated projects need not wait on each other (#208). */
+export const DEFAULT_MONITOR_PROJECT_CONCURRENCY = 4;
 
 export interface WorkspaceCandidate {
   wsId: string;
@@ -122,6 +133,21 @@ export interface ProcessWorkspaceDeps {
   getWorkingTreeDiff?: typeof getWorkingTreeDiff;
   commitLeftoverChanges?: typeof commitLeftoverChanges;
   startReview?: typeof startManualReview;
+  /** Per-project time budget (ms) — see `DEFAULT_MONITOR_PROJECT_TIME_BUDGET_MS`. */
+  projectTimeBudgetMs?: number;
+  /** Max number of DIFFERENT projects' candidate walks processed concurrently. */
+  projectConcurrency?: number;
+  /** Clock seam for deterministic time-budget tests. */
+  now?: () => number;
+}
+
+export interface ProcessWorkspaceCandidatesResult {
+  relaunched: number;
+  merged: number;
+  nudged: number;
+  /** Projects whose candidate walk exceeded its time budget this cycle — their
+   *  remaining candidates were skipped and will be picked up next cycle. */
+  deferredProjectIds: string[];
 }
 
 /** Shared per-cycle state handed to the per-status handlers. `stats` is the
@@ -262,7 +288,6 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
       conflictMsg: `[monitor] Merge conflict for idle+readyForMerge workspace ${ws.wsId}  triggered fix-and-merge`,
       successMsg: `[monitor] Triggered merge for idle+readyForMerge workspace ${ws.wsId}`,
     }, gateTokenFromWorkspaceEvidence(ws, "review-exit gate (readyForMerge, idle)"));
-    stats.merged++;
     deps.boardEvents.broadcast(ws.projectId, "board_changed");
   } else if (await hasStaleBaseWithCommits(ws, deps)) {
     // #191: finished-but-stuck — real committed work, blocked only by a stale base. Recover it
@@ -291,7 +316,6 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
       conflictMsg: `[monitor] Stale-base workspace ${ws.wsId} could not merge cleanly  triggered fix-and-merge`,
       successMsg: `[monitor] Auto-recovered stale-base workspace ${ws.wsId} via merge`,
     }, RUN_GATE);
-    stats.merged++;
     deps.boardEvents.broadcast(ws.projectId, "board_changed");
   } else if (sessionCount >= MAX_SESSIONS) {
     const needsReviewStatusId = await getProjectStatusIdByName(ws.projectId, "Needs Review");
@@ -340,7 +364,6 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
         conflictMsg: `[monitor] Merge conflict for idle In-Review workspace ${ws.wsId} (auto_merge_in_review)  triggered fix-and-merge`,
         successMsg: `[monitor] Auto-merged idle In-Review workspace ${ws.wsId} (auto_merge_in_review, not marked ready)`,
       }, gateToken);
-      stats.merged++;
       deps.boardEvents.broadcast(ws.projectId, "board_changed");
     } else {
       console.log(`[monitor] Skipping relaunch for idle workspace ${ws.wsId}  issue #${ws.issueNumber} is in review (committed work awaiting merge; enable auto_merge_in_review to land it)`);
@@ -353,7 +376,6 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
     } catch {
       launchOk = false;
     }
-    stats.relaunched++;
     logAction("relaunch", ws.wsId, ws.issueId, {
       endpoint: `POST /api/workspaces/${ws.wsId}/launch`,
       verificationResult: launchOk ? "ok" : "failed",
@@ -423,7 +445,6 @@ async function handleReviewingWorkspace(ws: WorkspaceCandidate, sess: LatestSess
     } catch {
       mergeOk = false;
     }
-    stats.merged++;
     logAction("merge", ws.wsId, ws.issueId, {
       endpoint: `POST /api/workspaces/${ws.wsId}/merge`,
       verificationResult: mergeOk ? "ok" : "failed",
@@ -491,24 +512,29 @@ async function handleActiveRunningWorkspace(ws: WorkspaceCandidate, sess: Latest
   }
 }
 
-export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[], deps: ProcessWorkspaceDeps): Promise<{ relaunched: number; merged: number; nudged: number }> {
+export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[], deps: ProcessWorkspaceDeps): Promise<ProcessWorkspaceCandidatesResult> {
   const stats = { relaunched: 0, merged: 0, nudged: 0 };
   const maxRelaunches = deps.maxRelaunchesPerCycle ?? MAX_MONITOR_RELAUNCHES_PER_CYCLE;
   const maxMerges = deps.maxMergesPerCycle ?? MAX_MONITOR_MERGES_PER_CYCLE;
   const stuckBuilderTimeoutMs = deps.stuckBuilderTimeoutMs ?? parseStuckBuilderTimeoutMs();
   const logAction: LogMonitorActionFn = (action, workspaceId, issueId, extra) => deps.logMonitorAction(deps.monitorRecentActions, action, workspaceId, issueId, extra);
+  // Reserve the slot as part of the CHECK (not after the async action completes) so the
+  // cap is enforced correctly even when different projects' candidate walks run
+  // concurrently below — otherwise two concurrent walks could both pass the check before
+  // either increments, overshooting the cycle cap.
   const canStartRelaunch = (ws: WorkspaceCandidate) => {
-    if (stats.relaunched < maxRelaunches) return true;
+    if (stats.relaunched < maxRelaunches) { stats.relaunched++; return true; }
     console.log(`[monitor] Relaunch cap reached (${maxRelaunches}/cycle)  leaving workspace ${ws.wsId} idle until the next monitor run`);
     return false;
   };
   const canStartMerge = (ws: WorkspaceCandidate) => {
-    if (stats.merged < maxMerges) return true;
+    if (stats.merged < maxMerges) { stats.merged++; return true; }
     console.log(`[monitor] Merge cap reached (${maxMerges}/cycle)  leaving workspace ${ws.wsId} queued until the next monitor run`);
     return false;
   };
   const ctx: CycleContext = { deps, stats, logAction, canStartRelaunch, canStartMerge, stuckBuilderTimeoutMs };
-  for (const ws of candidates) {
+
+  async function processCandidate(ws: WorkspaceCandidate): Promise<void> {
     try {
       const [sess] = await db.select({ id: sessions.id, status: sessions.status, startedAt: sessions.startedAt, triggerType: sessions.triggerType, stats: sessions.stats }).from(sessions)
         .where(eq(sessions.workspaceId, ws.wsId)).orderBy(desc(sessions.startedAt)).limit(1);
@@ -525,7 +551,6 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
         await handleReviewingWorkspace(ws, sess, ctx);
       } else if (ws.wsStatus === "blocked") {
         console.log(`[monitor] Needs attention: blocked workspace ${ws.wsId} for issue #${ws.issueNumber ?? "?"}; skipping automation`);
-        continue;
       } else if (ws.wsStatus === "active" && sess?.status === "stopped") {
         await handleActiveStoppedWorkspace(ws, sess, ctx);
       } else if (ws.wsStatus === "active" && sess?.status === "running") {
@@ -535,5 +560,46 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
       console.warn(`[monitor] Error processing workspace ${ws.wsId}:`, err);
     }
   }
-  return stats;
+
+  const byProject = new Map<string, WorkspaceCandidate[]>();
+  for (const ws of candidates) {
+    const list = byProject.get(ws.projectId);
+    if (list) list.push(ws); else byProject.set(ws.projectId, [ws]);
+  }
+
+  const now = deps.now ?? Date.now;
+  const projectTimeBudgetMs = deps.projectTimeBudgetMs ?? DEFAULT_MONITOR_PROJECT_TIME_BUDGET_MS;
+  const deferredProjectIds: string[] = [];
+
+  async function processProjectGroup(projectId: string, wsList: WorkspaceCandidate[]): Promise<void> {
+    const deadline = now() + projectTimeBudgetMs;
+    for (let i = 0; i < wsList.length; i++) {
+      if (now() > deadline) {
+        const remaining = wsList.length - i;
+        console.warn(`[monitor] Project ${projectId} exceeded its ${projectTimeBudgetMs}ms per-cycle time budget  deferring ${remaining} remaining candidate(s) to the next cycle`);
+        deferredProjectIds.push(projectId);
+        return;
+      }
+      await processCandidate(wsList[i]);
+    }
+  }
+
+  // Bounded concurrency ACROSS projects: unrelated projects' candidate walks are I/O and
+  // subprocess bound, so they need not wait on each other. WITHIN a project, candidates
+  // still process strictly sequentially (unchanged behavior) — only the per-project
+  // deadline above lets us bail out of a single slow project's walk early.
+  const groups = [...byProject.entries()];
+  const concurrency = Math.max(1, Math.min(deps.projectConcurrency ?? DEFAULT_MONITOR_PROJECT_CONCURRENCY, groups.length || 1));
+  let cursor = 0;
+  async function worker(): Promise<void> {
+    for (;;) {
+      const idx = cursor++;
+      if (idx >= groups.length) return;
+      const [projectId, wsList] = groups[idx];
+      await processProjectGroup(projectId, wsList);
+    }
+  }
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
+
+  return { ...stats, deferredProjectIds };
 }
