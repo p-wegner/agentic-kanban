@@ -13,11 +13,14 @@ import { getPluginService } from "./plugin.service.js";
  * converge rather than pile up — each round's output is the state the next round
  * is planned from, so planning ahead of the work would plan against stale facts.
  *
- * **Opt-in by construction, with no extra preference.** A loop is only advanced
- * here if it already has at least one ticket, i.e. a human pressed "Advance"
- * once. So the monitor continues loops the user started and never starts one on
- * its own — and stopping a loop is just cancelling its open tickets and not
- * pressing Advance again. Convergence (the planner reporting no units) ends it.
+ * **Opt-in by construction.** A loop is only advanced here if it already has at
+ * least one ticket, i.e. a human pressed "Advance" once. So the monitor
+ * continues loops the user started and never starts one on its own.
+ *
+ * **Explicit pause.** A human can also stop a converging loop directly via the
+ * `plugin_loop_paused_<slug>_<loop>_<projectId>` pref (Pause/Resume in the loop
+ * pane) — this pass skips any paused loop entirely, leaving its open tickets
+ * (if any) alone. Otherwise convergence (the planner reporting no units) ends it.
  */
 export async function advanceDuePluginLoops(
   database: Database,
@@ -62,6 +65,9 @@ export async function advanceDuePluginLoops(
         continue; // e.g. the project was deleted mid-cycle
       }
       for (const loop of statuses) {
+        // Explicitly paused by a human — the only direct way to stop a converging
+        // loop; a manual "Advance now" from the UI still works while paused.
+        if (loop.paused) continue;
         // Not started by a human yet, or the current round is still running.
         if (loop.closedTickets === 0 && loop.openTickets === 0) continue;
         if (loop.openTickets > 0) continue;

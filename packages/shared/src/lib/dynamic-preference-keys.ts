@@ -87,6 +87,7 @@ export function isProjectScopedDynamicKey(key: string): boolean {
   return matchesScopedKey(key, PROJECT_SCOPED_KEY_PREFIXES, (rest) => PROJECT_ID_SUFFIX.test(rest))
     || matchesScopedKey(key, FREEFORM_SUFFIX_KEY_PREFIXES, (rest) => rest.length > 0)
     || isPluginEnabledPreferenceKey(key)
+    || isPluginLoopPausedPreferenceKey(key)
     || isPluginOutputLocationPreferenceKey(key);
 }
 
@@ -98,6 +99,17 @@ export function isProjectScopedDynamicKey(key: string): boolean {
  */
 export function isPluginEnabledPreferenceKey(key: string): boolean {
   return /^plugin_enabled_[a-z0-9-]+_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(key);
+}
+
+/**
+ * True for the per-loop pause key (`plugin_loop_paused_<pluginSlug>_<loopName>_<projectId>`).
+ * Three dynamic segments — unlike the plugin slug, a loop `name` has no declared
+ * charset in the manifest schema, so this can't reuse the strict `[a-z0-9-]+`
+ * matcher above. The trailing UUID (fixed 8-4-4-4-12 shape) is unambiguous, so
+ * matching is anchored there instead of trying to split slug from loop name.
+ */
+export function isPluginLoopPausedPreferenceKey(key: string): boolean {
+  return /^plugin_loop_paused_.+_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(key);
 }
 
 /**

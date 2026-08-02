@@ -28,6 +28,7 @@ export type PluginLoop = PluginOwner & {
   skill: string;
   openTickets: number;
   closedTickets: number;
+  paused: boolean;
 };
 
 export type PluginScript = PluginOwner & {
@@ -69,6 +70,7 @@ function PaneHeading({ title, subtitle, mono }: { title: string; subtitle?: stri
 /** Converging analysis loop: advance a round, then let the board's monitor run it. */
 export function PluginLoopPane({ loop, projectId, onChanged }: { loop: PluginLoop; projectId: string; onChanged: () => void }) {
   const [advancing, setAdvancing] = useState(false);
+  const [pausing, setPausing] = useState(false);
   const [result, setResult] = useState<LoopAdvanceResult | null>(null);
 
   async function advance() {
@@ -96,17 +98,41 @@ export function PluginLoopPane({ loop, projectId, onChanged }: { loop: PluginLoo
     }
   }
 
+  async function togglePause() {
+    if (pausing) return;
+    setPausing(true);
+    try {
+      await apiPost(
+        `/api/plugins/${loop.pluginId}/loops/${encodeURIComponent(loop.name)}/${loop.paused ? "resume" : "pause"}`,
+        { projectId },
+      );
+      showToast(loop.paused ? `"${loop.label}" resumed` : `"${loop.label}" paused`, "success");
+      onChanged();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Loop pause/resume failed", "error");
+    } finally {
+      setPausing(false);
+    }
+  }
+
   const roundRunning = loop.openTickets > 0;
   return (
     <div className="p-6 space-y-4 overflow-y-auto" data-testid="plugin-loop-pane">
-      <PaneHeading title={loop.label} subtitle={loop.description} />
+      <div className="flex items-start justify-between gap-3">
+        <PaneHeading title={loop.label} subtitle={loop.description} />
+        {loop.paused && (
+          <span className="shrink-0 text-[11px] px-2 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+            Paused
+          </span>
+        )}
+      </div>
 
       <p className="text-xs text-gray-500 dark:text-gray-400 max-w-2xl">
         A board-owned loop. Each advance asks the plugin what work is still outstanding and turns every unit
         into a ticket carrying the <span className="font-mono">{loop.skill}</span> skill. The board&apos;s monitor
         starts those tickets within this project&apos;s WIP limit — so they use the same provider selection and
         profile rotation as any other ticket. Once a round&apos;s tickets are all closed the next round is planned
-        automatically, until the plugin reports nothing left to do.
+        automatically, until the plugin reports nothing left to do — or until the loop is paused.
       </p>
 
       <div className="flex items-center gap-4 text-sm">
@@ -127,11 +153,27 @@ export function PluginLoopPane({ loop, projectId, onChanged }: { loop: PluginLoo
         >
           {advancing ? "Planning…" : loop.closedTickets === 0 && loop.openTickets === 0 ? "Start loop" : "Advance now"}
         </button>
+        <button
+          onClick={() => void togglePause()}
+          disabled={pausing}
+          className="text-sm px-3 py-1.5 rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+          data-testid="plugin-loop-pause-toggle"
+          title={loop.paused
+            ? "Resume — the monitor will auto-advance this loop again"
+            : "Pause — stops the monitor from auto-advancing this loop; manual Advance still works"}
+        >
+          {pausing ? "Working…" : loop.paused ? "Resume" : "Pause"}
+        </button>
       </div>
 
       {roundRunning && (
         <p className="text-xs text-amber-700 dark:text-amber-400">
           Round in progress — {loop.openTickets} ticket(s) still open. The next round is planned automatically once they close.
+        </p>
+      )}
+      {loop.paused && (
+        <p className="text-xs text-amber-700 dark:text-amber-400">
+          Paused — the monitor will not auto-advance this loop. Press Resume to let it converge hands-off again.
         </p>
       )}
 

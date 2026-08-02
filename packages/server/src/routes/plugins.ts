@@ -31,6 +31,9 @@ import { createWebhookSender } from "../services/outbound-webhook.service.js";
  *   GET    /api/plugins/:id/loops?projectId=    per-loop ticket counts (planner NOT run)
  *   POST   /api/plugins/:id/loops/:name/advance { projectId } → one advance of a converging
  *            loop: plan, then a ticket per outstanding unit for the board's monitor to start
+ *   POST   /api/plugins/:id/loops/:name/pause  { projectId } → stops the monitor's
+ *            auto-advance for this loop only (manual "Advance now" still works)
+ *   POST   /api/plugins/:id/loops/:name/resume { projectId } → re-arms auto-advance
  *
  * The client's flat per-project listings live under the `/projects` prefix
  * (convention: per-project reads hang off /projects/:projectId/...):
@@ -130,6 +133,16 @@ export function createPluginsRoute(
   router.post("/:id/loops/:name/advance", async (c) => {
     const projectId = await requireProjectId(c);
     return c.json(await service.advanceLoop(c.req.param("id"), c.req.param("name"), projectId));
+  });
+
+  router.post("/:id/loops/:name/pause", async (c) => {
+    const projectId = await requireProjectId(c);
+    return c.json(await service.setLoopPaused(c.req.param("id"), c.req.param("name"), projectId, true));
+  });
+
+  router.post("/:id/loops/:name/resume", async (c) => {
+    const projectId = await requireProjectId(c);
+    return c.json(await service.setLoopPaused(c.req.param("id"), c.req.param("name"), projectId, false));
   });
 
   router.post("/:id/scripts/:name/run", async (c) => {
