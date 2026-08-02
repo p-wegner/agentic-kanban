@@ -35,6 +35,7 @@ import {
   type PluginPlaceholderVars,
 } from "@agentic-kanban/shared/lib/plugin-manifest";
 import { isPluginEnabledPreferenceKey } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
+import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
 import type { Database } from "../db/index.js";
 import { spawnShellCommand, taskkillTree } from "./process-exec.js";
 import { runPluginCommand, tailOutput as tail, type PluginCommandResult } from "./plugin-exec.js";
@@ -248,7 +249,10 @@ export function createPluginService(deps: {
     const rows = await listPluginEnabledPreferences(database);
     const map = new Map<string, Set<string>>();
     for (const row of rows) {
-      if (!isPluginEnabledPreferenceKey(row.key) || row.value !== "true") continue;
+      // plugin_enabled_* has no SETTINGS_REGISTRY entry (dynamic per-plugin-per-project key),
+      // so parseBoolSetting falls back to the explicit `false` default below — same polarity
+      // as the raw `!== "true"` check this replaces, but routed through the #947 accessor.
+      if (!isPluginEnabledPreferenceKey(row.key) || !parseBoolSetting(row.key, row.value, false)) continue;
       // key = plugin_enabled_<slug>_<uuid>; the uuid is the fixed-length tail.
       const rest = row.key.slice("plugin_enabled_".length);
       const projectId = rest.slice(-36);
@@ -639,6 +643,10 @@ export function createPluginService(deps: {
   /** Single HTTP probe — never polls in a loop. */
   async function probeHealth(port: number): Promise<boolean> {
     try {
+      // readiness probe against a PLUGIN's supervised child view-server process
+      // (spawnShellCommand, above), not this board server — a genuinely separate process
+      // on a dynamically allocated port with no in-process function to inject.
+      // SELF-HTTP OK: see server/CLAUDE.md "Self-HTTP calls are an anti-pattern".
       const res = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(1500) });
       return res.status < 500;
     } catch {
