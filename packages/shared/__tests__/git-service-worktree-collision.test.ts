@@ -21,6 +21,15 @@ import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createWorktree, listWorktrees } from "../src/lib/git-service.js";
 
+/**
+ * Per-test budget for this real-git suite (#206 tail). Its cost is `git` spawn latency, not
+ * the code under test: measured standalone on an IDLE machine it needs ~64s of test time, so
+ * the previous hand-set 30s cap failed under any parallel load — and `pnpm test:mine` doubles
+ * as the merge verify_script, so that turned into a withheld merge for unrelated diffs.
+ * A hang still never completes, so this only removes the false red.
+ */
+const GIT_IO_TIMEOUT_MS = Number(process.env.VITEST_GIT_IO_TIMEOUT) || 120_000;
+
 function git(cwd: string, args: string[]): Promise<string> {
   return new Promise((resolvePromise, reject) => {
     execFile("git", args, { cwd, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
@@ -59,7 +68,7 @@ describe("createWorktree collision safety (repos sharing a parent directory)", (
     parent = await mkdtemp(join(tmpdir(), "ak-wt-collision-"));
     appRepo = await initRepoAt(parent, "app");
     libRepo = await initRepoAt(parent, "lib");
-  }, 30000);
+  }, GIT_IO_TIMEOUT_MS);
 
   afterEach(async () => {
     await rm(parent, { recursive: true, force: true });
@@ -70,14 +79,14 @@ describe("createWorktree collision safety (repos sharing a parent directory)", (
 
     expect(resolve(wt)).toBe(resolve(join(parent, ".worktrees", "feature_solo")));
     expect(existsSync(join(wt, "app.txt"))).toBe(true);
-  }, 30000);
+  }, GIT_IO_TIMEOUT_MS);
 
   it("shortens the on-disk leaf to just ak-<N> for a branch carrying an issue number (#193)", async () => {
     const wt = await createWorktree(appRepo, "feature/ak-1-a-very-long-descriptive-slug-goes-here", "main");
 
     expect(resolve(wt)).toBe(resolve(join(parent, ".worktrees", "ak-1")));
     expect(existsSync(join(wt, "app.txt"))).toBe(true);
-  }, 30000);
+  }, GIT_IO_TIMEOUT_MS);
 
   it("does not destroy the first repo's worktree when a sibling repo uses the same branch", async () => {
     const wtApp = await createWorktree(appRepo, "feature/shared", "main");
@@ -100,7 +109,7 @@ describe("createWorktree collision safety (repos sharing a parent directory)", (
     expect(appWorktrees.some((wt) => resolve(wt.path) === resolve(wtApp))).toBe(true);
     expect((await git(wtApp, ["rev-parse", "--abbrev-ref", "HEAD"])).trim()).toBe("feature/shared");
     expect((await git(wtLib, ["rev-parse", "--abbrev-ref", "HEAD"])).trim()).toBe("feature/shared");
-  }, 30000);
+  }, GIT_IO_TIMEOUT_MS);
 
   it("pathNamespace places the worktree under .worktrees/<namespace>/<branch>, avoiding collision entirely", async () => {
     const wtApp = await createWorktree(appRepo, "feature/multi", "main");
@@ -109,7 +118,7 @@ describe("createWorktree collision safety (repos sharing a parent directory)", (
     expect(resolve(wtLib)).toBe(resolve(join(parent, ".worktrees", "lib", "feature_multi")));
     expect(existsSync(join(wtApp, "app.txt"))).toBe(true);
     expect(existsSync(join(wtLib, "lib.txt"))).toBe(true);
-  }, 30000);
+  }, GIT_IO_TIMEOUT_MS);
 
   it("still removes and reuses a plain leftover directory (no .git) at the target path", async () => {
     const target = join(parent, ".worktrees", "feature_leftover");
@@ -121,7 +130,7 @@ describe("createWorktree collision safety (repos sharing a parent directory)", (
     expect(resolve(wt)).toBe(resolve(target));
     expect(existsSync(join(wt, "junk.txt"))).toBe(false);
     expect(existsSync(join(wt, "app.txt"))).toBe(true);
-  }, 30000);
+  }, GIT_IO_TIMEOUT_MS);
 
   it("does not delete this repo's own worktree of a DIFFERENT branch that sanitizes to the same directory name", async () => {
     // "feature/x" and "feature_x" both sanitize to "feature_x".
@@ -132,5 +141,5 @@ describe("createWorktree collision safety (repos sharing a parent directory)", (
     expect(existsSync(join(wtSlash, "app.txt"))).toBe(true);
     expect((await git(wtSlash, ["rev-parse", "--abbrev-ref", "HEAD"])).trim()).toBe("feature/x");
     expect((await git(wtUnderscore, ["rev-parse", "--abbrev-ref", "HEAD"])).trim()).toBe("feature_x");
-  }, 30000);
+  }, GIT_IO_TIMEOUT_MS);
 });
