@@ -67,15 +67,25 @@ Per project, a plugin's output location is `leading` (default) or `sidecar`:
 - **`sidecar`** — a dedicated repo named `<plugin-slug>-requirements`, added to the project's
   repo set and created on first use.
 
-**`{{repoPath}}` resolves to the OUTPUT repo, not the product repo.** There is no separate
-placeholder for the leading repo. So a plugin that must READ the product source while WRITING
-its artifacts elsewhere cannot express that in sidecar mode — both paths would point at the
-sidecar, and the plugin would analyse an empty repository and honestly report nothing. Until the
-contract grows a `{{leadingRepoPath}}`:
+**`{{repoPath}}` resolves to the OUTPUT repo, not the product repo.** A plugin that must READ the
+product source while WRITING its artifacts elsewhere — the common shape for an analysis plugin
+run in `sidecar` mode — uses **`{{leadingRepoPath}}`** for the source and `{{repoPath}}` for the
+output:
 
-- if your plugin reads the source, document that it requires `leading` (the default), and
-- if it needs its output elsewhere, take an absolute path in its own env var rather than
-  switching the board's output location.
+```json
+"scripts": [
+  { "name": "coverage", "command": "npm run coverage", "cwd": "plugin",
+    "env": { "SOURCE_ROOT": "{{leadingRepoPath}}", "COVERAGE_ROOT": "{{repoPath}}" } }
+]
+```
+
+`{{leadingRepoPath}}` always names the project's leading (product) repo, regardless of the
+project's output-location choice — in `leading` mode it is the same path as `{{repoPath}}`; in
+`sidecar` mode the two diverge. It is populated at every substitution site (enable/scaffold,
+`startView`, `runScript`, `advanceLoop`), so it is available anywhere `{{repoPath}}` is.
+
+A multi-repo project cannot yet address a SIBLING repo (one that is neither leading nor the
+plugin's own output) from a manifest at all — see [Known gaps](#known-gaps).
 
 ## The four capabilities
 
@@ -241,6 +251,7 @@ Available in every `command` and every `env` value, and in the scaffold template
 | Placeholder | Value |
 |---|---|
 | `{{repoPath}}` | the **output** repo (leading repo, or sidecar — see above) |
+| `{{leadingRepoPath}}` | the project's **leading (product)** repo, regardless of output location |
 | `{{projectName}}` | the project's display name (may contain spaces and capitals — slugify it yourself) |
 | `{{pluginPath}}` | the plugin's own checkout |
 | `{{port}}` | views only, filled at serve time |
@@ -439,8 +450,11 @@ Useful endpoints while developing: `POST /api/plugins` (install),
 
 ### Known gaps
 
-- **No `{{leadingRepoPath}}`.** A plugin cannot read one repo and write another (see
-  [Where output goes](#where-output-goes)).
+- **No way to address a SIBLING repo.** `{{leadingRepoPath}}` (product repo) and `{{repoPath}}`
+  (output repo, leading or sidecar) are both explicit now (see
+  [Where output goes](#where-output-goes)), but a multi-repo project's OTHER siblings — repos that
+  are neither leading nor the plugin's own output — have no placeholder at all. A plugin that
+  needs to analyse two repos still cannot name the second one.
 - **Loop dedupe rides on `issues.externalKey`** (#201), a column documented and rendered as a
   genuine external-tracker link. Safe today because the key is namespaced and loop tickets never
   set `externalUrl`; a second "machine-created, dedupe on re-run" feature should get its own
