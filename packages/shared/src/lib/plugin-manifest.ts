@@ -405,6 +405,13 @@ export function parsePluginLoopPlan(stdout: string): PluginLoopPlan {
  * against on the next advance so a still-outstanding unit is never re-ticketed.
  * Kept in the shared lib so the server (which writes it) and any consumer that
  * needs to recognise loop tickets derive it identically.
+ *
+ * KNOWN DEBT (#201): this key rides on `issues.externalKey`, a column documented
+ * (and rendered in the UI) as a genuine external-tracker link — not a private
+ * board-internal dedupe carrier. Works today because the prefix is namespaced and
+ * no loop ticket sets `externalUrl`, but a second "machine-created, dedupe on
+ * re-run" feature should get its own nullable `source_key` column rather than
+ * reuse this one.
  */
 export function pluginLoopUnitKey(pluginSlug: string, loopName: string, unitId: string): string {
   return `plugin-loop:${pluginSlug}:${loopName}:${unitId}`;
@@ -456,4 +463,24 @@ export function pluginEnabledPreferenceKey(pluginSlug: string, projectId: string
  */
 export function pluginLoopPausedPreferenceKey(pluginSlug: string, loopName: string, projectId: string): string {
   return `plugin_loop_paused_${pluginSlug}_${loopName}_${projectId}`;
+}
+
+/**
+ * Count unfilled `TODO:` markers left in a scaffold file's content.
+ *
+ * A plugin's `scaffold.profileTemplate` ships with `TODO:` markers for a human
+ * to fill in; a script or loop `plan` command that reads the scaffold before
+ * that happens fails with a confusing stack (or its own domain-specific "no
+ * source files under TODO: e.g. src" error) instead of saying why. This is the
+ * one shared signal both the enable report and the pre-run gate key off.
+ */
+export function countScaffoldPlaceholders(content: string): number {
+  // Ignore `TODO:` inside inline-code spans. A scaffold template explains itself
+  // ("Fill in every `TODO:` marker before running the pipeline"), and counting
+  // that sentence made a FULLY filled-in profile report a leftover placeholder
+  // forever — the loop gate then refused to run against a correct scaffold, which
+  // is worse than the confusing failure the gate exists to prevent. A marker shown
+  // as code is documentation ABOUT the marker; a real placeholder is a value
+  // (`"language": "TODO: ts|js|..."`), which is never wrapped in backticks.
+  return (content.replace(/`[^`\n]*`/g, "").match(/TODO:/g) ?? []).length;
 }

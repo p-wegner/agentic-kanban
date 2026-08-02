@@ -64,6 +64,22 @@ function makePluginDir(manifest: Record<string, unknown> = MANIFEST): string {
   return dir;
 }
 
+const MANIFEST_WITH_LOOP = {
+  ...MANIFEST,
+  loops: [{ name: "identify-modules", skill: "requirement-extraction", plan: { command: "node plan.mjs", cwd: "plugin" } }],
+};
+
+/** A plugin whose scaffold template still has unfilled TODO markers, like refactor-safety-net's. */
+function makePluginDirWithTodoScaffold(): string {
+  const dir = makePluginDir(MANIFEST_WITH_LOOP);
+  writeFileSync(
+    join(dir, "profile-template.md"),
+    "# Profile for {{projectName}}\n\nSource dirs: TODO: e.g. src\nBuild command: TODO: e.g. npm run build\n",
+  );
+  writeFileSync(join(dir, "plan.mjs"), "console.log(JSON.stringify({ units: [] }));");
+  return dir;
+}
+
 async function insertProject(db: TestDb, repoPath: string, name = "Plugin Project"): Promise<string> {
   const now = new Date().toISOString();
   const projectId = randomUUID();
@@ -159,6 +175,9 @@ describe("plugin.service", () => {
     expect(profile).toContain("# Profile for Plugin Project");
     expect(profile).toContain(`Repo: ${repo}`);
     expect(profile).toContain(`Plugin: ${pluginDir}`);
+    // The stock template has no TODO markers, so nothing to flag.
+    expect(report.scaffoldPlaceholders).toBe(0);
+    expect(report.warnings).toEqual([]);
 
     // Enabled flag shows up in the project-scoped listing.
     const listed = await service.listPlugins(projectId);
@@ -248,6 +267,46 @@ describe("plugin.service", () => {
     const plugin = await service.installPlugin({ source: makePluginDir() });
     const projectId = await insertProject(db, makeProjectRepo());
     await expect(service.runScript(plugin.id, "nope", projectId)).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("enableForProject flags an unfilled scaffold's TODO placeholders in warnings", async () => {
+    const pluginDir = makePluginDirWithTodoScaffold();
+    const plugin = await service.installPlugin({ source: pluginDir });
+    const projectId = await insertProject(db, makeProjectRepo());
+
+    const report = await service.enableForProject(plugin.id, projectId);
+    expect(report.scaffoldWritten).toBe(true);
+    expect(report.scaffoldPlaceholders).toBe(2);
+    expect(report.warnings).toEqual([
+      expect.stringContaining("2 placeholders need filling in docs/analysis/_project-profile.md"),
+    ]);
+  });
+
+  it("runScript and advanceLoop refuse to run with a clear error while scaffold TODOs are unfilled", async () => {
+    const pluginDir = makePluginDirWithTodoScaffold();
+    const repo = makeProjectRepo();
+    const plugin = await service.installPlugin({ source: pluginDir });
+    const projectId = await insertProject(db, repo);
+    await service.enableForProject(plugin.id, projectId);
+
+    await expect(service.runScript(plugin.id, "print-env", projectId)).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: expect.stringContaining("2 unresolved TODO: placeholders"),
+    });
+
+    const createIssue = vi.fn();
+    const withDeps = createPluginService({ database: db as unknown as Database, createIssue });
+    await expect(withDeps.advanceLoop(plugin.id, "identify-modules", projectId)).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: expect.stringContaining("2 unresolved TODO: placeholders"),
+    });
+    expect(createIssue).not.toHaveBeenCalled();
+
+    // Once the human fills in the scaffold, the same script runs normally again.
+    const target = join(repo, "docs", "analysis", "_project-profile.md");
+    writeFileSync(target, readFileSync(target, "utf8").replace(/TODO:[^\n]*/g, "filled in"));
+    const result = await service.runScript(plugin.id, "print-env", projectId);
+    expect(result.code).toBe(0);
   });
 
   it("runSkill creates a ticket and launches a workspace against the named skill", async () => {

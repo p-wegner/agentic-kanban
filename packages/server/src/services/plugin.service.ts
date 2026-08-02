@@ -20,6 +20,7 @@ import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-preference-write";
 import {
   PLUGIN_MANIFEST_FILENAME,
+  countScaffoldPlaceholders,
   parsePluginManifest,
   pluginEnabledPreferenceKey,
   substitutePluginEnv,
@@ -200,6 +201,8 @@ export interface EnableReport {
   prefKey: string;
   skills: Array<{ name: string; mode: "junction" | "copy" | "skipped-existing" | "missing-source" }>;
   scaffoldWritten: boolean;
+  /** Unfilled `TODO:` markers in the just-written scaffold file (0 when nothing was written). */
+  scaffoldPlaceholders: number;
   warnings: string[];
 }
 
@@ -382,6 +385,45 @@ export function createPluginService(deps: {
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, content, "utf8");
     report.scaffoldWritten = true;
+    report.scaffoldPlaceholders = countScaffoldPlaceholders(content);
+    if (report.scaffoldPlaceholders > 0) {
+      report.warnings.push(
+        `scaffold written — ${report.scaffoldPlaceholders} placeholder${report.scaffoldPlaceholders === 1 ? "" : "s"} `
+        + `need filling in ${scaffold.targetPath} before this plugin's scripts/loops will run`,
+      );
+    }
+  }
+
+  /**
+   * Live readiness of a plugin's scaffold file (not the write-time snapshot in
+   * `EnableReport` — the human may fill it in any time after enable). Returns
+   * `null` when the plugin declares no scaffold, or the file doesn't exist yet
+   * (nothing to gate on until it's written).
+   */
+  function scaffoldPlaceholderStatus(
+    plugin: PluginRow & { manifest: PluginManifest },
+    repoPath: string,
+  ): { targetPath: string; remaining: number } | null {
+    const scaffold = plugin.manifest.scaffold;
+    if (!scaffold) return null;
+    const target = resolveInside(repoPath, scaffold.targetPath, `scaffold targetPath "${scaffold.targetPath}"`);
+    if (!existsSync(target)) return null;
+    return { targetPath: scaffold.targetPath, remaining: countScaffoldPlaceholders(readFileSync(target, "utf8")) };
+  }
+
+  /** Throws a clear, actionable error instead of letting a script/loop fail on unfilled scaffold TODOs. */
+  function requireScaffoldReady(
+    plugin: PluginRow & { manifest: PluginManifest },
+    repoPath: string,
+    action: "scripts" | "loops",
+  ): void {
+    const status = scaffoldPlaceholderStatus(plugin, repoPath);
+    if (!status || status.remaining === 0) return;
+    throw new PluginError(
+      `Scaffold "${status.targetPath}" still has ${status.remaining} unresolved TODO: placeholder${status.remaining === 1 ? "" : "s"} `
+      + `— fill them in before running this plugin's ${action}.`,
+      "CONFLICT",
+    );
   }
 
   async function enableForProject(pluginRowId: string, projectId: string): Promise<EnableReport> {
@@ -390,7 +432,7 @@ export function createPluginService(deps: {
     const prefKey = pluginEnabledPreferenceKey(plugin.pluginId, projectId);
     await setPreferenceChecked(database, [{ key: prefKey, value: "true" }]);
 
-    const report: EnableReport = { prefKey, skills: [], scaffoldWritten: false, warnings: [] };
+    const report: EnableReport = { prefKey, skills: [], scaffoldWritten: false, scaffoldPlaceholders: 0, warnings: [] };
     fanOutSkills(plugin, project.repoPath, report);
     fanOutScaffold(plugin, project.repoPath, project.name, report);
     return report;
@@ -589,6 +631,7 @@ export function createPluginService(deps: {
     const project = await requireProject(projectId);
     const script = (plugin.manifest.scripts ?? []).find((s) => s.name === scriptName);
     if (!script) throw new PluginError(`Script "${scriptName}" not found in plugin manifest`, "NOT_FOUND");
+    requireScaffoldReady(plugin, project.repoPath, "scripts");
 
     const vars: PluginPlaceholderVars = {
       repoPath: project.repoPath,
@@ -659,6 +702,7 @@ export function createPluginService(deps: {
   async function advanceLoop(pluginRowId: string, loopName: string, projectId: string): Promise<LoopAdvanceResult> {
     const plugin = await requirePlugin(pluginRowId);
     const project = await requireProject(projectId);
+    requireScaffoldReady(plugin, project.repoPath, "loops");
     return loops.advanceLoop({
       manifest: plugin.manifest,
       pluginSlug: plugin.pluginId,

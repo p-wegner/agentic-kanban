@@ -21,6 +21,12 @@ export const issues = sqliteTable("issues", {
   dueDate: text("due_date"),
   // Optional link to an issue in an external tracker (Jira, Linear, GitHub, ...).
   // externalKey is the human-readable identifier (e.g. "PROJ-123"); externalUrl is the http/https deep link.
+  // KNOWN DEBT (#201): plugin loops (plugin-loop.service.ts) also stash their own
+  // machine-generated dedupe identity here as a `plugin-loop:<slug>:<loop>:<unit>` prefixed
+  // string, via pluginLoopUnitKey(). It works but overloads a column documented (and rendered
+  // in the UI) as a genuine external-tracker link. If a second board feature ever needs the
+  // same "created by a machine, dedupe on re-run" identity, split it into a dedicated nullable
+  // `source_key` column (or typed origin JSON) instead of growing this overload further.
   externalKey: text("external_key"),
   externalUrl: text("external_url"),
   // Configurable workflow graph this issue flows through (null = legacy status-only flow).
