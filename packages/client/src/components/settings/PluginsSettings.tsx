@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import type { PluginManifest } from "@agentic-kanban/shared";
+import type { PluginManifest, PluginOutputLocation } from "@agentic-kanban/shared";
+import { PLUGIN_OUTPUT_LOCATIONS } from "@agentic-kanban/shared";
 import { apiFetch, apiPost, apiDelete } from "../../lib/api.js";
 import { showToast } from "../Toast.js";
 
@@ -15,6 +16,15 @@ type PluginListItem = {
   manifestError: string | null;
   /** Only present when the list was fetched with a projectId. */
   enabled?: boolean;
+  /** Only present when the list was fetched with a projectId. */
+  outputLocation?: PluginOutputLocation;
+};
+
+type OutputLocationResult = { location: PluginOutputLocation; repoPath: string | null; sidecarRepoName: string };
+
+const OUTPUT_LOCATION_LABELS: Record<PluginOutputLocation, string> = {
+  leading: "Leading repo",
+  sidecar: "Dedicated sidecar repo",
 };
 
 type ScriptRunResult = {
@@ -49,6 +59,7 @@ export function PluginsSettings({ activeProjectId }: PluginsSettingsProps) {
   const [installSource, setInstallSource] = useState("");
   const [installing, setInstalling] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [changingOutputLocationId, setChangingOutputLocationId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   // Script runs keyed `${pluginRowId}:${scriptName}`.
   const [runningScript, setRunningScript] = useState<string | null>(null);
@@ -108,6 +119,28 @@ export function PluginsSettings({ activeProjectId }: PluginsSettingsProps) {
       showToast(err instanceof Error ? err.message : "Toggle failed", "error");
     } finally {
       setTogglingId(null);
+    }
+  }
+
+  async function handleChangeOutputLocation(plugin: PluginListItem, location: PluginOutputLocation) {
+    if (!activeProjectId || changingOutputLocationId || location === plugin.outputLocation) return;
+    setChangingOutputLocationId(plugin.id);
+    try {
+      const result = await apiPost<OutputLocationResult>(`/api/plugins/${plugin.id}/output-location`, {
+        projectId: activeProjectId,
+        location,
+      });
+      setPlugins((rows) => rows.map((p) => (p.id === plugin.id ? { ...p, outputLocation: result.location } : p)));
+      showToast(
+        result.location === "sidecar"
+          ? `Extracted output now goes to the sidecar repo "${result.sidecarRepoName}"`
+          : "Extracted output now goes to the leading repo",
+        "success",
+      );
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to change output location", "error");
+    } finally {
+      setChangingOutputLocationId(null);
     }
   }
 
@@ -210,6 +243,7 @@ export function PluginsSettings({ activeProjectId }: PluginsSettingsProps) {
             const scripts = plugin.manifest?.scripts ?? [];
             const views = plugin.manifest?.views ?? [];
             const skills = (plugin.manifest?.skills ?? []).map((s) => s.dir.split("/").pop() || s.dir);
+            const producesOutput = Boolean(plugin.manifest?.scaffold || plugin.manifest?.loops?.length || scripts.length > 0);
             return (
               <div key={plugin.id} className="border border-gray-200 dark:border-gray-700 rounded-md p-3 space-y-2">
                 <div className="flex items-start justify-between gap-2">
@@ -267,6 +301,32 @@ export function PluginsSettings({ activeProjectId }: PluginsSettingsProps) {
                     </button>
                   </div>
                 </div>
+
+                {/* Output location — where scaffold/script/loop output (e.g. extracted requirements) is written */}
+                {activeProjectId && producesOutput && !plugin.manifestError && (
+                  <div className="border-t border-gray-100 dark:border-gray-800 pt-2 space-y-1">
+                    <div className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide">Output location</div>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={plugin.outputLocation ?? "leading"}
+                        onChange={(e) => void handleChangeOutputLocation(plugin, e.target.value as PluginOutputLocation)}
+                        disabled={changingOutputLocationId === plugin.id}
+                        className="text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-800 dark:text-gray-200 disabled:opacity-50"
+                        data-testid={`plugin-output-location-${plugin.id}`}
+                      >
+                        {PLUGIN_OUTPUT_LOCATIONS.map((loc) => (
+                          <option key={loc} value={loc}>{OUTPUT_LOCATION_LABELS[loc]}</option>
+                        ))}
+                      </select>
+                      {changingOutputLocationId === plugin.id && <span className="text-[11px] text-gray-400">Saving…</span>}
+                    </div>
+                    <p className="text-[11px] text-gray-400 dark:text-gray-500">
+                      Where this plugin's scaffold, scripts and loops write output (e.g. extracted requirements). Leading repo
+                      by default — for a single-repo project that IS the repo. Sidecar creates/uses a dedicated
+                      "{plugin.pluginId}-requirements" repo, added to this project.
+                    </p>
+                  </div>
+                )}
 
                 {/* Scripts */}
                 {scripts.length > 0 && (

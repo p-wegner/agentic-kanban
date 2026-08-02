@@ -455,6 +455,36 @@ export function pluginEnabledPreferenceKey(pluginSlug: string, projectId: string
 }
 
 /**
+ * Where a plugin's scaffold/script/loop output (e.g. extracted requirements docs)
+ * is written for a project:
+ * - `"leading"` — the project's leading repo. Default for every project; for a
+ *   single-repo project this IS "inside the repo" (there is nothing else to pick).
+ * - `"sidecar"` — a dedicated repo of its own, named after the plugin
+ *   (`pluginSidecarRepoName`), added to the project's repo set. Meaningful mainly
+ *   for multi-repo projects that want extraction output kept out of every
+ *   product repo, but available regardless of repo count.
+ */
+export type PluginOutputLocation = "leading" | "sidecar";
+
+export const PLUGIN_OUTPUT_LOCATIONS: readonly PluginOutputLocation[] = ["leading", "sidecar"];
+
+export const DEFAULT_PLUGIN_OUTPUT_LOCATION: PluginOutputLocation = "leading";
+
+export function isPluginOutputLocation(value: unknown): value is PluginOutputLocation {
+  return value === "leading" || value === "sidecar";
+}
+
+/** The per-project output-location pref key: `plugin_output_location_<pluginSlug>_<projectId>`. */
+export function pluginOutputLocationPreferenceKey(pluginSlug: string, projectId: string): string {
+  return `plugin_output_location_${pluginSlug}_${projectId}`;
+}
+
+/** Repo name a `"sidecar"`-mode plugin's dedicated repo is looked up / created under. */
+export function pluginSidecarRepoName(pluginSlug: string): string {
+  return `${pluginSlug}-requirements`;
+}
+
+/**
  * Count unfilled `TODO:` markers left in a scaffold file's content.
  *
  * A plugin's `scaffold.profileTemplate` ships with `TODO:` markers for a human

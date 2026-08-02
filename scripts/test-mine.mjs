@@ -22,6 +22,10 @@
 //
 // Excluded suites (keep in sync with CLAUDE.md "Known Flaky Test Suites" and the
 // "Use pnpm test:mine to skip these" note):
+//   shared:
+//     - git-service.integration.test.ts (#202) real git on temp dirs; Windows file-locking /
+//       timing — same root cause as server's git.service.test.ts below. Measured: passes in
+//       ~36s, fails on a 30s timeout in ~43s, no code change in between — pure timing flake.
 //   server:
 //     - cli.test.ts        spawn-based CLI integration; stale migration list / worktree DB resolution
 //     - cli-butler.test.ts spawn-based CLI integration; same root causes
@@ -68,7 +72,7 @@ const PACKAGES = [
   {
     dir: "packages/shared",
     label: "shared",
-    exclude: [],
+    exclude: ["**/git-service.integration.test.ts"],
   },
   {
     dir: "packages/server",
