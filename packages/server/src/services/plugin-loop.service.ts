@@ -39,6 +39,14 @@ import type { CreateIssueInput, CreateIssueResult } from "./issue.service.js";
  * (e.g. `billing:round-3`); re-reporting `billing` forever would be read as "that
  * work is already ticketed" and quietly do nothing. This is deliberate: it makes
  * an infinite ticket loop impossible without the board second-guessing the plan.
+ *
+ * KNOWN DEBT (#201): `external_key` is documented (and rendered in the UI) as a
+ * genuine external-tracker link, so this reuses that column for a private,
+ * board-internal dedupe identity instead of a purpose-built one. Safe today only
+ * because the key is namespace-prefixed and no loop ticket ever sets
+ * `externalUrl`. If a second board feature needs the same "created by a machine,
+ * dedupe on re-run" identity, give it a dedicated nullable `source_key` column
+ * (or typed origin JSON) rather than growing this overload further.
  */
 
 const PLAN_TIMEOUT_MS = 2 * 60 * 1000;

@@ -16,6 +16,7 @@ import {
   type FleetListenerHandle,
 } from "../services/fleet-listener.service.js";
 import { getWorkerFleet, type WorkerFleet } from "../services/worker-fleet.service.js";
+import { createFleetWorkersRoute } from "../routes/workers.js";
 import { startWorkerDaemon, type WorkerDaemonHandle } from "../worker/worker-daemon.js";
 
 describe("fleet listener", () => {
@@ -27,7 +28,12 @@ describe("fleet listener", () => {
   beforeAll(async () => {
     db = createTestDb().db as unknown as Database;
     fleet = getWorkerFleet(db);
-    listener = await startFleetListener({ database: db, port: 0, host: "127.0.0.1" });
+    listener = await startFleetListener({
+      database: db,
+      port: 0,
+      host: "127.0.0.1",
+      createWorkersRoute: createFleetWorkersRoute,
+    });
     base = `http://127.0.0.1:${listener.port}`;
   });
 

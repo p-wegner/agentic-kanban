@@ -31,6 +31,13 @@ type SkillRunResult = {
   branch: string;
 };
 
+type EnableReport = {
+  prefKey: string;
+  scaffoldWritten: boolean;
+  scaffoldPlaceholders: number;
+  warnings: string[];
+};
+
 type PluginsSettingsProps = {
   activeProjectId?: string | null;
 };
@@ -87,9 +94,16 @@ export function PluginsSettings({ activeProjectId }: PluginsSettingsProps) {
     setTogglingId(plugin.id);
     try {
       const action = plugin.enabled ? "disable" : "enable";
-      await apiPost(`/api/plugins/${plugin.id}/${action}`, { projectId: activeProjectId });
+      const result = await apiPost<EnableReport | { prefKey: string; skillsRemoved: string[] }>(
+        `/api/plugins/${plugin.id}/${action}`,
+        { projectId: activeProjectId },
+      );
       setPlugins((rows) => rows.map((p) => (p.id === plugin.id ? { ...p, enabled: !plugin.enabled } : p)));
-      showToast(`${plugin.name} ${action}d for this project`, "success");
+      if (action === "enable" && "warnings" in result && result.warnings.length > 0) {
+        for (const warning of result.warnings) showToast(warning, "error");
+      } else {
+        showToast(`${plugin.name} ${action}d for this project`, "success");
+      }
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Toggle failed", "error");
     } finally {
