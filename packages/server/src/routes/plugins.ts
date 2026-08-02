@@ -25,10 +25,13 @@ import { createWebhookSender } from "../services/outbound-webhook.service.js";
  *   POST   /api/plugins/:id/views/:viewId/start { projectId } → { url, port, pid }
  *   POST   /api/plugins/:id/views/:viewId/stop  { projectId }
  *   POST   /api/plugins/:id/scripts/:name/run   { projectId } → { code, stdout, stderr, timedOut }
- *   POST   /api/plugins/:id/skills/:name/run    { projectId, title?, description?, prompt? } →
+ *   POST   /api/plugins/:id/skills/:name/run
+ *            { projectId, title?, description?, prompt?, workflowTemplateId? } →
  *            { issueId, issueNumber, workspaceId, branch } (creates a ticket + launches a
  *            workspace against the skill — the agentic counterpart to scripts/:name/run).
  *            `prompt` is extra context for this run, appended to the skill's brief.
+ *            `workflowTemplateId` picks the ticket's workflow; omitted, the manifest's declared
+ *            workflow for the skill wins, and failing that the board's per-issue-type default.
  *            With `?stream=1` (or Accept: text/event-stream) the same call streams SSE progress
  *            events instead — `ticket` the moment the ticket exists, `workspace` while the
  *            worktree + setup script run, then `done`/`error`. The launch takes MINUTES; without
@@ -158,12 +161,19 @@ export function createPluginsRoute(
   router.post("/:id/skills/:name/run", async (c) => {
     const body = await parseOptionalJsonBody<{
       projectId?: string; title?: string; description?: string; prompt?: string;
+      workflowTemplateId?: string | null;
     }>(c);
     const projectId = typeof body.projectId === "string" ? body.projectId.trim() : "";
     if (!projectId) throw new PluginError("projectId is required", "BAD_REQUEST");
     const pluginId = c.req.param("id");
     const skillName = c.req.param("name");
-    const opts = { title: body.title, description: body.description, prompt: body.prompt };
+    const opts = {
+      title: body.title,
+      description: body.description,
+      prompt: body.prompt,
+      // Empty string from a `<select>` means "let the plugin/board decide", not "no workflow".
+      workflowTemplateId: body.workflowTemplateId || undefined,
+    };
 
     const wantsStream = c.req.query("stream") === "1"
       || (c.req.header("accept") ?? "").includes("text/event-stream");

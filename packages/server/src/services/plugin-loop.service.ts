@@ -167,6 +167,8 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
     projectName: string;
     repoPath: string;
     leadingRepoPath: string;
+    /** Resolved by the caller from the loop's (or its skill's) declared `workflow`. */
+    workflowTemplateId?: string | null;
   }): Promise<LoopAdvanceResult> {
     if (!createIssue) {
       throw new PluginLoopError("Loop advance is not available on this route", "BAD_REQUEST");
@@ -232,6 +234,10 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
         // Loop tickets are analysis work, not product changes; the loop's own
         // convergence check is the gate, so don't queue an LLM review per round.
         skipAutoReview: true,
+        // …and for the same reason the loop may declare a workflow whose graph has no review
+        // gate at all. `skipAutoReview` only silences the automatic reviewer; the workflow
+        // template is what decides whether the ticket must pass through review to reach done.
+        workflowTemplateId: args.workflowTemplateId ?? null,
       });
       created.push({
         unitId: unit.id,

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { apiPost } from "../lib/api.js";
+import { apiFetch, apiPost } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 
 /**
@@ -41,6 +41,17 @@ export type PluginScript = PluginOwner & {
 export type PluginSkill = PluginOwner & {
   name: string;
   description: string | null;
+  /** Workflow the manifest declares for this skill (builtin key or name); null = board default. */
+  workflow?: string | null;
+};
+
+type WorkflowTemplate = {
+  id: string;
+  name: string;
+  description: string | null;
+  builtinKey: string | null;
+  isDefault: boolean;
+  ticketType: string | null;
 };
 
 type LoopAdvanceResult = {
@@ -302,7 +313,28 @@ export function PluginSkillPane({ skill, projectId }: { skill: PluginSkill; proj
   const [prompt, setPrompt] = useState("");
   const [progress, setProgress] = useState<SkillRunProgress[]>([]);
   const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
+  const [workflowTemplateId, setWorkflowTemplateId] = useState("");
   const elapsed = useElapsed(running ? startedAt : null);
+
+  // The workflow decides whether this ticket has to pass a review gate to reach done. A skill
+  // that only writes analysis docs has nothing to review, so being silently routed through the
+  // board's implement → review → done default parks it on a gate that can only rubber-stamp it.
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<WorkflowTemplate[]>(`/api/workflows/templates?projectId=${projectId}`)
+      .then((rows) => { if (!cancelled) setTemplates(rows); })
+      .catch(() => { /* the launch still works; it just falls back to the board default */ });
+    return () => { cancelled = true; };
+  }, [projectId]);
+
+  // Reset the choice when switching skills so one skill's pick can't leak onto another.
+  useEffect(() => { setWorkflowTemplateId(""); }, [skill.pluginId, skill.name]);
+
+  const declared = skill.workflow
+    ? templates.find((t) => t.builtinKey === skill.workflow || t.name.toLowerCase() === skill.workflow!.toLowerCase())
+    : undefined;
+  const boardDefault = templates.find((t) => t.isDefault && !t.ticketType);
 
   const ticket = progress.find((p) => p.stage === "ticket");
   const workspaceStage = progress.find((p) => p.stage === "workspace");
@@ -322,7 +354,12 @@ export function PluginSkillPane({ skill, projectId }: { skill: PluginSkill; proj
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projectId, title: title.trim() || undefined, prompt: prompt.trim() || undefined }),
+          body: JSON.stringify({
+            projectId,
+            title: title.trim() || undefined,
+            prompt: prompt.trim() || undefined,
+            workflowTemplateId: workflowTemplateId || undefined,
+          }),
         },
       );
       if (!resp.ok || !resp.body) throw new Error(`Launch failed (${resp.status})`);
@@ -392,6 +429,32 @@ export function PluginSkillPane({ skill, projectId }: { skill: PluginSkill; proj
           />
           <span className="text-[11px] text-gray-500 dark:text-gray-400">
             Appended to the skill&apos;s brief in the ticket the agent reads.
+          </span>
+        </label>
+        <label className="block space-y-1">
+          <span className="text-xs font-medium text-gray-700 dark:text-gray-300">Workflow</span>
+          <select
+            value={workflowTemplateId}
+            onChange={(e) => setWorkflowTemplateId(e.target.value)}
+            disabled={running || templates.length === 0}
+            className="w-full text-sm px-2 py-1.5 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 disabled:opacity-50"
+            data-testid="plugin-skill-workflow"
+          >
+            <option value="">
+              {declared
+                ? `${declared.name} — declared by this plugin`
+                : boardDefault
+                  ? `${boardDefault.name} — this board's default`
+                  : "Board default"}
+            </option>
+            {templates.map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
+          <span className="text-[11px] text-gray-500 dark:text-gray-400">
+            {declared?.description
+              ?? boardDefault?.description
+              ?? "Decides which gates this ticket passes on its way to done — including whether it needs a review."}
           </span>
         </label>
       </div>
