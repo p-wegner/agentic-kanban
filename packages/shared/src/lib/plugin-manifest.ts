@@ -43,6 +43,17 @@ export interface PluginSkillDef {
   dir: string;
   /** One-line "what this skill does", surfaced next to its Run button. */
   description?: string;
+  /**
+   * Default workflow template for tickets launched from this skill — a builtin key
+   * (`research-task`, `simple-ticket`, …) or a template name. Optional, and only a DEFAULT:
+   * the launcher can always pick another in the UI.
+   *
+   * It exists because the plugin author knows something the board cannot infer. A mining
+   * round that only writes analysis docs has nothing for a code reviewer to review, so
+   * sending it through implement → review → done makes every round wait on a gate that can
+   * only rubber-stamp it. Without this field the board's per-issue-type default silently wins.
+   */
+  workflow?: string;
 }
 
 export interface PluginViewServeDef {
@@ -107,6 +118,13 @@ export interface PluginLoopDef {
   skill: string;
   /** Deterministic command printing the outstanding work units as JSON. */
   plan: PluginLoopPlanDef;
+  /**
+   * Default workflow template for the tickets this loop creates (builtin key or name).
+   * Falls back to the loop's skill's `workflow`, then to the board's default. Same reason as
+   * `PluginSkillDef.workflow` — and it matters more here, because a loop creates tickets in
+   * bulk with no human at the keyboard to pick one.
+   */
+  workflow?: string;
   /**
    * Safety stop: refuse to create more than this many tickets for one advance.
    * Defaults to `DEFAULT_LOOP_MAX_UNITS_PER_ADVANCE`.
@@ -265,6 +283,7 @@ export function parsePluginManifest(input: string | unknown): PluginManifest {
     return {
       dir: requireRelativePath(rec.dir, `skills[${i}].dir`),
       description: optionalString(rec.description, `skills[${i}].description`),
+      workflow: optionalString(rec.workflow, `skills[${i}].workflow`),
     };
   });
 
@@ -333,6 +352,7 @@ export function parsePluginManifest(input: string | unknown): PluginManifest {
       label: optionalString(rec.label, `loops[${i}].label`),
       description: optionalString(rec.description, `loops[${i}].description`),
       skill,
+      workflow: optionalString(rec.workflow, `loops[${i}].workflow`),
       maxUnitsPerAdvance: maxUnits,
       plan: {
         command: requireString(plan.command, `loops[${i}].plan.command`),
