@@ -662,6 +662,7 @@ export async function acquireRepoMergeLock<T>(
   }
 
   const diskLock = await acquireOnDiskRepoLock(repoPath, workspaceId);
+  console.log(`[merge-lock] acquired on-disk lock: repoPath=${repoPath} workspaceId=${workspaceId} pid=${diskLock.contents.pid}`);
   const heartbeatTimer = setInterval(() => diskLock.heartbeat(), 15_000);
 
   const holdExtensions: Promise<unknown>[] = [];
@@ -701,6 +702,7 @@ export async function acquireRepoMergeLock<T>(
     }
     clearInterval(heartbeatTimer);
     diskLock.release();
+    console.log(`[merge-lock] released on-disk lock: repoPath=${repoPath} workspaceId=${workspaceId}`);
   })();
   activeMerges.set(repoPath, lock);
   return resultPromise;

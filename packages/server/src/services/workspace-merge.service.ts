@@ -300,6 +300,7 @@ export function createWorkspaceMergeService(deps: {
     opts: MergeOptions = {},
   ) {
     const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
+    console.log(`[workspace-merge] doMerge phase=start workspaceId=${id} repoPath=${repoPath} baseBranch=${baseBranch}`);
     const prefMap = await loadMergePreferences(database);
     const autoMergeInReview = getBool(prefMap, "auto_merge_in_review");
     // `database` makes the pre-flight multi-repo aware: the reconcile/clean-ancestor
@@ -322,6 +323,7 @@ export function createWorkspaceMergeService(deps: {
       recordMergeAttempt,
     });
     if (preflight.kind === "completed") return preflight.result;
+    console.log(`[workspace-merge] doMerge phase=pre-merge-validation workspaceId=${id}`);
     await runWorkspacePreMergeValidation({ workspace, repoPath, baseBranch, gitService });
 
     // Gate the merge with the SAME verify_script + boot/render smoke gate every path shares
@@ -335,6 +337,7 @@ export function createWorkspaceMergeService(deps: {
     //     proof avoids doubling an expensive build/boot; STALE/absent proof re-runs the gate.
     // On failure we WITHHOLD the merge (throw, surfaced to the operator) rather than land it.
     if (project) {
+      console.log(`[workspace-merge] doMerge phase=pre-merge-gate workspaceId=${id}`);
       const gate = await resolveMergeGate({
         token: opts.gate ?? RUN_GATE,
         workspace: { id, workingDir: workspace.workingDir },
@@ -363,11 +366,15 @@ export function createWorkspaceMergeService(deps: {
     // minutes on tests/review), not before it — running it earlier would leave
     // a wide TOCTOU window in which sibling repo state could drift before the
     // all-or-nothing sibling merge actually lands (adversarial-review finding 22).
+    if (!workspace.isDirect) {
+      console.log(`[workspace-merge] doMerge phase=sibling-prevalidation workspaceId=${id}`);
+    }
     const siblingPlans = workspace.isDirect
       ? []
       : await prevalidateSiblingMerges({ gitService, database, workspaceId: id });
 
     const targetBranch = baseBranch;
+    console.log(`[workspace-merge] doMerge phase=execute-merge workspaceId=${id} targetBranch=${targetBranch}`);
     const { response, postMergeContext } = await executeWorkspaceMerge({
       id,
       workspace,
@@ -464,6 +471,7 @@ export function createWorkspaceMergeService(deps: {
       scheduleDeferredCleanup();
     }
 
+    console.log(`[workspace-merge] doMerge phase=done workspaceId=${id}`);
     return response;
   }
 
