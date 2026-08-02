@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, hostname } from "node:os";
 import { join } from "node:path";
 import {
   tryAcquireRepoLock,
@@ -136,6 +136,78 @@ describe("repo-lock (#993 on-disk cross-process merge lock)", () => {
     tryAcquireRepoLock(repo, "holder-a");
     const attempt = tryAcquireRepoLock(repo, "holder-b");
     expect(attempt).toBeNull();
+  });
+
+  describe("#207: same-host dead-process reclaim", () => {
+    // A pid that is (overwhelmingly likely to be) not running on this machine —
+    // same convention the existing "release() never removes a lock it no longer
+    // owns" test above uses for a fabricated foreign lock.
+    const DEAD_PID = 999999;
+
+    it("reclaims immediately a fresh-heartbeat lock held by a dead pid on this host (frozen heartbeat, not yet stale)", () => {
+      const repo = makeRepo();
+      const lockPath = join(repo, ".git", "agentic-kanban-merge.lock");
+      // Heartbeat is FRESH (just now) — simulates a process that died the instant
+      // after its last heartbeat write, well inside REPO_LOCK_STALE_MS.
+      const now = new Date().toISOString();
+      writeFileSync(
+        lockPath,
+        JSON.stringify({
+          pid: DEAD_PID,
+          hostname: hostname(),
+          holder: "workspace:dead-holder",
+          acquiredAt: now,
+          heartbeatAt: now,
+        }),
+      );
+
+      const status = inspectRepoLock(repo);
+      expect(status!.isStale).toBe(false);
+      expect(status!.ownerProcessDead).toBe(true);
+
+      const recovered = tryAcquireRepoLock(repo, "new-holder");
+      expect(recovered).not.toBeNull();
+      expect(recovered!.contents.holder).toBe("new-holder");
+    });
+
+    it("does NOT reclaim a fresh lock whose pid is alive on this host (our own pid)", () => {
+      const repo = makeRepo();
+      const lockPath = join(repo, ".git", "agentic-kanban-merge.lock");
+      const now = new Date().toISOString();
+      writeFileSync(
+        lockPath,
+        JSON.stringify({
+          pid: process.pid, // definitely alive — it's us
+          hostname: hostname(),
+          holder: "workspace:live-holder",
+          acquiredAt: now,
+          heartbeatAt: now,
+        }),
+      );
+
+      expect(inspectRepoLock(repo)!.ownerProcessDead).toBe(false);
+      expect(tryAcquireRepoLock(repo, "new-holder")).toBeNull();
+    });
+
+    it("does NOT probe liveness for a lock recorded under a different hostname (falls back to staleness only)", () => {
+      const repo = makeRepo();
+      const lockPath = join(repo, ".git", "agentic-kanban-merge.lock");
+      const now = new Date().toISOString();
+      writeFileSync(
+        lockPath,
+        JSON.stringify({
+          pid: DEAD_PID, // would be "dead" on THIS host, but the lock is foreign
+          hostname: "some-other-host",
+          holder: "workspace:remote-holder",
+          acquiredAt: now,
+          heartbeatAt: now,
+        }),
+      );
+
+      const status = inspectRepoLock(repo);
+      expect(status!.ownerProcessDead).toBe(false);
+      expect(tryAcquireRepoLock(repo, "new-holder")).toBeNull();
+    });
   });
 
   it("withRepoLock runs work under the lock and releases it afterward, success or failure", async () => {
