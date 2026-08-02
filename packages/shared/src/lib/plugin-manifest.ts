@@ -405,6 +405,13 @@ export function parsePluginLoopPlan(stdout: string): PluginLoopPlan {
  * against on the next advance so a still-outstanding unit is never re-ticketed.
  * Kept in the shared lib so the server (which writes it) and any consumer that
  * needs to recognise loop tickets derive it identically.
+ *
+ * KNOWN DEBT (#201): this key rides on `issues.externalKey`, a column documented
+ * (and rendered in the UI) as a genuine external-tracker link — not a private
+ * board-internal dedupe carrier. Works today because the prefix is namespaced and
+ * no loop ticket sets `externalUrl`, but a second "machine-created, dedupe on
+ * re-run" feature should get its own nullable `source_key` column rather than
+ * reuse this one.
  */
 export function pluginLoopUnitKey(pluginSlug: string, loopName: string, unitId: string): string {
   return `plugin-loop:${pluginSlug}:${loopName}:${unitId}`;
