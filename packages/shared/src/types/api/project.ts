@@ -49,6 +49,8 @@ export interface ProjectResponse {
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Number of workspaces in this project whose agent is currently active. */
+  activeWorkspaceCount: number;
 }
 
 /**
