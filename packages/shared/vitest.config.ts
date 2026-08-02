@@ -19,11 +19,20 @@ import os from "node:os";
 // (raised) budget. Both knobs are env-overridable so a dedicated CI runner can opt back into
 // full parallelism / tighter timeouts without touching this file.
 //
+// #206: 20s was still not enough headroom. This machine runs several agent sessions at once, so
+// `pnpm test:mine` — which is ALSO the merge verify_script — went red on master with 6-9 failures,
+// every one of them a TIMEOUT in these same tree-scanning / real-git suites. A red master gate
+// withholds every merge board-wide, including diffs that touch none of it. Measured while loaded:
+// migration-renumber-conflict-guard used 19.1s of its 20s budget, and git-service.integration took
+// 304s wall for a file whose tests pass. The budget was measuring CPU contention, not correctness,
+// which is the one thing a merge gate must never do. 60s restores real headroom without hiding a
+// hang (a hang still never finishes). Heavier real-git suites set their own budget on top.
+//
 // `maxWorkers`/`minWorkers` are TOP-LEVEL in vitest 4 — see the note in
 // packages/server/vitest.config.ts. The v3 `poolOptions.forks` form is ignored with a warning.
 const cpuCount = os.cpus().length || 4;
 const maxWorkers = Number(process.env.VITEST_MAX_WORKERS) || Math.max(2, Math.floor(cpuCount / 2));
-const testTimeout = Number(process.env.VITEST_TEST_TIMEOUT) || 20_000;
+const testTimeout = Number(process.env.VITEST_TEST_TIMEOUT) || 60_000;
 
 export default defineConfig({
   test: {
