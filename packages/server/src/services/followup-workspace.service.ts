@@ -6,6 +6,7 @@ import { resolveAgentSettings } from "./agent-settings.service.js";
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
 import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../constants/preference-keys.js";
+import { hasSkipAutoStartTag } from "../repositories/dependency-auto-chain.repository.js";
 import {
   getDependentsOf,
   getProjectStatusesForFollowup,
@@ -18,6 +19,14 @@ import {
   updateIssueStatus,
   updateWorkspaceStatus,
 } from "../repositories/followup-workspace.repository.js";
+
+/** Issues carrying this tag are an explicit opt-out of monitor/cascade auto-start. */
+const SKIP_AUTO_START_TAG = "no-auto-start";
+
+/** Statuses a dependent issue must be sitting in for a followup auto-start to be valid.
+ * Anything else — including a Cancelled issue whose deps happen to resolve — is NOT
+ * an implicit "not Done means startable" case; it must be an explicit backlog status. */
+const STARTABLE_STATUS_NAMES = new Set(["Todo", "Backlog"]);
 
 /**
  * After an issue is merged, find issues that depended on it and are now unblocked.
@@ -38,6 +47,7 @@ export async function autoStartFollowups(
 
   const statuses = await getProjectStatusesForFollowup(projectId, database);
   const doneStatusIds = new Set(statuses.filter(s => isTerminalStatusName(s.name)).map(s => s.id));
+  const startableStatusIds = new Set(statuses.filter(s => STARTABLE_STATUS_NAMES.has(s.name)).map(s => s.id));
   const todoStatus = statuses.find(s => s.name === "Todo") ?? statuses[0];
   const project = await getProjectForFollowup(projectId, database);
   if (!project[0]) return;
@@ -63,6 +73,12 @@ export async function autoStartFollowups(
 
     const followupIssue = await getIssueById(dep.issueId, database);
     if (!followupIssue[0]) continue;
+
+    // A dependent issue that was moved out of the backlog — most notably Cancelled —
+    // must not be resurrected just because its blockers finished merging (#219). Only an
+    // explicit Todo/Backlog status is a valid launch point; "not Done" is not "startable".
+    if (!startableStatusIds.has(followupIssue[0].statusId)) continue;
+    if (await hasSkipAutoStartTag(dep.issueId, SKIP_AUTO_START_TAG, database)) continue;
 
     try {
       const sanitized = followupIssue[0].title
