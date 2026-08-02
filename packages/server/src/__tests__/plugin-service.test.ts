@@ -107,6 +107,25 @@ async function insertProject(db: TestDb, repoPath: string, name = "Plugin Projec
   return projectId;
 }
 
+/** A global (project-less) workflow template, like the board's builtins. */
+async function seedTemplate(db: TestDb, opts: { name: string; builtinKey: string }): Promise<string> {
+  const now = new Date().toISOString();
+  const id = randomUUID();
+  await db.insert(schema.workflowTemplates).values({
+    id,
+    projectId: null,
+    name: opts.name,
+    description: null,
+    ticketType: null,
+    isDefault: false,
+    isBuiltin: true,
+    builtinKey: opts.builtinKey,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return id;
+}
+
 async function getPref(db: TestDb, key: string): Promise<string | null> {
   const rows = await db.select().from(schema.preferences).where(eq(schema.preferences.key, key));
   return rows[0]?.value ?? null;
@@ -420,6 +439,71 @@ describe("plugin.service", () => {
 
     const workspaceStage = events.find((e) => e.stage === "workspace");
     expect(workspaceStage).toMatchObject({ setupScript: "npm install" });
+  });
+
+  it("runSkill uses the manifest's declared workflow, and the launcher's choice overrides it", async () => {
+    // A skill that only writes analysis docs should not be routed through implement → review →
+    // done just because that is the board's default for a task.
+    const manifest = {
+      ...MANIFEST,
+      skills: [{ dir: "skills/requirement-extraction", workflow: "research-task" }],
+    };
+    const plugin = await service.installPlugin({ source: makePluginDir(manifest) });
+    const projectId = await insertProject(db, makeProjectRepo());
+    const research = await seedTemplate(db, { name: "Research Task", builtinKey: "research-task" });
+    const other = await seedTemplate(db, { name: "Hard Bug", builtinKey: "hard-bug" });
+
+    const createIssue = vi.fn().mockResolvedValue({ id: "issue-1", issueNumber: 42 });
+    const withDeps = createPluginService({
+      database: db as unknown as Database,
+      createIssue,
+      createWorkspace: vi.fn().mockResolvedValue({ id: "ws-1", branch: "b" }),
+    });
+
+    await withDeps.runSkill(plugin.id, "requirement-extraction", projectId);
+    expect(createIssue.mock.calls[0][0].workflowTemplateId).toBe(research);
+
+    await withDeps.runSkill(plugin.id, "requirement-extraction", projectId, { workflowTemplateId: other });
+    expect(createIssue.mock.calls[1][0].workflowTemplateId).toBe(other);
+  });
+
+  it("runSkill falls back to the board default when the manifest names an unknown workflow", async () => {
+    const manifest = {
+      ...MANIFEST,
+      skills: [{ dir: "skills/requirement-extraction", workflow: "no-such-workflow" }],
+    };
+    const plugin = await service.installPlugin({ source: makePluginDir(manifest) });
+    const projectId = await insertProject(db, makeProjectRepo());
+    const createIssue = vi.fn().mockResolvedValue({ id: "issue-1", issueNumber: 42 });
+    const withDeps = createPluginService({
+      database: db as unknown as Database,
+      createIssue,
+      createWorkspace: vi.fn().mockResolvedValue({ id: "ws-1", branch: "b" }),
+    });
+
+    // Degrades rather than blocking: a plugin naming a workflow this board has never heard of
+    // must not make the skill unlaunchable.
+    await expect(withDeps.runSkill(plugin.id, "requirement-extraction", projectId)).resolves.toBeTruthy();
+    expect(createIssue.mock.calls[0][0].workflowTemplateId).toBeNull();
+  });
+
+  it("runSkill matches a declared workflow by template NAME as well as builtin key", async () => {
+    const manifest = {
+      ...MANIFEST,
+      skills: [{ dir: "skills/requirement-extraction", workflow: "Research Task" }],
+    };
+    const plugin = await service.installPlugin({ source: makePluginDir(manifest) });
+    const projectId = await insertProject(db, makeProjectRepo());
+    const research = await seedTemplate(db, { name: "Research Task", builtinKey: "research-task" });
+    const createIssue = vi.fn().mockResolvedValue({ id: "issue-1", issueNumber: 42 });
+    const withDeps = createPluginService({
+      database: db as unknown as Database,
+      createIssue,
+      createWorkspace: vi.fn().mockResolvedValue({ id: "ws-1", branch: "b" }),
+    });
+
+    await withDeps.runSkill(plugin.id, "requirement-extraction", projectId);
+    expect(createIssue.mock.calls[0][0].workflowTemplateId).toBe(research);
   });
 
   it("runSkill rejects an unknown skill name with NOT_FOUND", async () => {
