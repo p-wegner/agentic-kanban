@@ -18,6 +18,7 @@ import {
 import type { ChildProcess } from "node:child_process";
 import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-preference-write";
+import { listWorkflowTemplates, type WorkflowDb } from "@agentic-kanban/shared/lib/workflow-engine";
 import {
   DEFAULT_PLUGIN_OUTPUT_LOCATION,
   PLUGIN_MANIFEST_FILENAME,
@@ -769,6 +770,8 @@ export function createPluginService(deps: {
       title?: string;
       description?: string;
       prompt?: string;
+      /** Explicit workflow template for the ticket; overrides the manifest's declared default. */
+      workflowTemplateId?: string | null;
       onProgress?: (event: PluginSkillRunProgress) => void;
     },
   ): Promise<PluginSkillRunResult> {
@@ -777,8 +780,14 @@ export function createPluginService(deps: {
     }
     const plugin = await requirePlugin(pluginRowId);
     const project = await requireProject(projectId);
-    const known = (plugin.manifest.skills ?? []).some((s) => s.dir.split("/").pop() === skillName);
-    if (!known) throw new PluginError(`Skill "${skillName}" not found in plugin manifest`, "NOT_FOUND");
+    const skillDef = (plugin.manifest.skills ?? []).find((s) => s.dir.split("/").pop() === skillName);
+    if (!skillDef) throw new PluginError(`Skill "${skillName}" not found in plugin manifest`, "NOT_FOUND");
+
+    // Workflow precedence: what the launcher picked → what the plugin declares for this skill →
+    // the board's per-issue-type default. The launcher's choice always wins; the manifest only
+    // supplies a better starting point than "whatever the board does for a generic task".
+    const workflowTemplateId = opts?.workflowTemplateId
+      ?? await resolveWorkflowTemplateId(projectId, skillDef.workflow);
 
     const title = opts?.title?.trim() || `${plugin.name}: run ${skillName}`;
     const base = opts?.description?.trim()
@@ -796,6 +805,7 @@ export function createPluginService(deps: {
       issueType: "task",
       priority: "medium",
       skipAutoReview: true,
+      workflowTemplateId,
     });
     // The ticket exists within milliseconds; provisioning the workspace behind it takes MINUTES
     // (worktree, then the project's setup script, then the agent launch). Reporting the ticket
@@ -820,6 +830,33 @@ export function createPluginService(deps: {
     return result;
   }
 
+  /**
+   * Resolve a manifest's `workflow` string to a template id for this project.
+   *
+   * Accepts a builtin key (`research-task`), a template name ("Research Task"), or an id, in
+   * that order — a plugin ships one manifest for every board, so it cannot know local template
+   * ids, and builtin keys are the only stable handle across installs. An unresolvable value is
+   * NOT an error: the board's own default takes over and a warning is logged, because a plugin
+   * naming a workflow this board has never heard of should degrade, not block the launch.
+   */
+  async function resolveWorkflowTemplateId(
+    projectId: string,
+    workflow: string | undefined,
+  ): Promise<string | null> {
+    const wanted = workflow?.trim();
+    if (!wanted) return null;
+    const templates = await listWorkflowTemplates(database as unknown as WorkflowDb, projectId);
+    const needle = wanted.toLowerCase();
+    const match = templates.find((t) => t.builtinKey?.toLowerCase() === needle)
+      ?? templates.find((t) => t.name.toLowerCase() === needle)
+      ?? templates.find((t) => t.id === wanted);
+    if (!match) {
+      console.warn(`[plugins] workflow "${wanted}" not found for project ${projectId} — using the board default`);
+      return null;
+    }
+    return match.id;
+  }
+
   /** Per-loop ticket counts for one plugin (cheap — does not run the planner). */
   async function listLoops(pluginRowId: string, projectId: string): Promise<LoopStatus[]> {
     const plugin = await requirePlugin(pluginRowId);
@@ -836,6 +873,15 @@ export function createPluginService(deps: {
     const project = await requireProject(projectId);
     const outputRepoPath = await resolveOutputRepoPath(plugin, project);
     requireScaffoldReady(plugin, outputRepoPath, "loops");
+    // A loop declares its own workflow, or inherits the one its skill declares — nobody is at
+    // the keyboard when the monitor advances a round, so the manifest is the only place this
+    // choice can come from.
+    const loopDef = (plugin.manifest.loops ?? []).find((l) => l.name === loopName);
+    const skillDef = (plugin.manifest.skills ?? []).find((s) => s.dir.split("/").pop() === loopDef?.skill);
+    const workflowTemplateId = await resolveWorkflowTemplateId(
+      projectId,
+      loopDef?.workflow ?? skillDef?.workflow,
+    );
     return loops.advanceLoop({
       manifest: plugin.manifest,
       pluginSlug: plugin.pluginId,
@@ -845,6 +891,7 @@ export function createPluginService(deps: {
       projectName: project.name,
       repoPath: outputRepoPath,
       leadingRepoPath: project.repoPath,
+      workflowTemplateId,
     });
   }
 
@@ -901,7 +948,9 @@ export function createPluginService(deps: {
       }
       for (const skill of manifest.skills ?? []) {
         const name = skill.dir.split("/").pop() || skill.dir;
-        skills.push({ ...owner, name, description: skill.description ?? null });
+        // `workflow` travels to the UI so the launcher can SEE which workflow the plugin
+        // chose for this skill, and change it, instead of discovering it after the fact.
+        skills.push({ ...owner, name, description: skill.description ?? null, workflow: skill.workflow ?? null });
       }
     }
     return { views, loops: projectLoops, scripts, skills };
