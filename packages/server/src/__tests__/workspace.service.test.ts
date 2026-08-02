@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { GIT_HEAVY_TEST_TIMEOUT_MS } from "./helpers/timeouts.js";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { and, eq } from "drizzle-orm";
@@ -19,6 +20,17 @@ vi.mock("../services/process-cleanup.js", () => ({
   killProcessesOnPorts: vi.fn(async () => 0),
   killDevServerSupervisorOnPorts: vi.fn(async () => 0),
 }));
+
+// The on-disk repo merge lock (repo-lock.ts) refuses to acquire when
+// "<repoPath>/.git" doesn't exist on disk, and mergeWorkspace's on-disk lock
+// acquisition retries indefinitely rather than surfacing that refusal — so
+// without a real ".git" dir at the fixture repoPath below, any merge test
+// here hangs until the suite times out. gitService is fully mocked in this
+// file, so a real git repo isn't needed — just the directory's presence.
+const fixtureGitDir = join("/tmp/test-repo", ".git");
+if (!existsSync(fixtureGitDir)) {
+  mkdirSync(fixtureGitDir, { recursive: true });
+}
 
 /**
  * Unit tests for workspace.service using an in-memory SQLite DB plus an injected
