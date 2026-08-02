@@ -41,6 +41,7 @@ import { loadProjectRuntimeConfig } from "./project-runtime-config.service.js";
 import { WorkspaceError, type CreateWorkspaceInput, type GitService } from "./workspace-internals.js";
 import { buildContextPrimer } from "./context-packer.service.js";
 import { getStackProfile } from "./stack-profile.service.js";
+import { resolveBoardFeedbackRouting } from "./board-feedback-routing.js";
 
 export function createWorkspaceProvisionService(deps: {
   database: Database;
@@ -352,6 +353,14 @@ exit 1
     } catch (err) {
       console.warn(`[workspaces] stack-profile read failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
     }
+    // Best-effort like the stack profile: a builder still gets its ticket even if we
+    // can't tell it where to route board feedback.
+    let boardFeedback = null;
+    try {
+      boardFeedback = await resolveBoardFeedbackRouting(issue.projectId, database);
+    } catch (err) {
+      console.warn(`[workspaces] board-feedback routing failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    }
     return writeTicketContextFile(worktreePath, {
       issueNumber: issue.issueNumber,
       title: issue.title,
@@ -360,6 +369,7 @@ exit 1
       stackProfile,
       additionalRepos,
       serviceStack,
+      boardFeedback,
     });
   }
 

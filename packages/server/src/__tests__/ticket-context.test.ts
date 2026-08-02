@@ -6,6 +6,7 @@ import {
   buildTicketContextMarkdown,
   buildStackProfileSection,
   buildServiceStackSection,
+  buildBoardFeedbackSection,
   writeTicketContextFile,
   TICKET_CONTEXT_FILENAME,
 } from "@agentic-kanban/shared/lib/ticket-context";
@@ -217,6 +218,88 @@ describe("ticket-context", () => {
         description: "d",
       });
       expect(written).toBeNull();
+    });
+  });
+
+  describe("board feedback routing section", () => {
+    const fileTicket = {
+      kind: "file-ticket" as const,
+      projectId: "board-uuid",
+      projectName: "agentic-kanban",
+      isCurrentProject: false,
+    };
+
+    it("is omitted entirely when there is no routing", () => {
+      expect(buildBoardFeedbackSection(null)).toBeNull();
+      expect(buildBoardFeedbackSection(undefined)).toBeNull();
+      const md = buildTicketContextMarkdown({ title: "t", description: "d" });
+      expect(md).not.toContain("bug in the kanban board itself");
+    });
+
+    it("names the board project and its explicit id when building a DIFFERENT project", () => {
+      const section = buildBoardFeedbackSection(fileTicket)!;
+      expect(section).toContain("agentic-kanban");
+      expect(section).toContain('projectId: "board-uuid"');
+      // The whole point: create_issue defaults to the ACTIVE project, so the builder has to
+      // be told to pass projectId explicitly or the ticket lands in the wrong backlog.
+      expect(section).toMatch(/ACTIVE project/);
+      expect(section).toMatch(/NOT the project you are building/);
+    });
+
+    it("tells a builder inside the board's own repo to file against this same project", () => {
+      const section = buildBoardFeedbackSection({ ...fileTicket, isCurrentProject: true })!;
+      expect(section).toContain("this same project");
+      expect(section).toContain('projectId: "board-uuid"');
+      expect(section).not.toMatch(/NOT the project you are building/);
+    });
+
+    it("always says report-and-continue, never fix-the-board-from-here", () => {
+      for (const routing of [
+        fileTicket,
+        { kind: "gh-issue" as const, issuesUrl: "https://example.test/issues", deployment: "packaged" as const },
+      ]) {
+        const section = buildBoardFeedbackSection(routing)!;
+        expect(section).toMatch(/do not try to fix the board's own code/i);
+        expect(section).toMatch(/keep going|do not abandon/i);
+      }
+    });
+
+    describe("deployments with no board backlog route to GitHub", () => {
+      // npx/docker installs have no board project to file into and no editable checkout —
+      // a local ticket would land in some project's backlog where nobody looks for board bugs.
+      const cases = [
+        { deployment: "container" as const, expect: /container image/i },
+        { deployment: "packaged" as const, expect: /installed package \(npx\/npm\)/i },
+        { deployment: "source-checkout" as const, expect: /not registered as a project/i },
+      ];
+
+      for (const c of cases) {
+        it(`explains the ${c.deployment} case and points at the issues URL`, () => {
+          const section = buildBoardFeedbackSection({
+            kind: "gh-issue",
+            issuesUrl: "https://example.test/issues",
+            deployment: c.deployment,
+          })!;
+          expect(section).toMatch(c.expect);
+          expect(section).toContain("https://example.test/issues");
+          // Must not tell the agent to create_issue anywhere in this mode.
+          expect(section).not.toContain("create_issue(");
+          // And must explicitly steer it away from the built project's backlog.
+          expect(section).toMatch(/not file it as a ticket in the project you are building/i);
+        });
+      }
+    });
+
+    it("is rendered into the generated ticket file when a routing is supplied", () => {
+      const md = buildTicketContextMarkdown({
+        issueNumber: 7,
+        title: "Build a thing",
+        description: "d",
+        boardFeedback: fileTicket,
+      });
+      expect(md).toContain("# Ticket #7: Build a thing");
+      expect(md).toContain("## If you hit a bug in the kanban board itself");
+      expect(md).toContain('projectId: "board-uuid"');
     });
   });
 });
