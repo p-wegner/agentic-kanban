@@ -27,8 +27,7 @@ import { Transform } from "node:stream";
 import { gitStream } from "@agentic-kanban/shared/lib/git-exec";
 import { db as realDb } from "../db/index.js";
 import type { Database } from "../db/index.js";
-import { projects } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
+import { getProjectRepoPath } from "../repositories/project.repository.js";
 
 export const KANBAN_INCOMING_REF_PREFIX = "refs/kanban/incoming/";
 
@@ -82,8 +81,7 @@ function reject(res: ServerResponse, status: number, message: string): void {
 }
 
 async function resolveRepoPath(projectId: string, database: Database): Promise<string | null> {
-  const rows = await database.select({ repoPath: projects.repoPath }).from(projects).where(eq(projects.id, projectId)).limit(1);
-  return rows[0]?.repoPath ?? null;
+  return getProjectRepoPath(projectId, database);
 }
 
 /** GET /git/:id/info/refs — the ref advertisement that starts every fetch/push. */
