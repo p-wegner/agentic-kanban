@@ -2,9 +2,11 @@ import type { Database } from "../db/index.js";
 import { NotFoundError } from "../errors/index.js";
 import { isAnalyticsNoise } from "./session-filter.js";
 import { isCodexUsageLimitStats } from "./codex-rate-limit.js";
+import { getDirtyTrackedSourceFiles } from "./dirty-main-checkout.js";
+import { getProjectById } from "../repositories/project.repository.js";
+import { revParse, countUniqueCommits } from "@agentic-kanban/shared/lib/git-service";
 import {
   getNonClosedWorkspacesForIssues,
-  getProjectIdOrNull,
   getProjectIssueRows,
   getProjectStatusRows,
   getSessionsForWorkspacesDesc,
@@ -16,7 +18,17 @@ export type LaunchFailureCategory =
   | "setup-failed"  // workspace setup script failed (non-zero exit)
   | "preflight-failed" // launch preflight refused before a session row existed
   | "missing-worktree" // workingDir is null or missing
-  | "session-error"; // session exited with non-zero exit code
+  | "session-error" // session exited with non-zero exit code
+  | "empty-branch-dirty-main"; // idle with 0 unique commits WHILE the project's main checkout is dirty — likely wrote into main instead of the worktree (#218)
+
+/** Git probes behind the empty-branch-dirty-main check — injectable so tests never spawn real git. */
+export interface WorkspaceLaunchFailureGitDeps {
+  revParse: (repoPath: string, ref: string) => Promise<string>;
+  countUniqueCommits: (repoPath: string, baseSha: string, branchSha: string) => Promise<number>;
+  getDirtyTrackedSourceFiles: (repoPath: string) => Promise<string[]>;
+}
+
+const defaultGitDeps: WorkspaceLaunchFailureGitDeps = { revParse, countUniqueCommits, getDirtyTrackedSourceFiles };
 
 export interface WorkspaceLaunchFailure {
   workspaceId: string;
@@ -94,10 +106,12 @@ function extractFailureMessage(session: { stats: string | null } | null, setupSt
 export async function getWorkspaceLaunchFailures(
   projectId: string,
   database: Database,
+  gitDeps: WorkspaceLaunchFailureGitDeps = defaultGitDeps,
 ): Promise<WorkspaceLaunchFailuresResponse> {
   // Resolve project
-  const projectIdResolved = await getProjectIdOrNull(projectId, database);
-  if (!projectIdResolved) throw new NotFoundError(`Project ${projectId} not found`);
+  const project = await getProjectById(projectId, database);
+  if (!project) throw new NotFoundError(`Project ${projectId} not found`);
+  const projectIdResolved = project.id;
 
   // Get non-terminal issue statuses
   const statusRows = await getProjectStatusRows(projectId, database);
@@ -214,6 +228,38 @@ export async function getWorkspaceLaunchFailures(
     };
   }
 
+  // #218: a workspace that goes idle with 0 unique commits on its branch WHILE the
+  // project's main checkout sits dirty is a strong signal the agent wrote into main
+  // instead of its own worktree — cheap enough to check on every read of this panel,
+  // but only worth the git spawns once we already know main is dirty (checked once,
+  // not per workspace) and only for workspaces no other check already flagged.
+  let dirtyMainFiles: string[] = [];
+  if (project.repoPath) {
+    try {
+      dirtyMainFiles = await gitDeps.getDirtyTrackedSourceFiles(project.repoPath);
+    } catch { /* best-effort — a git error here just skips this one signal */ }
+  }
+
+  async function checkEmptyBranchDirtyMain(ws: WsRow): Promise<FailureClassification | null> {
+    if (dirtyMainFiles.length === 0) return null;
+    if (ws.status !== "idle" || ws.isDirect || !ws.workingDir || !ws.branch || !project.repoPath) return null;
+    const baseBranch = ws.baseBranch || project.defaultBranch;
+    if (!baseBranch) return null;
+    try {
+      const branchSha = await gitDeps.revParse(project.repoPath, ws.branch);
+      const baseSha = await gitDeps.revParse(project.repoPath, baseBranch);
+      const uniqueCommits = await gitDeps.countUniqueCommits(project.repoPath, baseSha, branchSha);
+      if (uniqueCommits > 0) return null;
+    } catch {
+      return null; // can't resolve refs — don't guess
+    }
+    return {
+      failureCategory: "empty-branch-dirty-main",
+      lastMessage: `Branch has 0 unique commits relative to ${baseBranch} while the project's main checkout has ${dirtyMainFiles.length} uncommitted tracked change(s) (${dirtyMainFiles.slice(0, 3).join(", ")}${dirtyMainFiles.length > 3 ? ", ..." : ""}) — the agent likely wrote into the main checkout instead of this workspace's worktree.`,
+      failedAt: ws.updatedAt,
+    };
+  }
+
   const failures: WorkspaceLaunchFailure[] = [];
 
   for (const ws of workspaceRows) {
@@ -223,7 +269,7 @@ export async function getWorkspaceLaunchFailures(
     const issueStatusName = statusNameById.get(issue.statusId) ?? "Unknown";
     const latestSession = latestSessionByWs.get(ws.id) ?? null;
 
-    const classification = classifyWorkspaceFailure(ws, latestSession);
+    const classification = classifyWorkspaceFailure(ws, latestSession) ?? await checkEmptyBranchDirtyMain(ws);
     if (!classification) continue;
 
     failures.push(buildFailure(ws, issue, issueStatusName, latestSession, classification));

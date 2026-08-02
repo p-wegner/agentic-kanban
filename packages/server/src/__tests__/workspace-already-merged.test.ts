@@ -265,6 +265,90 @@ describe("checkAlreadyMerged", () => {
     const svc = createWorkspaceMergeService({ database: db, gitService: makeGitService() as never, createBackup: async () => {} });
     await expect(svc.checkAlreadyMerged(workspaceId)).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
+
+  // ─── #218: adoptMainCheckout recovery override ─────────────────────────────
+  describe("adoptMainCheckout recovery (#218)", () => {
+    it("still refuses a 0-unique-commit branch by default, and the message points at the recovery flag", async () => {
+      const { workspaceId } = await seedScenario(db, {});
+      const git = {
+        ...makeGitService({ getDiff: async () => "", revParse: async () => "same-sha", isAncestor: async () => true }),
+        countUniqueCommits: vi.fn(async () => 0),
+      };
+      const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+
+      const result = await svc.checkAlreadyMerged(workspaceId);
+      expect(result.isAlreadyMerged).toBe(false);
+      expect(result.reason).toMatch(/no unique commits/i);
+      expect(result.reason).toMatch(/adoptMainCheckout/);
+    });
+
+    it("reports adopted-merged when adoptMainCheckout is passed for a 0-unique-commit branch", async () => {
+      const { workspaceId } = await seedScenario(db, {});
+      const git = {
+        ...makeGitService({ getDiff: async () => "", revParse: async () => "same-sha", isAncestor: async () => true }),
+        countUniqueCommits: vi.fn(async () => 0),
+      };
+      const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+
+      const result = await svc.checkAlreadyMerged(workspaceId, { adoptMainCheckout: true });
+      expect(result.isAlreadyMerged).toBe(true);
+      expect(result.adopted).toBe(true);
+    });
+
+    it("does NOT let adoptMainCheckout bypass a real diff (still refuses)", async () => {
+      const { workspaceId } = await seedScenario(db, {});
+      const git = makeGitService({ getDiff: async () => "diff --git a/foo.ts b/foo.ts\n+something", isAncestor: async () => false });
+      const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+
+      const result = await svc.checkAlreadyMerged(workspaceId, { adoptMainCheckout: true });
+      expect(result.isAlreadyMerged).toBe(false);
+      expect(result.reason).toMatch(/diff/i);
+    });
+
+    it("does NOT let adoptMainCheckout bypass a failed ancestry check", async () => {
+      const { workspaceId } = await seedScenario(db, {});
+      const git = makeGitService({ getDiff: async () => "", isAncestor: async () => false });
+      const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+
+      const result = await svc.checkAlreadyMerged(workspaceId, { adoptMainCheckout: true });
+      expect(result.isAlreadyMerged).toBe(false);
+      expect(result.reason).toMatch(/reachable/i);
+    });
+
+    it("reconcileAlreadyMerged closes the workspace when adoptMainCheckout is passed for a 0-unique-commit branch", async () => {
+      const { workspaceId, issueId } = await seedScenario(db, {});
+      const git = {
+        ...makeGitService({ getDiff: async () => "", revParse: async () => "same-sha", isAncestor: async () => true }),
+        countUniqueCommits: vi.fn(async () => 0),
+      };
+      const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+
+      const result = await svc.reconcileAlreadyMerged(workspaceId, { adoptMainCheckout: true });
+      expect(result.adopted).toBe(true);
+
+      const [workspace] = await db.select({ status: workspaces.status, mergedAt: workspaces.mergedAt })
+        .from(workspaces)
+        .where(eq(workspaces.id, workspaceId));
+      expect(workspace.status).toBe("closed");
+      expect(workspace.mergedAt).toBeTruthy();
+
+      const { issues: issuesTable } = await import("@agentic-kanban/shared/schema");
+      const [issue] = await db.select({ statusId: issuesTable.statusId }).from(issuesTable).where(eq(issuesTable.id, issueId));
+      const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+      expect(status.name).toBe("Done");
+    });
+
+    it("reconcileAlreadyMerged without adoptMainCheckout still refuses the 0-unique-commit branch", async () => {
+      const { workspaceId } = await seedScenario(db, {});
+      const git = {
+        ...makeGitService({ getDiff: async () => "", revParse: async () => "same-sha", isAncestor: async () => true }),
+        countUniqueCommits: vi.fn(async () => 0),
+      };
+      const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+
+      await expect(svc.reconcileAlreadyMerged(workspaceId)).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    });
+  });
 });
 
 describe("mergeWorkspace not-approved guard", () => {

@@ -209,9 +209,12 @@ export function createWorkspaceActionsRoute(
   });
 
   // GET /api/workspaces/:id/already-merged-status — check if branch is already merged without modifying state
+  // ?adoptMainCheckout=true previews the #218 recovery override (work asserted to have
+  // landed on the base branch out-of-band) without acting on it.
   router.get("/:id/already-merged-status", async (c) => {
     const id = c.req.param("id");
-    return c.json(await workspaceService.checkAlreadyMerged(id));
+    const adoptMainCheckout = c.req.query("adoptMainCheckout") === "true";
+    return c.json(await workspaceService.checkAlreadyMerged(id, { adoptMainCheckout }));
   });
 
   // GET /api/workspaces/:id/repo-merge-status — per-repo (leading + siblings) merge status (#70)
@@ -221,9 +224,13 @@ export function createWorkspaceActionsRoute(
   });
 
   // POST /api/workspaces/:id/reconcile-as-done — close a workspace whose branch is already on master
+  // Body `{ adoptMainCheckout: true }` (#218) is the explicit "the work landed on the base
+  // branch out-of-band" recovery — it overrides ONLY the "no unique commits" refusal, never
+  // the diff/ancestry/pending-sibling/dirty-sibling checks.
   router.post("/:id/reconcile-as-done", async (c) => {
     const id = c.req.param("id");
-    return c.json(await workspaceService.reconcileAlreadyMerged(id), 200);
+    const body = await parseOptionalJsonBody<{ adoptMainCheckout?: boolean }>(c);
+    return c.json(await workspaceService.reconcileAlreadyMerged(id, { adoptMainCheckout: body.adoptMainCheckout === true }), 200);
   });
 
   // GET /api/workspaces/:id/github-handoff-draft
