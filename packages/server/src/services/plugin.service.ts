@@ -670,6 +670,14 @@ export function createPluginService(deps: {
     });
   }
 
+  /** Pause/resume a loop's monitor-driven auto-advance. Manual "Advance now" still works. */
+  async function setLoopPaused(pluginRowId: string, loopName: string, projectId: string, paused: boolean): Promise<LoopStatus[]> {
+    const plugin = await requirePlugin(pluginRowId);
+    await requireProject(projectId);
+    await loops.setLoopPaused(plugin.manifest, plugin.pluginId, loopName, projectId, paused);
+    return loops.loopStatuses(plugin.manifest, plugin.pluginId, projectId);
+  }
+
   /**
    * Everything the ENABLED plugins offer this project, in one read: the board's
    * Plugins panel renders views, loops, scripts and skills side by side, and
@@ -747,6 +755,7 @@ export function createPluginService(deps: {
     listProjectLoops,
     listProjectSurface,
     advanceLoop,
+    setLoopPaused,
     removePlugin,
     enableForProject,
     disableForProject,

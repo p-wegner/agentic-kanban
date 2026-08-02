@@ -446,3 +446,14 @@ export function substitutePluginEnv(
 export function pluginEnabledPreferenceKey(pluginSlug: string, projectId: string): string {
   return `plugin_enabled_${pluginSlug}_${projectId}`;
 }
+
+/**
+ * Per-loop pause pref key. Explicit and per-loop (not per-plugin) since a plugin
+ * can offer several independent loops — pausing one must not stop the others.
+ * Checked by `advanceDuePluginLoops` (the monitor's auto-advance pass); a human
+ * pressing "Advance now" on a paused loop still works, since pause only stops the
+ * hands-off convergence, not deliberate manual action.
+ */
+export function pluginLoopPausedPreferenceKey(pluginSlug: string, loopName: string, projectId: string): string {
+  return `plugin_loop_paused_${pluginSlug}_${loopName}_${projectId}`;
+}
