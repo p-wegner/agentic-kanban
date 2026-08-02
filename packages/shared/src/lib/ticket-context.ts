@@ -49,7 +49,33 @@ export type TicketContext = {
      */
     lintWarnings?: string[] | null;
   } | null;
+  /**
+   * Where a builder should route a flaw it finds in the BOARD (as opposed to in the
+   * project it is building). See {@link BoardFeedbackRouting}.
+   */
+  boardFeedback?: BoardFeedbackRouting | null;
 };
+
+/**
+ * How board feedback leaves this machine. Which one applies is a property of how the
+ * board is DEPLOYED, not a preference:
+ *
+ * - `file-ticket` — the board's own repo is registered as a project here, so there is a
+ *   backlog to file into that the operator actually looks at. Normal for a git clone.
+ * - `gh-issue` — there is no such project, so a ticket would have nowhere to live. This is
+ *   the normal case for `npx agentic-kanban` and `docker run`: the board's code is a
+ *   read-only package or image, nobody develops it on this machine, and a local ticket
+ *   about board code would never be actioned. GitHub is where it reaches the maintainers.
+ *
+ * Note what is NOT offered in either case: editing the board's source. A builder lives in
+ * a worktree of some other repo; for a packaged/containerized board there is no editable
+ * checkout at all, and even for a clone the main checkout may be in use by other
+ * workspaces. Fixing board code directly is a decision for the human's session, gated by
+ * `CLAUDE.local.md` — see CLAUDE.md "Board Feedback Conventions".
+ */
+export type BoardFeedbackRouting =
+  | { kind: "file-ticket"; projectId: string; projectName: string; isCurrentProject: boolean }
+  | { kind: "gh-issue"; issuesUrl: string; deployment: "packaged" | "container" | "source-checkout" };
 
 /**
  * Render the stack profile's exact feedback commands as a markdown section, or null
@@ -210,6 +236,73 @@ function appendLintWarnings(lines: string[], lintWarnings: string[] | null | und
 export const TICKET_CONTEXT_FILENAME = "CLAUDE.local.md";
 
 /**
+ * Render the "you found a bug in the BOARD" routing rule, or null when the board's own
+ * project isn't registered (nothing actionable to point at — the agent should raise it
+ * with the user instead of guessing a project).
+ *
+ * Why this ships in every worktree rather than living only in the board repo's CLAUDE.md:
+ * a builder driving some OTHER project reads THAT project's CLAUDE.md, never the board's,
+ * so the board's conventions reach it through exactly one channel — this file.
+ */
+export function buildBoardFeedbackSection(
+  routing: TicketContext["boardFeedback"],
+): string | null {
+  if (!routing) return null;
+  const lines = [
+    "## If you hit a bug in the kanban board itself",
+    "",
+    "Distinct from a bug in the project you are building. You are in a WORKTREE, so the rule is",
+    "fixed: **report it and keep going.** Do not try to fix the board's own code from here, and do",
+    "not abandon your ticket over it.",
+    "",
+  ];
+  if (routing.kind === "file-ticket") {
+    if (routing.isCurrentProject) {
+      lines.push(
+        "This worktree IS the board's own repo, so file it against this same project:",
+        "",
+        "```",
+        `create_issue({ projectId: "${routing.projectId}", title: "...", description: "..." })`,
+        "```",
+      );
+    } else {
+      lines.push(
+        `The board's own project is **${routing.projectName}** — NOT the project you are building.`,
+        "Pass `projectId` explicitly: `create_issue` defaults to the board's ACTIVE project, which is",
+        "usually neither, and a misfiled ticket sits unactionable in the wrong backlog.",
+        "",
+        "```",
+        `create_issue({ projectId: "${routing.projectId}", title: "...", description: "..." })`,
+        "```",
+      );
+    }
+  } else {
+    const why =
+      routing.deployment === "container"
+        ? "This board runs from a container image"
+        : routing.deployment === "packaged"
+          ? "This board runs from an installed package (npx/npm), not a source checkout"
+          : "This board's own repo is not registered as a project here";
+    lines.push(
+      `${why}, so there is`,
+      "no board backlog on this machine to file into and no editable checkout to patch.",
+      "Report it upstream instead:",
+      "",
+      `  ${routing.issuesUrl}`,
+      "",
+      "Do NOT file it as a ticket in the project you are building — that backlog is about that",
+      "project, and a board bug there will never be actioned.",
+    );
+  }
+  lines.push(
+    "",
+    "Write it up so it is actionable without your session: what you observed, the exact error,",
+    "which file/command produced it, and what you expected instead.",
+  );
+  return lines.join("\n");
+}
+
+/**
  * Build the markdown body injected into the worktree as `CLAUDE.local.md`.
  * Frames the ticket as an authoritative reference doc so the agent treats it as
  * the source of truth instead of re-foraging the codebase for the same details.
@@ -254,6 +347,11 @@ export function buildTicketContextMarkdown(ctx: TicketContext): string {
   }
   if (ctx.contextPrimer?.trim()) {
     lines.push(ctx.contextPrimer.trim());
+    lines.push("");
+  }
+  const boardFeedback = buildBoardFeedbackSection(ctx.boardFeedback);
+  if (boardFeedback) {
+    lines.push(boardFeedback);
     lines.push("");
   }
   return lines.join("\n");
