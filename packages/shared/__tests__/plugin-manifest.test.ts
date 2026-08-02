@@ -7,9 +7,14 @@ import {
   pluginEnabledPreferenceKey,
   parsePluginLoopPlan,
   pluginLoopUnitKey,
+  pluginLoopPausedPreferenceKey,
   countScaffoldPlaceholders,
 } from "../src/lib/plugin-manifest.js";
-import { isPluginEnabledPreferenceKey, isProjectScopedDynamicKey } from "../src/lib/dynamic-preference-keys.js";
+import {
+  isPluginEnabledPreferenceKey,
+  isPluginLoopPausedPreferenceKey,
+  isProjectScopedDynamicKey,
+} from "../src/lib/dynamic-preference-keys.js";
 
 const FULL_MANIFEST = {
   id: "refactor-safety-net",
@@ -132,6 +137,22 @@ describe("plugin enable preference key", () => {
     expect(isPluginEnabledPreferenceKey(`plugin_enabled_Bad!_${projectId}`)).toBe(false);
     expect(isPluginEnabledPreferenceKey("plugin_enabled_slug_not-a-uuid")).toBe(false);
     expect(isPluginEnabledPreferenceKey(`plugin_enabled_${projectId}`)).toBe(false);
+  });
+});
+
+describe("plugin loop pause preference key", () => {
+  const projectId = "0b6f38e1-2f14-4a5c-9d3e-77aa00bb11cc";
+
+  it("builds and recognizes the key, including dash-bearing slug and loop names", () => {
+    const key = pluginLoopPausedPreferenceKey("refactor-safety-net", "requirement-extraction", projectId);
+    expect(key).toBe(`plugin_loop_paused_refactor-safety-net_requirement-extraction_${projectId}`);
+    expect(isPluginLoopPausedPreferenceKey(key)).toBe(true);
+    expect(isProjectScopedDynamicKey(key)).toBe(true);
+  });
+
+  it("rejects malformed keys", () => {
+    expect(isPluginLoopPausedPreferenceKey(`plugin_loop_paused_slug_loop_not-a-uuid`)).toBe(false);
+    expect(isPluginLoopPausedPreferenceKey(`plugin_loop_paused_${projectId}`)).toBe(false);
   });
 });
 
