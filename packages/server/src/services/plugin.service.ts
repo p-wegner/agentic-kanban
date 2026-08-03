@@ -85,6 +85,8 @@ import {
   removeLink,
 } from "./plugin-fs.js";
 import { PluginError } from "./plugin-errors.js";
+import { fanOutScaffold, scaffoldPlaceholderStatus, requireScaffoldReady } from "./plugin-scaffold.js";
+import { findView, probeHealth } from "./plugin-view-probe.js";
 import { pluginsHomeDir } from "./plugin-fs.js";
 import {
   marketplaceCatalogPath,
@@ -165,6 +167,18 @@ export interface EnableReport {
   /** Unfilled `TODO:` markers in the just-written scaffold file (0 when nothing was written). */
   scaffoldPlaceholders: number;
   warnings: string[];
+}
+
+export interface PluginUpdateResult {
+  row: PluginRow;
+  /** Whether a `git pull` ran (only board-managed clones, i.e. rows with a sourceUrl). */
+  pulled: boolean;
+  /** Whether the pull actually moved HEAD. */
+  headChanged: boolean;
+  previousVersion: string | null;
+  version: string | null;
+  /** Running view servers of this plugin killed because they executed pre-update code. */
+  viewsStopped: number;
 }
 
 export interface PluginSkillRunResult {
@@ -262,6 +276,73 @@ export function createPluginService(deps: {
     );
   }
 
+  /**
+   * Refresh an installed plugin in place: `git pull --ff-only` for a board-managed clone
+   * (a row with a `sourceUrl`), then re-read the manifest into the row. A plugin installed
+   * from a local directory is the USER'S checkout — it is never pulled, only re-read, so
+   * "Update" doubles as "pick up my local manifest edits". When the pull actually moved
+   * HEAD, this plugin's running view servers are stopped: they still execute the old code,
+   * and a silently stale dashboard is worse than a one-click restart.
+   */
+  async function updatePlugin(id: string): Promise<PluginUpdateResult> {
+    const row = await getPluginRowById(id, database);
+    if (!row) throw new PluginError("Plugin not found", "NOT_FOUND");
+    if (!existsSync(row.localPath)) {
+      throw new PluginError(`Plugin checkout no longer exists at ${row.localPath}`, "BAD_REQUEST");
+    }
+
+    let pulled = false;
+    let headChanged = false;
+    if (row.sourceUrl) {
+      const before = (await gitExecOrThrow(["rev-parse", "HEAD"], { cwd: row.localPath })).trim();
+      // ff-only: an update must never merge or rebase a plugin checkout; divergence
+      // (e.g. a hand-edited clone) surfaces as an error instead of a surprise merge.
+      await gitExecOrThrow(["pull", "--ff-only"], { cwd: row.localPath });
+      const after = (await gitExecOrThrow(["rev-parse", "HEAD"], { cwd: row.localPath })).trim();
+      pulled = true;
+      headChanged = before !== after;
+    }
+
+    const { manifest, raw } = readManifestFromDir(row.localPath);
+    if (manifest.id !== row.pluginId) {
+      throw new PluginError(
+        `Manifest id changed upstream ("${row.pluginId}" → "${manifest.id}"). Uninstall and reinstall to adopt the new id — per-project enablement is keyed by it.`,
+        "BAD_REQUEST",
+      );
+    }
+
+    let viewsStopped = 0;
+    if (headChanged) {
+      for (const [key, entry] of viewChildren) {
+        if (entry.pluginId !== row.id) continue;
+        killChild(entry);
+        viewChildren.delete(key);
+        viewsStopped++;
+      }
+    }
+
+    const updated = await upsertPluginRow(
+      {
+        id: row.id,
+        pluginId: row.pluginId,
+        name: manifest.name,
+        sourceUrl: row.sourceUrl,
+        localPath: row.localPath,
+        version: manifest.version ?? null,
+        manifestJson: raw,
+      },
+      database,
+    );
+    return {
+      row: updated,
+      pulled,
+      headChanged,
+      previousVersion: row.version ?? null,
+      version: updated.version ?? null,
+      viewsStopped,
+    };
+  }
+
   async function listPlugins(projectId?: string) {
     const rows = await listPluginRows(database);
     const enabledMap = projectId ? await enabledSlugsByProject() : null;
@@ -348,72 +429,6 @@ export function createPluginService(deps: {
       addToGitInfoExclude(repoPath, `.claude/skills/${name}`);
       addToGitInfoExclude(repoPath, `.claude/skills/${name}/`);
     }
-  }
-
-  function fanOutScaffold(
-    plugin: PluginRow & { manifest: PluginManifest },
-    repoPath: string,
-    leadingRepoPath: string,
-    projectName: string,
-    report: EnableReport,
-  ) {
-    const scaffold = plugin.manifest.scaffold;
-    if (!scaffold) return;
-    const target = resolveInside(repoPath, scaffold.targetPath, `scaffold targetPath "${scaffold.targetPath}"`);
-    if (existsSync(target)) return;
-    const templatePath = resolveInside(plugin.localPath, scaffold.profileTemplate, "scaffold profileTemplate");
-    if (!existsSync(templatePath)) {
-      report.warnings.push(`scaffold template not found in plugin: ${scaffold.profileTemplate}`);
-      return;
-    }
-    const content = substitutePluginPlaceholders(readFileSync(templatePath, "utf8"), {
-      repoPath,
-      leadingRepoPath,
-      projectName,
-      pluginPath: plugin.localPath,
-    });
-    mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, content, "utf8");
-    report.scaffoldWritten = true;
-    report.scaffoldPlaceholders = countScaffoldPlaceholders(content);
-    if (report.scaffoldPlaceholders > 0) {
-      report.warnings.push(
-        `scaffold written — ${report.scaffoldPlaceholders} placeholder${report.scaffoldPlaceholders === 1 ? "" : "s"} `
-        + `need filling in ${scaffold.targetPath} before this plugin's scripts/loops will run`,
-      );
-    }
-  }
-
-  /**
-   * Live readiness of a plugin's scaffold file (not the write-time snapshot in
-   * `EnableReport` — the human may fill it in any time after enable). Returns
-   * `null` when the plugin declares no scaffold, or the file doesn't exist yet
-   * (nothing to gate on until it's written).
-   */
-  function scaffoldPlaceholderStatus(
-    plugin: PluginRow & { manifest: PluginManifest },
-    repoPath: string,
-  ): { targetPath: string; remaining: number } | null {
-    const scaffold = plugin.manifest.scaffold;
-    if (!scaffold) return null;
-    const target = resolveInside(repoPath, scaffold.targetPath, `scaffold targetPath "${scaffold.targetPath}"`);
-    if (!existsSync(target)) return null;
-    return { targetPath: scaffold.targetPath, remaining: countScaffoldPlaceholders(readFileSync(target, "utf8")) };
-  }
-
-  /** Throws a clear, actionable error instead of letting a script/loop fail on unfilled scaffold TODOs. */
-  function requireScaffoldReady(
-    plugin: PluginRow & { manifest: PluginManifest },
-    repoPath: string,
-    action: "scripts" | "loops",
-  ): void {
-    const status = scaffoldPlaceholderStatus(plugin, repoPath);
-    if (!status || status.remaining === 0) return;
-    throw new PluginError(
-      `Scaffold "${status.targetPath}" still has ${status.remaining} unresolved TODO: placeholder${status.remaining === 1 ? "" : "s"} `
-      + `— fill them in before running this plugin's ${action}.`,
-      "CONFLICT",
-    );
   }
 
   async function readOutputLocationPref(pluginSlug: string, projectId: string): Promise<PluginOutputLocation> {
@@ -545,12 +560,6 @@ export function createPluginService(deps: {
     return fragments;
   }
 
-  function findView(manifest: PluginManifest, viewId: string) {
-    const view = (manifest.views ?? []).find((v) => v.id === viewId);
-    if (!view) throw new PluginError(`View "${viewId}" not found in plugin manifest`, "NOT_FOUND");
-    return view;
-  }
-
   async function startView(pluginRowId: string, viewId: string, projectId: string): Promise<{ url: string; port: number; pid: number | null }> {
     const plugin = await requirePlugin(pluginRowId);
     const project = await requireProject(projectId);
@@ -614,28 +623,6 @@ export function createPluginService(deps: {
     killChild(entry);
     viewChildren.delete(key);
     return { stopped: true };
-  }
-
-  /**
-   * Single HTTP probe — never polls in a loop. Tries `healthPath` (default "/health") first;
-   * a 404 there falls back to "/" so a plugin with no dedicated health endpoint still works.
-   */
-  async function probeHealth(port: number, healthPath = "/health"): Promise<boolean> {
-    // readiness probe against a PLUGIN's supervised child view-server process
-    // (spawnShellCommand, above), not this board server — a genuinely separate process
-    // on a dynamically allocated port with no in-process function to inject.
-    // SELF-HTTP OK: see server/CLAUDE.md "Self-HTTP calls are an anti-pattern".
-    const path = healthPath.startsWith("/") ? healthPath : `/${healthPath}`;
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}${path}`, { signal: AbortSignal.timeout(1500) });
-      if (res.status === 404 && path !== "/") {
-        const fallback = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(1500) });
-        return fallback.status < 500;
-      }
-      return res.status < 500;
-    } catch {
-      return false;
-    }
   }
 
   async function getViewStatus(pluginRowId: string, viewId: string, projectId: string) {
@@ -937,6 +924,7 @@ export function createPluginService(deps: {
 
   return {
     installPlugin,
+    updatePlugin,
     listPlugins,
     listMarketplace,
     listLoops,

@@ -630,13 +630,16 @@ slug lives in the row's `pluginId` column. Passing the slug gets a 404; read the
 `GET /api/plugins` or the plugin surface.
 
 **Editing the manifest of an installed plugin does not update the board.** The parsed manifest is
-stored in the `plugins` row at install time, so re-run `POST /api/plugins` with the same source to
-pick it up (install is an idempotent upsert on the manifest `id`) — otherwise the board keeps
-serving the manifest it read the first time and your change appears to do nothing. **This only
-refreshes a LOCAL-DIRECTORY source.** For a git URL the clone is skipped when its directory
-already exists — no fetch, no pull — so re-installing re-reads the same stale checkout. Update a
-git-sourced plugin by pulling in its clone under `~/.agentic-kanban/plugins/` (or deleting that
-directory) before re-installing.
+stored in the `plugins` row at install time. Use **Update** (the button on the plugin's
+marketplace card, or `POST /api/plugins/:id/update`): for a git-sourced plugin it runs
+`git pull --ff-only` in the clone under `~/.agentic-kanban/plugins/` and then re-reads the
+manifest; for a local-directory plugin it only re-reads the manifest (your checkout is never
+pulled). When the pull actually moves HEAD, the plugin's running view servers are stopped so the
+next start serves the new code. An update whose manifest `id` changed upstream is refused —
+per-project enablement is keyed by the slug, so that case is uninstall + reinstall. (Re-running
+`POST /api/plugins` with the same source still works as a manifest re-read for local
+directories, but for git URLs the clone step is skipped when the directory exists — no fetch, no
+pull — so `update` is the right verb.)
 
 Because the upsert key is the manifest `id`, two plugins sharing an `id` silently overwrite each
 other's row. Namespace it.

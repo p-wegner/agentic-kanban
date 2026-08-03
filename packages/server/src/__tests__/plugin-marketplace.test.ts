@@ -141,6 +141,66 @@ describe("plugin marketplace", () => {
     expect(entries[0]).toMatchObject({ slug: "bom", installed: false, origin: "catalog" });
   });
 
+  it("update on a local-directory plugin re-reads the manifest without pulling", async () => {
+    const svc = service();
+    const dir = makePluginDir("alpha", "Alpha");
+    const row = await svc.installPlugin({ source: dir });
+    expect(row.version).toBe("1.2.3");
+    writeFileSync(
+      join(dir, "kanban-plugin.json"),
+      JSON.stringify({ id: "alpha", name: "Alpha Renamed", version: "2.0.0" }),
+    );
+    const result = await svc.updatePlugin(row.id);
+    expect(result).toMatchObject({
+      pulled: false,
+      headChanged: false,
+      previousVersion: "1.2.3",
+      version: "2.0.0",
+      viewsStopped: 0,
+    });
+    expect(result.row.name).toBe("Alpha Renamed");
+  });
+
+  it("update on a git-sourced plugin pulls fast-forward and reports whether HEAD moved", async () => {
+    const svc = service();
+    // A local "origin" repo the clone can pull from; sourceUrl only marks the row as
+    // board-managed — the pull itself uses the clone's own origin remote.
+    const originParent = makeTempDir("plugin-market-origin-");
+    const origin = join(originParent, "origin");
+    mkdirSync(origin, { recursive: true });
+    gitExecSync(["init"], { cwd: origin });
+    gitExecSync(["config", "user.email", "test@test"], { cwd: origin });
+    gitExecSync(["config", "user.name", "test"], { cwd: origin });
+    writeFileSync(join(origin, "kanban-plugin.json"), JSON.stringify({ id: "gitplug", name: "Git Plug", version: "1.0.0" }));
+    gitExecSync(["add", "."], { cwd: origin });
+    gitExecSync(["commit", "-m", "v1"], { cwd: origin });
+
+    const cloneParent = makeTempDir("plugin-market-clone-");
+    const clone = join(cloneParent, "gitplug");
+    gitExecSync(["clone", origin, clone], {});
+    const row = await svc.installPlugin({ source: clone });
+    await db.update(schema.plugins).set({ sourceUrl: "https://example.com/gitplug.git" }).where(eq(schema.plugins.id, row.id));
+
+    // No upstream change yet → pulled but HEAD unmoved.
+    const same = await svc.updatePlugin(row.id);
+    expect(same).toMatchObject({ pulled: true, headChanged: false, version: "1.0.0" });
+
+    // Upstream bumps the manifest → pull fast-forwards and the row picks it up.
+    writeFileSync(join(origin, "kanban-plugin.json"), JSON.stringify({ id: "gitplug", name: "Git Plug", version: "1.1.0" }));
+    gitExecSync(["add", "."], { cwd: origin });
+    gitExecSync(["commit", "-m", "v1.1"], { cwd: origin });
+    const moved = await svc.updatePlugin(row.id);
+    expect(moved).toMatchObject({ pulled: true, headChanged: true, previousVersion: "1.0.0", version: "1.1.0" });
+  });
+
+  it("update refuses a manifest whose id changed upstream", async () => {
+    const svc = service();
+    const dir = makePluginDir("alpha", "Alpha");
+    const row = await svc.installPlugin({ source: dir });
+    writeFileSync(join(dir, "kanban-plugin.json"), JSON.stringify({ id: "renamed", name: "Alpha", version: "3.0.0" }));
+    await expect(svc.updatePlugin(row.id)).rejects.toThrow(/Manifest id changed/);
+  });
+
   it("reports the enabled flag for the requested project and survives a broken catalog file", async () => {
     const svc = service();
     const row = await svc.installPlugin({ source: makePluginDir("alpha", "Alpha") });

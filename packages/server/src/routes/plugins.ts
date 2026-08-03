@@ -16,6 +16,8 @@ import { createWebhookSender } from "../services/outbound-webhook.service.js";
  *   GET    /api/plugins/marketplace?projectId=  installed plugins merged with the machine's
  *            catalog file (~/.agentic-kanban/plugins/marketplace.json) of installable plugins
  *   POST   /api/plugins { source }            install (local dir or git URL)
+ *   POST   /api/plugins/:id/update            git pull --ff-only (board-managed clones) +
+ *            re-read the manifest; stops the plugin's running views when HEAD moved
  *   DELETE /api/plugins/:id                   remove row + disable (files kept)
  *   POST   /api/plugins/:id/enable  { projectId }
  *   POST   /api/plugins/:id/disable { projectId }
@@ -85,6 +87,10 @@ export function createPluginsRoute(
     const body = await parseJsonBody(c);
     const source = typeof body.source === "string" ? body.source : "";
     return c.json(await service.installPlugin({ source }), 201);
+  });
+
+  router.post("/:id/update", async (c) => {
+    return c.json(await service.updatePlugin(c.req.param("id")));
   });
 
   router.delete("/:id", async (c) => {

@@ -107,6 +107,35 @@ export function PluginMarketplacePanel({ projectId }: PluginMarketplacePanelProp
     }
   }
 
+  async function handleUpdate(entry: MarketplaceEntry) {
+    if (!entry.installedId || busyId) return;
+    setBusyId(entry.installedId);
+    try {
+      const result = await apiPost<{
+        pulled: boolean;
+        headChanged: boolean;
+        previousVersion: string | null;
+        version: string | null;
+        viewsStopped: number;
+      }>(`/api/plugins/${entry.installedId}/update`, {});
+      const versionNote =
+        result.previousVersion !== result.version
+          ? ` (${result.previousVersion ?? "?"} → ${result.version ?? "?"})`
+          : "";
+      const message = !result.pulled
+        ? `Re-read "${entry.name}" manifest from its local checkout${versionNote}`
+        : result.headChanged
+          ? `Updated "${entry.name}"${versionNote}${result.viewsStopped > 0 ? ` — ${result.viewsStopped} running view${result.viewsStopped === 1 ? "" : "s"} stopped` : ""}`
+          : `"${entry.name}" is already up to date`;
+      showToast(message, "success");
+      await refetch();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Update failed", "error");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function handleUninstall(entry: MarketplaceEntry) {
     if (!entry.installedId || busyId) return;
     if (!window.confirm(`Uninstall "${entry.name}"? Its cloned files stay on disk; the board forgets it and disables it everywhere.`)) {
@@ -199,6 +228,14 @@ export function PluginMarketplacePanel({ projectId }: PluginMarketplacePanelProp
                   Open
                 </button>
               )}
+              <button
+                onClick={() => void handleUpdate(entry)}
+                disabled={busy}
+                className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+                title={entry.gitUrl ? "git pull --ff-only, then re-read the manifest" : "Re-read the manifest from the local checkout"}
+              >
+                {busy ? "Working…" : "Update"}
+              </button>
               <button
                 onClick={() => void handleUninstall(entry)}
                 disabled={busy}
