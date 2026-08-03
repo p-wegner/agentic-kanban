@@ -82,7 +82,7 @@ describe("VIEW_REGISTRY", () => {
 
     // Primary views (no `group` or group === "primary") stay one click away.
     expect([...primaryIds].sort()).toEqual(
-      ["agents", "backlog", "butler", "calendar", "drive", "graph", "insights", "kanban", "monitor-history", "strategy", "table", "timeline", "workflows"].sort(),
+      ["agents", "backlog", "butler", "calendar", "drive", "graph", "insights", "kanban", "monitor-history", "plugin-views", "strategy", "table", "timeline", "workflows"].sort(),
     );
     // Analytics/secondary views live behind the "More" overflow dropdown.
     expect([...secondaryIds].sort()).toEqual(
@@ -90,9 +90,17 @@ describe("VIEW_REGISTRY", () => {
         "digest", "flaky-tests", "focus", "metrics", "quality-metrics", "swimlane", "workflow-analytics",
         "health-events", "runbooks", "capacity", "constellation", "momentum", "activity", "stale-work", "throughput",
         "provider-mix", "lead-time", "scorecard-distribution", "provider-cost", "agent-throughput", "fireworks", "burndown",
-        "crime-scene", "milestones", "cross-repo-activity", "agent-flight-recorder", "garden", "plugin-views",
+        "crime-scene", "milestones", "cross-repo-activity", "agent-flight-recorder", "garden",
       ].sort(),
     );
+  });
+
+  it("places the Plugins tab directly after Graph → Butler → Workflows in the primary tab order", () => {
+    const order = PRIMARY_VIEWS.map((v) => v.id);
+    const idx = (id: ViewMode) => order.indexOf(id);
+    expect(idx("graph")).toBeLessThan(idx("butler"));
+    expect(idx("butler")).toBeLessThan(idx("workflows"));
+    expect(idx("plugin-views")).toBe(idx("workflows") + 1);
   });
 
   it("keeps every view reachable by some keyboard shortcut regardless of group", () => {

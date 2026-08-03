@@ -6,6 +6,7 @@ import { getSettings } from "../lib/settingsStore.js";
 import { VoiceInboxButton } from "./VoiceInboxButton.js";
 import { ProjectScriptsMenu } from "./ProjectScriptsMenu.js";
 import { PRIMARY_VIEWS, SECONDARY_VIEWS, VIEW_REGISTRY, type ViewDescriptor } from "../lib/viewRegistry.js";
+import { PluginViewsTab } from "./PluginViewsTab.js";
 import type { StatusWithIssues } from "@agentic-kanban/shared";
 import type { CardDensity } from "../hooks/useBoardPreferences.js";
 import { PRIORITY_META } from "../lib/chartColors.js";
@@ -333,6 +334,19 @@ export function BoardToolbar({
     splitToolbarViews(PRIMARY_VIEWS, SECONDARY_VIEWS, visibleViewCount, viewMode);
 
   function renderViewTab(view: ViewDescriptor, measuring = false) {
+    if (view.id === "plugin-views") {
+      // Not a plain tab: a per-plugin dropdown (plus install/marketplace entries).
+      return (
+        <PluginViewsTab
+          key={view.id}
+          view={view}
+          viewMode={viewMode}
+          onViewModeChange={onViewModeChange}
+          projectId={projectId}
+          measuring={measuring}
+        />
+      );
+    }
     const isActive = viewMode === view.id;
     const activeClass = view.activeClass ?? ACTIVE_DEFAULT;
     const showBadge = view.badge === "butler" && butlerBadgeCount > 0;

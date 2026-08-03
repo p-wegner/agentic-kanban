@@ -524,6 +524,18 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     shortcut: "u",
   },
   {
+    // Primary tab placed after Graph → Butler → Workflows (its toolbar button is a
+    // per-plugin dropdown, special-cased in BoardToolbar via PluginViewsTab).
+    id: "plugin-views",
+    toolbarLabel: "Plugins",
+    label: "Plugins",
+    tooltip: "Plugins — one view per enabled plugin, plus install & marketplace",
+    icon: ICON["plugin-views"],
+    paletteIcon: "🧩",
+    paletteDescription: "Everything this project's enabled plugins offer: embedded views, converging analysis loops, one-shot scripts, and skills launched as tickets",
+    activeClass: "bg-violet-600 text-white",
+  },
+  {
     id: "workflow-analytics",
     toolbarLabel: "Flow Stats",
     label: "Workflow Analytics",
@@ -790,17 +802,6 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteIcon: "BD",
     paletteDescription: "Burndown chart of remaining open issues per day with an ideal target trend line",
     activeClass: "bg-emerald-600 text-white",
-    group: "secondary",
-  },
-  {
-    id: "plugin-views",
-    toolbarLabel: "Plugins",
-    label: "Plugins",
-    tooltip: "Plugins — views, analysis loops, scripts and skills from this project's enabled plugins",
-    icon: ICON["plugin-views"],
-    paletteIcon: "🧩",
-    paletteDescription: "Everything this project's enabled plugins offer: embedded views, converging analysis loops, one-shot scripts, and skills launched as tickets",
-    activeClass: "bg-violet-600 text-white",
     group: "secondary",
   },
 ];
