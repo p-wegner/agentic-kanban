@@ -56,7 +56,11 @@ export function readMarketplaceCatalog(): CatalogFileEntry[] {
   const file = marketplaceCatalogPath();
   if (!existsSync(file)) return [];
   try {
-    const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
+    // Strip a UTF-8 BOM: PowerShell's `Set-Content -Encoding utf8` (the way a Windows
+    // user will most likely author this file) writes one, and JSON.parse rejects it.
+    let raw = readFileSync(file, "utf8");
+    if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
+    const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed
       .filter((e): e is Record<string, unknown> => !!e && typeof e === "object")
