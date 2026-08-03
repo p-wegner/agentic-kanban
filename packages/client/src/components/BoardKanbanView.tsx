@@ -279,7 +279,7 @@ export function BoardKanbanView({
                     ? undefined
                     : dynamicColumnScaling
                       ? { flexGrow: Math.max(1, col.issues.length) }
-                      : colIdx === activeColumns.length - 1 && Object.keys(columnWidths).length === 0
+                      : colIdx === activeColumns.length - 1
                         ? { flexGrow: 1 }
                         : undefined
               }
