@@ -130,6 +130,17 @@ describe("plugin marketplace", () => {
     });
   });
 
+  it("tolerates a UTF-8 BOM in the catalog file (PowerShell Set-Content writes one)", async () => {
+    const svc = service();
+    writeFileSync(
+      marketplaceCatalogPath(),
+      "﻿" + JSON.stringify([{ name: "Bom", slug: "bom", gitUrl: "https://example.com/bom.git" }]),
+    );
+    const { entries } = await svc.listMarketplace();
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ slug: "bom", installed: false, origin: "catalog" });
+  });
+
   it("reports the enabled flag for the requested project and survives a broken catalog file", async () => {
     const svc = service();
     const row = await svc.installPlugin({ source: makePluginDir("alpha", "Alpha") });
