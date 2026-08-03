@@ -315,6 +315,7 @@ export function PluginSkillPane({ skill, projectId }: { skill: PluginSkill; proj
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
   const [workflowTemplateId, setWorkflowTemplateId] = useState("");
+  const [templatesError, setTemplatesError] = useState<string | null>(null);
   const elapsed = useElapsed(running ? startedAt : null);
 
   // The workflow decides whether this ticket has to pass a review gate to reach done. A skill
@@ -322,9 +323,15 @@ export function PluginSkillPane({ skill, projectId }: { skill: PluginSkill; proj
   // board's implement → review → done default parks it on a gate that can only rubber-stamp it.
   useEffect(() => {
     let cancelled = false;
+    setTemplatesError(null);
     apiFetch<WorkflowTemplate[]>(`/api/workflows/templates?projectId=${projectId}`)
       .then((rows) => { if (!cancelled) setTemplates(rows); })
-      .catch(() => { /* the launch still works; it just falls back to the board default */ });
+      // Don't swallow this. The launch still works — it falls back to the board default — but a
+      // selector silently offering one option looks like the board HAS one workflow, which is a
+      // different and wrong message.
+      .catch((err) => {
+        if (!cancelled) setTemplatesError(err instanceof Error ? err.message : String(err));
+      });
     return () => { cancelled = true; };
   }, [projectId]);
 
@@ -451,10 +458,12 @@ export function PluginSkillPane({ skill, projectId }: { skill: PluginSkill; proj
               <option key={t.id} value={t.id}>{t.name}</option>
             ))}
           </select>
-          <span className="text-[11px] text-gray-500 dark:text-gray-400">
-            {declared?.description
-              ?? boardDefault?.description
-              ?? "Decides which gates this ticket passes on its way to done — including whether it needs a review."}
+          <span className={`text-[11px] ${templatesError ? "text-amber-700 dark:text-amber-400" : "text-gray-500 dark:text-gray-400"}`}>
+            {templatesError
+              ? `Could not load this project's workflows (${templatesError}) — the launch will use the board default.`
+              : declared?.description
+                ?? boardDefault?.description
+                ?? "Decides which gates this ticket passes on its way to done — including whether it needs a review."}
           </span>
         </label>
       </div>
