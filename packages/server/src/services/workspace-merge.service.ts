@@ -54,7 +54,8 @@ import { prevalidateSiblingMerges, executeSiblingMerges } from "./workspace-repo
 import { getAllWorkspaceRepos } from "./workspace-all-repos.js";
 import { getRepoMergeStatus } from "./repo-merge-status.service.js";
 import { checkAlreadyMerged as checkAlreadyMergedImpl, reconcileAlreadyMerged as reconcileAlreadyMergedImpl } from "./workspace-already-merged.service.js";
-import { resolveMergeGate, RUN_GATE, gateAlreadyPassed, type MergeGateToken } from "./pre-merge-gate.service.js";
+import { resolveMergeGate, RUN_GATE, type MergeGateToken } from "./pre-merge-gate.service.js";
+import { recordGateFailureNote as recordGateFailureNoteImpl, runPreLockGate } from "./workspace-merge-gate.js";
 
 export function createWorkspaceMergeService(deps: {
   database: Database;
@@ -132,34 +133,14 @@ export function createWorkspaceMergeService(deps: {
     }
   }
 
-  /**
-   * Record a pre-merge-gate withhold, deduped against the most recent gate-failure note for this
-   * issue: an orchestrator tick retries every ~30s, so an unchanged verify/smoke failure would
-   * otherwise spam a fresh "merge-attempt" comment every cycle (#170). Only inserts a new note
-   * when the gate message actually changed (new failure signature) or none was recorded yet.
-   */
-  async function recordGateFailureNote(
+  /** Thin binding of the extracted gate-failure recorder to this service's collaborators. */
+  const recordGateFailureNote = (
     workspace: typeof workspaces.$inferSelect,
     stage: string,
     gateMessage: string,
     targetBranch: string,
-  ): Promise<void> {
-    try {
-      const latest = await getLatestIssueCommentByKind(workspace.issueId, "merge-attempt", database);
-      const latestPayload = latest?.payload ? (JSON.parse(latest.payload) as Record<string, unknown>) : null;
-      if (latestPayload?.mergeReason === "pre_merge_gate_failed" && latestPayload?.gateMessage === gateMessage) {
-        return; // identical failure repeating — already recorded, don't spam another note
-      }
-    } catch (err) {
-      console.warn("[workspace-merge] failed to check prior gate-failure note (non-fatal):", err instanceof Error ? err.message : String(err));
-    }
-    await recordMergeAttempt(
-      workspace,
-      "gate-failed",
-      `Merge withheld: pre-merge gate failed (${stage}). ${gateMessage}`,
-      { mergeReason: "pre_merge_gate_failed", gateStage: stage, gateMessage, targetBranch },
-    );
-  }
+  ): Promise<void> =>
+    recordGateFailureNoteImpl({ workspace, stage, gateMessage, targetBranch, database, recordMergeAttempt });
 
   /** Best-effort kill of processes in the worktree dir using the injected killer. */
   async function killWorktreeProcesses(workingDir: string | null | undefined, label: string): Promise<void> {
@@ -289,42 +270,15 @@ export function createWorkspaceMergeService(deps: {
     // Deliberately placed AFTER the refuse/reuse check above: when another merge is already in
     // flight this call is going to be refused anyway, and gating first would burn a full test
     // run to produce that refusal.
-    let gateToken: MergeGateToken = opts.gate ?? RUN_GATE;
-    if (project && gateToken.kind === "run-gate") {
-      console.log(`[workspace-merge] pre-lock gate phase=start workspaceId=${id}`);
-      const preGate = await resolveMergeGate({
-        token: RUN_GATE,
-        workspace: { id, workingDir: workspace.workingDir },
-        projectId: project.id,
-        database,
-      });
-      if (!preGate.passed) {
-        // Fail WITHOUT ever taking the lock — the whole point: a red gate must not block
-        // other workspaces from merging.
-        await recordGateFailureNote(
-          workspace,
-          preGate.stage,
-          preGate.message,
-          requireBaseBranch(workspace.baseBranch || defaultBranch),
-        );
-        throw new WorkspaceError(
-          `Pre-merge gate failed (${preGate.stage}) — merge withheld. ${preGate.message}`,
-          "CONFLICT",
-          { mergeReason: "pre_merge_gate_failed", gateStage: preGate.stage },
-        );
-      }
-      // Only hand over proof when the gate actually RAN. A "none"/skipped outcome carries no
-      // evidence worth trusting, so leave the token as run-gate and let doMerge resolve it
-      // (cheaply) under the lock.
-      if (preGate.ran) {
-        gateToken = gateAlreadyPassed({
-          ranAt: new Date().toISOString(),
-          stage: preGate.stage,
-          source: "pre-lock-merge",
-        });
-        console.log(`[workspace-merge] pre-lock gate passed workspaceId=${id} stage=${preGate.stage}; acquiring lock`);
-      }
-    }
+    const gateToken: MergeGateToken = await runPreLockGate({
+      workspaceId: id,
+      workspace,
+      projectId: project?.id ?? null,
+      baseBranch: requireBaseBranch(workspace.baseBranch || defaultBranch),
+      token: opts.gate ?? RUN_GATE,
+      database,
+      recordMergeAttempt,
+    });
 
     // Install the lock and run the merge via the shared primitive (#944) so the
     // entry can never be overwritten by a concurrent acquirer.
