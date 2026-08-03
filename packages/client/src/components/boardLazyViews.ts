@@ -45,3 +45,4 @@ export const BurndownChart = lazy(() => import("./BurndownChart.js").then((m) =>
 export const DriveDashboard = lazy(() => import("./DriveDashboard.js").then((m) => ({ default: m.DriveDashboard })));
 export const GardenView = lazy(() => import("./GardenView.js").then((m) => ({ default: m.GardenView })));
 export const PluginViewsPanel = lazy(() => import("./PluginViewsPanel.js").then((m) => ({ default: m.PluginViewsPanel })));
+export const PluginMarketplacePanel = lazy(() => import("./PluginMarketplacePanel.js").then((m) => ({ default: m.PluginMarketplacePanel })));

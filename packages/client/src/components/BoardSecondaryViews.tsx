@@ -13,7 +13,9 @@ import {
   MomentumView, FireworksView, StaleWorkDashboard, ThroughputChart, ProviderMixChart,
   LeadTimeTrendChart, ScorecardDistributionChart, ProviderCostOverTimeChart, CalendarView,
   AgentThroughputLeaderboard, BurndownChart, DriveDashboard, GardenView, PluginViewsPanel,
+  PluginMarketplacePanel,
 } from "./boardLazyViews.js";
+import { usePluginViewStore } from "../stores/pluginViewStore.js";
 
 interface BoardSecondaryViewsProps {
   viewMode: string;
@@ -71,6 +73,8 @@ export function BoardSecondaryViews({
   const searchQuery = useBoardFilterStore((s) => s.searchQuery);
   const createdDateFilter = useBoardFilterStore((s) => s.createdDateFilter);
   const setCreatedDateFilter = useBoardFilterStore((s) => s.setCreatedDateFilter);
+  // Plugins tab: which plugin (or the marketplace) the plugin-views mode shows.
+  const pluginSelection = usePluginViewStore((s) => s.selection);
   return (
     <>
       {viewMode === "graph" && activeProjectId ? (
@@ -401,7 +405,14 @@ export function BoardSecondaryViews({
       )}
       {viewMode === "plugin-views" && activeProjectId && (
         <BoardErrorBoundary columnName="Plugins">
-          <PluginViewsPanel projectId={activeProjectId} />
+          {pluginSelection?.kind === "marketplace" ? (
+            <PluginMarketplacePanel projectId={activeProjectId} />
+          ) : (
+            <PluginViewsPanel
+              projectId={activeProjectId}
+              pluginSlug={pluginSelection?.kind === "plugin" ? pluginSelection.slug : null}
+            />
+          )}
         </BoardErrorBoundary>
       )}
       {viewMode === "garden" && (
