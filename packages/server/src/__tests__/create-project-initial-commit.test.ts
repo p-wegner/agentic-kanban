@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getHeadState } from "@agentic-kanban/shared/lib/git-service";
-import { db } from "../db/index.js";
+import { createTestDb } from "./helpers/test-db.js";
 import { createProjectService } from "../services/project.service.js";
 import { setPreference } from "../repositories/preferences.repository.js";
 import { commitProjectScaffoldArtifacts } from "../services/project-scaffold.js";
@@ -22,6 +22,23 @@ import { deleteProjectCascade } from "../repositories/project.repository.js";
 
 const dirs: string[] = [];
 const registeredProjectIds: string[] = [];
+
+/**
+ * An ISOLATED, migrated database — never the real `db` singleton (#231).
+ *
+ * This suite calls `createProject`, which inserts a project ROW. Against the singleton that row
+ * lands in the user's live board: `db/index.ts` resolves to `packages/server/kanban.db`, and in a
+ * worktree (where that file is never checked out) it falls through to
+ * `~/.agentic-kanban/kanban.db` — the production board. The `afterAll` below does delete what it
+ * registered, but a run that is KILLED or times out first (which is exactly what the pre-merge
+ * gate kept doing) leaves `p-init-*` fixture projects behind in real data. Six were recovered by
+ * hand on 2026-08-03.
+ *
+ * Opening the singleton also made this file contend with the running board server for SQLite
+ * locks, which is what pinned several server suites at their 60s timeout under the gate.
+ */
+const testDb = createTestDb();
+const db = testDb.db;
 
 function makeBaseDir(prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), `kanban-${prefix}-`));
@@ -54,6 +71,7 @@ afterAll(async () => {
   for (const d of dirs) {
     try { rmSync(d, { recursive: true, force: true }); } catch { /* best effort */ }
   }
+  testDb.dispose?.();
 });
 
 describe("getHeadState — an unborn branch is a state, not an error (#47)", () => {
