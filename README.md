@@ -31,7 +31,8 @@ Each task card on the board is backed by a git worktree and a live Claude Code s
 - **Session history** — browse past agent sessions per workspace without leaving context
 - **Worktree overview** — see all git worktrees across workspaces with diff stats and status badges
 - **Butler assistant** — a warm, persistent Claude (Agent SDK) per project (press `i`): chat for board/codebase guidance, per-project model & profile pickers, slash-command autocomplete, a Stop button, and it can orchestrate board work for you
-- **Plugins** — install a repo with a `kanban-plugin.json` and it contributes agent skills, one-shot scripts, framed dashboards, and **board-owned converging loops**: the plugin prints the outstanding work units, the board turns each into a ticket and runs it under the project's WIP limit, provider selection and quota rotation, so an open-ended analysis is resumable and visible instead of hidden in a private run-log. See [docs/plugin-development.md](docs/plugin-development.md)
+- **Plugins** — install a repo with a `kanban-plugin.json` and it contributes agent skills, one-shot scripts, framed dashboards, and **board-owned converging loops**: the plugin prints the outstanding work units, the board turns each into a ticket and runs it under the project's WIP limit, provider selection and quota rotation, so an open-ended analysis is resumable and visible instead of hidden in a private run-log. Each enabled plugin gets **its own view** under the toolbar's Plugins dropdown tab. See [docs/plugin-development.md](docs/plugin-development.md)
+- **Plugin marketplace** — the Plugins tab's Marketplace surface: install a plugin from a git URL or local path in one click, enable/disable it per project, and browse a per-machine catalog of installable plugins (`~/.agentic-kanban/plugins/marketplace.json` — a user-maintained JSON list of `{ name, description, gitUrl }` entries; no remote registry, nothing phones home)
 
 ## Tech Stack
 
