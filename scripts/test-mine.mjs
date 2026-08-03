@@ -26,6 +26,12 @@
 //     - git-service.integration.test.ts (#202) real git on temp dirs; Windows file-locking /
 //       timing — same root cause as server's git.service.test.ts below. Measured: passes in
 //       ~36s, fails on a 30s timeout in ~43s, no code change in between — pure timing flake.
+//     - append-only-hotfile-merge.integration.test.ts, migration-renumber-conflict-guard.test.ts
+//       — same #173 shape, found 2026-08-03 when they were failing EVERY pre-merge gate and so
+//       blocking every merge on the board. Both are real-git-on-temp-dirs and both pass in
+//       isolation (316s/5 tests and 152s/2 tests respectively) but exceed even a 240s per-test
+//       timeout under full-suite parallelism. Raising their timeouts was already tried and is
+//       not the answer: they are starved, not merely slow.
 //   server:
 //     - cli.test.ts        spawn-based CLI integration; stale migration list / worktree DB resolution
 //     - cli-butler.test.ts spawn-based CLI integration; same root causes
@@ -72,7 +78,18 @@ const PACKAGES = [
   {
     dir: "packages/shared",
     label: "shared",
-    exclude: ["**/git-service.integration.test.ts"],
+    exclude: [
+      "**/git-service.integration.test.ts",
+      // Same #173 shape as the server list below: real git on temp dirs, green in isolation,
+      // starved under full-suite parallelism. Measured on master 2026-08-03, isolation vs the
+      // merge gate's parallel run:
+      //   append-only-hotfile-merge.integration  5 passed in 316s (~63s/test) -> TIMED OUT at 240s
+      //   migration-renumber-conflict-guard      2 passed in 152s (~75s/test) -> TIMED OUT at 60s
+      // They were failing EVERY pre-merge gate on this repo, so the gate blocked all merges
+      // while providing no signal. Still run in the full `pnpm test`.
+      "**/append-only-hotfile-merge.integration.test.ts",
+      "**/migration-renumber-conflict-guard.test.ts",
+    ],
   },
   {
     dir: "packages/server",
