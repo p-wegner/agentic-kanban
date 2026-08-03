@@ -54,7 +54,7 @@ import { prevalidateSiblingMerges, executeSiblingMerges } from "./workspace-repo
 import { getAllWorkspaceRepos } from "./workspace-all-repos.js";
 import { getRepoMergeStatus } from "./repo-merge-status.service.js";
 import { checkAlreadyMerged as checkAlreadyMergedImpl, reconcileAlreadyMerged as reconcileAlreadyMergedImpl } from "./workspace-already-merged.service.js";
-import { resolveMergeGate, RUN_GATE, type MergeGateToken } from "./pre-merge-gate.service.js";
+import { resolveMergeGate, RUN_GATE, gateAlreadyPassed, type MergeGateToken } from "./pre-merge-gate.service.js";
 
 export function createWorkspaceMergeService(deps: {
   database: Database;
@@ -270,11 +270,67 @@ export function createWorkspaceMergeService(deps: {
       }
     }
 
+    // THROUGHPUT: run the verify gate BEFORE taking the repo lock, not inside it.
+    //
+    // The gate (verify_script — tests + build) is the expensive part of a merge: 20-40 min on
+    // this repo. The git work it guards takes seconds. Running it inside the lock turned the
+    // per-repo lock into a repo-wide throughput cap of roughly one merge per gate duration, and
+    // made a FAILING gate even more costly than a passing one: it blocked every other
+    // workspace for its full run while landing nothing (measured: one gate held the lock 41
+    // minutes and then failed, with three other workspaces sitting ready behind it).
+    //
+    // This is NOT a new weakening of the gate. `already-passed` evidence is exactly what the
+    // in-process monitor has always handed the merge path (it gates during its cycle, then
+    // merges), and `resolveMergeGate` rejects evidence older than
+    // MERGE_GATE_EVIDENCE_MAX_AGE_MS — so if we then wait a long time for the lock, doMerge
+    // re-runs the gate under the lock exactly as before. Worst case degrades to the old
+    // behaviour; the common case holds the lock for seconds.
+    //
+    // Deliberately placed AFTER the refuse/reuse check above: when another merge is already in
+    // flight this call is going to be refused anyway, and gating first would burn a full test
+    // run to produce that refusal.
+    let gateToken: MergeGateToken = opts.gate ?? RUN_GATE;
+    if (project && gateToken.kind === "run-gate") {
+      console.log(`[workspace-merge] pre-lock gate phase=start workspaceId=${id}`);
+      const preGate = await resolveMergeGate({
+        token: RUN_GATE,
+        workspace: { id, workingDir: workspace.workingDir },
+        projectId: project.id,
+        database,
+      });
+      if (!preGate.passed) {
+        // Fail WITHOUT ever taking the lock — the whole point: a red gate must not block
+        // other workspaces from merging.
+        await recordGateFailureNote(
+          workspace,
+          preGate.stage,
+          preGate.message,
+          requireBaseBranch(workspace.baseBranch || defaultBranch),
+        );
+        throw new WorkspaceError(
+          `Pre-merge gate failed (${preGate.stage}) — merge withheld. ${preGate.message}`,
+          "CONFLICT",
+          { mergeReason: "pre_merge_gate_failed", gateStage: preGate.stage },
+        );
+      }
+      // Only hand over proof when the gate actually RAN. A "none"/skipped outcome carries no
+      // evidence worth trusting, so leave the token as run-gate and let doMerge resolve it
+      // (cheaply) under the lock.
+      if (preGate.ran) {
+        gateToken = gateAlreadyPassed({
+          ranAt: new Date().toISOString(),
+          stage: preGate.stage,
+          source: "pre-lock-merge",
+        });
+        console.log(`[workspace-merge] pre-lock gate passed workspaceId=${id} stage=${preGate.stage}; acquiring lock`);
+      }
+    }
+
     // Install the lock and run the merge via the shared primitive (#944) so the
     // entry can never be overwritten by a concurrent acquirer.
     return await acquireRepoMergeLock(repoPath, id, (extendHold) =>
       // #943: thread `opts` (e.g. skipPreMergeGate from the monitor auto-merge path) through.
-      doMerge(id, workspace, project, repoPath, defaultBranch, extendHold, opts).catch((err) => {
+      doMerge(id, workspace, project, repoPath, defaultBranch, extendHold, { ...opts, gate: gateToken }).catch((err) => {
         // A TypeError (e.g. "gitService.X is not a function") means shared/dist is stale —
         // a deploy/build issue, NOT a merge conflict. Return a distinct 503 so the board
         // monitor can rebuild rather than attempting a wasted fix-and-merge.
