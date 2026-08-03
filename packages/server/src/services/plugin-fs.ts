@@ -9,8 +9,14 @@
  */
 import { existsSync, readFileSync, appendFileSync, mkdirSync, statSync, lstatSync, unlinkSync, rmdirSync } from "node:fs";
 import { join, resolve, sep, dirname } from "node:path";
+import { homedir } from "node:os";
 import { PLUGIN_MANIFEST_FILENAME, parsePluginManifest, type PluginManifest } from "@agentic-kanban/shared/lib/plugin-manifest";
 import { PluginError } from "./plugin-errors.js";
+
+/** Where cloned plugins live. Overridable so tests never touch a real plugin store. */
+export function pluginsHomeDir(): string {
+  return process.env.AGENTIC_KANBAN_PLUGINS_DIR || join(homedir(), ".agentic-kanban", "plugins");
+}
 
 /** True for a source string that should be treated as a git remote rather than a local path. */
 export function looksLikeGitUrl(source: string): boolean {

@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import net from "node:net";
-import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import {
   appendFileSync,
@@ -86,6 +85,17 @@ import {
   removeLink,
 } from "./plugin-fs.js";
 import { PluginError } from "./plugin-errors.js";
+import { pluginsHomeDir } from "./plugin-fs.js";
+import {
+  marketplaceCatalogPath,
+  buildMarketplaceEntries,
+  type PluginMarketplaceEntry,
+  type InstalledPluginRow,
+} from "./plugin-marketplace.js";
+
+// Re-exported so existing importers keep working after the split.
+export { pluginsHomeDir, marketplaceCatalogPath };
+export type { PluginMarketplaceEntry };
 
 
 export interface PluginViewProcess {
@@ -145,65 +155,6 @@ function allocateFreePort(): Promise<number> {
   });
 }
 
-export function pluginsHomeDir(): string {
-  return process.env.AGENTIC_KANBAN_PLUGINS_DIR || join(homedir(), ".agentic-kanban", "plugins");
-}
-
-/**
- * User-editable marketplace catalog: a JSON array of `{ name?, slug?, description?, gitUrl }`
- * entries listing plugins that are AVAILABLE but not necessarily installed. Kept next to the
- * cloned plugins so a machine's catalog travels with its plugin store, never with the board's
- * source. Missing file = empty catalog; the marketplace still lists every installed plugin.
- */
-export function marketplaceCatalogPath(): string {
-  return join(pluginsHomeDir(), "marketplace.json");
-}
-
-export interface PluginMarketplaceEntry {
-  /** Manifest id for installed plugins; the catalog's declared slug (or null) otherwise. */
-  slug: string | null;
-  name: string;
-  description: string | null;
-  version: string | null;
-  gitUrl: string | null;
-  localPath: string | null;
-  installed: boolean;
-  /** Plugin DB row id — the `:id` segment of the plugin routes — when installed. */
-  installedId: string | null;
-  /** Enabled for the requested project (false when no projectId was given). */
-  enabled: boolean;
-  origin: "installed" | "catalog";
-}
-
-type CatalogFileEntry = { name: string; gitUrl: string; description?: string; slug?: string };
-
-function readMarketplaceCatalog(): CatalogFileEntry[] {
-  const file = marketplaceCatalogPath();
-  if (!existsSync(file)) return [];
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((e): e is Record<string, unknown> => !!e && typeof e === "object")
-      .filter((e) => typeof e.gitUrl === "string" && (e.gitUrl as string).trim().length > 0)
-      .map((e) => ({
-        gitUrl: (e.gitUrl as string).trim(),
-        name:
-          typeof e.name === "string" && e.name.trim()
-            ? e.name.trim()
-            : basename((e.gitUrl as string).trim()).replace(/\.git$/i, ""),
-        description: typeof e.description === "string" ? e.description : undefined,
-        slug: typeof e.slug === "string" && e.slug.trim() ? e.slug.trim() : undefined,
-      }));
-  } catch {
-    return []; // a hand-edited broken catalog must not 500 the marketplace
-  }
-}
-
-/** `.git` suffix, trailing slashes, and case are presentation, not identity. */
-function normalizeGitUrl(url: string): string {
-  return url.trim().replace(/\.git$/i, "").replace(/\/+$/, "").toLowerCase();
-}
 
 export type PluginScriptResult = PluginCommandResult;
 
@@ -341,40 +292,8 @@ export function createPluginService(deps: {
    * absorbed into the installed row rather than listed twice.
    */
   async function listMarketplace(projectId?: string): Promise<{ entries: PluginMarketplaceEntry[]; catalogPath: string }> {
-    const rows = await listPlugins(projectId);
-    const entries: PluginMarketplaceEntry[] = rows.map((row) => ({
-      slug: row.pluginId,
-      name: row.name,
-      description: row.manifest?.description ?? null,
-      version: row.version ?? null,
-      gitUrl: row.sourceUrl ?? null,
-      localPath: row.localPath,
-      installed: true,
-      installedId: row.id,
-      enabled: (row as { enabled?: boolean }).enabled ?? false,
-      origin: "installed",
-    }));
-    const installedUrls = new Set(
-      entries.map((e) => (e.gitUrl ? normalizeGitUrl(e.gitUrl) : null)).filter((u): u is string => !!u),
-    );
-    const installedSlugs = new Set(entries.map((e) => e.slug));
-    for (const item of readMarketplaceCatalog()) {
-      if (installedUrls.has(normalizeGitUrl(item.gitUrl))) continue;
-      if (item.slug && installedSlugs.has(item.slug)) continue;
-      entries.push({
-        slug: item.slug ?? null,
-        name: item.name,
-        description: item.description ?? null,
-        version: null,
-        gitUrl: item.gitUrl,
-        localPath: null,
-        installed: false,
-        installedId: null,
-        enabled: false,
-        origin: "catalog",
-      });
-    }
-    return { entries, catalogPath: marketplaceCatalogPath() };
+    const rows = (await listPlugins(projectId)) as unknown as InstalledPluginRow[];
+    return { entries: buildMarketplaceEntries(rows), catalogPath: marketplaceCatalogPath() };
   }
 
   /** Delete the row + running views. Never deletes cloned files on disk. */
