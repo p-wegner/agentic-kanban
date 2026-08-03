@@ -37,9 +37,16 @@ If your tool already has its own scheduler, the porting work is mostly *deleting
 
 ## Lifecycle
 
-**Install** (`Settings → Plugins`, or `POST /api/plugins {source}`). `source` is a local
-directory or a git URL; a URL is cloned shallowly into the board's plugins home. The manifest is
-parsed and a row is stored. Installing does nothing to any project.
+**Install** (the Plugins tab's **Marketplace**, `Settings → Plugins`, or
+`POST /api/plugins {source}`). `source` is a local directory or a git URL; a URL is cloned
+shallowly into the board's plugins home. The manifest is parsed and a row is stored. Installing
+does nothing to any project.
+
+The marketplace (`GET /api/plugins/marketplace`) lists every installed plugin plus the entries of
+a per-machine catalog file, `<plugins home>/marketplace.json` — a JSON array of
+`{ name?, slug?, description?, gitUrl }` objects describing plugins that are one click from
+installed. There is no remote registry; the catalog is user-maintained, and entries matching an
+installed plugin (by slug or normalized git URL) are absorbed into the installed listing.
 
 **Enable per project** (`POST /api/plugins/:id/enable`). This is where the fan-out happens:
 
@@ -55,8 +62,10 @@ parsed and a row is stored. Installing does nothing to any project.
 A preference `plugin_enabled_<slug>_<projectId>` records the state. Disabling removes the skill
 junctions and clears the preference; scaffolded files stay (they are the project's now).
 
-**Use** — the **Plugins** board view is where all four capabilities are started. Scripts run
-inline; views open in a framed iframe; skills and loop units become tickets.
+**Use** — the **Plugins** toolbar tab (after Workflows) is a dropdown listing every enabled
+plugin; each opens that plugin's own view with its capabilities, and the menu also carries
+"Install plugin…" and "Marketplace". Scripts run inline; views open in a framed iframe; skills
+and loop units become tickets.
 
 ## Where output goes
 
