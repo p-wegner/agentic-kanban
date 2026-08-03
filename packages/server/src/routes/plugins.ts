@@ -13,6 +13,8 @@ import { createWebhookSender } from "../services/outbound-webhook.service.js";
  * Plugin-system REST surface, mounted at `/plugins` (routes/index.ts):
  *
  *   GET    /api/plugins?projectId=            list (manifest + enabled flag when projectId given)
+ *   GET    /api/plugins/marketplace?projectId=  installed plugins merged with the machine's
+ *            catalog file (~/.agentic-kanban/plugins/marketplace.json) of installable plugins
  *   POST   /api/plugins { source }            install (local dir or git URL)
  *   DELETE /api/plugins/:id                   remove row + disable (files kept)
  *   POST   /api/plugins/:id/enable  { projectId }
@@ -72,6 +74,11 @@ export function createPluginsRoute(
   router.get("/", async (c) => {
     const projectId = c.req.query("projectId") || undefined;
     return c.json(await service.listPlugins(projectId));
+  });
+
+  router.get("/marketplace", async (c) => {
+    const projectId = c.req.query("projectId") || undefined;
+    return c.json(await service.listMarketplace(projectId));
   });
 
   router.post("/", async (c) => {

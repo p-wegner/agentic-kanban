@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { showToast } from "./Toast.js";
+import { usePluginViewStore } from "../stores/pluginViewStore.js";
 import {
   PluginLoopPane,
   PluginScriptPane,
@@ -44,11 +45,15 @@ const ownerKey = (o: PluginOwner, id: string) => `${o.pluginId}:${id}`;
 
 interface PluginViewsPanelProps {
   projectId: string;
+  /** Which plugin's capabilities to show; null = resolve to the first available one. */
+  pluginSlug: string | null;
 }
 
 /**
- * The board's Plugins panel — the single place every capability an enabled plugin
- * offers can be started from.
+ * The board's per-plugin panel — every capability ONE enabled plugin offers,
+ * started from one place. The plugin is picked in the toolbar's Plugins dropdown
+ * tab (pluginViewStore); with nothing picked yet, the first plugin present in the
+ * project's surface is auto-selected.
  *
  * It hosts four different KINDS of thing, and the distinction is the point rather
  * than an implementation detail: a **view** is a page the plugin serves (started
@@ -58,7 +63,7 @@ interface PluginViewsPanelProps {
  * rail groups by kind so "what can this plugin do here" is answerable at a glance;
  * the right pane belongs to whatever is selected.
  */
-export function PluginViewsPanel({ projectId }: PluginViewsPanelProps) {
+export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProps) {
   const [surface, setSurface] = useState<PluginSurface>(EMPTY_SURFACE);
   const [loading, setLoading] = useState(true);
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -66,6 +71,8 @@ export function PluginViewsPanel({ projectId }: PluginViewsPanelProps) {
   const [starting, setStarting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [frameKey, setFrameKey] = useState(0);
+  const setStoreSelection = usePluginViewStore((s) => s.setSelection);
+  const openMarketplace = usePluginViewStore((s) => s.openMarketplace);
 
   const refetch = useCallback(async () => {
     try {
@@ -104,25 +111,53 @@ export function PluginViewsPanel({ projectId }: PluginViewsPanelProps) {
     }
   }, [projectId]);
 
-  // Initial load; auto-select the first view (reusing its url when already running),
-  // else the first loop — a plugin may offer no views at all.
+  // Initial load per project. Selection is driven by the two effects below so a
+  // plugin switch (same project, new slug) reuses the already-loaded surface.
   useEffect(() => {
-    let cancelled = false;
     setLoading(true);
     setSelection(null);
     setActiveUrl(null);
-    void refetch().then((next) => {
-      if (cancelled) return;
-      if (next.views.length > 0) {
-        const first = next.views[0];
-        setSelection({ kind: "view", key: ownerKey(first, first.id) });
-        void startView(first);
-      } else if (next.loops.length > 0) {
-        setSelection({ kind: "loop", key: ownerKey(next.loops[0], next.loops[0].name) });
-      }
-    });
-    return () => { cancelled = true; };
-  }, [refetch, startView]);
+    void refetch();
+  }, [refetch]);
+
+  // The slug-scoped slice of the surface this panel actually renders.
+  const filtered = useMemo<PluginSurface>(() => {
+    if (!pluginSlug) return surface;
+    return {
+      views: surface.views.filter((v) => v.pluginSlug === pluginSlug),
+      loops: surface.loops.filter((l) => l.pluginSlug === pluginSlug),
+      scripts: surface.scripts.filter((s) => s.pluginSlug === pluginSlug),
+      skills: surface.skills.filter((s) => s.pluginSlug === pluginSlug),
+    };
+  }, [surface, pluginSlug]);
+
+  // No plugin picked yet (fresh navigation) → adopt the first plugin present.
+  useEffect(() => {
+    if (loading || pluginSlug) return;
+    const first = [...surface.views, ...surface.loops, ...surface.scripts, ...surface.skills][0];
+    if (first) setStoreSelection({ kind: "plugin", slug: first.pluginSlug });
+  }, [loading, pluginSlug, surface, setStoreSelection]);
+
+  // Whenever the SHOWN plugin changes, auto-select its first view (reusing the
+  // server when already running), else its first loop — a plugin may offer no
+  // views at all. Guarded per project+slug so refetches don't re-trigger it.
+  const autoSelectedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (loading || !pluginSlug) return;
+    const key = `${projectId}:${pluginSlug}`;
+    if (autoSelectedFor.current === key) return;
+    autoSelectedFor.current = key;
+    setActiveUrl(null);
+    if (filtered.views.length > 0) {
+      const first = filtered.views[0];
+      setSelection({ kind: "view", key: ownerKey(first, first.id) });
+      void startView(first);
+    } else if (filtered.loops.length > 0) {
+      setSelection({ kind: "loop", key: ownerKey(filtered.loops[0], filtered.loops[0].name) });
+    } else {
+      setSelection(null);
+    }
+  }, [loading, pluginSlug, projectId, filtered, startView]);
 
   const activeView = useMemo(
     () => (selection?.kind === "view" ? surface.views.find((v) => ownerKey(v, v.id) === selection.key) ?? null : null),
@@ -164,21 +199,51 @@ export function PluginViewsPanel({ projectId }: PluginViewsPanelProps) {
     }
   }
 
-  const isEmpty = surface.views.length === 0 && surface.loops.length === 0
+  const surfaceEmpty = surface.views.length === 0 && surface.loops.length === 0
     && surface.scripts.length === 0 && surface.skills.length === 0;
+  const filteredEmpty = filtered.views.length === 0 && filtered.loops.length === 0
+    && filtered.scripts.length === 0 && filtered.skills.length === 0;
+  const pluginName =
+    [...filtered.views, ...filtered.loops, ...filtered.scripts, ...filtered.skills][0]?.pluginName
+    ?? pluginSlug ?? "Plugins";
 
   if (loading) {
     return <div className="flex-1 p-6 text-sm text-gray-500 dark:text-gray-400">Loading plugins…</div>;
   }
 
-  if (isEmpty) {
+  if (surfaceEmpty) {
     return (
       <div className="flex-1 flex items-center justify-center p-6" data-testid="plugin-views-empty-state">
         <div className="text-center max-w-md">
           <div className="text-3xl mb-2" aria-hidden="true">🧩</div>
           <div className="text-sm font-medium text-gray-700 dark:text-gray-200">No plugins enabled for this project</div>
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            Enable a plugin in Settings → Plugins. Its views, analysis loops, scripts and skills all appear here.
+            Install a plugin from the marketplace, then enable it for this project. Its views,
+            analysis loops, scripts and skills each get their own entry in the Plugins tab.
+          </p>
+          <button
+            onClick={() => openMarketplace()}
+            className="mt-3 text-sm px-3 py-1.5 rounded bg-violet-600 text-white hover:bg-violet-700"
+          >
+            Open Marketplace
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (filteredEmpty) {
+    // The plugin is enabled but contributes nothing visible here (e.g. only a
+    // butler prompt fragment or a scaffold template).
+    return (
+      <div className="flex-1 flex items-center justify-center p-6" data-testid="plugin-views-plugin-empty-state">
+        <div className="text-center max-w-md">
+          <div className="text-3xl mb-2" aria-hidden="true">🧩</div>
+          <div className="text-sm font-medium text-gray-700 dark:text-gray-200">
+            {pluginName} adds no views, loops, scripts or skills
+          </div>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            This plugin only contributes background material (butler context, scaffold templates).
           </p>
         </div>
       </div>
@@ -221,9 +286,16 @@ export function PluginViewsPanel({ projectId }: PluginViewsPanelProps) {
 
   return (
     <div className="flex-1 min-h-0 flex" data-testid="plugin-views-panel">
-      {/* Capability rail */}
+      {/* Capability rail (scoped to the selected plugin) */}
       <div className="w-56 shrink-0 border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 overflow-y-auto px-1.5 pb-3">
-        {railGroup("Views", surface.views, (view) =>
+        <div
+          className="px-2 pt-3 text-xs font-semibold text-gray-700 dark:text-gray-200 truncate"
+          title={pluginName}
+          data-testid="plugin-panel-title"
+        >
+          🧩 {pluginName}
+        </div>
+        {railGroup("Views", filtered.views, (view) =>
           railButton(
             ownerKey(view, view.id),
             view.label,
@@ -231,7 +303,7 @@ export function PluginViewsPanel({ projectId }: PluginViewsPanelProps) {
             () => selectView(view),
             view.running ? "live" : undefined,
           ))}
-        {railGroup("Loops", surface.loops, (loop) =>
+        {railGroup("Loops", filtered.loops, (loop) =>
           railButton(
             ownerKey(loop, loop.name),
             loop.label,
@@ -239,14 +311,14 @@ export function PluginViewsPanel({ projectId }: PluginViewsPanelProps) {
             () => setSelection({ kind: "loop", key: ownerKey(loop, loop.name) }),
             loop.openTickets > 0 ? String(loop.openTickets) : undefined,
           ))}
-        {railGroup("Scripts", surface.scripts, (script) =>
+        {railGroup("Scripts", filtered.scripts, (script) =>
           railButton(
             ownerKey(script, script.name),
             script.label,
             selection?.kind === "script" && selection.key === ownerKey(script, script.name),
             () => setSelection({ kind: "script", key: ownerKey(script, script.name) }),
           ))}
-        {railGroup("Skills", surface.skills, (skill) =>
+        {railGroup("Skills", filtered.skills, (skill) =>
           railButton(
             ownerKey(skill, skill.name),
             skill.name,
