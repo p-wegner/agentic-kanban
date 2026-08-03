@@ -1,8 +1,8 @@
 # Writing a plugin
 
 Everything needed to build a plugin for this board, assuming no prior knowledge of it. Read
-top to bottom the first time; after that, the [checklist](#checklist) and the
-[field reference](#manifest-field-reference) are what you come back for.
+top to bottom the first time; after that, the [checklist](#checklist) and
+[the parser rules](#parser-rules-that-reject-a-manifest) are what you come back for.
 
 **A plugin is a git repository with a `kanban-plugin.json` at its root.** Nothing is registered
 in the board's code, nothing is published, nothing is compiled. You point the board at a
@@ -18,15 +18,15 @@ document and that file disagree, the file wins; tell whoever sent you here.
 
 A plugin may not spawn agents, and does not want to. Work that spawns agents belongs on the
 board, where it is visible on a kanban column, governed by the project's WIP limit and provider
-selection, resumable after a restart, and subject to the normal review and merge gates. A plugin
+selection, resumable after a restart, and passing whatever gates its workflow declares. A plugin
 that ran its own agents would be a second, invisible scheduler competing with the board's.
 
 So the split is:
 
 | The plugin provides | The board does |
 |---|---|
-| `skills` — prompt bundles on disk | junctions them into the project, launches them as tickets |
-| `scripts` — one-shot shell commands | runs them on demand, streams the output |
+| `skills` — prompt bundles on disk, each naming the `workflow` its tickets should follow | junctions them into the project, launches them as tickets on that workflow |
+| `scripts` — one-shot shell commands | runs them on demand and shows the captured output |
 | `views` — a command that starts an HTTP server | supervises the process, assigns a port, frames it |
 | `loops` — a `plan` command printing outstanding work as JSON | turns each unit into a ticket and runs it |
 | `butler` — a markdown fragment | appends it to the assistant's prompt for that project |
@@ -98,12 +98,55 @@ do not exist.
 
 ```json
 "skills": [
-  { "dir": ".claude/skills/extract", "description": "One-line 'what this does', shown next to its Run button." }
+  { "dir": ".claude/skills/extract",
+    "description": "One-line 'what this does', shown next to its Run button.",
+    "workflow": "analysis-task" }
 ]
 ```
 
 `dir` must be relative and must not escape the plugin root. The directory's **basename** is the
 skill name everywhere else — including `loops[].skill`.
+
+#### Running one
+
+Running a skill creates a ticket and launches a workspace against it — the same path as any
+other board work. The launcher gets a **title** and a free-text **additional context** box, and
+whatever they type is *appended* to the skill's brief under a heading, never substituted for it
+(substituting would drop the sentence naming the skill to run and leave the agent guessing). Write
+your `SKILL.md` so it still makes sense when a launcher adds "only the billing module" underneath
+it — that is the normal case, not the exception.
+
+The API distinguishes the two, and a caller driving this programmatically should know which it
+wants: **`prompt` appends** to the generated brief, **`description` replaces it entirely**. The UI
+only ever sends `prompt`.
+
+The launch itself takes **minutes** (worktree → the project's setup script → agent launch) while
+the ticket exists within milliseconds. The board streams that as progress, so a launcher sees the
+ticket number in the first second. You get this for free; it is worth knowing when someone reports
+your skill "did nothing" — check the board for the ticket before believing it.
+
+#### `workflow` — choosing the gates
+
+`workflow` names the workflow template tickets from this skill start on: a **builtin key**
+(`analysis-task`, `simple-ticket`, `research-task`, …) or a template **name**. It is optional and
+only a DEFAULT — the launcher can pick another per run.
+
+Set it. The board's default for a task is `simple-ticket` (implement → review → done), and that
+gate is wrong for most plugin work:
+
+| If your skill… | Use | Because |
+|---|---|---|
+| writes analysis artifacts (registers, ledgers, docs) | `analysis-task` | no product diff exists, so a reviewer can only rubber-stamp it; this template is work → done on a clean exit, with no review and no human consult |
+| changes product code | `simple-ticket` (or omit) | there IS a diff, and it should be reviewed |
+| needs a human decision mid-flight | `research-task` | its Consult User node is the point — but never for a loop (see below) |
+
+Two traps:
+
+- **Never give a loop's skill a workflow with a human node.** `research-task` parks the ticket at
+  Consult User until someone appears; a loop that advances unattended will simply stop converging.
+- A name this board has never heard of is **not** an error — the board logs a warning and falls
+  back to its own default. That keeps a plugin installable on a board with different templates,
+  but it also means a typo degrades silently. Prefer builtin keys, which are stable across boards.
 
 ### scripts
 
@@ -122,6 +165,12 @@ judgment: a status query, a rebuild, a CI-style gate.
 to `"repo"`**, which is usually not what you want if the script ships with the plugin. Set it
 explicitly.
 
+Output is **buffered, not streamed**: the run returns one `{ code, stdout, stderr, timedOut }`
+when the process closes, with each stream capped at 16 KB (the tail is kept — it is what diagnoses
+a failure). The timeout is **5 minutes**, and hitting it returns `code: null, timedOut: true`
+rather than raising. So a script is the wrong shape for anything long-running or worth watching
+live; that is what a view or a loop is for.
+
 ### views
 
 A supervised child process serving HTTP, framed as a board view.
@@ -137,8 +186,11 @@ A supervised child process serving HTTP, framed as a board view.
 ```
 
 - `kind` must be `"iframe"`; it is the only kind so far.
-- `portEnv` names the variable the board sets — **without it the board cannot tell your server
-  which port to use** and the view will not come up.
+- `portEnv` names the environment variable the board sets to the port it allocated. It is the
+  usual way to receive the port but not the only one: `{{port}}` is substituted into `serve.command`
+  and every `serve.env` value too, so `"command": "node tools/serve.mjs --port {{port}}"` works
+  with no `portEnv` at all. What you must not do is *pick* a port — the board allocates one and
+  frames that exact port.
 - `serve.cwd` is `"plugin"` (the plugin's own checkout) or `"repo"` (the output repo); **views
   default to `"plugin"`**, matching the doc comment. If your server ships with the plugin but
   needs to run against the output repo, set `"cwd": "repo"` and reference the script via
@@ -154,6 +206,18 @@ A supervised child process serving HTTP, framed as a board view.
 - Read your state **fresh per request**. The process is long-lived; a page built at startup shows
   a snapshot of whenever the panel was first opened, which is worse than no panel.
 - Be self-contained: inline CSS and JS, no CDN, no external fonts, no remote images.
+- **Handle the empty case.** Your view is started before the pipeline that fills it has ever run,
+  and "no data yet" is the state a first-time user sees. A 404 body renders as raw `not found`, and
+  a server that exits leaves a broken-document icon — both read as "the plugin is broken". Answer
+  200 with a page that says what is missing and names the command that produces it.
+- **The panel is small; offer fullscreen.** The board's iframe carries `allow="fullscreen"`, so
+  `element.requestFullscreen()` works. Fullscreen the whole workbench — toolbar *and* content — not
+  just the canvas, or the controls end up off-screen. The API still *rejects* on an older board (the
+  frame is cross-origin, where the default permission allowlist is `self`), so catch the rejection
+  and fall back to `position: fixed` inside your own frame.
+- **Anything bigger than a page needs interaction.** A single static rendering of a whole dataset
+  stops being usable almost immediately. Budget for filters, zoom/pan and a detail pane rather than
+  drawing everything at once — the UI-map view in refactor-safety-net is a worked example.
 
 ### loops
 
@@ -164,6 +228,7 @@ The interesting one: **board-owned converging analysis**.
   { "name": "extract", "label": "Extract (until converged)",
     "description": "What one unit of this loop does.",
     "skill": "extract",
+    "workflow": "analysis-task",
     "maxUnitsPerAdvance": 2,
     "plan": { "command": "node tools/loop-plan.mjs --json", "cwd": "plugin",
               "env": { "MY_ROOT": "{{repoPath}}" } } }
@@ -173,6 +238,11 @@ The interesting one: **board-owned converging analysis**.
 `skill` must be one of your `skills[]` basenames — the manifest parser rejects a loop naming a
 skill it does not declare, because its tickets would carry a skill that never materializes in
 the worktree.
+
+`workflow` works exactly as it does on a skill, and falls back to the loop's skill's `workflow`
+when omitted. It matters **more** here: a loop creates tickets in bulk with nobody at the keyboard,
+so the manifest is the only place the choice can come from, and a template with a review or
+consult node will strand every round of the loop behind it.
 
 On each **advance** the board runs `plan.command` and expects JSON on stdout:
 
@@ -190,10 +260,21 @@ Then, per unit: derive `plugin-loop:<slug>:<loop>:<unitId>`, skip any unit whose
 a ticket, and create a ticket for the rest (up to the cap) carrying the loop's skill. The board's
 monitor starts them within the WIP limit.
 
-Parsing is deliberately tolerant: the **last** JSON value in stdout wins, so npm notices and
-tsx warnings do not break you, and a bare array is accepted as `{units: [...]}`. Exit non-zero
-or print nothing and the advance fails loudly with your output attached. There is a **2-minute
-timeout**.
+Parsing is tolerant of noise **before** the JSON: the scan walks backwards for the last offset
+that parses, so npm notices and tsx warnings ahead of your output do not break you, and a bare
+array is accepted as `{units: [...]}`. Exit non-zero or print nothing and the advance fails loudly
+with your output attached. There is a **2-minute timeout**.
+
+Two ways that tolerance runs out, both of which fail with the unhelpful `loop plan output is not
+JSON`:
+
+- **Nothing may follow the JSON.** The parse must consume to the end of stdout, so a warning, a
+  timing line or a shell epilogue printed *after* your plan breaks the whole advance. Print the
+  plan last, and route diagnostics to stderr.
+- **Captured stdout is capped at 16 KB, keeping the TAIL.** A plan larger than that loses its
+  opening `{`, so nothing parses. A planner emitting many units with prose descriptions reaches
+  this sooner than you would expect — keep unit descriptions short (they are a brief, not the
+  work) and let `maxUnitsPerAdvance` bound the round rather than emitting hundreds of units.
 
 #### Four loop rules that will bite you
 
@@ -205,9 +286,17 @@ Every one of these fails *silently* — the loop looks fine and the work does no
    what makes an infinite ticket loop impossible without the board second-guessing your plan.
 2. **`converged` is a claim about the whole job, not about this moment's ready set.** If your
    loop has nothing to do *right now* because something upstream is unfinished, report
-   `units: [], converged: false` — the board's "blocked, not done". Reporting `true` ends the
-   loop, and an ended loop needs a human to restart it. Same for work that is blocked awaiting a
-   decision: not converged.
+   `units: [], converged: false` — the board's "blocked, not done". Same for work blocked awaiting
+   a decision: not converged.
+
+   Be clear about what the flag does and does not do: it is **reported, not persisted**. The
+   monitor logs it and the panel shows it, but nothing stores it, so a "converged" loop whose
+   tickets are all closed is **re-planned on every monitor cycle, indefinitely** — your planner is
+   re-run each time and the loop simply creates no tickets while it returns no units. Two
+   consequences. Your planner must stay cheap and side-effect-free, because it runs forever, not
+   once. And what actually terminates a loop is **returning no units**, not the flag; `converged:
+   true` *with* units still creates those tickets. The only way to stop the re-planning is the
+   per-loop **pause** (below).
 3. **The planner runs on every advance, including the very first, when nothing is set up.** It
    must not throw. Report the precondition as a note (`"profile not filled in"`,
    `"no revision pinned"`) with no units and `converged: false`. A stack trace here blocks the
@@ -221,8 +310,19 @@ Every one of these fails *silently* — the loop looks fine and the work does no
 
 `advanceDuePluginLoops` (the monitor pass) **continues** loops that already have tickets and
 never starts one. A human presses advance once; after that a round is replanned when its tickets
-are all terminal. And for hands-off running the project's **Start Mode must be `monitor`** —
-otherwise tickets are created and never started, which the advance result warns about.
+are all terminal.
+
+For hands-off running the project's **Start Mode must be `monitor`**. Under `manual` the monitor
+pass skips the project *entirely* — your planner is never run and no tickets are created at all,
+which looks identical to a loop that has quietly converged. (The "tickets created but not started"
+warning on the advance result only appears when a human presses Advance in the UI, which works
+regardless of Start Mode.)
+
+**Pause is the off switch.** Each loop has a per-project pause preference, toggled from its panel
+or `POST /api/plugins/:id/loops/:name/pause|resume`. A paused loop is skipped by the monitor —
+manual Advance still works — and it is the only way to stop a loop that would otherwise be
+re-planned forever. If a loop mysteriously stops converging on its own, check pause before
+suspecting the planner.
 
 ### butler
 
@@ -251,6 +351,11 @@ remain, with an actionable error. Two consequences:
 - A template with no `TODO:` markers is treated as "already filled in" — the gate never fires.
 - Explain a marker as `` `TODO:` `` in backticks when you are describing the mechanism, or your
   own explanation counts as an unfilled placeholder forever.
+- **A missing file is also treated as "filled in".** The gate reads the target and, finding
+  nothing, passes. That matters when the output location changes: the scaffold is written once, at
+  enable, into whatever the output repo was *then*, and switching to `sidecar` afterwards does not
+  re-write it. The plugin then runs against a sidecar with no profile file and no gate. Switch the
+  output location **before** enabling, or disable and re-enable after switching.
 
 ## Placeholders and env
 
@@ -265,6 +370,21 @@ Available in every `command` and every `env` value, and in the scaffold template
 | `{{port}}` | views only, filled at serve time |
 
 An unknown placeholder is left as-is. Paths are absolute; on Windows they contain backslashes.
+
+Two exceptions worth knowing before you build a path out of one:
+
+- **They point at the MAIN checkout, not the worktree the ticket will run in.** The board hands
+  your planner (and scripts, and view servers) the project's own repo path. The agent that later
+  picks up the ticket works in a *git worktree* at a different path, and writes outside it are
+  blocked by a safety hook. So a unit brief that says "write your findings to
+  `<{{repoPath}}>/.myplugin/findings/x.json`" hands the agent a path it is not allowed to touch —
+  it plans fine and fails at run time. Have the brief name paths **relative to the repo root** and
+  let the agent resolve them inside its own worktree; use the absolute path only for what the
+  planner itself reads.
+- **In a butler fragment, `{{repoPath}}` is the LEADING repo even in sidecar mode.** That site
+  substitutes the product repo for both `{{repoPath}}` and `{{leadingRepoPath}}`, unlike every
+  other site. If your fragment tells the assistant where your artifacts live and you use a sidecar,
+  say so in prose rather than relying on the placeholder.
 
 ## Design guidance from the plugins that exist
 
@@ -309,12 +429,14 @@ my-plugin/
   "version": "0.1.0",
   "description": "One paragraph: what this is for, shown in Settings → Plugins.",
   "skills": [
-    { "dir": ".claude/skills/my-analysis", "description": "Analyse one module and write its findings." }
+    { "dir": ".claude/skills/my-analysis",
+      "description": "Analyse one module and write its findings.",
+      "workflow": "analysis-task" }
   ],
   "loops": [
     { "name": "analyse", "label": "Analyse (until converged)",
       "description": "One ticket per module, until every module is covered.",
-      "skill": "my-analysis", "maxUnitsPerAdvance": 2,
+      "skill": "my-analysis", "workflow": "analysis-task", "maxUnitsPerAdvance": 2,
       "plan": { "command": "node tools/loop-plan.mjs", "cwd": "plugin",
                 "env": { "MY_ROOT": "{{repoPath}}", "MY_PROJECT": "{{projectName}}" } } }
   ],
@@ -322,6 +444,7 @@ my-plugin/
     { "id": "findings", "label": "Findings", "kind": "iframe",
       "description": "What has been found so far.",
       "serve": { "command": "node tools/serve.mjs", "cwd": "plugin", "portEnv": "PORT",
+                 "healthPath": "/health",
                  "env": { "MY_ROOT": "{{repoPath}}" } } }
   ],
   "scripts": [
@@ -420,10 +543,15 @@ no agents. Cover, at minimum:
 
 - [ ] `kanban-plugin.json` at the repo root; `id` matches `^[a-z0-9-]+$`
 - [ ] every `skills[].dir` exists and contains `SKILL.md`, with a one-line `description`
+- [ ] every `skills[].workflow` set — `analysis-task` for doc-writing work; omitting it means
+      implement → review → done, whose review gate has nothing to judge
+- [ ] no loop's workflow contains a human node (`research-task` stalls a loop at Consult User)
 - [ ] every `loops[].skill` is one of those skill basenames
+- [ ] `SKILL.md` still reads correctly with a launcher's extra context appended under it
 - [ ] `scripts[].cwd` set explicitly (it defaults to `"repo"`)
 - [ ] `views[].serve.portEnv` set; the server binds it, answers `/health` (or `serve.healthPath`),
       and re-reads state per request
+- [ ] every view renders a useful page BEFORE the pipeline has ever run, and offers fullscreen
 - [ ] the planner never throws, reports preconditions as notes, and returns `converged: false`
       when blocked
 - [ ] unit ids are fresh per pass
@@ -432,6 +560,24 @@ no agents. Cover, at minimum:
 - [ ] no per-project state written inside the plugin checkout
 - [ ] butler fragment says what the plugin must *not* decide for the user
 - [ ] a self-test that runs offline, and passes
+
+## Parser rules that reject a manifest
+
+`parsePluginManifest` fails loudly with a field-precise message rather than accepting something
+half-valid. The rules that are easy to trip:
+
+- `id` must match `^[a-z0-9-]+$`; `name` is required.
+- Every path field — `skills[].dir`, `butler.promptFragment`, `scaffold.profileTemplate`,
+  `scaffold.targetPath` — must be **relative** and must not contain `..`.
+- **Duplicate ids are errors**, not last-wins: `views[].id`, `scripts[].name`, `loops[].name`.
+- `loops[].skill` must be one of your `skills[]` basenames.
+- `maxUnitsPerAdvance` must be a positive integer.
+- `views[].kind` must be `"iframe"`.
+- In a plan: every unit needs an `id` and a `title`, and duplicate unit ids **within one plan**
+  are an error.
+- **Unknown top-level fields are ignored**, deliberately — a manifest using a newer field stays
+  loadable on an older board (that field simply does nothing, which is why a `workflow` this board
+  has never heard of degrades rather than failing).
 
 ## Reference implementations
 
@@ -450,11 +596,41 @@ no agents. Cover, at minimum:
 | the monitor pass that continues loops | `packages/server/src/services/plugin-loop-monitor.ts` |
 | running a plugin command | `packages/server/src/services/plugin-exec.ts` |
 | REST surface | `packages/server/src/routes/plugins.ts` |
+| the panes that launch skills/loops/scripts | `packages/client/src/components/PluginActionPanes.tsx` |
+| workflow templates a `workflow` name resolves against | `packages/server/src/db/builtin-workflows.ts` |
 
-Useful endpoints while developing: `POST /api/plugins` (install),
-`POST /api/plugins/:id/enable`, `GET /api/plugins/:id/loops`,
-`POST /api/plugins/:id/loops/:name/advance`, `POST /api/plugins/:id/scripts/:name/run`,
-`POST /api/plugins/:id/views/:viewId/start`, `GET /api/projects/:projectId/plugin-surface`.
+Endpoints you will use while developing (all take the plugin ROW id — see below):
+
+| Endpoint | For |
+|---|---|
+| `POST /api/plugins {source}` | install / re-read a local manifest |
+| `DELETE /api/plugins/:id` | remove the row and disable it (files kept) |
+| `POST /api/plugins/:id/enable\|disable {projectId}` | per-project on/off |
+| `GET\|POST /api/plugins/:id/output-location` | read/set `leading` vs `sidecar` — the only way to choose |
+| `GET /api/plugins/:id/loops?projectId=` | per-loop ticket counts (planner NOT run) |
+| `POST /api/plugins/:id/loops/:name/advance` | one advance |
+| `POST /api/plugins/:id/loops/:name/pause\|resume` | stop/allow monitor auto-advance |
+| `POST /api/plugins/:id/scripts/:name/run` | run a script |
+| `POST /api/plugins/:id/skills/:name/run` | launch a skill — body `{ projectId, title?, prompt?, description?, workflowTemplateId? }`, add `?stream=1` for SSE progress |
+| `POST /api/plugins/:id/views/:viewId/start\|stop` | supervise a view |
+| `GET /api/projects/:projectId/plugin-surface` | everything enabled for a project, as the panel sees it |
+| `GET /api/workflows/templates?projectId=` | the `workflow` names you can target |
+
+**`:id` in every one of those routes is the plugins-table row UUID, not your manifest `id`.** The
+slug lives in the row's `pluginId` column. Passing the slug gets a 404; read the real id from
+`GET /api/plugins` or the plugin surface.
+
+**Editing the manifest of an installed plugin does not update the board.** The parsed manifest is
+stored in the `plugins` row at install time, so re-run `POST /api/plugins` with the same source to
+pick it up (install is an idempotent upsert on the manifest `id`) — otherwise the board keeps
+serving the manifest it read the first time and your change appears to do nothing. **This only
+refreshes a LOCAL-DIRECTORY source.** For a git URL the clone is skipped when its directory
+already exists — no fetch, no pull — so re-installing re-reads the same stale checkout. Update a
+git-sourced plugin by pulling in its clone under `~/.agentic-kanban/plugins/` (or deleting that
+directory) before re-installing.
+
+Because the upsert key is the manifest `id`, two plugins sharing an `id` silently overwrite each
+other's row. Namespace it.
 
 ### Known gaps
 
@@ -468,3 +644,14 @@ Useful endpoints while developing: `POST /api/plugins` (install),
   set `externalUrl`; a second "machine-created, dedupe on re-run" feature should get its own
   column.
 - **`views[].kind` is `"iframe"` only.**
+- **A skill cannot declare typed inputs.** The launcher gets one free-text box. A skill that really
+  wants "which module?" as a choice can only ask for it in prose and hope, and a loop's planner
+  cannot be parameterised from the UI at all.
+- **`workflow` cannot ship its own template.** A plugin can only name a workflow the board already
+  has. If none of the builtins fit your shape of work, the operator has to build the template by
+  hand in the Workflows view before your `workflow` name resolves — and until then it silently
+  falls back to the board default.
+- **`analysis-task` has no human beat.** Its only edge into Done is `auto_on_exit_0`, so a round
+  the agent exits cleanly from is Done with nobody looking; the plugin's own convergence check and
+  the board's merge preflight are the only remaining gates. That is the right trade for unattended
+  loops and the wrong one if you want a human to see each round.
