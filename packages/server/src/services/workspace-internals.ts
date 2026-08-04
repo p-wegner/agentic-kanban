@@ -2,7 +2,7 @@ import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { workspaces } from "@agentic-kanban/shared/schema";
 import type { WorkspaceSetupRun, WorkspaceSymlinkRun } from "@agentic-kanban/shared";
-import { tryAcquireRepoLock, type RepoLockHandle } from "@agentic-kanban/shared/lib/repo-lock";
+import { inspectRepoLock, tryAcquireRepoLock, type RepoLockHandle } from "@agentic-kanban/shared/lib/repo-lock";
 import type { Database } from "../db/index.js";
 import { listWorkspaceRepos, type RepoRow } from "../repositories/repo.repository.js";
 import type { ProviderName } from "./agent-provider.js";
@@ -596,6 +596,16 @@ export function tryRecoverStaleMergeLock(repoPath: string, lock: ActiveMergeLock
 }
 
 /**
+ * How long to wait for the on-disk repo lock before failing loudly (#230).
+ *
+ * Generous on purpose: a legitimately slow holder is a merge running its own verify gate,
+ * which on a full-suite-plus-build project is 30-45 minutes. This must exceed that, or the
+ * bound would convert "correctly waiting behind a real merge" into a spurious failure — so
+ * it only fires for a holder that is genuinely wedged rather than merely slow.
+ */
+const ON_DISK_REPO_LOCK_TIMEOUT_MS = 90 * 60 * 1000;
+
+/**
  * Poll for the on-disk repo lock (#993) — the cross-process source of truth
  * that guards the shared main checkout against every writer, not just this
  * server process: a Conductor-loop agent's own `git` commands, a human
@@ -604,11 +614,29 @@ export function tryRecoverStaleMergeLock(repoPath: string, lock: ActiveMergeLock
  * stays as the in-process waiter queue (so same-process callers get
  * promise-based waiting instead of polling), but admission is only granted
  * once the on-disk lock is actually held.
+ *
+ * Bounded by {@link ON_DISK_REPO_LOCK_TIMEOUT_MS}: this used to be an unbounded `for(;;)`,
+ * so a wedged holder turned a merge into an HTTP request that hung forever with no error,
+ * no log line, and no way for the caller to tell "waiting" from "dead" (#230). A holder that
+ * is merely SLOW is still waited out — the timeout is well past the staleness window, so the
+ * normal recovery paths (stale heartbeat, dead-pid reclaim in `tryAcquireRepoLock`) get their
+ * chance first and this only fires when something is genuinely stuck.
  */
 async function acquireOnDiskRepoLock(repoPath: string, workspaceId: string): Promise<RepoLockHandle> {
+  const deadline = Date.now() + ON_DISK_REPO_LOCK_TIMEOUT_MS;
   for (;;) {
     const handle = tryAcquireRepoLock(repoPath, `workspace:${workspaceId}`);
     if (handle) return handle;
+    if (Date.now() >= deadline) {
+      const held = inspectRepoLock(repoPath);
+      throw new Error(
+        `[merge-lock] timed out after ${Math.round(ON_DISK_REPO_LOCK_TIMEOUT_MS / 1000)}s waiting for the on-disk repo lock on ${repoPath} ` +
+          `(workspace:${workspaceId})` +
+          (held
+            ? ` — held by ${held.contents.holder} pid=${held.contents.pid} host=${held.contents.hostname}, heartbeat age ${Math.round(held.ageMs / 1000)}s`
+            : " — no lockfile present, so acquisition is failing for another reason (check the [repo-lock] warnings)"),
+      );
+    }
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
 }

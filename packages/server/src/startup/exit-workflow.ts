@@ -701,6 +701,13 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Pre-merge gate failed (${preMergeGate.stage}) for workspace ${workspaceId}; not approved for merge. ${preMergeGate.message.slice(0, 300)}` });
       return;
     }
+    // `ctx.now` was captured at the START of runWorkflowOnExit — 30-45 minutes before this
+    // point on a repo whose verify gate is a full suite + build. Stamping the gate evidence
+    // with it made `ranAt` describe when the SESSION EXITED, not when the gate ran, so
+    // evidence was born older than MERGE_GATE_EVIDENCE_MAX_AGE_MS (15 min) and
+    // `evidenceIsFresh` could never accept it — every merge re-ran the whole gate and the
+    // "honest evidence" of #182 was dead on arrival. Stamp the real completion time.
+    const gateRanAt = new Date().toISOString();
     if (!(await runColdCloneGate(ctx))) return;
     // #629 Guard: re-verify the branch still has committed changes ahead of base.
     // A race (e.g. branch reset/rebased to equal base between review start and exit)
@@ -713,12 +720,12 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     }
     // Persist the REAL gate evidence (ranAt/stage) alongside readyForMerge — this is what the
     // monitor's later auto-merge trigger reads to build honest `MergeGateEvidence` instead of
-    // fabricating `ranAt: new Date()` at merge time (#182). `ranAt` is stamped NOW, when the gate
-    // actually ran, not whenever a monitor cycle happens to notice the workspace idle.
+    // fabricating `ranAt: new Date()` at merge time (#182). `ranAt` is `gateRanAt` — the moment
+    // the gate FINISHED — not `ctx.now`, which predates the gate by its entire runtime.
     await db.update(workspaces).set({
       readyForMerge: true,
-      updatedAt: now,
-      mergeGateRanAt: now,
+      updatedAt: gateRanAt,
+      mergeGateRanAt: gateRanAt,
       mergeGateStage: preMergeGate.stage,
       mergeGateSource: "review-exit gate",
     }).where(eq(workspaces.id, workspaceId));
@@ -740,15 +747,15 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         // moments ago above, so hand autoMerge that PROOF as an `already-passed` token — it won't
         // re-run the expensive build. Stale/absent proof would force a re-gate in resolveMergeGate.
         await autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now,
-          gateAlreadyPassed({ ranAt: now, stage: preMergeGate.stage, source: "review-exit gate" }));
+          gateAlreadyPassed({ ranAt: gateRanAt, stage: preMergeGate.stage, source: "review-exit gate" }));
       } else {
         console.log(`[workflow] review session ${sessionId} completed  queued for scheduled auto-merge`);
       }
     } else {
       await db.update(workspaces).set({
         readyForMerge: true,
-        updatedAt: now,
-        mergeGateRanAt: now,
+        updatedAt: gateRanAt,
+        mergeGateRanAt: gateRanAt,
         mergeGateStage: preMergeGate.stage,
         mergeGateSource: "review-exit gate",
       }).where(eq(workspaces.id, workspaceId));

@@ -1,5 +1,12 @@
-import { tryAcquireRepoLock } from "@agentic-kanban/shared/lib/repo-lock";
+import { inspectRepoLock, tryAcquireRepoLock } from "@agentic-kanban/shared/lib/repo-lock";
 import type { Database } from "../db/index.js";
+
+/**
+ * How long a queue member waits for the repo lock before failing loudly (#230).
+ * Must exceed a legitimate holder's verify gate — see the matching constant in
+ * `workspace-internals.ts`.
+ */
+const MERGE_QUEUE_REPO_LOCK_TIMEOUT_MS = 90 * 60 * 1000;
 import * as gitService from "./git.service.js";
 import {
   getMergeQueueWorkspaceRows,
@@ -497,8 +504,21 @@ export function createMergeQueueService(deps: {
         // autoRenumberMigrations's direct reads there and rebaseOntoBase's fetch/rebase —
         // acquire the on-disk repo lock (#993) so this can't race a concurrent merge,
         // a Conductor-loop agent's own git, or human git in the same repo.
+        // Bounded (#230): an unbounded wait here wedged the whole queue behind one stuck
+        // holder with no error and no way to tell "waiting" from "dead". The budget must
+        // exceed a legitimate holder's verify gate (30-45 min on a full-suite project), so
+        // this only fires when something is genuinely stuck.
+        const repoLockDeadline = Date.now() + MERGE_QUEUE_REPO_LOCK_TIMEOUT_MS;
         let repoLock = tryAcquireRepoLock(ws.repoPath, `merge-queue:${ws.id}`);
         while (!repoLock) {
+          if (Date.now() >= repoLockDeadline) {
+            const held = inspectRepoLock(ws.repoPath);
+            throw new Error(
+              `[merge-queue] timed out after ${Math.round(MERGE_QUEUE_REPO_LOCK_TIMEOUT_MS / 60000)}min waiting for the repo lock on ${ws.repoPath} ` +
+                `(merge-queue:${ws.id})` +
+                (held ? ` — held by ${held.contents.holder} pid=${held.contents.pid}, heartbeat age ${Math.round(held.ageMs / 1000)}s` : " — no lockfile present"),
+            );
+          }
           await new Promise((resolve) => setTimeout(resolve, 500));
           repoLock = tryAcquireRepoLock(ws.repoPath, `merge-queue:${ws.id}`);
         }
