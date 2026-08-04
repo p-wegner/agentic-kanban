@@ -26,6 +26,7 @@ import { getLatestIssueCommentByKind } from "../repositories/issue-comments.repo
 import { WorkspaceError } from "./workspace-internals.js";
 import {
   resolveMergeGate,
+  resolveMergeGateShas,
   RUN_GATE,
   gateAlreadyPassed,
   type MergeGateToken,
@@ -110,7 +111,11 @@ export async function runPreLockGate(args: {
   console.log(`[workspace-merge] pre-lock gate phase=start workspaceId=${workspaceId}`);
   const preGate = await resolveMergeGate({
     token: RUN_GATE,
-    workspace: { id: workspaceId, workingDir: workspace.workingDir },
+    // `baseBranch` matters: without it the gate cannot read the diff, so every diff-derived
+    // cost decision silently degrades to its most expensive branch — the docs-only skip
+    // (#198) could never fire on the merge path, and the test-package scoping cannot either.
+    // The value is already in hand from the caller; omitting it was pure loss.
+    workspace: { id: workspaceId, workingDir: workspace.workingDir, baseBranch },
     projectId,
     database,
   });
@@ -136,9 +141,16 @@ export async function runPreLockGate(args: {
   console.log(
     `[workspace-merge] pre-lock gate passed workspaceId=${workspaceId} stage=${preGate.stage}; acquiring lock`,
   );
+  // Pin the evidence to the exact state that was verified. This is what lets the in-lock
+  // re-resolve accept the pass after an arbitrarily long lock wait (no pointless re-gate)
+  // while still catching the case that genuinely invalidates it: another merge landed and
+  // moved the base, so the merge RESULT is no longer what was tested.
+  const shas = await resolveMergeGateShas({ id: workspaceId, workingDir: workspace.workingDir, baseBranch });
   return gateAlreadyPassed({
     ranAt: new Date().toISOString(),
     stage: preGate.stage,
     source: "pre-lock-merge",
+    branchSha: shas.branchSha,
+    baseSha: shas.baseSha,
   });
 }

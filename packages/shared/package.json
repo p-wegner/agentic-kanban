@@ -120,6 +120,12 @@
       "import": "./dist/lib/repo-lock.js",
       "default": "./src/lib/repo-lock.ts"
     },
+    "./lib/changed-packages": {
+      "development": "./src/lib/changed-packages.ts",
+      "types": "./dist/lib/changed-packages.d.ts",
+      "import": "./dist/lib/changed-packages.js",
+      "default": "./src/lib/changed-packages.ts"
+    },
     "./lib/dependency-graph": {
       "development": "./src/lib/dependency-graph.ts",
       "types": "./dist/lib/dependency-graph.d.ts",

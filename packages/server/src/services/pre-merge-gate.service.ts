@@ -2,6 +2,8 @@ import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban
 import { runSmokeCheck } from "@agentic-kanban/shared/lib/smoke-check";
 import { gradleUserHomeForWorktree } from "@agentic-kanban/shared/lib/gradle-env";
 import { isDocsOnlyDiff } from "@agentic-kanban/shared";
+import { testPackagesEnvValue } from "@agentic-kanban/shared/lib/changed-packages";
+import { revParse } from "@agentic-kanban/shared/lib/git-service";
 import { getChangedFileNames } from "./git.service.js";
 import type { Database } from "../db/index.js";
 import { getPreference } from "../repositories/preferences.repository.js";
@@ -116,7 +118,23 @@ export async function runPreMergeGate(
     // Fail-closed: a gate we were told to run can't run without a worktree (#826).
     return { passed: false, skipped: false, stage: "verify", message: "verify_script configured but workspace has no worktree — cannot verify" };
   }
-  if (verifyConfigured && workspace.workingDir) {
+
+  // The diff drives two cost decisions below (docs-only skip, package scoping), so read it
+  // ONCE here instead of the single late read the smoke gate used to do. An unreadable diff
+  // or a missing baseBranch yields `[]`, which every consumer must treat as "I cannot see the
+  // diff" (run everything) rather than "the diff is empty" (skip everything).
+  const changedFiles = workspace.workingDir && workspace.baseBranch
+    ? await getChangedFileNames(workspace.workingDir, workspace.baseBranch).catch(() => [] as string[])
+    : ([] as string[]);
+  const docsOnly = changedFiles.length > 0 && isDocsOnlyDiff(changedFiles);
+
+  if (verifyConfigured && workspace.workingDir && docsOnly) {
+    // #198 skipped only the SMOKE boot for a docs-only diff while still paying the full
+    // verify suite — on this repo that is a ~40-minute build+test run to prove that editing
+    // a markdown file did not break the build. `isDocsOnlyDiff` is the same predicate the
+    // smoke gate already trusts for the same reason.
+    console.log(`[pre-merge-gate] skipping verify_script for workspace ${workspace.id} — diff touches only docs (${changedFiles.length} file(s))`);
+  } else if (verifyConfigured && workspace.workingDir) {
     const workingDir = workspace.workingDir;
     const verifyTimeoutMs = await resolveVerifyTimeoutMs(projectId, database);
     // #194: pin this worktree's backend-spawned gradle to the SAME per-worktree
@@ -124,9 +142,18 @@ export async function runPreMergeGate(
     // builder's own daemon cooperate instead of landing in the shared default home
     // where a different worktree's build can kill them out from under each other.
     const gradleEnv = { GRADLE_USER_HOME: gradleUserHomeForWorktree(workingDir) };
+    // Scope the test half of the gate to the packages the diff can actually affect. Honoured
+    // by `scripts/test-mine.mjs`; ignored by any other verify_script, so this is inert for
+    // projects that don't use it. `null` (diff unreadable, global config touched, path owned
+    // by no package) sets nothing, which means "run every package".
+    const testScope = testPackagesEnvValue(changedFiles);
+    if (testScope) {
+      console.log(`[pre-merge-gate] scoping verify tests to [${testScope}] for workspace ${workspace.id} (${changedFiles.length} changed file(s))`);
+    }
+    const verifyEnv = testScope ? { ...gradleEnv, KANBAN_TEST_PACKAGES: testScope } : gradleEnv;
     const runVerify = () =>
       runUnderBuildGate(() =>
-        runSetupScript(workingDir, verifyScript!, { timeoutMs: verifyTimeoutMs, env: gradleEnv }).catch((e) => ({
+        runSetupScript(workingDir, verifyScript!, { timeoutMs: verifyTimeoutMs, env: verifyEnv }).catch((e) => ({
           exitCode: 1,
           stdout: "",
           stderr: String(e),
@@ -204,13 +231,9 @@ export async function runPreMergeGate(
       }
       // #198: a docs-only diff can never change boot/render behavior, so skip the (expensive,
       // cold-JVM-hostile) smoke boot entirely rather than pay for a check whose outcome can't
-      // have changed. Only skip when we can actually SEE the diff (a baseBranch was provided);
-      // otherwise fall through and run the smoke check as before.
-      let docsOnly = false;
-      if (workspace.baseBranch) {
-        const changedFiles = await getChangedFileNames(workspace.workingDir, workspace.baseBranch).catch(() => []);
-        docsOnly = isDocsOnlyDiff(changedFiles);
-      }
+      // have changed. `docsOnly` is computed once at the top of the gate from the same diff
+      // read — it is false whenever we could not SEE the diff, so an unknown diff still runs
+      // the smoke check exactly as before.
       if (docsOnly) {
         console.log(`[pre-merge-gate] skipping smoke check for workspace ${workspace.id} — diff touches only docs (#198)`);
       } else {
@@ -227,12 +250,20 @@ export async function runPreMergeGate(
     console.warn(`[pre-merge-gate] smoke check errored (non-fatal) for workspace ${workspace.id}:`, smokeErr instanceof Error ? smokeErr.message : String(smokeErr));
   }
 
-  const ranSomething = verifyConfigured || smokeApplies;
+  // `verifyRan` — not `verifyConfigured` — because a docs-only diff skips the verify script.
+  // Reporting stage "verify" for a run that never happened would write false evidence into
+  // `mergeGateStage`, which is exactly the dishonesty #182 set out to remove.
+  const verifyRan = verifyConfigured && !docsOnly;
+  const ranSomething = verifyRan || smokeApplies;
   return {
     passed: true,
     skipped: !ranSomething,
-    stage: ranSomething ? (verifyConfigured ? "verify" : "smoke") : "none",
-    message: ranSomething ? "pre-merge gate passed" : "no pre-merge gate configured",
+    stage: ranSomething ? (verifyRan ? "verify" : "smoke") : "none",
+    message: ranSomething
+      ? "pre-merge gate passed"
+      : docsOnly
+        ? `pre-merge gate skipped — docs-only diff (${changedFiles.length} file(s))`
+        : "no pre-merge gate configured",
   };
 }
 
@@ -265,6 +296,41 @@ export interface MergeGateEvidence {
   stage: PreMergeGateResult["stage"];
   /** Which path ran the gate (for logs/diagnostics), e.g. "monitor-cycle", "review-exit". */
   source: string;
+  /**
+   * The branch tip the gate actually ran against. When present it is checked against the
+   * branch's CURRENT tip, which is strictly stronger than the timestamp: a commit pushed
+   * after the gate but merged inside the freshness window used to land on proof that
+   * described different code. Optional for back-compat — evidence written before this field
+   * existed (or by a caller that cannot resolve it) still validates on age alone.
+   */
+  branchSha?: string;
+  /**
+   * The base tip the gate ran against. A moved base means the merge RESULT is no longer the
+   * thing that was verified, even though the branch is untouched — this is the case a
+   * purely time-based check cannot see, and the reason a merge that waited behind another
+   * merge must re-gate rather than trust its pre-lock pass.
+   */
+  baseSha?: string;
+}
+
+/** The current branch/base tips to validate content-keyed evidence against. */
+export interface MergeGateShas {
+  branchSha?: string;
+  baseSha?: string;
+}
+
+/**
+ * Resolve the branch/base tips for a workspace, for stamping or validating evidence.
+ * Never throws — an unresolvable ref yields `undefined`, which degrades evidence to the
+ * age-only check rather than failing a merge over a diagnostic read.
+ */
+export async function resolveMergeGateShas(workspace: PreMergeGateWorkspace): Promise<MergeGateShas> {
+  if (!workspace.workingDir) return {};
+  const branchSha = await revParse(workspace.workingDir, "HEAD").catch(() => undefined);
+  const baseSha = workspace.baseBranch
+    ? await revParse(workspace.workingDir, workspace.baseBranch).catch(() => undefined)
+    : undefined;
+  return { branchSha, baseSha };
 }
 
 /**
@@ -315,8 +381,33 @@ function evidenceIsFresh(evidence: MergeGateEvidence, now: number): boolean {
   return ageMs >= 0 && ageMs <= MERGE_GATE_EVIDENCE_MAX_AGE_MS;
 }
 
-function evidenceIsValid(evidence: MergeGateEvidence | undefined, now: number): boolean {
+/**
+ * Why content-keying matters more than the clock: the question a merge needs answered is
+ * "was THIS code, against THIS base, verified?" — not "was something verified recently".
+ * When the evidence names both tips and both still match, the proof describes exactly the
+ * state about to be merged and its age is irrelevant, so a long queue wait no longer forces
+ * a pointless re-run. When either tip has moved, the proof is void no matter how fresh it is.
+ */
+function contentMatch(evidence: MergeGateEvidence, current: MergeGateShas | undefined): "match" | "mismatch" | "unknown" {
+  if (!current) return "unknown";
+  const branchKnown = Boolean(evidence.branchSha && current.branchSha);
+  const baseKnown = Boolean(evidence.baseSha && current.baseSha);
+  if (!branchKnown && !baseKnown) return "unknown";
+  if (branchKnown && evidence.branchSha !== current.branchSha) return "mismatch";
+  if (baseKnown && evidence.baseSha !== current.baseSha) return "mismatch";
+  // Require the BRANCH to be pinned before waiving the age check: base-only agreement does
+  // not tell us the code under test is the code being merged.
+  return branchKnown ? "match" : "unknown";
+}
+
+function evidenceIsValid(evidence: MergeGateEvidence | undefined, now: number, current?: MergeGateShas): boolean {
   if (!evidence || typeof evidence.source !== "string" || !evidence.source.trim()) return false;
+  const match = contentMatch(evidence, current);
+  // Content says the verified state is gone → reject regardless of age.
+  if (match === "mismatch") return false;
+  // Content pins the exact branch (and base, when known) → age is not evidence of anything.
+  if (match === "match") return true;
+  // No usable SHAs on either side → fall back to the legacy age-only check.
   return evidenceIsFresh(evidence, now);
 }
 
@@ -350,6 +441,11 @@ export async function resolveMergeGate(args: {
   database: Database;
   /** Injectable clock for staleness tests; defaults to Date.now(). */
   now?: number;
+  /**
+   * Injectable current branch/base tips for content-keyed evidence validation; defaults to
+   * reading them from the worktree. Pass this in tests instead of building a real repo.
+   */
+  currentShas?: MergeGateShas;
 }): Promise<ResolvedMergeGate> {
   const { token, workspace, projectId, database } = args;
   const now = args.now ?? Date.now();
@@ -359,12 +455,17 @@ export async function resolveMergeGate(args: {
   }
 
   if (token.kind === "already-passed") {
-    if (evidenceIsValid(token.evidence, now)) {
+    // Resolve the CURRENT tips so the evidence can be checked against the state actually
+    // about to merge. `args.currentShas` lets tests pin this without a real repo.
+    const currentShas = args.currentShas ?? (await resolveMergeGateShas(workspace));
+    if (evidenceIsValid(token.evidence, now, currentShas)) {
       return {
         passed: true,
         ran: false,
         stage: token.evidence.stage,
-        message: `pre-merge gate already passed (${token.evidence.source}, stage ${token.evidence.stage}, ran ${token.evidence.ranAt})`,
+        message: `pre-merge gate already passed (${token.evidence.source}, stage ${token.evidence.stage}, ran ${token.evidence.ranAt}`
+          + `${token.evidence.branchSha ? `, branch ${token.evidence.branchSha.slice(0, 8)}` : ""}`
+          + `${token.evidence.baseSha ? `, base ${token.evidence.baseSha.slice(0, 8)}` : ""})`,
         decision: "already-passed",
       };
     }

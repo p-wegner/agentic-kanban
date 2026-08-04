@@ -166,8 +166,32 @@ function runPackage({ dir, label, exclude }) {
   });
 }
 
+/**
+ * Optional package scoping via `KANBAN_TEST_PACKAGES` (comma-separated labels, e.g.
+ * "shared,server").
+ *
+ * Set by the pre-merge gate (`pre-merge-gate.service.ts`) when it can prove from the diff
+ * which workspace packages a branch touches. A client-only ticket then skips the ~507
+ * server+mcp test files instead of paying for them, which is the difference between a
+ * ~40-minute gate and a few minutes.
+ *
+ * Deliberately opt-IN and fail-open: an unset or unrecognised value runs everything, so a
+ * plain `pnpm test:mine` and any caller that cannot determine scope are unaffected. The
+ * gate only ever passes a scope it derived conservatively — see `scopedTestPackages`.
+ */
+const scopeRaw = (process.env.KANBAN_TEST_PACKAGES || "").trim();
+const scopeLabels = scopeRaw ? new Set(scopeRaw.split(",").map((s) => s.trim()).filter(Boolean)) : null;
+const selected = scopeLabels ? PACKAGES.filter((p) => scopeLabels.has(p.label)) : PACKAGES;
+if (scopeLabels && selected.length === 0) {
+  console.warn(`[test:mine] KANBAN_TEST_PACKAGES="${scopeRaw}" matched no known package — running ALL packages instead of silently testing nothing.`);
+}
+const toRun = selected.length > 0 ? selected : PACKAGES;
+if (scopeLabels && toRun !== PACKAGES) {
+  console.log(`[test:mine] scoped to: ${toRun.map((p) => p.label).join(", ")} (KANBAN_TEST_PACKAGES)`);
+}
+
 let failed = false;
-for (const pkg of PACKAGES) {
+for (const pkg of toRun) {
   const code = await runPackage(pkg);
   if (code !== 0) failed = true;
 }
