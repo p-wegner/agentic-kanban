@@ -68,6 +68,8 @@ export interface WorkspaceCandidate {
    *  with no gate run (e.g. manual ready-for-merge) — the monitor must then re-run the gate. */
   mergeGateRanAt?: string | null;
   mergeGateStage?: string | null;
+  mergeGateBranchSha?: string | null;
+  mergeGateBaseSha?: string | null;
   mergeGateSource?: string | null;
 }
 
@@ -80,7 +82,16 @@ export interface WorkspaceCandidate {
  */
 function gateTokenFromWorkspaceEvidence(ws: WorkspaceCandidate, source: string): MergeGateToken {
   if (ws.mergeGateRanAt && ws.mergeGateStage) {
-    return gateAlreadyPassed({ ranAt: ws.mergeGateRanAt, stage: ws.mergeGateStage as MergeGateEvidence["stage"], source });
+    // Carry the recorded tips (0108) so `resolveMergeGate` can validate the pass by CONTENT.
+    // Without them a pass that is merely old is re-gated (a wasted full suite + build) and a
+    // pass whose base has since moved is trusted purely because it looks recent.
+    return gateAlreadyPassed({
+      ranAt: ws.mergeGateRanAt,
+      stage: ws.mergeGateStage as MergeGateEvidence["stage"],
+      source,
+      branchSha: ws.mergeGateBranchSha ?? undefined,
+      baseSha: ws.mergeGateBaseSha ?? undefined,
+    });
   }
   return RUN_GATE;
 }

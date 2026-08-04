@@ -26,6 +26,14 @@ export const workspaces = sqliteTable("workspaces", {
   mergeGateRanAt: text("merge_gate_ran_at"),
   mergeGateStage: text("merge_gate_stage"),
   mergeGateSource: text("merge_gate_source"),
+  /**
+   * The branch/base tips the gate actually ran against (0108). These make the evidence above
+   * verifiable by CONTENT rather than by age: when both still match, a long queue wait no
+   * longer forces a pointless re-gate, and when either has moved the proof is void however
+   * fresh it looks. Nullable for back-compat — rows written before 0108 validate on age only.
+   */
+  mergeGateBranchSha: text("merge_gate_branch_sha"),
+  mergeGateBaseSha: text("merge_gate_base_sha"),
   planMode: integer("plan_mode", { mode: "boolean" }).notNull().default(false),
   tddMode: integer("tdd_mode", { mode: "boolean" }).notNull().default(false),
   status: text("status").notNull().default("active"),

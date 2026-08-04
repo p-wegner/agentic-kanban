@@ -269,7 +269,9 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
         // merge (surfaced via the outer catch's conflict recording).
         const gateResult = await resolveMergeGate({
           token: gate,
-          workspace: { id: workspace.id, workingDir: workspace.workingDir },
+          // `baseBranch` lets the gate read the diff, which is what makes the docs-only skip
+          // and test-package scoping reachable from this path too (see runPreLockGate).
+          workspace: { id: workspace.id, workingDir: workspace.workingDir, baseBranch: workspace.baseBranch },
           projectId,
           database: db,
         });

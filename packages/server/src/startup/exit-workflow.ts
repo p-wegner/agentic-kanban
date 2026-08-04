@@ -2,7 +2,7 @@ import { isSpecPlanningStageName, transitionIssueStatus } from "@agentic-kanban/
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { runUnderBuildGate } from "../services/jvm-build-gate.js";
-import { runPreMergeGate, gateAlreadyPassed, gateSkipExplicit, type MergeGateToken } from "../services/pre-merge-gate.service.js";
+import { runPreMergeGate, resolveMergeGateShas, gateAlreadyPassed, gateSkipExplicit, type MergeGateToken } from "../services/pre-merge-gate.service.js";
 import { issues, preferences, projectStatuses, projects, scheduledRunHistory, scheduledRuns, sessions, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { desc, eq } from "drizzle-orm";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
@@ -708,6 +708,9 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     // `evidenceIsFresh` could never accept it — every merge re-ran the whole gate and the
     // "honest evidence" of #182 was dead on arrival. Stamp the real completion time.
     const gateRanAt = new Date().toISOString();
+    // Content-key the persisted evidence too (0108), so the monitor's later merge trigger can
+    // trust a pass whose only sin is age while still re-gating when the base has moved.
+    const gateShas = await resolveMergeGateShas({ id: workspaceId, workingDir: workspace.workingDir, baseBranch: workspace.baseBranch || defaultBranch });
     if (!(await runColdCloneGate(ctx))) return;
     // #629 Guard: re-verify the branch still has committed changes ahead of base.
     // A race (e.g. branch reset/rebased to equal base between review start and exit)
@@ -728,6 +731,8 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       mergeGateRanAt: gateRanAt,
       mergeGateStage: preMergeGate.stage,
       mergeGateSource: "review-exit gate",
+      mergeGateBranchSha: gateShas.branchSha ?? null,
+      mergeGateBaseSha: gateShas.baseSha ?? null,
     }).where(eq(workspaces.id, workspaceId));
     boardEvents.broadcast(projectId, "workspace_ready_for_merge");
     const learningAfterReview = getBool(prefMap, "learning_step_after_review") && workspace.workingDir ? launchLearningStep(db, sessionManager, learningSessionIds, workspace, prefMap, "after review", true) : Promise.resolve();
@@ -746,8 +751,10 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         // Merge-gate DECISION (arch-review §1.2): the shared verify/smoke gate ran (and passed)
         // moments ago above, so hand autoMerge that PROOF as an `already-passed` token — it won't
         // re-run the expensive build. Stale/absent proof would force a re-gate in resolveMergeGate.
+        // `gateShas` was resolved with `gateRanAt` above — the proof stays valid through an
+        // arbitrary lock wait but is voided the moment the base moves under it.
         await autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now,
-          gateAlreadyPassed({ ranAt: gateRanAt, stage: preMergeGate.stage, source: "review-exit gate" }));
+          gateAlreadyPassed({ ranAt: gateRanAt, stage: preMergeGate.stage, source: "review-exit gate", branchSha: gateShas.branchSha, baseSha: gateShas.baseSha }));
       } else {
         console.log(`[workflow] review session ${sessionId} completed  queued for scheduled auto-merge`);
       }
@@ -758,6 +765,8 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         mergeGateRanAt: gateRanAt,
         mergeGateStage: preMergeGate.stage,
         mergeGateSource: "review-exit gate",
+        mergeGateBranchSha: gateShas.branchSha ?? null,
+        mergeGateBaseSha: gateShas.baseSha ?? null,
       }).where(eq(workspaces.id, workspaceId));
       boardEvents.broadcast(projectId, "workspace_ready_for_merge");
       console.log(`[workflow] review session ${sessionId} completed  auto-merge disabled, marked ready_for_merge and left in In Review`);
