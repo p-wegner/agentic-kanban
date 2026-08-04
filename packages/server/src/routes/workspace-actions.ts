@@ -9,6 +9,7 @@ import { createSessionArtifactsService } from "../services/session-artifacts.ser
 import { getWorkspaceTimeline } from "../services/workspace-timeline.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.js";
+import { completeMergeJob, failMergeJob, getMergeJob, startMergeJob } from "../services/merge-job.service.js";
 
 export function createWorkspaceActionsRoute(
   getSessionManager: () => SessionManager,
@@ -165,9 +166,46 @@ export function createWorkspaceActionsRoute(
   });
 
   // POST /api/workspaces/:id/merge
+  // POST /api/workspaces/:id/merge — land the branch. Runs the pre-merge gate inline, which
+  // on a full-suite project is 30-45 MINUTES, so the outcome is always recorded as a job
+  // (see merge-job.service.ts): a caller whose connection dies can still get the verdict from
+  // GET /:id/merge-status instead of being unable to tell a failure from a still-running gate.
+  //
+  // `?async=1` returns 202 + jobId immediately rather than holding the connection at all.
+  // The default stays SYNCHRONOUS for back-compat — the UI and CLI both read the merge result
+  // from this response body today, and silently turning that into a 202 would make them
+  // report success for a merge that had not happened yet.
   router.post("/:id/merge", async (c) => {
     const id = c.req.param("id");
-    return c.json(await workspaceService.mergeWorkspaceDeduped(id));
+    const wantsAsync = ["1", "true", "yes"].includes((c.req.query("async") || "").toLowerCase());
+    const job = startMergeJob(id);
+    const run = workspaceService
+      .mergeWorkspaceDeduped(id)
+      .then((result) => {
+        completeMergeJob(job.jobId, id, result);
+        return result;
+      })
+      .catch((err) => {
+        failMergeJob(job.jobId, id, err);
+        throw err;
+      });
+
+    if (wantsAsync) {
+      // Nothing awaits `run` in this branch, so an eventual rejection would be an unhandled
+      // promise rejection (which this server logs as [fatal]). The job record IS the report.
+      void run.catch(() => {});
+      return c.json({ accepted: true, jobId: job.jobId, workspaceId: id, statusUrl: `/api/workspaces/${id}/merge-status` }, 202);
+    }
+    return c.json(await run);
+  });
+
+  // GET /api/workspaces/:id/merge-status — the latest merge job for this workspace, including
+  // a finished one. `null` means this process has no record (never merged here, or restarted).
+  router.get("/:id/merge-status", (c) => {
+    const id = c.req.param("id");
+    const job = getMergeJob(id);
+    if (!job) return c.json({ job: null, message: "no merge job recorded for this workspace in the current server process" });
+    return c.json({ job });
   });
 
   // GET /api/workspaces/:id/already-merged-status — check if branch is already merged without modifying state
