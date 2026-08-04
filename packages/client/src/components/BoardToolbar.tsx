@@ -26,6 +26,14 @@ import type { ViewMode } from "../lib/viewRegistry.js";
 const ACTIVE_DEFAULT = "bg-brand-600 text-white hover:bg-brand-700";
 const INACTIVE = "text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-700";
 
+// The Plugins tab is a dropdown CONTROL (per-plugin submenu + install/marketplace), not a plain
+// tab: folded into the "More" overflow it degrades to a bare view switch and its menu becomes
+// unreachable — worse, when plugin-views is active the More trigger relabels to "Plugins" and
+// opens the hidden-views list instead. So it is PINNED: excluded from the overflow fold and
+// always rendered beside More, with its width reserved in the fit computation.
+const OVERFLOWABLE_PRIMARY_VIEWS = PRIMARY_VIEWS.filter((v) => v.id !== "plugin-views");
+const PLUGIN_TAB_VIEW = PRIMARY_VIEWS.find((v) => v.id === "plugin-views");
+
 interface AgingHeatmapLegendProps {
   warmDays: number;
   hotDays: number;
@@ -201,7 +209,7 @@ export function BoardToolbar({
   // A hidden measurement row mirrors the real tabs; we compare their intrinsic
   // widths against the available row width and show as many tabs as fit, folding
   // the rest (plus the analytics/secondary views) into "More".
-  const [visibleViewCount, setVisibleViewCount] = useState(PRIMARY_VIEWS.length);
+  const [visibleViewCount, setVisibleViewCount] = useState(OVERFLOWABLE_PRIMARY_VIEWS.length);
   const viewTabsWrapRef = useRef<HTMLDivElement>(null);
   const viewTabsMeasureRef = useRef<HTMLDivElement>(null);
   // Below sm the action cluster (Tasks/Scripts/Queue/Capacity/Voice/Monitor) is
@@ -317,11 +325,15 @@ export function BoardToolbar({
       const avail = wrap!.clientWidth;
       if (avail <= 0) return;
       const children = Array.from(measure!.children) as HTMLElement[];
-      if (children.length === 0) return;
-      // Last measured child is the "More" trigger; the rest are primary tabs.
+      if (children.length < 2) return;
+      // Last two measured children are fixed: the pinned Plugins dropdown tab and the
+      // "More" trigger. Everything before them is an overflowable primary tab.
       const moreWidth = children[children.length - 1].offsetWidth;
-      const tabWidths = children.slice(0, -1).map((el) => el.offsetWidth);
-      setVisibleViewCount(computeVisibleTabCount({ availableWidth: avail, tabWidths, moreWidth }));
+      const pluginTabWidth = children[children.length - 2].offsetWidth;
+      const tabWidths = children.slice(0, -2).map((el) => el.offsetWidth);
+      setVisibleViewCount(
+        computeVisibleTabCount({ availableWidth: avail - (pluginTabWidth + 4), tabWidths, moreWidth }),
+      );
     }
 
     recompute();
@@ -331,7 +343,7 @@ export function BoardToolbar({
   }, [butlerBadgeCount, boardActivitySummary, backlogCount]);
 
   const { visiblePrimaryViews, moreViews, activeMoreView } =
-    splitToolbarViews(PRIMARY_VIEWS, SECONDARY_VIEWS, visibleViewCount, viewMode);
+    splitToolbarViews(OVERFLOWABLE_PRIMARY_VIEWS, SECONDARY_VIEWS, visibleViewCount, viewMode);
 
   function renderViewTab(view: ViewDescriptor, measuring = false) {
     if (view.id === "plugin-views") {
@@ -606,6 +618,8 @@ export function BoardToolbar({
       <div ref={viewTabsWrapRef} className="relative hidden sm:block flex-1 min-w-0">
         <div className="flex w-fit items-center gap-1 border border-black/[0.07] dark:border-white/10 rounded-md p-0.5 bg-surface-raised dark:bg-surface-raised-dark">
           {visiblePrimaryViews.map((view) => renderViewTab(view))}
+          {/* Pinned: the Plugins dropdown tab never folds into More (its menu would be lost). */}
+          {PLUGIN_TAB_VIEW && renderViewTab(PLUGIN_TAB_VIEW)}
           {moreViews.length > 0 && (
             <div className="relative" ref={moreViewsRef}>
               <button
@@ -664,15 +678,17 @@ export function BoardToolbar({
             </div>
           )}
         </div>
-        {/* Hidden measurement row — mirrors every primary tab plus a plain "More"
-            trigger so the effect can measure intrinsic widths. Absolutely
-            positioned + invisible so it never affects layout. */}
+        {/* Hidden measurement row — mirrors every overflowable primary tab, then the
+            pinned Plugins tab, then a plain "More" trigger, so the effect can measure
+            intrinsic widths (recompute() relies on exactly this child order).
+            Absolutely positioned + invisible so it never affects layout. */}
         <div
           ref={viewTabsMeasureRef}
           aria-hidden="true"
           className="pointer-events-none invisible absolute left-0 top-0 flex items-center gap-1 p-0.5"
         >
-          {PRIMARY_VIEWS.map((view) => renderViewTab(view, true))}
+          {OVERFLOWABLE_PRIMARY_VIEWS.map((view) => renderViewTab(view, true))}
+          {PLUGIN_TAB_VIEW && renderViewTab(PLUGIN_TAB_VIEW, true)}
           <button tabIndex={-1} className="px-2.5 py-1 text-xs rounded flex items-center gap-1.5 whitespace-nowrap">
             More
             <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
