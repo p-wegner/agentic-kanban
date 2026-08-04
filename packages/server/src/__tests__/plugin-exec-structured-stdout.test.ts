@@ -42,7 +42,10 @@ describe("plugin-exec structured stdout", () => {
         `process.stdout.write(readFileSync(${JSON.stringify(planFile)}, 'utf8'));\n`,
       "utf8",
     );
-    command = `node ${JSON.stringify(emitter)}`;
+    // Unquoted on purpose: the sanctioned shell spec splits the command into argv itself and does
+    // NOT strip quotes, so a quoted path arrives at node with the quotes still attached. The
+    // mkdtemp path contains no spaces, so this is safe.
+    command = `node ${emitter}`;
   });
 
   it("the payload under test really is past the old cap", () => {
@@ -55,7 +58,7 @@ describe("plugin-exec structured stdout", () => {
       env: {},
       maxStdoutChars: STRUCTURED_STDOUT_CAP,
     });
-    expect(result.code).toBe(0);
+    expect(result.code, `stderr: ${result.stderr}`).toBe(0);
     expect(result.stdout.length).toBe(bigPlan.length);
     expect(result.stdoutTruncated).toBe(false);
     // The point of the fix: the plan survives the trip and parses.
@@ -65,7 +68,7 @@ describe("plugin-exec structured stdout", () => {
 
   it("still tail-truncates by default, and that is why a plan must opt out", async () => {
     const result = await runPluginCommand(command, { cwd: process.cwd(), env: {} });
-    expect(result.code).toBe(0);
+    expect(result.code, `stderr: ${result.stderr}`).toBe(0);
     expect(result.stdoutTruncated).toBe(true);
     expect(result.stdout.length).toBeLessThanOrEqual(16_384);
     // Front clipped ⇒ unparseable at every offset. This is the bug, pinned.
