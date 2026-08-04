@@ -126,7 +126,12 @@ describe("reconcileStrandedSiblingMerges (#18)", () => {
     // Idempotent: a second run finds nothing pending.
     const second = await reconcileStrandedSiblingMerges(db as unknown as Database);
     expect(second).toEqual({ landed: 0, preserved: 0 });
-  }, 90000);
+    // 240s, not 90s: this drives REAL git across two repos plus a worktree, twice (the
+    // idempotency re-run). Measured at 110s while the pre-merge gate's own vitest fleet was
+    // saturating the machine, which timed it out at 90s and — because a red gate withholds
+    // EVERY merge board-wide (#206) — deadlocked the board on a test whose work had actually
+    // succeeded. Same reasoning as #174 raising append-only-hotfile-merge 30s -> 120s.
+  }, 240000);
 
   it("preserves the sibling branch and records the blocker when the strand cannot land (conflict)", async () => {
     const worktreePath = await insertStrandedSibling();
@@ -146,7 +151,8 @@ describe("reconcileStrandedSiblingMerges (#18)", () => {
     // The gap is DETECTABLE: recorded loudly on the issue.
     const comments = await commentsForIssue();
     expect(comments.some((c) => /Multi-repo merge INCOMPLETE/.test(c.body))).toBe(true);
-  }, 90000);
+    // Same real-git-under-load reasoning as the case above.
+  }, 240000);
 
   it("is a no-op when the sibling merge already landed (mergedHeadSha stamped)", async () => {
     await insertStrandedSibling();
