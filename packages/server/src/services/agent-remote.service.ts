@@ -6,7 +6,12 @@
 // worker streams back events shaped exactly like AgentOutputEvent, which are
 // fed to the session's normal onOutput callback — so broadcast, DB persistence
 // and exit classification run unchanged. Phase 1c is same-machine: the spec's
-// cwd is the board-local worktree path and the env is the host-composed env.
+// cwd is the board-local worktree path.
+//
+// The spec env is an ALLOWLISTED projection of the host env (#244,
+// lib/remote-spec-env.ts) — never a copy of the board's process.env and never
+// the selected profile's credentials. The worker merges it over its OWN
+// environment, so its local agent login and paths win (decision 012).
 //
 // Failure contract:
 //  - assign not deliverable (worker vanished between placement and launch):
@@ -19,6 +24,7 @@
 
 import { buildAgentLaunchConfig, type ProviderId, type ProviderName } from "./agent-provider.js";
 import { resolveLaunchPorts, buildAgentSpawnEnv, resolveAgentHangTimeoutMs } from "../lib/agent-launch-env.js";
+import { buildRemoteSpecEnv } from "../lib/remote-spec-env.js";
 import { resolveWorktreeDevPorts } from "./worktree-ports.js";
 import { db as realDb } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -232,10 +238,15 @@ export function createRemoteAgentService(
       worktreePath,
       extraEnv,
     });
-    const env: Record<string, string> = {};
-    for (const [key, value] of Object.entries(envWithUndefined)) {
-      if (value !== undefined) env[key] = value;
-    }
+    // #244: a remote spec crosses a machine boundary, so it carries an ALLOWLISTED
+    // projection of the host env — never the board's process.env or the selected
+    // profile's credentials. The worker merges this over its own environment, so
+    // its local login and paths win (decision 012).
+    const env = buildRemoteSpecEnv({
+      env: envWithUndefined,
+      sharesFilesystem: !placement.repo,
+      worktreePath,
+    });
     const stdinPrompt = config.promptPrefix ? `${config.promptPrefix}\n\n${prompt}` : prompt;
 
     const spec = {
@@ -266,6 +277,11 @@ export function createRemoteAgentService(
         try {
           const git = await ensureGitHttpServer(database);
           const skillRows = await listAgentSkills(repo.projectId, false, database).catch(() => []);
+          const incomingRef = incomingRefFor(repo.branch);
+          // #247/#246: the token is scoped to THIS worker, THIS project and THIS
+          // incoming ref — not a board-wide credential for every repo — and it is
+          // dropped when the worker is revoked.
+          const gitToken = git.issueToken({ workerId, projectId: repo.projectId, incomingRef });
           const delivered = manager.send(workerId, {
             type: "assign",
             sessionId,
@@ -273,10 +289,10 @@ export function createRemoteAgentService(
             repo: {
               projectId: repo.projectId,
               gitPort: git.port,
-              gitToken: git.token,
+              gitToken,
               branch: repo.branch,
               baseBranch: repo.baseBranch,
-              incomingRef: incomingRefFor(repo.branch),
+              incomingRef,
               setupScript: repo.setupScript,
               skills: skillRows
                 .filter((s) => typeof s.prompt === "string" && s.prompt.trim().length > 0)

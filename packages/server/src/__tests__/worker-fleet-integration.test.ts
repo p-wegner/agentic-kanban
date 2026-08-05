@@ -75,6 +75,38 @@ describe("worker fleet integration (board <-> daemon <-> agent)", () => {
     expect(outcome).toBe("rejected");
   });
 
+  it("refuses a token in the query string, accepts the header, and closes the socket on revoke", async () => {
+    const { pairingToken } = registry.mintPairingToken();
+    const registered = await registry.registerWorker({ pairingToken, name: "revoke-me" });
+    if (!registered.ok) throw new Error(registered.error);
+    const wsBase = `${boardUrl.replace("http", "ws")}/ws/workers/${registered.workerId}`;
+
+    // A VALID token passed as ?token= must still be refused: query strings land
+    // in proxy/access logs, and the bundled daemon always uses the header.
+    const viaQuery = new WebSocket(`${wsBase}?token=${registered.workerToken}`);
+    const queryOutcome = await new Promise<string>((resolve) => {
+      viaQuery.on("open", () => resolve("open"));
+      viaQuery.on("error", () => resolve("rejected"));
+    });
+    expect(queryOutcome).toBe("rejected");
+
+    const viaHeader = new WebSocket(wsBase, {
+      headers: { authorization: `Bearer ${registered.workerToken}` },
+    });
+    await new Promise<void>((resolve, reject) => {
+      viaHeader.on("open", () => resolve());
+      viaHeader.on("error", reject);
+    });
+    await vi.waitFor(() => expect(manager.isConnected(registered.workerId)).toBe(true));
+
+    // Revoking must take effect at once: the already-upgraded socket is never
+    // re-authenticated, so leaving it open let a revoked worker keep streaming.
+    const closed = new Promise<void>((resolve) => viaHeader.on("close", () => resolve()));
+    expect(await registry.revokeWorker(registered.workerId)).toBe(true);
+    expect(manager.isConnected(registered.workerId)).toBe(false);
+    await closed;
+  }, 20000);
+
   it("pairs, connects, and says hello", async () => {
     const { pairingToken } = registry.mintPairingToken();
     daemon = await startWorkerDaemon({

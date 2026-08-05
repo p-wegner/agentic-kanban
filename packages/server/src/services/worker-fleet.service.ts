@@ -6,10 +6,11 @@
 import { db as realDb } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getPreferenceValue } from "../repositories/session-lifecycle.repository.js";
-import type { Placement } from "./agent-dispatch.service.js";
+import { WorkerDispatchUnavailableError as DispatchUnavailable, type Placement } from "./agent-dispatch.service.js";
 import { createRemoteAgentService } from "./agent-remote.service.js";
 import type { AgentExecutionService } from "./agent-dispatch.service.js";
 import { createWorkerConnectionManager, type WorkerConnectionManager } from "./worker-connection.service.js";
+import { revokeGitTokensForWorker } from "./git-http.service.js";
 import { getWorkerRegistry, type WorkerRegistry } from "./worker-registry.service.js";
 import type { ProviderName } from "./agent-provider.js";
 import { getProjectById } from "../repositories/project.repository.js";
@@ -19,14 +20,9 @@ import { getProjectById } from "../repositories/project.repository.js";
 import { SHARES_FILESYSTEM_LABEL } from "@agentic-kanban/shared/lib/worker-protocol";
 export { SHARES_FILESYSTEM_LABEL };
 
-/** Strict-mode refusal: dispatch was required but no worker could take the work. */
-export class WorkerDispatchUnavailableError extends Error {
-  readonly code = "NO_AVAILABLE_WORKER";
-  constructor(message: string) {
-    super(message);
-    this.name = "WorkerDispatchUnavailableError";
-  }
-}
+// Strict-mode refusal. Defined in the dispatch layer (which must throw it when it
+// refuses a host fallback, #245) and re-exported here for existing importers.
+export { WorkerDispatchUnavailableError } from "./agent-dispatch.service.js";
 
 export interface WorkerFleet {
   registry: WorkerRegistry;
@@ -41,6 +37,13 @@ export function getWorkerFleet(database: Database = realDb): WorkerFleet {
   if (!fleet) {
     const registry = getWorkerRegistry(database);
     const connections = createWorkerConnectionManager(registry);
+    // The socket half of revocation lives in the connection manager itself; the
+    // git-transport credential is this layer's business (#247).
+    registry.onRevoke(async (workerId) => {
+      await revokeGitTokensForWorker(workerId).catch((err) =>
+        console.error(`[worker-fleet] could not revoke git tokens for worker ${workerId}`, err),
+      );
+    });
     fleet = {
       registry,
       connections,
@@ -138,7 +141,9 @@ async function eligibleWorkers(
       const labels = parseLabels(w.labels);
       return requiredLabels.every((required) => labels.includes(required));
     })
-    .map((w) => ({ id: w.id, load: fleet.connections.runningSessionIds(w.id).length, cap: w.maxConcurrency }))
+    // Load counts DISPATCHED work, not just work that has already spoken (#248):
+    // otherwise three placements in a row all read 0 and pile onto one worker.
+    .map((w) => ({ id: w.id, load: fleet.connections.assignedSessionIds(w.id).length, cap: w.maxConcurrency }))
     .filter((w) => w.load < w.cap)
     .sort((a, b) => a.load - b.load);
 }
@@ -173,40 +178,46 @@ export async function resolveWorkerPlacement(params: {
     const pref = await getPreferenceValue(workerDispatchPrefKey(projectId), database);
     if (pref !== "true") return { kind: "host" };
     const fleet = getWorkerFleet(database);
+    // Read strictness ONCE and carry it on the placement (#245): every
+    // host-fallback path below — and the dispatch proxy's own catch, which runs
+    // long after this function returned — must honour the same answer.
+    const strict = (await getPreferenceValue(workerStrictPrefKey(projectId), database)) === "true";
+    const refuseHost = (reason: string): never => {
+      throw new DispatchUnavailable(`${reason} and worker dispatch is strict for project ${projectId}`);
+    };
     const requiredLabels = parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(projectId), database));
     const workerId = await selectWorkerForLaunch(fleet, providerName, requiredLabels, now);
     if (!workerId) {
       const detail = requiredLabels.length > 0 ? ` with labels [${requiredLabels.join(",")}]` : "";
-      const strict = (await getPreferenceValue(workerStrictPrefKey(projectId), database)) === "true";
-      if (strict) {
-        throw new WorkerDispatchUnavailableError(
-          `no eligible ${providerName} worker${detail} for project ${projectId} and worker dispatch is strict`,
-        );
-      }
+      if (strict) refuseHost(`no eligible ${providerName} worker${detail}`);
       console.warn(
         `[worker-fleet] project ${projectId} wants worker dispatch but no eligible ${providerName} worker${detail} is available; launching on host`,
       );
       return { kind: "host" };
     }
     if (await workerSharesFilesystem(fleet, workerId, now)) {
-      return { kind: "remote", workerId };
+      return { kind: "remote", workerId, strict };
     }
 
     // True remote worker: it needs the repo over git transport. Without a
     // branch to push back (e.g. a direct workspace with no feature branch)
-    // there is nothing safe to dispatch remotely — stay on the host.
+    // there is nothing safe to dispatch remotely — stay on the host, unless the
+    // project forbids that.
     if (!branch) {
+      if (strict) refuseHost(`remote worker ${workerId} needs a branch for git transport`);
       console.warn(`[worker-fleet] remote worker ${workerId} needs a branch for git transport; launching on host`);
       return { kind: "host" };
     }
     const project = await getProjectById(projectId, database);
     if (!project?.repoPath) {
+      if (strict) refuseHost(`project ${projectId} has no repoPath to serve over git transport`);
       console.warn(`[worker-fleet] project ${projectId} has no repoPath; launching on host`);
       return { kind: "host" };
     }
     return {
       kind: "remote",
       workerId,
+      strict,
       repo: {
         projectId,
         repoPath: project.repoPath,
@@ -218,7 +229,7 @@ export async function resolveWorkerPlacement(params: {
   } catch (err) {
     // Strict mode is a deliberate refusal, not a resolution failure — propagate it
     // so the caller surfaces "no worker" instead of silently running on the host.
-    if (err instanceof WorkerDispatchUnavailableError) throw err;
+    if (err instanceof DispatchUnavailable) throw err;
     console.error(`[worker-fleet] placement resolution failed; launching on host`, err);
     return { kind: "host" };
   }

@@ -12,17 +12,27 @@ import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { projects } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import type { Database } from "../db/index.js";
-import { startGitHttpServer, type GitHttpHandle, KANBAN_INCOMING_REF_PREFIX } from "../services/git-http.service.js";
+import {
+  startGitHttpServer,
+  parsePktLineLength,
+  type GitHttpHandle,
+  KANBAN_INCOMING_REF_PREFIX,
+} from "../services/git-http.service.js";
 
 const GIT_ID = "aaaabbbb-cccc-dddd-eeee-ffff00001111";
+const OTHER_PROJECT_ID = "aaaabbbb-cccc-dddd-eeee-ffff00002222";
+const WORKER_ID = "worker-1";
+const ASSIGNED_REF = `${KANBAN_INCOMING_REF_PREFIX}feature/ak-42-test`;
 
 describe("git-http service (worker fleet phase 2)", () => {
   let db: Database;
   let handle: GitHttpHandle;
   let repoDir: string;
   let workDir: string;
+  /** The assignment token: one worker, one project, one incoming ref (#246/#247). */
+  let token: string;
 
-  const authedUrl = () => `http://x-token:${handle.token}@127.0.0.1:${handle.port}/git/${GIT_ID}`;
+  const authedUrl = () => `http://x-token:${token}@127.0.0.1:${handle.port}/git/${GIT_ID}`;
 
   beforeAll(async () => {
     db = createTestDb().db as unknown as Database;
@@ -44,6 +54,7 @@ describe("git-http service (worker fleet phase 2)", () => {
     } as typeof projects.$inferInsert);
 
     handle = await startGitHttpServer({ database: db, host: "127.0.0.1" });
+    token = handle.issueToken({ workerId: WORKER_ID, projectId: GIT_ID, incomingRef: ASSIGNED_REF });
   });
 
   afterAll(async () => {
@@ -75,7 +86,7 @@ describe("git-http service (worker fleet phase 2)", () => {
 
     const push = await gitExec(
       ["push", "origin", `HEAD:${KANBAN_INCOMING_REF_PREFIX}feature/ak-42-test`],
-      { cwd: cloneDir, timeout: 30000 },
+      { cwd: cloneDir, timeout: GIT_HEAVY_TEST_TIMEOUT_MS },
     );
     expect(push.code).toBe(0);
     const sha = await gitExecOrThrow(["rev-parse", `${KANBAN_INCOMING_REF_PREFIX}feature/ak-42-test`], { cwd: repoDir });
@@ -84,18 +95,88 @@ describe("git-http service (worker fleet phase 2)", () => {
 
     const badPush = await gitExec(
       ["push", "origin", "HEAD:refs/heads/feature/ak-42-test"],
-      { cwd: cloneDir, timeout: 30000 },
+      { cwd: cloneDir, timeout: GIT_HEAVY_TEST_TIMEOUT_MS },
     );
     expect(badPush.code).not.toBe(0);
     const probe = await gitExec(["rev-parse", "refs/heads/feature/ak-42-test"], { cwd: repoDir });
     expect(probe.code).not.toBe(0);
+    // Two real pushes over HTTP plus a refusal round-trip: on a loaded machine
+    // this genuinely exceeds the 60s config default (see helpers/timeouts.ts).
+  }, GIT_HEAVY_TEST_TIMEOUT_MS * 2);
+
+  it("refuses a push to an incoming ref the token was not issued for (#246)", async () => {
+    const cloneDir = join(workDir, "clone");
+    const badPush = await gitExec(
+      ["push", "origin", `HEAD:${KANBAN_INCOMING_REF_PREFIX}master`],
+      { cwd: cloneDir, timeout: GIT_HEAVY_TEST_TIMEOUT_MS },
+    );
+    expect(badPush.code).not.toBe(0);
+    const probe = await gitExec(["rev-parse", `${KANBAN_INCOMING_REF_PREFIX}master`], { cwd: repoDir });
+    expect(probe.code).not.toBe(0);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS * 2);
+
+  // Scope is checked BEFORE the repo lookup, so this needs no second fixture repo:
+  // the point is that a token for project A never speaks for project B.
+  it("refuses a token scoped to another project (#247)", async () => {
+    const res = await fetch(
+      `http://127.0.0.1:${handle.port}/git/${OTHER_PROJECT_ID}/info/refs?service=git-upload-pack`,
+      { headers: { authorization: `Bearer ${token}` } },
+    );
+    expect(res.status).toBe(403);
   });
 
-  it("404s for an unknown project", async () => {
+  it("404s for an unknown project the token IS scoped to", async () => {
+    const unknownId = randomUUID();
+    const scoped = handle.issueToken({ workerId: WORKER_ID, projectId: unknownId });
     const res = await fetch(
-      `http://127.0.0.1:${handle.port}/git/${randomUUID()}/info/refs?service=git-upload-pack`,
-      { headers: { authorization: `Bearer ${handle.token}` } },
+      `http://127.0.0.1:${handle.port}/git/${unknownId}/info/refs?service=git-upload-pack`,
+      { headers: { authorization: `Bearer ${scoped}` } },
     );
     expect(res.status).toBe(404);
+  });
+
+  it("stops honoring a revoked worker's tokens (#247)", async () => {
+    const doomed = handle.issueToken({ workerId: "worker-doomed", projectId: GIT_ID });
+    const before = await fetch(
+      `http://127.0.0.1:${handle.port}/git/${GIT_ID}/info/refs?service=git-upload-pack`,
+      { headers: { authorization: `Bearer ${doomed}` } },
+    );
+    expect(before.status).toBe(200);
+
+    expect(handle.revokeWorkerTokens("worker-doomed")).toBe(1);
+
+    const after = await fetch(
+      `http://127.0.0.1:${handle.port}/git/${GIT_ID}/info/refs?service=git-upload-pack`,
+      { headers: { authorization: `Bearer ${doomed}` } },
+    );
+    expect(after.status).toBe(401);
+    // Another worker's token is untouched.
+    const other = await fetch(
+      `http://127.0.0.1:${handle.port}/git/${GIT_ID}/info/refs?service=git-upload-pack`,
+      { headers: { authorization: `Bearer ${token}` } },
+    );
+    expect(other.status).toBe(200);
+  });
+
+  it("expires tokens (#247)", async () => {
+    const shortLived = handle.issueToken({ workerId: WORKER_ID, projectId: GIT_ID, ttlMs: -1 });
+    const res = await fetch(
+      `http://127.0.0.1:${handle.port}/git/${GIT_ID}/info/refs?service=git-upload-pack`,
+      { headers: { authorization: `Bearer ${shortLived}` } },
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects non-canonical pkt-line lengths in the receive guard", () => {
+    expect(parsePktLineLength("0000")).toBe(0);
+    expect(parsePktLineLength("00a4")).toBe(164);
+    // "+000"/" 000"/"-000" all parse as 0 via parseInt — a forged flush-pkt.
+    expect(parsePktLineLength("+000")).toBeNull();
+    expect(parsePktLineLength(" 000")).toBeNull();
+    expect(parsePktLineLength("-000")).toBeNull();
+    expect(parsePktLineLength("00A4")).toBeNull();
+    expect(parsePktLineLength("0abz")).toBeNull();
+    // 1..3 are shorter than the header itself and would desync the offset.
+    for (const len of ["0001", "0002", "0003"]) expect(parsePktLineLength(len)).toBeNull();
   });
 });
