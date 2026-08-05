@@ -1,5 +1,4 @@
 import { applyOpenSpecDeltas, OPENSPEC_CHANGES_DIR, OPENSPEC_SPECS_DIR } from "@agentic-kanban/shared/lib/openspec";
-import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import type { Database } from "../db/index.js";
 import { persistWorkspaceCleanupWarning, getWorkspaceById } from "../repositories/workspace-merge-cleanup.repository.js";
 import type { SessionManager } from "./session.manager.js";
@@ -10,8 +9,8 @@ import { workspaceServicesService, parseStoredComposeProjectName } from "./works
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import { generateAndPersistGithubHandoffDraft } from "./github-handoff-draft.service.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
-import { PREF_AUTO_START_FOLLOWUP } from "../constants/preference-keys.js";
 import { autoStartFollowups } from "./followup-workspace.service.js";
+import { resolveStartPolicy } from "./start-policy.service.js";
 import { autoStartUnblockedDependencyIssue } from "./dependency-auto-chain.service.js";
 import { rebuildSharedIfChanged, runLearningStep } from "./merge-helpers.service.js";
 import { cleanupMergedWorktreeAndBranch } from "./merge-executor.service.js";
@@ -307,9 +306,15 @@ async function maybeAutoStartFollowups(
   deps: { database: Database; getSessionManager?: () => SessionManager; boardEvents?: BoardEvents },
 ): Promise<void> {
   try {
-    if (getBool(args.prefMap, PREF_AUTO_START_FOLLOWUP) && args.projectId && deps.getSessionManager) {
-      await autoStartFollowups(args.issueId, args.projectId, deps.database, deps.getSessionManager, args.prefMap, { boardEvents: deps.boardEvents });
-    }
+    if (!args.projectId || !deps.getSessionManager) return;
+    // Start Mode is the single source of truth for auto-start (decision 008), so the
+    // `auto_start_followup` pref alone is NOT enough: gated on the pref only, this path
+    // kept launching agents on a project whose Start Mode is `manual` — the one switch
+    // that is supposed to be a true kill-switch — and double-drove `conductor` projects.
+    // `postMergeFollowups` ANDs the mode with that same pref, mirroring how the sibling
+    // dependency cascade in dependency-auto-chain.service.ts is gated.
+    if (!resolveStartPolicy(args.prefMap, args.projectId).postMergeFollowups) return;
+    await autoStartFollowups(args.issueId, args.projectId, deps.database, deps.getSessionManager, args.prefMap, { boardEvents: deps.boardEvents });
   } catch (err) {
     console.warn("[workspace-merge] auto_start_followup check failed:", err);
   }

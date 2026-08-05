@@ -31,6 +31,15 @@ export interface StartPolicy {
   autoStartUnblocked: boolean;
   /** The post-merge dependency cascade may start the next unblocked ticket. */
   postMergeCascade: boolean;
+  /**
+   * The post-merge FOLLOW-UP auto-start (`autoStartFollowups`, gated by the
+   * `auto_start_followup` pref) may run. A second, independent post-merge starter that
+   * predates Start Mode and gated only on its own global pref — so `manual` was not the
+   * kill-switch it claims to be: merging one ticket still launched agents on a project
+   * whose drive was explicitly off. Same shape as `postMergeCascade`: the mode decides
+   * whether it may run at all, the fine-grained pref stays the enable signal.
+   */
+  postMergeFollowups: boolean;
   /** The backlog-empty refill skill may run to generate tickets. */
   backlogRefill: boolean;
   /** Cron/HTTP scheduled runs are honored. */
@@ -67,6 +76,7 @@ export function resolveStartPolicy(prefMap: Map<string, string>, projectId: stri
 
   const wip = resolveMonitorTunables(prefMap, projectId).tunables;
   const cascadeOptIn = getBool(prefMap, "dependency_auto_chain");
+  const followupOptIn = getBool(prefMap, "auto_start_followup");
   const refillOptIn = prefMap.get("backlog_empty_strategy") === "generate_tickets";
 
   switch (mode) {
@@ -75,6 +85,7 @@ export function resolveStartPolicy(prefMap: Map<string, string>, projectId: stri
         mode, source, wip,
         autoStartUnblocked: true,
         postMergeCascade: cascadeOptIn,
+        postMergeFollowups: followupOptIn,
         backlogRefill: refillOptIn,
         scheduledRuns: true,
       };
@@ -85,6 +96,7 @@ export function resolveStartPolicy(prefMap: Map<string, string>, projectId: stri
         mode, source, wip,
         autoStartUnblocked: false,
         postMergeCascade: false,
+        postMergeFollowups: false,
         backlogRefill: false,
         scheduledRuns: true,
       };
@@ -94,6 +106,7 @@ export function resolveStartPolicy(prefMap: Map<string, string>, projectId: stri
         mode: "manual", source, wip,
         autoStartUnblocked: false,
         postMergeCascade: false,
+        postMergeFollowups: false,
         backlogRefill: false,
         scheduledRuns: false,
       };
