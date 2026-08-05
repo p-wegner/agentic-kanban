@@ -26,7 +26,9 @@ import { createWebhookSender } from "../services/outbound-webhook.service.js";
  *            "leading" (default) writes into the project's leading repo; "sidecar" writes into
  *            a dedicated repo (created on first use) named "<pluginSlug>-requirements"
  *   GET    /api/plugins/:id/views?projectId=  view descriptors + running state + url
- *   POST   /api/plugins/:id/views/:viewId/start { projectId } → { url, port, pid }
+ *   POST   /api/plugins/:id/views/:viewId/start { projectId } → { url, port, pid, ready }
+ *          (`ready: false` = the child is up but not answering its health probe yet — poll
+ *           `GET .../views` / the status route instead of framing the URL; #252)
  *   POST   /api/plugins/:id/views/:viewId/stop  { projectId }
  *   POST   /api/plugins/:id/scripts/:name/run   { projectId } → { code, stdout, stderr, timedOut }
  *   POST   /api/plugins/:id/skills/:name/run

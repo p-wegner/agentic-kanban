@@ -212,6 +212,11 @@ A supervised child process serving HTTP, framed as a board view.
   request, `/` is the single most expensive request your server gets. A route that only your
   index serves is also the one place a legitimately-erroring index (e.g. a data source mid-write)
   can't be mistaken for the server being down.
+- **The board waits for you to bind.** `start` polls the readiness probe (up to 15s, tunable via
+  `PLUGIN_VIEW_READY_TIMEOUT_MS`) before answering `ready: true`, so a server that needs a second
+  to come up is framed only once it is serving instead of rendering a connection-refused page. If
+  you exceed the budget the start still succeeds with `ready: false` and the panel polls — but a
+  view that takes 30s to bind looks broken, so bind first and load lazily.
 - Read your state **fresh per request**. The process is long-lived; a page built at startup shows
   a snapshot of whenever the panel was first opened, which is worse than no panel.
 - Be self-contained: inline CSS and JS, no CDN, no external fonts, no remote images.
