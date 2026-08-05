@@ -22,11 +22,36 @@ export function defaultWorkerWorkRoot(): string {
   return join(homedir(), ".agentic-kanban", "worker");
 }
 
-/** The full clone/fetch URL for a repo transport, composed from the board host. */
+/**
+ * The clone/fetch/push URL for a repo transport — WITHOUT the token.
+ *
+ * The token used to be embedded (`http://x-token:<token>@host:port/...`), which
+ * put it on the `git clone` command line (visible in any process listing) and
+ * persisted it in the clone's `.git/config` origin URL on the worker's disk,
+ * where it outlived the assignment. The credential now travels via
+ * {@link gitAuthEnv} instead, so nothing durable on the worker holds it.
+ */
 export function composeGitUrl(boardUrl: string, repo: WorkerRepoTransport): string {
   const board = new URL(boardUrl);
   const scheme = board.protocol === "https:" ? "https" : "http";
-  return `${scheme}://x-token:${repo.gitToken}@${board.hostname}:${repo.gitPort}/git/${repo.projectId}`;
+  return `${scheme}://${board.hostname}:${repo.gitPort}/git/${repo.projectId}`;
+}
+
+/**
+ * Per-invocation git auth: the assignment token as an HTTP Authorization header,
+ * injected through git's ENV-based config (`GIT_CONFIG_COUNT`/`_KEY_0`/`_VALUE_0`,
+ * git >= 2.31). Env-based rather than `-c http.extraHeader=…` because the latter
+ * would still expose the token in the process's argv, and unlike a URL credential
+ * it is never written into the clone's config.
+ */
+export function gitAuthEnv(repo: WorkerRepoTransport): NodeJS.ProcessEnv {
+  const basic = Buffer.from(`x-token:${repo.gitToken}`).toString("base64");
+  return {
+    ...process.env,
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "http.extraHeader",
+    GIT_CONFIG_VALUE_0: `Authorization: Basic ${basic}`,
+  };
 }
 
 export interface WorkerCheckout {
@@ -51,13 +76,15 @@ export async function provisionWorkerCheckout(
   mkdirSync(join(workRoot, "repos"), { recursive: true });
   mkdirSync(join(workRoot, "checkouts"), { recursive: true });
 
+  const authEnv = gitAuthEnv(repo);
   if (!existsSync(join(cacheDir, ".git"))) {
-    await gitExecOrThrow(["clone", gitUrl, cacheDir], { timeout: 10 * 60 * 1000 });
+    await gitExecOrThrow(["clone", gitUrl, cacheDir], { timeout: 10 * 60 * 1000, env: authEnv });
   } else {
-    // The token rotates per board boot — always fetch with the CURRENT url.
+    // A token is per-assignment — always fetch with the CURRENT credential.
     await gitExecOrThrow(["fetch", gitUrl, "+refs/heads/*:refs/remotes/origin/*", "--prune"], {
       cwd: cacheDir,
       timeout: 10 * 60 * 1000,
+      env: authEnv,
     });
   }
 
@@ -108,6 +135,7 @@ export async function pushWorkerResult(
   await gitExecOrThrow(["push", "--force", gitUrl, `HEAD:${repo.incomingRef}`], {
     cwd: checkout.cwd,
     timeout: 10 * 60 * 1000,
+    env: gitAuthEnv(repo),
   });
 }
 
