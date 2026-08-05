@@ -194,10 +194,17 @@ async function reconcileStaleMergedIssue(
   issueNumber: number | null | undefined,
   boardEvents: ReturnType<typeof createBoardEvents>,
   noteSkip: (projectId: string, issueNumber: number | null | undefined, reason: AutoStartSkipReason) => void,
+  mergedAt: string | null,
 ): Promise<void> {
   const label = issueNumber != null ? `#${issueNumber}` : issueId;
   try {
-    const { issueTransitioned } = await reconcileMergedIssue({ database: db, issueId, projectId });
+    // `mergedAt` makes this a CATCH-UP reconcile: a status that was changed AFTER the merge
+    // is a deliberate reopen and must be left alone. Without it this sweep re-closed such a
+    // ticket on EVERY cycle, silently undoing the operator.
+    const { issueTransitioned, reopenedAfterMerge } = await reconcileMergedIssue({ database: db, issueId, projectId, mergedAt });
+    if (reopenedAfterMerge) {
+      console.log(`[monitor] Issue ${label} was reopened after its workspace merged — leaving its status alone (not re-closing it) and not starting a duplicate workspace`);
+    }
     if (issueTransitioned) {
       console.log(`[monitor] Reconciled issue ${label} to Done — its workspace was already merged but the issue status had not caught up; skipped starting a duplicate workspace (#190)`);
       boardEvents.broadcast(projectId, "board_changed");
@@ -273,7 +280,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       if (issueWorkspaces.some((w) => w.status !== "closed")) continue;
       const mergedWs = issueWorkspaces.find((w) => w.mergedAt != null);
       if (mergedWs) {
-        await reconcileStaleMergedIssue(inProgressSt.projectId, issue.id, issue.issueNumber, boardEvents, noteSkip);
+        await reconcileStaleMergedIssue(inProgressSt.projectId, issue.id, issue.issueNumber, boardEvents, noteSkip, mergedWs.mergedAt);
         continue;
       }
       if (!isMonitorEligibleIssue(issue, allowFeatureTypes)) continue;
@@ -384,7 +391,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       if (issueWorkspaces.some((w) => w.status !== "closed")) continue;
       const mergedWs = issueWorkspaces.find((w) => w.mergedAt != null);
       if (mergedWs) {
-        await reconcileStaleMergedIssue(issue.projectId, issue.id, issue.issueNumber, boardEvents, noteSkip);
+        await reconcileStaleMergedIssue(issue.projectId, issue.id, issue.issueNumber, boardEvents, noteSkip, mergedWs.mergedAt);
         continue;
       }
       if (!isMonitorEligibleIssue(issue, allowFeatureTypes)) { noteSkip(inProgressSt.projectId, issue.issueNumber, "feature_type_excluded"); continue; }

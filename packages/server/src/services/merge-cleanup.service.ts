@@ -41,6 +41,19 @@ export interface ReconcileMergedIssueInput {
   projectId?: string | null;
   /** When no "Done" status exists, fall back to "AI Reviewed" (used by the merge path). */
   fallbackToAiReviewed?: boolean;
+  /**
+   * When the work actually landed (the merged workspace's `mergedAt`). Supplying it turns
+   * the reconcile into a CATCH-UP: it converges the issue only when its current status
+   * predates the merge. Without it the reconcile is unconditional, which is only correct
+   * on the merge path itself (where the merge IS the latest event).
+   *
+   * Why it matters: the monitor's already-merged sweep runs every cycle, forever. Force-
+   * setting Done with no recency check meant a human who deliberately REOPENED a merged
+   * ticket (Done → Todo, because the work was wrong or incomplete) had it silently
+   * flipped back to Done on the next cycle — repeatedly, with no audit trail, so the
+   * board looked like it was fighting the operator.
+   */
+  mergedAt?: string | null;
 }
 
 export interface ReconcileMergedIssueResult {
@@ -49,6 +62,12 @@ export interface ReconcileMergedIssueResult {
   issueTransitioned: boolean;
   /** The status the issue was (or already is) reconciled to, when resolvable. */
   targetStatusId: string | null;
+  /**
+   * Set when the issue was left alone because its status was changed AFTER the merge —
+   * i.e. someone reopened it on purpose. Callers surface this instead of silently
+   * treating the no-op as "already Done".
+   */
+  reopenedAfterMerge?: boolean;
 }
 
 /**
@@ -61,6 +80,19 @@ export interface ReconcileMergedIssueResult {
  * safe — once the issue already sits on the target status, every later call is a no-op
  * (issueTransitioned=false) and never rewrites statusChangedAt.
  */
+/**
+ * True when the issue's status transition is strictly newer than the merge. Unparseable or
+ * missing timestamps return false — the guard must never *block* reconciliation on bad data,
+ * only on a demonstrably later status change.
+ */
+function isStatusNewerThanMerge(statusChangedAt: string | null | undefined, mergedAt: string): boolean {
+  if (!statusChangedAt) return false;
+  const statusTime = Date.parse(statusChangedAt);
+  const mergeTime = Date.parse(mergedAt);
+  if (Number.isNaN(statusTime) || Number.isNaN(mergeTime)) return false;
+  return statusTime > mergeTime;
+}
+
 export async function reconcileMergedIssue(
   input: ReconcileMergedIssueInput,
 ): Promise<ReconcileMergedIssueResult> {
@@ -90,6 +122,15 @@ export async function reconcileMergedIssue(
   // path) sees the issue already on the target status and does nothing.
   if (issue.statusId === targetStatus.id) {
     return { projectId, issueTransitioned: false, targetStatusId: targetStatus.id };
+  }
+
+  // Recency guard (only for catch-up callers that pass `mergedAt`): the merge is old news
+  // once the issue's status was changed AFTER it. That is a deliberate reopen, not a status
+  // that failed to catch up — converging it to Done would overwrite the operator's decision
+  // on every single cycle. `>` (not `>=`) so the merge path's own call, which stamps the
+  // transition and the merge at the same instant, still converges.
+  if (input.mergedAt && isStatusNewerThanMerge(issue.statusChangedAt, input.mergedAt)) {
+    return { projectId, issueTransitioned: false, targetStatusId: targetStatus.id, reopenedAfterMerge: true };
   }
 
   await setIssueStatus(input.issueId, targetStatus.id, now, input.database);

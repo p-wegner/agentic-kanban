@@ -73,7 +73,9 @@ describe("runAutoStart already-merged guard (#190)", () => {
 
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
     expect(reconcileMergedIssueMock).toHaveBeenCalledWith(
-      expect.objectContaining({ issueId: "issue-15", projectId: "proj-1" }),
+      // mergedAt must be forwarded: it is what makes the reconcile a CATCH-UP instead of an
+      // unconditional force-to-Done that re-closes a deliberately reopened ticket every cycle.
+      expect.objectContaining({ issueId: "issue-15", projectId: "proj-1", mergedAt: "2026-08-01T01:00:42.000Z" }),
     );
   });
 
@@ -92,7 +94,7 @@ describe("runAutoStart already-merged guard (#190)", () => {
 
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
     expect(reconcileMergedIssueMock).toHaveBeenCalledWith(
-      expect.objectContaining({ issueId: "issue-15", projectId: "proj-1" }),
+      expect.objectContaining({ issueId: "issue-15", projectId: "proj-1", mergedAt: "2026-08-01T01:00:42.000Z" }),
     );
   });
 
