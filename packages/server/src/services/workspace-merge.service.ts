@@ -350,7 +350,14 @@ export function createWorkspaceMergeService(deps: {
       console.log(`[workspace-merge] doMerge phase=pre-merge-gate workspaceId=${id}`);
       const gate = await resolveMergeGate({
         token: opts.gate ?? RUN_GATE,
-        workspace: { id, workingDir: workspace.workingDir },
+        // `baseBranch` is REQUIRED here, not decorative (#239): without it
+        // `resolveMergeGateShas` cannot resolve the base tip, so content-keyed
+        // `already-passed` evidence would validate on the branch tip alone — which also
+        // waives the 15-minute freshness check. Since the gate runs OUTSIDE the repo lock,
+        // that is exactly the window in which another merge moves the base and this
+        // workspace's never-verified merge RESULT lands on a stale proof. It also lets the
+        // in-lock re-gate read the diff for the docs-only skip and test scoping.
+        workspace: { id, workingDir: workspace.workingDir, baseBranch },
         projectId: project.id,
         database,
       });
