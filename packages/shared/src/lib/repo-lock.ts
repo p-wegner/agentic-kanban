@@ -27,15 +27,39 @@ import { join } from "node:path";
  * the server process was OOM-killed or crashed mid-merge) is reclaimed
  * immediately regardless of heartbeat age — otherwise every merge on that
  * repo is blocked for up to {@link REPO_LOCK_STALE_MS} by a holder that no
- * longer exists. A live pid (or a cross-host / unreadable holder) is never
- * treated as dead by this check — it only ever shortens the wait, never
- * widens it — so the heartbeat-staleness path stays the fallback.
+ * longer exists.
+ *
+ * The same probe cuts the other way too: a same-host holder whose pid is
+ * PROVABLY alive is NOT reclaimed even when its heartbeat has gone stale. A
+ * stale heartbeat is only presumptive evidence of death, and that presumption
+ * is wrong for a holder that is mid-`git` but failed to refresh the file in
+ * time (blocked event loop, system sleep/resume, an AV-locked write on
+ * Windows) — reclaiming there is how a live lock gets stolen. Bounded by
+ * {@link REPO_LOCK_LIVE_HOLDER_MAX_MS} so a recycled pid can never wedge the
+ * repo forever. A cross-host holder, an EPERM pid, or an unreadable holder is
+ * neither confirmed dead nor confirmed alive, so those keep the original
+ * heartbeat-staleness behaviour.
  */
 
 const LOCK_FILE_NAME = "agentic-kanban-merge.lock";
 
 /** A heartbeat older than this means the holder is presumed dead (crashed, hot-reloaded, killed). */
 export const REPO_LOCK_STALE_MS = 60 * 1000;
+
+/**
+ * Upper bound on how long a PROVABLY-ALIVE same-host holder can block reclaim on a stale
+ * heartbeat alone.
+ *
+ * `process.kill(pid, 0)` proving a pid alive normally means the holder is still working and its
+ * heartbeat merely lagged (a blocked event loop, a system sleep/resume, an AV-locked lockfile
+ * write on Windows) — reclaiming there steals the lock out from under a running `git`. But a pid
+ * can also be RECYCLED (after a reboot the recorded pid may belong to an unrelated process),
+ * and an unconditional refusal would then wedge the repo permanently with no recovery path but
+ * deleting the file by hand. This bound keeps the safe case safe while guaranteeing the lock is
+ * always eventually reclaimable. Generous on purpose: it must exceed any legitimate hold
+ * (`MERGE_QUEUE_REPO_LOCK_TIMEOUT_MS` is 90 minutes).
+ */
+export const REPO_LOCK_LIVE_HOLDER_MAX_MS = 2 * 60 * 60 * 1000;
 
 /** How often a held lock's heartbeat is refreshed while work is in flight. */
 export const REPO_LOCK_HEARTBEAT_INTERVAL_MS = 15 * 1000;
@@ -94,13 +118,36 @@ function heartbeatAgeMs(contents: RepoLockContents, nowMs: number): number {
  * the heartbeat window.
  */
 function isProcessConfirmedDead(contents: RepoLockContents): boolean {
-  if (contents.hostname !== hostname()) return false;
+  return probeHolderProcess(contents) === "dead";
+}
+
+/**
+ * True only when we can be CONFIDENT the holder is still running: same host, and
+ * `process.kill(pid, 0)` succeeded outright. A cross-host holder, an EPERM (a pid owned by
+ * another user — existing behaviour treats that as unprovable), or any unexpected error is NOT
+ * confirmation, so those keep the pre-existing heartbeat-staleness reclaim path.
+ */
+function isProcessConfirmedAlive(contents: RepoLockContents): boolean {
+  return probeHolderProcess(contents) === "alive";
+}
+
+/**
+ * Tri-state probe of the recorded holder pid. The three outcomes drive three different
+ * decisions, which is why this cannot be a boolean:
+ *  - `"dead"`   → same host, ESRCH: reclaim IMMEDIATELY, even inside the staleness window (#207).
+ *  - `"alive"`  → same host, signal delivered: REFUSE reclaim; the holder is mid-`git` and its
+ *                 heartbeat merely lagged.
+ *  - `"unknown"`→ cross-host, EPERM, or an unexpected error: fall back to heartbeat staleness,
+ *                 exactly as before.
+ */
+function probeHolderProcess(contents: RepoLockContents): "dead" | "alive" | "unknown" {
+  if (contents.hostname !== hostname()) return "unknown";
   try {
     process.kill(contents.pid, 0);
-    return false;
+    return "alive";
   } catch (err) {
     const code = err && typeof err === "object" && "code" in err ? (err as NodeJS.ErrnoException).code : undefined;
-    return code === "ESRCH";
+    return code === "ESRCH" ? "dead" : "unknown";
   }
 }
 
@@ -111,6 +158,12 @@ export interface RepoLockStatus {
   isStale: boolean;
   /** Same-host holder whose pid no longer exists — reclaimable even if not yet stale. See {@link isProcessConfirmedDead}. */
   ownerProcessDead: boolean;
+  /**
+   * Same-host holder whose pid is PROVABLY still running. Such a lock is not reclaimed even
+   * when its heartbeat is stale — see {@link isProcessConfirmedAlive} and
+   * {@link REPO_LOCK_LIVE_HOLDER_MAX_MS}.
+   */
+  ownerProcessAlive: boolean;
 }
 
 /** Inspect the current lock (if any) without acquiring or mutating it. */
@@ -126,6 +179,7 @@ export function inspectRepoLock(repoPath: string, nowMs = Date.now()): RepoLockS
     ageMs,
     isStale: ageMs > REPO_LOCK_STALE_MS,
     ownerProcessDead: isProcessConfirmedDead(contents),
+    ownerProcessAlive: isProcessConfirmedAlive(contents),
   };
 }
 
@@ -151,7 +205,9 @@ function recoverIfUnchanged(lockPath: string, expected: RepoLockContents): boole
  * {@link inspectRepoLock} or layer their own retry/backoff on top).
  *
  * Returns a handle on success, or `null` if a live (non-stale, live-process)
- * lock is held by someone else. A stale lock (heartbeat older than
+ * lock is held by someone else — or if the holder's heartbeat IS stale but its
+ * same-host pid is provably alive (see {@link REPO_LOCK_LIVE_HOLDER_MAX_MS}).
+ * A stale lock (heartbeat older than
  * {@link REPO_LOCK_STALE_MS}) is recovered automatically before the
  * acquisition attempt — as is a same-host lock whose holder pid is confirmed
  * dead ({@link isProcessConfirmedDead}), even if its heartbeat isn't stale
@@ -164,6 +220,20 @@ export function tryAcquireRepoLock(repoPath: string, holder: string, nowMs = Dat
   const existing = inspectRepoLock(repoPath, nowMs);
   if (existing) {
     if (!existing.isStale && !existing.ownerProcessDead) return null;
+    // A stale heartbeat is only PRESUMPTIVE evidence that the holder is gone. When the holder is
+    // same-host and its pid is provably alive, that presumption is simply wrong: the process is
+    // mid-`git` and merely failed to refresh the file in time (blocked event loop, system
+    // sleep/resume, an AV-locked write on Windows). Reclaiming there hands a second writer the
+    // same repo while the first is still working — the exact corruption the lock exists to
+    // prevent. `isProcessConfirmedDead` only ever SHORTENED the wait, so nothing used to block
+    // this. Bounded by REPO_LOCK_LIVE_HOLDER_MAX_MS so a recycled pid cannot wedge the repo.
+    if (existing.ownerProcessAlive && existing.ageMs <= REPO_LOCK_LIVE_HOLDER_MAX_MS) {
+      console.warn(
+        `[repo-lock] refusing to reclaim stale-heartbeat lock at ${lockPath}: holder pid=${existing.contents.pid} is ALIVE on this host ` +
+          `(heartbeat age=${Math.round(existing.ageMs / 1000)}s, holder=${existing.contents.holder}) — waiting rather than stealing a live lock`,
+      );
+      return null;
+    }
     if (existing.ownerProcessDead && !existing.isStale) {
       console.warn(
         `[repo-lock] recovering lock at ${lockPath} held by DEAD process pid=${existing.contents.pid} on this host ` +
