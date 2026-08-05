@@ -180,6 +180,30 @@ describe("resolveDbLocation rule 3 never adopts an empty/invalid local file (#16
     expect(loc.path).toBe(realCandidate);
   });
 
+  // The floor is a heuristic, and the stub that actually caused the incident was ~700 KB —
+  // far ABOVE it — because `drizzle-kit` ran every migration into it. So the rejection must
+  // not be silent: a rejected candidate is reported so the startup log can name the file.
+  it("REPORTS a rejected stub candidate instead of skipping it silently", () => {
+    const loc = resolveDbLocation(
+      base({
+        existsSync: () => true,
+        statSync: () => ({ size: 4096 }),
+        localDbCandidates: SERVER_CANDIDATES,
+      }),
+    );
+    expect(loc.source).toBe("home-fallback");
+    expect(loc.rejectedLocalCandidates).toEqual([SERVER_CANDIDATES[0]]);
+  });
+
+  it("reports NO rejected candidates on a clean resolution", () => {
+    const adopted = resolveDbLocation(base({ existsSync: () => true, localDbCandidates: SERVER_CANDIDATES }));
+    expect(adopted.rejectedLocalCandidates).toEqual([]);
+    const home = resolveDbLocation(base({ existsSync: () => false, localDbCandidates: SERVER_CANDIDATES }));
+    expect(home.rejectedLocalCandidates).toEqual([]);
+    const envDir = resolveDbLocation(base({ env: { AGENTIC_KANBAN_DIR: resolve("/data/dir") }, existsSync: () => true, localDbCandidates: SERVER_CANDIDATES }));
+    expect(envDir.rejectedLocalCandidates).toEqual([]);
+  });
+
   it("resolveDbLocation never calls fs functions that create/open a file (pure path decision)", () => {
     // A dedicated assertion that the resolver itself never touches anything but
     // the injected existsSync/statSync — no write/open API is imported or called.

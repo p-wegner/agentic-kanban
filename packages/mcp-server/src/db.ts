@@ -24,6 +24,9 @@ const url = location.url;
 // Log the resolved absolute DB path at startup so a split-brain is visible.
 // MCP speaks JSON-RPC over stdout, so diagnostics MUST go to stderr.
 console.error(`[mcp-db] opening ${location.path ?? url} (source: ${location.source})`);
+for (const rejected of location.rejectedLocalCandidates) {
+  console.error(`[mcp-db] IGNORING ${rejected} — it exists but is too small to be a real database (a stray schema-only stub). Delete it.`);
+}
 
 // Ensure the target directory exists (the home-dir fallback may not yet).
 if (location.dir && !existsSync(location.dir)) mkdirSync(location.dir, { recursive: true });
