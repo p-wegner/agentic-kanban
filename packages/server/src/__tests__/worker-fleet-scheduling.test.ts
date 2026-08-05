@@ -6,7 +6,15 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { WSContext } from "hono/ws";
-import { preferences, projects as projectsTable } from "@agentic-kanban/shared/schema";
+import {
+  preferences,
+  projects as projectsTable,
+  projectStatuses,
+  issues,
+  workspaces,
+  sessions,
+} from "@agentic-kanban/shared/schema";
+import { randomUUID } from "node:crypto";
 import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { createTestDb } from "./helpers/test-db.js";
 import type { Database } from "../db/index.js";
@@ -23,10 +31,12 @@ import {
   SHARES_FILESYSTEM_LABEL,
   type WorkerFleet,
 } from "../services/worker-fleet.service.js";
+import { PENDING_ASSIGN_TTL_MS } from "../services/worker-connection.service.js";
 import { sweepIncomingWorkerRefs } from "../startup/worker-incoming-sweep.js";
 import { incomingRefFor } from "../services/worker-remote-sync.service.js";
 
 const PROJECT_ID = "cccc1111-2222-3333-4444-555566667777";
+const STATUS_ID = "cccc1111-2222-3333-4444-5555666677aa";
 const fakeWs = () => ({ send: () => {}, close: () => {} }) as unknown as WSContext;
 
 describe("worker fleet scheduling (phase 3)", () => {
@@ -69,7 +79,7 @@ describe("worker fleet scheduling (phase 3)", () => {
       const full = await connectWorker({ name: "full", labels: ["docker", "gpu", "extra"] });
       expect(await selectWorkerForLaunch(fleet, "claude", ["docker", "gpu"])).toBe(full);
       expect(await resolveWorkerPlacement({ database: db, projectId: PROJECT_ID, providerName: "claude" }))
-        .toEqual({ kind: "remote", workerId: full });
+        .toEqual({ kind: "remote", workerId: full, strict: false });
       expect(partial).not.toBe(full);
     });
   });
@@ -85,6 +95,67 @@ describe("worker fleet scheduling (phase 3)", () => {
       fleet.connections.handleMessage(a, JSON.stringify({ type: "hello", workerId: a, runningSessionIds: ["s1", "s2"] }));
       // `a` is now at capacity and drops out entirely.
       expect(await resolveFleetCapacity(fleet, "claude")).toEqual({ eligibleWorkers: 1, freeSlots: 3 });
+    });
+
+    it("counts a dispatched-but-silent assignment against capacity (#248)", async () => {
+      const workerId = await connectWorker({ name: "solo", maxConcurrency: 1 });
+      expect(await selectWorkerForLaunch(fleet, "claude")).toBe(workerId);
+
+      // Dispatch one session and send NO output back — exactly the window a
+      // monitor cycle starting three workspaces at once lands in.
+      const spec = { command: "node", args: [], env: {}, cwd: "/wt" };
+      expect(fleet.connections.send(workerId, { type: "assign", sessionId: "s1", spec })).toBe(true);
+
+      expect(await selectWorkerForLaunch(fleet, "claude")).toBeNull();
+      expect(await resolveFleetCapacity(fleet, "claude")).toEqual({ eligibleWorkers: 0, freeSlots: 0 });
+
+      // Its first output turns the pending slot into a running one — still 1 load,
+      // not 2 (the pending entry must not double-count).
+      fleet.connections.handleMessage(workerId, JSON.stringify({
+        type: "event", event: { type: "stdout", sessionId: "s1", data: "working" },
+      }));
+      expect(fleet.connections.assignedSessionIds(workerId)).toEqual(["s1"]);
+
+      // Exit frees the slot again.
+      fleet.connections.handleMessage(workerId, JSON.stringify({
+        type: "event", event: { type: "exit", sessionId: "s1", exitCode: 0 },
+      }));
+      expect(await selectWorkerForLaunch(fleet, "claude")).toBe(workerId);
+    });
+
+    it("frees the slot when the worker reports the assignment failed (#248)", async () => {
+      const workerId = await connectWorker({ name: "solo-failed", maxConcurrency: 1 });
+      const spec = { command: "node", args: [], env: {}, cwd: "/wt" };
+      fleet.connections.send(workerId, { type: "assign", sessionId: "s1", spec });
+      expect(await selectWorkerForLaunch(fleet, "claude")).toBeNull();
+
+      fleet.connections.handleMessage(workerId, JSON.stringify({
+        type: "assign_failed", sessionId: "s1", error: "spawn ENOENT",
+      }));
+      expect(await selectWorkerForLaunch(fleet, "claude")).toBe(workerId);
+    });
+
+    it("expires a pending assignment that never reported anything (#248)", async () => {
+      const workerId = await connectWorker({ name: "solo-lost", maxConcurrency: 1 });
+      const spec = { command: "node", args: [], env: {}, cwd: "/wt" };
+      const t0 = Date.now();
+      fleet.connections.send(workerId, { type: "assign", sessionId: "s1", spec }, t0);
+      expect(fleet.connections.assignedSessionIds(workerId, t0 + 1000)).toEqual(["s1"]);
+      expect(fleet.connections.assignedSessionIds(workerId, t0 + PENDING_ASSIGN_TTL_MS + 1)).toEqual([]);
+    });
+
+    it("reconciles pending assignments against a reconnecting worker's hello (#248)", async () => {
+      const workerId = await connectWorker({ name: "reconnect", maxConcurrency: 2 });
+      const spec = { command: "node", args: [], env: {}, cwd: "/wt" };
+      fleet.connections.send(workerId, { type: "assign", sessionId: "s1", spec });
+      fleet.connections.send(workerId, { type: "assign", sessionId: "s2", spec });
+      expect(fleet.connections.assignedSessionIds(workerId).sort()).toEqual(["s1", "s2"]);
+
+      // The worker says it only ever got s1: the board's guess is superseded.
+      fleet.connections.handleMessage(workerId, JSON.stringify({
+        type: "hello", workerId, runningSessionIds: ["s1"],
+      }));
+      expect(fleet.connections.assignedSessionIds(workerId)).toEqual(["s1"]);
     });
   });
 
@@ -105,8 +176,30 @@ describe("worker fleet scheduling (phase 3)", () => {
       const workerId = await connectWorker();
       expect(await projectCanDispatch({ database: db, projectId: PROJECT_ID, providerName: "claude" }))
         .toEqual({ available: true });
+      // `strict` rides on the placement (#245) so the dispatch proxy can refuse
+      // the host fallback later, when the worker may already be gone.
       expect(await resolveWorkerPlacement({ database: db, projectId: PROJECT_ID, providerName: "claude" }))
-        .toEqual({ kind: "remote", workerId });
+        .toEqual({ kind: "remote", workerId, strict: true });
+    });
+
+    it("carries strict onto a git-transport placement too (#245)", async () => {
+      const { pairingToken } = fleet.registry.mintPairingToken();
+      const result = await fleet.registry.registerWorker({ pairingToken, name: "true-remote" });
+      if (!result.ok) throw new Error(result.error);
+      fleet.connections.handleOpen(result.workerId, fakeWs());
+      await db.insert(projectsTable).values({
+        id: PROJECT_ID, name: "strict-fixture", repoPath: "C:/repos/strict", defaultBranch: "master",
+      } as typeof projectsTable.$inferInsert);
+
+      const placement = await resolveWorkerPlacement({
+        database: db, projectId: PROJECT_ID, providerName: "claude", branch: "feature/ak-1-x",
+      });
+      expect(placement).toMatchObject({ kind: "remote", workerId: result.workerId, strict: true });
+
+      // No branch to push back = nothing safe to dispatch; strict forbids the
+      // host fallback that used to happen silently here.
+      await expect(resolveWorkerPlacement({ database: db, projectId: PROJECT_ID, providerName: "claude" }))
+        .rejects.toBeInstanceOf(WorkerDispatchUnavailableError);
     });
 
     it("non-strict projects never block the monitor (host fallback stays legal)", async () => {
@@ -135,11 +228,37 @@ describe("worker fleet scheduling (phase 3)", () => {
       await db.insert(projectsTable).values({
         id: PROJECT_ID, name: "sweep-fixture", repoPath: repo, defaultBranch: "master",
       } as typeof projectsTable.$inferInsert);
+      await db.insert(projectStatuses).values({
+        id: STATUS_ID, projectId: PROJECT_ID, name: "In Progress", sortOrder: 0,
+      } as typeof projectStatuses.$inferInsert);
     });
 
     afterEach(() => rmSync(repo, { recursive: true, force: true }));
 
+    /**
+     * The persisted assignment record the sweep now requires (#246): an issue +
+     * workspace on `branch` with a session stamped with a worker id. Without it
+     * the incoming ref is an unsolicited push and must be held.
+     */
+    async function seedWorkerAssignment(branch: string, issueNumber: number): Promise<void> {
+      const issueId = randomUUID();
+      const workspaceId = randomUUID();
+      const now = new Date().toISOString();
+      await db.insert(issues).values({
+        id: issueId, issueNumber, title: `assignment for ${branch}`,
+        statusId: STATUS_ID, projectId: PROJECT_ID, createdAt: now, updatedAt: now,
+      } as typeof issues.$inferInsert);
+      await db.insert(workspaces).values({
+        id: workspaceId, issueId, branch, baseBranch: "master", status: "active",
+        createdAt: now, updatedAt: now,
+      } as typeof workspaces.$inferInsert);
+      await db.insert(sessions).values({
+        id: randomUUID(), workspaceId, status: "stopped", startedAt: now, workerId: "worker-1",
+      } as typeof sessions.$inferInsert);
+    }
+
     it("lands a push that arrived while the board was down", async () => {
+      await seedWorkerAssignment("feature/ak-5-x", 5);
       writeFileSync(join(repo, "b.txt"), "worker work\n");
       await gitExecOrThrow(["add", "."], { cwd: repo });
       await gitExecOrThrow(["commit", "-m", "worker work"], { cwd: repo });
@@ -157,6 +276,7 @@ describe("worker fleet scheduling (phase 3)", () => {
     });
 
     it("holds (never force-lands) a diverged branch", async () => {
+      await seedWorkerAssignment("feature/ak-6-y", 6);
       const base = (await gitExecOrThrow(["rev-parse", "HEAD"], { cwd: repo })).trim();
       writeFileSync(join(repo, "worker.txt"), "worker\n");
       await gitExecOrThrow(["add", "."], { cwd: repo });
@@ -179,6 +299,56 @@ describe("worker fleet scheduling (phase 3)", () => {
       // The staging ref survives so the work is still recoverable by hand.
       const incoming = await gitExec(["rev-parse", "--verify", incomingRefFor("feature/ak-6-y")], { cwd: repo });
       expect(incoming.code).toBe(0);
+    });
+
+    it("refuses to land an incoming ref with no worker assignment (#246)", async () => {
+      // The attack: a token holder pushes a descendant of master to
+      // refs/kanban/incoming/master and waits for a board restart. No session
+      // was ever dispatched for "master", so nothing may land.
+      writeFileSync(join(repo, "evil.txt"), "unreviewed\n");
+      await gitExecOrThrow(["add", "."], { cwd: repo });
+      await gitExecOrThrow(["commit", "-m", "injected"], { cwd: repo });
+      const evilSha = (await gitExecOrThrow(["rev-parse", "HEAD"], { cwd: repo })).trim();
+      await gitExecOrThrow(["update-ref", incomingRefFor("master"), evilSha], { cwd: repo });
+      await gitExecOrThrow(["reset", "--hard", "HEAD~1"], { cwd: repo });
+      const masterBefore = (await gitExecOrThrow(["rev-parse", "refs/heads/master"], { cwd: repo })).trim();
+
+      const result = await sweepIncomingWorkerRefs(db);
+      expect(result.landed).toEqual([]);
+      expect(result.held).toEqual([{ branch: "master", reason: "no worker assignment for this branch" }]);
+      const masterAfter = (await gitExecOrThrow(["rev-parse", "refs/heads/master"], { cwd: repo })).trim();
+      expect(masterAfter).toBe(masterBefore);
+      // Held, not deleted — a legitimate ref stays recoverable.
+      expect((await gitExec(["rev-parse", "--verify", incomingRefFor("master")], { cwd: repo })).code).toBe(0);
+    });
+
+    it("does not land a branch assigned in ANOTHER project (#246)", async () => {
+      const otherProjectId = "dddd1111-2222-3333-4444-555566667777";
+      const otherRepo = mkdtempSync(join(tmpdir(), "sweep-other-"));
+      try {
+        await db.insert(projectsTable).values({
+          id: otherProjectId, name: "other-fixture", repoPath: otherRepo, defaultBranch: "master",
+        } as typeof projectsTable.$inferInsert);
+        await db.insert(projectStatuses).values({
+          id: randomUUID(), projectId: otherProjectId, name: "In Progress", sortOrder: 0,
+        } as typeof projectStatuses.$inferInsert);
+        // The assignment lives in THIS project; the ref is pushed into it too,
+        // but the branch was only ever dispatched for the other project.
+        await seedWorkerAssignment("feature/ak-9-elsewhere", 9);
+
+        writeFileSync(join(repo, "c.txt"), "x\n");
+        await gitExecOrThrow(["add", "."], { cwd: repo });
+        await gitExecOrThrow(["commit", "-m", "work"], { cwd: repo });
+        const sha = (await gitExecOrThrow(["rev-parse", "HEAD"], { cwd: repo })).trim();
+        await gitExecOrThrow(["update-ref", incomingRefFor("feature/ak-99-foreign"), sha], { cwd: repo });
+        await gitExecOrThrow(["reset", "--hard", "HEAD~1"], { cwd: repo });
+
+        const result = await sweepIncomingWorkerRefs(db);
+        expect(result.landed).toEqual([]);
+        expect(result.held.map((h) => h.branch)).toEqual(["feature/ak-99-foreign"]);
+      } finally {
+        rmSync(otherRepo, { recursive: true, force: true });
+      }
     });
   });
 });
