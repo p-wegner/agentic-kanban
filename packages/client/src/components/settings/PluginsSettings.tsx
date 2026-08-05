@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { PluginManifest, PluginOutputLocation } from "@agentic-kanban/shared";
 import { PLUGIN_OUTPUT_LOCATIONS } from "@agentic-kanban/shared";
 import { apiFetch, apiPost, apiDelete } from "../../lib/api.js";
+import { getViewRoutePath } from "../../lib/appRoutes.js";
 import { showToast } from "../Toast.js";
 
 /** One row from GET /api/plugins?projectId= — DB row + parsed manifest + enabled flag. */
@@ -34,13 +35,6 @@ type ScriptRunResult = {
   timedOut: boolean;
 };
 
-type SkillRunResult = {
-  issueId: string;
-  issueNumber: number | null;
-  workspaceId: string;
-  branch: string;
-};
-
 type EnableReport = {
   prefKey: string;
   scaffoldWritten: boolean;
@@ -64,9 +58,6 @@ export function PluginsSettings({ activeProjectId }: PluginsSettingsProps) {
   // Script runs keyed `${pluginRowId}:${scriptName}`.
   const [runningScript, setRunningScript] = useState<string | null>(null);
   const [scriptResults, setScriptResults] = useState<Record<string, ScriptRunResult>>({});
-  // Skill runs keyed `${pluginRowId}:${skillName}`.
-  const [runningSkill, setRunningSkill] = useState<string | null>(null);
-  const [skillResults, setSkillResults] = useState<Record<string, SkillRunResult>>({});
 
   const refetch = useCallback(async () => {
     try {
@@ -176,34 +167,13 @@ export function PluginsSettings({ activeProjectId }: PluginsSettingsProps) {
     }
   }
 
-  async function handleRunSkill(plugin: PluginListItem, skillName: string) {
-    if (!activeProjectId || runningSkill) return;
-    const key = `${plugin.id}:${skillName}`;
-    setRunningSkill(key);
-    try {
-      const result = await apiPost<SkillRunResult>(
-        `/api/plugins/${plugin.id}/skills/${encodeURIComponent(skillName)}/run`,
-        { projectId: activeProjectId },
-      );
-      setSkillResults((r) => ({ ...r, [key]: result }));
-      showToast(
-        `Launched #${result.issueNumber ?? "?"} on branch ${result.branch}`,
-        "success",
-      );
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Skill run failed", "error");
-    } finally {
-      setRunningSkill(null);
-    }
-  }
-
   return (
     <div className="space-y-4">
       <p className="text-xs text-gray-500 dark:text-gray-400">
         Plugins are git repos (or local directories) carrying a <span className="font-mono">kanban-plugin.json</span> manifest
         that declares agent skills, embeddable iframe views, runnable scripts, and butler prompt fragments.
-        Install once, then enable per project. Scripts run as one-shot subprocesses; skills need judgment,
-        so "Run" launches a ticket + workspace against them instead.
+        Install once, then enable per project. Scripts run as one-shot subprocesses here; skills need
+        judgment (and a prompt), so they are launched as a ticket + workspace from the Plugins board view.
       </p>
 
       {/* Install form */}
@@ -374,37 +344,37 @@ export function PluginsSettings({ activeProjectId }: PluginsSettingsProps) {
                   </div>
                 )}
 
-                {/* Skills — agentic (judgment-requiring) work, launched as a workspace rather than a subprocess */}
+                {/* Skills — listed here, LAUNCHED from the Plugins board view.
+                    Settings deliberately does not launch them: a skill launch takes
+                    minutes (worktree → setup script → agent) and needs a title, a
+                    free-text prompt and a workflow choice, none of which fit a
+                    settings row. The board view streams the launch stage by stage;
+                    this tab's old "Run" button awaited the whole thing behind a
+                    static "Launching…" label, indistinguishable from a dead button. */}
                 {skills.length > 0 && (
                   <div className="border-t border-gray-100 dark:border-gray-800 pt-2 space-y-1.5">
                     <div className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide">Skills</div>
-                    {skills.map((skillName) => {
-                      const key = `${plugin.id}:${skillName}`;
-                      const result = skillResults[key];
-                      return (
-                        <div key={skillName} className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-mono text-gray-700 dark:text-gray-300">{skillName}</span>
-                            <button
-                              onClick={() => void handleRunSkill(plugin, skillName)}
-                              disabled={!activeProjectId || runningSkill !== null}
-                              title={activeProjectId ? "Create a ticket and launch a workspace against this skill" : "Select a project to run skills"}
-                              className="ml-auto text-xs px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 shrink-0"
-                            >
-                              {runningSkill === key ? "Launching…" : "Run"}
-                            </button>
-                          </div>
-                          {result && (
-                            <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                              Launched issue #{result.issueNumber ?? "?"} on <span className="font-mono">{result.branch}</span>
-                            </p>
-                          )}
-                        </div>
-                      );
-                    })}
-                    {!activeProjectId && (
-                      <p className="text-[11px] text-gray-400 dark:text-gray-500">Open a project to run skills.</p>
-                    )}
+                    <div className="flex flex-wrap gap-1">
+                      {skills.map((skillName) => (
+                        <span
+                          key={skillName}
+                          className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300"
+                        >
+                          {skillName}
+                        </span>
+                      ))}
+                    </div>
+                    <p className="text-[11px] text-gray-400 dark:text-gray-500">
+                      Run these from the{" "}
+                      <a
+                        href={getViewRoutePath("plugin-views")}
+                        className="text-brand-600 dark:text-brand-400 hover:underline"
+                        data-testid="plugin-skills-open-board-view"
+                      >
+                        Plugins board view
+                      </a>
+                      , where a launch can carry a title, a prompt and a workflow, and streams its progress.
+                    </p>
                   </div>
                 )}
               </div>
