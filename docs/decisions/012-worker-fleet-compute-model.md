@@ -62,14 +62,24 @@ completely unchanged.
 Fast-forward ONLY. A diverged branch is reported and held, never force-updated — the
 staging ref keeps the work recoverable instead of silently discarding one side.
 
+Landing is bound to an **assignment**, not to the namespace (correction, see below): a
+git token names one worker, one project and one incoming ref, and the startup sweep lands
+an incoming ref only when the DB holds a dispatch for that project + branch
+(`sessions.workerId` + `workspaces.branch`). Fast-forward-only is not a defence on its own —
+a pusher who authors a descendant of `main` satisfies it.
+
 ### Security: separate listeners, not a defended API
 The board's REST API has no auth; its defense is loopback binding. The fleet surfaces are
 the exception because they must be reachable off-loopback, so they follow the existing
 MCP-HTTP-bridge pattern rather than inventing one: a single-use, short-lived **pairing
 token** mints a per-worker **bearer token**, stored only as a sha-256 hash and compared
-with `timingSafeEqual`; the WS upgrade authenticates before upgrading. Board agent
+with `timingSafeEqual`; the WS upgrade authenticates before upgrading (Authorization
+header only — a token in a query string would land in proxy logs). Board agent
 credentials are NEVER sent to a worker — a worker authenticates its agent with its own
-machine-local login.
+machine-local login. That is enforced, not merely intended: the remote launch spec's env
+is built from an explicit ALLOWLIST of non-secret board wiring
+(`server/src/lib/remote-spec-env.ts`), and the worker MERGES it over its own environment
+so its login and paths win.
 
 **The worker-facing endpoints therefore live on their OWN listener** (`KANBAN_FLEET_PORT`),
 serving `POST /api/workers/register`, `POST /api/workers/:id/heartbeat`, `GET
@@ -144,6 +154,26 @@ Key modules: `services/agent-dispatch.service.ts`, `services/agent-remote.servic
 `services/worker-remote-sync.service.ts`, `services/fleet-listener.service.ts`,
 `worker/worker-{daemon,agent-runner,repo,cli}.ts`, `startup/worker-incoming-sweep.ts`,
 `components/WorkerFleetPanel.tsx`.
+
+## Security corrections (2026-08-06, #244-#248)
+
+An adversarial review of the shipped epic found that four of the properties claimed above
+were **not** true of the code — the docs were the aspiration, not the behaviour. All four
+are now enforced with regression tests; the list is kept here because "the docs said the
+opposite" is the part worth remembering.
+
+| # | Claimed | Actually did | Now |
+|---|---|---|---|
+| #244 | "credentials never leave their machine" | serialized the board's whole `process.env` (incl. the selected profile's `ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_BASE_URL`, plus any inherited `GITHUB_TOKEN`/npm token) into every `assign`, over a plaintext socket, and the worker spawned the agent with it INSTEAD of its own env | spec env built from an allowlist (`remote-spec-env.ts`); the worker merges it OVER its own env. Board-host paths (`GRADLE_USER_HOME`) travel only to a `shares-filesystem` worker |
+| #245 | strict dispatch means host execution "can never be silent" | strictness was honoured only while CHOOSING a worker; if the socket dropped before `assign`, the dispatch proxy caught the throw and ran the agent on the board host anyway | `strict` rides on the `Placement`; the proxy refuses the host fallback and fails the session with `NO_AVAILABLE_WORKER`. The no-branch / no-repoPath fallbacks refuse too |
+| #246 | pushes are confined to a staging namespace | the startup sweep fast-forwarded ANY `refs/kanban/incoming/*` ref in ANY project onto `refs/heads/<name>` — so a pushed descendant of `main` + a board restart = unreviewed code on `main` | the receive guard allows only the ONE ref the token was issued for, and the sweep lands only refs with a matching DB dispatch; unmatched refs are held and reported |
+| #247 | "the worker's token stops working immediately" on revoke | ONE board-wide, per-boot git token granted full clone of EVERY project and outlived `revokeWorker`; the live WebSocket also stayed open | per-assignment tokens scoped to (worker, project, incoming ref) with a TTL, dropped on revoke; `revokeWorker` fires listeners that close the socket and invalidate the tokens |
+| #248 | capacity scheduling respects `maxConcurrency` | load was derived from worker EVENTS, so an `assign` counted as zero until the agent's first output and three placements in a row could pile onto a `maxConcurrency=1` worker | a delivered `assign` occupies a slot immediately (expiring pending set, reconciled against `hello`) |
+
+Two smaller items from the same review: the worker no longer embeds the token in the clone
+URL (it was persisted in the clone's `.git/config` and visible in a process listing — it now
+travels per invocation via `GIT_CONFIG_*`/`http.extraHeader`), and the receive-guard pkt-line
+parser now requires canonical `[0-9a-f]{4}` lengths instead of trusting `parseInt`.
 
 ## Operating it
 
