@@ -416,6 +416,71 @@ worktrees.
 skill, and the repo. Say which unit it is, which invariants apply, what to do when it finishes,
 and — for a retry — what *not* to redo.
 
+## Ship an operator skill, not just work skills — RECOMMENDED
+
+Every plugin today declares skills that do the WORK inside a ticket, and a `butler.promptFragment`
+that tells an agent how to CONSUME the output. Nothing tells an agent how to **drive the plugin
+itself** — enable it, advance a loop, run the resulting tickets, know when it has converged. So an
+agent asked to "run the extraction on this project" has to rediscover the board's plugin API and
+its sharp edges from source, every time. Both requirement-extraction plugins were driven that way
+once and it cost hours; the notes below are what that cost bought.
+
+**The convention:** ship one more skill whose subject is the plugin's own operation. It reads
+`kanban-plugin.json` for the loop names, `maxUnitsPerAdvance` and script names rather than
+hardcoding them, and it encodes the operating sequence plus the traps. Name it after the plugin
+(`<plugin>-operate`) so it is obvious which one drives which.
+
+### The operating sequence
+
+```
+GET  /api/plugins?projectId=<p>                     → installed AND enabled-for-this-project?
+POST /api/plugins/:id/enable        {projectId}     → enabling junctions the skills into the repo
+GET  /api/plugins/:id/loops?projectId=<p>           → loop names, open/closed counts, paused
+POST /api/plugins/:id/loops/:name/advance {projectId}
+     → { planned, created[], skippedExisting[], capped, converged, note, warnings[] }
+POST /api/workspaces               {issueId, skillName, skipSetup}   → provision a worktree
+POST /api/workspaces/:id/launch    {}               → start the agent
+GET  /api/workspaces/:id                            → sessionStatus / lastSessionAt
+POST /api/plugins/:id/scripts/:name/run {projectId} → the plugin's own status scripts
+```
+
+### Traps, each of which has cost a real session
+
+- **`advance` creates ISSUES, not running work.** With board monitoring disabled it provisions no
+  workspace at all, so a sweep looks stalled while the loop keeps planning. Provision + launch
+  explicitly, or check monitoring first — do not assume "created" means "running".
+- **Session state is NOT on the workspace LIST endpoint.** `GET /api/workspaces?projectId=…` omits
+  `sessionStatus` and `lastSessionAt`; only `GET /api/workspaces/:id` joins them. Polling the list
+  reports every workspace as idle, so a driver skips its wait and advances over agents that are
+  still writing.
+- **Wait for the wave before the next advance.** A converging loop plans round N+1 from what round
+  N left behind. Advancing mid-round replans the round in flight.
+- **A failed write may already have committed.** A call that returns
+  `dev_server_backend_unavailable` can have created the issue and lost only the response.
+  Re-check by title before retrying, or you double-create.
+- **The loop dedupes by `externalKey`, which hand-made tickets do not have.** Mixing manual
+  `skills/run` tickets with loop-driven ones therefore always duplicates the unit.
+- **`prompt` appends to the skill's brief; `description` REPLACES it.** A driver almost always
+  wants `prompt`.
+- **`skipSetup` for read-only work.** A docs/analysis mining task does not need the project's build;
+  a cold build per worktree across N modules is pure critical-path cost.
+- **Untracked files are invisible in a worktree.** If the plugin reads a config the target has not
+  committed (a profile, a context map), a fresh worktree cannot see it and the skill silently falls
+  back to its built-in defaults — which are another stack's. Seed it, or commit it.
+- **The public port is a proxy.** A dev server serves the UI on one port and the API on
+  `port + 10000`; when the backend dies the proxy still answers and every write returns
+  `dev_server_backend_unavailable`. Check the backend port directly before believing the board is up.
+- **The CLI and a checkout dev server can use different databases.** `pnpm cli -- list` is not
+  evidence about what the running server sees; ask the API.
+
+### What a driver should reuse rather than reinvent
+
+- the **manifest** (`loops[]`, `scripts[]`, `maxUnitsPerAdvance`) — it is the machine-readable
+  contract for what this plugin can be told to do;
+- the plugin's own **status scripts** (`loop-status`, `driver-health`) over ad-hoc commands;
+- the **butler fragment** for consumer-side vocabulary, so the operator skill can stay purely about
+  operation and link to it instead of restating it.
+
 ## A minimal plugin, end to end
 
 ```
