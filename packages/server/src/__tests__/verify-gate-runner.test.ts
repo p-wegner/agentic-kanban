@@ -159,6 +159,22 @@ describe("verify-gate-runner", () => {
       expect(result.stderr).toContain("[verify-gate] Passed.");
     },
   );
+
+  // The translation used to recognise only `^` and `&&`, so a chained command's SECOND
+  // wrapper invocation reached cmd.exe as `./gradlew` and failed the gate anyway.
+  it.runIf(process.platform === "win32")(
+    "translates a wrapper invocation after a separator other than && on win32",
+    async () => {
+      await writeFile(join(hookDir, "gradlew.bat"), "@echo off\r\nexit /b 0\r\n");
+      await writeFile(
+        join(hookDir, "verify-gate.config.json"),
+        JSON.stringify({ command: "echo pre; ./gradlew build" }),
+      );
+      const result = runGate({ hookDir });
+      expect(result.status).toBe(0);
+      expect(result.stderr).toContain("[verify-gate] Passed.");
+    },
+  );
 });
 
 function isPidAlive(pid: number): boolean {

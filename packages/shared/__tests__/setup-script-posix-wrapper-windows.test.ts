@@ -32,6 +32,43 @@ describe("translatePosixWrapperForWindows (#181)", () => {
   it("does not touch a wrapper invocation nested inside another path", () => {
     expect(translatePosixWrapperForWindows("./sub/gradlew build")).toBe("./sub/gradlew build");
   });
+
+  // Only `^` and `&&` were recognised, so the SECOND half of the very scripts this
+  // function exists for reached cmd.exe untranslated and failed exactly as before.
+  describe("recognises every shell separator, not just &&", () => {
+    it("rewrites after ||", () => {
+      expect(translatePosixWrapperForWindows("./gradlew check || ./gradlew clean check")).toBe(
+        ".\\gradlew.bat check || .\\gradlew.bat clean check",
+      );
+    });
+
+    it("rewrites after ;", () => {
+      expect(translatePosixWrapperForWindows("cd app; ./gradlew build")).toBe("cd app; .\\gradlew.bat build");
+    });
+
+    it("rewrites after a single & and after a pipe", () => {
+      expect(translatePosixWrapperForWindows("setup & ./mvnw test")).toBe("setup & .\\mvnw.cmd test");
+      expect(translatePosixWrapperForWindows("echo x | ./gradlew build")).toBe("echo x | .\\gradlew.bat build");
+    });
+
+    it("rewrites inside parentheses", () => {
+      expect(translatePosixWrapperForWindows("(./gradlew build)")).toBe("(.\\gradlew.bat build)");
+    });
+
+    it("rewrites every line of a multi-line script", () => {
+      const script = ["./gradlew clean", "./mvnw verify", "./gradlew build"].join(String.fromCharCode(10));
+      const expected = [".\\gradlew.bat clean", ".\\mvnw.cmd verify", ".\\gradlew.bat build"].join(String.fromCharCode(10));
+      expect(translatePosixWrapperForWindows(script)).toBe(expected);
+    });
+
+    it("preserves the original spacing around the separator", () => {
+      expect(translatePosixWrapperForWindows("a &&   ./gradlew build")).toBe("a &&   .\\gradlew.bat build");
+    });
+
+    it("still leaves a quoted mention alone (conservative by design)", () => {
+      expect(translatePosixWrapperForWindows('echo "./gradlew build"')).toBe('echo "./gradlew build"');
+    });
+  });
 });
 
 describe("runSetupScript with a ./gradlew-style verify_script on win32 (#181)", () => {

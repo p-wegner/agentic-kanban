@@ -39,11 +39,23 @@ export interface SetupScriptContainer {
  * merge gate outright on Windows, regardless of where that POSIX-style text came from.
  * The explicit `.\` prefix is required too — a bare `gradlew.bat`/`mvnw.cmd` is not
  * resolved from the cwd under `cmd /c`.
+ *
+ * Every shell separator counts, not just `&&`. The original pattern matched only the
+ * start of the script or a preceding `&&`, so the SECOND half of the very scripts this
+ * exists for slipped through untranslated and failed exactly as before —
+ * `./gradlew check || ./gradlew clean check`, `cd app; ./gradlew build`, a piped or
+ * parenthesised invocation, and any multi-line script. The character class below covers
+ * `&&`/`||` too (their last character is `&`/`|`), and the captured whitespace is
+ * restored so the rewritten script keeps its original spacing. Deliberately
+ * conservative: a wrapper preceded by anything else (a quote, another path segment as in
+ * `./sub/gradlew`) is left alone.
  */
+const WRAPPER_INVOCATION_START = "(^|[\\r\\n;&|(])(\\s*)";
+
 export function translatePosixWrapperForWindows(script: string): string {
   return script
-    .replace(/(^|&&\s*)\.\/gradlew\b/g, "$1.\\gradlew.bat")
-    .replace(/(^|&&\s*)\.\/mvnw\b/g, "$1.\\mvnw.cmd");
+    .replace(new RegExp(`${WRAPPER_INVOCATION_START}\\./gradlew\\b`, "g"), "$1$2.\\gradlew.bat")
+    .replace(new RegExp(`${WRAPPER_INVOCATION_START}\\./mvnw\\b`, "g"), "$1$2.\\mvnw.cmd");
 }
 
 export interface RunSetupScriptOptions {
