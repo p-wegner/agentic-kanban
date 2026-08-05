@@ -26,6 +26,36 @@ import { spawnShellCommand, taskkillTree } from "./process-exec.js";
 import { tailOutput as tail } from "./plugin-exec.js";
 import { findView, probeHealth } from "./plugin-view-probe.js";
 
+/**
+ * How long `startView` waits for the child to answer its health probe before returning — #252.
+ *
+ * The start path used to return `http://localhost:<port>` the instant `spawnShellCommand`
+ * returned, and the client sets that as the iframe `src` immediately, so any server needing more
+ * than ~100ms to bind (a Vite dev server, a Python dashboard) rendered the browser's
+ * ERR_CONNECTION_REFUSED page with no retry. The wait is BOUNDED and non-fatal: a slower server
+ * still comes up, it just reports `ready: false` and the caller polls `getViewStatus`.
+ */
+const DEFAULT_READINESS_TIMEOUT_MS = 15_000;
+const READINESS_POLL_MS = 150;
+
+/** Read per call, not at import, so a test (or an operator) can retune it without a restart. */
+function readinessTimeoutMs(): number {
+  const raw = Number(process.env.PLUGIN_VIEW_READY_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_READINESS_TIMEOUT_MS;
+}
+
+export interface PluginViewStartResult {
+  url: string;
+  port: number;
+  pid: number | null;
+  /**
+   * True when the child answered its health probe before the deadline. `false` means "still
+   * starting" — the process is alive and tracked, so the caller should show a spinner and poll
+   * `getViewStatus` rather than frame a URL that is not listening yet.
+   */
+  ready: boolean;
+}
+
 export interface PluginViewProcess {
   child: ChildProcess;
   port: number;
@@ -41,6 +71,36 @@ export interface PluginViewProcess {
  * no service/db instance. Keyed `pluginRowId:viewId:projectId`.
  */
 const viewChildren = new Map<string, PluginViewProcess>();
+
+/**
+ * In-flight `startView` calls, keyed exactly like `viewChildren` — #251.
+ *
+ * The double-start guard is a check-then-set with FOUR awaits between the `viewChildren.get(key)`
+ * and the matching `set` (plugin row, project row, output repo path, port allocation). Two
+ * concurrent starts of one view therefore both saw "not running" and both spawned a server; the
+ * second overwrote the map entry and the first child was orphaned FOREVER — its exit handler's
+ * `entry?.child === child` guard makes it remove nothing, `stopView` cannot see it and
+ * `stopAllPluginViews()` cannot kill it on shutdown.
+ *
+ * Rather than reserve the slot and kill a loser, the second caller now JOINS the first promise:
+ * the key is derivable from the arguments alone, before any await, so there is no window at all
+ * and only one child is ever spawned.
+ */
+const startingViews = new Map<string, Promise<PluginViewStartResult>>();
+
+/**
+ * Poll the child's health endpoint until it answers or the deadline passes. Gives up early if the
+ * child exited — a server that died has nothing to become ready.
+ */
+async function waitUntilReady(port: number, healthPath: string | undefined, child: ChildProcess): Promise<boolean> {
+  const deadline = Date.now() + readinessTimeoutMs();
+  for (;;) {
+    if (await probeHealth(port, healthPath)) return true;
+    if (child.exitCode !== null || child.killed) return false;
+    if (Date.now() >= deadline) return false;
+    await new Promise((r) => setTimeout(r, READINESS_POLL_MS));
+  }
+}
 
 function viewKey(pluginRowId: string, viewId: string, projectId: string): string {
   return `${pluginRowId}:${viewId}:${projectId}`;
@@ -119,7 +179,21 @@ export function createPluginViewsRuntime<P extends PluginWithManifest, Pr extend
 }) {
   const { requirePlugin, requireProject, resolveOutputRepoPath, enabledSlugsByProject, listPluginRows, parseManifest } = deps;
 
-  async function startView(pluginRowId: string, viewId: string, projectId: string): Promise<{ url: string; port: number; pid: number | null }> {
+  async function startView(pluginRowId: string, viewId: string, projectId: string): Promise<PluginViewStartResult> {
+    // Serialize per view BEFORE the first await — see `startingViews` (#251).
+    const key = viewKey(pluginRowId, viewId, projectId);
+    const inFlight = startingViews.get(key);
+    if (inFlight) return inFlight;
+    const attempt = startViewSerialized(pluginRowId, viewId, projectId);
+    startingViews.set(key, attempt);
+    try {
+      return await attempt;
+    } finally {
+      if (startingViews.get(key) === attempt) startingViews.delete(key);
+    }
+  }
+
+  async function startViewSerialized(pluginRowId: string, viewId: string, projectId: string): Promise<PluginViewStartResult> {
     const plugin = await requirePlugin(pluginRowId);
     const project = await requireProject(projectId);
     const view = findView(plugin.manifest, viewId);
@@ -128,7 +202,14 @@ export function createPluginViewsRuntime<P extends PluginWithManifest, Pr extend
     const existing = viewChildren.get(key);
     if (existing) {
       if (existing.child.exitCode === null && !existing.child.killed) {
-        return { url: `http://localhost:${existing.port}`, port: existing.port, pid: existing.pid };
+        // Already supervised: report its LIVE readiness rather than assuming a running process is
+        // serving — a view that died between requests must not be framed as ready.
+        return {
+          url: `http://localhost:${existing.port}`,
+          port: existing.port,
+          pid: existing.pid,
+          ready: await probeHealth(existing.port, view.serve.healthPath),
+        };
       }
       viewChildren.delete(key);
     }
@@ -172,7 +253,16 @@ export function createPluginViewsRuntime<P extends PluginWithManifest, Pr extend
       viewId,
       projectId,
     });
-    return { url: `http://localhost:${port}`, port, pid: child.pid ?? null };
+    // Wait for the server to actually LISTEN before reporting the URL as usable (#252). Bounded
+    // and non-fatal — the child stays supervised either way, and `ready: false` tells the caller
+    // to poll instead of framing a socket that is not accepting connections yet.
+    const ready = await waitUntilReady(port, view.serve.healthPath, child);
+    if (!ready && (child.exitCode !== null || child.killed)) {
+      console.warn(
+        `[plugins] view ${plugin.pluginId}:${viewId} exited before it became ready${stderrTail ? `: ${stderrTail.slice(-500)}` : ""}`,
+      );
+    }
+    return { url: `http://localhost:${port}`, port, pid: child.pid ?? null, ready };
   }
 
   async function stopView(pluginRowId: string, viewId: string, projectId: string): Promise<{ stopped: boolean }> {
