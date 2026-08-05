@@ -44,6 +44,23 @@ export const MAX_MONITOR_MERGES_PER_CYCLE = 2;
  * pass — previously a single sequential walk with no per-project ceiling.
  */
 export const DEFAULT_MONITOR_PROJECT_TIME_BUDGET_MS = 30_000;
+/**
+ * Wall-clock ceiling on a SINGLE candidate's processing, after which the walk stops
+ * waiting for it (the abandoned work keeps running detached, but no longer holds the
+ * cycle). #208 only bounded the walk BETWEEN candidates: the project deadline was
+ * checked before each candidate and never again, so one candidate awaiting an
+ * unbounded `git` call (credential prompt, dead network mount, a Windows git that
+ * never exits) made `processWorkspaceCandidates` never resolve. The cycle's `finally`
+ * then never ran, `cycleRunning` stayed `true` forever, and EVERY later cycle
+ * short-circuited on the re-entrancy guard — for every project, until a restart.
+ * A between-candidates deadline cannot express that; preemption has to be a race.
+ *
+ * Deliberately independent of `projectTimeBudgetMs` (and generous): the project budget
+ * is a scheduling fairness knob measured on an INJECTED clock, while this is a real
+ * wall-clock hang detector. Coupling them would make a small test/ops budget abandon
+ * healthy candidates mid-merge.
+ */
+export const DEFAULT_MONITOR_CANDIDATE_TIMEOUT_MS = 5 * 60_000;
 /** Bounded concurrency across DIFFERENT projects' candidate walks — the pass is I/O
  *  and subprocess bound, so unrelated projects need not wait on each other (#208). */
 export const DEFAULT_MONITOR_PROJECT_CONCURRENCY = 4;
@@ -148,6 +165,8 @@ export interface ProcessWorkspaceDeps {
   projectTimeBudgetMs?: number;
   /** Max number of DIFFERENT projects' candidate walks processed concurrently. */
   projectConcurrency?: number;
+  /** Real wall-clock cap per candidate — see `DEFAULT_MONITOR_CANDIDATE_TIMEOUT_MS`. */
+  candidateTimeoutMs?: number;
   /** Clock seam for deterministic time-budget tests. */
   now?: () => number;
 }
@@ -580,7 +599,25 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
 
   const now = deps.now ?? Date.now;
   const projectTimeBudgetMs = deps.projectTimeBudgetMs ?? DEFAULT_MONITOR_PROJECT_TIME_BUDGET_MS;
+  const candidateTimeoutMs = deps.candidateTimeoutMs ?? DEFAULT_MONITOR_CANDIDATE_TIMEOUT_MS;
   const deferredProjectIds: string[] = [];
+
+  /**
+   * Await `work`, but give up after `timeoutMs` real milliseconds. A JS promise cannot
+   * be cancelled, so the abandoned work keeps running detached — the point is only that
+   * it no longer holds the cycle open (see `DEFAULT_MONITOR_CANDIDATE_TIMEOUT_MS`).
+   * Returns `true` when the wait was abandoned.
+   */
+  function raceCandidateTimeout(work: Promise<void>, timeoutMs: number): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => resolve(true), timeoutMs);
+      timer.unref?.();
+      work.then(
+        () => { clearTimeout(timer); resolve(false); },
+        () => { clearTimeout(timer); resolve(false); },
+      );
+    });
+  }
 
   async function processProjectGroup(projectId: string, wsList: WorkspaceCandidate[]): Promise<void> {
     const deadline = now() + projectTimeBudgetMs;
@@ -591,7 +628,16 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
         deferredProjectIds.push(projectId);
         return;
       }
-      await processCandidate(wsList[i]);
+      // PREEMPTIVE, unlike the deadline check above: a candidate that wedges inside an
+      // unbounded await (hung git) must not keep the whole cycle — and therefore every
+      // project's next cycle — from ever finishing.
+      const abandoned = await raceCandidateTimeout(processCandidate(wsList[i]), candidateTimeoutMs);
+      if (abandoned) {
+        const remaining = wsList.length - i;
+        console.warn(`[monitor] Workspace ${wsList[i].wsId} (project ${projectId}) did not finish within ${candidateTimeoutMs}ms  abandoning the wait and deferring ${remaining} remaining candidate(s) to the next cycle`);
+        deferredProjectIds.push(projectId);
+        return;
+      }
     }
   }
 

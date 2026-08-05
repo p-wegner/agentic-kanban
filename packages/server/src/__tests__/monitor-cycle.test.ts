@@ -719,3 +719,77 @@ describe("processWorkspaceCandidates — per-project time budget (#208)", () => 
     expect(launchedIds).not.toContain("slow-2");
   });
 });
+
+// #208 tail: the per-project budget above is only consulted BETWEEN candidates, so it cannot
+// preempt a candidate that is itself stuck inside an unbounded await (a `git` call that never
+// returns). That left `processWorkspaceCandidates` pending forever — the cycle's `finally`
+// never ran, `cycleRunning` stayed true, and every LATER cycle short-circuited on the
+// re-entrancy guard, for every project, until a server restart.
+describe("processWorkspaceCandidates — preemptive per-candidate timeout (#208 tail)", () => {
+  /** A git call that never returns — the real-world wedge this guards against. */
+  const neverReturns = () => new Promise<number>(() => {});
+
+  function queueSelectsFor(candidateCount: number) {
+    vi.mocked(db.select).mockReset();
+    for (let i = 0; i < candidateCount; i++) {
+      vi.mocked(db.select)
+        .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>)
+        .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>);
+    }
+  }
+
+  const hungCandidate: WorkspaceCandidate = {
+    ...baseCandidate,
+    wsId: "hung-1",
+    issueId: "issue-hung-1",
+    projectId: "proj-hung",
+    workingDir: "/hung/worktree",
+    readyForMerge: false,
+    issueStatusName: "In Progress",
+  };
+  const healthyCandidate: WorkspaceCandidate = {
+    ...baseCandidate,
+    wsId: "healthy-1",
+    issueId: "issue-healthy-1",
+    projectId: "proj-healthy",
+    workingDir: "/healthy/worktree",
+    readyForMerge: false,
+    issueStatusName: "In Progress",
+  };
+
+  /** Hangs only for the wedged worktree, so the healthy project is unaffected. */
+  function makeHangingDeps(): ProcessWorkspaceDeps {
+    return {
+      ...makeDeps(),
+      candidateTimeoutMs: 50,
+      projectConcurrency: 1,
+      getCommitCountAhead: vi.fn((dir: string) => (dir === "/hung/worktree" ? neverReturns() : Promise.resolve(0))),
+    } satisfies ProcessWorkspaceDeps;
+  }
+
+  it("completes the cycle even when a candidate's git call never returns, and still processes other projects", async () => {
+    queueSelectsFor(2);
+    const deps = makeHangingDeps();
+
+    // The assertion IS that this await settles at all — before the fix it never did.
+    const stats = await processWorkspaceCandidates([hungCandidate, healthyCandidate], deps);
+
+    expect(stats.deferredProjectIds).toContain("proj-hung");
+    const launchedIds = vi.mocked(deps.workspaceActions.launch).mock.calls.map(([id]) => id);
+    expect(launchedIds).toContain("healthy-1");
+    expect(launchedIds).not.toContain("hung-1");
+  });
+
+  it("does not poison LATER cycles — a subsequent pass still runs to completion", async () => {
+    queueSelectsFor(2);
+    await processWorkspaceCandidates([hungCandidate, healthyCandidate], makeHangingDeps());
+
+    // Second cycle: the first one's abandoned git call is still pending in the background.
+    queueSelectsFor(2);
+    const secondDeps = makeHangingDeps();
+    const stats = await processWorkspaceCandidates([hungCandidate, healthyCandidate], secondDeps);
+
+    expect(stats.deferredProjectIds).toContain("proj-hung");
+    expect(vi.mocked(secondDeps.workspaceActions.launch).mock.calls.map(([id]) => id)).toContain("healthy-1");
+  });
+});
