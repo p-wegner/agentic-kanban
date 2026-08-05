@@ -43,6 +43,29 @@ type Selection =
 
 const ownerKey = (o: PluginOwner, id: string) => `${o.pluginId}:${id}`;
 
+/**
+ * Last-request-wins latch for view starts (#251).
+ *
+ * A cold view spawn takes seconds, an already-running one resolves instantly, so
+ * "click A, then click B" routinely resolves B FIRST. Without a guard, A's late
+ * response still ran `setActiveUrl(A)` while the header showed B — the pane
+ * rendered B's title around A's page — and A's `finally` cleared the `starting`
+ * flag out from under B's in-flight launch. The latch records the key of the most
+ * recent start and every continuation checks it, so a superseded response is
+ * dropped whole (url, surface stamp and flag alike).
+ */
+export function createStartLatch() {
+  let current: string | null = null;
+  return {
+    /** Claim the latch for a new start; supersedes anything in flight. */
+    begin(key: string) { current = key; },
+    /** False once another start has claimed the latch — the response is stale. */
+    isCurrent(key: string) { return current === key; },
+    /** Release, but only if still the current start (a stale finally is a no-op). */
+    end(key: string) { if (current === key) current = null; },
+  };
+}
+
 interface PluginViewsPanelProps {
   projectId: string;
   /** Which plugin's capabilities to show; null = resolve to the first available one. */
@@ -72,22 +95,31 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
   const [stopping, setStopping] = useState(false);
   const [frameKey, setFrameKey] = useState(0);
   const setStoreSelection = usePluginViewStore((s) => s.setSelection);
+  const setStoreActiveProject = usePluginViewStore((s) => s.setActiveProject);
   const openMarketplace = usePluginViewStore((s) => s.openMarketplace);
+  const startLatch = useRef(createStartLatch());
 
   const refetch = useCallback(async () => {
     try {
       const next = await apiFetch<PluginSurface>(`/api/projects/${projectId}/plugin-surface`);
       setSurface(next);
-      return next;
     } catch (err) {
+      // Drop the previous project's surface. Keeping it leaves plugin rows from
+      // project A clickable while `projectId` is already B, so every action POSTs
+      // A's plugin row ids against B.
+      setSurface(EMPTY_SURFACE);
+      setSelection(null);
+      setActiveUrl(null);
       showToast(err instanceof Error ? err.message : "Failed to load plugins", "error");
-      return EMPTY_SURFACE;
     } finally {
       setLoading(false);
     }
   }, [projectId]);
 
   const startView = useCallback(async (view: PluginView) => {
+    const key = ownerKey(view, view.id);
+    const latch = startLatch.current;
+    latch.begin(key);
     setActiveUrl(null);
     setStarting(true);
     try {
@@ -96,20 +128,38 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
         `/api/plugins/${view.pluginId}/views/${encodeURIComponent(view.id)}/start`,
         { projectId },
       );
+      // Another view was selected while this was in flight — its start owns the pane now.
+      if (!latch.isCurrent(key)) return;
       setActiveUrl(result.url);
-      setFrameKey((k) => k + 1);
+      // No frameKey bump here: the iframe is unmounted for the duration of the
+      // start (the `starting` branch renders in its place), so it mounts fresh
+      // on its own. Bumping it unconditionally also remounted the ALREADY-running
+      // case, throwing away in-page state (graph zoom, form input) for nothing.
+      // The key exists only to force a reload of an unchanged src — the Refresh button.
       setSurface((s) => ({
         ...s,
         views: s.views.map((v) =>
-          ownerKey(v, v.id) === ownerKey(view, view.id) ? { ...v, running: true, url: result.url, port: result.port } : v,
+          ownerKey(v, v.id) === key ? { ...v, running: true, url: result.url, port: result.port } : v,
         ),
       }));
     } catch (err) {
+      if (!latch.isCurrent(key)) return;
       showToast(err instanceof Error ? err.message : `Failed to start view "${view.label}"`, "error");
     } finally {
-      setStarting(false);
+      // Only the current start owns the flag; a superseded one must not clear it
+      // while its successor is still launching.
+      if (latch.isCurrent(key)) {
+        latch.end(key);
+        setStarting(false);
+      }
     }
   }, [projectId]);
+
+  // A plugin pick belongs to the project it was made in — tell the store which
+  // project is showing so a stale slug can't leak across a project switch.
+  useEffect(() => {
+    setStoreActiveProject(projectId);
+  }, [projectId, setStoreActiveProject]);
 
   // Initial load per project. Selection is driven by the two effects below so a
   // plugin switch (same project, new slug) reuses the already-loaded surface.
@@ -159,6 +209,11 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
     }
   }, [loading, pluginSlug, projectId, filtered, startView]);
 
+  // Latest selection, readable from an async continuation (state captured in a
+  // closure is the selection as it was when the request went out).
+  const selectionRef = useRef<Selection | null>(selection);
+  useEffect(() => { selectionRef.current = selection; }, [selection]);
+
   const activeView = useMemo(
     () => (selection?.kind === "view" ? surface.views.find((v) => ownerKey(v, v.id) === selection.key) ?? null : null),
     [selection, surface.views],
@@ -183,15 +238,21 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
 
   async function handleStop() {
     if (!activeView || stopping) return;
+    // Capture the view being stopped: `selection` may have moved to another row by
+    // the time the response lands, and keying off it then flips the WRONG row to
+    // not-running while the stopped one still shows "live".
+    const view = activeView;
+    const stoppedKey = ownerKey(view, view.id);
     setStopping(true);
     try {
-      await apiPost(`/api/plugins/${activeView.pluginId}/views/${encodeURIComponent(activeView.id)}/stop`, { projectId });
-      setActiveUrl(null);
+      await apiPost(`/api/plugins/${view.pluginId}/views/${encodeURIComponent(view.id)}/stop`, { projectId });
+      // Same reason: only blank the pane if it is still showing the stopped view.
+      if (selectionRef.current?.key === stoppedKey) setActiveUrl(null);
       setSurface((s) => ({
         ...s,
-        views: s.views.map((v) => (ownerKey(v, v.id) === selection?.key ? { ...v, running: false, url: undefined } : v)),
+        views: s.views.map((v) => (ownerKey(v, v.id) === stoppedKey ? { ...v, running: false, url: undefined } : v)),
       }));
-      showToast(`Stopped "${activeView.label}"`, "success");
+      showToast(`Stopped "${view.label}"`, "success");
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to stop view", "error");
     } finally {
