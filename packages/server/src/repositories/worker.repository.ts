@@ -1,5 +1,5 @@
-import { workers } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
+import { workers, sessions, workspaces, issues } from "@agentic-kanban/shared/schema";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
@@ -41,6 +41,26 @@ export async function updateWorkerStatus(
 
 export async function deleteWorker(id: string, database: Database = db): Promise<void> {
   await database.delete(workers).where(eq(workers.id, id));
+}
+
+/**
+ * The branches a project actually DISPATCHED to a fleet worker — the persisted
+ * assignment record (`sessions.workerId` + the workspace's branch) that survives
+ * a board restart. The incoming-ref sweep uses it to land only refs it asked a
+ * worker to produce (#246): an incoming ref with no such assignment is held and
+ * reported, never fast-forwarded onto `refs/heads/*`.
+ */
+export async function listWorkerAssignedBranches(
+  projectId: string,
+  database: Database = db,
+): Promise<Set<string>> {
+  const rows = await database
+    .select({ branch: workspaces.branch })
+    .from(sessions)
+    .innerJoin(workspaces, eq(workspaces.id, sessions.workspaceId))
+    .innerJoin(issues, eq(issues.id, workspaces.issueId))
+    .where(and(eq(issues.projectId, projectId), isNotNull(sessions.workerId)));
+  return new Set(rows.map((r) => r.branch));
 }
 
 /**

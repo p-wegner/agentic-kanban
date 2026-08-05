@@ -6,12 +6,23 @@
 // sweep, so the work would sit in the staging namespace invisibly. This sweep
 // runs once at startup, lands every incoming ref that can be fast-forwarded,
 // and reports the ones that cannot instead of forcing them.
+//
+// LANDING IS BOUND TO AN ASSIGNMENT (#246). The first cut landed ANY ref under
+// the incoming namespace in ANY project, so a worker (or anyone holding the
+// then-board-wide git token) could push a commit descending from `main`, wait for
+// a board restart, and have it fast-forwarded onto `refs/heads/main` with no
+// review, no session and no human. Fast-forward-only is no defence there — the
+// attacker authors the descendant. A ref is now landed only when the DB holds a
+// matching assignment for that project and branch (`sessions.workerId` +
+// `workspaces.branch`); unmatched refs are HELD and reported, and left in the
+// staging namespace so a real one can still be recovered by hand.
 
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { projects } from "@agentic-kanban/shared/schema";
 import { db as realDb } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { KANBAN_INCOMING_REF_PREFIX } from "../services/git-http.service.js";
+import { listWorkerAssignedBranches } from "../repositories/worker.repository.js";
 import { syncIncomingBranch, clearIncomingRef } from "../services/worker-remote-sync.service.js";
 
 export interface IncomingSweepResult {
@@ -49,7 +60,28 @@ export async function sweepIncomingWorkerRefs(database: Database = realDb): Prom
     } catch {
       continue; // not a repo / unreadable — nothing to recover
     }
+    if (branches.length === 0) continue;
+    let assigned: Set<string>;
+    try {
+      assigned = await listWorkerAssignedBranches(project.id, database);
+    } catch (err) {
+      console.error(`[worker-sweep] could not read worker assignments for project ${project.id}:`, err);
+      // Fail CLOSED: with no assignment record we cannot tell a worker's result
+      // from an injected ref, so nothing lands.
+      for (const branch of branches) {
+        result.held.push({ branch, reason: "assignment lookup failed" });
+      }
+      continue;
+    }
     for (const branch of branches) {
+      if (!assigned.has(branch)) {
+        result.held.push({ branch, reason: "no worker assignment for this branch" });
+        console.warn(
+          `[worker-sweep] refusing to land ${branch} in project ${project.id}: ` +
+          `no session was ever dispatched to a worker for that branch`,
+        );
+        continue;
+      }
       const sync = await syncIncomingBranch(project.repoPath, branch);
       if (sync.ok) {
         result.landed.push(branch);
