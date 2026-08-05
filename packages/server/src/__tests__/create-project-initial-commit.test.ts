@@ -12,9 +12,41 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+
+/**
+ * #231 tail: passing an isolated `database` to every call was NOT enough. This file
+ * value-imports `project.service.js` / `preferences.repository.js` /
+ * `project.repository.js`, and their module graph reaches `../db/index.js`, whose TOP
+ * LEVEL opens TWO libsql clients (read + write) against the resolved DB — the user's live
+ * `~/.agentic-kanban/kanban.db` in a worktree. Merely IMPORTING this suite therefore still
+ * held two connections on the production board and contended for its SQLite locks, which
+ * is what pinned server suites at their 60s timeout under the pre-merge gate.
+ *
+ * Replacing the module with an isolated migrated DB closes it for good, and — unlike a
+ * bare `{}` stub — anything that ever falls back to the singleton default parameter writes
+ * into the throwaway DB instead of failing (or worse, reaching the real board).
+ */
+vi.mock("../db/index.js", async () => {
+  const [{ createTestDb }, { withDbRetry }, schema] = await Promise.all([
+    import("./helpers/test-db.js"),
+    import("../db/retry.js"),
+    import("@agentic-kanban/shared/schema"),
+  ]);
+  const isolated = createTestDb();
+  return {
+    db: isolated.db,
+    writeDb: isolated.db,
+    rawClient: isolated.client,
+    rawWriteClient: isolated.client,
+    schema,
+    withDbRetry,
+    withTransaction: <T,>(database: { transaction: (fn: unknown) => Promise<T> }, fn: unknown) => database.transaction(fn),
+  };
+});
+
 import { getHeadState } from "@agentic-kanban/shared/lib/git-service";
-import { createTestDb } from "./helpers/test-db.js";
+import { db as isolatedDb, rawClient as isolatedClient } from "../db/index.js";
 import { createProjectService } from "../services/project.service.js";
 import { setPreference } from "../repositories/preferences.repository.js";
 import { commitProjectScaffoldArtifacts } from "../services/project-scaffold.js";
@@ -37,8 +69,8 @@ const registeredProjectIds: string[] = [];
  * Opening the singleton also made this file contend with the running board server for SQLite
  * locks, which is what pinned several server suites at their 60s timeout under the gate.
  */
-const testDb = createTestDb();
-const db = testDb.db;
+// The SAME isolated DB the mocked module hands to any default-parameter fallback.
+const db = isolatedDb;
 
 function makeBaseDir(prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), `kanban-${prefix}-`));
@@ -71,7 +103,22 @@ afterAll(async () => {
   for (const d of dirs) {
     try { rmSync(d, { recursive: true, force: true }); } catch { /* best effort */ }
   }
-  testDb.dispose?.();
+  try { isolatedClient.close(); } catch { /* best effort */ }
+});
+
+// #231 tail regression: pin that this suite's `db` really is a throwaway temp DB. If the
+// mock above is ever dropped, `../db/index.js` evaluates and this file opens two clients on
+// the user's live board again — silently, since every call already passes `db` explicitly.
+describe("suite isolation from the live board DB (#231)", () => {
+  it("runs against a temp-file database, never the resolved live kanban.db", async () => {
+    const rows = await isolatedClient.execute("PRAGMA database_list");
+    const files = rows.rows.map((r) => String((r as { file?: unknown }).file ?? "")).filter(Boolean);
+    expect(files.length).toBeGreaterThan(0);
+    for (const file of files) {
+      expect(file.replace(/\\/g, "/").toLowerCase()).toContain(tmpdir().replace(/\\/g, "/").toLowerCase());
+      expect(file.toLowerCase()).not.toContain(".agentic-kanban");
+    }
+  });
 });
 
 describe("getHeadState — an unborn branch is a state, not an error (#47)", () => {
