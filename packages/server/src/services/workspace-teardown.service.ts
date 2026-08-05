@@ -27,6 +27,7 @@ import { killProcessesInDir, killProcessesOnPorts, killDevServerSupervisorOnPort
 import { runScript } from "./script-runner.js";
 import { resolveWorktreeDevPorts } from "./worktree-ports.js";
 import { auditProcessEvent, guardProcessKill } from "./process-guard.js";
+import { removeGradleUserHomeForWorktree } from "@agentic-kanban/shared/lib/gradle-env";
 
 /**
  * Best-effort kill of a process and its descendants by PID. Windows uses
@@ -189,6 +190,16 @@ export async function teardownWorktree(
     } catch (err) {
       console.warn(`[teardown:${label}] script threw (non-fatal):`, err instanceof Error ? err.message : String(err));
     }
+  }
+
+  // Layer 1c — reclaim the worktree's per-worktree Gradle home. It lives OUTSIDE the
+  // worktree (under the OS temp dir, deliberately — see gradle-env.ts), so removing the
+  // worktree never removed it: every worktree that ever ran gradle left a multi-GB cache
+  // behind forever. Runs AFTER the process kills above so no daemon still holds it open.
+  try {
+    await removeGradleUserHomeForWorktree(workingDir);
+  } catch (err) {
+    console.warn(`[teardown:${label}] gradle home cleanup failed (non-fatal):`, err instanceof Error ? err.message : String(err));
   }
 
   if (result.killedInDir || result.killedOnPorts) {
