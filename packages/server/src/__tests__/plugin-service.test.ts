@@ -282,6 +282,41 @@ describe("plugin.service", () => {
     expect(await service.getButlerFragments(projectId)).toEqual([]);
   });
 
+  it("getButlerFragments appends a DERIVED capability roster so the butler knows what the plugin can be asked to do", async () => {
+    // A plugin's own fragment explains how to CONSUME its output; it rarely lists what the plugin can
+    // be told to do, and drifts when loops are added. The roster is derived from the manifest so it
+    // cannot go stale, and it names skills by the same basename `loops[].skill` uses.
+    const pluginDir = makePluginDir(MANIFEST_WITH_LOOP);
+    const repo = makeProjectRepo();
+    const plugin = await service.installPlugin({ source: pluginDir });
+    const projectId = await insertProject(db, repo);
+    await service.enableForProject(plugin.id, projectId);
+
+    const [fragment] = await service.getButlerFragments(projectId);
+    expect(fragment).toContain("Coverage docs live in"); // the author's fragment survives
+    expect(fragment).toContain("**Skills it provides**");
+    expect(fragment).toContain("`requirement-extraction`");
+    expect(fragment).toContain("**Converging loops**");
+    expect(fragment).toContain("`identify-modules`");
+    expect(fragment).toContain("hands out `requirement-extraction`");
+  });
+
+  it("a plugin with no butler fragment still announces its capabilities instead of being invisible", async () => {
+    const { promptFragment: _dropped, ...noButler } = { ...MANIFEST_WITH_LOOP, butler: undefined } as Record<string, unknown>;
+    const manifest = { ...noButler };
+    delete (manifest as { butler?: unknown }).butler;
+    const pluginDir = makePluginDir(manifest);
+    const repo = makeProjectRepo();
+    const plugin = await service.installPlugin({ source: pluginDir });
+    const projectId = await insertProject(db, repo);
+    await service.enableForProject(plugin.id, projectId);
+
+    const fragments = await service.getButlerFragments(projectId);
+    expect(fragments).toHaveLength(1);
+    expect(fragments[0]).toContain("**Skills it provides**");
+    expect(fragments[0]).not.toContain("Coverage docs live in");
+  });
+
   it("runScript runs with plugin cwd and substituted env, capturing output", async () => {
     const pluginDir = makePluginDir();
     const repo = makeProjectRepo();
