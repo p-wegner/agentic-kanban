@@ -20,12 +20,37 @@ import type { ContainerProvision } from "./devcontainer-workspace.service.js";
  * `containerProvision` launch argument (folded into this union in phase 1c);
  * `remote` names a connected worker from the worker registry (phase 1a).
  */
+/**
+ * Strict-mode refusal: dispatch was required but no worker could take the work.
+ *
+ * Lives here rather than in worker-fleet.service because the DISPATCH layer must
+ * be able to refuse a host fallback (#245) without importing the fleet service
+ * (which imports this module). Re-exported from worker-fleet.service for the
+ * existing importers.
+ */
+export class WorkerDispatchUnavailableError extends Error {
+  readonly code = "NO_AVAILABLE_WORKER";
+  constructor(message: string) {
+    super(message);
+    this.name = "WorkerDispatchUnavailableError";
+  }
+}
+
 export type Placement =
   | { kind: "host" }
   | { kind: "container" }
   | {
       kind: "remote";
       workerId: string;
+      /**
+       * The project set `worker_dispatch_strict_<projectId>` — host execution is
+       * FORBIDDEN for this session (#245). Carried on the placement because
+       * strictness was previously honoured only while CHOOSING a worker: if the
+       * worker dropped its socket in the window before `assign`, the dispatch
+       * proxy caught the throw and silently ran the agent on the board host,
+       * which is exactly what strict mode exists to prevent.
+       */
+      strict?: boolean;
       /**
        * Git transport for a TRUE remote worker (phase 2): the worker clones the
        * project from the board and pushes results back. Absent = same-machine
@@ -106,6 +131,12 @@ export function createAgentDispatch(implementations: AgentDispatchImplementation
   const resolveImplementation = (sessionId: string, placement?: Placement): AgentExecutionService => {
     if (placement?.kind === "remote") {
       if (implementations.remote) return implementations.remote;
+      if (placement.strict) {
+        throw new WorkerDispatchUnavailableError(
+          `remote placement requested (workerId=${placement.workerId}) but no remote implementation is registered, ` +
+          `and worker dispatch is strict: sessionId=${sessionId}`,
+        );
+      }
       console.warn(
         `[agent-dispatch] remote placement requested (workerId=${placement.workerId}) but no remote implementation is registered; falling back to host: sessionId=${sessionId}`,
       );
@@ -138,8 +169,20 @@ export function createAgentDispatch(implementations: AgentDispatchImplementation
         );
       } catch (err) {
         // A remote launch can race the worker disconnecting between placement
-        // and assign. Degrade to host rather than failing the session.
+        // and assign. Degrade to host rather than failing the session — UNLESS
+        // the project forbids host execution (#245), in which case the session
+        // must fail with NO_AVAILABLE_WORKER instead of quietly running here.
         if (impl === implementations.host) throw err;
+        if (placement?.kind === "remote" && placement.strict) {
+          const detail = err instanceof Error ? err.message : String(err);
+          console.warn(
+            `[agent-dispatch] remote launch failed under STRICT worker dispatch; refusing the host fallback: sessionId=${sessionId}: ${detail}`,
+          );
+          bySession.delete(sessionId);
+          throw new WorkerDispatchUnavailableError(
+            `remote launch on worker ${placement.workerId} failed (${detail}) and worker dispatch is strict for this project`,
+          );
+        }
         console.warn(
           `[agent-dispatch] non-host launch failed (${err instanceof Error ? err.message : String(err)}); falling back to host: sessionId=${sessionId}`,
         );

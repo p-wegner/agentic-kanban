@@ -680,6 +680,13 @@ export function createSessionLifecycle(
       state.sessionExitHandled.delete(sessionId);
       await lifecycleRepo.updateSessionStoppedNoStats(sessionId, new Date().toISOString(), db)
         .catch(() => {});
+      // A strict-dispatch refusal can also surface at LAUNCH time (#245): the
+      // worker vanished between placement and assign and the dispatch proxy
+      // refused the host fallback. Same CONFLICT shape as the placement-time
+      // refusal above so callers see one contract.
+      if (err instanceof WorkerDispatchUnavailableError) {
+        throw new WorkspaceError(err.message, "CONFLICT", { code: "NO_AVAILABLE_WORKER" });
+      }
       throw err;
     }
 
