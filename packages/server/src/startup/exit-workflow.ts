@@ -3,6 +3,7 @@ import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { runUnderBuildGate } from "../services/jvm-build-gate.js";
 import { runPreMergeGate, resolveMergeGateShas, gateAlreadyPassed, gateSkipExplicit, type MergeGateToken } from "../services/pre-merge-gate.service.js";
+import { movedDuringGate } from "../services/workspace-merge-gate.js";
 import { issues, preferences, projectStatuses, projects, scheduledRunHistory, scheduledRuns, sessions, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { desc, eq } from "drizzle-orm";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
@@ -694,7 +695,12 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     // still runs FIRST (it must commit its fix onto the branch before the verify build); the #792
     // cold-clone check stays a separate opt-in gate. Any failure WITHHOLDS readyForMerge.
     await applyBuildApprovalRepair(ctx);
-    const preMergeGate = await runPreMergeGate({ id: workspaceId, workingDir: workspace.workingDir, baseBranch: workspace.baseBranch || defaultBranch }, projectId, db);
+    const gateWorkspace = { id: workspaceId, workingDir: workspace.workingDir, baseBranch: workspace.baseBranch || defaultBranch };
+    // Pin the tips BEFORE the gate runs (#243). The gate is a 20-40 minute build+test run and
+    // nothing requires the workspace to be stopped while it runs, so SHAs read afterwards can
+    // name a commit the gate never saw — evidence that asserts verification it does not have.
+    const shasBeforeGate = await resolveMergeGateShas(gateWorkspace);
+    const preMergeGate = await runPreMergeGate(gateWorkspace, projectId, db);
     if (!preMergeGate.passed) {
       console.log(`[workflow] pre-merge gate failed (${preMergeGate.stage}) for workspace ${workspaceId} — withholding readyForMerge: ${preMergeGate.message}`);
       boardEvents.broadcast(projectId, "workflow_error");
@@ -710,7 +716,16 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     const gateRanAt = new Date().toISOString();
     // Content-key the persisted evidence too (0108), so the monitor's later merge trigger can
     // trust a pass whose only sin is age while still re-gating when the base has moved.
-    const gateShas = await resolveMergeGateShas({ id: workspaceId, workingDir: workspace.workingDir, baseBranch: workspace.baseBranch || defaultBranch });
+    // #243: the persisted tips are the ones read BEFORE the gate — what it actually verified.
+    // If either moved during the run the pass is about a state that no longer exists, so we
+    // persist NO content key (and no ranAt/stage), which forces the later merge to re-gate
+    // rather than trust a proof token for code the gate never saw.
+    const shasAfterGate = await resolveMergeGateShas(gateWorkspace);
+    const tipMovedDuringGate = movedDuringGate(shasBeforeGate, shasAfterGate);
+    if (tipMovedDuringGate) {
+      console.warn(`[workflow] pre-merge gate passed for workspace ${workspaceId} but the ${tipMovedDuringGate} moved DURING the run — persisting no gate evidence (#243)`);
+    }
+    const gateShas = tipMovedDuringGate ? {} : shasBeforeGate;
     if (!(await runColdCloneGate(ctx))) return;
     // #629 Guard: re-verify the branch still has committed changes ahead of base.
     // A race (e.g. branch reset/rebased to equal base between review start and exit)
@@ -728,9 +743,12 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     await db.update(workspaces).set({
       readyForMerge: true,
       updatedAt: gateRanAt,
-      mergeGateRanAt: gateRanAt,
-      mergeGateStage: preMergeGate.stage,
-      mergeGateSource: "review-exit gate",
+      // A gate whose worktree moved under it produced no trustworthy proof — clear the whole
+      // evidence quartet rather than leaving a ranAt/stage that the merge path would honour
+      // on age alone (#243).
+      mergeGateRanAt: tipMovedDuringGate ? null : gateRanAt,
+      mergeGateStage: tipMovedDuringGate ? null : preMergeGate.stage,
+      mergeGateSource: tipMovedDuringGate ? null : "review-exit gate",
       mergeGateBranchSha: gateShas.branchSha ?? null,
       mergeGateBaseSha: gateShas.baseSha ?? null,
     }).where(eq(workspaces.id, workspaceId));
