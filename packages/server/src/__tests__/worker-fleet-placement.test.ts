@@ -79,7 +79,7 @@ describe("worker-fleet placement (phase 1c)", () => {
     const workerId = await registerLocalWorker({ providers: ["claude"] });
     fleet.connections.handleOpen(workerId, fakeWs());
     const placement = await resolveWorkerPlacement({ database: db, projectId: PROJECT_ID, providerName: "claude" });
-    expect(placement).toEqual({ kind: "remote", workerId });
+    expect(placement).toEqual({ kind: "remote", workerId, strict: false });
   });
 
   it("gives a TRUE remote worker git transport with the branch and repo", async () => {
@@ -94,6 +94,7 @@ describe("worker-fleet placement (phase 1c)", () => {
     expect(placement).toEqual({
       kind: "remote",
       workerId,
+      strict: false,
       repo: {
         projectId: PROJECT_ID,
         repoPath: "C:/repos/fixture",

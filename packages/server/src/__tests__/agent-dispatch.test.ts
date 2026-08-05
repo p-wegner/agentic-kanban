@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createAgentDispatch, type AgentExecutionService, type Placement } from "../services/agent-dispatch.service.js";
+import {
+  createAgentDispatch,
+  WorkerDispatchUnavailableError,
+  type AgentExecutionService,
+  type Placement,
+} from "../services/agent-dispatch.service.js";
 import type { AgentOutputCallback } from "../services/agent.service.js";
 
 function mockExecutionService(pid: number): AgentExecutionService {
@@ -105,6 +110,48 @@ describe("agent-dispatch", () => {
     dispatch.sendInput("s1", "now host");
     expect(host.sendInput).toHaveBeenCalledWith("s1", "now host");
     expect(remote.sendInput).toHaveBeenCalledOnce();
+  });
+
+  describe("strict worker dispatch refuses the host fallback (#245)", () => {
+    it("falls back to host when a NON-strict remote launch throws", () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      (remote.launch as ReturnType<typeof vi.fn>).mockImplementation(() => {
+        throw new Error("fleet worker w1 is not connected");
+      });
+      const dispatch = createAgentDispatch({ host, remote });
+      const handle = launchOn(dispatch, "s1", { kind: "remote", workerId: "w1" });
+      expect(handle.pid).toBe(101);
+      expect(host.launch).toHaveBeenCalledOnce();
+      warn.mockRestore();
+    });
+
+    it("fails the session instead when the remote launch throws under strict", () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      (remote.launch as ReturnType<typeof vi.fn>).mockImplementation(() => {
+        throw new Error("fleet worker w1 is not connected");
+      });
+      const dispatch = createAgentDispatch({ host, remote });
+      expect(() => launchOn(dispatch, "s1", { kind: "remote", workerId: "w1", strict: true }))
+        .toThrow(WorkerDispatchUnavailableError);
+      expect(host.launch).not.toHaveBeenCalled();
+      // The routing entry is cleared, so follow-ups don't point at a dead impl.
+      dispatch.kill("s1");
+      expect(remote.kill).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
+
+    it("refuses a strict remote placement when no remote implementation is registered", () => {
+      const dispatch = createAgentDispatch({ host });
+      let thrown: unknown;
+      try {
+        launchOn(dispatch, "s1", { kind: "remote", workerId: "w1", strict: true });
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(WorkerDispatchUnavailableError);
+      expect((thrown as WorkerDispatchUnavailableError).code).toBe("NO_AVAILABLE_WORKER");
+      expect(host.launch).not.toHaveBeenCalled();
+    });
   });
 
   it("clears the session routing on kill", () => {
