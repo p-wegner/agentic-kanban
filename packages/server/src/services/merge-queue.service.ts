@@ -17,6 +17,8 @@ import {
 import { getProjectsByIds } from "../repositories/project.repository.js";
 import { listWorkspaceRepos } from "../repositories/repo.repository.js";
 import { createWorkspaceMergeService } from "./workspace-merge.service.js";
+import { runMergeTrain } from "./merge-train.service.js";
+import { runPreMergeGate } from "./pre-merge-gate.service.js";
 import type { BoardEvents } from "./board-events.js";
 import type { SessionManager } from "./session.manager.js";
 
@@ -463,12 +465,148 @@ export function createMergeQueueService(deps: {
     }
   }
 
+  /**
+   * Are these members eligible for a single release train?
+   *
+   * v1 is deliberately narrow — a train must be provably one repo, one base. Multi-repo
+   * workspaces merge all-or-nothing across siblings (`prevalidateSiblingMerges` /
+   * `executeSiblingMerges`), and coordinating THAT across a batch is a separate problem; a
+   * direct workspace has no branch to put on a train at all. Anything ineligible falls back
+   * to the existing per-ticket path, which is slower but always correct.
+   */
+  function trainEligible(order: MergeQueuePlan["order"]): boolean {
+    if (order.length < 2) return false;
+    const first = order[0];
+    return order.every(
+      (ws) =>
+        !ws.isDirect &&
+        ws.workingDir &&
+        ws.branch &&
+        ws.repoPath === first.repoPath &&
+        ws.baseBranch === first.baseBranch,
+    );
+  }
+
+  /**
+   * Run the whole batch as one release train: assemble → gate ONCE → land → close each member.
+   *
+   * The gate needs a worktree whose tree IS the assembled train (not any member's branch), so
+   * one is created at the train ref, gated, and removed. That worktree is the only reason this
+   * lives here rather than in merge-train.service.ts — the service stays free of worktree and
+   * DB concerns so its logic can be tested without either.
+   *
+   * The whole run holds the repo lock: the train's value depends on its base not moving
+   * between assembly and landing, and `landMergeTrain` refuses (correctly) if it does.
+   */
+  async function* runTrainStrategy(plan: MergeQueuePlan): AsyncGenerator<MergeQueueEvent> {
+    const first = plan.order[0];
+    const repoPath = first.repoPath;
+    const baseBranch = first.baseBranch as string;
+    const label = `q${Date.now().toString(36)}`;
+    const members = plan.order.map((ws) => ({
+      workspaceId: ws.id,
+      branch: ws.branch as string,
+      issueNumber: ws.issueNumber,
+    }));
+
+    // The gate is per-PROJECT (it reads verify_script_<projectId>), and WorkspaceQueueInfo
+    // carries only issueId — resolve the project the same way computePlan does.
+    const issueRows = await getMergeQueueIssueRows([first.issueId], database);
+    const projectId = issueRows[0]?.projectId ?? null;
+    if (!projectId) {
+      // Fail closed rather than gate-less: without a project there is no verify_script to run,
+      // and a train that skips the gate is exactly what this feature must never become.
+      yield { type: "error", workspaceId: first.id, issueNumber: first.issueNumber, issueTitle: first.issueTitle, error: "train aborted: could not resolve the project for the batch, so the gate could not be run" };
+      yield { type: "done", merged: [], failed: members.map((m) => m.workspaceId), skipped: [] };
+      return;
+    }
+
+    const deadline = Date.now() + MERGE_QUEUE_REPO_LOCK_TIMEOUT_MS;
+    let repoLock = tryAcquireRepoLock(repoPath, `merge-train:${label}`);
+    while (!repoLock) {
+      if (Date.now() >= deadline) throw new Error(`[merge-train] timed out waiting for the repo lock on ${repoPath}`);
+      await new Promise((r) => setTimeout(r, 500));
+      repoLock = tryAcquireRepoLock(repoPath, `merge-train:${label}`);
+    }
+    const heartbeat = setInterval(() => repoLock!.heartbeat(), 15_000);
+
+    let result: Awaited<ReturnType<typeof runMergeTrain>> | null = null;
+    try {
+      result = await runMergeTrain({
+        repoPath,
+        baseBranch,
+        members,
+        label,
+        runGate: async ({ trainRef }) => {
+          // Gate the TREE THAT LANDS. A per-member gate never tests the merge commit, which is
+          // how two individually-green branches can produce a red base with no conflict.
+          let gateWorktree: string | null = null;
+          try {
+            gateWorktree = await gitService.createWorktree(repoPath, trainRef, undefined, { pathNamespace: "train" });
+            const gate = await runPreMergeGate({ id: `train:${label}`, workingDir: gateWorktree, baseBranch }, projectId, database);
+            return { passed: gate.passed, message: gate.message };
+          } catch (err) {
+            // Fail CLOSED: a gate we could not run is not a gate that passed.
+            return { passed: false, message: `train gate could not run: ${err instanceof Error ? err.message : String(err)}` };
+          } finally {
+            if (gateWorktree) await gitService.removeWorktree(repoPath, gateWorktree).catch(() => undefined);
+          }
+        },
+        closeMember: async (workspaceId) => {
+          // Reuse the sanctioned already-merged path rather than reimplementing the
+          // mergedAt/status/comment bookkeeping the reconcilers depend on.
+          await mergeService.reconcileAlreadyMerged(workspaceId);
+        },
+      });
+    } finally {
+      clearInterval(heartbeat);
+      repoLock.release();
+    }
+
+    for (const d of result.dropped) {
+      yield { type: "skipped", workspaceId: d.member.workspaceId, issueNumber: d.member.issueNumber ?? null, issueTitle: "", reason: `dropped from train: ${d.reason.slice(0, 200)}` };
+    }
+    if (result.landed.length === 0) {
+      for (const m of members) {
+        if (result.dropped.some((d) => d.member.workspaceId === m.workspaceId)) continue;
+        yield { type: "error", workspaceId: m.workspaceId, issueNumber: m.issueNumber ?? null, issueTitle: "", error: `train gate failed — nothing landed: ${(result.gateFailure ?? "").slice(0, 300)}` };
+      }
+      yield { type: "done", merged: [], failed: members.map((m) => m.workspaceId), skipped: [] };
+      return;
+    }
+    for (const m of result.landed) {
+      const closeFailure = result.closeFailures.find((c) => c.member.workspaceId === m.workspaceId);
+      // A close-out failure is NOT a merge failure — the work IS on the base branch, only the
+      // bookkeeping lags, and the existing reconcilers recover that. Log it rather than
+      // emitting `error`, which callers treat as "this ticket did not land".
+      if (closeFailure) {
+        console.warn(`[merge-train] ${m.branch} landed via train ${result.mergeSha?.slice(0, 8)} but close-out lagged: ${closeFailure.reason.slice(0, 200)}`);
+      }
+      yield { type: "merged", workspaceId: m.workspaceId, issueNumber: m.issueNumber ?? null, issueTitle: "" };
+    }
+    yield {
+      type: "done",
+      merged: result.landed.map((m) => m.workspaceId),
+      failed: [],
+      skipped: result.dropped.map((d) => d.member.workspaceId),
+    };
+  }
+
   async function* executeQueue(
     workspaceIds: string[],
-    opts: { skipOnConflict?: boolean } = {},
+    opts: { skipOnConflict?: boolean; strategy?: "sequential" | "train" } = {},
   ): AsyncGenerator<MergeQueueEvent> {
     const plan = await computePlan(workspaceIds);
     yield { type: "planned", plan };
+
+    // Release train (#throughput): gate the assembled batch ONCE instead of once per member.
+    // Chosen when the caller asks for it, or when the planner's own classifier already says
+    // `integration-union` — the recommendation it has been computing and nobody dispatched on.
+    const wantsTrain = opts.strategy === "train" || plan.recommendedStrategy === "integration-union";
+    if (wantsTrain && opts.strategy !== "sequential" && trainEligible(plan.order)) {
+      yield* runTrainStrategy(plan);
+      return;
+    }
 
     const merged: string[] = [];
     const failed: string[] = [];
