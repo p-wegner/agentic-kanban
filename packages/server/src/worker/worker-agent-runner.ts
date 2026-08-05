@@ -129,7 +129,11 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     try {
       proc = spawn(spec.command, spec.args, {
         cwd: spec.cwd,
-        env: spec.env,
+        // #244: MERGE the board's (allowlisted, non-secret) wiring over THIS
+        // machine's environment — never replace it. The worker authenticates its
+        // agent with its own local login, so HOME/USERPROFILE/PATH and the
+        // provider config dir must stay this machine's (decision 012).
+        env: { ...process.env, ...spec.env },
         shell: spec.useShell ?? false,
         windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
