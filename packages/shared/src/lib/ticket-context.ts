@@ -131,9 +131,9 @@ export function buildStackProfileSection(profile: StackProfile | null | undefine
       "the merge gate, so a green run here is what lets your work merge. Use it as-is —",
       "do not hand-roll your own build/test invocation, and do not add flags or pipes.",
       "",
-      "```",
-      verify.command,
-      "```",
+      // Fenced defensively too: the verify command comes from the project's
+      // `verify_script` preference, i.e. operator-supplied text, not a board constant.
+      ...fencedBlock(verify.command),
       "",
     );
     for (const rule of verify.rules) {
@@ -171,7 +171,7 @@ export function buildServiceStackSection(
       "clearly in your final summary that the service stack was unavailable.",
     ];
     if (stack.error?.trim()) {
-      lines.push("", "Failure reason:", "", "```", stack.error.trim(), "```");
+      lines.push("", "Failure reason:", "", ...fencedBlock(stack.error.trim()));
     }
     appendLintWarnings(lines, stack.lintWarnings);
     return lines.join("\n");
@@ -223,8 +223,29 @@ function appendLintWarnings(lines: string[], lintWarnings: string[] | null | und
   if (!lintWarnings || lintWarnings.length === 0) return;
   lines.push("", "**Compose lint warning(s):**", "");
   for (const w of lintWarnings) {
-    lines.push("```", w, "```");
+    lines.push(...fencedBlock(w));
   }
+}
+
+/**
+ * Fence a block of UNTRUSTED text so it cannot escape into the agent's instructions.
+ *
+ * This file is written to the worktree as `CLAUDE.local.md`, which Claude Code loads as
+ * project memory — everything in it reads as instructions. The content fenced here is
+ * external: docker/compose stderr and compose lint warnings, which routinely quote YAML
+ * and file excerpts and can therefore contain a line of three backticks. With a
+ * hardcoded ``` fence, that line CLOSED the block early and everything after it became
+ * live instruction text in the agent's memory.
+ *
+ * The fix is CommonMark's own rule: an info-string-free fence may be closed only by a
+ * run of at least as many backticks, so a fence LONGER than the longest backtick run in
+ * the content cannot be closed from inside it. The content itself is never modified —
+ * mangling a build error is how you make it undiagnosable — only the delimiter grows.
+ */
+export function fencedBlock(content: string): string[] {
+  const longestRun = Math.max(0, ...[...content.matchAll(/`+/g)].map((m) => m[0].length));
+  const fence = "`".repeat(Math.max(3, longestRun + 1));
+  return [fence, content, fence];
 }
 
 /**
