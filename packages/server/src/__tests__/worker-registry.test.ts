@@ -92,6 +92,21 @@ describe("worker-registry (worker fleet phase 1a)", () => {
       expect(await registry.authenticateWorker(workerId, workerToken)).toBe(false);
       expect(await registry.revokeWorker(workerId)).toBe(false);
     });
+
+    it("fires revoke listeners so the live socket and git tokens die too", async () => {
+      const revoked: string[] = [];
+      const unsubscribe = registry.onRevoke((id) => { revoked.push(id); });
+      const { workerId } = await registerOne();
+      await registry.revokeWorker(workerId);
+      expect(revoked).toEqual([workerId]);
+
+      // Unsubscribed listeners stop being called; a revoke of an unknown worker
+      // fires nothing at all.
+      unsubscribe();
+      const second = await registerOne();
+      await registry.revokeWorker(second.workerId);
+      expect(revoked).toEqual([workerId]);
+    });
   });
 
   describe("heartbeat and staleness", () => {

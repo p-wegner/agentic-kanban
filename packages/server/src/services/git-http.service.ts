@@ -8,20 +8,29 @@
 //   POST /git/:projectId/git-receive-pack    (push)
 //
 // SECURITY — mirrors mcp-http-bridge/http-transport exactly: the listener must
-// be reachable off-loopback (that is its whole point), so every request needs
-// the per-boot bearer token. Git clients authenticate with URL-embedded basic
-// auth (`http://x-token:<token>@host:port/...`); both Basic (password) and
-// Bearer are accepted, compared constant-time. `/health` is unauthenticated.
-// No "localhost is trusted" shortcut — see http-transport.ts's module comment.
+// be reachable off-loopback (that is its whole point), so every request needs a
+// bearer token. Git clients authenticate with URL-embedded basic auth
+// (`http://x-token:<token>@host:port/...`); both Basic (password) and Bearer are
+// accepted. `/health` is unauthenticated. No "localhost is trusted" shortcut —
+// see http-transport.ts's module comment.
 //
-// Push contract: workers push ONLY to the `refs/kanban/incoming/*` namespace
-// (enforced here), never to refs/heads/* — feature branches are checked out in
-// board-side worktrees and a direct push would be refused or, worse, desync a
-// worktree. The board-side sync step fast-forwards the real branch from the
-// incoming ref (worker-remote-sync service).
+// TOKENS ARE PER-ASSIGNMENT AND SCOPED (#247). The first cut minted ONE
+// board-wide token per boot: it granted a full clone of EVERY registered project
+// to every git-transport worker and survived `revokeWorker`, so a worker paired
+// for one fixture project could read every repo on the machine and a revoked
+// worker kept working until the board restarted. A token now names exactly one
+// worker, one project and (for pushes) one incoming ref, expires, and is dropped
+// when its worker is revoked (`revokeGitTokensForWorker`).
+//
+// Push contract: workers push ONLY to the `refs/kanban/incoming/*` namespace,
+// and only to the ONE ref their token was issued for (#246) — never to
+// refs/heads/*, because feature branches are checked out in board-side worktrees
+// and a direct push would be refused or, worse, desync a worktree. The
+// board-side sync step fast-forwards the real branch from the incoming ref
+// (worker-remote-sync service).
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { createGunzip } from "node:zlib";
 import { Transform } from "node:stream";
 import { gitStream } from "@agentic-kanban/shared/lib/git-exec";
@@ -33,20 +42,93 @@ export const KANBAN_INCOMING_REF_PREFIX = "refs/kanban/incoming/";
 
 const SERVICES = new Set(["git-upload-pack", "git-receive-pack"]);
 
+/** How long an issued git token stays valid. A worker re-issues per assignment. */
+export const DEFAULT_GIT_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+
+export interface IssueGitTokenInput {
+  /** The worker the token is for — revoking that worker invalidates it. */
+  workerId: string;
+  /** The ONLY project this token may read/write. */
+  projectId: string;
+  /**
+   * The ONLY ref a receive-pack under this token may update. Omitted = read-only
+   * scope in practice: any push is refused because no ref can match.
+   */
+  incomingRef?: string;
+  ttlMs?: number;
+  /** Test seam for expiry. */
+  now?: number;
+}
+
+interface GitTokenScope {
+  workerId: string;
+  projectId: string;
+  incomingRef?: string;
+  expiresAtMs: number;
+}
+
 export interface GitHttpHandle {
   port: number;
-  token: string;
+  /** Mint a scoped, expiring token for one assignment. Returns the clear token once. */
+  issueToken(input: IssueGitTokenInput): string;
+  /** Drop every token held by a worker (called from revokeWorker). Returns the count. */
+  revokeWorkerTokens(workerId: string): number;
   close(): Promise<void>;
 }
 
-function tokensMatch(provided: string, expected: string): boolean {
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) {
-    timingSafeEqual(b, b);
-    return false;
+function sha256Hex(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+/**
+ * Token store: clear tokens are never kept, only their sha-256 digests (same
+ * rule as the worker registry's bearer tokens). Lookup is by digest, so there is
+ * no per-candidate comparison to leak timing.
+ */
+function createGitTokenStore() {
+  const scopes = new Map<string, GitTokenScope>();
+
+  function prune(nowMs: number): void {
+    for (const [hash, scope] of scopes) {
+      if (scope.expiresAtMs <= nowMs) scopes.delete(hash);
+    }
   }
-  return timingSafeEqual(a, b);
+
+  function issue(input: IssueGitTokenInput): string {
+    const nowMs = input.now ?? Date.now();
+    prune(nowMs);
+    const token = randomBytes(32).toString("hex");
+    scopes.set(sha256Hex(token), {
+      workerId: input.workerId,
+      projectId: input.projectId,
+      incomingRef: input.incomingRef,
+      expiresAtMs: nowMs + (input.ttlMs ?? DEFAULT_GIT_TOKEN_TTL_MS),
+    });
+    return token;
+  }
+
+  function resolve(token: string, nowMs = Date.now()): GitTokenScope | null {
+    const scope = scopes.get(sha256Hex(token));
+    if (!scope) return null;
+    if (scope.expiresAtMs <= nowMs) {
+      scopes.delete(sha256Hex(token));
+      return null;
+    }
+    return scope;
+  }
+
+  function revokeWorker(workerId: string): number {
+    let removed = 0;
+    for (const [hash, scope] of scopes) {
+      if (scope.workerId === workerId) {
+        scopes.delete(hash);
+        removed += 1;
+      }
+    }
+    return removed;
+  }
+
+  return { issue, resolve, revokeWorker };
 }
 
 function extractToken(req: IncomingMessage): string | null {
@@ -103,13 +185,29 @@ function handleInfoRefs(res: ServerResponse, service: string, repoPath: string):
 }
 
 /**
+ * Strict pkt-line length: exactly four LOWERCASE hex digits, and never 1..3
+ * (those are shorter than the header itself and would desync the offset).
+ * `Number.parseInt(hex, 16)` was too permissive — it accepts `"+000"`, `" 000"`
+ * and `"-000"` as 0 (a fake flush that would end the command section early) and
+ * `"0abz"` as 10. Git's own parser rejects such streams first, so no bypass was
+ * demonstrated, but a guard must not depend on the thing it guards.
+ */
+export function parsePktLineLength(lenHex: string): number | null {
+  if (!/^[0-9a-f]{4}$/.test(lenHex)) return null;
+  const len = Number.parseInt(lenHex, 16);
+  if (len >= 1 && len <= 3) return null;
+  return len;
+}
+
+/**
  * A Transform that parses the receive-pack COMMAND section (pkt-lines of
  * `<old-sha> <new-sha> <refname>[\0caps]` up to the `0000` flush) and destroys
- * the stream if any refname is outside `refs/kanban/incoming/` — after the
- * flush it becomes a passthrough for the packfile. Keeps worker pushes out of
- * refs/heads/* (checked out in board worktrees).
+ * the stream if any refname is outside `refs/kanban/incoming/` or outside the
+ * ONE ref this token was issued for — after the flush it becomes a passthrough
+ * for the packfile. Keeps worker pushes out of refs/heads/* (checked out in
+ * board worktrees) and out of other workers' branches (#246).
  */
-function createReceiveGuard(onViolation: (refname: string) => void): Transform {
+function createReceiveGuard(allowedRef: string | undefined, onViolation: (refname: string) => void): Transform {
   let buffered: Buffer = Buffer.alloc(0);
   let commandsDone = false;
   return new Transform({
@@ -122,8 +220,8 @@ function createReceiveGuard(onViolation: (refname: string) => void): Transform {
       let offset = 0;
       while (offset + 4 <= buffered.length) {
         const lenHex = buffered.subarray(offset, offset + 4).toString("latin1");
-        const len = Number.parseInt(lenHex, 16);
-        if (Number.isNaN(len)) {
+        const len = parsePktLineLength(lenHex);
+        if (len === null) {
           onViolation(`<malformed pkt-line: ${lenHex}>`);
           callback(new Error("malformed receive-pack stream"));
           return;
@@ -139,7 +237,7 @@ function createReceiveGuard(onViolation: (refname: string) => void): Transform {
         if (offset + len > buffered.length) break; // incomplete pkt — wait for more
         const line = buffered.subarray(offset + 4, offset + len).toString("utf8");
         const refname = (line.split("\0")[0] ?? "").trim().split(/\s+/)[2] ?? "";
-        if (refname && !refname.startsWith(KANBAN_INCOMING_REF_PREFIX)) {
+        if (refname && (!refname.startsWith(KANBAN_INCOMING_REF_PREFIX) || refname !== allowedRef)) {
           onViolation(refname);
           callback(new Error(`push to ${refname} refused`));
           return;
@@ -155,7 +253,13 @@ function createReceiveGuard(onViolation: (refname: string) => void): Transform {
 }
 
 /** POST /git/:id/git-(upload|receive)-pack — the actual pack exchange. */
-function handleServiceRpc(req: IncomingMessage, res: ServerResponse, service: string, repoPath: string): void {
+function handleServiceRpc(
+  req: IncomingMessage,
+  res: ServerResponse,
+  service: string,
+  repoPath: string,
+  allowedRef: string | undefined,
+): void {
   const cmd = service.replace(/^git-/, "");
   res.writeHead(200, {
     "Content-Type": `application/x-${service}-result`,
@@ -164,8 +268,10 @@ function handleServiceRpc(req: IncomingMessage, res: ServerResponse, service: st
   const proc = gitStream([cmd, "--stateless-rpc", repoPath]);
   let body: NodeJS.ReadableStream = req.headers["content-encoding"] === "gzip" ? req.pipe(createGunzip()) : req;
   if (cmd === "receive-pack") {
-    const guard = createReceiveGuard((refname) => {
-      console.warn(`[git-http] refused push outside ${KANBAN_INCOMING_REF_PREFIX}: ${refname} (repo=${repoPath})`);
+    const guard = createReceiveGuard(allowedRef, (refname) => {
+      console.warn(
+        `[git-http] refused push to ${refname}: token is scoped to ${allowedRef ?? "<no ref>"} (repo=${repoPath})`,
+      );
     });
     guard.on("error", () => {
       try { proc.kill(); } catch { /* already gone */ }
@@ -206,10 +312,9 @@ export async function startGitHttpServer(opts?: {
   database?: Database;
   port?: number;
   host?: string;
-  token?: string;
 }): Promise<GitHttpHandle> {
   const database = opts?.database ?? realDb;
-  const token = opts?.token ?? randomBytes(32).toString("hex");
+  const tokens = createGitTokenStore();
 
   const http: Server = createServer((req, res) => {
     void (async () => {
@@ -222,7 +327,8 @@ export async function startGitHttpServer(opts?: {
         }
 
         const provided = extractToken(req);
-        if (!provided || !tokensMatch(provided, token)) {
+        const scope = provided ? tokens.resolve(provided) : null;
+        if (!scope) {
           reject(res, 401, "unauthorized");
           return;
         }
@@ -233,6 +339,15 @@ export async function startGitHttpServer(opts?: {
           return;
         }
         const [, projectId, tail] = match;
+        // #247: a token is scoped to ONE project. Answering for another project
+        // would hand every registered repo to any paired worker.
+        if (scope.projectId !== projectId) {
+          console.warn(
+            `[git-http] refused ${tail} for project ${projectId}: token is scoped to ${scope.projectId} (worker=${scope.workerId})`,
+          );
+          reject(res, 403, "token is not scoped to this project");
+          return;
+        }
         const repoPath = await resolveRepoPath(projectId!, database);
         if (!repoPath) {
           reject(res, 404, "unknown project");
@@ -253,7 +368,7 @@ export async function startGitHttpServer(opts?: {
           reject(res, 400, "bad request");
           return;
         }
-        handleServiceRpc(req, res, tail!, repoPath);
+        handleServiceRpc(req, res, tail!, repoPath, scope.incomingRef);
       } catch (err) {
         console.error("[git-http] request failed:", err);
         try {
@@ -270,11 +385,12 @@ export async function startGitHttpServer(opts?: {
       resolve(typeof address === "object" && address ? address.port : 0);
     });
   });
-  console.log(`[git-http] serving project repos on port ${port} (token-authed)`);
+  console.log(`[git-http] serving project repos on port ${port} (per-assignment scoped tokens)`);
 
   return {
     port,
-    token,
+    issueToken: (input) => tokens.issue(input),
+    revokeWorkerTokens: (workerId) => tokens.revokeWorker(workerId),
     close: () => new Promise<void>((resolve) => http.close(() => resolve())),
   };
 }
@@ -290,6 +406,21 @@ export function ensureGitHttpServer(database?: Database): Promise<GitHttpHandle>
     });
   }
   return activeServer;
+}
+
+/**
+ * Invalidate every git token held by a worker (#247). Called from
+ * `revokeWorker` so "revoked" really means revoked — before this, a revoked
+ * machine kept a working clone/push credential until the board restarted, while
+ * the UI told the operator the token stopped working immediately. A no-op when
+ * the git listener was never started (nothing was ever issued).
+ */
+export async function revokeGitTokensForWorker(workerId: string): Promise<number> {
+  if (!activeServer) return 0;
+  const handle = await activeServer.catch(() => null);
+  const removed = handle?.revokeWorkerTokens(workerId) ?? 0;
+  if (removed > 0) console.log(`[git-http] revoked ${removed} git token(s) for worker ${workerId}`);
+  return removed;
 }
 
 export async function stopGitHttpServer(): Promise<void> {

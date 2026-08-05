@@ -9,7 +9,12 @@
 //  - WORKER token: issued at registration, returned to the worker exactly once,
 //    stored here only as a sha-256 hash, verified with a constant-time compare.
 // Board credentials never flow to workers; workers use their machine-local
-// agent logins.
+// agent logins (enforced for launch specs by lib/remote-spec-env.ts, #244).
+//
+// Revocation is not just a row delete: `revokeWorker` also fires the registered
+// revoke listeners, which close the worker's live WebSocket and invalidate its
+// scoped git tokens (#247) — otherwise a revoked machine keeps streaming into
+// in-flight sessions and keeps cloning/pushing until the board restarts.
 
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { db as realDb } from "../db/index.js";
@@ -164,15 +169,35 @@ export function createWorkerRegistry(database: Database = realDb) {
     await workerRepo.updateWorkerHeartbeat(workerId, now ?? new Date().toISOString(), undefined, database);
   }
 
+  /**
+   * Side effects that must accompany a revocation but live outside this service:
+   * closing the worker's already-upgraded WebSocket and invalidating its scoped
+   * git tokens. Registered by the fleet facade AFTER the connection manager
+   * exists (it is built FROM this registry, so it cannot be a constructor dep).
+   */
+  const revokeListeners = new Set<(workerId: string) => void | Promise<void>>();
+
+  function onRevoke(listener: (workerId: string) => void | Promise<void>): () => void {
+    revokeListeners.add(listener);
+    return () => revokeListeners.delete(listener);
+  }
+
   async function revokeWorker(workerId: string): Promise<boolean> {
     const row = await workerRepo.getWorkerById(workerId, database);
     if (!row) return false;
     await workerRepo.deleteWorker(workerId, database);
+    // Deleting the row only stops NEW authentications. A revoked worker also
+    // holds a live socket and (for git transport) working git tokens — both must
+    // die now, or "revoked" is a claim the code does not honour (#247).
+    await Promise.allSettled([...revokeListeners].map(async (listener) => listener(workerId)));
     console.log(`[worker-registry] revoked worker: id=${workerId} name=${row.name}`);
     return true;
   }
 
-  return { mintPairingToken, registerWorker, authenticateWorker, heartbeat, touchHeartbeat, listWorkersView, revokeWorker };
+  return {
+    mintPairingToken, registerWorker, authenticateWorker, heartbeat, touchHeartbeat,
+    listWorkersView, revokeWorker, onRevoke,
+  };
 }
 
 export type WorkerRegistry = ReturnType<typeof createWorkerRegistry>;
