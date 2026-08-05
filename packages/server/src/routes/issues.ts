@@ -26,7 +26,9 @@ import { createShowdownService } from "../services/showdown.service.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../middleware/ai-operation.js";
-import { runTicketPreflight, formatClarificationsBlock, type PreflightClarification } from "../services/ticket-preflight.service.js";
+import { runTicketPreflight, formatClarificationsBlock, type PreflightClarification, type PreflightVerdict } from "../services/ticket-preflight.service.js";
+import { getPreference } from "../repositories/preferences.repository.js";
+import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { WorkspaceError } from "../services/workspace-internals.js";
 import { getIssueActivity } from "../services/issue-activity.service.js";
 import { createIssueMergedCommitsService } from "../services/issue-merged-commits.service.js";
@@ -367,6 +369,21 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     const issueId = c.req.param("id");
     const body = await parseJsonBody<{ projectId: string; clarifications?: PreflightClarification[] }>(c);
     if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
+
+    // `skip_preflight` is enforced HERE, not only in the client. The launch form was the
+    // sole gate, so every other caller (CLI, MCP, butler, a second tab) still paid for the
+    // AI check after the operator turned it off. Report the skip in the verdict instead of
+    // faking a "ready" the model never produced.
+    const preflightPrefs = { skip_preflight: (await getPreference("skip_preflight", database)) ?? undefined };
+    if (getBool(preflightPrefs, "skip_preflight")) {
+      return c.json({
+        verdict: "ready" satisfies PreflightVerdict,
+        questions: [],
+        summary: "Preflight is disabled (skip_preflight); no check was run.",
+        looksComplex: false,
+        skipped: true,
+      });
+    }
 
     const answered = (body.clarifications ?? []).filter(
       (cl) => cl && typeof cl.question === "string" && typeof cl.answer === "string" && cl.question.trim() && cl.answer.trim(),
