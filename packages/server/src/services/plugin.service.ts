@@ -529,6 +529,33 @@ export function createPluginService(deps: {
     return { prefKey, skillsRemoved };
   }
 
+  /**
+   * What an enabled plugin can be ASKED to do, derived from its manifest so it cannot drift out of
+   * date the way hand-written prose does. Returns "" when the plugin declares neither skills nor
+   * loops, so a plugin with nothing to offer adds nothing to the butler's context.
+   */
+  function pluginCapabilityRoster(manifest: PluginManifest): string {
+    const lines: string[] = [];
+    const skills = manifest.skills ?? [];
+    if (skills.length) {
+      lines.push("**Skills it provides** (run one to create a ticket and launch a workspace against it):");
+      for (const s of skills) {
+        const name = s.dir.split(/[\\/]/).filter(Boolean).pop() ?? s.dir;
+        lines.push(s.description ? `- \`${name}\` — ${s.description}` : `- \`${name}\``);
+      }
+    }
+    const loops = manifest.loops ?? [];
+    if (loops.length) {
+      if (lines.length) lines.push("");
+      lines.push("**Converging loops** (each advance tickets the units its plan says are ready):");
+      for (const l of loops) {
+        const via = l.skill ? ` — hands out \`${l.skill}\`` : "";
+        lines.push(`- \`${l.name}\`${l.label && l.label !== l.name ? ` (${l.label})` : ""}${via}`);
+      }
+    }
+    return lines.join("\n");
+  }
+
   async function getButlerFragments(projectId: string): Promise<string[]> {
     const enabled = (await enabledSlugsByProject()).get(projectId);
     if (!enabled || enabled.size === 0) return [];
@@ -543,16 +570,32 @@ export function createPluginService(deps: {
       if (!enabled.has(row.pluginId)) continue;
       try {
         const manifest = parsePluginManifest(row.manifestJson);
-        if (!manifest.butler?.promptFragment) continue;
-        const fragmentPath = resolveInside(row.localPath, manifest.butler.promptFragment, "butler.promptFragment");
-        if (!existsSync(fragmentPath)) continue;
-        const text = substitutePluginPlaceholders(readFileSync(fragmentPath, "utf8"), {
+        const vars = {
           repoPath: project.repoPath,
           leadingRepoPath: project.repoPath,
           projectName: project.name,
           pluginPath: row.localPath,
-        }).trim();
-        if (text) fragments.push(`## Plugin: ${row.name}\n\n${text}`);
+        };
+
+        const parts: string[] = [];
+        if (manifest.butler?.promptFragment) {
+          const fragmentPath = resolveInside(row.localPath, manifest.butler.promptFragment, "butler.promptFragment");
+          if (existsSync(fragmentPath)) {
+            const text = substitutePluginPlaceholders(readFileSync(fragmentPath, "utf8"), vars).trim();
+            if (text) parts.push(text);
+          }
+        }
+
+        // The roster is DERIVED, not authored. A plugin's own fragment is written by its author and
+        // drifts: it explains how to consume the output and rarely lists what the plugin can be
+        // ASKED to do. So every enabled plugin contributes its skills and loops here automatically,
+        // and a plugin that ships no fragment at all still announces its capabilities instead of
+        // being invisible. Skill names are the directory basenames — the same identifiers
+        // `loops[].skill` uses and the same ones materialized into each ticket's worktree.
+        const roster = pluginCapabilityRoster(manifest);
+        if (roster) parts.push(roster);
+
+        if (parts.length) fragments.push(`## Plugin: ${row.name}\n\n${parts.join("\n\n")}`);
       } catch {
         /* a broken plugin must never take the butler down */
       }
