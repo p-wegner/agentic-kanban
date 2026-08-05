@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import net from "node:net";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import {
   appendFileSync,
@@ -14,7 +13,6 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import type { ChildProcess } from "node:child_process";
 import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-preference-write";
 import { listWorkflowTemplates, type WorkflowDb } from "@agentic-kanban/shared/lib/workflow-engine";
@@ -37,8 +35,7 @@ import {
 import { isPluginEnabledPreferenceKey } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
 import type { Database } from "../db/index.js";
-import { spawnShellCommand, taskkillTree } from "./process-exec.js";
-import { runPluginCommand, tailOutput as tail, type PluginCommandResult } from "./plugin-exec.js";
+import { runPluginCommand, type PluginCommandResult } from "./plugin-exec.js";
 import { createPluginLoopEngine, type LoopAdvanceResult, type LoopStatus } from "./plugin-loop.service.js";
 import { getProjectById } from "../repositories/project.repository.js";
 import { getPreference } from "../repositories/preferences.repository.js";
@@ -86,7 +83,12 @@ import {
 } from "./plugin-fs.js";
 import { PluginError } from "./plugin-errors.js";
 import { fanOutScaffold, scaffoldPlaceholderStatus, requireScaffoldReady } from "./plugin-scaffold.js";
-import { findView, probeHealth } from "./plugin-view-probe.js";
+import {
+  createPluginViewsRuntime,
+  stopAllPluginViews,
+  stopPluginViews,
+  type PluginViewProcess,
+} from "./plugin-views.service.js";
 import { pluginsHomeDir } from "./plugin-fs.js";
 import {
   marketplaceCatalogPath,
@@ -95,68 +97,11 @@ import {
   type InstalledPluginRow,
 } from "./plugin-marketplace.js";
 
-// Re-exported so existing importers keep working after the split.
-export { pluginsHomeDir, marketplaceCatalogPath };
-export type { PluginMarketplaceEntry };
-
-
-export interface PluginViewProcess {
-  child: ChildProcess;
-  port: number;
-  pid: number | null;
-  startedAt: string;
-  pluginId: string;
-  viewId: string;
-  projectId: string;
-}
-
-/**
- * Module-level so `stopAllPluginViews()` (called from the shutdown handler) needs
- * no service/db instance. Keyed `pluginRowId:viewId:projectId`.
- */
-const viewChildren = new Map<string, PluginViewProcess>();
-
-function viewKey(pluginRowId: string, viewId: string, projectId: string): string {
-  return `${pluginRowId}:${viewId}:${projectId}`;
-}
-
-function killChild(entry: PluginViewProcess): void {
-  // The child is a cmd.exe/sh wrapper; on Windows kill the tree so the actual
-  // server (a grandchild) dies too. Never touches anything but this exact pid.
-  if (process.platform === "win32" && entry.pid) {
-    void taskkillTree(entry.pid).catch(() => {});
-  }
-  try {
-    entry.child.kill();
-  } catch {
-    /* already gone */
-  }
-}
-
-/** Kill every supervised plugin-view server. Called from the server shutdown path. */
-export function stopAllPluginViews(): number {
-  let stopped = 0;
-  for (const entry of viewChildren.values()) {
-    killChild(entry);
-    stopped++;
-  }
-  viewChildren.clear();
-  return stopped;
-}
-
-/** OS-assigned free port: bind to 0, read, close. Never guesses a number. */
-function allocateFreePort(): Promise<number> {
-  return new Promise((resolvePort, reject) => {
-    const server = net.createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      const port = typeof address === "object" && address ? address.port : 0;
-      server.close(() => (port > 0 ? resolvePort(port) : reject(new Error("failed to allocate a port"))));
-    });
-  });
-}
-
+// Re-exported so existing importers keep working after the split. `stopAllPluginViews` is the
+// shutdown handler's entry point (`startup/process-handlers.ts`) and several tests import it from
+// here; the view child-process map now lives in ONE place, `plugin-views.service.ts`.
+export { pluginsHomeDir, marketplaceCatalogPath, stopAllPluginViews };
+export type { PluginMarketplaceEntry, PluginViewProcess };
 
 export type PluginScriptResult = PluginCommandResult;
 
@@ -207,6 +152,19 @@ export function createPluginService(deps: {
 }) {
   const { database, createIssue, createWorkspace } = deps;
   const loops = createPluginLoopEngine({ database, createIssue });
+  /**
+   * The view child-server lifecycle lives in `plugin-views.service.ts` — it owns the module-level
+   * process map, so this is the only place it gets bound to a service closure. Do NOT reach for the
+   * map from here; use these functions and `stopPluginViews()`.
+   */
+  const { startView, stopView, getViewStatus, listViews, listProjectViews } = createPluginViewsRuntime({
+    requirePlugin,
+    requireProject,
+    resolveOutputRepoPath,
+    enabledSlugsByProject,
+    listPluginRows: () => listPluginRows(database),
+    parseManifest: parsePluginManifest,
+  });
 
   async function requirePlugin(id: string): Promise<PluginRow & { manifest: PluginManifest }> {
     const row = await getPluginRowById(id, database);
@@ -311,15 +269,7 @@ export function createPluginService(deps: {
       );
     }
 
-    let viewsStopped = 0;
-    if (headChanged) {
-      for (const [key, entry] of viewChildren) {
-        if (entry.pluginId !== row.id) continue;
-        killChild(entry);
-        viewChildren.delete(key);
-        viewsStopped++;
-      }
-    }
+    const viewsStopped = headChanged ? stopPluginViews(row.id) : 0;
 
     const updated = await upsertPluginRow(
       {
@@ -381,11 +331,7 @@ export function createPluginService(deps: {
   async function removePlugin(id: string): Promise<void> {
     const row = await getPluginRowById(id, database);
     if (!row) throw new PluginError("Plugin not found", "NOT_FOUND");
-    for (const [key, entry] of viewChildren) {
-      if (entry.pluginId !== id) continue;
-      killChild(entry);
-      viewChildren.delete(key);
-    }
+    stopPluginViews(id);
     // Disable everywhere: flip every plugin_enabled_<slug>_* pref to "false" via the
     // checked write (skill junctions/scaffolds stay — the row is gone, the files inert).
     const prefs = await listPluginEnabledPreferences(database);
@@ -510,11 +456,7 @@ export function createPluginService(deps: {
     await setPreferenceChecked(database, [{ key: prefKey, value: "false" }]);
 
     // Stop this plugin's serve processes for the project.
-    for (const [key, entry] of viewChildren) {
-      if (entry.pluginId !== pluginRowId || entry.projectId !== projectId) continue;
-      killChild(entry);
-      viewChildren.delete(key);
-    }
+    stopPluginViews(pluginRowId, projectId);
 
     // Remove skill JUNCTIONS only — a path that is a real directory (copy fallback
     // or a pre-existing project skill) is NEVER deleted.
@@ -601,126 +543,6 @@ export function createPluginService(deps: {
       }
     }
     return fragments;
-  }
-
-  async function startView(pluginRowId: string, viewId: string, projectId: string): Promise<{ url: string; port: number; pid: number | null }> {
-    const plugin = await requirePlugin(pluginRowId);
-    const project = await requireProject(projectId);
-    const view = findView(plugin.manifest, viewId);
-    const key = viewKey(pluginRowId, viewId, projectId);
-
-    const existing = viewChildren.get(key);
-    if (existing) {
-      if (existing.child.exitCode === null && !existing.child.killed) {
-        return { url: `http://localhost:${existing.port}`, port: existing.port, pid: existing.pid };
-      }
-      viewChildren.delete(key);
-    }
-
-    const port = await allocateFreePort();
-    const outputRepoPath = await resolveOutputRepoPath(plugin, project);
-    const vars: PluginPlaceholderVars = {
-      repoPath: outputRepoPath,
-      leadingRepoPath: project.repoPath,
-      projectName: project.name,
-      pluginPath: plugin.localPath,
-      port,
-    };
-    const env: Record<string, string> = substitutePluginEnv(view.serve.env, vars);
-    if (view.serve.portEnv) env[view.serve.portEnv] = String(port);
-    const command = substitutePluginPlaceholders(view.serve.command, vars);
-
-    const child = spawnShellCommand(command, {
-      cwd: view.serve.cwd === "repo" ? outputRepoPath : plugin.localPath,
-      stdio: ["ignore", "ignore", "pipe"],
-      mergeEnv: env,
-    });
-    let stderrTail = "";
-    child.stderr?.on("data", (chunk: Buffer) => {
-      stderrTail = tail(stderrTail + chunk.toString("utf8"));
-    });
-    child.on("exit", (code) => {
-      const entry = viewChildren.get(key);
-      if (entry?.child === child) viewChildren.delete(key);
-      if (code !== 0 && code !== null) {
-        console.warn(`[plugins] view ${plugin.pluginId}:${viewId} exited with code ${code}${stderrTail ? `: ${stderrTail.slice(-500)}` : ""}`);
-      }
-    });
-
-    viewChildren.set(key, {
-      child,
-      port,
-      pid: child.pid ?? null,
-      startedAt: new Date().toISOString(),
-      pluginId: pluginRowId,
-      viewId,
-      projectId,
-    });
-    return { url: `http://localhost:${port}`, port, pid: child.pid ?? null };
-  }
-
-  async function stopView(pluginRowId: string, viewId: string, projectId: string): Promise<{ stopped: boolean }> {
-    const key = viewKey(pluginRowId, viewId, projectId);
-    const entry = viewChildren.get(key);
-    if (!entry) return { stopped: false };
-    killChild(entry);
-    viewChildren.delete(key);
-    return { stopped: true };
-  }
-
-  async function getViewStatus(pluginRowId: string, viewId: string, projectId: string) {
-    const entry = viewChildren.get(viewKey(pluginRowId, viewId, projectId));
-    if (!entry || entry.child.exitCode !== null) {
-      return { running: false as const };
-    }
-    const plugin = await requirePlugin(pluginRowId);
-    const view = findView(plugin.manifest, viewId);
-    return {
-      running: true as const,
-      port: entry.port,
-      pid: entry.pid,
-      startedAt: entry.startedAt,
-      url: `http://localhost:${entry.port}`,
-      healthy: await probeHealth(entry.port, view.serve.healthPath),
-    };
-  }
-
-  /** View descriptors + running state for one plugin (route: GET /plugins/:id/views). */
-  async function listViews(pluginRowId: string, projectId: string) {
-    const plugin = await requirePlugin(pluginRowId);
-    await requireProject(projectId);
-    const views = [];
-    for (const view of plugin.manifest.views ?? []) {
-      views.push({ id: view.id, label: view.label, kind: view.kind, ...(await getViewStatus(pluginRowId, view.id, projectId)) });
-    }
-    return views;
-  }
-
-  /** Flat list of the ENABLED plugins' views for a project (the client view host). */
-  async function listProjectViews(projectId: string) {
-    await requireProject(projectId);
-    const enabled = (await enabledSlugsByProject()).get(projectId) ?? new Set<string>();
-    const out = [];
-    for (const row of await listPluginRows(database)) {
-      if (!enabled.has(row.pluginId)) continue;
-      try {
-        const manifest = parsePluginManifest(row.manifestJson);
-        for (const view of manifest.views ?? []) {
-          out.push({
-            pluginId: row.id,
-            pluginSlug: row.pluginId,
-            pluginName: row.name,
-            id: view.id,
-            label: view.label,
-            kind: view.kind,
-            ...(await getViewStatus(row.id, view.id, projectId)),
-          });
-        }
-      } catch {
-        /* skip plugins with a broken cached manifest */
-      }
-    }
-    return out;
   }
 
   async function runScript(pluginRowId: string, scriptName: string, projectId: string): Promise<PluginScriptResult> {
