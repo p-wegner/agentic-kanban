@@ -35,6 +35,19 @@ export const PLUGIN_MANIFEST_FILENAME = "kanban-plugin.json";
 /** Valid plugin slug: lowercase alphanumerics and dashes. */
 export const PLUGIN_ID_PATTERN = /^[a-z0-9-]+$/;
 
+/**
+ * Valid loop `name`: letters, digits, `.`, `_`, `-` — and notably NO `:` (#250).
+ *
+ * The loop name is a SEGMENT of the `:`-joined dedupe key (`pluginLoopUnitKey`), and unit ids
+ * legitimately contain colons (`billing:round-3` is the documented retry shape). If a loop name
+ * could contain one too, loop `a` + unit `b:c` and loop `a:b` + unit `c` would produce the same
+ * key, so one loop's unit would be read as "already ticketed" by the other and silently never
+ * ticketed. Constraining the name — not the unit ids — makes the split unambiguous while leaving
+ * planners free to compose ids. Whitespace and `%`/`\` are excluded for the same reason the LIKE
+ * prefix is escaped: a name that is also a pattern is a name that matches the wrong rows.
+ */
+export const PLUGIN_LOOP_NAME_PATTERN = /^[A-Za-z0-9._-]+$/;
+
 /** Where a manifest command runs: the plugin's own checkout or the project repo. */
 export type PluginCwd = "plugin" | "repo";
 
@@ -331,6 +344,9 @@ export function parsePluginManifest(input: string | unknown): PluginManifest {
   const loops = obj.loops == null ? undefined : requireArray(obj.loops, "loops").map((entry, i) => {
     const rec = asRecord(entry, `loops[${i}]`);
     const loopName = requireString(rec.name, `loops[${i}].name`);
+    if (!PLUGIN_LOOP_NAME_PATTERN.test(loopName)) {
+      fail(`"loops[${i}].name" must match ${PLUGIN_LOOP_NAME_PATTERN} (got "${loopName}") — the name is a segment of the ticket dedupe key, so a ":" in it would collide with a unit id`);
+    }
     if (seenLoopNames.has(loopName)) fail(`duplicate loop name "${loopName}"`);
     seenLoopNames.add(loopName);
     const skill = requireString(rec.skill, `loops[${i}].skill`);
@@ -433,6 +449,11 @@ export function parsePluginLoopPlan(stdout: string): PluginLoopPlan {
  * against on the next advance so a still-outstanding unit is never re-ticketed.
  * Kept in the shared lib so the server (which writes it) and any consumer that
  * needs to recognise loop tickets derive it identically.
+ *
+ * The key is `:`-joined, so both leading segments must be colon-free for the join to be
+ * unambiguous: the slug is `PLUGIN_ID_PATTERN` and the loop name `PLUGIN_LOOP_NAME_PATTERN`
+ * (#250). Unit ids are deliberately unconstrained — they are the planner's own composite
+ * ("billing:round-3") and only ever the TAIL.
  *
  * KNOWN DEBT (#201): this key rides on `issues.externalKey`, a column documented
  * (and rendered in the UI) as a genuine external-tracker link — not a private

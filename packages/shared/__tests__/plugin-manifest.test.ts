@@ -205,6 +205,33 @@ describe("plugin manifest — converging loops", () => {
     })).toThrow(/positive integer/);
   });
 
+  // #250 — the loop name is a SEGMENT of the `:`-joined dedupe key, so a colon in it makes the
+  // key ambiguous with a unit id that also contains one. Table-driven over the exact collision
+  // the reviewer traced: loop `a` + unit `b:c` vs loop `a:b` + unit `c`.
+  it.each([
+    { name: "a:b", valid: false, why: "a colon collides with a unit id's own colons" },
+    { name: "extract v2", valid: false, why: "whitespace" },
+    { name: "extract%", valid: false, why: "a LIKE wildcard in the key prefix" },
+    { name: "extract_v2", valid: true, why: "underscores are fine — the LIKE prefix is escaped" },
+    { name: "extract.v2", valid: true, why: "dots are fine" },
+    { name: "requirement-extraction", valid: true, why: "the shape every real plugin uses" },
+  ])("loop name $name is ${valid} ($why)", ({ name, valid }) => {
+    const manifest = { ...LOOP_MANIFEST, loops: [{ ...LOOP_MANIFEST.loops[0], name }] };
+    if (valid) {
+      expect(parsePluginManifest(manifest).loops?.[0].name).toBe(name);
+    } else {
+      expect(() => parsePluginManifest(manifest)).toThrow(/loops\[0\]\.name/);
+    }
+  });
+
+  it("keeps the ambiguous key pair unreachable: loop 'a' + unit 'b:c' vs loop 'a:b' + unit 'c'", () => {
+    // The two keys ARE identical — which is exactly why the loop name may not contain a colon.
+    expect(pluginLoopUnitKey("p", "a", "b:c")).toBe(pluginLoopUnitKey("p", "a:b", "c"));
+    // …and a manifest can only ever produce the first of them.
+    expect(() => parsePluginManifest({ ...LOOP_MANIFEST, loops: [{ ...LOOP_MANIFEST.loops[0], name: "a:b" }] }))
+      .toThrow(PluginManifestError);
+  });
+
   it("rejects an unknown cwd on a script, a view serve, and a loop plan alike", () => {
     expect(() => parsePluginManifest({
       ...LOOP_MANIFEST,

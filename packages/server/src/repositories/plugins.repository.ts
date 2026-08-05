@@ -1,5 +1,5 @@
 import { issues, plugins, preferences, projectStatuses } from "@agentic-kanban/shared/schema";
-import { and, eq, like } from "drizzle-orm";
+import { and, eq, like, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
@@ -48,6 +48,11 @@ export async function deletePluginRow(id: string, database: Database = db): Prom
   await database.delete(plugins).where(eq(plugins.id, id));
 }
 
+/** Escape the LIKE metacharacters (`\`, `%`, `_`) so a prefix matches itself and nothing else. */
+export function escapeLikeLiteral(text: string): string {
+  return text.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
 export interface LoopIssueRow {
   id: string;
   issueNumber: number | null;
@@ -62,12 +67,19 @@ export interface LoopIssueRow {
  * already has a ticket must NOT be re-ticketed, and a unit whose ticket reached a
  * terminal status is what lets the planner's next round move on. Scoped by the
  * `plugin-loop:<slug>:<loop>:` prefix so one project can run several loops.
+ *
+ * The prefix is matched as a LITERAL (#250): a loop named `extract_v2` puts a `_` — a
+ * single-character LIKE wildcard — into the prefix, so an unescaped match counted a sibling
+ * loop's tickets and the monitor's `openTickets > 0` gate then blocked or released the wrong
+ * loop. Every wildcard in the prefix is escaped and the pattern carries an explicit
+ * `ESCAPE '\'`.
  */
 export async function listPluginLoopIssues(
   projectId: string,
   keyPrefix: string,
   database: Database = db,
 ): Promise<LoopIssueRow[]> {
+  const pattern = `${escapeLikeLiteral(keyPrefix)}%`;
   const rows = await database
     .select({
       id: issues.id,
@@ -77,7 +89,7 @@ export async function listPluginLoopIssues(
     })
     .from(issues)
     .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .where(and(eq(issues.projectId, projectId), like(issues.externalKey, `${keyPrefix}%`)));
+    .where(and(eq(issues.projectId, projectId), sql`${issues.externalKey} LIKE ${pattern} ESCAPE '\\'`));
   return rows.flatMap((row) =>
     row.externalKey ? [{ ...row, externalKey: row.externalKey }] : [],
   );
