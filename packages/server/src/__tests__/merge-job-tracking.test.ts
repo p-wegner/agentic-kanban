@@ -82,4 +82,41 @@ describe("merge job tracking", () => {
     expect(getMergeJob("ws-bulk-0")).toBeNull();
     expect(getMergeJob("ws-bulk-119")?.state).toBe("succeeded");
   });
+
+  /**
+   * The eviction list is keyed by workspaceId while the map holds at most ONE job per workspace,
+   * so a workspace that merged twice used to occupy two slots pointing at the same key. When the
+   * OLDER duplicate reached the cap and shifted out, the eviction deleted the entry holding the
+   * NEWER (still-poll-able) verdict — and the surviving duplicate then evicted nothing, so the
+   * bound leaked by one at the same time. A workspace merged twice is routine (fix-and-merge,
+   * a retried merge after a gate failure), not exotic.
+   */
+  it("does not lose a re-merged workspace's verdict when its older duplicate is evicted", () => {
+    // Finish ws-twice ONCE, early enough that its first slot is what the cap pushes out.
+    const first = startMergeJob("ws-twice");
+    completeMergeJob(first.jobId, "ws-twice", { merged: true, attempt: 1 });
+
+    // Fill the retention window most of the way.
+    for (let i = 0; i < 45; i++) {
+      const job = startMergeJob(`ws-filler-${i}`);
+      completeMergeJob(job.jobId, `ws-filler-${i}`, { merged: true });
+    }
+
+    // Merge the same workspace a SECOND time — this is the record a caller polls for.
+    const second = startMergeJob("ws-twice");
+    failMergeJob(second.jobId, "ws-twice", new Error("conflict on retry"));
+    expect(getMergeJob("ws-twice")?.jobId).toBe(second.jobId);
+
+    // Push past the 50-job cap so the oldest entries are evicted.
+    for (let i = 0; i < 20; i++) {
+      const job = startMergeJob(`ws-late-${i}`);
+      completeMergeJob(job.jobId, `ws-late-${i}`, { merged: true });
+    }
+
+    const survivor = getMergeJob("ws-twice");
+    expect(survivor).not.toBeNull();
+    expect(survivor!.jobId).toBe(second.jobId);
+    expect(survivor!.state).toBe("failed");
+    expect(survivor!.error).toContain("conflict on retry");
+  });
 });
