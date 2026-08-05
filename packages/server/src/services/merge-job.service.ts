@@ -84,6 +84,13 @@ function finish(jobId: string, workspaceId: string, patch: Partial<MergeJob>): v
     finishedAt,
     durationMs: Date.parse(finishedAt) - Date.parse(job.startedAt),
   });
+  // Dedupe by workspaceId: `jobsByWorkspace` holds at most ONE entry per workspace, so a
+  // workspace merged twice used to leave two `finishedOrder` entries pointing at the same map
+  // key. When the OLDER duplicate shifted out at the cap, the eviction deleted the entry holding
+  // the NEWER finished job — losing a verdict a caller was still polling for, while the retained
+  // duplicate then evicted nothing. Keep one entry per workspace, at its most recent position.
+  const previous = finishedOrder.indexOf(workspaceId);
+  if (previous !== -1) finishedOrder.splice(previous, 1);
   finishedOrder.push(workspaceId);
   evictIfNeeded();
 }
