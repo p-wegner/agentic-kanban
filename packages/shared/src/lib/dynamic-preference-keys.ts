@@ -88,6 +88,7 @@ export function isProjectScopedDynamicKey(key: string): boolean {
     || matchesScopedKey(key, FREEFORM_SUFFIX_KEY_PREFIXES, (rest) => rest.length > 0)
     || isPluginEnabledPreferenceKey(key)
     || isPluginLoopPausedPreferenceKey(key)
+    || isPluginLoopConvergedPreferenceKey(key)
     || isPluginOutputLocationPreferenceKey(key);
 }
 
@@ -110,6 +111,15 @@ export function isPluginEnabledPreferenceKey(key: string): boolean {
  */
 export function isPluginLoopPausedPreferenceKey(key: string): boolean {
   return /^plugin_loop_paused_.+_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(key);
+}
+
+/**
+ * True for the per-loop convergence key
+ * (`plugin_loop_converged_<pluginSlug>_<loopName>_<projectId>`). Same three-dynamic-segment
+ * shape as the pause key, anchored on the trailing UUID for the same reason.
+ */
+export function isPluginLoopConvergedPreferenceKey(key: string): boolean {
+  return /^plugin_loop_converged_.+_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(key);
 }
 
 /**

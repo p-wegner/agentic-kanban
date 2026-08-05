@@ -317,6 +317,21 @@ describe("plugin.service", () => {
     expect(fragments[0]).not.toContain("Coverage docs live in");
   });
 
+  it("a butler fragment's {{repoPath}} is the OUTPUT repo in sidecar mode, like every other site", async () => {
+    const pluginDir = makePluginDir();
+    const repo = makeProjectRepo();
+    const plugin = await service.installPlugin({ source: pluginDir });
+    const projectId = await insertProject(db, repo);
+    await service.enableForProject(plugin.id, projectId);
+    // Creates the sidecar, so the fragment has a real output repo to name.
+    const { repoPath: sidecar } = await service.setOutputLocation(plugin.id, projectId, "sidecar");
+
+    const fragments = await service.getButlerFragments(projectId);
+    // The stock fragment is "Coverage docs live in {{repoPath}}/docs/analysis."
+    expect(fragments[0]).toContain(`Coverage docs live in ${sidecar}/docs/analysis`);
+    expect(fragments[0]).not.toContain(`Coverage docs live in ${repo}/docs/analysis`);
+  });
+
   it("runScript runs with plugin cwd and substituted env, capturing output", async () => {
     const pluginDir = makePluginDir();
     const repo = makeProjectRepo();

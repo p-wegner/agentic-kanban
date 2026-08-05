@@ -17,10 +17,18 @@ import { getPluginService } from "./plugin.service.js";
  * least one ticket, i.e. a human pressed "Advance" once. So the monitor
  * continues loops the user started and never starts one on its own.
  *
- * **Explicit pause.** A human can also stop a converging loop directly via the
- * `plugin_loop_paused_<slug>_<loop>_<projectId>` pref (Pause/Resume in the loop
- * pane) — this pass skips any paused loop entirely, leaving its open tickets
- * (if any) alone. Otherwise convergence (the planner reporting no units) ends it.
+ * **Two ways a loop stops here.**
+ * - **Convergence** — an advance whose plan reported no units AND `converged: true` persists
+ *   `plugin_loop_converged_<slug>_<loop>_<projectId>`, and this pass then skips the loop. Without
+ *   that persistence a finished loop was replanned on EVERY cycle indefinitely (one planner
+ *   subprocess per finished loop per cycle) and only a pause could stop it. A plan reporting
+ *   `units: [], converged: false` is the "blocked, not done" case and deliberately keeps polling.
+ * - **Explicit pause** — a human stops the loop via
+ *   `plugin_loop_paused_<slug>_<loop>_<projectId>` (Pause/Resume in the loop pane); this pass
+ *   skips it entirely, leaving its open tickets alone.
+ *
+ * Neither flag is consulted by a manual "Advance now", so replanning a converged loop (or a
+ * paused one) is always one deliberate click away.
  */
 export async function advanceDuePluginLoops(
   database: Database,
@@ -68,6 +76,9 @@ export async function advanceDuePluginLoops(
         // Explicitly paused by a human — the only direct way to stop a converging
         // loop; a manual "Advance now" from the UI still works while paused.
         if (loop.paused) continue;
+        // Already reported the JOB done. Re-running its planner every cycle bought nothing and
+        // cost a subprocess per finished loop per cycle.
+        if (loop.converged) continue;
         // Not started by a human yet, or the current round is still running.
         if (loop.closedTickets === 0 && loop.openTickets === 0) continue;
         if (loop.openTickets > 0) continue;

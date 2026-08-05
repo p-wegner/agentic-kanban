@@ -303,14 +303,14 @@ Every one of these fails *silently* — the loop looks fine and the work does no
    `units: [], converged: false` — the board's "blocked, not done". Same for work blocked awaiting
    a decision: not converged.
 
-   Be clear about what the flag does and does not do: it is **reported, not persisted**. The
-   monitor logs it and the panel shows it, but nothing stores it, so a "converged" loop whose
-   tickets are all closed is **re-planned on every monitor cycle, indefinitely** — your planner is
-   re-run each time and the loop simply creates no tickets while it returns no units. Two
-   consequences. Your planner must stay cheap and side-effect-free, because it runs forever, not
-   once. And what actually terminates a loop is **returning no units**, not the flag; `converged:
-   true` *with* units still creates those tickets. The only way to stop the re-planning is the
-   per-loop **pause** (below).
+   Be clear about what the flag does: `converged: true` **with no units** is the loop's terminal
+   verdict and it is **persisted** per project (`plugin_loop_converged_<slug>_<loop>_<projectId>`).
+   The monitor then stops advancing that loop, so your planner is not re-run forever. Two things
+   this does NOT do: `converged: true` *with* units still creates those tickets (and clears the
+   flag — a planner handing out work has not converged), and `converged: false` with no units
+   keeps the loop being polled, which is the whole point of the blocked-not-done case. A converged
+   loop is restarted by a manual **Advance now**, which never consults the flag; the per-loop
+   **pause** (below) remains the way to stop a loop that is still reporting work.
 3. **The planner runs on every advance, including the very first, when nothing is set up.** It
    must not throw. Report the precondition as a note (`"profile not filled in"`,
    `"no revision pinned"`) with no units and `converged: false`. A stack trace here blocks the
@@ -334,9 +334,9 @@ regardless of Start Mode.)
 
 **Pause is the off switch.** Each loop has a per-project pause preference, toggled from its panel
 or `POST /api/plugins/:id/loops/:name/pause|resume`. A paused loop is skipped by the monitor —
-manual Advance still works — and it is the only way to stop a loop that would otherwise be
-re-planned forever. If a loop mysteriously stops converging on its own, check pause before
-suspecting the planner.
+manual Advance still works — so it is how you stop a loop that is still reporting units. (A loop
+that has *reported convergence* stops on its own; see rule 2.) If a loop mysteriously stops
+advancing, check pause and the persisted convergence flag before suspecting the planner.
 
 ### butler
 
@@ -395,10 +395,11 @@ Two exceptions worth knowing before you build a path out of one:
   it plans fine and fails at run time. Have the brief name paths **relative to the repo root** and
   let the agent resolve them inside its own worktree; use the absolute path only for what the
   planner itself reads.
-- **In a butler fragment, `{{repoPath}}` is the LEADING repo even in sidecar mode.** That site
-  substitutes the product repo for both `{{repoPath}}` and `{{leadingRepoPath}}`, unlike every
-  other site. If your fragment tells the assistant where your artifacts live and you use a sidecar,
-  say so in prose rather than relying on the placeholder.
+- **In a butler fragment, a sidecar that does not exist yet resolves to the LEADING repo.** The
+  fragment site substitutes the output repo like everywhere else, but it resolves it without
+  CREATING anything (assembling a prompt must not materialize a repo), so a project set to
+  `sidecar` before the sidecar has been created gets the leading repo. Once anything has run —
+  enable, a script, a loop — the sidecar exists and the placeholder is correct.
 
 ## Design guidance from the plugins that exist
 
@@ -647,7 +648,11 @@ half-valid. The rules that are easy to trip:
 
 - `id` must match `^[a-z0-9-]+$`; `name` is required.
 - Every path field — `skills[].dir`, `butler.promptFragment`, `scaffold.profileTemplate`,
-  `scaffold.targetPath` — must be **relative** and must not contain `..`.
+  `scaffold.targetPath` — must be **relative**, must not contain `..`, and must not end with a
+  slash (the trailing slash breaks the basename a skill's NAME is derived from).
+- `scaffold.targetPath` may not write inside `.git/`.
+- `loops[].name` must match `[A-Za-z0-9._-]+` — no colon, since the name is a segment of the
+  `:`-joined ticket dedupe key and unit ids legitimately contain colons.
 - **Duplicate ids are errors**, not last-wins: `views[].id`, `scripts[].name`, `loops[].name`.
 - `loops[].skill` must be one of your `skills[]` basenames.
 - `maxUnitsPerAdvance` must be a positive integer.
