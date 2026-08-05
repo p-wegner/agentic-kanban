@@ -46,6 +46,13 @@ export async function listWorkspacesSlim(
     model: workspaces.model,
     mergedAt: workspaces.mergedAt,
     isDirect: workspaces.isDirect,
+    // Included despite the slim contract: it is a plain column on `workspaces` (no join, no cost),
+    // and its absence fails SILENTLY for anything driving workspaces over the API. A driver that
+    // seeds files into a worktree reads `workingDir` off a list row, gets undefined, and skips the
+    // seed instead of erroring — so the agent runs against a worktree missing its config and still
+    // looks plausible. Session fields (`sessionStatus`, `lastSessionAt`) genuinely need the sessions
+    // join and stay on the single-workspace GET only.
+    workingDir: workspaces.workingDir,
     createdAt: workspaces.createdAt,
     updatedAt: workspaces.updatedAt,
   };
