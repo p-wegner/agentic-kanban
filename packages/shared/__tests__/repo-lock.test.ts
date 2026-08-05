@@ -7,6 +7,7 @@ import {
   inspectRepoLock,
   withRepoLock,
   REPO_LOCK_STALE_MS,
+  REPO_LOCK_LIVE_HOLDER_MAX_MS,
 } from "../src/lib/repo-lock.js";
 
 describe("repo-lock (#993 on-disk cross-process merge lock)", () => {
@@ -207,6 +208,85 @@ describe("repo-lock (#993 on-disk cross-process merge lock)", () => {
       const status = inspectRepoLock(repo);
       expect(status!.ownerProcessDead).toBe(false);
       expect(tryAcquireRepoLock(repo, "new-holder")).toBeNull();
+    });
+  });
+
+  describe("a live same-host holder is never reclaimed on heartbeat staleness alone", () => {
+    const lockFor = (repo: string) => join(repo, ".git", "agentic-kanban-merge.lock");
+
+    function writeLock(repo: string, contents: Record<string, unknown>): void {
+      writeFileSync(lockFor(repo), JSON.stringify(contents));
+    }
+
+    it("refuses reclaim when the heartbeat is STALE but the same-host pid is provably alive", () => {
+      // The real scenario: the holder is mid-`git`, but its heartbeat write lagged past the
+      // 60s window (blocked event loop, system sleep/resume, an AV-locked write on Windows).
+      // `isProcessConfirmedDead` only ever SHORTENED the wait, so nothing blocked the steal.
+      const repo = makeRepo();
+      const stale = new Date(Date.now() - REPO_LOCK_STALE_MS - 30_000).toISOString();
+      writeLock(repo, {
+        pid: process.pid, // definitely alive — it's us
+        hostname: hostname(),
+        holder: "workspace:live-but-lagging",
+        acquiredAt: stale,
+        heartbeatAt: stale,
+      });
+
+      const status = inspectRepoLock(repo);
+      expect(status!.isStale).toBe(true);
+      expect(status!.ownerProcessAlive).toBe(true);
+      expect(status!.ownerProcessDead).toBe(false);
+
+      expect(tryAcquireRepoLock(repo, "thief")).toBeNull();
+      // And the holder's lockfile is untouched — not merely un-acquired.
+      expect(JSON.parse(readFileSync(lockFor(repo), "utf8")).holder).toBe("workspace:live-but-lagging");
+    });
+
+    it("still reclaims a stale CROSS-HOST lock (liveness is unprovable there — unchanged behaviour)", () => {
+      const repo = makeRepo();
+      const stale = new Date(Date.now() - REPO_LOCK_STALE_MS - 30_000).toISOString();
+      writeLock(repo, {
+        pid: process.pid,
+        hostname: "some-other-host",
+        holder: "workspace:remote",
+        acquiredAt: stale,
+        heartbeatAt: stale,
+      });
+
+      expect(inspectRepoLock(repo)!.ownerProcessAlive).toBe(false);
+      expect(tryAcquireRepoLock(repo, "new-holder")).not.toBeNull();
+    });
+
+    it("still reclaims a same-host CONFIRMED-DEAD pid immediately (#207 unchanged)", () => {
+      const repo = makeRepo();
+      const now = new Date().toISOString();
+      writeLock(repo, {
+        pid: 999999,
+        hostname: hostname(),
+        holder: "workspace:dead",
+        acquiredAt: now,
+        heartbeatAt: now,
+      });
+
+      expect(inspectRepoLock(repo)!.ownerProcessAlive).toBe(false);
+      expect(tryAcquireRepoLock(repo, "new-holder")).not.toBeNull();
+    });
+
+    it("reclaims even a live holder past REPO_LOCK_LIVE_HOLDER_MAX_MS (a recycled pid must never wedge the repo)", () => {
+      const repo = makeRepo();
+      const ancient = new Date(Date.now() - REPO_LOCK_LIVE_HOLDER_MAX_MS - 60_000).toISOString();
+      writeLock(repo, {
+        pid: process.pid,
+        hostname: hostname(),
+        holder: "workspace:pid-recycled-after-reboot",
+        acquiredAt: ancient,
+        heartbeatAt: ancient,
+      });
+
+      expect(inspectRepoLock(repo)!.ownerProcessAlive).toBe(true);
+      const recovered = tryAcquireRepoLock(repo, "new-holder");
+      expect(recovered).not.toBeNull();
+      expect(recovered!.contents.holder).toBe("new-holder");
     });
   });
 
