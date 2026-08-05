@@ -54,6 +54,39 @@ describe("scopedTestPackages", () => {
     expect(scopedTestPackages(["./packages/server/src/index.ts"])).toEqual(["shared", "server"]);
   });
 
+  /**
+   * #241: scoping was OWNERSHIP-based, so a shared-only diff ran only shared's own suites —
+   * dropping exactly the packages a shared change affects most. The dangerous concrete case
+   * was a migration-only diff skipping the server-side migration-drift gate.
+   */
+  it("expands a shared-only diff DOWNSTREAM to every package that depends on shared", () => {
+    expect(scopedTestPackages(["packages/shared/src/lib/git-service/merge.ts"])).toEqual([
+      "shared",
+      "server",
+      "mcp-server",
+      "client",
+    ]);
+  });
+
+  it("keeps the server-side migration-drift gate in scope for a migration-only diff (#241)", () => {
+    const scope = scopedTestPackages([
+      "packages/shared/drizzle/0110_add_thing.sql",
+      "packages/shared/drizzle/meta/_journal.json",
+    ]);
+    expect(scope).toContain("server");
+    expect(testPackagesEnvValue([
+      "packages/shared/drizzle/0110_add_thing.sql",
+      "packages/shared/drizzle/meta/_journal.json",
+    ])).toBe("shared,server,mcp-server");
+  });
+
+  it("does NOT let the always-run `shared` entry expand a narrow diff to everything", () => {
+    // `shared` is forced in for every diff; if downstream expansion ran after that, scoping
+    // would degenerate to "run all packages" and the whole module would be pointless.
+    expect(scopedTestPackages(["packages/client/src/App.tsx"])).toEqual(["shared", "client"]);
+    expect(scopedTestPackages(["packages/server/src/index.ts"])).toEqual(["shared", "server"]);
+  });
+
   it("returns a stable order regardless of input order", () => {
     const a = scopedTestPackages(["packages/mcp-server/x.ts", "packages/server/y.ts"]);
     const b = scopedTestPackages(["packages/server/y.ts", "packages/mcp-server/x.ts"]);

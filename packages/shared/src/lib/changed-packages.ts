@@ -47,6 +47,29 @@ const GLOBAL_SCOPE_BREAKERS: ReadonlyArray<RegExp> = [
 const ALWAYS_RUN: ReadonlyArray<TestPackageLabel> = ["shared"];
 
 /**
+ * DOWNSTREAM dependents of each package (#241). Ownership is not the same as blast radius:
+ * `packages/shared` is imported by every other package (git-service, the merge services, the
+ * Drizzle schema and its migrations), so a shared-only diff affects precisely the suites that
+ * ownership-based scoping dropped.
+ *
+ * The concrete failure this closes: a migration-only diff (`packages/shared/drizzle/NNNN_x.sql`
+ * + the journal) scoped to `shared` alone and therefore SKIPPED
+ * `packages/server/src/__tests__/migration-schema-drift.test.ts` — the gate `packages/shared/CLAUDE.md`
+ * names as THE gate for exactly that diff. Same for `shared/src/lib/git-service/*`: it could
+ * merge without one merge-service test running.
+ *
+ * Derived from the workspace `package.json` dependency graph: server, mcp-server and client each
+ * depend on `@agentic-kanban/shared`; nothing depends on the other three. Keep this in sync if
+ * that ever changes — the direction that matters for safety is the one that ADDS suites.
+ */
+const DOWNSTREAM_DEPENDENTS: Readonly<Record<TestPackageLabel, ReadonlyArray<TestPackageLabel>>> = {
+  shared: ["server", "mcp-server", "client"],
+  server: [],
+  "mcp-server": [],
+  client: [],
+};
+
+/**
  * Order used for the returned list — stable output makes the value safe to put in a log line
  * or an env var and compare across runs.
  */
@@ -81,6 +104,12 @@ export function scopedTestPackages(changedFiles: readonly string[]): TestPackage
     labels.add(owner.label);
   }
   if (labels.size === 0) return null;
+  // Expand along the dependency graph BEFORE adding ALWAYS_RUN. Order matters: `shared` is in
+  // ALWAYS_RUN, so expanding after it would pull shared's dependents in for EVERY diff and
+  // scoping would degenerate to "run everything". Only labels the diff actually OWNS expand.
+  for (const owned of [...labels]) {
+    for (const dependent of DOWNSTREAM_DEPENDENTS[owned]) labels.add(dependent);
+  }
   for (const always of ALWAYS_RUN) labels.add(always);
   return LABEL_ORDER.filter((l) => labels.has(l));
 }
