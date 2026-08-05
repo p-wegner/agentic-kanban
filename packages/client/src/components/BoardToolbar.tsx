@@ -324,15 +324,24 @@ export function BoardToolbar({
       // narrowing isn't carried into this nested closure, so assert it.
       const avail = wrap!.clientWidth;
       if (avail <= 0) return;
+      // Fixed trailing children of the measurement row: the pinned Plugins dropdown
+      // tab (only rendered when PLUGIN_TAB_VIEW resolves) and the "More" trigger.
+      // Everything before them is an overflowable primary tab — so the offset has to
+      // follow whether the Plugins tab is actually there, otherwise the last real
+      // tab's width is counted twice AND dropped from `tabWidths`, silently
+      // miscounting how many tabs fit.
+      const fixedTrailing = PLUGIN_TAB_VIEW ? 2 : 1;
       const children = Array.from(measure!.children) as HTMLElement[];
-      if (children.length < 2) return;
-      // Last two measured children are fixed: the pinned Plugins dropdown tab and the
-      // "More" trigger. Everything before them is an overflowable primary tab.
+      if (children.length < fixedTrailing) return;
       const moreWidth = children[children.length - 1].offsetWidth;
-      const pluginTabWidth = children[children.length - 2].offsetWidth;
-      const tabWidths = children.slice(0, -2).map((el) => el.offsetWidth);
+      const pluginTabWidth = PLUGIN_TAB_VIEW ? children[children.length - 2].offsetWidth : 0;
+      const tabWidths = children.slice(0, -fixedTrailing).map((el) => el.offsetWidth);
       setVisibleViewCount(
-        computeVisibleTabCount({ availableWidth: avail - (pluginTabWidth + 4), tabWidths, moreWidth }),
+        computeVisibleTabCount({
+          availableWidth: avail - (PLUGIN_TAB_VIEW ? pluginTabWidth + 4 : 0),
+          tabWidths,
+          moreWidth,
+        }),
       );
     }
 

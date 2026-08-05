@@ -13,14 +13,32 @@ interface PluginViewState {
   selection: PluginViewSelection | null;
   /** Bumped by "Install plugin…" so the marketplace focuses its install input. */
   installFocusNonce: number;
+  /** Which project the current `selection` belongs to — see `setActiveProject`. */
+  projectId: string | null;
   setSelection: (selection: PluginViewSelection | null) => void;
   openMarketplace: (opts?: { focusInstall?: boolean }) => void;
+  /**
+   * Scope the selection to a project. A plugin pick is only meaningful for the
+   * project it was made in: carried onto another project it names a plugin that
+   * may not even be installed there, and the panel then renders its "‹slug› adds
+   * no views, loops, scripts or skills" state about a plugin the project never
+   * had. Switching projects therefore DROPS a plugin pick (the panel re-resolves
+   * a default from the new project's surface). A marketplace pick survives — the
+   * marketplace is not project-scoped.
+   */
+  setActiveProject: (projectId: string | null) => void;
 }
 
 export const usePluginViewStore = create<PluginViewState>((set) => ({
   selection: null,
   installFocusNonce: 0,
+  projectId: null,
   setSelection: (selection) => set({ selection }),
+  setActiveProject: (projectId) =>
+    set((s) => {
+      if (s.projectId === projectId) return s;
+      return { projectId, selection: s.selection?.kind === "plugin" ? null : s.selection };
+    }),
   openMarketplace: (opts) =>
     set((s) => ({
       selection: { kind: "marketplace" },
