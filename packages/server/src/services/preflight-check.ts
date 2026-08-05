@@ -251,7 +251,14 @@ export async function workspaceLaunchPreflight(
   if (dirtyFiles.length === 0 && baseBranch) {
     try {
       await git(["fetch", "origin", baseBranch], options.worktreePath).catch(() => "");
-      await git(["rebase", baseBranch], options.worktreePath);
+      // `--autostash` because `dirtyFiles` is deliberately NOT the whole truth: it excludes
+      // the board's own materialized artifacts (#217, see BOARD_MATERIALIZED_PREFIXES), so
+      // "no dirty files" can still mean "git sees modified .claude/skills/** files". git
+      // then refuses to rebase a dirty tree, this catch turned that refusal into an error,
+      // and the workspace became permanently unrelaunchable — the exclusion bought nothing.
+      // Autostash makes the exclusion real: the excluded churn is set aside and restored
+      // around the rebase. A no-op when the tree is genuinely clean.
+      await git(["rebase", "--autostash", baseBranch], options.worktreePath);
       refreshed = true;
     } catch (err) {
       try { await git(["rebase", "--abort"], options.worktreePath); } catch { /* best effort */ }
