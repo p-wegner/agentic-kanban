@@ -4,8 +4,8 @@
  * pre-merge gate for every workspace on the board).
  *
  * Only the closure-FREE parts live here. The view lifecycle proper (startView/stopView and the
- * `viewChildren` process map) still needs the service closure and stays behind; splitting that
- * out is the next seam if this file grows again.
+ * `viewChildren` process map) needs the service closure and lives in `plugin-views.service.ts`,
+ * which imports these two helpers.
  */
 import type { PluginManifest } from "@agentic-kanban/shared/lib/plugin-manifest";
 import { PluginError } from "./plugin-errors.js";
