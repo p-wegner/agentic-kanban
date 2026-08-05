@@ -334,10 +334,13 @@ function spawnBackgroundSweep(cwd) {
 // `./gradlew`/`./mvnw`-style verify command must be rewritten to the `.bat`/`.cmd` form
 // before it reaches cmd.exe. Duplicated here because this file is a standalone scaffold
 // copy shipped into scaffolded repos, not an importer of the shared package.
+// Keep the separator class in sync with the shared copy: `&&` alone missed the second
+// half of every chained script (`... || ./gradlew clean`, `cd app; ./gradlew build`,
+// multi-line), which then failed on cmd.exe exactly as before the fix.
 function translatePosixWrapperForWindows(command) {
   return command
-    .replace(/(^|&&\s*)\.\/gradlew\b/g, "$1.\\gradlew.bat")
-    .replace(/(^|&&\s*)\.\/mvnw\b/g, "$1.\\mvnw.cmd");
+    .replace(/(^|[\r\n;&|(])(\s*)\.\/gradlew\b/g, "$1$2.\\gradlew.bat")
+    .replace(/(^|[\r\n;&|(])(\s*)\.\/mvnw\b/g, "$1$2.\\mvnw.cmd");
 }
 
 function runVerifyCommand(command, cwd) {
