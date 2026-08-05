@@ -90,6 +90,51 @@ describe("content-keyed merge gate evidence", () => {
     expect(result.decision).toBe("run-gate-stale-evidence");
   });
 
+  /**
+   * #239: an UNPINNED (or unresolvable) base must not grant evidence an unlimited lifetime.
+   *
+   * `doMerge` omitted `baseBranch`, so `resolveMergeGateShas` produced `baseSha: undefined` and
+   * branch-only agreement counted as a full content match — which ALSO waived the freshness
+   * check, because `evidenceIsValid` returns true without ever consulting the age. Since the
+   * gate now runs OUTSIDE the repo lock, "another merge landed and moved the base" is the
+   * ordinary case, and that is precisely what an unassessable base cannot see. Unknown base ⇒
+   * fall back to the age check.
+   */
+  it("does NOT waive the age check when the evidence pins no base (#239)", async () => {
+    const ancient = await resolveMergeGate({
+      token: gateAlreadyPassed({ ranAt: ANCIENT, stage: "verify", source: "pre-lock-merge", branchSha: "aaa1" }),
+      workspace,
+      projectId: null,
+      database: db,
+      currentShas: { branchSha: "aaa1", baseSha: "bbb2" },
+    });
+    expect(ancient.decision).toBe("run-gate-stale-evidence");
+
+    // …but such evidence is still USABLE while genuinely fresh — the age check is the fallback,
+    // not a rejection.
+    const fresh = await resolveMergeGate({
+      token: gateAlreadyPassed({ ranAt: FRESH, stage: "verify", source: "pre-lock-merge", branchSha: "aaa1" }),
+      workspace,
+      projectId: null,
+      database: db,
+      currentShas: { branchSha: "aaa1", baseSha: "bbb2" },
+    });
+    expect(fresh.decision).toBe("already-passed");
+  });
+
+  it("does NOT waive the age check when the CURRENT base cannot be resolved at validation time (#239)", async () => {
+    // The evidence names a base, but the revParse at merge time failed (detached HEAD, deleted
+    // ref, a transient git error). We cannot compare, so we must not claim a match.
+    const result = await resolveMergeGate({
+      token: gateAlreadyPassed({ ranAt: ANCIENT, stage: "verify", source: "pre-lock-merge", branchSha: "aaa1", baseSha: "bbb2" }),
+      workspace,
+      projectId: null,
+      database: db,
+      currentShas: { branchSha: "aaa1" },
+    });
+    expect(result.decision).toBe("run-gate-stale-evidence");
+  });
+
   it("still honours skip-explicit, and still rejects a future-dated legacy timestamp", async () => {
     const skip = await resolveMergeGate({
       token: { kind: "skip-explicit", reason: "fix-and-merge retry" },

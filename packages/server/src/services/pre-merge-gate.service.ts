@@ -395,9 +395,14 @@ function contentMatch(evidence: MergeGateEvidence, current: MergeGateShas | unde
   if (!branchKnown && !baseKnown) return "unknown";
   if (branchKnown && evidence.branchSha !== current.branchSha) return "mismatch";
   if (baseKnown && evidence.baseSha !== current.baseSha) return "mismatch";
-  // Require the BRANCH to be pinned before waiving the age check: base-only agreement does
-  // not tell us the code under test is the code being merged.
-  return branchKnown ? "match" : "unknown";
+  // Waiving the age check requires BOTH tips (#239). Branch-only agreement says the code under
+  // test is the code being merged, but says nothing about the merge RESULT — and since the gate
+  // now runs outside the repo lock, "another merge landed and moved the base" is the common
+  // case, not the exotic one. An unpinned base (legacy evidence, a direct workspace, a caller
+  // that omitted `baseBranch`) or a base that cannot be resolved at validation time is
+  // therefore "unknown": fall back to the age check rather than granting unassessable evidence
+  // an unlimited lifetime. Base-only agreement is likewise not a match.
+  return branchKnown && baseKnown ? "match" : "unknown";
 }
 
 function evidenceIsValid(evidence: MergeGateEvidence | undefined, now: number, current?: MergeGateShas): boolean {
