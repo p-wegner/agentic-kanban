@@ -236,45 +236,52 @@ export async function runMergeTrain(args: {
   const asm = await assembleMergeTrain({ repoPath, baseBranch, members, label });
   const closeFailures: TrainRunResult["closeFailures"] = [];
 
-  if (asm.included.length === 0 || !asm.trainSha) {
-    await deleteTrainRef(repoPath, asm.trainRef);
-    return { trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateFailure: "no members could be assembled onto the train" };
-  }
-
-  // Cheap insurance before spending a gate on it: if assembly somehow produced a train that
-  // does not contain a member's tip, everything downstream would be wrong.
-  await assertTrainPreservesAncestry(repoPath, asm.trainRef, asm.included);
-
-  const gate = await runGate({ trainRef: asm.trainRef, trainSha: asm.trainSha });
-  if (!gate.passed) {
-    await deleteTrainRef(repoPath, asm.trainRef);
-    return { trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateFailure: gate.message };
-  }
-
-  const { mergeSha } = await landMergeTrain({
-    repoPath,
-    baseBranch,
-    trainRef: asm.trainRef,
-    trainSha: asm.trainSha,
-    baseSha: asm.baseSha,
-    included: asm.included,
-  });
-
-  // Bookkeeping AFTER the work is safely on the base. A failure here leaves a member merged
-  // but not marked — recoverable by the existing done-unmerged/already-merged reconcilers,
-  // and reported rather than swallowed.
-  for (const member of asm.included) {
-    try {
-      await closeMember(member.workspaceId);
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      closeFailures.push({ member, reason });
-      console.warn(`[merge-train] landed ${member.branch} but could not close its workspace: ${reason.slice(0, 200)}`);
+  // The train ref is scratch state, so its cleanup belongs in a `finally` rather than at each
+  // of the three exits. `deleteTrainRef` used to be called on assembly-empty, gate-fail and
+  // success — but a THROW from `assertTrainPreservesAncestry` or `landMergeTrain` (base moved
+  // under us, ancestry violation) skipped all three, so every failed train left a
+  // `refs/kanban/train/q…` branch behind and they accumulated for the life of the repo.
+  // `deleteTrainRef` is itself best-effort and never throws, so it cannot mask a real error.
+  try {
+    if (asm.included.length === 0 || !asm.trainSha) {
+      return { trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateFailure: "no members could be assembled onto the train" };
     }
-  }
 
-  await deleteTrainRef(repoPath, asm.trainRef);
-  return { trainRef: asm.trainRef, landed: asm.included, dropped: asm.dropped, mergeSha, closeFailures };
+    // Cheap insurance before spending a gate on it: if assembly somehow produced a train that
+    // does not contain a member's tip, everything downstream would be wrong.
+    await assertTrainPreservesAncestry(repoPath, asm.trainRef, asm.included);
+
+    const gate = await runGate({ trainRef: asm.trainRef, trainSha: asm.trainSha });
+    if (!gate.passed) {
+      return { trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateFailure: gate.message };
+    }
+
+    const { mergeSha } = await landMergeTrain({
+      repoPath,
+      baseBranch,
+      trainRef: asm.trainRef,
+      trainSha: asm.trainSha,
+      baseSha: asm.baseSha,
+      included: asm.included,
+    });
+
+    // Bookkeeping AFTER the work is safely on the base. A failure here leaves a member merged
+    // but not marked — recoverable by the existing done-unmerged/already-merged reconcilers,
+    // and reported rather than swallowed.
+    for (const member of asm.included) {
+      try {
+        await closeMember(member.workspaceId);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        closeFailures.push({ member, reason });
+        console.warn(`[merge-train] landed ${member.branch} but could not close its workspace: ${reason.slice(0, 200)}`);
+      }
+    }
+
+    return { trainRef: asm.trainRef, landed: asm.included, dropped: asm.dropped, mergeSha, closeFailures };
+  } finally {
+    await deleteTrainRef(repoPath, asm.trainRef);
+  }
 }
 
 /** Delete a train ref once its members have been stamped. Best-effort: a leftover ref is harmless. */

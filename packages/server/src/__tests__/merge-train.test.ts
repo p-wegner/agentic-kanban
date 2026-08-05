@@ -9,6 +9,7 @@ import {
   assertTrainPreservesAncestry,
   landMergeTrain,
   deleteTrainRef,
+  runMergeTrain,
   trainRefName,
 } from "../services/merge-train.service.js";
 
@@ -183,6 +184,70 @@ describe("merge train assembly", () => {
     await expect(
       assertTrainPreservesAncestry(repo, trainRef, [{ workspaceId: "w1", branch: "f1" }]),
     ).rejects.toThrow(/ancestry invariant violated/);
+  });
+
+  /**
+   * `deleteTrainRef` used to be called at each of `runMergeTrain`'s three exits
+   * (assembly-empty, gate-fail, success) — so a THROW from `assertTrainPreservesAncestry` or
+   * `landMergeTrain` (base moved, ancestry violation) skipped all of them and left the
+   * `refs/kanban/train/q…` branch behind. Failed trains are exactly the case that recurs, so
+   * the refs accumulated in the repo for the life of the checkout. Cleanup belongs in a
+   * `finally`.
+   */
+  it("deletes the train ref even when landing THROWS (base moved under the gate)", async () => {
+    await git(["branch", "f1"]);
+    await commitFile("f1", "a.txt", "a\n");
+    await git(["checkout", "-q", "main"]);
+
+    let trainRefDuringGate = "";
+    await expect(
+      runMergeTrain({
+        repoPath: repo,
+        baseBranch: "main",
+        members: [{ workspaceId: "w1", branch: "f1" }],
+        label: "t-throw",
+        runGate: async ({ trainRef }) => {
+          trainRefDuringGate = trainRef;
+          // Another merge lands on main while the (long) gate runs — landMergeTrain must refuse,
+          // and that refusal is a throw, not a returned gateFailure.
+          await commitFile("main", "intruder.txt", "x\n");
+          return { passed: true, message: "ok" };
+        },
+        closeMember: async () => {},
+      }),
+    ).rejects.toThrow(/base 'main' moved/);
+
+    expect(trainRefDuringGate).toBeTruthy();
+    await expect(revParse(repo, trainRefDuringGate)).rejects.toBeTruthy();
+  });
+
+  it("deletes the train ref on the ordinary exits too (gate failure, success)", async () => {
+    await git(["branch", "f1"]);
+    await commitFile("f1", "a.txt", "a\n");
+    await git(["checkout", "-q", "main"]);
+
+    const red = await runMergeTrain({
+      repoPath: repo,
+      baseBranch: "main",
+      members: [{ workspaceId: "w1", branch: "f1" }],
+      label: "t-red",
+      runGate: async () => ({ passed: false, message: "verify_script failed (exit 1)" }),
+      closeMember: async () => {},
+    });
+    expect(red.landed).toEqual([]);
+    expect(red.gateFailure).toContain("verify_script failed");
+    await expect(revParse(repo, red.trainRef)).rejects.toBeTruthy();
+
+    const green = await runMergeTrain({
+      repoPath: repo,
+      baseBranch: "main",
+      members: [{ workspaceId: "w1", branch: "f1" }],
+      label: "t-green",
+      runGate: async () => ({ passed: true, message: "ok" }),
+      closeMember: async () => {},
+    });
+    expect(green.landed.map((m) => m.branch)).toEqual(["f1"]);
+    await expect(revParse(repo, green.trainRef)).rejects.toBeTruthy();
   });
 
   it("cleans up the train ref", async () => {
