@@ -40,6 +40,15 @@ export interface DbLocation {
   dir: string | null;
   /** which precedence rule decided the location — surfaced in startup logs. */
   source: DbPathSource;
+  /**
+   * In-checkout candidates that EXIST on disk but were rejected as stubs by the size
+   * floor. Almost always the fingerprint of a real problem — a schema-only DB that some
+   * tool (historically `drizzle-kit` with its old hardcoded `file:kanban.db`) minted in
+   * the checkout. Returned rather than logged so this function stays pure; every caller
+   * that logs its resolution logs these too, because the failure mode being guarded
+   * against is precisely a SILENT choice of the wrong database.
+   */
+  rejectedLocalCandidates: string[];
 }
 
 export interface ResolveDbLocationOptions {
@@ -105,7 +114,7 @@ function filePathFromFileUrl(fileUrl: string): string {
 
 function fileUrl(path: string): DbLocation {
   const abs = resolve(path);
-  return { url: `file:${abs}`, path: abs, dir: dirname(abs), source: "AGENTIC_KANBAN_DIR" };
+  return { url: `file:${abs}`, path: abs, dir: dirname(abs), source: "AGENTIC_KANBAN_DIR", rejectedLocalCandidates: [] };
 }
 
 export function resolveDbLocation(opts: ResolveDbLocationOptions = {}): DbLocation {
@@ -120,7 +129,7 @@ export function resolveDbLocation(opts: ResolveDbLocationOptions = {}): DbLocati
   const dbUrl = env.DB_URL;
   if (dbUrl) {
     const path = dbUrl.startsWith("file:") ? filePathFromFileUrl(dbUrl) : null;
-    return { url: dbUrl, path, dir: path ? dirname(path) : null, source: "DB_URL" };
+    return { url: dbUrl, path, dir: path ? dirname(path) : null, source: "DB_URL", rejectedLocalCandidates: [] };
   }
 
   // 2. AGENTIC_KANBAN_DIR — explicit data dir. Env ALWAYS wins over the
@@ -134,12 +143,17 @@ export function resolveDbLocation(opts: ResolveDbLocationOptions = {}): DbLocati
   //    a real database (see isValidLocalDb above). A present-but-empty/stub file
   //    falls through to the home-dir fallback rather than being opened (and so
   //    permanently adopted) as-is.
+  const rejectedLocalCandidates: string[] = [];
   for (const candidate of candidates) {
-    if (exists(candidate) && isValidLocalDb(candidate, stat)) {
-      return { ...fileUrl(candidate), source: "local-checkout" };
+    if (!exists(candidate)) continue;
+    if (isValidLocalDb(candidate, stat)) {
+      return { ...fileUrl(candidate), source: "local-checkout", rejectedLocalCandidates };
     }
+    // Present but too small to be a real DB. Report it: silently skipping it is how a
+    // stray stub stayed invisible while it shadowed (or nearly shadowed) the real DB.
+    rejectedLocalCandidates.push(candidate);
   }
 
   // 4. Home-dir fallback: ~/.agentic-kanban/kanban.db.
-  return { ...fileUrl(join(home, ".agentic-kanban", "kanban.db")), source: "home-fallback" };
+  return { ...fileUrl(join(home, ".agentic-kanban", "kanban.db")), source: "home-fallback", rejectedLocalCandidates };
 }
