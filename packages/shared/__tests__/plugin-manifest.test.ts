@@ -8,6 +8,7 @@ import {
   parsePluginLoopPlan,
   pluginLoopUnitKey,
   pluginLoopPausedPreferenceKey,
+  pluginSkillName,
   countScaffoldPlaceholders,
 } from "../src/lib/plugin-manifest.js";
 import {
@@ -91,6 +92,31 @@ describe("parsePluginManifest", () => {
     expect(() =>
       parsePluginManifest({ id: "p", name: "P", scripts: [{ name: "s", command: "x", cwd: "elsewhere" }] }),
     ).toThrow(/cwd" must be "plugin" or "repo"/);
+  });
+
+  it("rejects a trailing slash on a path field — it breaks the basename a skill's name comes from", () => {
+    expect(() => parsePluginManifest({ id: "p", name: "P", skills: [{ dir: ".claude/skills/x/" }] }))
+      .toThrow(/must not end with a slash/);
+    // And the one derivation every consumer uses agrees on the name either way.
+    expect(pluginSkillName(".claude/skills/x")).toBe("x");
+    expect(pluginSkillName(".claude/skills/x/")).toBe("x");
+    expect(pluginSkillName(".claude\\skills\\x")).toBe("x");
+  });
+
+  it("refuses a scaffold target inside .git", () => {
+    const withTarget = (targetPath: string) => ({
+      id: "p",
+      name: "P",
+      scaffold: { profileTemplate: "t.md", targetPath },
+    });
+    expect(() => parsePluginManifest(withTarget(".git/hooks/pre-commit"))).toThrow(/must not write inside "\.git"/);
+    expect(parsePluginManifest(withTarget("docs/_profile.md")).scaffold?.targetPath).toBe("docs/_profile.md");
+  });
+
+  it("strips a UTF-8 BOM-bearing manifest only via the reader, but parses clean text as-is", () => {
+    // The BOM strip lives in the FILE reader (plugin-fs); the parser sees text. Guard the
+    // contract that a leading BOM is not silently tolerated here, so the reader stays the fix.
+    expect(() => parsePluginManifest('﻿{"id":"p","name":"P"}')).toThrow(/not valid JSON/);
   });
 
   it("rejects absolute and parent-escaping manifest paths", () => {

@@ -18,9 +18,15 @@ export function pluginsHomeDir(): string {
   return process.env.AGENTIC_KANBAN_PLUGINS_DIR || join(homedir(), ".agentic-kanban", "plugins");
 }
 
-/** True for a source string that should be treated as a git remote rather than a local path. */
+/**
+ * True for a source string that should be treated as a git remote rather than a local path.
+ *
+ * `file://` counts: it is a git transport like any other (`git clone file:///path` clones rather
+ * than using the directory in place), it was previously rejected outright as "neither a directory
+ * nor a git URL", and it is what makes the clone path testable with no network.
+ */
 export function looksLikeGitUrl(source: string): boolean {
-  return /^(https?:\/\/|git@|ssh:\/\/|git:\/\/)/.test(source);
+  return /^(https?:\/\/|git@|ssh:\/\/|git:\/\/|file:\/\/)/.test(source);
 }
 
 /**
@@ -34,7 +40,13 @@ export function readManifestFromDir(dir: string): { manifest: PluginManifest; ra
   if (!existsSync(manifestPath)) {
     throw new PluginError(`No ${PLUGIN_MANIFEST_FILENAME} found at ${dir}`, "BAD_REQUEST");
   }
-  const raw = readFileSync(manifestPath, "utf8");
+  // Strip a UTF-8 BOM before parsing: an author on Windows writing this file with PowerShell's
+  // `Set-Content -Encoding utf8` (or Notepad) gets one, and `JSON.parse` rejects it with
+  // "Unexpected token" — so a perfectly valid manifest failed install with an error blaming its
+  // JSON. Same fix fc32d1cedd applied to the marketplace catalog. The stripped text is also what
+  // gets stored in the row, so every later re-parse is clean too.
+  let raw = readFileSync(manifestPath, "utf8");
+  if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
   try {
     return { manifest: parsePluginManifest(raw), raw };
   } catch (err) {

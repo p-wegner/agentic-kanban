@@ -33,6 +33,19 @@ export function pluginLoopUnitKey(pluginSlug: string, loopName: string, unitId: 
   return `plugin-loop:${pluginSlug}:${loopName}:${unitId}`;
 }
 
+/**
+ * The name a `skills[].dir` is known by everywhere else: its basename.
+ *
+ * ONE derivation, because three hand-rolled ones disagreed: `runSkill` matched
+ * `dir.split("/").pop()`, the butler roster used `split(/[\\/]/).filter(Boolean).pop()`, and the
+ * fan-out used `path.basename`. A dir written `".claude/skills/x/"` therefore appeared in the
+ * roster as `x` and was unlaunchable (`pop()` returned `""`). The parser now also rejects the
+ * trailing slash, so this is belt and braces — but the sites must still agree.
+ */
+export function pluginSkillName(dir: string): string {
+  return dir.split(/[\\/]/).filter(Boolean).pop() ?? dir;
+}
+
 /** The per-project enable pref key for a plugin: `plugin_enabled_<pluginSlug>_<projectId>`. */
 export function pluginEnabledPreferenceKey(pluginSlug: string, projectId: string): string {
   return `plugin_enabled_${pluginSlug}_${projectId}`;

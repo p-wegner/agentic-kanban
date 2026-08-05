@@ -183,7 +183,7 @@ A plugin is a repo with a `kanban-plugin.json` manifest (`packages/shared/src/li
 - **Unit ids are the planner's contract.** Each ticket stores `pluginLoopUnitKey(slug, loop, unitId)` in `external_key`, and an advance skips any unit already ticketed — terminal or not. A planner wanting another pass must mint a FRESH id (`billing:r3`), which is what makes an infinite ticket loop impossible.
 - A round is only replanned once its tickets are all terminal, and only for a loop that already has tickets — so `advanceDuePluginLoops` (monitor pass) *continues* loops a human started and never starts one itself.
 - **`converged` is a claim about the JOB, not the current ready set.** A loop with nothing to do *right now* because its upstream is unfinished must report `units: [], converged: false` (the board's "blocked, not done"); reporting `true` ends a loop that then needs a human to restart it.
-- **`{{repoPath}}` is the OUTPUT repo** (leading repo, or the `<slug>-requirements` sidecar), not the product repo — and there is no `{{leadingRepoPath}}`. A plugin that reads the source and writes elsewhere cannot express that in sidecar mode; it must require `leading`.
+- **`{{repoPath}}` is the OUTPUT repo** (leading repo, or the `<slug>-requirements` sidecar), not the product repo; **`{{leadingRepoPath}}` is always the product repo** regardless of output location (#213), so a plugin that READS the source and WRITES elsewhere expresses that with the two placeholders and works in sidecar mode. What still has no placeholder is a SIBLING repo — one that is neither leading nor the plugin's own output.
 
 ## Skill Map
 | Need | Skill |

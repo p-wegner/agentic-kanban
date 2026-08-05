@@ -2,6 +2,7 @@ import { isTerminalStatusName } from "@agentic-kanban/shared";
 import {
   DEFAULT_LOOP_MAX_UNITS_PER_ADVANCE,
   parsePluginLoopPlan,
+  pluginLoopConvergedPreferenceKey,
   pluginLoopPausedPreferenceKey,
   pluginLoopUnitKey,
   substitutePluginEnv,
@@ -12,7 +13,8 @@ import {
 } from "@agentic-kanban/shared/lib/plugin-manifest";
 import type { Database } from "../db/index.js";
 import { listPluginLoopIssues } from "../repositories/plugins.repository.js";
-import { getAllPreferences, getPreference, setPreference } from "../repositories/preferences.repository.js";
+import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-preference-write";
+import { getAllPreferences, getPreference } from "../repositories/preferences.repository.js";
 import { resolveStartPolicy } from "./start-policy.service.js";
 import { runPluginCommand, STRUCTURED_STDOUT_CAP } from "./plugin-exec.js";
 import type { CreateIssueInput, CreateIssueResult } from "./issue.service.js";
@@ -132,6 +134,12 @@ export interface LoopStatus {
   closedTickets: number;
   /** True when a human has paused this loop's monitor-driven auto-advance. */
   paused: boolean;
+  /**
+   * True when the planner's last advance reported the JOB done (no units + `converged: true`)
+   * and that verdict was persisted. The monitor stops advancing such a loop; a manual "Advance
+   * now" still replans it and clears the flag if there is work again.
+   */
+  converged: boolean;
 }
 
 export interface PluginLoopDeps {
@@ -164,6 +172,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
     for (const loop of manifest.loops ?? []) {
       const rows = await listPluginLoopIssues(projectId, keyPrefix(pluginSlug, loop.name), database);
       const pausedValue = await getPreference(pluginLoopPausedPreferenceKey(pluginSlug, loop.name, projectId), database);
+      const convergedValue = await getPreference(pluginLoopConvergedPreferenceKey(pluginSlug, loop.name, projectId), database);
       out.push({
         name: loop.name,
         label: loop.label ?? loop.name,
@@ -172,6 +181,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
         openTickets: rows.filter((r) => !isTerminalStatusName(r.statusName)).length,
         closedTickets: rows.filter((r) => isTerminalStatusName(r.statusName)).length,
         paused: pausedValue === "true",
+        converged: convergedValue === "true",
       });
     }
     return out;
@@ -186,7 +196,11 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
     paused: boolean,
   ): Promise<void> {
     findLoop(manifest, loopName); // throws NOT_FOUND for an unknown loop name
-    await setPreference(pluginLoopPausedPreferenceKey(pluginSlug, loopName, projectId), paused ? "true" : "false", database);
+    // Through the ONE checked write, like every other plugin pref (server/CLAUDE.md): a raw
+    // `setPreference` here was the last plugin writer bypassing the guard/regen path.
+    await setPreferenceChecked(database, [
+      { key: pluginLoopPausedPreferenceKey(pluginSlug, loopName, projectId), value: paused ? "true" : "false" },
+    ]);
   }
 
   /**
@@ -324,9 +338,23 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
       );
     }
 
+    // Persist the terminal verdict so the loop stops being replanned forever. Only a plan with NO
+    // units and an affirmative `converged` counts: `units: [], converged: false` is the
+    // documented "blocked, not done" state and must keep polling, and `converged: true` WITH
+    // units is a planner still handing out work. Any advance that plans units clears the flag,
+    // which is what makes a manual "Advance now" the restart path.
+    const converged = plan.converged ?? plan.units.length === 0;
+    const isDone = converged && plan.units.length === 0;
+    await setPreferenceChecked(database, [
+      {
+        key: pluginLoopConvergedPreferenceKey(args.pluginSlug, loop.name, args.projectId),
+        value: isDone ? "true" : "false",
+      },
+    ]);
+
     return {
       loop: loop.name,
-      converged: plan.converged ?? plan.units.length === 0,
+      converged,
       note: plan.note ?? null,
       planned: plan.units.length,
       created,

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import {
   appendFileSync,
@@ -13,7 +13,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
+import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-preference-write";
 import { listWorkflowTemplates, type WorkflowDb } from "@agentic-kanban/shared/lib/workflow-engine";
 import {
@@ -26,6 +26,7 @@ import {
   pluginEnabledPreferenceKey,
   pluginOutputLocationPreferenceKey,
   pluginSidecarRepoName,
+  pluginSkillName,
   substitutePluginEnv,
   substitutePluginPlaceholders,
   type PluginManifest,
@@ -93,6 +94,7 @@ import { pluginsHomeDir } from "./plugin-fs.js";
 import {
   marketplaceCatalogPath,
   buildMarketplaceEntries,
+  normalizeGitUrl,
   type PluginMarketplaceEntry,
   type InstalledPluginRow,
 } from "./plugin-marketplace.js";
@@ -196,6 +198,40 @@ export function createPluginService(deps: {
     return map;
   }
 
+  /**
+   * Where a git-sourced plugin is cloned. Keyed by a hash of the NORMALIZED url, not by the
+   * repo's basename: `github.com/a/tools` and `gitlab.com/b/tools` both wanted
+   * `<plugins home>/tools`, and since the clone is skipped when the directory exists, the second
+   * install silently registered the FIRST checkout under its own `sourceUrl` — a plugin serving
+   * another repo's code.
+   *
+   * A legacy basename-only directory is still reused when its `origin` is the same remote, so
+   * plugins installed before this change are not re-cloned. Any existing directory whose origin
+   * disagrees is refused rather than adopted.
+   */
+  async function resolveCloneDir(source: string): Promise<string> {
+    const repoName = (basename(source).replace(/\.git$/i, "") || "plugin").toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "-");
+    const legacy = join(pluginsHomeDir(), repoName);
+    if (existsSync(legacy) && await cloneMatchesRemote(legacy, source)) return legacy;
+    const digest = createHash("sha1").update(normalizeGitUrl(source)).digest("hex").slice(0, 8);
+    const keyed = join(pluginsHomeDir(), `${repoName}-${digest}`);
+    if (existsSync(keyed) && !(await cloneMatchesRemote(keyed, source))) {
+      throw new PluginError(
+        `${keyed} already holds a checkout of a different remote — remove it or install from a local directory`,
+        "CONFLICT",
+      );
+    }
+    return keyed;
+  }
+
+  /** True when `dir` is a git checkout whose origin is (the normalized form of) `source`. */
+  async function cloneMatchesRemote(dir: string, source: string): Promise<boolean> {
+    const result = await gitExec(["remote", "get-url", "origin"], { cwd: dir });
+    if (result.code !== 0) return false;
+    return normalizeGitUrl(result.stdout) === normalizeGitUrl(source);
+  }
+
   async function installPlugin(input: { source: string }): Promise<PluginRow> {
     const source = typeof input.source === "string" ? input.source.trim() : "";
     if (!source) throw new PluginError("source is required", "BAD_REQUEST");
@@ -206,8 +242,7 @@ export function createPluginService(deps: {
       localPath = resolve(source);
     } else if (looksLikeGitUrl(source)) {
       sourceUrl = source;
-      const repoName = (basename(source).replace(/\.git$/i, "") || "plugin").toLowerCase();
-      localPath = join(pluginsHomeDir(), repoName);
+      localPath = await resolveCloneDir(source);
       if (!existsSync(localPath)) {
         mkdirSync(pluginsHomeDir(), { recursive: true });
         await gitExecOrThrow(["clone", "--depth", "1", source, localPath], {});
@@ -344,7 +379,7 @@ export function createPluginService(deps: {
 
   function fanOutSkills(plugin: PluginRow & { manifest: PluginManifest }, repoPath: string, report: EnableReport) {
     for (const skill of plugin.manifest.skills ?? []) {
-      const name = basename(skill.dir.replace(/\\/g, "/"));
+      const name = pluginSkillName(skill.dir);
       const source = resolveInside(plugin.localPath, skill.dir, `skill dir "${skill.dir}"`);
       if (!existsSync(source)) {
         report.skills.push({ name, mode: "missing-source" });
@@ -414,6 +449,17 @@ export function createPluginService(deps: {
     return repoInfo.repoPath;
   }
 
+  /**
+   * The output repo path as it stands, CREATING NOTHING — for read-only consumers (the butler
+   * prompt) where materializing a sidecar repo as a side effect would be wrong. A chosen-but-
+   * not-yet-created sidecar falls back to the leading repo, which is the best available answer.
+   */
+  async function peekOutputRepoPath(pluginSlug: string, project: { id: string; repoPath: string }): Promise<string> {
+    const location = await readOutputLocationPref(pluginSlug, project.id);
+    if (location === "leading") return project.repoPath;
+    return (await findSidecarRepo(pluginSlug, project.id))?.path ?? project.repoPath;
+  }
+
   /** Current output-location choice + its resolved repo path (`null` = sidecar chosen but not created yet). */
   async function getOutputLocation(pluginRowId: string, projectId: string) {
     const plugin = await requirePlugin(pluginRowId);
@@ -462,7 +508,7 @@ export function createPluginService(deps: {
     // or a pre-existing project skill) is NEVER deleted.
     const skillsRemoved: string[] = [];
     for (const skill of plugin.manifest.skills ?? []) {
-      const name = basename(skill.dir.replace(/\\/g, "/"));
+      const name = pluginSkillName(skill.dir);
       const target = join(project.repoPath, ".claude", "skills", name);
       if (!isLinkPath(target)) continue;
       removeLink(target);
@@ -482,7 +528,7 @@ export function createPluginService(deps: {
     if (skills.length) {
       lines.push("**Skills it provides** (run one to create a ticket and launch a workspace against it):");
       for (const s of skills) {
-        const name = s.dir.split(/[\\/]/).filter(Boolean).pop() ?? s.dir;
+        const name = pluginSkillName(s.dir);
         lines.push(s.description ? `- \`${name}\` — ${s.description}` : `- \`${name}\``);
       }
     }
@@ -501,7 +547,7 @@ export function createPluginService(deps: {
   async function getButlerFragments(projectId: string): Promise<string[]> {
     const enabled = (await enabledSlugsByProject()).get(projectId);
     if (!enabled || enabled.size === 0) return [];
-    let project: { repoPath: string; name: string } | null = null;
+    let project: { id: string; repoPath: string; name: string } | null = null;
     try {
       project = await requireProject(projectId);
     } catch {
@@ -512,8 +558,13 @@ export function createPluginService(deps: {
       if (!enabled.has(row.pluginId)) continue;
       try {
         const manifest = parsePluginManifest(row.manifestJson);
+        // `{{repoPath}}` is the OUTPUT repo at every other substitution site; this one used to
+        // hand the butler the LEADING repo for both placeholders, so in sidecar mode a fragment
+        // saying "the register lives in {{repoPath}}/docs" named a path with nothing in it.
+        // Resolved WITHOUT creating anything — assembling a prompt must not materialize a repo —
+        // so a sidecar that has not been created yet still falls back to the leading repo.
         const vars = {
-          repoPath: project.repoPath,
+          repoPath: await peekOutputRepoPath(row.pluginId, project),
           leadingRepoPath: project.repoPath,
           projectName: project.name,
           pluginPath: row.localPath,
@@ -592,7 +643,7 @@ export function createPluginService(deps: {
     }
     const plugin = await requirePlugin(pluginRowId);
     const project = await requireProject(projectId);
-    const skillDef = (plugin.manifest.skills ?? []).find((s) => s.dir.split("/").pop() === skillName);
+    const skillDef = (plugin.manifest.skills ?? []).find((s) => pluginSkillName(s.dir) === skillName);
     if (!skillDef) throw new PluginError(`Skill "${skillName}" not found in plugin manifest`, "NOT_FOUND");
 
     // Workflow precedence: what the launcher picked → what the plugin declares for this skill →
@@ -689,7 +740,7 @@ export function createPluginService(deps: {
     // the keyboard when the monitor advances a round, so the manifest is the only place this
     // choice can come from.
     const loopDef = (plugin.manifest.loops ?? []).find((l) => l.name === loopName);
-    const skillDef = (plugin.manifest.skills ?? []).find((s) => s.dir.split("/").pop() === loopDef?.skill);
+    const skillDef = (plugin.manifest.skills ?? []).find((s) => pluginSkillName(s.dir) === loopDef?.skill);
     const workflowTemplateId = await resolveWorkflowTemplateId(
       projectId,
       loopDef?.workflow ?? skillDef?.workflow,
@@ -759,7 +810,7 @@ export function createPluginService(deps: {
         });
       }
       for (const skill of manifest.skills ?? []) {
-        const name = skill.dir.split("/").pop() || skill.dir;
+        const name = pluginSkillName(skill.dir);
         // `workflow` travels to the UI so the launcher can SEE which workflow the plugin
         // chose for this skill, and change it, instead of discovering it after the fact.
         skills.push({ ...owner, name, description: skill.description ?? null, workflow: skill.workflow ?? null });
