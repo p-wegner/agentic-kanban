@@ -51,6 +51,41 @@ import type { CreateIssueInput, CreateIssueResult } from "./issue.service.js";
 
 const PLAN_TIMEOUT_MS = 2 * 60 * 1000;
 
+/**
+ * One in-flight advance per (project, plugin, loop) — #249.
+ *
+ * The dedupe is read-then-create (`listPluginLoopIssues` → `byKey.get` → `createIssue`) and
+ * `issues.external_key` carries no unique index, so two overlapping advances of the SAME loop
+ * both see "not ticketed yet" and both create a ticket for the same unit. The window is not
+ * narrow: the planner may run for up to `PLAN_TIMEOUT_MS` (2 minutes) between the read and the
+ * write. And two callers genuinely race — the monitor's `plugin-loops` phase is serialized only
+ * against ITSELF (`cycleRunning`), not against `POST /api/plugins/:id/loops/:name/advance`.
+ *
+ * So advances of one loop are QUEUED rather than rejected: the second caller runs after the
+ * first, re-reads the tickets the first created, and reports those units as `skippedExisting` —
+ * which is exactly what a repeat advance is supposed to do. Module-level on purpose: the plugin
+ * service is rebuilt whenever it gains a dep (`getPluginService`), so a closure-scoped map would
+ * silently stop serializing at that point.
+ *
+ * NOT a substitute for a DB constraint. A partial unique index on `external_key` would also
+ * cover a second board process against one database; this covers the real deployment (one
+ * server process owns the DB) and is what makes the invariant testable.
+ */
+const advanceQueues = new Map<string, Promise<unknown>>();
+
+async function withLoopAdvanceLock<T>(key: string, run: () => Promise<T>): Promise<T> {
+  const prior = advanceQueues.get(key) ?? Promise.resolve();
+  // `then(run, run)`: a failed advance must not wedge the queue for the next caller.
+  const attempt = prior.then(run, run);
+  const tail = attempt.then(() => undefined, () => undefined);
+  advanceQueues.set(key, tail);
+  try {
+    return await attempt;
+  } finally {
+    if (advanceQueues.get(key) === tail) advanceQueues.delete(key);
+  }
+}
+
 export class PluginLoopError extends Error {
   constructor(message: string, public readonly code: "NOT_FOUND" | "BAD_REQUEST" = "BAD_REQUEST") {
     super(message);
@@ -156,9 +191,27 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
 
   /**
    * Run one advance: plan → dedupe → create tickets. Idempotent with respect to
-   * unit ids, so calling it repeatedly (a button, a monitor cycle) is safe.
+   * unit ids, so calling it repeatedly (a button, a monitor cycle) is safe — which
+   * only holds because overlapping advances of one loop are serialized (#249).
    */
   async function advanceLoop(args: {
+    manifest: PluginManifest;
+    pluginSlug: string;
+    pluginLocalPath: string;
+    loopName: string;
+    projectId: string;
+    projectName: string;
+    repoPath: string;
+    leadingRepoPath: string;
+    workflowTemplateId?: string | null;
+  }): Promise<LoopAdvanceResult> {
+    return withLoopAdvanceLock(
+      `${args.projectId}:${args.pluginSlug}:${args.loopName}`,
+      () => advanceLoopSerialized(args),
+    );
+  }
+
+  async function advanceLoopSerialized(args: {
     manifest: PluginManifest;
     pluginSlug: string;
     pluginLocalPath: string;
