@@ -19,6 +19,33 @@ import { execFile, execFileSync, spawn, type ChildProcess, type ExecFileExceptio
 /** Generous default for diff/log output; individual callers may narrow it. */
 const DEFAULT_MAX_BUFFER = 10 * 1024 * 1024;
 
+/**
+ * Wall-clock ceiling applied to every buffered git invocation that does not set its
+ * own `timeout`. Without it a single git call could block FOREVER — and one did: a
+ * monitor-path git call that never returned kept `processWorkspaceCandidates` pending,
+ * so the monitor cycle's `finally` never ran, `cycleRunning` stayed `true`, and every
+ * later cycle short-circuited on the re-entrancy guard for every project until the
+ * server was restarted (the #208 tail). Ten minutes is far longer than any legitimate
+ * buffered call here (the largest is a shallow/`--single-branch` clone) while still
+ * guaranteeing that a wedged git eventually dies. `gitStream` is deliberately exempt:
+ * it carries packfiles for the worker-fleet smart-HTTP transport, which has no
+ * meaningful upper bound and is already bounded by the HTTP request lifecycle.
+ */
+export const DEFAULT_GIT_TIMEOUT_MS = 10 * 60_000;
+
+/**
+ * Never let git block on a human. `GIT_TERMINAL_PROMPT=0` makes any credential /
+ * host-key / passphrase prompt FAIL FAST instead of waiting on a tty that no server
+ * process has, which is the most common way a git call hangs indefinitely on a
+ * private remote. Merged over (not replacing) the caller's `env` so explicit
+ * overrides like `GIT_INDEX_FILE` still apply, and over `process.env` when the
+ * caller passes none, because `child_process`'s `env` option REPLACES the
+ * environment rather than extending it.
+ */
+function nonInteractiveEnv(env: NodeJS.ProcessEnv | undefined): NodeJS.ProcessEnv {
+  return { ...(env ?? process.env), GIT_TERMINAL_PROMPT: "0" };
+}
+
 export interface GitExecOptions {
   /** Working directory. Omit only for repo-path-as-argument commands like `clone`. */
   cwd?: string;
@@ -56,9 +83,9 @@ function exitCodeOf(err: ExecFileException | null, hadError: boolean): number | 
  * `diff --quiet`, allowed-exit-code probes) or when failures should be swallowed.
  */
 export function gitExec(args: string[], opts: GitExecOptions = {}): Promise<GitExecResult> {
-  const { cwd, timeout, maxBuffer = DEFAULT_MAX_BUFFER, env, input } = opts;
+  const { cwd, timeout = DEFAULT_GIT_TIMEOUT_MS, maxBuffer = DEFAULT_MAX_BUFFER, env, input } = opts;
   return new Promise((resolve) => {
-    const child = execFile("git", args, { cwd, timeout, maxBuffer, windowsHide: true, env }, (err, stdout, stderr) => {
+    const child = execFile("git", args, { cwd, timeout, maxBuffer, windowsHide: true, env: nonInteractiveEnv(env) }, (err, stdout, stderr) => {
       const error: ExecFileException | null = err;
       resolve({
         stdout: stdout == null ? "" : stdout.toString(),
@@ -95,8 +122,8 @@ export interface GitExecSyncOptions extends GitExecOptions {
  * the try/catch-as-boolean idiom (`diff --quiet`) by catching it.
  */
 export function gitExecSync(args: string[], opts: GitExecSyncOptions): string {
-  const { cwd, timeout, maxBuffer = DEFAULT_MAX_BUFFER, stdio } = opts;
-  const out = execFileSync("git", args, { cwd, timeout, maxBuffer, windowsHide: true, encoding: "utf8", stdio });
+  const { cwd, timeout = DEFAULT_GIT_TIMEOUT_MS, maxBuffer = DEFAULT_MAX_BUFFER, env, stdio } = opts;
+  const out = execFileSync("git", args, { cwd, timeout, maxBuffer, windowsHide: true, encoding: "utf8", stdio, env: nonInteractiveEnv(env) });
   return (out ?? "").toString();
 }
 
@@ -111,7 +138,7 @@ export function gitExecSync(args: string[], opts: GitExecSyncOptions): string {
 export function gitStream(args: string[], opts: Pick<GitExecOptions, "cwd" | "env"> = {}): ChildProcess {
   return spawn("git", args, {
     cwd: opts.cwd,
-    env: opts.env,
+    env: nonInteractiveEnv(opts.env),
     windowsHide: true,
     stdio: ["pipe", "pipe", "pipe"],
   });

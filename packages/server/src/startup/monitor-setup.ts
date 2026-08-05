@@ -320,6 +320,10 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
           const ms = Number(prefMap.get("monitor_project_time_budget_ms"));
           return Number.isFinite(ms) && ms > 0 ? ms : undefined;
         })(),
+        candidateTimeoutMs: (() => {
+          const ms = Number(prefMap.get("monitor_candidate_timeout_ms"));
+          return Number.isFinite(ms) && ms > 0 ? ms : undefined;
+        })(),
       });
       cycleStats.relaunched = candidateResult.relaunched;
       cycleStats.merged = candidateResult.merged;
