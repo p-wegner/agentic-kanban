@@ -17,6 +17,7 @@ import {
   bucketScorecardScores,
 } from "../lib/workspace-stats.js";
 import { clampDays, cutoffDayFor, subDays, buildDateAxis } from "../lib/analytics-window.js";
+import { startCreateJob, completeCreateJob, failCreateJob, getCreateJob } from "../services/create-job.service.js";
 
 export function createWorkspacesRoute(
   database: Database,
@@ -186,7 +187,26 @@ export function createWorkspacesRoute(
     return c.json(rows);
   });
 
-  // POST /api/workspaces — create workspace with worktree + auto-launch agent
+  // GET /api/workspaces/create-jobs/:jobId — the tracked state of an async workspace
+  // creation started with `POST /api/workspaces?async=1`. `null` means this process has
+  // no record (unknown id, evicted, or the server restarted mid-create).
+  // Must be registered BEFORE /:id to avoid `create-jobs` being matched as an ID param.
+  router.get("/create-jobs/:jobId", (c) => {
+    const jobId = c.req.param("jobId");
+    const job = getCreateJob(jobId);
+    if (!job) return c.json({ job: null, message: "no create job with this id in the current server process" });
+    return c.json({ job });
+  });
+
+  // POST /api/workspaces — create workspace with worktree + auto-launch agent.
+  //
+  // Provisioning (worktree + branch, per-worktree dependency install, sibling-repo
+  // worktrees, context packer) is minutes-long on real projects (#269: measured 514s
+  // total, worktree-setup alone 294s), so `?async=1` records the creation as a job
+  // (create-job.service.ts) and returns `202 + jobId` immediately; poll
+  // GET /api/workspaces/create-jobs/:jobId for the verdict. The default stays
+  // SYNCHRONOUS for back-compat — the UI, CLI, and MCP all read branch/workingDir
+  // from this response body today.
   router.post("/", async (c) => {
     const body = await parseJsonBody<{
       issueId?: string;
@@ -214,7 +234,7 @@ export function createWorkspacesRoute(
       return c.json({ error: "issueId is required" }, 400);
     }
 
-    const result = await workspaceService.createWorkspace({
+    const input = {
       issueId: body.issueId,
       branch: body.branch,
       isDirect,
@@ -234,7 +254,25 @@ export function createWorkspacesRoute(
       model: body.model,
       skipContextPacker: body.skipContextPacker === true,
       repoScope: Array.isArray(body.repoScope) ? body.repoScope : undefined,
-    } satisfies CreateWorkspaceInput);
+    } satisfies CreateWorkspaceInput;
+
+    const wantsAsync = ["1", "true", "yes"].includes((c.req.query("async") || "").toLowerCase());
+    if (wantsAsync) {
+      const job = startCreateJob(input.issueId);
+      // Nothing awaits this promise; the job record IS the report. createWorkspace
+      // resolves with status:"error" for most failures (completeCreateJob maps that to
+      // a failed job) and only throws WorkspaceErrors (failCreateJob path).
+      void workspaceService
+        .createWorkspace(input)
+        .then((result) => completeCreateJob(job.jobId, result))
+        .catch((err: unknown) => failCreateJob(job.jobId, err));
+      return c.json(
+        { accepted: true, jobId: job.jobId, issueId: input.issueId, statusUrl: `/api/workspaces/create-jobs/${job.jobId}` },
+        202,
+      );
+    }
+
+    const result = await workspaceService.createWorkspace(input);
     return c.json(result, 201);
   });
 
