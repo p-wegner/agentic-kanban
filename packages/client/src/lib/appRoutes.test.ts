@@ -9,7 +9,7 @@ describe("appRoutes", () => {
     expect(getViewRoutePath("agents")).toBe("/agents");
     expect(getViewRoutePath("crime-scene")).toBe("/crime-scene");
     expect(getViewRoutePath("milestones")).toBe("/milestones");
-    expect(getViewRoutePath("fireworks")).toBe("/fireworks");
+    expect(getViewRoutePath("swimlane")).toBe("/swimlane");
     expect(getViewRoutePath("plugin-views")).toBe("/plugin-views");
   });
 
@@ -21,8 +21,13 @@ describe("appRoutes", () => {
     expect(getAppRouteView("/quality-metrics?project=abc")).toBe("quality-metrics");
     expect(getAppRouteView("/crime-scene")).toBe("crime-scene");
     expect(getAppRouteView("/milestones")).toBe("milestones");
-    expect(getAppRouteView("/fireworks")).toBe("fireworks");
+    expect(getAppRouteView("/swimlane")).toBe("swimlane");
     expect(getAppRouteView("/plugin-views")).toBe("plugin-views");
+    // Extracted to the board-whimsy plugin (#237) — no longer app routes.
+    expect(getAppRouteView("/fireworks")).toBeNull();
+    expect(getAppRouteView("/garden")).toBeNull();
+    expect(getAppRouteView("/constellation")).toBeNull();
+    expect(getAppRouteView("/momentum")).toBeNull();
   });
 
   it("supports friendly aliases for workspace-oriented links", () => {

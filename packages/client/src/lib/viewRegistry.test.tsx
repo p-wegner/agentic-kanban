@@ -32,16 +32,20 @@ describe("VIEW_REGISTRY", () => {
     // 35 → 31 (#235): the six event feeds collapsed to two — "activity"
     // (+ digest & cross-repo tabs) and "runtime" (flight-recorder,
     // monitor-cycles, health-events tabs).
-    expect(VIEW_REGISTRY).toHaveLength(31);
+    // 31 → 27 (#237): the four decorative views (constellation, momentum,
+    // fireworks, garden) were extracted to the external board-whimsy plugin
+    // (momentum dropped outright — swimlane is a strict superset), freeing
+    // the `v` and `e` single-key shortcuts.
+    expect(VIEW_REGISTRY).toHaveLength(27);
   });
 
   it("preserves the existing view ids", () => {
     const expected: ViewMode[] = [
       "kanban", "backlog", "graph", "table", "agents", "timeline", "metrics",
       "quality-metrics", "strategy", "focus", "butler", "workflows", "workflow-analytics", "insights", "swimlane", "flaky-tests",
-      "runtime", "drive", "runbooks", "capacity", "constellation", "momentum", "activity", "stale-work",
-      "analytics", "fireworks", "calendar",
-      "crime-scene", "milestones", "garden", "plugin-views",
+      "runtime", "drive", "runbooks", "capacity", "activity", "stale-work",
+      "analytics", "calendar",
+      "crime-scene", "milestones", "plugin-views",
     ];
     expect(VIEW_IDS.slice().sort()).toEqual(expected.slice().sort());
   });
@@ -73,6 +77,11 @@ describe("VIEW_REGISTRY", () => {
     expect(byId["workflow-analytics"]).toBe("h");
   });
 
+  it("keeps the shortcuts freed by the board-whimsy extraction (v, e) unassigned (#237)", () => {
+    expect(SHORTCUT_TO_VIEW["v"]).toBeUndefined();
+    expect(SHORTCUT_TO_VIEW["e"]).toBeUndefined();
+  });
+
   it("every view has the fields the three consumers need", () => {
     for (const v of VIEW_REGISTRY) {
       expect(v.id).toBeTruthy();
@@ -101,9 +110,9 @@ describe("VIEW_REGISTRY", () => {
     expect([...secondaryIds].sort()).toEqual(
       [
         "flaky-tests", "focus", "metrics", "quality-metrics", "swimlane", "workflow-analytics",
-        "runbooks", "capacity", "constellation", "momentum", "activity", "stale-work",
-        "analytics", "fireworks",
-        "crime-scene", "milestones", "garden",
+        "runbooks", "capacity", "activity", "stale-work",
+        "analytics",
+        "crime-scene", "milestones",
       ].sort(),
     );
   });
