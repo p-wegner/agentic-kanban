@@ -1,5 +1,5 @@
 import { db, rawClient, rawWriteClient } from "../db/index.js";
-import { workspaces, issues, projects, preferences, sessions } from "@agentic-kanban/shared/schema";
+import { workspaces, issues, projects, preferences, sessions, pluginViewProcesses } from "@agentic-kanban/shared/schema";
 import { and, eq, isNotNull, ne } from "drizzle-orm";
 import { applyMigrations } from "../db/manual-migrate.js";
 import { deduplicateProjects, unregisterLeakedTempProjects, findProjectsWithMissingRepoPath } from "../services/project-registration.js";
@@ -21,7 +21,7 @@ import { modelBelongsToProvider } from "@agentic-kanban/shared";
 import { PREF_DEFAULT_MODEL, PREF_PROVIDER } from "../constants/preference-keys.js";
 import { MODEL_PREF_KEYS_BY_PROVIDER } from "../services/effective-config.service.js";
 import { narrowProviderName } from "../services/agent-provider.js";
-import { listOsProcesses } from "../services/process-exec.js";
+import { listOsProcesses, taskkillTree } from "../services/process-exec.js";
 import { refreshContainerMcpConfig } from "../services/devcontainer-workspace.service.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 
@@ -365,6 +365,56 @@ export async function cleanupStaleSessions(sessionManager: SessionManager, agent
   }
 }
 
+/**
+ * Reap plugin view child servers (`views[].serve`) left running by the previous
+ * server generation (#228). `tsx watch` restarts the backend on every
+ * server-source edit without killing the children it had spawned; the new
+ * process has no in-memory handle on them, so `plugin_view_processes` — a PID
+ * persisted at spawn time (see `plugin-views.service.ts` via the injected
+ * `persistViewProcess` hook) — is the only record of them. Every row found here
+ * predates this process, so unlike `cleanupStaleSessions` there is no "reattach
+ * the survivor" branch: a live process is unconditionally killed, and the row is
+ * dropped either way.
+ *
+ * A bare `process.kill(pid, 0)` check is NOT enough before killing: PIDs get
+ * recycled, and on this dev machine a fresh unrelated process (another agent's
+ * dev server, a shell) can easily land on a PID a stale row remembers minutes
+ * later. Cross-check the live process's command line against the `command` this
+ * row persisted at spawn time — the same guard `shouldKillOrphanedServerProcess`
+ * above applies for the tsx-server sweep — before killing anything.
+ */
+export async function reapOrphanedPluginViewProcesses(database: Database = db): Promise<void> {
+  const rows = await database.select().from(pluginViewProcesses);
+  if (rows.length === 0) return;
+
+  console.log(`[startup] Checking ${rows.length} plugin view server(s) from the previous server generation`);
+  const osProcs = await listOsProcesses();
+  const commandLineByPid = new Map(osProcs.map((p) => [p.pid, p.commandLine]));
+  let reaped = 0;
+  for (const row of rows) {
+    const liveCommandLine = commandLineByPid.get(row.pid);
+    const stillTheSameProcess = liveCommandLine !== undefined && liveCommandLine.includes(row.command);
+    if (stillTheSameProcess) {
+      try {
+        if (process.platform === "win32") {
+          await taskkillTree(row.pid);
+        } else {
+          process.kill(row.pid, "SIGKILL");
+        }
+        reaped++;
+      } catch (err) {
+        console.warn(`[startup] failed to kill orphaned plugin view server PID ${row.pid} (non-fatal):`, err instanceof Error ? err.message : String(err));
+      }
+    } else if (liveCommandLine !== undefined) {
+      console.warn(`[startup] plugin view server PID ${row.pid} is now a different process (command line no longer matches) — skipping kill, dropping stale row`);
+    }
+    await database.delete(pluginViewProcesses).where(eq(pluginViewProcesses.id, row.id));
+  }
+  if (reaped > 0) {
+    console.log(`[startup] killed ${reaped} orphaned plugin view server process(es)`);
+  }
+}
+
 /** Prune closed workspaces that still have a workingDir (stale git worktrees). */
 export async function pruneStaleWorktrees(): Promise<void> {
   const staleWs = await db.select({ id: workspaces.id, branch: workspaces.branch, workingDir: workspaces.workingDir, issueId: workspaces.issueId })
@@ -565,6 +615,11 @@ export async function runStartupTasks(sessionManager: SessionManager, _deps?: { 
   await abortStaleMerges();
   await abortStaleRebases();
   await cleanupStaleSessions(sessionManager);
+  try {
+    await reapOrphanedPluginViewProcesses();
+  } catch (err) {
+    console.warn("[startup] reapOrphanedPluginViewProcesses failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
   try {
     // Worker fleet (epic #184): land any remote-worker pushes that arrived while
     // the board was down. Must run AFTER cleanupStaleSessions — that sweep
