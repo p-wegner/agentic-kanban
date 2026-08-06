@@ -17,7 +17,8 @@ import { resolveFleetPort, startFleetListener } from "./services/fleet-listener.
 import { createFleetWorkersRoute } from "./routes/workers.js";
 import { setupRoutes } from "./startup/route-setup.js";
 import { BACKGROUND_SERVICES } from "./startup/background-services.js";
-import { runStartupTasks } from "./startup/startup-tasks.js";
+import { runCriticalStartupTasks, runDeferredStartupTasks } from "./startup/startup-tasks.js";
+import { createStartupReadinessGate, markStartupComplete } from "./startup/readiness.js";
 import { runSessionRestore } from "./startup/session-restore.js";
 import { cleanupExpiredRuntimeState } from "./repositories/runtime-state.repository.js";
 import { invalidateAgentQuestionsCache } from "./services/agent-questions.service.js";
@@ -65,6 +66,10 @@ export async function startServer(port?: number, hostname?: string) {
   // SSE (text/event-stream) is excluded by content-type inside the middleware;
   // WebSocket upgrades live under /ws/* and never enter this mount.
   app.use("/api/*", jsonGzip);
+  // #282 — the deferred startup phase runs BEHIND the listener, so reads answer
+  // immediately while writes still see the state the reconcilers repair. Mounted before
+  // the routes so it covers every /api mutation, including the monitor routes below.
+  app.use("/api/*", createStartupReadinessGate());
   // Dependency-aware health probe. A bare "status: ok" stayed green even when
   // the shared package's dist was missing after a restart (#691), so monitors
   // polling /health never noticed that every DB-backed API route was broken
@@ -102,9 +107,12 @@ export async function startServer(port?: number, hostname?: string) {
   autoMerge = createAutoMerge({ sessionManager, boardEvents, learningSessionIds: workflow.learningSessionIds });
   runWorkflowOnExit = workflow.runWorkflowOnExit;
 
-  await runStartupTasks(sessionManager, { agentService });
+  // #282 — only the work that must precede serving: process cleanup, migrations, FK
+  // assertions, session settling. Every git-spawning reconciler moved to the deferred
+  // phase started after `serve()` below.
+  await runCriticalStartupTasks(sessionManager, { agentService });
 
-  // Reap orphan service stacks after stale-session cleanup (runs inside runStartupTasks).
+  // Reap orphan service stacks after stale-session cleanup (runs inside the critical phase).
   // Boot pass runs BEFORE setupRoutes so no HTTP create can race it — and it does NOT
   // shield mid-provision null-state rows (a crash-mid-`up` leaves no state; that IS the
   // orphan to reclaim). The periodic pass (background-services) shields those instead,
@@ -175,6 +183,19 @@ export async function startServer(port?: number, hostname?: string) {
   // the TCP handshake cost across rapid back-to-back requests.
   (server as { keepAliveTimeout?: number }).keepAliveTimeout = 1000;
   injectWebSocket(server);
+
+  // #282 — the deferrable half of startup now runs BEHIND the bound listener instead of
+  // in front of it. Reads (the board payload) are served from this moment; mutating /api
+  // requests are held by the readiness gate until this settles, preserving the ordering
+  // the serial prologue used to guarantee. Never awaited here: awaiting it would restore
+  // exactly the 238 s time-to-first-response this change removes. A failure marks
+  // readiness anyway — a broken reconciler must not leave the board permanently unwritable.
+  void runDeferredStartupTasks()
+    .catch((err) => console.warn("[startup] deferred startup phase failed (non-fatal):", err instanceof Error ? err.message : err))
+    .finally(() => {
+      markStartupComplete();
+      console.log("[startup] deferred startup phase complete — mutating requests no longer gated");
+    });
 
   // Start every background service (periodic reconcilers, schedulers, supervisors)
   // from the plugin registry. Each entry's start() returns an optional cleanup that

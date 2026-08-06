@@ -681,14 +681,35 @@ export async function reconcileSilentlyMergedWorkspaces(database: Database = db)
   }
 }
 
-/** Combined startup sequence: kill orphans, migrate, seed, dedup, abort stale merges, clean sessions/worktrees. */
-export async function runStartupTasks(sessionManager: SessionManager, _deps?: { agentService?: typeof agentServiceType }): Promise<void> {
+/**
+ * The startup work that MUST complete before the server may answer anything (#282).
+ *
+ * Deliberately short and git-free: kill a previous generation's process that may still
+ * hold the DB, bring the schema up to date, assert FK enforcement, and settle the session
+ * rows this process inherits. Everything else — every reconciler that spawns git per
+ * worktree — is deferred to {@link runDeferredStartupTasks} and runs AFTER the listener
+ * binds, because none of it is needed to render a board and all of it was being paid as
+ * time-to-first-response (measured 238 s on this checkout, with ~65 worktrees).
+ */
+export async function runCriticalStartupTasks(sessionManager: SessionManager, _deps?: { agentService?: typeof agentServiceType }): Promise<void> {
   await killOrphanedServers();
   await runMigrations();
   await alignLiveDbForeignKeys();
+  await cleanupStaleSessions(sessionManager);
+}
+
+/**
+ * The deferrable half of startup (#282): self-healing git state and the reconcilers.
+ *
+ * Safe to run behind the listener because nothing here is required to SERVE — but several
+ * entries do repair state that a mutating request would otherwise act on (an unaborted
+ * rebase, a silently-merged workspace). Callers therefore mark readiness when this
+ * resolves, and the readiness gate holds mutating API requests until then; read-only
+ * traffic, which is what "the board takes minutes to load" was about, is never held.
+ */
+export async function runDeferredStartupTasks(): Promise<void> {
   await abortStaleMerges();
   await abortStaleRebases();
-  await cleanupStaleSessions(sessionManager);
   try {
     await reapOrphanedPluginViewProcesses();
   } catch (err) {
@@ -749,4 +770,16 @@ export async function runStartupTasks(sessionManager: SessionManager, _deps?: { 
   }
   await pruneStaleWorktrees();
   await checkMainCheckoutHeads();
+}
+
+/**
+ * The full startup sequence, critical phase then deferred phase back to back.
+ *
+ * Retained for callers that genuinely want everything done before continuing (tests, and
+ * any embedding that is not serving HTTP). `server-start.ts` does NOT use this — it runs
+ * the two phases either side of `serve()` on purpose.
+ */
+export async function runStartupTasks(sessionManager: SessionManager, deps?: { agentService?: typeof agentServiceType }): Promise<void> {
+  await runCriticalStartupTasks(sessionManager, deps);
+  await runDeferredStartupTasks();
 }
