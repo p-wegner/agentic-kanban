@@ -5,10 +5,43 @@ import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
-import { getCommitCountAhead } from "../services/git.service.js";
+import { getCommitCountAhead, revParse } from "../services/git.service.js";
 import { startManualReview, isReviewLaunchPending } from "../services/review.service.js";
 import { getMergeJob } from "../services/merge-job.service.js";
+import { recordDriveObstacle } from "../services/drive-obstacles.service.js";
 import { PREF_RECONCILER_STRANDED_REVIEW_ENABLED } from "../constants/preference-keys.js";
+
+/**
+ * How many times the reconciler may attempt a review preflight for the SAME pair of
+ * branch/base tips before it gives up and reports a drive obstacle (#283).
+ *
+ * A rebase conflict is deterministic: the same two commits conflict every time until a
+ * human or fix-and-merge changes something. Retrying it once a minute forever spawned the
+ * most expensive git operation the board runs (one observed server run: 5 workspaces, 48
+ * failures, 39 rebase attempts) and blocked the event loop each cycle. The budget is not 1
+ * because a preflight can also fail transiently — an `index.lock` held by another process,
+ * a fetch blip — and those deserve a retry.
+ */
+export const MAX_REVIEW_PREFLIGHT_ATTEMPTS = 3;
+
+/** Marker signature used when the tips cannot be resolved, so the budget still applies. */
+const UNKNOWN_SIGNATURE = "unknown";
+
+/**
+ * `<branchHeadSha>..<baseHeadSha>` — the identity of a preflight attempt. When it changes,
+ * the conflict may genuinely have been resolved, so any existing block is void.
+ */
+async function computePreflightSignature(workingDir: string, baseBranch: string): Promise<string> {
+  try {
+    const [head, base] = await Promise.all([
+      revParse(workingDir, "HEAD"),
+      revParse(workingDir, baseBranch),
+    ]);
+    return `${head.trim()}..${base.trim()}`;
+  } catch {
+    return UNKNOWN_SIGNATURE;
+  }
+}
 
 export interface StrandedReviewReconcilerDeps {
   database?: Database;
@@ -22,6 +55,25 @@ export interface StrandedReviewReconcilerDeps {
    * so a pref-level disable takes effect on the next tick with no restart.
    */
   enabled?: boolean;
+}
+
+/**
+ * Drop any review-preflight backoff recorded for a workspace (#283). Called when the tips
+ * move under a block, when a preflight finally succeeds, and by callers that materially
+ * change the workspace (a new agent turn, an explicit rebase) and want the reconciler to
+ * try again immediately.
+ */
+export async function clearReviewPreflightBlock(database: Database, workspaceId: string): Promise<void> {
+  try {
+    await database.update(workspaces).set({
+      reviewPreflightFailures: 0,
+      reviewPreflightError: null,
+      reviewPreflightSignature: null,
+      reviewPreflightBlockedAt: null,
+    }).where(eq(workspaces.id, workspaceId));
+  } catch (err) {
+    console.warn(`[reconcile] could not clear review-preflight block for ${workspaceId}:`, err instanceof Error ? err.message : err);
+  }
 }
 
 /**
@@ -75,6 +127,8 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
       baseBranch: workspaces.baseBranch,
       issueNumber: issues.issueNumber,
       projectId: issues.projectId,
+      preflightFailures: workspaces.reviewPreflightFailures,
+      preflightSignature: workspaces.reviewPreflightSignature,
     })
     .from(workspaces)
     .innerJoin(issues, eq(workspaces.issueId, issues.id))
@@ -87,6 +141,7 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
     ));
 
   let recovered = 0;
+  let blocked = 0;
   for (const c of candidates) {
     if (!c.workingDir || !c.baseBranch) continue;
     // A merge in flight OWNS this workspace (#270): its pre-lock gate runs for 20-40 minutes
@@ -105,6 +160,25 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
     const priorReview = await database.select({ id: sessions.id }).from(sessions)
       .where(and(eq(sessions.workspaceId, c.wsId), eq(sessions.triggerType, "review"))).limit(1);
     if (priorReview.length > 0) continue;
+
+    // #283 — a preflight that already failed its budget for THESE tips is not retried.
+    // Checked before the (more expensive) ahead-count so a blocked workspace costs two
+    // rev-parses per cycle instead of a full rebase. Candidates that have never failed
+    // skip the signature computation entirely and resolve it lazily on failure.
+    let signature: string | null = null;
+    const priorFailures = c.preflightFailures ?? 0;
+    if (priorFailures > 0) {
+      signature = await computePreflightSignature(c.workingDir, c.baseBranch);
+      if (c.preflightSignature && c.preflightSignature !== signature) {
+        // Either tip moved — the conflict may be resolved, so the block is void.
+        await clearReviewPreflightBlock(database, c.wsId);
+        console.log(`[reconcile] workspace ${c.wsId} (#${c.issueNumber ?? "?"}) has new commits — clearing review-preflight block`);
+      } else if (priorFailures >= MAX_REVIEW_PREFLIGHT_ATTEMPTS) {
+        blocked++;
+        continue;
+      }
+    }
+
     // Require committed changes ahead of base (don't review an empty branch).
     const ahead = await getCommitCountAhead(c.workingDir, c.baseBranch).catch(() => 0);
     if (!ahead || ahead <= 0) continue;
@@ -112,6 +186,7 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
     try {
       if (autoReview) {
         const { sessionId } = await startManualReview(database, getSessionManager, boardEvents, reviewSessionIds, c.wsId, false);
+        if (priorFailures > 0) await clearReviewPreflightBlock(database, c.wsId);
         console.log(`[reconcile] re-launched stranded review for workspace ${c.wsId} (#${c.issueNumber ?? "?"}) session=${sessionId}`);
       } else {
         await database.update(workspaces).set({ readyForMerge: true, updatedAt: new Date().toISOString() }).where(eq(workspaces.id, c.wsId));
@@ -120,10 +195,39 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
       }
       recovered++;
     } catch (err) {
-      console.warn(`[reconcile] failed to recover stranded workspace ${c.wsId}:`, err instanceof Error ? err.message : err);
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[reconcile] failed to recover stranded workspace ${c.wsId}:`, message);
+      // #283 — remember the failure so the next cycle does not repeat it blindly.
+      signature ??= await computePreflightSignature(c.workingDir, c.baseBranch);
+      const failures = (c.preflightSignature === signature ? priorFailures : 0) + 1;
+      const exhausted = failures >= MAX_REVIEW_PREFLIGHT_ATTEMPTS;
+      await database.update(workspaces).set({
+        reviewPreflightFailures: failures,
+        reviewPreflightError: message.slice(0, 2000),
+        reviewPreflightSignature: signature,
+        reviewPreflightBlockedAt: exhausted ? new Date().toISOString() : null,
+        updatedAt: new Date().toISOString(),
+      }).where(eq(workspaces.id, c.wsId)).catch((writeErr) => {
+        console.warn(`[reconcile] could not persist review-preflight failure for ${c.wsId}:`, writeErr instanceof Error ? writeErr.message : writeErr);
+      });
+      if (exhausted) {
+        blocked++;
+        console.warn(
+          `[reconcile] giving up on stranded workspace ${c.wsId} (#${c.issueNumber ?? "?"}) after ${failures} failed review preflights for the same commits — route to fix-and-merge`,
+        );
+        await recordDriveObstacle({
+          projectId: c.projectId,
+          kind: "review_preflight_conflict",
+          severity: "warning",
+          issueNumber: c.issueNumber ?? null,
+          summary: `Review preflight failed ${failures}x for workspace ${c.wsId}; retries stopped until the branch or base moves`,
+          details: { workspaceId: c.wsId, signature, error: message.slice(0, 2000) },
+        }, { database, broadcast: (projectId, reason) => boardEvents.broadcast(projectId, reason) });
+      }
     }
   }
   if (recovered > 0) console.log(`[reconcile] recovered ${recovered} stranded In-Review workspace(s)`);
+  if (blocked > 0) console.log(`[reconcile] ${blocked} stranded workspace(s) blocked on an unresolvable review preflight — not retried`);
   return recovered;
 }
 

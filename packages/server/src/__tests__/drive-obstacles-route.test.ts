@@ -110,8 +110,9 @@ describe("Drive obstacles API", () => {
     expect(res.status).toBe(200);
     const body = await res.json() as { total: number; byKind: Array<{ kind: string; count: number }> };
     expect(body.total).toBe(3);
-    // Every taxonomy kind is present, zeroes included.
-    expect(body.byKind).toHaveLength(6);
+    // Every taxonomy kind is present, zeroes included. Derived from the taxonomy rather
+    // than hardcoded, so adding a kind does not fail an assertion that isn't about counts.
+    expect(body.byKind).toHaveLength(schema.DRIVE_OBSTACLE_KINDS.length);
     const map = new Map(body.byKind.map((k) => [k.kind, k.count]));
     expect(map.get("stall")).toBe(2);
     expect(map.get("silent_merge_loss")).toBe(1);

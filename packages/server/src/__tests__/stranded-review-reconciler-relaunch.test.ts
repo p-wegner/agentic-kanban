@@ -41,8 +41,10 @@ vi.mock("../services/review.service.js", () => ({
 // Mock the git boundary so "has commits ahead of base" is deterministic without a
 // real worktree on disk (the working dirs below never exist).
 const getCommitCountAheadMock = vi.fn(async () => 1);
+const revParseMock = vi.fn(async (_dir: string, ref: string) => `sha-${ref}`);
 vi.mock("../services/git.service.js", () => ({
   getCommitCountAhead: (...args: unknown[]) => getCommitCountAheadMock(...args),
+  revParse: (...args: [string, string]) => revParseMock(...args),
 }));
 
 // Import AFTER the mocks are registered (vi.mock is hoisted, but keep it explicit).
