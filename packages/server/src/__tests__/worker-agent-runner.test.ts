@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { tmpdir } from "node:os";
-import { createWorkerAgentRunner } from "../worker/worker-agent-runner.js";
+import { createWorkerAgentRunner, ASSIGN_REFUSED_AT_CAPACITY } from "../worker/worker-agent-runner.js";
 import type { WorkerToBoardMessage, WorkerLaunchSpec } from "@agentic-kanban/shared/lib/worker-protocol";
 
 const cleanEnv = Object.fromEntries(
@@ -18,9 +18,9 @@ function nodeSpec(script: string, overrides?: Partial<WorkerLaunchSpec>): Worker
   };
 }
 
-function collector() {
+function collector(options?: { maxConcurrency?: number }) {
   const messages: WorkerToBoardMessage[] = [];
-  const runner = createWorkerAgentRunner((msg) => messages.push(msg));
+  const runner = createWorkerAgentRunner((msg) => messages.push(msg), options);
   const eventsOf = (sessionId: string) =>
     messages.flatMap((m) => (m.type === "event" && m.event.sessionId === sessionId ? [m.event] : []));
   const exitOf = (sessionId: string) => eventsOf(sessionId).find((e) => e.type === "exit");
@@ -150,4 +150,64 @@ describe("worker hang watchdog (parity with the host spawn site)", () => {
     expect(stderr).not.toContain("hang watchdog");
     expect(eventsOf("s1").filter((e) => e.type === "stdout").map((e) => e.data).join("")).toContain("late");
   }, 35000);
+});
+
+// #266 — the worker enforces its OWN declared ceiling. The board tracks capacity too
+  // (#248), but that only protects against a well-behaved board; the whole point of
+  // declaring capacity is that the machine's owner controls its load.
+describe("maxConcurrency (worker-side enforcement, #266)", () => {
+  const stayAlive = "setInterval(()=>{},1000)";
+
+  it("refuses a second concurrent assign when maxConcurrency=1", async () => {
+    const { messages, runner } = collector({ maxConcurrency: 1 });
+    runner.assign("s1", nodeSpec(stayAlive, { keepStdinOpen: true, hangTimeoutMs: 0 }));
+    expect(runner.runningSessionIds()).toEqual(["s1"]);
+
+    runner.assign("s2", nodeSpec(stayAlive, { keepStdinOpen: true, hangTimeoutMs: 0 }));
+
+    const refusal = messages.find((m) => m.type === "assign_failed" && m.sessionId === "s2");
+    expect(refusal).toBeTruthy();
+    // Distinguishable from a launch failure so the board can place elsewhere
+    // and release its pending slot, rather than recording a broken session.
+    expect(refusal).toMatchObject({ error: ASSIGN_REFUSED_AT_CAPACITY });
+    // Crucially: it was refused, not silently run.
+    expect(runner.runningSessionIds()).toEqual(["s1"]);
+
+    runner.stopAll();
+  });
+
+  it("accepts a later assign once the slot is free again", async () => {
+    const { messages, runner, exitOf } = collector({ maxConcurrency: 1 });
+    runner.assign("s1", nodeSpec("process.exit(0)"));
+    await vi.waitFor(() => expect(exitOf("s1")).toBeTruthy(), { timeout: 15000 });
+
+    runner.assign("s2", nodeSpec("console.log('second-ran')"));
+    await vi.waitFor(() => expect(exitOf("s2")).toBeTruthy(), { timeout: 15000 });
+
+    expect(messages.find((m) => m.type === "assign_failed" && m.sessionId === "s2")).toBeUndefined();
+  }, 35000);
+
+  it("allows concurrent sessions up to the declared ceiling", async () => {
+    const { messages, runner } = collector({ maxConcurrency: 2 });
+    runner.assign("s1", nodeSpec(stayAlive, { keepStdinOpen: true, hangTimeoutMs: 0 }));
+    runner.assign("s2", nodeSpec(stayAlive, { keepStdinOpen: true, hangTimeoutMs: 0 }));
+    expect(runner.runningSessionIds().sort()).toEqual(["s1", "s2"]);
+
+    runner.assign("s3", nodeSpec(stayAlive, { keepStdinOpen: true, hangTimeoutMs: 0 }));
+    expect(messages.find((m) => m.type === "assign_failed" && m.sessionId === "s3"))
+      .toMatchObject({ error: ASSIGN_REFUSED_AT_CAPACITY });
+    expect(runner.runningSessionIds().sort()).toEqual(["s1", "s2"]);
+
+    runner.stopAll();
+  });
+
+  it("defaults to 1 when the worker declared no ceiling", () => {
+    const { messages, runner } = collector();
+    runner.assign("s1", nodeSpec(stayAlive, { keepStdinOpen: true, hangTimeoutMs: 0 }));
+    runner.assign("s2", nodeSpec(stayAlive, { keepStdinOpen: true, hangTimeoutMs: 0 }));
+
+    expect(messages.find((m) => m.type === "assign_failed" && m.sessionId === "s2"))
+      .toMatchObject({ error: ASSIGN_REFUSED_AT_CAPACITY });
+    runner.stopAll();
+  });
 });
