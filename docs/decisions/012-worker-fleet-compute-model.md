@@ -81,6 +81,17 @@ is built from an explicit ALLOWLIST of non-secret board wiring
 (`server/src/lib/remote-spec-env.ts`), and the worker MERGES it over its own environment
 so its login and paths win.
 
+**Container placement deliberately does the opposite, and that is not an inconsistency**
+(#267). `agent-provider/container-wrap.ts` forwards `ANTHROPIC_*` / `CLAUDE_*` wholesale
+into the container, because a container runs on the SAME machine under the SAME owner as
+a host launch — the agent inside needs the credentials, and it is exposed to nobody who
+could not already read the host environment. The invariant is *"credentials never leave
+their machine"*, not *"credentials are never forwarded"*; only `remote` crosses a machine
+boundary, so only `remote` gets the allowlist projection. The trigger to revisit: if
+container placement ever stops being local — a remote Docker host, a shared CI runner, or
+a daemon owned by another user — that forwarding becomes a credential leak and must route
+through the same projection (with a `sameMachine: true` allowlist) instead.
+
 **The worker-facing endpoints therefore live on their OWN listener** (`KANBAN_FLEET_PORT`),
 serving `POST /api/workers/register`, `POST /api/workers/:id/heartbeat`, `GET
 /ws/workers/:id` and health — and nothing else. The main app stays on `127.0.0.1`
