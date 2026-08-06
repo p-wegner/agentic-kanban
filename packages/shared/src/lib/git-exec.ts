@@ -1,4 +1,5 @@
 import { execFile, execFileSync, spawn, type ChildProcess, type ExecFileException, type StdioOptions } from "node:child_process";
+import { existsSync } from "node:fs";
 
 /**
  * The single sanctioned adapter for spawning the `git` CLI.
@@ -86,11 +87,20 @@ export function gitExec(args: string[], opts: GitExecOptions = {}): Promise<GitE
   const { cwd, timeout = DEFAULT_GIT_TIMEOUT_MS, maxBuffer = DEFAULT_MAX_BUFFER, env, input } = opts;
   return new Promise((resolve) => {
     const child = execFile("git", args, { cwd, timeout, maxBuffer, windowsHide: true, env: nonInteractiveEnv(env) }, (err, stdout, stderr) => {
-      const error: ExecFileException | null = err;
+      let error: Error | null = err;
+      // `spawn git ENOENT` conflates two very different failures (#271): a missing WORKING
+      // DIRECTORY (deleted repo — deterministic, act on the project) and the git BINARY not
+      // spawning (PATH broken or process/handle exhaustion — environmental, retryable).
+      // Disambiguate here, at the single spawn site, so every caller reports the real cause.
+      if (err && (err as NodeJS.ErrnoException).code === "ENOENT") {
+        error = cwd && !existsSync(cwd)
+          ? new Error(`working directory does not exist: ${cwd} (repo deleted or moved?)`)
+          : new Error("git could not be spawned (ENOENT) with the working directory present — PATH problem or process/handle exhaustion, NOT a missing repo");
+      }
       resolve({
         stdout: stdout == null ? "" : stdout.toString(),
         stderr: stderr == null ? "" : stderr.toString(),
-        code: exitCodeOf(error, err != null),
+        code: exitCodeOf(err, err != null),
         error,
       });
     });
