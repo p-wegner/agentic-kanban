@@ -127,7 +127,7 @@ describe("reconcileAncestorBranchWorkspaces", () => {
     const checkAncestor = makeCheckAncestor(true);
     const countCommits = makeCountCommits(1);
 
-    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor, countCommits });
+    const count = await reconcileAncestorBranchWorkspaces({ pathExists: () => true, database: db, checkAncestor, countCommits });
 
     expect(count).toBe(1);
 
@@ -144,7 +144,7 @@ describe("reconcileAncestorBranchWorkspaces", () => {
     const { issueId } = await seedWorkspace(db, { statusName: "In Progress", wsStatus: "active" });
     const checkAncestor = makeCheckAncestor(true);
 
-    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor });
+    const count = await reconcileAncestorBranchWorkspaces({ pathExists: () => true, database: db, checkAncestor });
 
     expect(count).toBe(0);
     expect(checkAncestor).not.toHaveBeenCalled();
@@ -163,7 +163,7 @@ describe("reconcileAncestorBranchWorkspaces", () => {
     const checkAncestor = makeCheckAncestor(true);
     const countCommits = makeCountCommits(2);
 
-    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor, countCommits });
+    const count = await reconcileAncestorBranchWorkspaces({ pathExists: () => true, database: db, checkAncestor, countCommits });
 
     expect(count).toBe(1);
     expect(checkAncestor).toHaveBeenCalled();
@@ -203,7 +203,7 @@ describe("reconcileAncestorBranchWorkspaces", () => {
     const checkAncestor = makeCheckAncestor(true);
     const countCommits = makeCountCommits(2);
 
-    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor, countCommits });
+    const count = await reconcileAncestorBranchWorkspaces({ pathExists: () => true, database: db, checkAncestor, countCommits });
 
     expect(count).toBe(0);
     expect(checkAncestor).not.toHaveBeenCalled();
@@ -225,7 +225,7 @@ describe("reconcileAncestorBranchWorkspaces", () => {
     const { issueId } = await seedWorkspace(db, { statusName: "In Review" });
     const checkAncestor = makeCheckAncestor(false);
 
-    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor });
+    const count = await reconcileAncestorBranchWorkspaces({ pathExists: () => true, database: db, checkAncestor });
 
     expect(count).toBe(0);
     const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
@@ -237,7 +237,7 @@ describe("reconcileAncestorBranchWorkspaces", () => {
     const { workspaceId } = await seedWorkspace(db, { statusName: "Done" });
     const checkAncestor = makeCheckAncestor(true);
 
-    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor });
+    const count = await reconcileAncestorBranchWorkspaces({ pathExists: () => true, database: db, checkAncestor });
 
     expect(count).toBe(0);
     expect(checkAncestor).not.toHaveBeenCalled();
@@ -250,7 +250,7 @@ describe("reconcileAncestorBranchWorkspaces", () => {
     const { issueId } = await seedWorkspace(db, { statusName: "In Review", isDirect: true });
     const checkAncestor = makeCheckAncestor(true);
 
-    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor });
+    const count = await reconcileAncestorBranchWorkspaces({ pathExists: () => true, database: db, checkAncestor });
 
     expect(count).toBe(0);
     const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
@@ -263,7 +263,7 @@ describe("reconcileAncestorBranchWorkspaces", () => {
     const { issueId } = await seedWorkspace(db, { statusName: "In Review", mergedAt: now });
     const checkAncestor = makeCheckAncestor(true);
 
-    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor });
+    const count = await reconcileAncestorBranchWorkspaces({ pathExists: () => true, database: db, checkAncestor });
 
     expect(count).toBe(0);
     const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
@@ -275,7 +275,7 @@ describe("reconcileAncestorBranchWorkspaces", () => {
     const { issueId } = await seedWorkspace(db, { statusName: "In Review", wsStatus: "closed" });
     const checkAncestor = makeCheckAncestor(true);
 
-    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor });
+    const count = await reconcileAncestorBranchWorkspaces({ pathExists: () => true, database: db, checkAncestor });
 
     expect(count).toBe(0);
     expect(checkAncestor).not.toHaveBeenCalled();
@@ -289,8 +289,8 @@ describe("reconcileAncestorBranchWorkspaces", () => {
     const checkAncestor = makeCheckAncestor(true);
     const countCommits = makeCountCommits(1);
 
-    const first = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor, countCommits });
-    const second = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor, countCommits });
+    const first = await reconcileAncestorBranchWorkspaces({ pathExists: () => true, database: db, checkAncestor, countCommits });
+    const second = await reconcileAncestorBranchWorkspaces({ pathExists: () => true, database: db, checkAncestor, countCommits });
 
     expect(first).toBe(1);
     expect(second).toBe(0);
@@ -307,7 +307,7 @@ describe("reconcileAncestorBranchWorkspaces", () => {
     const checkAncestor = makeCheckAncestor(true);
     const countCommits = makeCountCommits(0);
 
-    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor, countCommits });
+    const count = await reconcileAncestorBranchWorkspaces({ pathExists: () => true, database: db, checkAncestor, countCommits });
 
     expect(count).toBe(0);
     const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
@@ -326,7 +326,7 @@ describe("reconcileAncestorBranchWorkspaces", () => {
     const checkAncestor = makeCheckAncestor(true);
     const countCommits = makeCountCommits(0);
 
-    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor, countCommits });
+    const count = await reconcileAncestorBranchWorkspaces({ pathExists: () => true, database: db, checkAncestor, countCommits });
 
     expect(count).toBe(0);
     const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
@@ -342,7 +342,7 @@ describe("reconcileAncestorBranchWorkspaces", () => {
     const checkAncestor = makeCheckAncestor(true);
     const countCommits = makeCountCommits(0);
 
-    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor, countCommits });
+    const count = await reconcileAncestorBranchWorkspaces({ pathExists: () => true, database: db, checkAncestor, countCommits });
 
     expect(count).toBe(0);
     expect(checkAncestor).not.toHaveBeenCalled(); // filtered out by In Progress guard
@@ -364,7 +364,7 @@ describe("reconcileAncestorBranchWorkspaces", () => {
     const checkAncestor = makeCheckAncestor(true);
     const countCommits = makeCountCommits(0);
 
-    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor, countCommits });
+    const count = await reconcileAncestorBranchWorkspaces({ pathExists: () => true, database: db, checkAncestor, countCommits });
 
     expect(count).toBe(0);
     // The In-Progress status guard filters before git is consulted.
@@ -385,7 +385,7 @@ describe("reconcileAncestorBranchWorkspaces", () => {
     const checkAncestor = makeCheckAncestor(true);
     const countCommits = makeCountCommits(3); // 3 real commits on the branch
 
-    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor, countCommits });
+    const count = await reconcileAncestorBranchWorkspaces({ pathExists: () => true, database: db, checkAncestor, countCommits });
 
     expect(count).toBe(1);
     expect(checkAncestor).toHaveBeenCalled();
@@ -405,7 +405,7 @@ describe("reconcileAncestorBranchWorkspaces", () => {
     const checkAncestor = makeCheckAncestor(true);
     const countCommits = makeCountCommits(1);
 
-    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor, countCommits, enabled: false });
+    const count = await reconcileAncestorBranchWorkspaces({ pathExists: () => true, database: db, checkAncestor, countCommits, enabled: false });
 
     expect(count).toBe(0);
     expect(checkAncestor).not.toHaveBeenCalled();
@@ -431,7 +431,7 @@ describe("reconcileAncestorBranchWorkspaces", () => {
     await db.insert(preferences).values({ key: "reconciler_ancestor_branch_enabled", value: "false", updatedAt: now })
       .onConflictDoUpdate({ target: preferences.key, set: { value: "false", updatedAt: now } });
 
-    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor, countCommits });
+    const count = await reconcileAncestorBranchWorkspaces({ pathExists: () => true, database: db, checkAncestor, countCommits });
 
     expect(count).toBe(0);
     expect(checkAncestor).not.toHaveBeenCalled();
@@ -476,7 +476,7 @@ describe("reconcileAncestorBranchWorkspaces", () => {
     });
     const countCommits = makeCountCommits(1);
 
-    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor, countCommits });
+    const count = await reconcileAncestorBranchWorkspaces({ pathExists: () => true, database: db, checkAncestor, countCommits });
 
     expect(count).toBe(1);
     const [issue2] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId2));
@@ -588,7 +588,7 @@ describe("reconcileAncestorBranchWorkspaces — sibling-aware terminalization (#
     const checkAncestor = makeCheckAncestor(true);
     const countCommits = makeCountCommits(1);
 
-    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor, countCommits, gitService: realGitService });
+    const count = await reconcileAncestorBranchWorkspaces({ pathExists: () => true, database: db, checkAncestor, countCommits, gitService: realGitService });
 
     expect(count).toBe(1);
 
@@ -623,7 +623,7 @@ describe("reconcileAncestorBranchWorkspaces — sibling-aware terminalization (#
     const checkAncestor = makeCheckAncestor(true);
     const countCommits = makeCountCommits(1);
 
-    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor, countCommits, gitService: realGitService });
+    const count = await reconcileAncestorBranchWorkspaces({ pathExists: () => true, database: db, checkAncestor, countCommits, gitService: realGitService });
 
     expect(count).toBe(0);
 

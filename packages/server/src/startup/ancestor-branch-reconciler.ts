@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { and, eq, isNull, ne, notInArray } from "drizzle-orm";
 import { issues, preferences, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { checkBranchTipIsAncestor, countUniqueCommits } from "@agentic-kanban/shared/lib/git-service";
@@ -20,12 +21,27 @@ import { createBackup } from "../db/backup.js";
 /** Issue status names that are already terminal; skip these workspaces. */
 const TERMINAL_STATUS_NAMES = ["Done", "AI Reviewed", "Closed", "Cancelled"];
 
+/**
+ * Max candidates allowed to reach the git-spawning phase per pass (#277).
+ *
+ * This reconciler runs during startup, BEFORE the HTTP listener binds, and each
+ * candidate costs an ancestry check plus a commit count — synchronous CreateProcess
+ * work on the event-loop thread. With a large workspace table that is added straight
+ * onto time-to-first-response. Deferred candidates are picked up on the next pass.
+ */
+const MAX_GIT_CANDIDATES_PER_PASS = 25;
+
 export interface AncestorBranchReconcilerDeps {
   database?: Database;
   /** Injectable for testing. Defaults to the real checkBranchTipIsAncestor from git-service. */
   checkAncestor?: typeof checkBranchTipIsAncestor;
   /** Injectable for testing. Defaults to the real countUniqueCommits from git-service. */
   countCommits?: typeof countUniqueCommits;
+  /**
+   * On-disk presence probe for a candidate's repo path (#277). Defaults to `existsSync`;
+   * suites using synthetic repo paths inject `() => true`.
+   */
+  pathExists?: (path: string) => boolean;
   /**
    * Override enabled state for testing. When undefined (production path), the reconciler
    * reads the live `reconciler_ancestor_branch_enabled` preference from the DB at call time,
@@ -90,6 +106,9 @@ export async function reconcileAncestorBranchWorkspaces(
   const ancestorCheck = deps.checkAncestor ?? checkBranchTipIsAncestor;
   const commitCounter = deps.countCommits ?? countUniqueCommits;
   const gitSvc = deps.gitService ?? realGitService;
+  // Injectable so suites driving fake git over synthetic repo paths keep testing the
+  // git-level semantics instead of tripping the missing-repo short-circuit (#277).
+  const pathExists = deps.pathExists ?? existsSync;
 
   // Live pref read at every tick so disabling via pref takes effect without a restart.
   // The `enabled` override in deps lets tests inject the state directly.
@@ -147,9 +166,24 @@ export async function reconcileAncestorBranchWorkspaces(
   let reconciled = 0;
   const now = new Date().toISOString();
 
+  let gitBudgetUsed = 0;
+  let deferred = 0;
   for (const c of candidates) {
     if (!c.branch || !c.baseBranch || !c.repoPath) continue;
     if (c.statusName === "In Progress" && (!c.readyForMerge || c.wsStatus !== "idle")) continue;
+    // Repo gone → every git call below can only fail. A stat beats a ~120ms spawn,
+    // and this ran for every candidate on every pass (#277).
+    if (!pathExists(c.repoPath)) continue;
+
+    // This reconciler runs BEFORE the HTTP listener binds, so its cost is added
+    // directly to "the board takes minutes to load". Bound the git work per pass;
+    // the remainder is picked up next pass (reconciled workspaces are stamped, so
+    // progress is monotonic and this converges).
+    if (gitBudgetUsed >= MAX_GIT_CANDIDATES_PER_PASS) {
+      deferred++;
+      continue;
+    }
+    gitBudgetUsed++;
 
     let result: Awaited<ReturnType<typeof checkBranchTipIsAncestor>>;
     try {
@@ -285,6 +319,12 @@ export async function reconcileAncestorBranchWorkspaces(
 
   if (reconciled > 0) {
     console.log(`[ancestor-reconciler] reconciled ${reconciled} stranded workspace(s) whose branch was already merged`);
+  }
+  if (deferred > 0) {
+    console.log(
+      `[ancestor-reconciler] git budget reached (${MAX_GIT_CANDIDATES_PER_PASS} candidates); ` +
+      `${deferred} candidate(s) deferred to the next pass`,
+    );
   }
   return reconciled;
 }
