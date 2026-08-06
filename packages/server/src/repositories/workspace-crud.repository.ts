@@ -255,32 +255,28 @@ export async function applyWorkspaceUpdates(
   database: Database = db,
 ): Promise<void> {
   const { status, updatedAt, ...rest } = updates;
+  // Dual-write (#222 stage 2): forward any of the five git-state columns in the PATCH bag
+  // onto the leading-repo row. Nested — it exists only for this function's two branches.
+  const mirrorGitColumnsFromPatch = async (patch: Record<string, unknown>) => {
+    const forward: Parameters<typeof mirrorWorkspaceColumnsToLeadingRepo>[1] = {};
+    if ("branch" in patch) forward.branch = patch.branch as string | null;
+    if ("workingDir" in patch) forward.workingDir = patch.workingDir as string | null;
+    if ("baseBranch" in patch) forward.baseBranch = patch.baseBranch as string | null;
+    if ("baseCommitSha" in patch) forward.baseCommitSha = patch.baseCommitSha as string | null;
+    if ("mergedHeadSha" in patch) forward.mergedHeadSha = patch.mergedHeadSha as string | null;
+    if (Object.keys(forward).length === 0) return;
+    await mirrorWorkspaceColumnsToLeadingRepo(workspaceId, forward, database);
+  };
   if (status !== undefined) {
     await setWorkspaceStatus(database, workspaceId, status as WorkspaceStatus, {
       now: updatedAt as string | undefined,
       set: rest,
     });
-    await mirrorGitColumnsFromPatch(workspaceId, rest, database);
+    await mirrorGitColumnsFromPatch(rest);
     return;
   }
   await database.update(workspaces).set(updates).where(eq(workspaces.id, workspaceId));
-  await mirrorGitColumnsFromPatch(workspaceId, updates, database);
-}
-
-/** Dual-write (#222 stage 2): forward any of the five git-state columns in a PATCH bag. */
-async function mirrorGitColumnsFromPatch(
-  workspaceId: string,
-  patch: Record<string, unknown>,
-  database: Database,
-): Promise<void> {
-  const forward: Parameters<typeof mirrorWorkspaceColumnsToLeadingRepo>[1] = {};
-  if ("branch" in patch) forward.branch = patch.branch as string | null;
-  if ("workingDir" in patch) forward.workingDir = patch.workingDir as string | null;
-  if ("baseBranch" in patch) forward.baseBranch = patch.baseBranch as string | null;
-  if ("baseCommitSha" in patch) forward.baseCommitSha = patch.baseCommitSha as string | null;
-  if ("mergedHeadSha" in patch) forward.mergedHeadSha = patch.mergedHeadSha as string | null;
-  if (Object.keys(forward).length === 0) return;
-  await mirrorWorkspaceColumnsToLeadingRepo(workspaceId, forward, database);
+  await mirrorGitColumnsFromPatch(updates);
 }
 
 export async function listStaleWorktreeRows(
