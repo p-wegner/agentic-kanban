@@ -130,14 +130,34 @@ describe("parsePluginManifest", () => {
 
 describe("substitutePluginPlaceholders", () => {
   it("substitutes all supported placeholders", () => {
-    const text = "{{repoPath}}|{{projectName}}|{{pluginPath}}|{{port}}";
+    const text = "{{repoPath}}|{{projectName}}|{{pluginPath}}|{{port}}|{{boardUrl}}|{{projectId}}";
     expect(
-      substitutePluginPlaceholders(text, { repoPath: "C:/r", projectName: "proj", pluginPath: "C:/p", port: 4321 }),
-    ).toBe("C:/r|proj|C:/p|4321");
+      substitutePluginPlaceholders(text, {
+        repoPath: "C:/r",
+        projectName: "proj",
+        pluginPath: "C:/p",
+        port: 4321,
+        boardUrl: "http://localhost:3001",
+        projectId: "0b6f38e1-2f14-4a5c-9d3e-77aa00bb11cc",
+      }),
+    ).toBe("C:/r|proj|C:/p|4321|http://localhost:3001|0b6f38e1-2f14-4a5c-9d3e-77aa00bb11cc");
   });
 
   it("leaves unknown and unprovided placeholders untouched", () => {
     expect(substitutePluginPlaceholders("{{port}} {{mystery}}", { repoPath: "r" })).toBe("{{port}} {{mystery}}");
+    // boardUrl/projectId behave like {{port}}: unprovided means left as-is for a later pass.
+    expect(substitutePluginPlaceholders("{{boardUrl}} {{projectId}}", { repoPath: "r" })).toBe(
+      "{{boardUrl}} {{projectId}}",
+    );
+  });
+
+  it("substitutes {{boardUrl}} and {{projectId}} in env maps", () => {
+    expect(
+      substitutePluginEnv(
+        { BOARD_API: "{{boardUrl}}/api", PROJECT: "{{projectId}}" },
+        { boardUrl: "http://localhost:3007", projectId: "p-1" },
+      ),
+    ).toEqual({ BOARD_API: "http://localhost:3007/api", PROJECT: "p-1" });
   });
 
   it("substitutes {{leadingRepoPath}} independently of {{repoPath}} — reads source, writes output elsewhere", () => {

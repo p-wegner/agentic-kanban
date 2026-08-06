@@ -176,6 +176,9 @@ export function createPluginViewsRuntime<P extends PluginWithManifest, Pr extend
   /** Installed plugin rows (raw, manifest still JSON — a broken one must not blank the panel). */
   listPluginRows: () => Promise<Array<{ id: string; pluginId: string; name: string; manifestJson: string }>>;
   parseManifest: (manifestJson: string) => PluginManifest;
+  /** Externally reachable board API base URL (`{{boardUrl}}`) — resolved by the composition
+   *  root, not read from env here, so a worktree server hands out its own URL. */
+  boardUrl: string;
   /**
    * Persistence hooks (#228) — this module stays database-free, so the PID bookkeeping that
    * lets the NEXT server generation reap children orphaned by a tsx-watch restart is injected.
@@ -184,7 +187,7 @@ export function createPluginViewsRuntime<P extends PluginWithManifest, Pr extend
   persistViewProcess?: (values: { pluginRowId: string; viewId: string; projectId: string; pid: number; port: number; command: string }) => Promise<void>;
   dropViewProcess?: (pluginRowId: string, viewId: string, projectId: string) => Promise<void>;
 }) {
-  const { requirePlugin, requireProject, resolveOutputRepoPath, enabledSlugsByProject, listPluginRows, parseManifest, persistViewProcess, dropViewProcess } = deps;
+  const { requirePlugin, requireProject, resolveOutputRepoPath, enabledSlugsByProject, listPluginRows, parseManifest, boardUrl, persistViewProcess, dropViewProcess } = deps;
 
   async function startView(pluginRowId: string, viewId: string, projectId: string): Promise<PluginViewStartResult> {
     // Serialize per view BEFORE the first await — see `startingViews` (#251).
@@ -229,6 +232,8 @@ export function createPluginViewsRuntime<P extends PluginWithManifest, Pr extend
       projectName: project.name,
       pluginPath: plugin.localPath,
       port,
+      boardUrl,
+      projectId,
     };
     const env: Record<string, string> = substitutePluginEnv(view.serve.env, vars);
     if (view.serve.portEnv) env[view.serve.portEnv] = String(port);

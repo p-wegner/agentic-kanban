@@ -363,6 +363,53 @@ describe("plugin.service", () => {
     expect(existsSync(output)).toBe(true);
   });
 
+  it("runScript substitutes {{boardUrl}} and {{projectId}} into script env (#236)", async () => {
+    const manifest = {
+      ...MANIFEST,
+      scripts: [
+        ...MANIFEST.scripts,
+        { name: "print-board", command: "node print-board.mjs", cwd: "plugin", env: { BOARD: "{{boardUrl}}", PROJECT: "{{projectId}}" } },
+      ],
+    };
+    const pluginDir = makePluginDir(manifest);
+    writeFileSync(join(pluginDir, "print-board.mjs"), "console.log(process.env.BOARD + '|' + process.env.PROJECT);");
+    const withBoardUrl = createPluginService({ database: db as unknown as Database, boardUrl: "http://localhost:3123" });
+    const plugin = await withBoardUrl.installPlugin({ source: pluginDir });
+    const projectId = await insertProject(db, makeProjectRepo());
+
+    const result = await withBoardUrl.runScript(plugin.id, "print-board", projectId);
+    expect(result.code).toBe(0);
+    expect(result.stdout.trim()).toBe(`http://localhost:3123|${projectId}`);
+  });
+
+  it("advanceLoop substitutes {{boardUrl}} and {{projectId}} into the planner's env (#236)", async () => {
+    const manifest = {
+      ...MANIFEST,
+      loops: [{
+        name: "identify-modules",
+        skill: "requirement-extraction",
+        plan: { command: "node plan.mjs", cwd: "plugin", env: { BOARD: "{{boardUrl}}", PROJECT: "{{projectId}}" } },
+      }],
+    };
+    const pluginDir = makePluginDir(manifest);
+    // The planner echoes its substituted env back through the plan's `note`, which
+    // `advanceLoop` surfaces verbatim — no ticket creation needed to observe it.
+    writeFileSync(
+      join(pluginDir, "plan.mjs"),
+      "console.log(JSON.stringify({ units: [], converged: false, note: process.env.BOARD + '|' + process.env.PROJECT }));",
+    );
+    const withBoardUrl = createPluginService({
+      database: db as unknown as Database,
+      boardUrl: "http://localhost:3123",
+      createIssue: vi.fn(),
+    });
+    const plugin = await withBoardUrl.installPlugin({ source: pluginDir });
+    const projectId = await insertProject(db, makeProjectRepo());
+
+    const result = await withBoardUrl.advanceLoop(plugin.id, "identify-modules", projectId);
+    expect(result.note).toBe(`http://localhost:3123|${projectId}`);
+  });
+
   it("runScript rejects an unknown script name with NOT_FOUND", async () => {
     const plugin = await service.installPlugin({ source: makePluginDir() });
     const projectId = await insertProject(db, makeProjectRepo());
@@ -626,6 +673,34 @@ describe("plugin.service", () => {
     expect(await service.stopView(plugin.id, "coverage", projectId)).toEqual({ stopped: true });
     const after = await service.getViewStatus(plugin.id, "coverage", projectId);
     expect(after.running).toBe(false);
+  });
+
+  it("startView substitutes {{boardUrl}} and {{projectId}} into the view server's env (#236)", async () => {
+    const manifest = {
+      ...MANIFEST,
+      views: [{
+        id: "coverage",
+        label: "Coverage",
+        kind: "iframe",
+        serve: { command: "node serve.mjs", portEnv: "PORT", env: { BOARD: "{{boardUrl}}", PROJECT: "{{projectId}}" } },
+      }],
+    };
+    const pluginDir = makePluginDir(manifest);
+    // The child answers with its substituted env — proving a plugin view server can be
+    // handed the board's API URL and project id, i.e. can actually show board data.
+    writeFileSync(
+      join(pluginDir, "serve.mjs"),
+      "import http from 'node:http'; http.createServer((req, res) => res.end(process.env.BOARD + '|' + process.env.PROJECT)).listen(process.env.PORT, '127.0.0.1');",
+    );
+    const withBoardUrl = createPluginService({ database: db as unknown as Database, boardUrl: "http://localhost:3123" });
+    const plugin = await withBoardUrl.installPlugin({ source: pluginDir });
+    const projectId = await insertProject(db, makeProjectRepo());
+
+    const started = await withBoardUrl.startView(plugin.id, "coverage", projectId);
+    expect(started.ready).toBe(true);
+    const body = await (await fetch(`http://127.0.0.1:${started.port}/`)).text();
+    expect(body).toBe(`http://localhost:3123|${projectId}`);
+    await withBoardUrl.stopView(plugin.id, "coverage", projectId);
   });
 
   it("startView persists the child's PID, stopView drops it (#228)", async () => {

@@ -103,7 +103,7 @@ export interface PluginViewServeDef {
    * Prefer a cheap, dependency-free endpoint — the probe runs on every status check.
    */
   healthPath?: string;
-  /** Extra env vars; values support {{repoPath}}/{{leadingRepoPath}}/{{projectName}}/{{pluginPath}}/{{port}}. */
+  /** Extra env vars; values support {{repoPath}}/{{leadingRepoPath}}/{{projectName}}/{{pluginPath}}/{{port}}/{{boardUrl}}/{{projectId}}. */
   env?: Record<string, string>;
 }
 
@@ -491,6 +491,14 @@ export interface PluginPlaceholderVars {
   projectName?: string;
   pluginPath?: string;
   port?: number | string;
+  /** Externally REACHABLE base URL of the board's REST API — scheme+host+port, no trailing
+   *  slash (e.g. `http://localhost:3001`). This is what a plugin view server, script, or loop
+   *  planner calls to read board data. In dev the backend binds an INTERNAL port behind the
+   *  stable proxy; this is always the public (proxy) URL, never the internal one. */
+  boardUrl?: string;
+  /** The board project the view/script/loop was started FOR — the id to pass as `projectId`
+   *  in board API calls. */
+  projectId?: string;
 }
 
 /**
@@ -506,6 +514,8 @@ export function substitutePluginPlaceholders(text: string, vars: PluginPlacehold
   if (vars.projectName !== undefined) out = out.replace(/\{\{projectName}}/g, vars.projectName);
   if (vars.pluginPath !== undefined) out = out.replace(/\{\{pluginPath}}/g, vars.pluginPath);
   if (vars.port !== undefined) out = out.replace(/\{\{port}}/g, String(vars.port));
+  if (vars.boardUrl !== undefined) out = out.replace(/\{\{boardUrl}}/g, vars.boardUrl);
+  if (vars.projectId !== undefined) out = out.replace(/\{\{projectId}}/g, vars.projectId);
   return out;
 }
 
