@@ -2057,3 +2057,92 @@ describe("createWorkspace — service stack deferred chain", () => {
     }
   });
 });
+
+/**
+ * Regression for #268: `POST /api/workspaces/:id/close` hung forever (no HTTP response
+ * at all) on an idle, empty worktree — closeWorkspace had no bound on its worktree
+ * teardown steps, so a single wedged step (an unbounded fs walk, a git call blocked on
+ * a Windows file handle, ...) never let the request settle. closeWorkspace now races
+ * each step against `withStepTimeout` (workspace-internals.ts) and, specifically for
+ * worktree removal, treats a timeout the same as any other removal failure: the close
+ * still completes (the branch was already preserved either way) and a cleanup warning
+ * is recorded so the leftover directory stays trackable via the Cleanup Queue instead of
+ * silently hanging or silently vanishing from tracking.
+ */
+describe("closeWorkspace — bounded worktree teardown (#268)", () => {
+  let db: TestDb;
+
+  beforeEach(() => {
+    ({ db } = createTestDb());
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("never hangs on a wedged worktree removal — bounds the step and records a cleanup warning", async () => {
+    vi.useFakeTimers();
+
+    const { issueId } = await seedProjectAndIssue(db);
+    const wsId = randomUUID();
+    const workingDir = "/tmp/test-repo/.worktrees/feature-268";
+    await db.insert(workspaces).values({
+      id: wsId,
+      issueId,
+      branch: "feature/ak-268-stale",
+      status: "idle",
+      workingDir,
+      baseBranch: "main",
+    });
+
+    // Simulates the observed hang: the git call (or the fs work around it) never
+    // settles at all — not even a rejection.
+    const gitService = createFakeGitService({
+      removeWorktree: vi.fn(() => new Promise<void>(() => {})),
+    });
+    const sessionManager = createMockSessionManager();
+    const service = createWorkspaceService({ database: db, getSessionManager: () => sessionManager, gitService });
+
+    const closePromise = service.closeWorkspace(wsId);
+    // Drive the fake clock past the per-step bound so the wedged removeWorktree call
+    // times out instead of stalling the request forever.
+    await vi.advanceTimersByTimeAsync(35_000);
+    const result = await closePromise;
+
+    expect(result.status).toBe("closed");
+
+    const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, wsId));
+    expect(wsRows[0].status).toBe("closed");
+    expect(wsRows[0].closedAt).not.toBeNull();
+    // Escape hatch: the failed/timed-out removal is recorded, not swallowed silently.
+    expect(wsRows[0].cleanupWarning).toContain("remove-worktree");
+    // The directory is NOT nulled out on a failed removal — it must stay discoverable
+    // (stale-worktree / cleanup-warning listings key off a non-null workingDir).
+    expect(wsRows[0].workingDir).toBe(workingDir);
+  }, 15000);
+
+  it("closes cleanly (no warning, workingDir cleared) when worktree removal succeeds", async () => {
+    const { issueId } = await seedProjectAndIssue(db);
+    const wsId = randomUUID();
+    const workingDir = "/tmp/test-repo/.worktrees/feature-268-clean";
+    await db.insert(workspaces).values({
+      id: wsId,
+      issueId,
+      branch: "feature/ak-268-clean",
+      status: "idle",
+      workingDir,
+      baseBranch: "main",
+    });
+
+    const gitService = createFakeGitService();
+    const sessionManager = createMockSessionManager();
+    const service = createWorkspaceService({ database: db, getSessionManager: () => sessionManager, gitService });
+
+    const result = await service.closeWorkspace(wsId);
+    expect(result.status).toBe("closed");
+
+    const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, wsId));
+    expect(wsRows[0].cleanupWarning).toBeNull();
+    expect(wsRows[0].workingDir).toBeNull();
+  });
+});

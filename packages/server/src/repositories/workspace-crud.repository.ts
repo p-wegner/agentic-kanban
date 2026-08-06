@@ -179,12 +179,23 @@ export async function getSessionStatusesForWorkspace(
 
 export async function updateWorkspaceClosed(
   workspaceId: string,
-  values: { status: "closed"; workingDir: string | null; closedAt: string; updatedAt: string },
+  values: {
+    status: "closed";
+    workingDir: string | null;
+    closedAt: string;
+    updatedAt: string;
+    /** Set when the worktree could not be cleanly removed (#268) — surfaces in the Cleanup Queue. */
+    cleanupWarning?: string | null;
+  },
   database: Database = db,
 ): Promise<void> {
   await setWorkspaceStatus(database, workspaceId, "closed", {
     now: values.updatedAt,
-    set: { workingDir: values.workingDir, closedAt: values.closedAt },
+    set: {
+      workingDir: values.workingDir,
+      closedAt: values.closedAt,
+      ...(values.cleanupWarning !== undefined ? { cleanupWarning: values.cleanupWarning } : {}),
+    },
   });
 }
 
