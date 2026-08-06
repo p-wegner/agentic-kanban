@@ -32,8 +32,10 @@ import type { SessionManager } from "../services/session.manager.js";
 // Mock the agent/session boundary so no real review agent spawns. The reconciler
 // imports startManualReview directly; we assert it is (or is not) invoked.
 const startManualReviewMock = vi.fn(async () => ({ sessionId: randomUUID() }));
+const isReviewLaunchPendingMock = vi.fn(() => false);
 vi.mock("../services/review.service.js", () => ({
   startManualReview: (...args: unknown[]) => startManualReviewMock(...args),
+  isReviewLaunchPending: (...args: unknown[]) => isReviewLaunchPendingMock(...args),
 }));
 
 // Mock the git boundary so "has commits ahead of base" is deterministic without a
@@ -45,6 +47,8 @@ vi.mock("../services/git.service.js", () => ({
 
 // Import AFTER the mocks are registered (vi.mock is hoisted, but keep it explicit).
 const { reconcileStrandedReviews } = await import("../startup/stranded-review-reconciler.js");
+// Real module (not mocked) — the reconciler consults the in-memory merge-job registry (#270).
+const { startMergeJob, resetMergeJobs } = await import("../services/merge-job.service.js");
 
 type Db = ReturnType<typeof createTestDb>["db"];
 
@@ -103,6 +107,9 @@ describe("reconcileStrandedReviews — relaunch path (recovers stranded reviews,
     startManualReviewMock.mockClear();
     getCommitCountAheadMock.mockClear();
     getCommitCountAheadMock.mockResolvedValue(1);
+    isReviewLaunchPendingMock.mockClear();
+    isReviewLaunchPendingMock.mockReturnValue(false);
+    resetMergeJobs();
   });
 
   it("relaunches review for a genuinely stranded In-Review workspace", async () => {
@@ -137,6 +144,31 @@ describe("reconcileStrandedReviews — relaunch path (recovers stranded reviews,
     const relaunchedIds = startManualReviewMock.mock.calls.map((c) => c[4]);
     expect(relaunchedIds).toContain(stranded.workspaceId);
     expect(relaunchedIds).not.toContain(reviewed.workspaceId);
+  });
+
+  it("skips a workspace whose merge is in flight — the merge owns it (#270)", async () => {
+    const { db } = createTestDb();
+    const { projectId, inReviewStatusId } = await seedProject(db);
+    const { workspaceId } = await seedInReviewWorkspace(db, { projectId, statusId: inReviewStatusId, issueNumber: 270 });
+
+    // Without the merge job this candidate WOULD be recovered (proven by the first test).
+    startMergeJob(workspaceId);
+    const recovered = await reconcileStrandedReviews(makeDeps(db));
+
+    expect(recovered).toBe(0);
+    expect(startManualReviewMock).not.toHaveBeenCalled();
+  });
+
+  it("skips a workspace whose review launch is already mid-flight on another path (#270)", async () => {
+    const { db } = createTestDb();
+    const { projectId, inReviewStatusId } = await seedProject(db);
+    await seedInReviewWorkspace(db, { projectId, statusId: inReviewStatusId, issueNumber: 271 });
+
+    isReviewLaunchPendingMock.mockReturnValue(true);
+    const recovered = await reconcileStrandedReviews(makeDeps(db));
+
+    expect(recovered).toBe(0);
+    expect(startManualReviewMock).not.toHaveBeenCalled();
   });
 
   it("marks the stranded workspace ready-for-merge (no relaunch) when auto_review is off", async () => {
