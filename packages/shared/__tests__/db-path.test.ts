@@ -77,6 +77,29 @@ describe("resolveDbLocation precedence", () => {
     expect(loc.dir).toBe(envDir);
   });
 
+  it("redirects to a per-process throwaway DB under a test runner with no explicit override (#231)", () => {
+    // The pre-merge verify gate's vitest workers used to fall through to the user's LIVE
+    // home-fallback DB, contend with the running server for locks, and write junk into it.
+    const loc = resolveDbLocation(base({ env: { VITEST: "true" } }));
+    expect(loc.source).toBe("test-throwaway");
+    expect(loc.path).toContain(`agentic-kanban-vitest-${process.pid}`);
+    expect(loc.path?.replace(/\\/g, "/")).not.toContain(".agentic-kanban");
+  });
+
+  it("test-runner redirect also outranks a present in-checkout dev DB (#231)", () => {
+    const loc = resolveDbLocation(
+      base({ env: { NODE_ENV: "test" }, existsSync: () => true, localDbCandidates: SERVER_CANDIDATES }),
+    );
+    expect(loc.source).toBe("test-throwaway");
+  });
+
+  it("an explicit override still wins under a test runner — tests can pin a DB deliberately (#231)", () => {
+    const envDir = resolve("/gate/throwaway");
+    const loc = resolveDbLocation(base({ env: { VITEST: "true", AGENTIC_KANBAN_DIR: envDir } }));
+    expect(loc.source).toBe("AGENTIC_KANBAN_DIR");
+    expect(loc.dir).toBe(envDir);
+  });
+
   it("uses the in-checkout dev DB when it exists and no env override is set", () => {
     const loc = resolveDbLocation(
       base({ existsSync: () => true, localDbCandidates: SERVER_CANDIDATES }),

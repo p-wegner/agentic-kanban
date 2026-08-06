@@ -1,3 +1,6 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { runSmokeCheck } from "@agentic-kanban/shared/lib/smoke-check";
 import { gradleUserHomeForWorktree } from "@agentic-kanban/shared/lib/gradle-env";
@@ -150,7 +153,21 @@ export async function runPreMergeGate(
     if (testScope) {
       console.log(`[pre-merge-gate] scoping verify tests to [${testScope}] for workspace ${workspace.id} (${changedFiles.length} changed file(s))`);
     }
-    const verifyEnv = testScope ? { ...gradleEnv, KANBAN_TEST_PACKAGES: testScope } : gradleEnv;
+    // #231: the verify gate's test processes must NEVER resolve the live board DB. Without an
+    // explicit override, `resolveDbLocation` falls through to `~/.agentic-kanban/kanban.db` —
+    // the production board — so gate-spawned vitest workers contended with the running server
+    // for SQLite locks (six suites pinned at their 60s timeout) and one suite wrote junk
+    // projects into real data. An explicit AGENTIC_KANBAN_DIR outranks every on-disk probe.
+    // Belt-and-suspenders with db-path.ts's test-throwaway redirect, which covers vitest even
+    // when the verify script is invoked outside this gate.
+    let gateDataDir: string;
+    try {
+      gateDataDir = mkdtempSync(join(tmpdir(), "kanban-verify-gate-"));
+    } catch {
+      gateDataDir = tmpdir();
+    }
+    const isolationEnv = { ...gradleEnv, AGENTIC_KANBAN_DIR: gateDataDir };
+    const verifyEnv = testScope ? { ...isolationEnv, KANBAN_TEST_PACKAGES: testScope } : isolationEnv;
     const runVerify = () =>
       runUnderBuildGate(() =>
         runSetupScript(workingDir, verifyScript!, { timeoutMs: verifyTimeoutMs, env: verifyEnv }).catch((e) => ({

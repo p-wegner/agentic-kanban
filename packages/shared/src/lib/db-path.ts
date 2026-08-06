@@ -1,4 +1,4 @@
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { existsSync as fsExistsSync, statSync as fsStatSync } from "node:fs";
 import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,7 +29,8 @@ export type DbPathSource =
   | "DB_URL"
   | "AGENTIC_KANBAN_DIR"
   | "local-checkout"
-  | "home-fallback";
+  | "home-fallback"
+  | "test-throwaway";
 
 export interface DbLocation {
   /** libsql connection url — `file:<abs>` for a file DB, or the verbatim `DB_URL`. */
@@ -137,6 +138,21 @@ export function resolveDbLocation(opts: ResolveDbLocationOptions = {}): DbLocati
   const envDir = env.AGENTIC_KANBAN_DIR;
   if (envDir) {
     return { ...fileUrl(resolve(envDir, "kanban.db")), source: "AGENTIC_KANBAN_DIR" };
+  }
+
+  // 2b. Test runner with NO explicit override — NEVER resolve real data (#231). The silent
+  //     fall-through below is how the pre-merge verify gate's vitest workers opened the
+  //     user's LIVE board DB: they contended with the running server for SQLite locks
+  //     (pinning six suites at their 60s timeout) and one suite wrote junk projects into
+  //     production data. A test that genuinely needs a specific DB must say so explicitly
+  //     via DB_URL or AGENTIC_KANBAN_DIR (both win above); everything else gets a
+  //     per-process throwaway file, so a module-load side effect that opens the singleton
+  //     can never reach real data. Loud by design: callers log `source: test-throwaway`.
+  if (env.VITEST || env.NODE_ENV === "test") {
+    // Directly in tmpdir() (no subdirectory) so the file's parent always exists — this
+    // function stays pure and never mkdirs.
+    const throwaway = join(tmpdir(), `agentic-kanban-vitest-${process.pid}.db`);
+    return { ...fileUrl(throwaway), source: "test-throwaway", rejectedLocalCandidates: [] };
   }
 
   // 3. In-checkout dev DB — only when one actually exists on disk AND looks like
