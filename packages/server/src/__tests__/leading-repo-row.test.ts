@@ -4,7 +4,7 @@
 // stage must hold is: the new row is INVISIBLE to every "the workspace's siblings" query.
 // Before the filters, the backfilled leading row would have been double-counted as a
 // sibling (breaking single-repo fast paths, sibling prevalidation, and stranded scans).
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { issues, projectStatuses, projects, repos, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
@@ -14,6 +14,8 @@ import {
   listWorkspaceRepos,
 } from "../repositories/repo.repository.js";
 import { getAllWorkspaceRepos } from "../services/workspace-all-repos.js";
+import { stampWorkspaceMergedAt } from "../repositories/workspace-merge-execution.repository.js";
+import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.repository.js";
 import type { Database } from "../db/index.js";
 
 type Db = ReturnType<typeof createTestDb>["db"];
@@ -85,6 +87,45 @@ describe("physical leading-repo row (#222 stage 1)", () => {
     expect(all).toHaveLength(2);
     expect(all[0].kind).toBe("leading");
     expect(all[1]).toMatchObject({ kind: "sibling", path: "/sibling/repo" });
+  });
+
+  it("merge-stamp and workingDir-clear dual-write onto the leading row (#224)", async () => {
+    const { db } = createTestDb();
+    const { workspaceId } = await seedWorkspace(db);
+    await insertLeadingWorkspaceRepo({
+      workspaceId, path: "/main/repo", worktreePath: "/main/repo/.worktrees/ak-223", branch: "feature/ak-223",
+    }, db as unknown as Database);
+
+    const now = new Date().toISOString();
+    await stampWorkspaceMergedAt(workspaceId, now, "merged-sha-224", db as unknown as Database);
+    let row = await getLeadingRepoRow(workspaceId, db as unknown as Database);
+    expect(row?.mergedHeadSha).toBe("merged-sha-224");
+
+    await clearWorkspaceWorkingDir(workspaceId, now, db as unknown as Database);
+    row = await getLeadingRepoRow(workspaceId, db as unknown as Database);
+    expect(row?.worktreePath).toBeNull();
+  });
+
+  it("leadingRef read-repair backfills a missing leading row and converges a diverged one (#224)", async () => {
+    const { db } = createTestDb();
+    const { workspaceId } = await seedWorkspace(db);
+
+    // No row yet (workspace created in the stage-1→2 window): a read repairs it.
+    await getAllWorkspaceRepos(workspaceId, db as unknown as Database);
+    await vi.waitFor(async () => {
+      const row = await getLeadingRepoRow(workspaceId, db as unknown as Database);
+      expect(row).toMatchObject({ path: "/main/repo", branch: "feature/ak-223", isLeading: true });
+    });
+
+    // Diverge the row by hand; the next read converges it back to the workspace columns.
+    const { repos: reposTable } = await import("@agentic-kanban/shared/schema");
+    const { eq } = await import("drizzle-orm");
+    await db.update(reposTable).set({ branch: "stale-branch" }).where(eq(reposTable.workspaceId, workspaceId));
+    await getAllWorkspaceRepos(workspaceId, db as unknown as Database);
+    await vi.waitFor(async () => {
+      const row = await getLeadingRepoRow(workspaceId, db as unknown as Database);
+      expect(row?.branch).toBe("feature/ak-223");
+    });
   });
 
   it("a single-repo workspace with a backfilled leading row still takes the single-repo fast path", async () => {

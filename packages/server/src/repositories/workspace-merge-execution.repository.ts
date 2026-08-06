@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { workspaces } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { mirrorWorkspaceColumnsToLeadingRepo } from "./repo.repository.js";
 
 /** Stamp mergedAt/mergedHeadSha/updatedAt on a workspace row. */
 export async function stampWorkspaceMergedAt(
@@ -11,6 +12,7 @@ export async function stampWorkspaceMergedAt(
   database: Database = db,
 ): Promise<void> {
   await database.update(workspaces).set({ mergedAt: now, mergedHeadSha, updatedAt: now }).where(eq(workspaces.id, id));
+  await mirrorWorkspaceColumnsToLeadingRepo(id, { mergedHeadSha }, database);
 }
 
 /**
@@ -25,4 +27,5 @@ export async function stampWorkspaceMergedHeadSha(
   database: Database = db,
 ): Promise<void> {
   await database.update(workspaces).set({ mergedHeadSha, updatedAt: now }).where(eq(workspaces.id, id));
+  await mirrorWorkspaceColumnsToLeadingRepo(id, { mergedHeadSha }, database);
 }

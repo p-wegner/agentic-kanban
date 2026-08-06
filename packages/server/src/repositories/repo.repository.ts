@@ -168,6 +168,37 @@ export async function insertWorkspaceRepo(
   });
 }
 
+/**
+ * Dual-write (#222 stage 2): mirror a change to the workspace's git-state columns onto its
+ * physical leading-repo row. The `workspaces` columns remain the read model until stage 4;
+ * this keeps the leading row convergent so the eventual source-of-truth flip is a no-op.
+ * A workspace without a leading row (created in the stage-1→2 window) is a silent no-op —
+ * `leadingRef`'s read-repair backfills it on the next read.
+ */
+export async function mirrorWorkspaceColumnsToLeadingRepo(
+  workspaceId: string,
+  patch: {
+    branch?: string | null;
+    workingDir?: string | null;
+    baseBranch?: string | null;
+    baseCommitSha?: string | null;
+    mergedHeadSha?: string | null;
+  },
+  database: RepoDb = db,
+): Promise<void> {
+  const set: Partial<typeof repos.$inferInsert> = {};
+  if (patch.branch !== undefined) set.branch = patch.branch;
+  if (patch.workingDir !== undefined) set.worktreePath = patch.workingDir;
+  if (patch.baseBranch !== undefined) set.baseBranch = patch.baseBranch;
+  if (patch.baseCommitSha !== undefined) set.baseCommitSha = patch.baseCommitSha;
+  if (patch.mergedHeadSha !== undefined) set.mergedHeadSha = patch.mergedHeadSha;
+  if (Object.keys(set).length === 0) return;
+  await database
+    .update(repos)
+    .set(set)
+    .where(and(eq(repos.workspaceId, workspaceId), eq(repos.isLeading, true)));
+}
+
 export async function setWorkspaceRepoMergedSha(
   repoId: string,
   mergedHeadSha: string,
