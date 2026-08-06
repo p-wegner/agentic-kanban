@@ -26,7 +26,22 @@ export interface WorkerAgentRunnerOptions {
   /** Board base URL — required to compose git-transport URLs for repo assignments. */
   boardUrl?: string;
   workRoot?: string;
+  /**
+   * This machine's own concurrency ceiling (#266). The board also tracks capacity
+   * (#248), but that only protects against a well-behaved board — the point of a
+   * worker DECLARING capacity is that the machine's owner controls its load, so it
+   * must enforce it itself rather than trust the assigner. Defaults to 1, matching
+   * `worker-registry.service.ts`.
+   */
+  maxConcurrency?: number;
 }
+
+/**
+ * Reason string for a refusal caused by this worker's own capacity ceiling (#266).
+ * Distinguishable on purpose: the board must be able to tell "this machine is full"
+ * (place elsewhere, release the pending slot) apart from a launch failure.
+ */
+export const ASSIGN_REFUSED_AT_CAPACITY = "worker at capacity";
 
 export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentRunnerOptions = {}) {
   const processes = new Map<string, ChildProcess>();
@@ -37,6 +52,33 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   const provisioning = new Set<string>();
   /** Per-session silence watchdogs; reset on every byte of agent output. */
   const hangWatchdogs = new Map<string, { reset(): void; close(): void }>();
+  const maxConcurrency = options.maxConcurrency && options.maxConcurrency > 0 ? options.maxConcurrency : 1;
+
+  /**
+   * Slots this machine currently holds. A provisioning session counts: it is already
+   * cloning and about to spawn, so ignoring it would let a burst of assigns all pass
+   * the check before any of them owns a pid.
+   */
+  function occupiedSlots(): number {
+    let count = provisioning.size;
+    for (const sessionId of processes.keys()) {
+      if (!provisioning.has(sessionId)) count += 1;
+    }
+    return count;
+  }
+
+  /** True when accepting one more session would exceed this worker's own ceiling (#266). */
+  function wouldExceedCapacity(sessionId: string): boolean {
+    if (processes.has(sessionId) || provisioning.has(sessionId)) return false; // already holds a slot
+    return occupiedSlots() + 1 > maxConcurrency;
+  }
+
+  function refuseAtCapacity(sessionId: string): void {
+    console.warn(
+      `[worker] refusing assign: sessionId=${sessionId} would exceed maxConcurrency=${maxConcurrency} (in use: ${occupiedSlots()})`,
+    );
+    send({ type: "assign_failed", sessionId, error: ASSIGN_REFUSED_AT_CAPACITY });
+  }
 
   function closeWatchdog(sessionId: string): void {
     const watchdog = hangWatchdogs.get(sessionId);
@@ -91,6 +133,10 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
       send({ type: "assign_failed", sessionId, error: "session already running on this worker" });
       return;
     }
+    if (wouldExceedCapacity(sessionId)) {
+      refuseAtCapacity(sessionId);
+      return;
+    }
     if (!options.boardUrl) {
       send({ type: "assign_failed", sessionId, error: "worker has no board URL for git transport" });
       return;
@@ -106,9 +152,12 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
           return;
         }
         checkouts.set(sessionId, { checkout, repo });
-        provisioning.delete(sessionId);
         // The board composed cwd from ITS filesystem; the real cwd is here.
+        // Stay in `provisioning` across this call so the capacity check sees the
+        // slot this session already holds and cannot refuse it to itself (#266);
+        // release it only once the process exists.
         assign(sessionId, { ...spec, cwd: checkout.cwd });
+        provisioning.delete(sessionId);
       } catch (err) {
         provisioning.delete(sessionId);
         const message = err instanceof Error ? err.message : String(err);
@@ -121,6 +170,10 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   function assign(sessionId: string, spec: WorkerLaunchSpec): void {
     if (processes.has(sessionId)) {
       send({ type: "assign_failed", sessionId, error: "session already running on this worker" });
+      return;
+    }
+    if (wouldExceedCapacity(sessionId)) {
+      refuseAtCapacity(sessionId);
       return;
     }
     exited.delete(sessionId);

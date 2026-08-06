@@ -143,7 +143,14 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     }
   };
 
-  const runner = createWorkerAgentRunner(sendToBoard, { boardUrl, workRoot: opts.workRoot });
+  // maxConcurrency is passed to the runner as well as to register (#266): the board
+  // tracking capacity protects a well-behaved board, but the ceiling is this machine
+  // owner's, so the worker enforces it locally instead of trusting the assigner.
+  const runner = createWorkerAgentRunner(sendToBoard, {
+    boardUrl,
+    workRoot: opts.workRoot,
+    maxConcurrency: opts.maxConcurrency,
+  });
 
   let resolveConnected!: () => void;
   const connected = new Promise<void>((resolve) => { resolveConnected = resolve; });
