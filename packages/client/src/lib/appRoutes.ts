@@ -23,14 +23,10 @@ const VIEW_ROUTE_PATHS: Record<ViewMode, string> = {
   focus: "/focus",
   runbooks: "/runbooks",
   capacity: "/capacity",
-  constellation: "/constellation",
-  momentum: "/momentum",
-  fireworks: "/fireworks",
   activity: "/activity",
   "stale-work": "/stale-work",
   analytics: "/analytics",
   calendar: "/calendar",
-  garden: "/garden",
   "plugin-views": "/plugin-views",
 };
 

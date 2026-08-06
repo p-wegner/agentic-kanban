@@ -35,14 +35,10 @@ export type ViewMode =
   | "focus"
   | "runbooks"
   | "capacity"
-  | "constellation"
-  | "momentum"
-  | "fireworks"
   | "activity"
   | "stale-work"
   | "analytics"
   | "calendar"
-  | "garden"
   | "plugin-views";
 
 export interface ViewDescriptor {
@@ -205,42 +201,6 @@ const ICON = {
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h4v7H3zM10 8h4v11h-4zM17 4h4v15h-4z" />
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 19h18" />
-    </svg>
-  ),
-  constellation: (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <circle cx="5" cy="5" r="1.5" fill="currentColor" stroke="none" />
-      <circle cx="19" cy="8" r="1.5" fill="currentColor" stroke="none" />
-      <circle cx="12" cy="19" r="1.5" fill="currentColor" stroke="none" />
-      <circle cx="8" cy="14" r="1" fill="currentColor" stroke="none" />
-      <circle cx="17" cy="16" r="1" fill="currentColor" stroke="none" />
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M5 5l7 14M5 5l14 3M19 8l-7 11M8 14l9 2" />
-    </svg>
-  ),
-  momentum: (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 6h4M3 12h8M3 18h14" />
-      <circle cx="9" cy="6" r="1.5" fill="currentColor" stroke="none" />
-      <circle cx="13" cy="12" r="1.5" fill="currentColor" stroke="none" />
-      <circle cx="19" cy="18" r="1.5" fill="currentColor" stroke="none" />
-    </svg>
-  ),
-  garden: (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 21V11" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 11C12 8 14 6 17 6C17 9 15 11 12 11Z" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 14C12 11 10 9 7 9C7 12 9 14 12 14Z" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 21h18" />
-    </svg>
-  ),
-  fireworks: (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 21V9" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v2M12 4l-2 2M12 4l2 2" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M5 8l1.5 1.5M5 8h2M5 8v2M19 8l-1.5 1.5M19 8h-2M19 8v2" />
-      <circle cx="12" cy="9" r="1.5" fill="currentColor" stroke="none" />
-      <circle cx="6.5" cy="10.5" r="1" fill="currentColor" stroke="none" />
-      <circle cx="17.5" cy="10.5" r="1" fill="currentColor" stroke="none" />
     </svg>
   ),
   activity: (
@@ -547,52 +507,10 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     // useBoardKeyboardShortcuts). Reachable via the More menu and Ctrl+K palette.
     group: "secondary",
   },
-  {
-    id: "momentum",
-    toolbarLabel: "Momentum",
-    label: "Momentum",
-    tooltip: "Momentum — priority-lane river view of your board",
-    icon: ICON.momentum,
-    paletteIcon: "≋",
-    paletteDescription: "Priority lanes × flowing issue cards sorted by workflow progress",
-    shortcut: "v",
-    activeClass: "bg-orange-500 text-white",
-    group: "secondary",
-  },
-  {
-    id: "constellation",
-    toolbarLabel: "Stars",
-    label: "Constellation",
-    tooltip: "Constellation — animated starfield view of your board",
-    icon: ICON.constellation,
-    paletteIcon: "✦",
-    paletteDescription: "Immersive radial starfield: issues as glowing nodes orbiting status clusters",
-    shortcut: "e",
-    activeClass: "bg-indigo-700 text-white",
-    group: "secondary",
-  },
-  {
-    id: "fireworks",
-    toolbarLabel: "Fireworks",
-    label: "Fireworks",
-    tooltip: "Fireworks - celebratory launch-sky view of your board",
-    icon: ICON.fireworks,
-    paletteIcon: "FW",
-    paletteDescription: "Fancy launch-sky view: issues as animated fireworks across status rails",
-    activeClass: "bg-rose-600 text-white",
-    group: "secondary",
-  },
-  {
-    id: "garden",
-    toolbarLabel: "Garden",
-    label: "Garden",
-    tooltip: "Garden — issues as plants growing through status beds",
-    icon: ICON.garden,
-    paletteIcon: "\u{1F33F}",
-    paletteDescription: "Calming garden view: issues as plants that grow from seedling to bloom by status",
-    activeClass: "bg-emerald-600 text-white",
-    group: "secondary",
-  },
+  // The four decorative views — constellation (`e`), momentum (`v`), fireworks,
+  // garden — were extracted to the external `board-whimsy` plugin (#237); momentum
+  // was dropped outright (swimlane is a strict superset). The `v` and `e`
+  // single-key shortcuts are FREE for future views.
   {
     // Board-side event feed (#235): absorbs the former digest and
     // cross-repo-activity views as tabs (BoardFeedView). The Cross-Repo tab is

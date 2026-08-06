@@ -30,15 +30,11 @@ export const SwimlaneView = lazy(() => import("./SwimlaneView.js").then((m) => (
 export const FlakyTestsPanel = lazy(() => import("./FlakyTestsPanel.js").then((m) => ({ default: m.FlakyTestsPanel })));
 export const RunbooksView = lazy(() => import("./RunbooksView.js").then((m) => ({ default: m.RunbooksView })));
 export const SprintCapacityPlanner = lazy(() => import("./SprintCapacityPlanner.js").then((m) => ({ default: m.SprintCapacityPlanner })));
-export const ConstellationView = lazy(() => import("./ConstellationView.js").then((m) => ({ default: m.ConstellationView })));
-export const MomentumView = lazy(() => import("./MomentumView.js").then((m) => ({ default: m.MomentumView })));
-export const FireworksView = lazy(() => import("./FireworksView.js").then((m) => ({ default: m.FireworksView })));
 export const StaleWorkDashboard = lazy(() => import("./StaleWorkDashboard.js").then((m) => ({ default: m.StaleWorkDashboard })));
 // Tabbed Analytics container (#234) — imports the seven chart components directly,
 // so the whole analytics bundle is one lazy chunk.
 export const AnalyticsView = lazy(() => import("./AnalyticsView.js").then((m) => ({ default: m.AnalyticsView })));
 export const CalendarView = lazy(() => import("./CalendarView.js").then((m) => ({ default: m.CalendarView })));
 export const DriveDashboard = lazy(() => import("./DriveDashboard.js").then((m) => ({ default: m.DriveDashboard })));
-export const GardenView = lazy(() => import("./GardenView.js").then((m) => ({ default: m.GardenView })));
 export const PluginViewsPanel = lazy(() => import("./PluginViewsPanel.js").then((m) => ({ default: m.PluginViewsPanel })));
 export const PluginMarketplacePanel = lazy(() => import("./PluginMarketplacePanel.js").then((m) => ({ default: m.PluginMarketplacePanel })));

@@ -4,7 +4,9 @@ Preparation doc for thinning the board's view surface. It answers two questions:
 **which views are genuinely helpful vs. clutter**, and **which of the clutter can actually
 become plugins** given what the plugin system supports today.
 
-Status: assessment + sequenced plan. Nothing has been extracted yet.
+Status: assessment + sequenced plan; steps 2 (#234), 3 (#235), 4 (`{{boardUrl}}`/`{{projectId}}`),
+and 5 (#237, the `board-whimsy` extraction — see the learnings section at the end) are executed.
+The registry counts in "The numbers" below describe the original state (41 views); current count: 27.
 
 ## The numbers
 
@@ -211,3 +213,120 @@ ids with monitor/health folded into flight-recorder's own filter bar. Rejected
 because monitor cycles and health events are lists with their own drill-downs
 and category filters, not flight-recorder severities — forcing them into one
 stream would rewrite three components; tabs re-parent them unchanged.
+
+## Execution (#237): group E extracted as the `board-whimsy` plugin — learnings
+
+Executed 2026-08-06 as step 5 of the sequence, immediately after step 4
+(`{{boardUrl}}`/`{{projectId}}`, commit `0dc0d5d382`) landed. This section is the
+write-up the ticket asked for: what the extraction actually cost, what it proved,
+and what step 6 (#238, the code-health views) should expect.
+
+### What was built
+
+- **New repo `C:\projects\andrena\board-whimsy`** (separate git repo, not inside the
+  board checkout): a manifest declaring **one** iframe view served by **one**
+  dependency-free node stdlib server (`tools/serve.mjs`, no `package.json`, no deps),
+  tabbed across the visualizations — not four child processes. The server takes
+  `BOARD_URL={{boardUrl}}` / `PROJECT_ID={{projectId}}` via `serve.env`, binds the
+  board-allocated `PORT`, answers a cheap `/health`, and proxies
+  `GET {BOARD_URL}/api/projects/{PROJECT_ID}/board` at `/data` so the iframe page
+  fetches same-origin and never thinks about CORS or the board's port.
+- **Three visualizations ported** as inline vanilla canvas/DOM JS: constellation,
+  fireworks, garden. Faithful-enough, not pixel-identical: same layouts, colors
+  (chartColors values copied), animation behaviors, hover tooltips; issue-click
+  (which opened the board's issue panel) is gone — an iframe can't open board UI.
+- **Momentum was NOT ported — dropped.** Verified against `SwimlaneView`: swimlane
+  is priority lanes × status columns, i.e. a strict superset of momentum's
+  priority-lanes-with-status-sorted-cards. Porting it would have preserved a
+  duplicate the inventory above already called "a weaker swimlane".
+- **Board side:** the four registry entries, four components, garden's test, their
+  lazy-view exports, render branches, and app routes deleted. Registry 31 → **27**;
+  shortcuts **`v` and `e` freed** (guarded by a new registry test). Legacy paths
+  (`/fireworks` etc.) now resolve to no view — deliberate, unlike the #234/#235
+  tab-redirects, because there is no in-board target to redirect to.
+- **Offline self-test** (`tools/selftest.mjs`, reqextract pattern): mock board
+  server + the real serve.mjs; asserts health-before-data, the tabbed page renders
+  (and has NO Momentum tab), `/data` proxies and the mock board actually received
+  `GET /api/projects/:id/board`, and an unreachable board yields a friendly
+  `{ok:false}` 200 instead of a raw 500. All 12 checks pass. The three tabs were
+  additionally verified visually via playwright screenshots against fixture data.
+
+### What was easy
+
+- **The board-side deletion.** The registry consolidation (#116/#109) did its job:
+  removing a view = one union member, one icon, one registry entry, one route line,
+  one lazy export, one render branch, then mechanical test-count updates. ~30
+  minutes including tests, no surprises, typecheck caught every dangling reference.
+- **The placeholder contract (step 4) worked first try.** `{{boardUrl}}` +
+  `{{projectId}}` through `serve.env` is exactly enough; nothing else was missing.
+  Sequencing 4 before 5 was correct — this extraction would have been blocked
+  without it, precisely as predicted above.
+- **The board endpoint needed no changes.** `GET /api/projects/:id/board` returns
+  `StatusWithIssues[]` (array of `{id, name, count, issues[]}`) — exactly the
+  `columns` prop the components already took. The props-only design of group E
+  meant the data contract was already the public API.
+- **Server-side proxying instead of iframe-CORS.** Having the plugin server fetch
+  the board and re-serve at `/data` (rather than the iframe fetching
+  `{{boardUrl}}` cross-origin) made the empty/error case trivial to shape
+  (`{ok:false, error}` always 200) and made the self-test able to assert "the
+  board endpoint was called" without a browser. Recommended pattern for #238.
+
+### What was painful
+
+- **"Extract" is a rewrite, as the blocker section above predicted.** ~1,120 LOC of
+  React/Tailwind became ~560 LOC of hand-written vanilla JS/CSS inside a template
+  literal in serve.mjs. React idioms (refs, ResizeObserver, hooks deps) port
+  mechanically, but Tailwind classes all become hand-rolled CSS, and there is no
+  type checking inside the embedded page script — two typo-level bugs (garbage CSS
+  from editing, template-literal escaping of `\u{...}` emoji) that tsc would have
+  caught cost a syntax-check round. Mitigation that worked: extract the inline
+  `<script>` and run `node --check` on it in the self-test loop.
+- **Interactivity loss is real, not theoretical.** `onIssueClick` (open the issue
+  panel) has no plugin-side equivalent — there is no board→iframe or iframe→board
+  message channel. For decoration this costs nothing; for #238's views (crime-scene
+  drills into hotspots, flaky-tests triggers a parse endpoint) it is THE design
+  problem. Decide per view: link out (`window.open` the board route), or accept
+  view-only, or add a postMessage contract first (a new prerequisite ticket if
+  wanted).
+- **Two sources of truth now exist for board vocabulary.** STATUS_COLORS /
+  TYPE_COLORS / priority meta are copied into the plugin and will drift if the
+  board's palette changes. Acceptable for whimsy; for #238 consider serving a tiny
+  `/api/theme`-ish constants payload, or just accept drift.
+
+### What step 6 (#238) should expect
+
+1. **Budget the rewrite honestly.** Whimsy's three views were prop-driven and
+   still took a full session. `crime-scene` (384 LOC + its own endpoint),
+   `quality-metrics` (273 + POST ingestion), `flaky-tests` (360 + parse endpoint)
+   each carry SERVER routes that must either stay in the board (plugin calls them
+   via `{{boardUrl}}`) or move into the plugin's own server. Inventory those
+   endpoints first; that decision, not the component port, is the real scope.
+2. **Reuse the whimsy skeleton.** Manifest shape, `/health` + `/data` proxy +
+   inline-page pattern, the selftest.mjs harness (mock board, spawn server, assert
+   endpoint hit, assert empty state) and the `node --check` page-script guard are
+   all copy-pasteable. That skeleton is now the "views can live in a plugin" proof
+   the sequence asked for.
+3. **Resolve the interactivity question before porting, not after** (see above —
+   link-out vs postMessage). crime-scene without drill-down is a screenshot.
+4. **Home the views with their data producers** as planned above:
+   refactor-safety-net / code-metrics-skill already run view servers; add tabs to
+   an existing server rather than minting new processes — the whimsy tab pattern
+   shows one server carrying several views comfortably.
+5. **Registry effect available:** after #238 the registry would drop to 24
+   (crime-scene, quality-metrics, flaky-tests), freeing `y` and `k`.
+
+### Verification status
+
+- Verified: plugin self-test (12/12, offline), manifest parsed by the board's own
+  `parsePluginManifest` (from built `shared/dist`), all three tabs rendered in a
+  real browser against a mock board (playwright screenshots), client `tsc --noEmit`
+  clean, `viewRegistry.test.tsx` + `appRoutes.test.ts` green (19 tests).
+- NOT verified: the full board-side loop — install the plugin on a running board,
+  enable for a project, start the view from the Plugins tab, and see the iframe
+  framed with real `{{boardUrl}}`/`{{projectId}}` substitution. That needs a live
+  dev server; nothing in the code path is novel (the placeholder substitution has
+  its own tests from step 4), but until someone clicks it once, treat "installable
+  end-to-end" as unproven.
+- Cosmetic residue (out of #237's scope): the four views still appear in
+  `docs/user-manual/USER-MANUAL.md`, `CHANGELOG.md` history, and
+  `docs/verification/_test-index.json`; the user manual should be regenerated.

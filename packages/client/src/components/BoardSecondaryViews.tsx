@@ -9,9 +9,9 @@ import {
   QualityMetricsView, MilestonesOverview, ButlerView, WorkflowsView,
   WorkflowAnalyticsDashboard, InsightsPanel, BoardFeedView, RuntimeFeedView, FocusView,
   StrategyTargetsView, SwimlaneView, FlakyTestsPanel,
-  RunbooksView, SprintCapacityPlanner, ConstellationView,
-  MomentumView, FireworksView, StaleWorkDashboard, AnalyticsView, CalendarView,
-  DriveDashboard, GardenView, PluginViewsPanel,
+  RunbooksView, SprintCapacityPlanner,
+  StaleWorkDashboard, AnalyticsView, CalendarView,
+  DriveDashboard, PluginViewsPanel,
   PluginMarketplacePanel,
 } from "./boardLazyViews.js";
 import { usePluginViewStore } from "../stores/pluginViewStore.js";
@@ -311,33 +311,6 @@ export function BoardSecondaryViews({
           <SprintCapacityPlanner projectId={activeProjectId} />
         </BoardErrorBoundary>
       )}
-      {viewMode === "constellation" && (
-        <BoardErrorBoundary columnName="Constellation View">
-          <ConstellationView
-            columns={columns}
-            onIssueClick={onIssueClick}
-            searchQuery={searchQuery}
-          />
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "momentum" && (
-        <BoardErrorBoundary columnName="Momentum View">
-          <MomentumView
-            columns={columns}
-            onIssueClick={onIssueClick}
-            searchQuery={searchQuery}
-          />
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "fireworks" && (
-        <BoardErrorBoundary columnName="Fireworks View">
-          <FireworksView
-            columns={columns}
-            onIssueClick={onIssueClick}
-            searchQuery={searchQuery}
-          />
-        </BoardErrorBoundary>
-      )}
       {viewMode === "plugin-views" && activeProjectId && (
         <BoardErrorBoundary columnName="Plugins">
           {pluginSelection?.kind === "marketplace" ? (
@@ -348,15 +321,6 @@ export function BoardSecondaryViews({
               pluginSlug={pluginSelection?.kind === "plugin" ? pluginSelection.slug : null}
             />
           )}
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "garden" && (
-        <BoardErrorBoundary columnName="Garden View">
-          <GardenView
-            columns={columns}
-            onIssueClick={onIssueClick}
-            searchQuery={searchQuery}
-          />
         </BoardErrorBoundary>
       )}
     </>
