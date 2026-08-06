@@ -1,4 +1,4 @@
-import { index, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { workspaces } from "./workspaces.js";
 import { projects } from "./projects.js";
 
@@ -30,6 +30,15 @@ export const repos = sqliteTable("repos", {
   baseBranch: text("base_branch"),
   baseCommitSha: text("base_commit_sha"),
   mergedHeadSha: text("merged_head_sha"),
+  /**
+   * TRUE on the ONE workspace-scoped row that represents the workspace's LEADING repo
+   * (#222 stage 1, backfilled by migration 0110). Historically the leading repo had no
+   * `repos` row — its git state lives on the `workspaces` columns and `leadingRef()`
+   * synthesizes the row at read time. This physical row is the target the epic migrates
+   * reads onto (stage 2) so the workspace mirror columns can eventually drop (stage 4).
+   * Every query that means "the SIBLING repos of a workspace" MUST filter this out.
+   */
+  isLeading: integer("is_leading", { mode: "boolean" }).notNull().default(false),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 }, (table) => [
   index("repos_project_id_idx").on(table.projectId),
