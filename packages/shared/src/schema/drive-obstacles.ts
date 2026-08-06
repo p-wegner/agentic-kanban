@@ -27,6 +27,8 @@ export const DRIVE_OBSTACLE_KINDS = [
   "silent_merge_loss",
   "verify_gate_failure",
   "over_launch",
+  /** A review preflight rebase conflicts and cannot be retried into success (#283). */
+  "review_preflight_conflict",
 ] as const;
 export type DriveObstacleKind = (typeof DRIVE_OBSTACLE_KINDS)[number];
 

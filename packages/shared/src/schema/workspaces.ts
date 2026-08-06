@@ -100,6 +100,23 @@ export const workspaces = sqliteTable("workspaces", {
   latestSymlinkError: text("latest_symlink_error"),
   /** Latest pre-session agent launch failure, e.g. safety-policy preflight refusal. */
   latestLaunchError: text("latest_launch_error"),
+  /**
+   * Backoff state for the stranded-review reconciler's rebase preflight (#283). A rebase
+   * conflict is DETERMINISTIC given the same branch tip and base tip, so retrying it every
+   * 60s cycle can never succeed — it just re-spawns the most expensive git operation the
+   * board runs and blocks the event loop. `reviewPreflightSignature` records the
+   * `<headSha>..<baseSha>` pair the failures were observed against: when either tip moves
+   * the block clears itself (new commits deserve a fresh attempt), and while it holds the
+   * reconciler stops after `MAX_REVIEW_PREFLIGHT_ATTEMPTS` and surfaces a drive obstacle
+   * instead of looping.
+   */
+  reviewPreflightFailures: integer("review_preflight_failures").notNull().default(0),
+  /** The last rebase-preflight error message, so the block is explainable without the log. */
+  reviewPreflightError: text("review_preflight_error"),
+  /** `<branchHeadSha>..<baseHeadSha>` the failures above were observed against. */
+  reviewPreflightSignature: text("review_preflight_signature"),
+  /** Set when the attempt budget was exhausted for the current signature. */
+  reviewPreflightBlockedAt: text("review_preflight_blocked_at"),
   /** Context primer assembled by the context-packer at workspace creation. Injected into CLAUDE.local.md. */
   contextPrimer: text("context_primer"),
   /** Set when worktree removal fails post-merge (e.g. EBUSY). Cleared on successful retry cleanup. */
