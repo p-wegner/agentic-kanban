@@ -40,6 +40,26 @@ async function resolveVerifyTimeoutMs(projectId: string, database: Database): Pr
 }
 
 /**
+ * Default vitest worker cap for gate runs (#278). Two forks still overlap I/O-bound
+ * suites while leaving the box responsive; the pre-fix default was `cpus/2`.
+ */
+export const DEFAULT_VERIFY_MAX_WORKERS = 2;
+
+/** Preference key for a per-project override of the verify-gate vitest worker cap. */
+export function verifyMaxWorkersPrefKey(projectId: string): string {
+  return `verify_max_workers_${projectId}`;
+}
+
+const MAX_VERIFY_WORKERS = 32;
+
+async function resolveVerifyMaxWorkers(projectId: string, database: Database): Promise<number> {
+  const raw = await getPreference(verifyMaxWorkersPrefKey(projectId), database).catch(() => null);
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  if (Number.isFinite(parsed) && parsed >= 1 && parsed <= MAX_VERIFY_WORKERS) return parsed;
+  return DEFAULT_VERIFY_MAX_WORKERS;
+}
+
+/**
  * Failure-message signature of a verify_script that couldn't even resolve its own
  * tooling because dependencies were never installed (#169 — a worktree whose blocking
  * setup script failed silently proceeds, then fails the verify gate hours later with an
@@ -221,7 +241,19 @@ export async function runPreMergeGate(
     } catch {
       gateDataDir = tmpdir();
     }
-    const isolationEnv = { ...gradleEnv, AGENTIC_KANBAN_DIR: gateDataDir };
+    // #278: cap the gate's vitest fan-out. vitest's default `maxWorkers = cpus/2`
+    // under `pool: "forks"` is tuned for a machine doing nothing else; a gate shares
+    // the box with the dev server, other worktrees' gates and the agent, and the
+    // fan-out then multiplies peak memory + process-spawn pressure until suites time
+    // out — which fails the gate and triggers a full retry (#218: 7 failed attempts
+    // over 4 days). Honoured by `scripts/test-mine.mjs`; inert for any other
+    // verify_script, and unset for interactive runs so `pnpm test:mine` is unchanged.
+    const gateMaxWorkers = await resolveVerifyMaxWorkers(projectId, database);
+    const isolationEnv = {
+      ...gradleEnv,
+      AGENTIC_KANBAN_DIR: gateDataDir,
+      KANBAN_TEST_MAX_WORKERS: String(gateMaxWorkers),
+    };
     const verifyEnv = testScope ? { ...isolationEnv, KANBAN_TEST_PACKAGES: testScope } : isolationEnv;
     const runVerify = () =>
       runUnderBuildGate(() =>

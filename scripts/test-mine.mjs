@@ -122,6 +122,32 @@ const PACKAGES = [
 const passthrough = process.argv.slice(2);
 
 /**
+ * Optional worker cap via `KANBAN_TEST_MAX_WORKERS` (#278).
+ *
+ * vitest defaults to `maxWorkers = cpus/2` with `pool: "forks"` and full isolation,
+ * so each fork re-transforms its own module graph. When the pre-merge verify gate
+ * runs on a box that is ALSO running a dev server, other worktrees' gates and the
+ * agent itself, that fan-out is self-defeating: it multiplies peak memory and
+ * process-spawn pressure, which is what produced the load-dependent timeouts that
+ * made gates fail and retry (#218 failed 7 times over 4 days).
+ *
+ * Not set = vitest's own default, so interactive `pnpm test:mine` is unchanged.
+ * The gate sets it explicitly (see `pre-merge-gate.service.ts`).
+ *
+ * A passthrough `--maxWorkers` on the command line wins — an explicit flag from the
+ * caller must never be silently overridden by an env var.
+ */
+const maxWorkersRaw = (process.env.KANBAN_TEST_MAX_WORKERS || "").trim();
+const callerSetWorkers = passthrough.some((a) => a.startsWith("--maxWorkers"));
+const workerCapArgs =
+  maxWorkersRaw && /^\d+$/.test(maxWorkersRaw) && !callerSetWorkers
+    ? [`--maxWorkers=${maxWorkersRaw}`]
+    : [];
+if (maxWorkersRaw && !/^\d+$/.test(maxWorkersRaw)) {
+  console.warn(`[test:mine] ignoring non-numeric KANBAN_TEST_MAX_WORKERS="${maxWorkersRaw}"`);
+}
+
+/**
  * Resolve vitest's runnable entry for a package. pnpm hoists most deps to the
  * workspace root, but each package may also have a local copy. Prefer the local
  * one, fall back to the root.
@@ -146,9 +172,9 @@ function runPackage({ dir, label, exclude }) {
       return;
     }
     const excludeArgs = exclude.flatMap((glob) => ["--exclude", glob]);
-    const args = [vitestEntry, "run", ...excludeArgs, ...passthrough];
+    const args = [vitestEntry, "run", ...excludeArgs, ...workerCapArgs, ...passthrough];
     console.log(
-      `\n[test:mine] ${label}: node vitest run ${[...excludeArgs, ...passthrough].join(" ")}`
+      `\n[test:mine] ${label}: node vitest run ${[...excludeArgs, ...workerCapArgs, ...passthrough].join(" ")}`
     );
     // No shell — pass argv as an array so globs reach vitest verbatim (vitest does
     // its own glob matching; the OS shell must NOT expand them). cwd = package dir
