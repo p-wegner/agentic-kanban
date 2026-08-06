@@ -57,6 +57,11 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // a hardcoded 5 minutes with no per-project knob, which becomes a hard ceiling as a
   // compiled-stack project's clean build grows past it.
   "verify_timeout_ms",
+  // Pre-merge verify-gate vitest worker cap (#278): vitest's `cpus/2` default is
+  // tuned for an idle machine, but a gate shares the box with the dev server, other
+  // worktrees' gates and the agent — the fan-out then causes the load-dependent
+  // timeouts that fail gates and trigger whole-pipeline retries.
+  "verify_max_workers",
 ] as const;
 
 /**
