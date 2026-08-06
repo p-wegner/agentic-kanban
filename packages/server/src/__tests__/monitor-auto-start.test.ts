@@ -88,21 +88,21 @@ describe("runAutoStart dependency resolution (blocker must be MERGED, not just t
     mockUpToDepCheck({ id: "blocker-1", statusId: "done-1", currentNodeId: null, currentNodeType: null }, [{ issueId: "blocker-1", mergedAt: "2026-06-14T10:00:00.000Z", isDirect: false }]);
     vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ id: "ws-new" }) } as Response);
     await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]), makeDeps());
-    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces", expect.any(Object));
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces?async=1", expect.any(Object));
   });
 
   it("starts a dependent whose blocker committed via a direct workspace (no merge step)", async () => {
     mockUpToDepCheck({ id: "blocker-1", statusId: "done-1", currentNodeId: null, currentNodeType: null }, [{ issueId: "blocker-1", mergedAt: null, isDirect: true }]);
     vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ id: "ws-new" }) } as Response);
     await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]), makeDeps());
-    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces", expect.any(Object));
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces?async=1", expect.any(Object));
   });
 
   it("starts a dependent whose terminal blocker has no workspace at all (manually resolved)", async () => {
     mockUpToDepCheck({ id: "blocker-1", statusId: "done-1", currentNodeId: null, currentNodeType: null }, []);
     vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ id: "ws-new" }) } as Response);
     await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]), makeDeps());
-    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces", expect.any(Object));
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces?async=1", expect.any(Object));
   });
 
   // #782/#798 fan-in: a dependent with TWO Done blockers must stay blocked until BOTH
@@ -154,7 +154,7 @@ describe("runAutoStart dependency resolution (blocker must be MERGED, not just t
       ]) as ReturnType<typeof db.select>); // blocker-workspaces: A merged, B direct
     vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ id: "ws-new" }) } as Response);
     await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]), makeDeps());
-    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces", expect.any(Object));
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces?async=1", expect.any(Object));
   });
 
   it("starts a wide Backlog fan-in dependent once every blocker has landed (#782 integration tier)", async () => {
@@ -189,7 +189,7 @@ describe("runAutoStart dependency resolution (blocker must be MERGED, not just t
       makeDeps({ isAutoDrivenProject: () => true }),
     );
 
-    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces", expect.any(Object));
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces?async=1", expect.any(Object));
     const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
     expect(body).toMatchObject({ issueId: "issue-1", planMode: false });
   });
@@ -228,7 +228,7 @@ describe("runAutoStart dependency resolution (blocker must be MERGED, not just t
     mockUpToDepCheck({ id: "blocker-1", statusId: "done-1", currentNodeId: "node-review", currentNodeType: "normal" }, [{ issueId: "blocker-1", mergedAt: "2026-06-14T10:00:00.000Z", isDirect: false }]);
     vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ id: "ws-new" }) } as Response);
     await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]), makeDeps());
-    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces", expect.any(Object));
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces?async=1", expect.any(Object));
   });
 });
 
@@ -250,7 +250,7 @@ describe("runAutoStart URL construction", () => {
     ]), makeDeps());
 
     expect(vi.mocked(fetch)).toHaveBeenCalledWith(
-      "http://127.0.0.1:3001/api/workspaces",
+      "http://127.0.0.1:3001/api/workspaces?async=1",
       expect.any(Object),
     );
   });
@@ -278,7 +278,7 @@ describe("runAutoStart Backlog promotion for auto-driven projects", () => {
       makeDeps({ isAutoDrivenProject: () => true }),
     );
 
-    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces", expect.any(Object));
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces?async=1", expect.any(Object));
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("inactiveStale=19"));
     logSpy.mockRestore();
   });
@@ -303,7 +303,7 @@ describe("runAutoStart Backlog promotion for auto-driven projects", () => {
       makeDeps({ isAutoDrivenProject: () => true }),
     );
 
-    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces", expect.any(Object));
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces?async=1", expect.any(Object));
   });
 
   it("skips feature and enhancement candidates and starts the next eligible non-feature issue", async () => {

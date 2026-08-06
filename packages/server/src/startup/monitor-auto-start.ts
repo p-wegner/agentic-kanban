@@ -313,7 +313,9 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       const launchBody: Record<string, unknown> = { issueId: issue.id, branch, customPrompt: prompt };
       // Auto-driven projects must not stall in plan-only mode (#666).
       if (isAutoDrivenProject(inProgressSt.projectId)) launchBody.planMode = false;
-      const resp = await fetch(`${baseUrl}/api/workspaces`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(launchBody) }).catch((err) => {
+      // #269: `?async=1` — provisioning is minutes-long (measured 8+ min); a synchronous
+      // launch blocked the whole monitor cycle for the duration. 202 + create-job instead.
+      const resp = await fetch(`${baseUrl}/api/workspaces?async=1`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(launchBody) }).catch((err) => {
         // #775: surface a thrown launch instead of swallowing it.
         console.warn(`[monitor] Auto-start launch threw for In Progress issue #${issue.issueNumber} (${issue.id}): ${err instanceof Error ? err.message : String(err)}`);
         return null;
@@ -466,15 +468,19 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       const launchBody: Record<string, unknown> = { issueId: issue.id, branch };
       // Auto-driven projects must not stall in plan-only mode (#666).
       if (isAutoDrivenProject(issue.projectId)) launchBody.planMode = false;
-      const resp = await fetch(`${baseUrl}/api/workspaces`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(launchBody) }).catch((err) => {
+      // #269: `?async=1` — same as the backfill loop above; the cycle must not block
+      // ~8 minutes per launch while the worktree provisions.
+      const resp = await fetch(`${baseUrl}/api/workspaces?async=1`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(launchBody) }).catch((err) => {
         // #775: surface a thrown launch (network/connection error) instead of silently
         // dropping it — record a failure action so it shows in the monitor logs.
         console.warn(`[monitor] Auto-start launch threw for issue "${issue.title}" (${issue.id}): ${err instanceof Error ? err.message : String(err)}`);
         return null;
       });
       if (resp?.ok) {
-        const wsData = await resp.json().catch(() => null) as { id?: string } | null;
-        logMonitorAction("auto_start", wsData?.id ?? "unknown", issue.id);
+        // Async launch (#269): the 202 body carries a create-job id, not a workspace id;
+        // record whichever is available so the action stays traceable.
+        const wsData = await resp.json().catch(() => null) as { id?: string; jobId?: string } | null;
+        logMonitorAction("auto_start", wsData?.id ?? wsData?.jobId ?? "unknown", issue.id);
         console.log(`[monitor] Auto-started workspace for unblocked issue "${issue.title}" (${issue.id})`);
         boardEvents.broadcast(issue.projectId, "board_changed");
         started++;

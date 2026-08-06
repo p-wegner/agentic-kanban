@@ -530,7 +530,9 @@ export function createWorkspaceCreateService(deps: {
       timing("resolve-issue", t);
       repoPath = project.repoPath;
 
+      t = Date.now();
       await assertNoOpenDirectWorkspaceForIssue(input.issueId);
+      timing("assert-no-open-direct", t);
 
       // Default plan mode on for high/critical priority when not explicitly set.
       // This ensures expensive misunderstandings are caught before implementation begins.
@@ -590,6 +592,7 @@ export function createWorkspaceCreateService(deps: {
       // stack isn't provisioned until the deferred step); the deferred step REWRITES this
       // file to add the running-stack section once the stack is up. Skipped for direct
       // workspaces. This write is cheap (never the hot-path cost — only `up --wait` was).
+      t = Date.now();
       const ticketContextPath = !isDirect && worktreePath
         ? await writeWorktreeTicketContext(
             worktreePath,
@@ -599,10 +602,15 @@ export function createWorkspaceCreateService(deps: {
             null,
           )
         : null;
+      if (ticketContextPath) timing("ticket-context", t);
 
+      // #269: this span (skill materialization + prompt assembly) was part of the
+      // ~153s the phase timers left unaccounted — keep it instrumented.
+      t = Date.now();
       const { agentPrompt, skillName, effectiveSkillId, hasWorkflowStart } = await resolveAgentPromptAndSkill({
         issue, input, includeVisualProof, workspaceId: id, worktreePath, project, skillId,
       });
+      timing("resolve-prompt-skill", t);
 
       // #169: a BLOCKING setup script that failed must not proceed silently — the
       // agent would otherwise launch into a worktree missing its dependencies and
