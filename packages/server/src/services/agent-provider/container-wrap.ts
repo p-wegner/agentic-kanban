@@ -125,6 +125,26 @@ export function containerCommandFor(command: string): string {
 /**
  * Env var name prefixes that are meaningful to an agent regardless of which
  * machine it runs on — credentials, endpoints and board wiring.
+ *
+ * #267 — this list DELIBERATELY forwards credentials (`ANTHROPIC_*`, `CLAUDE_*`, …),
+ * which is the opposite of what the REMOTE placement does. The two are not
+ * inconsistent; they sit on different trust boundaries:
+ *
+ * - **Container placement (here)** runs on the SAME machine, under the SAME owner,
+ *   as a host launch. The agent inside genuinely needs the credentials, and passing
+ *   them exposes them to nobody who could not already read them from the host env.
+ *   It is the same boundary as spawning the agent directly.
+ * - **Remote placement** ships a launch spec to ANOTHER machine over the network, so
+ *   `packages/server/src/lib/remote-spec-env.ts` builds env from an explicit allowlist
+ *   with a `looksSecretEnvKey` guard, and the worker MERGES it over its own
+ *   environment — the worker authenticates with its own local login and the board
+ *   sends no credentials at all (#244, decision 012).
+ *
+ * So the rule is "credentials never leave their machine", not "credentials are never
+ * forwarded". **If container placement ever stops being local — a remote Docker host,
+ * a shared CI runner, a rootless daemon owned by someone else — this list becomes a
+ * credential leak and must be routed through the remote projection instead.** That is
+ * the trigger to re-open this decision; nothing else here needs to change today.
  */
 const FORWARDED_ENV_PREFIXES = [
   "ANTHROPIC_",
