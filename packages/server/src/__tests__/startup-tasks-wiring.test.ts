@@ -85,9 +85,13 @@ vi.mock("../startup/merge-workflow.js", () => ({
   reconcileStrandedSiblingMerges: vi.fn(async () => ({ landed: 0, preserved: 0 })),
 }));
 
-import { runStartupTasks } from "../startup/startup-tasks.js";
+import { runStartupTasks, runCriticalStartupTasks, runDeferredStartupTasks } from "../startup/startup-tasks.js";
 import { reconcileStrandedSiblingMerges } from "../startup/merge-workflow.js";
 import { reapTerminalWorkspaces } from "../startup/terminal-workspace-reaper.js";
+import { reconcileAncestorBranchWorkspaces } from "../startup/ancestor-branch-reconciler.js";
+import { scanDoneUnmergedWorkspaces } from "../startup/done-unmerged-invariant-scanner.js";
+import { applyMigrations } from "../db/manual-migrate.js";
+import * as gitService from "../services/git.service.js";
 
 const sessionManager = {} as unknown as Parameters<typeof runStartupTasks>[0];
 
@@ -105,5 +109,44 @@ describe("runStartupTasks wiring", () => {
     vi.mocked(reconcileStrandedSiblingMerges).mockRejectedValueOnce(new Error("boom"));
     await expect(runStartupTasks(sessionManager)).resolves.toBeUndefined();
     expect(vi.mocked(reapTerminalWorkspaces)).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * The split that lets `serve()` bind first (#282). The critical phase is what the board
+ * must finish before it may answer anything; if a reconciler creeps back into it, the
+ * 238 s time-to-first-response creeps back with it, so the boundary is asserted rather
+ * than left to review.
+ */
+describe("startup phase split (#282)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("runs migrations and session cleanup in the critical phase", async () => {
+    await runCriticalStartupTasks(sessionManager);
+    expect(vi.mocked(applyMigrations)).toHaveBeenCalledTimes(1);
+  });
+
+  it("spawns NO git and runs NO reconciler before the listener binds", async () => {
+    await runCriticalStartupTasks(sessionManager);
+
+    expect(vi.mocked(gitService.isMergeInProgress)).not.toHaveBeenCalled();
+    expect(vi.mocked(gitService.isRebaseInProgress)).not.toHaveBeenCalled();
+    expect(vi.mocked(gitService.getCurrentBranch)).not.toHaveBeenCalled();
+    expect(vi.mocked(reconcileStrandedSiblingMerges)).not.toHaveBeenCalled();
+    expect(vi.mocked(reconcileAncestorBranchWorkspaces)).not.toHaveBeenCalled();
+    expect(vi.mocked(scanDoneUnmergedWorkspaces)).not.toHaveBeenCalled();
+    expect(vi.mocked(reapTerminalWorkspaces)).not.toHaveBeenCalled();
+  });
+
+  it("runs every deferred reconciler in the deferred phase, without re-migrating", async () => {
+    await runDeferredStartupTasks();
+
+    expect(vi.mocked(reconcileStrandedSiblingMerges)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(reconcileAncestorBranchWorkspaces)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(scanDoneUnmergedWorkspaces)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(reapTerminalWorkspaces)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(applyMigrations)).not.toHaveBeenCalled();
   });
 });
