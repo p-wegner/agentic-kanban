@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import type { Database } from "../db/index.js";
 import { detectConflicts, getCommitCountAhead, getDiffShortstat, getLatestCommit } from "./git.service.js";
 import type { ProviderName } from "./agent-provider.js";
@@ -119,8 +120,11 @@ export async function buildWorkspaceSummaryMap(
       mergedAt: mainWs.mergedAt,
     };
 
-    // Skip background git/metrics refreshes for archived issues — CompletedCard shows none of these fields
-    if (!isArchivedIssue && mainWs.workingDir && mainWs.status !== "closed") {
+    // Skip background git/metrics refreshes for archived issues — CompletedCard shows none of these fields.
+    // The existsSync is the same point as in prefetchGitData: a set-but-vanished
+    // workingDir would otherwise schedule diff-stat + conflict-detection git spawns
+    // that can only fail, on every board build (#277).
+    if (!isArchivedIssue && mainWs.workingDir && mainWs.status !== "closed" && existsSync(mainWs.workingDir)) {
       const diffRef = mainWs.isDirect ? "HEAD" : (mainWs.baseBranch || defaultBranch);
       if (!diffRef) continue;
       const mainRef = summary.main;
@@ -240,7 +244,16 @@ async function prefetchGitData(
   const latestCommitByIssue = new Map<string, { sha: string; message: string } | null>();
   await Promise.all(
     [...mainWorkspaceMap.entries()]
-      .filter(([issueId, ws]) => !archivedIssueIds?.has(issueId) && ws.workingDir && ws.status !== "closed")
+      // `workingDir` being SET is not the same as it EXISTING. A worktree that was
+      // removed (or lived in a since-deleted fixture repo) still has its path on the
+      // row, and each such workspace then costs 2 doomed git spawns on every cold
+      // board build — the dominant cost in a 16.7s /board response (#277). A stat
+      // gets the same answer for free.
+      .filter(([issueId, ws]) =>
+        !archivedIssueIds?.has(issueId)
+        && ws.workingDir
+        && ws.status !== "closed"
+        && existsSync(ws.workingDir))
       .map(async ([issueId, ws]) => {
         const [latestCommit] = await Promise.all([
           cachedGitOp(`latestCommit:${ws.workingDir}`, () => getLatestCommit(ws.workingDir!)),

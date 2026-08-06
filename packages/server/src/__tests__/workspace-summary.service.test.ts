@@ -1,7 +1,26 @@
 import { randomUUID } from "node:crypto";
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it, vi, beforeEach, afterAll } from "vitest";
 import { issues, projects, projectStatuses, sessions, workflowEdges, workflowNodes, workflowTemplates, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
+
+// The summary service skips git work for a workingDir that does not EXIST on disk
+// (#277 — a set-but-vanished path otherwise costs doomed git spawns on every board
+// build). These two suites assert diff-stat caching behaviour, which requires the
+// workspace to be eligible, so they need a real directory rather than a made-up path.
+const tempWorktrees: string[] = [];
+function makeTempWorktree(label: string): string {
+  const dir = mkdtempSync(join(tmpdir(), `ws-summary-${label}-`));
+  tempWorktrees.push(dir);
+  return dir;
+}
+afterAll(() => {
+  while (tempWorktrees.length > 0) {
+    try { rmSync(tempWorktrees.pop()!, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+});
 
 const getDiffShortstat = vi.fn();
 const getLatestCommit = vi.fn();
@@ -359,7 +378,7 @@ describe("workspace-summary.service", () => {
       id: workspaceId,
       issueId,
       branch: "feature/cached",
-      workingDir: "/tmp/cache-project/.worktrees/cached",
+      workingDir: makeTempWorktree("cached"),
       baseBranch: "main",
       status: "idle",
       // Cache is fresh and HEAD SHA matches
@@ -380,6 +399,7 @@ describe("workspace-summary.service", () => {
   });
 
   it("triggers background diff refresh immediately when HEAD SHA advances", async () => {
+    const headChangedWorktree = makeTempWorktree("head-changed");
     const { db } = createTestDb();
     const now = new Date().toISOString();
     const recentCheckedAt = new Date(Date.now() - 5_000).toISOString(); // 5s ago — within TTL
@@ -423,7 +443,7 @@ describe("workspace-summary.service", () => {
       id: workspaceId,
       issueId,
       branch: "feature/head-changed",
-      workingDir: "/tmp/head-changed/.worktrees/head-changed",
+      workingDir: headChangedWorktree,
       baseBranch: "main",
       status: "idle",
       // Cache is within TTL but HEAD SHA is outdated
@@ -440,7 +460,7 @@ describe("workspace-summary.service", () => {
 
     // Background refresh must be triggered because HEAD advanced
     await vi.waitFor(() => expect(getDiffShortstat).toHaveBeenCalledWith(
-      "/tmp/head-changed/.worktrees/head-changed",
+      headChangedWorktree,
       "main",
     ));
   });
