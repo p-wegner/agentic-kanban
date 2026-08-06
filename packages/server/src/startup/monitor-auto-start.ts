@@ -195,7 +195,7 @@ async function reconcileStaleMergedIssue(
   boardEvents: ReturnType<typeof createBoardEvents>,
   noteSkip: (projectId: string, issueNumber: number | null | undefined, reason: AutoStartSkipReason) => void,
   mergedAt: string | null,
-): Promise<void> {
+): Promise<{ reopenedAfterMerge: boolean }> {
   const label = issueNumber != null ? `#${issueNumber}` : issueId;
   try {
     // `mergedAt` makes this a CATCH-UP reconcile: a status that was changed AFTER the merge
@@ -203,7 +203,13 @@ async function reconcileStaleMergedIssue(
     // ticket on EVERY cycle, silently undoing the operator.
     const { issueTransitioned, reopenedAfterMerge } = await reconcileMergedIssue({ database: db, issueId, projectId, mergedAt });
     if (reopenedAfterMerge) {
-      console.log(`[monitor] Issue ${label} was reopened after its workspace merged — leaving its status alone (not re-closing it) and not starting a duplicate workspace`);
+      // #265: the reopen is respected AND actionable. Previously this returned here and the
+      // ticket sat in Todo forever on a monitor-driven project — the operator's reopen was
+      // honoured but inert, needing a hand-made workspace. The caller now falls through to
+      // the normal start path, which builds a FRESH branch (the merged one already contains
+      // the landed work, so reusing it would give the agent nothing to do).
+      console.log(`[monitor] Issue ${label} was reopened after its workspace merged — leaving its status alone and starting a fresh workspace for the reopened work`);
+      return { reopenedAfterMerge: true };
     }
     if (issueTransitioned) {
       console.log(`[monitor] Reconciled issue ${label} to Done — its workspace was already merged but the issue status had not caught up; skipped starting a duplicate workspace (#190)`);
@@ -213,6 +219,17 @@ async function reconcileStaleMergedIssue(
     console.warn(`[monitor] Failed to reconcile already-merged issue ${label}:`, err instanceof Error ? err.message : String(err));
   }
   noteSkip(projectId, issueNumber, "already_merged");
+  return { reopenedAfterMerge: false };
+}
+
+/**
+ * Branch for a reopen retry (#265). The deterministic `feature/ak-<N>-<slug>` name is already
+ * taken by the merged workspace, so a retry needs its own — suffixed with the attempt number
+ * derived from how many workspaces the issue already has. The old merged workspace is left
+ * closed as history; nothing reuses or deletes it.
+ */
+function reopenRetryBranch(branch: string, priorWorkspaceCount: number): string {
+  return `${branch}-r${priorWorkspaceCount + 1}`;
 }
 
 export async function runAutoStart(prefMap: Map<string, string>, { serverPort, boardEvents, logMonitorAction, allowProject, isAutoDrivenProject = () => false, buildContentionGate = buildFileContentionGate, canDispatch = projectCanDispatch }: AutoStartDeps): Promise<Map<string, AutoStartSkipInfo>> {
@@ -279,15 +296,19 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
         .where(sql`${workspaces.issueId} = ${issue.id}`);
       if (issueWorkspaces.some((w) => w.status !== "closed")) continue;
       const mergedWs = issueWorkspaces.find((w) => w.mergedAt != null);
+      let isReopenRetry = false;
       if (mergedWs) {
-        await reconcileStaleMergedIssue(inProgressSt.projectId, issue.id, issue.issueNumber, boardEvents, noteSkip, mergedWs.mergedAt);
-        continue;
+        // #265: only a DELIBERATE reopen falls through to start again; a merged issue whose
+        // status simply had not caught up is still reconciled and skipped as before.
+        ({ reopenedAfterMerge: isReopenRetry } = await reconcileStaleMergedIssue(inProgressSt.projectId, issue.id, issue.issueNumber, boardEvents, noteSkip, mergedWs.mergedAt));
+        if (!isReopenRetry) continue;
       }
       if (!isMonitorEligibleIssue(issue, allowFeatureTypes)) continue;
       if (await hasSkipAutoStartTag(issue.id)) continue;
       if (shouldDeferForContention(contentionGate, issue.id, issue.issueNumber)) continue;
       const branchSlug = issue.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").substring(0, 40);
-      const branch = `feature/ak-${issue.issueNumber}-${branchSlug}`;
+      const baseBranchName = `feature/ak-${issue.issueNumber}-${branchSlug}`;
+      const branch = isReopenRetry ? reopenRetryBranch(baseBranchName, issueWorkspaces.length) : baseBranchName;
       const prompt = issue.description ? `${issue.title}\n\n${issue.description}` : issue.title;
       const launchBody: Record<string, unknown> = { issueId: issue.id, branch, customPrompt: prompt };
       // Auto-driven projects must not stall in plan-only mode (#666).
@@ -390,9 +411,11 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
         .where(sql`${workspaces.issueId} = ${issue.id}`);
       if (issueWorkspaces.some((w) => w.status !== "closed")) continue;
       const mergedWs = issueWorkspaces.find((w) => w.mergedAt != null);
+      let isReopenRetry = false;
       if (mergedWs) {
-        await reconcileStaleMergedIssue(issue.projectId, issue.id, issue.issueNumber, boardEvents, noteSkip, mergedWs.mergedAt);
-        continue;
+        // #265: a deliberate reopen starts fresh work; a stale status is reconciled and skipped.
+        ({ reopenedAfterMerge: isReopenRetry } = await reconcileStaleMergedIssue(issue.projectId, issue.id, issue.issueNumber, boardEvents, noteSkip, mergedWs.mergedAt));
+        if (!isReopenRetry) continue;
       }
       if (!isMonitorEligibleIssue(issue, allowFeatureTypes)) { noteSkip(inProgressSt.projectId, issue.issueNumber, "feature_type_excluded"); continue; }
       if (await hasSkipAutoStartTag(issue.id)) { noteSkip(inProgressSt.projectId, issue.issueNumber, "no_auto_start_tag"); continue; }
@@ -438,7 +461,8 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       }
 
       const slug = issue.title.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, "-").slice(0, 40).replace(/-+$/, "");
-      const branch = `feature/ak-${issue.issueNumber}-${slug}`;
+      const baseBranchName = `feature/ak-${issue.issueNumber}-${slug}`;
+      const branch = isReopenRetry ? reopenRetryBranch(baseBranchName, issueWorkspaces.length) : baseBranchName;
       const launchBody: Record<string, unknown> = { issueId: issue.id, branch };
       // Auto-driven projects must not stall in plan-only mode (#666).
       if (isAutoDrivenProject(issue.projectId)) launchBody.planMode = false;
