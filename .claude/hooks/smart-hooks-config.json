@@ -13,21 +13,21 @@
     ],
     "Stop": [
       {
-        "name": "Vitest (server)",
-        "command": "pnpm --filter @agentic-kanban/server test",
-        "filePatterns": ["packages/server/**/*.ts"],
-        "enabled": true,
-        "blocking": true,
-        "timeout": 60,
-        "containerSkippable": true
-      },
-      {
-        "name": "TypeScript build check",
-        "command": "pnpm build",
+        "name": "Vitest (edited files only)",
+        "command": "node .claude/hooks/scoped-vitest.js",
         "filePatterns": ["packages/**/*.ts", "packages/**/*.tsx"],
         "enabled": true,
         "blocking": true,
-        "timeout": 180,
+        "timeout": 300,
+        "containerSkippable": true
+      },
+      {
+        "name": "TypeScript typecheck",
+        "command": "pnpm typecheck",
+        "filePatterns": ["packages/**/*.ts", "packages/**/*.tsx"],
+        "enabled": true,
+        "blocking": true,
+        "timeout": 300,
         "containerSkippable": true
       },
       {
