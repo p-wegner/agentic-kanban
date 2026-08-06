@@ -36,6 +36,7 @@ import {
 import { isPluginEnabledPreferenceKey } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
 import type { Database } from "../db/index.js";
+import { resolvePublicBoardUrl } from "../runtime-port.js";
 import { runPluginCommand, type PluginCommandResult } from "./plugin-exec.js";
 import { createPluginLoopEngine, type LoopAdvanceResult, type LoopStatus } from "./plugin-loop.service.js";
 import { getProjectById } from "../repositories/project.repository.js";
@@ -156,9 +157,14 @@ export function createPluginService(deps: {
   /** Injected rather than self-HTTP'd (see server/CLAUDE.md "Self-HTTP calls are an anti-pattern"). */
   createIssue?: (input: CreateIssueInput) => Promise<CreateIssueResult>;
   createWorkspace?: (input: CreateWorkspaceInput) => Promise<CreateWorkspaceResult>;
+  /** Externally reachable board API base URL for `{{boardUrl}}` (#236). Defaults to the
+   *  public (proxy-fronted) URL derived from the runtime env — a worktree server on 3001+N
+   *  produces its own URL. Injectable so tests need no env fiddling. */
+  boardUrl?: string;
 }) {
   const { database, createIssue, createWorkspace } = deps;
-  const loops = createPluginLoopEngine({ database, createIssue });
+  const boardUrl = deps.boardUrl ?? resolvePublicBoardUrl();
+  const loops = createPluginLoopEngine({ database, createIssue, boardUrl });
   /**
    * The view child-server lifecycle lives in `plugin-views.service.ts` — it owns the module-level
    * process map, so this is the only place it gets bound to a service closure. Do NOT reach for the
@@ -171,6 +177,7 @@ export function createPluginService(deps: {
     enabledSlugsByProject,
     listPluginRows: () => listPluginRows(database),
     parseManifest: parsePluginManifest,
+    boardUrl,
     // PID bookkeeping for the startup reap of orphaned view servers (#228).
     persistViewProcess: (values) => upsertPluginViewProcess(values, database),
     dropViewProcess: (pluginRowId, viewId, projectId) => deletePluginViewProcess(pluginRowId, viewId, projectId, database),
@@ -579,6 +586,8 @@ export function createPluginService(deps: {
           leadingRepoPath: project.repoPath,
           projectName: project.name,
           pluginPath: row.localPath,
+          boardUrl,
+          projectId,
         };
 
         const parts: string[] = [];
@@ -620,6 +629,8 @@ export function createPluginService(deps: {
       leadingRepoPath: project.repoPath,
       projectName: project.name,
       pluginPath: plugin.localPath,
+      boardUrl,
+      projectId,
     };
     return runPluginCommand(substitutePluginPlaceholders(script.command, vars), {
       cwd: script.cwd === "plugin" ? plugin.localPath : outputRepoPath,

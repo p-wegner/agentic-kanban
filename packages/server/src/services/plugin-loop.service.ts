@@ -145,10 +145,13 @@ export interface LoopStatus {
 export interface PluginLoopDeps {
   database: Database;
   createIssue?: (input: CreateIssueInput) => Promise<CreateIssueResult>;
+  /** Externally reachable board API base URL (`{{boardUrl}}` in planner command/env) —
+   *  resolved by the composition root, not read from env here. */
+  boardUrl: string;
 }
 
 export function createPluginLoopEngine(deps: PluginLoopDeps) {
-  const { database, createIssue } = deps;
+  const { database, createIssue, boardUrl } = deps;
 
   function findLoop(manifest: PluginManifest, loopName: string): PluginLoopDef {
     const loop = (manifest.loops ?? []).find((l) => l.name === loopName);
@@ -246,6 +249,8 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
       leadingRepoPath: args.leadingRepoPath,
       projectName: args.projectName,
       pluginPath: args.pluginLocalPath,
+      boardUrl,
+      projectId: args.projectId,
     };
 
     const result = await runPluginCommand(substitutePluginPlaceholders(loop.plan.command, vars), {

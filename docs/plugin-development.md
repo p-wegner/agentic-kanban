@@ -220,6 +220,11 @@ A supervised child process serving HTTP, framed as a board view.
 - Read your state **fresh per request**. The process is long-lived; a page built at startup shows
   a snapshot of whenever the panel was first opened, which is worse than no panel.
 - Be self-contained: inline CSS and JS, no CDN, no external fonts, no remote images.
+- **Board data is reachable via `{{boardUrl}}` + `{{projectId}}`.** Pass them through `serve.env`
+  (e.g. `"env": { "BOARD_API": "{{boardUrl}}", "PROJECT_ID": "{{projectId}}" }`) and call
+  `GET {{boardUrl}}/api/...` — from your server, or from the iframe page itself (the board's CORS
+  reflects loopback origins). The URL is the public one even behind the dev proxy, and a worktree
+  board hands out its own port.
 - **Handle the empty case.** Your view is started before the pipeline that fills it has ever run,
   and "no data yet" is the state a first-time user sees. A 404 body renders as raw `not found`, and
   a server that exits leaves a broken-document icon — both read as "the plugin is broken". Answer
@@ -382,8 +387,14 @@ Available in every `command` and every `env` value, and in the scaffold template
 | `{{projectName}}` | the project's display name (may contain spaces and capitals — slugify it yourself) |
 | `{{pluginPath}}` | the plugin's own checkout |
 | `{{port}}` | views only, filled at serve time |
+| `{{boardUrl}}` | the board API's externally reachable base URL, no trailing slash (e.g. `http://localhost:3001`) — call `{{boardUrl}}/api/...` to read board data. Always the PUBLIC port: in dev the backend binds an internal port behind a proxy, and this is the proxy; a worktree server on 3001+N hands out its own URL. CORS already reflects loopback origins, so an iframe view page can fetch it directly. |
+| `{{projectId}}` | the id of the project the view/script/loop was started for — pass it as `projectId` in board API calls |
 
 An unknown placeholder is left as-is. Paths are absolute; on Windows they contain backslashes.
+`{{boardUrl}}`/`{{projectId}}` are substituted in view serve commands/env, script commands/env,
+loop plan commands/env, and butler fragments — but **not** into the scaffold template: the
+scaffold is written once at enable and committed, and a URL frozen at enable time goes stale the
+first time the board runs on another port.
 
 Two exceptions worth knowing before you build a path out of one:
 
