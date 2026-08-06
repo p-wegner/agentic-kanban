@@ -276,6 +276,28 @@ export class ReviewError extends Error {
  *  concurrent requests both pass the idle-status check before either updates the DB. */
 const pendingReviewLaunches = new Set<string>();
 
+/**
+ * Cross-path review-launch reservation (#270). The Set above only guarded concurrent
+ * `startManualReview` calls; the exit-workflow's auto-review launches sessions directly and
+ * raced the stranded-review reconciler into TWO review sessions for one workspace within the
+ * same second (the zombie-fixer then killed one and reset the workspace mid-merge). Every
+ * code path that launches a review session must reserve here first and release when done.
+ */
+export function tryReserveReviewLaunch(workspaceId: string): boolean {
+  if (pendingReviewLaunches.has(workspaceId)) return false;
+  pendingReviewLaunches.add(workspaceId);
+  return true;
+}
+
+export function releaseReviewLaunch(workspaceId: string): void {
+  pendingReviewLaunches.delete(workspaceId);
+}
+
+/** True while any path (manual, auto-review, reconciler) is mid-launch for this workspace. */
+export function isReviewLaunchPending(workspaceId: string): boolean {
+  return pendingReviewLaunches.has(workspaceId);
+}
+
 function isUsageLimitLaunchFailureStats(stats: string | null): boolean {
   if (!stats) return false;
   try {
@@ -393,10 +415,9 @@ export async function startManualReview(
 
   // Guard against concurrent requests that both passed the idle check before either
   // updates the DB status to "reviewing".
-  if (pendingReviewLaunches.has(workspaceId)) {
+  if (!tryReserveReviewLaunch(workspaceId)) {
     throw new ReviewError("Review launch already in progress for this workspace", "CONFLICT");
   }
-  pendingReviewLaunches.add(workspaceId);
 
   try {
     const issueRows = await getIssueProjectAndId(workspace.issueId, database);
@@ -491,6 +512,6 @@ export async function startManualReview(
     console.log(`[review-service] manual review session ${sessionId} for workspace ${workspaceId}`);
     return { sessionId };
   } finally {
-    pendingReviewLaunches.delete(workspaceId);
+    releaseReviewLaunch(workspaceId);
   }
 }

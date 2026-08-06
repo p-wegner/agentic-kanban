@@ -6,9 +6,18 @@ import { db } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import { PREF_RECONCILER_ZOMBIE_FIX_ENABLED } from "../constants/preference-keys.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
+import { getMergeJob } from "../services/merge-job.service.js";
 
 /** Grace window: a fix-and-merge session must be this old before it is a candidate. */
 const GRACE_WINDOW_MS = 60_000;
+
+/**
+ * A session with NO recorded PID gets a much longer grace (#270): the PID is written after the
+ * agent process spawns, and under board load a launch can take minutes between the session row
+ * appearing and the process existing. The zombie-fixer killed a review session at age 73s whose
+ * own launch had not finished registering — and reset the workspace out from under a merge.
+ */
+const PIDLESS_GRACE_WINDOW_MS = 5 * 60_000;
 
 export interface ZombieFixSessionReconcilerDeps {
   database?: Database;
@@ -98,6 +107,18 @@ export async function reconcileZombieFixSessions(deps: ZombieFixSessionReconcile
     }
 
     if (processAlive) continue; // Real running session — leave it alone.
+
+    // No PID yet: the launch may simply not have finished registering — give it the long
+    // grace before treating the missing process as proof of death (#270).
+    if (s.pid == null && Date.parse(s.startedAt) > Date.now() - PIDLESS_GRACE_WINDOW_MS) continue;
+
+    // A merge in flight owns this workspace (#270): resetting it to idle here abandoned an
+    // in-flight merge silently (no verdict, mergedAt and mergeError both null). Let the merge
+    // finish or fail on its own; a genuinely-dead session is collected on a later tick.
+    if (getMergeJob(s.workspaceId)?.state === "running") {
+      console.log(`[zombie-fix] session ${s.sessionId} looks zombie but workspace ${s.workspaceId} has a merge in flight — skipping reset`);
+      continue;
+    }
 
     // Check message count for this session.
     const msgCountRows = await database

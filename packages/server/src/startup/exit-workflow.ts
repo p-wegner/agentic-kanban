@@ -30,6 +30,7 @@ import { classifySessionExit, resolveSessionRoleFlags } from "./session-exit-cla
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { listWorkspaceRepos, type RepoRow } from "../repositories/repo.repository.js";
 import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
+import { tryReserveReviewLaunch, releaseReviewLaunch } from "../services/review.service.js";
 import type { SessionRoleFlags } from "./session-exit-classification.js";
 import { buildLearningStepPrompt } from "../services/merge-helpers.service.js";
 import { isFoundationalBlocker } from "../services/foundational-merge.service.js";
@@ -860,6 +861,22 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
    * recover it (#529) rather than leaving it stuck at "reviewing".
    */
   async function launchAutoReview(ctx: ExitContext): Promise<void> {
+    const workspaceId = ctx.workspace.id;
+    // Cross-path launch reservation (#270): the stranded-review reconciler and manual review
+    // share this slot, so two paths deciding "this workspace needs a review" in the same
+    // second can no longer both spawn a session.
+    if (!tryReserveReviewLaunch(workspaceId)) {
+      console.log(`[workflow] review launch already in progress for workspace ${workspaceId} — skipping duplicate auto-review`);
+      return;
+    }
+    try {
+      await launchAutoReviewReserved(ctx);
+    } finally {
+      releaseReviewLaunch(workspaceId);
+    }
+  }
+
+  async function launchAutoReviewReserved(ctx: ExitContext): Promise<void> {
     const { workspace, projectId, issueId, now, prefMap, defaultBranch } = ctx;
     const workspaceId = workspace.id;
     // Review on the same provider/profile the workspace was built with (e.g. its

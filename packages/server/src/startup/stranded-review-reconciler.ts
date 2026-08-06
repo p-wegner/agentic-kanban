@@ -6,7 +6,8 @@ import { db } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 import { getCommitCountAhead } from "../services/git.service.js";
-import { startManualReview } from "../services/review.service.js";
+import { startManualReview, isReviewLaunchPending } from "../services/review.service.js";
+import { getMergeJob } from "../services/merge-job.service.js";
 import { PREF_RECONCILER_STRANDED_REVIEW_ENABLED } from "../constants/preference-keys.js";
 
 export interface StrandedReviewReconcilerDeps {
@@ -88,6 +89,14 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
   let recovered = 0;
   for (const c of candidates) {
     if (!c.workingDir || !c.baseBranch) continue;
+    // A merge in flight OWNS this workspace (#270): its pre-lock gate runs for 20-40 minutes
+    // with the workspace still idle, which is exactly the window in which this reconciler
+    // used to launch a second review and strand the merge. The merge path runs/ran its own
+    // gate — nothing here to recover.
+    if (getMergeJob(c.wsId)?.state === "running") continue;
+    // Another path (exit-workflow auto-review, manual review) is mid-launch — its session
+    // row may not exist yet, so the running-session check below cannot see it (#270).
+    if (isReviewLaunchPending(c.wsId)) continue;
     // Skip if a session is currently running for this workspace.
     const running = await database.select({ id: sessions.id }).from(sessions)
       .where(and(eq(sessions.workspaceId, c.wsId), eq(sessions.status, "running"))).limit(1);
