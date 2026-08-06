@@ -3,6 +3,7 @@ import { sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { setWorkspaceStatus, type WorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { mirrorWorkspaceColumnsToLeadingRepo } from "./repo.repository.js";
 
 export async function getWorkspaceCloseState(workspaceId: string, database: Database = db) {
   return database
@@ -28,6 +29,10 @@ export async function applyWorkspaceClosePatch(
     now: updatedAt,
     set: rest,
   });
+  // Dual-write (#222 stage 2): the close patch may null workingDir (clearWorkingDir).
+  if ("workingDir" in rest) {
+    await mirrorWorkspaceColumnsToLeadingRepo(workspaceId, { workingDir: rest.workingDir ?? null }, database);
+  }
 }
 
 export async function getRunningSessionIdsForWorkspace(workspaceId: string, database: Database = db) {

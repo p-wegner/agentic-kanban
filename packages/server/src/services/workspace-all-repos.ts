@@ -17,7 +17,14 @@
 
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
-import { listWorkspaceRepos, setWorkspaceRepoMergedSha, type RepoRow } from "../repositories/repo.repository.js";
+import {
+  getLeadingRepoRow,
+  insertLeadingWorkspaceRepo,
+  listWorkspaceRepos,
+  mirrorWorkspaceColumnsToLeadingRepo,
+  setWorkspaceRepoMergedSha,
+  type RepoRow,
+} from "../repositories/repo.repository.js";
 import { getWorkspaceById, resolveProjectRepo } from "../repositories/workspace.repository.js";
 import { stampWorkspaceMergedHeadSha } from "../repositories/workspace-merge-execution.repository.js";
 
@@ -52,11 +59,26 @@ export interface WorkspaceRepoRef {
   defaultBranch: string | null;
 }
 
-/** Project the leading repo's state (workspace row + project row) into a uniform ref. */
+/**
+ * Project the leading repo's state (workspace row + project row) into a uniform ref.
+ *
+ * #222 stage 2: the synthesized projection stays AUTHORITATIVE (the workspace columns are
+ * still the source of truth until stage 4's column drop), but a physical `is_leading` row
+ * now exists (migration 0110 + dual-writes) and this function READ-REPAIRS it: a missing
+ * row is backfilled, a diverging one is converged to the synthesis. Best-effort — repair
+ * failures never break a read.
+ */
 async function leadingRef(workspaceId: string, database: Database): Promise<WorkspaceRepoRef | null> {
   const workspace = await getWorkspaceById(workspaceId, database);
   if (!workspace) return null;
   const { repoPath, defaultBranch } = await resolveProjectRepo(workspaceId, database);
+  // AWAITED, not fire-and-forget: `database` is frequently a TRANSACTION client, and an
+  // un-awaited statement still pending on a tx handle deadlocks its commit.
+  try {
+    await repairLeadingRepoRow(workspaceId, workspace, repoPath, defaultBranch, database);
+  } catch (err) {
+    console.warn(`[workspace-all-repos] leading-row read-repair failed for ${workspaceId} (non-fatal):`, err instanceof Error ? err.message : String(err));
+  }
   return {
     kind: "leading",
     id: workspaceId,
@@ -74,6 +96,54 @@ async function leadingRef(workspaceId: string, database: Database): Promise<Work
     mergedHeadSha: workspace.mergedHeadSha ?? null,
     defaultBranch,
   };
+}
+
+/**
+ * Converge the physical leading row to the synthesized truth (#222 stage 2). Fire-and-forget
+ * from `leadingRef` — a workspace created in the stage-1→2 window (no row) gets one, and a
+ * row a dual-write missed is brought back in line, so the rows are trustworthy by the time
+ * stage 4 flips the source of truth.
+ */
+async function repairLeadingRepoRow(
+  workspaceId: string,
+  workspace: { workingDir: string | null; branch: string | null; baseBranch: string | null; baseCommitSha: string | null; mergedHeadSha: string | null },
+  repoPath: string,
+  defaultBranch: string | null,
+  database: Database,
+): Promise<void> {
+  const truth = {
+    workingDir: workspace.workingDir ?? null,
+    branch: workspace.branch ?? null,
+    baseBranch: workspace.baseBranch || defaultBranch,
+    baseCommitSha: workspace.baseCommitSha ?? null,
+    mergedHeadSha: workspace.mergedHeadSha ?? null,
+  };
+  const row = await getLeadingRepoRow(workspaceId, database);
+  if (!row) {
+    await insertLeadingWorkspaceRepo({
+      workspaceId,
+      path: repoPath,
+      defaultBranch,
+      worktreePath: truth.workingDir,
+      branch: truth.branch,
+      baseBranch: truth.baseBranch,
+      baseCommitSha: truth.baseCommitSha,
+    }, database);
+    if (truth.mergedHeadSha) {
+      await mirrorWorkspaceColumnsToLeadingRepo(workspaceId, { mergedHeadSha: truth.mergedHeadSha }, database);
+    }
+    return;
+  }
+  const diverged =
+    row.worktreePath !== truth.workingDir ||
+    row.branch !== truth.branch ||
+    row.baseBranch !== truth.baseBranch ||
+    row.baseCommitSha !== truth.baseCommitSha ||
+    row.mergedHeadSha !== truth.mergedHeadSha;
+  if (diverged) {
+    console.warn(`[workspace-all-repos] leading row for ${workspaceId} diverged from workspace columns — converging (a dual-write path may be missing)`);
+    await mirrorWorkspaceColumnsToLeadingRepo(workspaceId, truth, database);
+  }
 }
 
 /** Map a workspace-scoped `repos` row into a uniform ref. */

@@ -7,6 +7,7 @@ import { eq, inArray, and, isNotNull, ne } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database, TransactionClient } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
+import { mirrorWorkspaceColumnsToLeadingRepo } from "./repo.repository.js";
 
 export async function updateLatestSetupRunFields(
   workspaceId: string,
@@ -238,6 +239,7 @@ export async function setWorkspaceWorkingDir(
     .update(workspaces)
     .set(values)
     .where(eq(workspaces.id, workspaceId));
+  await mirrorWorkspaceColumnsToLeadingRepo(workspaceId, { workingDir: values.workingDir, baseBranch: values.baseBranch }, database);
 }
 
 /**
@@ -258,9 +260,27 @@ export async function applyWorkspaceUpdates(
       now: updatedAt as string | undefined,
       set: rest,
     });
+    await mirrorGitColumnsFromPatch(workspaceId, rest, database);
     return;
   }
   await database.update(workspaces).set(updates).where(eq(workspaces.id, workspaceId));
+  await mirrorGitColumnsFromPatch(workspaceId, updates, database);
+}
+
+/** Dual-write (#222 stage 2): forward any of the five git-state columns in a PATCH bag. */
+async function mirrorGitColumnsFromPatch(
+  workspaceId: string,
+  patch: Record<string, unknown>,
+  database: Database,
+): Promise<void> {
+  const forward: Parameters<typeof mirrorWorkspaceColumnsToLeadingRepo>[1] = {};
+  if ("branch" in patch) forward.branch = patch.branch as string | null;
+  if ("workingDir" in patch) forward.workingDir = patch.workingDir as string | null;
+  if ("baseBranch" in patch) forward.baseBranch = patch.baseBranch as string | null;
+  if ("baseCommitSha" in patch) forward.baseCommitSha = patch.baseCommitSha as string | null;
+  if ("mergedHeadSha" in patch) forward.mergedHeadSha = patch.mergedHeadSha as string | null;
+  if (Object.keys(forward).length === 0) return;
+  await mirrorWorkspaceColumnsToLeadingRepo(workspaceId, forward, database);
 }
 
 export async function listStaleWorktreeRows(
@@ -305,6 +325,7 @@ export async function clearWorkspaceWorkingDir(
     .update(workspaces)
     .set({ workingDir: null, updatedAt: now })
     .where(eq(workspaces.id, workspaceId));
+  await mirrorWorkspaceColumnsToLeadingRepo(workspaceId, { workingDir: null }, database);
 }
 
 export async function getAgentSkillNameById(

@@ -24,6 +24,7 @@ import { narrowProviderName } from "../services/agent-provider.js";
 import { listOsProcesses, taskkillTree } from "../services/process-exec.js";
 import { refreshContainerMcpConfig } from "../services/devcontainer-workspace.service.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
+import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.repository.js";
 
 /** Kill orphaned tsx server processes from previous hot-reload cycles (Windows only). */
 export function shouldKillOrphanedServerProcess(input: {
@@ -439,7 +440,7 @@ export async function pruneStaleWorktrees(): Promise<void> {
       // never deletes the leading branch, so an unmerged sibling branch (unshipped
       // work) must not be force-deleted either.
       await cleanupSiblingWorktrees(gitService, ws.id, db, { preserveUnmerged: true });
-      await db.update(workspaces).set({ workingDir: null, updatedAt: new Date().toISOString() }).where(eq(workspaces.id, ws.id));
+      await clearWorkspaceWorkingDir(ws.id, new Date().toISOString());
     } catch (err) {
       console.warn(`[startup] Failed to prune worktree for workspace ${ws.id}:`, err);
     }
