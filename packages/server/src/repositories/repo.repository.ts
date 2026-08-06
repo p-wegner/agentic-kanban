@@ -23,9 +23,60 @@ export async function listProjectRepos(projectId: string, database: RepoDb = db)
     .where(and(eq(repos.projectId, projectId), isNull(repos.workspaceId)));
 }
 
-/** Workspace-scoped rows: the per-workspace worktree records for the additional repos. */
+/**
+ * Workspace-scoped SIBLING rows: the per-workspace worktree records for the additional repos.
+ * Excludes the leading-repo row (#222 stage 1, `is_leading=1`) — every consumer of this
+ * function means "the siblings", and before the filter the backfilled leading row would have
+ * been double-counted as a sibling (breaking single-repo fast paths and sibling merges).
+ */
 export async function listWorkspaceRepos(workspaceId: string, database: RepoDb = db): Promise<RepoRow[]> {
-  return database.select().from(repos).where(eq(repos.workspaceId, workspaceId));
+  return database.select().from(repos).where(and(eq(repos.workspaceId, workspaceId), eq(repos.isLeading, false)));
+}
+
+/** The workspace's physical leading-repo row (#222 stage 1), or null when not yet backfilled. */
+export async function getLeadingRepoRow(workspaceId: string, database: RepoDb = db): Promise<RepoRow | null> {
+  const rows = await database
+    .select()
+    .from(repos)
+    .where(and(eq(repos.workspaceId, workspaceId), eq(repos.isLeading, true)))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/**
+ * Insert the physical leading-repo row for a new workspace (#222 stage 1). Mirrors what
+ * migration 0110 backfills for pre-existing workspaces: one `is_leading=1` row carrying the
+ * same git state the `workspaces` columns hold (which remain the read model until stage 2).
+ * The deterministic id makes a re-run (or a create retried after a crash) idempotent.
+ */
+export async function insertLeadingWorkspaceRepo(
+  input: {
+    workspaceId: string;
+    path: string;
+    defaultBranch?: string | null;
+    worktreePath?: string | null;
+    branch?: string | null;
+    baseBranch?: string | null;
+    baseCommitSha?: string | null;
+  },
+  database: RepoDb = db,
+): Promise<void> {
+  await database
+    .insert(repos)
+    .values({
+      id: `leading-${input.workspaceId}`,
+      workspaceId: input.workspaceId,
+      projectId: null,
+      path: input.path,
+      name: null,
+      defaultBranch: input.defaultBranch ?? null,
+      worktreePath: input.worktreePath ?? null,
+      branch: input.branch ?? null,
+      baseBranch: input.baseBranch ?? null,
+      baseCommitSha: input.baseCommitSha ?? null,
+      isLeading: true,
+    })
+    .onConflictDoNothing();
 }
 
 /**
@@ -173,6 +224,7 @@ export async function findCrossProjectBranchHolders(
     .where(
       and(
         isNotNull(repos.workspaceId),
+        eq(repos.isLeading, false),
         ne(workspaces.status, "closed"),
         ne(repos.projectId, params.projectId),
       ),
@@ -204,6 +256,7 @@ export async function findLiveSiblingSharers(
     .where(
       and(
         isNotNull(repos.workspaceId),
+        eq(repos.isLeading, false),
         ne(repos.workspaceId, excludeWorkspaceId),
         ne(workspaces.status, "closed"),
       ),

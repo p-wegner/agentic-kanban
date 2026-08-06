@@ -119,7 +119,9 @@ export async function reconcileStrandedSiblingMerges(database: Database = db): P
       })
       .from(repos)
       .innerJoin(workspaces, eq(repos.workspaceId, workspaces.id))
-      .where(and(isNotNull(workspaces.mergedAt), isNull(repos.mergedHeadSha)));
+      // is_leading excluded (#222 stage 1): a stranded-SIBLING scan must not treat the
+      // backfilled leading-repo row as a sibling with unmerged commits.
+      .where(and(isNotNull(workspaces.mergedAt), isNull(repos.mergedHeadSha), eq(repos.isLeading, false)));
 
     const byWorkspace = new Map<string, (typeof candidateRows)[number]>();
     for (const row of candidateRows) byWorkspace.set(row.workspaceId, row);
