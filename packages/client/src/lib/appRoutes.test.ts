@@ -46,6 +46,21 @@ describe("appRoutes", () => {
     expect(getAppRouteTab("/board")).toBeNull();
   });
 
+  it("redirects legacy event-feed routes to the two surviving feeds with the right tab (#235)", () => {
+    expect(getAppRouteView("/digest")).toBe("activity");
+    expect(getAppRouteView("/cross-repo-activity")).toBe("activity");
+    expect(getAppRouteView("/monitor-history")).toBe("runtime");
+    expect(getAppRouteView("/health-events")).toBe("runtime");
+    expect(getAppRouteView("/agent-flight-recorder")).toBe("runtime");
+    expect(getAppRouteTab("/digest")).toEqual({ view: "activity", tab: "digest" });
+    expect(getAppRouteTab("/cross-repo-activity")).toEqual({ view: "activity", tab: "cross-repo" });
+    expect(getAppRouteTab("/monitor-history")).toEqual({ view: "runtime", tab: "monitor-cycles" });
+    expect(getAppRouteTab("/health-events")).toEqual({ view: "runtime", tab: "health-events" });
+    expect(getAppRouteTab("/agent-flight-recorder")).toEqual({ view: "runtime", tab: "flight-recorder" });
+    expect(getAppRouteTab("/activity")).toBeNull();
+    expect(getAppRouteTab("/runtime")).toBeNull();
+  });
+
   it("ignores unknown non-app paths", () => {
     expect(getAppRouteView("/api/projects")).toBeNull();
     expect(getAppRouteView("/not-a-view")).toBeNull();

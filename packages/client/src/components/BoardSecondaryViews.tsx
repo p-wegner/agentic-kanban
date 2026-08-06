@@ -7,9 +7,9 @@ import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 import {
   GraphView, TableView, AgentGrid, TimelineView, MetricsView, CrimeSceneCityView,
   QualityMetricsView, MilestonesOverview, ButlerView, WorkflowsView,
-  WorkflowAnalyticsDashboard, InsightsPanel, DigestView, ActivityFeedView, CrossRepoActivityFeed, AgentFlightRecorder, FocusView,
-  StrategyTargetsView, SwimlaneView, FlakyTestsPanel, MonitorCycleHistoryPanel,
-  BoardHealthNotificationCenter, RunbooksView, SprintCapacityPlanner, ConstellationView,
+  WorkflowAnalyticsDashboard, InsightsPanel, BoardFeedView, RuntimeFeedView, FocusView,
+  StrategyTargetsView, SwimlaneView, FlakyTestsPanel,
+  RunbooksView, SprintCapacityPlanner, ConstellationView,
   MomentumView, FireworksView, StaleWorkDashboard, AnalyticsView, CalendarView,
   DriveDashboard, GardenView, PluginViewsPanel,
   PluginMarketplacePanel,
@@ -193,17 +193,6 @@ export function BoardSecondaryViews({
           />
         </BoardErrorBoundary>
       )}
-      {viewMode === "digest" && activeProjectId && (
-        <BoardErrorBoundary columnName="Digest View">
-          <DigestView
-            projectId={activeProjectId}
-            onIssueClick={(issueId) => {
-              const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
-              if (issue) onIssueClick(issue);
-            }}
-          />
-        </BoardErrorBoundary>
-      )}
       {viewMode === "focus" && activeProjectId && (
         <BoardErrorBoundary columnName="Focus View">
           <FocusView
@@ -217,18 +206,7 @@ export function BoardSecondaryViews({
       )}
       {viewMode === "activity" && activeProjectId && (
         <BoardErrorBoundary columnName="Activity Feed">
-          <ActivityFeedView
-            projectId={activeProjectId}
-            onIssueClick={(issueId) => {
-              const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
-              if (issue) onIssueClick(issue);
-            }}
-          />
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "cross-repo-activity" && activeProjectId && (
-        <BoardErrorBoundary columnName="Cross-Repo Activity">
-          <CrossRepoActivityFeed
+          <BoardFeedView
             projectId={activeProjectId}
             resolveIssue={(issueId) => {
               const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
@@ -241,9 +219,9 @@ export function BoardSecondaryViews({
           />
         </BoardErrorBoundary>
       )}
-      {viewMode === "agent-flight-recorder" && activeProjectId && (
-        <BoardErrorBoundary columnName="Agent Flight Recorder">
-          <AgentFlightRecorder
+      {viewMode === "runtime" && activeProjectId && (
+        <BoardErrorBoundary columnName="Runtime Feed">
+          <RuntimeFeedView
             projectId={activeProjectId}
             resolveIssue={(issueId) => {
               const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
@@ -252,6 +230,13 @@ export function BoardSecondaryViews({
             onJumpToTranscript={(target) => {
               const issue = columns.flatMap(c => c.issues).find(i => i.id === target.issueId);
               if (issue) onManageWorkspaces(issue, target.workspaceId, target.sessionId ?? undefined);
+            }}
+            onOpenIssue={(issueNumber) => {
+              const issue = columns.flatMap(c => c.issues).find(i => i.issueNumber === issueNumber);
+              if (issue) {
+                onViewModeChange("kanban");
+                onIssueClick(issue);
+              }
             }}
           />
         </BoardErrorBoundary>
@@ -305,25 +290,6 @@ export function BoardSecondaryViews({
       {viewMode === "runbooks" && (
         <BoardErrorBoundary columnName="Runbooks">
           <RunbooksView projectId={activeProjectId} />
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "monitor-history" && activeProjectId && (
-        <BoardErrorBoundary columnName="Monitor History">
-          <MonitorCycleHistoryPanel projectId={activeProjectId} />
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "health-events" && activeProjectId && (
-        <BoardErrorBoundary columnName="Board Health Events">
-          <BoardHealthNotificationCenter
-            projectId={activeProjectId}
-            onOpenIssue={(issueNumber) => {
-              const issue = columns.flatMap(c => c.issues).find(i => i.issueNumber === issueNumber);
-              if (issue) {
-                onViewModeChange("kanban");
-                onIssueClick(issue);
-              }
-            }}
-          />
         </BoardErrorBoundary>
       )}
       {viewMode === "drive" && activeProjectId && (

@@ -18,16 +18,16 @@ export const ButlerView = lazy(() => import("./ButlerView.js").then((m) => ({ de
 export const WorkflowsView = lazy(() => import("./WorkflowsView.js").then((m) => ({ default: m.WorkflowsView })));
 export const WorkflowAnalyticsDashboard = lazy(() => import("./WorkflowAnalyticsDashboard.js").then((m) => ({ default: m.WorkflowAnalyticsDashboard })));
 export const InsightsPanel = lazy(() => import("./InsightsPanel.js").then((m) => ({ default: m.InsightsPanel })));
-export const DigestView = lazy(() => import("./DigestView.js").then((m) => ({ default: m.DigestView })));
-export const ActivityFeedView = lazy(() => import("./ActivityFeedView.js").then((m) => ({ default: m.ActivityFeedView })));
-export const CrossRepoActivityFeed = lazy(() => import("./CrossRepoActivityFeed.js").then((m) => ({ default: m.CrossRepoActivityFeed })));
-export const AgentFlightRecorder = lazy(() => import("./AgentFlightRecorder.js").then((m) => ({ default: m.AgentFlightRecorder })));
+// The two surviving event-feed containers (#235): BoardFeedView bundles
+// activity + digest + cross-repo, RuntimeFeedView bundles flight-recorder +
+// monitor-cycles + health-events — each imports its feed components directly,
+// so each feed is one lazy chunk.
+export const BoardFeedView = lazy(() => import("./BoardFeedView.js").then((m) => ({ default: m.BoardFeedView })));
+export const RuntimeFeedView = lazy(() => import("./RuntimeFeedView.js").then((m) => ({ default: m.RuntimeFeedView })));
 export const FocusView = lazy(() => import("./FocusView.js").then((m) => ({ default: m.FocusView })));
 export const StrategyTargetsView = lazy(() => import("./StrategyTargetsView.js").then((m) => ({ default: m.StrategyTargetsView })));
 export const SwimlaneView = lazy(() => import("./SwimlaneView.js").then((m) => ({ default: m.SwimlaneView })));
 export const FlakyTestsPanel = lazy(() => import("./FlakyTestsPanel.js").then((m) => ({ default: m.FlakyTestsPanel })));
-export const MonitorCycleHistoryPanel = lazy(() => import("./MonitorCycleHistoryPanel.js").then((m) => ({ default: m.MonitorCycleHistoryPanel })));
-export const BoardHealthNotificationCenter = lazy(() => import("./BoardHealthNotificationCenter.js").then((m) => ({ default: m.BoardHealthNotificationCenter })));
 export const RunbooksView = lazy(() => import("./RunbooksView.js").then((m) => ({ default: m.RunbooksView })));
 export const SprintCapacityPlanner = lazy(() => import("./SprintCapacityPlanner.js").then((m) => ({ default: m.SprintCapacityPlanner })));
 export const ConstellationView = lazy(() => import("./ConstellationView.js").then((m) => ({ default: m.ConstellationView })));

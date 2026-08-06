@@ -29,10 +29,8 @@ export type ViewMode =
   | "insights"
   | "swimlane"
   | "flaky-tests"
-  | "monitor-history"
-  | "health-events"
+  | "runtime"
   | "drive"
-  | "digest"
   | "strategy"
   | "focus"
   | "runbooks"
@@ -41,8 +39,6 @@ export type ViewMode =
   | "momentum"
   | "fireworks"
   | "activity"
-  | "cross-repo-activity"
-  | "agent-flight-recorder"
   | "stale-work"
   | "analytics"
   | "calendar"
@@ -150,11 +146,6 @@ const ICON = {
       <path strokeLinecap="round" strokeLinejoin="round" d="M16 4v5l4-2.5L16 4z" />
     </svg>
   ),
-  digest: (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-    </svg>
-  ),
   strategy: (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <circle cx="12" cy="12" r="8" />
@@ -200,14 +191,9 @@ const ICON = {
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
     </svg>
   ),
-  "monitor-history": (
+  runtime: (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-    </svg>
-  ),
-  "health-events": (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h3l2 5 4-14 2 9 2-3h5" />
     </svg>
   ),
   runbooks: (
@@ -261,19 +247,6 @@ const ICON = {
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h2M19 12h2M12 3v2M12 19v2" />
-    </svg>
-  ),
-  "cross-repo-activity": (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <circle cx="6" cy="6" r="2" />
-      <circle cx="6" cy="18" r="2" />
-      <circle cx="18" cy="12" r="2" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M6 8v8M8 6h5a3 3 0 013 3v1M8 18h5a3 3 0 003-3v-1" />
-    </svg>
-  ),
-  "agent-flight-recorder": (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h3l2 5 4-14 2 9 2-3h5" />
     </svg>
   ),
   "stale-work": (
@@ -425,17 +398,6 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     group: "secondary",
   },
   {
-    id: "digest",
-    toolbarLabel: "Digest",
-    label: "Standup Digest",
-    tooltip: "Standup Digest — what changed since you were away",
-    icon: ICON.digest,
-    paletteIcon: "◷",
-    paletteDescription: "What changed since you were away",
-    shortcut: "d",
-    group: "secondary",
-  },
-  {
     id: "strategy",
     toolbarLabel: "Strategy",
     label: "Strategic Targets",
@@ -538,25 +500,19 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     group: "secondary",
   },
   {
-    id: "monitor-history",
-    toolbarLabel: "History",
-    label: "Monitor Cycle History",
-    tooltip: "Monitor Cycle History — recent merges, starts, errors, and actions",
-    icon: ICON["monitor-history"],
-    paletteIcon: "⏱",
-    paletteDescription: "Show recent monitor cycle events with action drill-downs",
+    // Operational event feed (#235): absorbs the former agent-flight-recorder,
+    // monitor-history, and health-events views as tabs (RuntimeFeedView). Keeps
+    // monitor-history's former primary toolbar slot so one operational feed
+    // stays one click away. Each tab is palette-reachable ("Runtime Feed: …")
+    // and deep-linkable; legacy routes redirect here (appRoutes.ts).
+    id: "runtime",
+    toolbarLabel: "Runtime",
+    label: "Runtime Feed",
+    tooltip: "Runtime Feed — agent flight recorder, monitor cycle history, and board health events",
+    icon: ICON.runtime,
+    paletteIcon: "FR",
+    paletteDescription: "Operational feed: live agent runtime events, monitor cycle history, and health notifications as tabs",
     activeClass: "bg-indigo-500 text-white",
-  },
-  {
-    id: "health-events",
-    toolbarLabel: "Health",
-    label: "Board Health Events",
-    tooltip: "Board Health Notification Center — merge, launch, server, refill, smoke-check events",
-    icon: ICON["health-events"],
-    paletteIcon: "🔔",
-    paletteDescription: "Notification center for monitor health events with category filters",
-    activeClass: "bg-indigo-500 text-white",
-    group: "secondary",
   },
   {
     id: "drive",
@@ -638,37 +594,19 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     group: "secondary",
   },
   {
+    // Board-side event feed (#235): absorbs the former digest and
+    // cross-repo-activity views as tabs (BoardFeedView). The Cross-Repo tab is
+    // only offered on multi-repo projects. Digest's former "d" shortcut was
+    // freed, not reassigned — digest stays palette-/deep-link-reachable.
     id: "activity",
     toolbarLabel: "Activity",
     label: "Activity Feed",
-    tooltip: "Activity Feed — recent status changes and merges across all issues",
+    tooltip: "Activity Feed — status changes and merges, standup digest, and cross-repo activity as tabs",
     icon: ICON.activity,
     paletteIcon: "⏱",
-    paletteDescription: "Project-wide activity: status transitions, merges, sessions in reverse-chronological order",
+    paletteDescription: "Board feed: status transitions, merges and sessions, plus standup digest and (multi-repo) cross-repo activity as tabs",
     // No single-key shortcut: "x" is a reserved global board action (see
     // useBoardKeyboardShortcuts). Reachable via the More menu and Ctrl+K palette.
-    group: "secondary",
-  },
-  {
-    id: "cross-repo-activity",
-    toolbarLabel: "Cross-Repo",
-    label: "Cross-Repo Activity",
-    tooltip: "Cross-Repo Activity — live timeline of merges, commits, and conflicts across a multi-repo project's repos",
-    icon: ICON["cross-repo-activity"],
-    paletteIcon: "CR",
-    paletteDescription: "Live, repo-labeled timeline of what is landing across a multi-repo project (merges, commits, conflicts)",
-    activeClass: "bg-indigo-600 text-white",
-    group: "secondary",
-  },
-  {
-    id: "agent-flight-recorder",
-    toolbarLabel: "Flight Rec",
-    label: "Agent Flight Recorder",
-    tooltip: "Agent Flight Recorder — one live, filterable stream of high-signal agent-runtime events (tool errors, questions, stalls, status changes, merges) across all active workspaces",
-    icon: ICON["agent-flight-recorder"],
-    paletteIcon: "FR",
-    paletteDescription: "Unified live runtime-event stream across the fleet — filter by workspace, repo, or severity; jump to any transcript",
-    activeClass: "bg-indigo-600 text-white",
     group: "secondary",
   },
   {

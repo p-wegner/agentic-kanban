@@ -97,3 +97,71 @@ export type AnalyticsTabId =
   | "scorecard-distribution";
 
 export const ANALYTICS_TAB_IDS = ANALYTICS_TABS.map((t) => t.id as AnalyticsTabId);
+
+// ---------------------------------------------------------------------------
+// #235 — the two surviving event feeds. Board feed ("activity"): what happened
+// to the board. Runtime feed ("runtime"): what the machinery (agents/monitor)
+// is doing. Decision + rationale: docs/view-inventory-and-plugin-extraction.md.
+// ---------------------------------------------------------------------------
+
+export const ACTIVITY_VIEW_ID = "activity";
+
+export const ACTIVITY_TABS: readonly ViewTabDescriptor[] = [
+  {
+    id: "activity",
+    label: "Activity",
+    paletteLabel: "Activity Feed",
+    paletteIcon: "⏱",
+    paletteDescription: "Project-wide activity: status transitions, merges, sessions in reverse-chronological order",
+  },
+  {
+    id: "digest",
+    label: "Digest",
+    paletteLabel: "Standup Digest",
+    paletteIcon: "◷",
+    paletteDescription: "What changed since you were away",
+  },
+  {
+    // Only offered on multi-repo projects — BoardFeedView gates this tab (and
+    // useBoardKeyboardShortcuts its palette action) on useProjectRepos.isMultiRepo.
+    id: "cross-repo",
+    label: "Cross-Repo",
+    paletteLabel: "Cross-Repo Activity",
+    paletteIcon: "CR",
+    paletteDescription: "Live, repo-labeled timeline of what is landing across a multi-repo project (merges, commits, conflicts)",
+  },
+];
+
+export type ActivityTabId = "activity" | "digest" | "cross-repo";
+
+export const ACTIVITY_TAB_IDS = ACTIVITY_TABS.map((t) => t.id as ActivityTabId);
+
+export const RUNTIME_VIEW_ID = "runtime";
+
+export const RUNTIME_TABS: readonly ViewTabDescriptor[] = [
+  {
+    id: "flight-recorder",
+    label: "Flight Recorder",
+    paletteLabel: "Agent Flight Recorder",
+    paletteIcon: "FR",
+    paletteDescription: "Unified live runtime-event stream across the fleet — filter by workspace, repo, or severity; jump to any transcript",
+  },
+  {
+    id: "monitor-cycles",
+    label: "Monitor Cycles",
+    paletteLabel: "Monitor Cycle History",
+    paletteIcon: "⏱",
+    paletteDescription: "Show recent monitor cycle events with action drill-downs",
+  },
+  {
+    id: "health-events",
+    label: "Health Events",
+    paletteLabel: "Board Health Events",
+    paletteIcon: "🔔",
+    paletteDescription: "Notification center for monitor health events with category filters",
+  },
+];
+
+export type RuntimeTabId = "flight-recorder" | "monitor-cycles" | "health-events";
+
+export const RUNTIME_TAB_IDS = RUNTIME_TABS.map((t) => t.id as RuntimeTabId);

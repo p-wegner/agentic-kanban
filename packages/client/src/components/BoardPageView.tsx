@@ -27,6 +27,8 @@ import { AgentLiveTickerPanel } from "./AgentLiveTickerPanel.js";
 import { SkeletonBoard } from "./SkeletonBoard.js";
 import { ViewLoadingFallback } from "./ViewLoadingFallback.js";
 import { MentionProvider } from "../lib/MentionContext.js";
+import { RUNTIME_VIEW_ID } from "../lib/viewTabs.js";
+import { viewTabActions } from "../stores/viewTabStore.js";
 import { useBoardSelectionStore } from "../stores/boardSelectionStore.js";
 import { boardBulkSelectionActions } from "../stores/boardBulkSelectionStore.js";
 import type { Dispatch, MouseEvent as ReactMouseEvent, MutableRefObject, SetStateAction } from "react";
@@ -374,7 +376,11 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
           runQueueOpenSlots={runQueueForecast.openSlots}
           onShowLiveActivityTicker={() => panels.setShowLiveActivityTicker((prev) => !prev)}
           liveActivityCount={tickerEntries.length}
-          onViewAllHealthEvents={() => handleViewModeChange("health-events")}
+          onViewAllHealthEvents={() => {
+            // Health events live in the Runtime feed's health tab (#235).
+            viewTabActions.request(RUNTIME_VIEW_ID, "health-events");
+            handleViewModeChange("runtime");
+          }}
           cardDensity={prefs.cardDensity}
           onCardDensityChange={prefs.handleCardDensityChange}
           visibilityColumns={visibilityColumns}
