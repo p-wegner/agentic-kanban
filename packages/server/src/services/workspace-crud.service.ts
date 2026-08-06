@@ -18,6 +18,7 @@ import {
 import {
   WorkspaceError,
   requireBaseBranch,
+  withStepTimeout,
   type GitService,
 } from "./workspace-internals.js";
 import { createWorkspaceCleanupService } from "./workspace-cleanup.service.js";
@@ -127,11 +128,20 @@ export function createWorkspaceCrudService(deps: {
     const runningSessions = wsSessions.filter((s) => s.status === "running");
     if (getSessionManager) {
       for (const s of runningSessions) {
-        await getSessionManager().stopSession(s.id).catch(() => {});
+        await withStepTimeout(`stop-session:${s.id}`, () => getSessionManager().stopSession(s.id)).catch((err) => {
+          console.warn(`[workspaces] close: stopSession step failed/timed out for session ${s.id} (best-effort)`, err);
+        });
       }
     }
 
     // Clean up the worktree for non-direct workspaces (mirrors merge/close behaviour).
+    // Every step below is bounded by withStepTimeout (#268): before this fix a single
+    // wedged step (an unbounded fs walk breaking junctions, a git call blocked on a
+    // Windows file handle, a hung docker/compose call) made the whole close request
+    // hang with no HTTP response at all, which also strands the issue In Progress
+    // (the board refuses Done while an unmerged workspace stays open).
+    let workingDirRemoved = workspace.isDirect;
+    let cleanupWarning: string | null = null;
     if (!workspace.isDirect && workspace.workingDir) {
       // Per-workspace Docker service stack down (only when one was provisioned) before
       // the worktree goes away. Uses the STORED compose project name (#F1). Best-effort —
@@ -140,34 +150,59 @@ export function createWorkspaceCrudService(deps: {
       // guard still skips the down while a co-resident sharer references the stack.
       const closeComposeName = parseStoredComposeProjectName(workspace.serviceState);
       if (closeComposeName) {
-        await workspaceServicesService.teardownWorkspaceServices({
-          composeProjectName: closeComposeName,
-          composeWorktreePath: workspace.workingDir,
-          releasedByWorkspaceId: workspaceId,
-        });
+        await withStepTimeout("teardown-service-stack", () =>
+          workspaceServicesService.teardownWorkspaceServices({
+            composeProjectName: closeComposeName,
+            composeWorktreePath: workspace.workingDir!,
+            releasedByWorkspaceId: workspaceId,
+          }),
+        ).catch((err) => console.warn(`[workspaces] close: service-stack teardown failed/timed out for ${workspaceId} (best-effort)`, err));
       }
       // Devcontainer builder teardown (#138), also before the worktree goes away:
       // the container bind-mounts this directory, and its dependency volumes
       // cannot be removed while it still holds them. No-op when the workspace was
       // never containerized (nothing matches the label / name prefix).
-      await reapWorkspaceContainer({ worktreePath: workspace.workingDir, workspaceId });
+      await withStepTimeout("reap-devcontainer", () =>
+        reapWorkspaceContainer({ worktreePath: workspace.workingDir!, workspaceId }),
+      ).catch((err) => console.warn(`[workspaces] close: devcontainer reap failed/timed out for ${workspaceId} (best-effort)`, err));
 
       const { repoPath } = await resolveProjectRepo(workspaceId, database).catch(() => ({ repoPath: null as string | null }));
       if (repoPath) {
-        try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch { /* best effort */ }
+        try {
+          await withStepTimeout("remove-worktree", () => gitService.removeWorktree(repoPath, workspace.workingDir!));
+          workingDirRemoved = true;
+        } catch (err) {
+          // Escape hatch (#268): a worktree that cannot be cleanly removed — whether
+          // git itself failed or the step ran past its bound (e.g. a wedged Windows
+          // file handle) — must never block the close. Close never deletes the
+          // branch either way, so nothing but disk is lost by leaving the directory
+          // behind; recording it as a cleanup warning (mirrors the post-merge
+          // cleanup pattern) keeps it discoverable via the Cleanup Queue instead of
+          // silently falling out of tracking.
+          cleanupWarning = err instanceof Error ? err.message : String(err);
+          console.warn(`[workspaces] close: worktree removal failed/timed out for ${workspace.workingDir} — recording cleanup warning`, err);
+        }
       }
       // Multi-repo: sibling worktrees + branches too (no-op single-repo). Close
       // deliberately preserves the LEADING branch (worktree removal only, above) so
       // abandoned work stays recoverable — preserveUnmerged mirrors that per sibling
       // repo: a sibling branch with unmerged commits survives instead of being
       // force-deleted (only fully-merged/empty sibling branches are dropped).
-      await cleanupSiblingWorktrees(gitService, workspaceId, database, { preserveUnmerged: true });
+      await withStepTimeout("cleanup-sibling-worktrees", () =>
+        cleanupSiblingWorktrees(gitService, workspaceId, database, { preserveUnmerged: true }),
+      ).catch((err) => console.warn(`[workspaces] close: sibling worktree cleanup failed/timed out for ${workspaceId} (best-effort)`, err));
     }
 
     const now = new Date().toISOString();
     await crudRepo.updateWorkspaceClosed(
       workspaceId,
-      { status: "closed", workingDir: workspace.isDirect ? workspace.workingDir : null, closedAt: now, updatedAt: now },
+      {
+        status: "closed",
+        workingDir: workingDirRemoved ? (workspace.isDirect ? workspace.workingDir : null) : workspace.workingDir,
+        closedAt: now,
+        updatedAt: now,
+        cleanupWarning,
+      },
       database,
     );
 

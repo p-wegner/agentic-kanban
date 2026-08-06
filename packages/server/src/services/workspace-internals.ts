@@ -22,6 +22,41 @@ export class WorkspaceError extends Error {
   }
 }
 
+/**
+ * Default per-step bound for {@link withStepTimeout}. Deliberately much shorter than
+ * the git adapter's own 10-minute default (`DEFAULT_GIT_TIMEOUT_MS`, git-exec.ts) — an
+ * interactive close/cleanup request must fail loudly within tens of seconds, not sit on
+ * a request that could legitimately still be "waiting" up to 10 minutes later (#268).
+ */
+export const CLOSE_STEP_TIMEOUT_MS = 30_000;
+
+/**
+ * Race `fn()` against a bound so a single wedged step (an unbounded fs walk, a git call
+ * blocked on a Windows file handle, a hung docker/compose call) can never make the whole
+ * operation hang forever (#268: `POST /workspaces/:id/close` hung with no HTTP response
+ * at all on an idle, empty worktree). On timeout, rejects with an error naming the step
+ * so callers/logs say exactly which step was slow instead of just "it hung".
+ *
+ * Note this does not (cannot, for a plain Promise) cancel the underlying operation — a
+ * still-running fs/git call keeps running in the background — but it unblocks the caller
+ * and lets it fail loudly / fall back instead of waiting indefinitely.
+ */
+export async function withStepTimeout<T>(
+  step: string,
+  fn: () => Promise<T>,
+  ms: number = CLOSE_STEP_TIMEOUT_MS,
+): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`step "${step}" timed out after ${ms}ms`)), ms);
+  });
+  try {
+    return await Promise.race([fn(), timeoutPromise]);
+  } finally {
+    clearTimeout(timer!);
+  }
+}
+
 export function applyWorkspaceAgentSelection(
   settings: AgentSettings,
   workspace: typeof workspaces.$inferSelect,
