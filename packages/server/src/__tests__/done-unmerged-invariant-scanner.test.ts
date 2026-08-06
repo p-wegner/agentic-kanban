@@ -10,14 +10,44 @@
  * Regression guard for the #581 incident: a buggy reconciler marked issues Done
  * while master never advanced — this scanner detects and recovers that state.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import { randomUUID } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { eq } from "drizzle-orm";
 import { issues, preferences, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { scanDoneUnmergedWorkspaces, startDoneUnmergedScanner } from "../startup/done-unmerged-invariant-scanner.js";
 import { activeMerges } from "../services/workspace-internals.js";
 import type { BranchTipAncestryResult } from "@agentic-kanban/shared/lib/git-service";
+
+/**
+ * A REAL directory with a `.git` inside, instead of the literal REPO_PATH this suite
+ * used to seed (#264 pattern). `tryAcquireRepoLock` refuses a repoPath that has no
+ * `.git` and then POLLS, so every auto-merge test hit its 60s timeout — and the suite
+ * only ever looked green on a machine where an earlier run had leaked an actual
+ * `C:
+epo\.git`. On a clean checkout it hangs.
+ */
+const tempRepos: string[] = [];
+function makeTempRepo(): string {
+  const dir = mkdtempSync(join(tmpdir(), "done-unmerged-"));
+  mkdirSync(join(dir, ".git"), { recursive: true });
+  tempRepos.push(dir);
+  return dir;
+}
+
+// Module-level (not per-test) so every `describe` in this file sees a valid path —
+// the scanner reads it out of the seeded project row, and the repo's identity is
+// irrelevant to what these tests assert.
+const REPO_PATH = makeTempRepo();
+
+afterAll(() => {
+  while (tempRepos.length > 0) {
+    try { rmSync(tempRepos.pop()!, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+});
 
 type CheckAncestor = (repoPath: string, branch: string, baseBranch: string, worktreeDir?: string) => Promise<BranchTipAncestryResult>;
 type CountCommits = (repoPath: string, baseSha: string, branchSha: string) => Promise<number>;
@@ -72,7 +102,7 @@ async function seedWorkspace(
   await db.insert(projects).values({
     id: projectId,
     name: "Test",
-    repoPath: "/repo",
+    repoPath: REPO_PATH,
     repoName: "repo",
     defaultBranch: "master",
     createdAt: now,
@@ -142,7 +172,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const checkAncestor = makeCheckAncestor(false);
     const countCommits = makeCountCommits(3);
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db, checkAncestor, countCommits,
       detectConflicts: makeDetectConflicts(false),
       countBehind: makeCountBehind(0),
@@ -159,7 +189,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const { issueId } = await seedWorkspace(db);
     const checkAncestor = makeCheckAncestor(true);
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db, checkAncestor, countCommits: makeCountCommits(2),
       detectConflicts: makeDetectConflicts(false),
       countBehind: makeCountBehind(0),
@@ -182,7 +212,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const countCommits = makeCountCommits(1);
     const mergeGitBranch = makeMergeGitBranch();
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db, checkAncestor, countCommits,
       detectConflicts: makeDetectConflicts(false),
       countBehind: makeCountBehind(0),
@@ -191,7 +221,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
 
     expect(result.findings).toHaveLength(1);
     expect(result.autoMerged).toBe(1);
-    expect(mergeGitBranch).toHaveBeenCalledWith("/repo", "feature/ak-584-test", "master");
+    expect(mergeGitBranch).toHaveBeenCalledWith(REPO_PATH, "feature/ak-584-test", "master");
 
     // Workspace is stamped mergedAt (closed)
     const [ws] = await db.select({ mergedAt: workspaces.mergedAt, status: workspaces.status })
@@ -210,7 +240,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const checkAncestor = makeCheckAncestor(false);
     const mergeGitBranch = makeMergeGitBranch();
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db, checkAncestor, countCommits: makeCountCommits(0),
       detectConflicts: makeDetectConflicts(false),
       countBehind: makeCountBehind(0),
@@ -236,7 +266,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const checkAncestor = makeCheckAncestor(false);
     const mergeGitBranch = makeMergeGitBranch();
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db, checkAncestor, countCommits: makeCountCommits(2),
       detectConflicts: makeDetectConflicts(true),
       countBehind: makeCountBehind(1),
@@ -261,7 +291,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const { workspaceId } = await seedWorkspace(db);
     const mergeGitBranch = makeMergeGitBranch();
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db,
       checkAncestor: makeCheckAncestor(false),
       countCommits: makeCountCommits(3),
@@ -283,7 +313,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const now = new Date().toISOString();
     const projectId = randomUUID();
     const doneStatusId = randomUUID();
-    await db.insert(projects).values({ id: projectId, name: "P", repoPath: "/repo", repoName: "repo", defaultBranch: "master", createdAt: now, updatedAt: now });
+    await db.insert(projects).values({ id: projectId, name: "P", repoPath: REPO_PATH, repoName: "repo", defaultBranch: "master", createdAt: now, updatedAt: now });
     await db.insert(projectStatuses).values([
       { id: doneStatusId, projectId, name: "Done", sortOrder: 3, isDefault: false, createdAt: now },
     ]);
@@ -299,7 +329,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
 
     const mergeGitBranch = makeMergeGitBranch();
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db,
       checkAncestor: makeCheckAncestor(false),
       countCommits: makeCountCommits(1),
@@ -317,7 +347,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const { issueId } = await seedWorkspace(db, { isDirect: true });
     const checkAncestor = makeCheckAncestor(false);
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db, checkAncestor, countCommits: makeCountCommits(3),
       detectConflicts: makeDetectConflicts(false),
       countBehind: makeCountBehind(0),
@@ -337,7 +367,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const checkAncestor = makeCheckAncestor(false);
     const countCommits = makeCountCommits(1);
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db, checkAncestor, countCommits,
       detectConflicts: makeDetectConflicts(false),
       countBehind: makeCountBehind(0),
@@ -355,7 +385,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const issueId = randomUUID();
     const wsId = randomUUID();
 
-    await db.insert(projects).values({ id: projectId, name: "P", repoPath: "/repo", repoName: "repo", defaultBranch: "master", createdAt: now, updatedAt: now });
+    await db.insert(projects).values({ id: projectId, name: "P", repoPath: REPO_PATH, repoName: "repo", defaultBranch: "master", createdAt: now, updatedAt: now });
     await db.insert(projectStatuses).values([
       { id: inReviewStatusId, projectId, name: "In Review", sortOrder: 2, isDefault: false, createdAt: now },
     ]);
@@ -363,7 +393,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     await db.insert(workspaces).values({ id: wsId, issueId, branch: "feature/ws", workingDir: "/repo/.w", baseBranch: "master", isDirect: false, status: "idle", readyForMerge: false, mergedAt: null, provider: "claude", createdAt: now, updatedAt: now });
 
     const checkAncestor = makeCheckAncestor(false);
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db, checkAncestor, countCommits: makeCountCommits(5),
       detectConflicts: makeDetectConflicts(false),
       countBehind: makeCountBehind(0),
@@ -384,7 +414,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const wsId1 = randomUUID();
     const wsId2 = randomUUID();
 
-    await db.insert(projects).values({ id: projectId, name: "P", repoPath: "/repo", repoName: "repo", defaultBranch: "master", createdAt: now, updatedAt: now });
+    await db.insert(projects).values({ id: projectId, name: "P", repoPath: REPO_PATH, repoName: "repo", defaultBranch: "master", createdAt: now, updatedAt: now });
     await db.insert(projectStatuses).values([
       { id: inReviewStatusId, projectId, name: "In Review", sortOrder: 2, isDefault: false, createdAt: now },
       { id: doneStatusId, projectId, name: "Done", sortOrder: 3, isDefault: false, createdAt: now },
@@ -405,7 +435,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
       return { isAncestor: false as const, branchSha: `sha-${branch}`, baseSha: `sha-${base}` };
     });
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db, checkAncestor, countCommits: makeCountCommits(1),
       detectConflicts: makeDetectConflicts(false),
       countBehind: makeCountBehind(0),
@@ -420,7 +450,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     await seedWorkspace(db);
     const checkAncestor = makeCheckAncestor(false);
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db, checkAncestor, countCommits: makeCountCommits(5), enabled: false,
       detectConflicts: makeDetectConflicts(false),
       countBehind: makeCountBehind(0),
@@ -440,7 +470,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     await db.insert(preferences).values({ key: "done_unmerged_scanner_enabled", value: "false", updatedAt: now })
       .onConflictDoUpdate({ target: preferences.key, set: { value: "false", updatedAt: now } });
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db, checkAncestor, countCommits: makeCountCommits(5),
       detectConflicts: makeDetectConflicts(false),
       countBehind: makeCountBehind(0),
@@ -501,7 +531,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const wsAId = randomUUID();
     const wsBId = randomUUID();
 
-    await db.insert(projects).values({ id: projectId, name: "P", repoPath: "/repo", repoName: "repo", defaultBranch: "master", createdAt: now, updatedAt: now });
+    await db.insert(projects).values({ id: projectId, name: "P", repoPath: REPO_PATH, repoName: "repo", defaultBranch: "master", createdAt: now, updatedAt: now });
     await db.insert(projectStatuses).values([
       { id: inReviewStatusId, projectId, name: "In Review", sortOrder: 2, isDefault: false, createdAt: now },
       { id: doneStatusId, projectId, name: "Done", sortOrder: 3, isDefault: false, createdAt: now },
@@ -515,7 +545,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const checkAncestor = makeCheckAncestor(false);
     const countCommits = makeCountCommits(2);
 
-    const result = await scanDoneUnmergedWorkspaces({ database: db, checkAncestor, countCommits, reopenToInReview: true });
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true, database: db, checkAncestor, countCommits, reopenToInReview: true });
 
     // The issue must NOT be flagged or reopened — it has a genuinely merged workspace
     expect(result.findings).toHaveLength(0);
@@ -539,7 +569,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     await db.insert(projects).values({
       id: projectId,
       name: "P",
-      repoPath: "/repo",
+      repoPath: REPO_PATH,
       repoName: "repo",
       defaultBranch: "master",
       createdAt: now,
@@ -595,7 +625,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const countBehind = makeCountBehind(0);
     const mergeGitBranch = makeMergeGitBranch();
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db,
       checkAncestor,
       countCommits,
@@ -623,7 +653,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const checkAncestor = makeCheckAncestor(true);
     const countCommits = makeCountCommits(4);
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db,
       checkAncestor,
       countCommits,
@@ -650,7 +680,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const countCommits = makeCountCommits(0);
     const mergeGitBranch = makeMergeGitBranch();
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db,
       checkAncestor,
       countCommits,
@@ -682,7 +712,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     await db.insert(projects).values({
       id: projectId,
       name: "P",
-      repoPath: "/repo",
+      repoPath: REPO_PATH,
       repoName: "repo",
       defaultBranch: "master",
       createdAt: now,
@@ -736,7 +766,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const checkAncestor = makeCheckAncestor(false);
     const countCommits = makeCountCommits(2);
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db,
       checkAncestor,
       countCommits,
@@ -762,7 +792,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const checkAncestor = makeCheckAncestor(true);
     const countCommits = makeCountCommits(4);
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db,
       checkAncestor,
       countCommits,
@@ -797,7 +827,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
       return callCount === 1 ? 25 : 3;
     });
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db,
       checkAncestor,
       countCommits,
@@ -825,7 +855,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
       return callCount === 1 ? 5 : 2;
     });
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db,
       checkAncestor,
       countCommits,
@@ -841,7 +871,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
   it("is idempotent — after auto-merge the workspace has mergedAt and is no longer scanned", async () => {
     const { workspaceId } = await seedWorkspace(db);
 
-    const first = await scanDoneUnmergedWorkspaces({
+    const first = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db,
       checkAncestor: makeCheckAncestor(false),
       countCommits: makeCountCommits(2),
@@ -853,7 +883,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
 
     // Workspace now has mergedAt — second scan excludes it (WHERE mergedAt IS NULL)
     const secondMerge = makeMergeGitBranch();
-    const second = await scanDoneUnmergedWorkspaces({
+    const second = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db,
       checkAncestor: makeCheckAncestor(false),
       countCommits: makeCountCommits(2),
@@ -875,7 +905,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const now = new Date().toISOString();
     const projectId = randomUUID();
     const doneStatusId = randomUUID();
-    await db.insert(projects).values({ id: projectId, name: "P", repoPath: "/repo", repoName: "repo", defaultBranch: "master", createdAt: now, updatedAt: now });
+    await db.insert(projects).values({ id: projectId, name: "P", repoPath: REPO_PATH, repoName: "repo", defaultBranch: "master", createdAt: now, updatedAt: now });
     await db.insert(projectStatuses).values([
       { id: doneStatusId, projectId, name: "Done", sortOrder: 3, isDefault: false, createdAt: now },
     ]);
@@ -898,7 +928,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
       return "Merge branch 'feature/ws2'";
     });
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db,
       checkAncestor: makeCheckAncestor(false),
       countCommits: makeCountCommits(1),
@@ -935,7 +965,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     });
     const mergeGitBranch = makeMergeGitBranch();
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db, checkAncestor, countCommits,
       detectConflicts: makeDetectConflicts(false),
       countBehind: makeCountBehind(5),
@@ -970,7 +1000,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     });
     const mergeGitBranch = makeMergeGitBranch();
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db, checkAncestor, countCommits,
       detectConflicts: makeDetectConflicts(false),
       countBehind: makeCountBehind(3),
@@ -1002,7 +1032,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const countCommits = makeCountCommits(5); // would be non-zero but should never be called
     const mergeGitBranch = makeMergeGitBranch();
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db, checkAncestor, countCommits,
       detectConflicts: makeDetectConflicts(false),
       countBehind: makeCountBehind(0),
@@ -1044,7 +1074,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const countCommits = makeCountCommits(2);
     const mergeGitBranch = makeMergeGitBranch();
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db, checkAncestor, countCommits,
       detectConflicts: makeDetectConflicts(false),
       countBehind: makeCountBehind(0),
@@ -1074,7 +1104,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const countCommits = makeCountCommits(3);
     const mergeGitBranch = makeMergeGitBranch();
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db, checkAncestor, countCommits,
       detectConflicts: makeDetectConflicts(false),
       countBehind: makeCountBehind(0),
@@ -1102,7 +1132,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const countCommits = makeCountCommits(0);
     const mergeGitBranch = makeMergeGitBranch();
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db, checkAncestor, countCommits,
       detectConflicts: makeDetectConflicts(false),
       countBehind: makeCountBehind(0),
@@ -1136,7 +1166,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
       throw new Error("fatal: The branch 'feature/ak-584-test' is not found.");
     });
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db, checkAncestor, countCommits,
       detectConflicts: makeDetectConflicts(false),
       countBehind: makeCountBehind(2),
@@ -1169,7 +1199,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const now = new Date().toISOString();
     const projectId = randomUUID();
     const doneStatusId = randomUUID();
-    await db.insert(projects).values({ id: projectId, name: "P", repoPath: "/repo", repoName: "repo", defaultBranch: "master", createdAt: now, updatedAt: now });
+    await db.insert(projects).values({ id: projectId, name: "P", repoPath: REPO_PATH, repoName: "repo", defaultBranch: "master", createdAt: now, updatedAt: now });
     await db.insert(projectStatuses).values([
       { id: doneStatusId, projectId, name: "Done", sortOrder: 3, isDefault: false, createdAt: now },
     ]);
@@ -1230,7 +1260,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
 
     const mergeGitBranch = makeMergeGitBranch();
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db,
       checkAncestor: checkAncestor,
       countCommits: preciseCountCommits,
@@ -1274,7 +1304,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     });
     const mergeGitBranch = makeMergeGitBranch();
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db, checkAncestor, countCommits,
       detectConflicts: makeDetectConflicts(false),
       countBehind: makeCountBehind(658),
@@ -1302,7 +1332,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const now = new Date().toISOString();
     const projectId = randomUUID();
     const doneStatusId = randomUUID();
-    await db.insert(projects).values({ id: projectId, name: "P", repoPath: "/repo", repoName: "repo", defaultBranch: "master", createdAt: now, updatedAt: now });
+    await db.insert(projects).values({ id: projectId, name: "P", repoPath: REPO_PATH, repoName: "repo", defaultBranch: "master", createdAt: now, updatedAt: now });
     await db.insert(projectStatuses).values([
       { id: doneStatusId, projectId, name: "Done", sortOrder: 3, isDefault: false, createdAt: now },
     ]);
@@ -1380,7 +1410,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
 
     const mergeGitBranch = makeMergeGitBranch();
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db,
       checkAncestor,
       countCommits,
@@ -1419,7 +1449,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     });
     const mergeGitBranch = makeMergeGitBranch();
 
-    const result = await scanDoneUnmergedWorkspaces({
+    const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
       database: db, checkAncestor, countCommits,
       detectConflicts: makeDetectConflicts(false),
       // Auto-merge "behind" check also uses > (exclusive): behind=0 → well within limit
@@ -1451,16 +1481,16 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const mergeGitBranch = makeMergeGitBranch();
 
     // Simulate an in-flight merge holding the repo lock (same primitive the merge service uses).
-    activeMerges.set("/repo", {
+    activeMerges.set(REPO_PATH, {
       promise: new Promise(() => {}), // never settles — merge still in flight
       workspaceId: "ws-other-merge",
-      repoPath: "/repo",
+      repoPath: REPO_PATH,
       startedAt: new Date().toISOString(),
       startedAtMs: Date.now(), // fresh — NOT stale
     });
 
     try {
-      const result = await scanDoneUnmergedWorkspaces({
+      const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
         database: db,
         checkAncestor: makeCheckAncestor(false),
         countCommits: makeCountCommits(2),
@@ -1481,7 +1511,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
       expect(ws.mergedAt).toBeNull();
 
       // The holder's lock entry is left alone.
-      expect(activeMerges.get("/repo")?.workspaceId).toBe("ws-other-merge");
+      expect(activeMerges.get(REPO_PATH)?.workspaceId).toBe("ws-other-merge");
 
       // Issue stays Done
       const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
@@ -1500,12 +1530,12 @@ describe("scanDoneUnmergedWorkspaces", () => {
       // right after work()'s synchronous prefix, so observe from the first async slice
       // (where a real git merge lives).
       await Promise.resolve();
-      lockHeldDuringMerge = activeMerges.has("/repo");
+      lockHeldDuringMerge = activeMerges.has(REPO_PATH);
       return "Merge branch 'feature/ak-584-test'";
     });
 
     try {
-      const result = await scanDoneUnmergedWorkspaces({
+      const result = await scanDoneUnmergedWorkspaces({ pathExists: () => true,
         database: db,
         checkAncestor: makeCheckAncestor(false),
         countCommits: makeCountCommits(2),
@@ -1518,7 +1548,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
       // The git merge ran INSIDE the shared repo merge lock ...
       expect(lockHeldDuringMerge).toBe(true);
       // ... and the lock was released afterwards (also on failure — the primitive releases on settle).
-      expect(activeMerges.has("/repo")).toBe(false);
+      expect(activeMerges.has(REPO_PATH)).toBe(false);
 
       // Terminal stamp went through (via the workspace-status authority).
       const [ws] = await db.select({ mergedAt: workspaces.mergedAt, status: workspaces.status })

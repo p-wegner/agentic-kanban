@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { issues, preferences, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import {
@@ -32,6 +33,18 @@ const MAX_BEHIND_FOR_AUTO_MERGE = 20;
 const MAX_AUTO_MERGES_PER_CYCLE = 3;
 
 /**
+ * Max candidates allowed to reach the git-spawning phase per cycle (#277).
+ *
+ * Every such candidate costs several `git` spawns, and a spawn is synchronous
+ * CreateProcess work on the event-loop thread (~120ms measured on Windows). With a
+ * large Done backlog this scan issued hundreds per cycle and made the whole API
+ * unresponsive for tens of seconds — the request handlers were fine (3ms) but never
+ * got scheduled. Deferred candidates are re-picked next cycle; the `mergedAt` stamp
+ * makes progress monotonic, so bounding the batch converges instead of starving.
+ */
+const MAX_GIT_CANDIDATES_PER_CYCLE = 25;
+
+/**
  * If a branch is more than this many commits behind its base it is an ancient abandoned
  * workspace (observed: 60-658 behind in the #590 mass-reopen incident) — NOT a
  * recoverable silent-merge-loss candidate; skip it.
@@ -61,6 +74,13 @@ export interface DoneUnmergedScannerDeps {
    * not recoverable silent-merge-loss.
    */
   maxCommitsBehindBase?: number;
+  /**
+   * Injectable on-disk presence probe for a candidate's repo path (#277). Defaults to
+   * the real `existsSync`. Suites that drive fake git over synthetic repo paths
+   * (`/repo`, `/lead`) pass `() => true` so they keep testing the git-level semantics
+   * they are about instead of tripping the missing-repo short-circuit.
+   */
+  pathExists?: (path: string) => boolean;
   /**
    * Override the timer callback for testing. When provided, replaces the default tick
    * (which calls scanDoneUnmergedWorkspaces) so tests can verify the interval stops
@@ -99,6 +119,7 @@ function resolveScanDeps(deps: DoneUnmergedScannerDeps) {
     behindCounter: deps.countBehind ?? countBehindCommits,
     gitMerge: deps.mergeGitBranch ?? mergeBranch,
     maxBehind: deps.maxCommitsBehindBase ?? MAX_COMMITS_BEHIND_BASE,
+    pathExists: deps.pathExists ?? existsSync,
   };
 }
 
@@ -118,7 +139,7 @@ function resolveScanDeps(deps: DoneUnmergedScannerDeps) {
 export async function scanDoneUnmergedWorkspaces(
   deps: DoneUnmergedScannerDeps & { reopenToInReview?: boolean } = {},
 ): Promise<DoneUnmergedScanResult> {
-  const { database, ancestorCheck, commitCounter, conflictDetector, behindCounter, gitMerge, maxBehind } =
+  const { database, ancestorCheck, commitCounter, conflictDetector, behindCounter, gitMerge, maxBehind, pathExists } =
     resolveScanDeps(deps);
 
   const isEnabled = deps.enabled !== undefined
@@ -178,6 +199,8 @@ export async function scanDoneUnmergedWorkspaces(
 
   const findings: DoneUnmergedFinding[] = [];
   let autoMerged = 0;
+  // Number of candidates that have entered the git-spawning phase this cycle.
+  let gitBudgetUsed = 0;
   const now = new Date().toISOString();
   // Track which workspaces have already been attempted this cycle (idempotency guard).
   const attemptedWorkspaceIds = new Set<string>();
@@ -196,6 +219,19 @@ export async function scanDoneUnmergedWorkspaces(
       console.log(`[done-unmerged-scanner] skipping issue #${c.issueNumber ?? "?"} — has a merged workspace (not a silent-merge-loss)`);
       return null;
     }
+
+    // Guard #0 (#277): a repo that is no longer on disk can never be evaluated, and
+    // every git call against it is a ~120ms spawn that blocks the event loop to
+    // learn nothing. This scan re-ran the same doomed spawns every cycle for
+    // deleted fixture repos. A stat gets the same answer for free.
+    if (!pathExists(c.repoPath)) {
+      console.log(`[done-unmerged-scanner] skipping issue #${c.issueNumber ?? "?"} — repo path is gone: ${c.repoPath}`);
+      return null;
+    }
+
+    // Past this point the candidate costs real git spawns, so it draws on the
+    // per-cycle budget enforced by the caller.
+    gitBudgetUsed++;
 
     let result: Awaited<ReturnType<typeof checkBranchTipIsAncestor>>;
     try {
@@ -418,10 +454,31 @@ export async function scanDoneUnmergedWorkspaces(
     }
   }
 
+  // Per-cycle git budget (#277). Each evaluated candidate costs several git spawns
+  // (ancestry + up to two commit counts + a behind count + conflict detection), and
+  // every spawn is synchronous CreateProcess work on the event-loop thread. With a
+  // large Done backlog this loop alone made the API unresponsive for tens of
+  // seconds per cycle. Bounding it keeps a cycle's cost flat: the remainder is not
+  // dropped, it is picked up by the next cycle (the mergedAt stamp makes progress
+  // monotonic, so this converges rather than starving).
+  let deferred = 0;
   for (const c of candidates) {
+    // Only candidates that reach the git phase consume budget — the cheap DB/stat
+    // skips above are free, so a backlog of already-explained rows can never crowd
+    // out the real work.
+    if (gitBudgetUsed >= MAX_GIT_CANDIDATES_PER_CYCLE) {
+      deferred++;
+      continue;
+    }
     const finding = await evaluateCandidateForFinding(c);
     if (!finding) continue;
     await attemptForwardOnlyAutoMerge(c, finding);
+  }
+  if (deferred > 0) {
+    console.log(
+      `[done-unmerged-scanner] git budget reached (${MAX_GIT_CANDIDATES_PER_CYCLE} candidates); ` +
+      `${deferred} candidate(s) deferred to the next cycle`,
+    );
   }
 
   if (findings.length > 0) {

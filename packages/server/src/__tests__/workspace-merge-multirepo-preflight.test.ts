@@ -109,6 +109,8 @@ describe("resolveMergeState — multi-repo awareness (sibling-only work must pro
     const result = await resolveMergeState(ws, LEAD_PATH, "main", {
       gitService: git as unknown as GitService,
       database: db as unknown as Database,
+      // Synthetic repo paths: assert git-level semantics, not on-disk presence.
+      pathExists: () => true,
     });
     expect(result.kind).toBe("clean-ancestor");
   });
@@ -120,6 +122,8 @@ describe("resolveMergeState — multi-repo awareness (sibling-only work must pro
     const result = await resolveMergeState(ws, LEAD_PATH, "main", {
       gitService: git as unknown as GitService,
       database: db as unknown as Database,
+      // Synthetic repo paths: assert git-level semantics, not on-disk presence.
+      pathExists: () => true,
     });
     expect(result.kind).toBe("proceed");
   });
@@ -131,6 +135,8 @@ describe("resolveMergeState — multi-repo awareness (sibling-only work must pro
     const result = await resolveMergeState(ws, LEAD_PATH, "main", {
       gitService: git as unknown as GitService,
       database: db as unknown as Database,
+      // Synthetic repo paths: assert git-level semantics, not on-disk presence.
+      pathExists: () => true,
     });
     expect(result.kind).toBe("proceed");
   });
@@ -142,6 +148,8 @@ describe("resolveMergeState — multi-repo awareness (sibling-only work must pro
     const result = await resolveMergeState(ws, LEAD_PATH, "main", {
       gitService: git as unknown as GitService,
       database: db as unknown as Database,
+      // Synthetic repo paths: assert git-level semantics, not on-disk presence.
+      pathExists: () => true,
     });
     expect(result.kind).toBe("reconcile");
   });
@@ -153,6 +161,8 @@ describe("resolveMergeState — multi-repo awareness (sibling-only work must pro
     const result = await resolveMergeState(ws, LEAD_PATH, "main", {
       gitService: git as unknown as GitService,
       database: db as unknown as Database,
+      // Synthetic repo paths: assert git-level semantics, not on-disk presence.
+      pathExists: () => true,
     });
     expect(result.kind).toBe("clean-ancestor");
   });
@@ -164,6 +174,8 @@ describe("resolveMergeState — multi-repo awareness (sibling-only work must pro
     const result = await resolveMergeState(ws, LEAD_PATH, "main", {
       gitService: git as unknown as GitService,
       database: db as unknown as Database,
+      // Synthetic repo paths: assert git-level semantics, not on-disk presence.
+      pathExists: () => true,
     });
     expect(result.kind).toBe("clean-ancestor");
   });
@@ -181,7 +193,7 @@ describe("listPendingSiblingMerges / checkPendingSiblingMergeGuards", () => {
   it("lists only unstamped, existing, ahead-of-base sibling rows", async () => {
     await insertSibling();
     const git = makeGit({ siblingAhead: 2 });
-    const pending = await listPendingSiblingMerges(git as unknown as GitService, db as unknown as Database, workspaceId);
+    const pending = await listPendingSiblingMerges(git as unknown as GitService, db as unknown as Database, workspaceId, { pathExists: () => true });
     expect(pending).toHaveLength(1);
     expect(pending[0].repo.path).toBe(SIBLING_PATH);
     expect(pending[0].uniqueCommits).toBe(2);
@@ -191,7 +203,7 @@ describe("listPendingSiblingMerges / checkPendingSiblingMergeGuards", () => {
     await insertSibling();
     const git = makeGit({ siblingAhead: 2 });
     git.getUncommittedTrackedChanges = vi.fn(async () => ["file.ts"]);
-    const pending = await listPendingSiblingMerges(git as unknown as GitService, db as unknown as Database, workspaceId);
+    const pending = await listPendingSiblingMerges(git as unknown as GitService, db as unknown as Database, workspaceId, { pathExists: () => true });
     const failures = await checkPendingSiblingMergeGuards(git as unknown as GitService, pending);
     expect(failures).toHaveLength(1);
     expect(failures[0]).toMatch(/uncommitted/i);
@@ -200,8 +212,32 @@ describe("listPendingSiblingMerges / checkPendingSiblingMergeGuards", () => {
   it("guards pass for a clean, conflict-free pending sibling", async () => {
     await insertSibling();
     const git = makeGit({ siblingAhead: 1 });
-    const pending = await listPendingSiblingMerges(git as unknown as GitService, db as unknown as Database, workspaceId);
+    const pending = await listPendingSiblingMerges(git as unknown as GitService, db as unknown as Database, workspaceId, { pathExists: () => true });
     const failures = await checkPendingSiblingMergeGuards(git as unknown as GitService, pending);
     expect(failures).toEqual([]);
+  });
+
+  // #277: this scan runs for every merged workspace on every reconciler pass. When a
+  // sibling repo has been deleted, probing it with git costs a ~120ms process spawn on
+  // the event-loop thread and can only ever fail — and it was re-paid every cycle,
+  // which is what made the whole API unresponsive for tens of seconds at a time.
+  // The verdict must stay fail-closed (`unverifiable`), just without the spawn.
+  it("reports a missing sibling repo as unverifiable WITHOUT spawning git", async () => {
+    await insertSibling();
+    const git = makeGit({ siblingAhead: 2 });
+
+    const pending = await listPendingSiblingMerges(
+      git as unknown as GitService,
+      db as unknown as Database,
+      workspaceId,
+      { pathExists: () => false },
+    );
+
+    expect(pending).toHaveLength(1);
+    expect(pending[0].unverifiable).toBe(true);
+    expect(pending[0].unverifiableReason).toMatch(/does not exist/i);
+    // The whole point: no git process was created to learn what a stat already knew.
+    expect(git.revParse).not.toHaveBeenCalled();
+    expect(git.countUniqueCommits).not.toHaveBeenCalled();
   });
 });
