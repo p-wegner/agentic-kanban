@@ -176,8 +176,15 @@ export function createPluginViewsRuntime<P extends PluginWithManifest, Pr extend
   /** Installed plugin rows (raw, manifest still JSON — a broken one must not blank the panel). */
   listPluginRows: () => Promise<Array<{ id: string; pluginId: string; name: string; manifestJson: string }>>;
   parseManifest: (manifestJson: string) => PluginManifest;
+  /**
+   * Persistence hooks (#228) — this module stays database-free, so the PID bookkeeping that
+   * lets the NEXT server generation reap children orphaned by a tsx-watch restart is injected.
+   * Both are best-effort: a persistence failure must never fail a view start/stop.
+   */
+  persistViewProcess?: (values: { pluginRowId: string; viewId: string; projectId: string; pid: number; port: number; command: string }) => Promise<void>;
+  dropViewProcess?: (pluginRowId: string, viewId: string, projectId: string) => Promise<void>;
 }) {
-  const { requirePlugin, requireProject, resolveOutputRepoPath, enabledSlugsByProject, listPluginRows, parseManifest } = deps;
+  const { requirePlugin, requireProject, resolveOutputRepoPath, enabledSlugsByProject, listPluginRows, parseManifest, persistViewProcess, dropViewProcess } = deps;
 
   async function startView(pluginRowId: string, viewId: string, projectId: string): Promise<PluginViewStartResult> {
     // Serialize per view BEFORE the first await — see `startingViews` (#251).
@@ -239,6 +246,7 @@ export function createPluginViewsRuntime<P extends PluginWithManifest, Pr extend
     child.on("exit", (code) => {
       const entry = viewChildren.get(key);
       if (entry?.child === child) viewChildren.delete(key);
+      void dropViewProcess?.(pluginRowId, viewId, projectId).catch(() => {});
       if (code !== 0 && code !== null) {
         console.warn(`[plugins] view ${plugin.pluginId}:${viewId} exited with code ${code}${stderrTail ? `: ${stderrTail.slice(-500)}` : ""}`);
       }
@@ -253,6 +261,15 @@ export function createPluginViewsRuntime<P extends PluginWithManifest, Pr extend
       viewId,
       projectId,
     });
+    // Persisted BEFORE the readiness wait so a restart during that window still finds the row —
+    // it is what the next server generation's startup reap reads (#228).
+    if (child.pid && persistViewProcess) {
+      try {
+        await persistViewProcess({ pluginRowId, viewId, projectId, pid: child.pid, port, command });
+      } catch (err) {
+        console.warn(`[plugins] failed to persist view server PID for ${plugin.pluginId}:${viewId} (non-fatal):`, err instanceof Error ? err.message : String(err));
+      }
+    }
     // Wait for the server to actually LISTEN before reporting the URL as usable (#252). Bounded
     // and non-fatal — the child stays supervised either way, and `ready: false` tells the caller
     // to poll instead of framing a socket that is not accepting connections yet.
@@ -271,6 +288,7 @@ export function createPluginViewsRuntime<P extends PluginWithManifest, Pr extend
     if (!entry) return { stopped: false };
     killChild(entry);
     viewChildren.delete(key);
+    await dropViewProcess?.(pluginRowId, viewId, projectId).catch(() => {});
     return { stopped: true };
   }
 

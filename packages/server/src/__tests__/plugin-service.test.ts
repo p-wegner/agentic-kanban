@@ -11,6 +11,7 @@ import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createPluginService, PluginError, stopAllPluginViews } from "../services/plugin.service.js";
 import type { PluginSkillRunProgress } from "../services/plugin.service.js";
 import type { Database } from "../db/index.js";
+import { reapOrphanedPluginViewProcesses } from "../startup/startup-tasks.js";
 
 /**
  * Plugin service integration tests against real temp dirs: a temp git repo as
@@ -626,6 +627,59 @@ describe("plugin.service", () => {
     const after = await service.getViewStatus(plugin.id, "coverage", projectId);
     expect(after.running).toBe(false);
   });
+
+  it("startView persists the child's PID, stopView drops it (#228)", async () => {
+    const pluginDir = makePluginDir();
+    writeFileSync(
+      join(pluginDir, "serve.mjs"),
+      "import http from 'node:http'; http.createServer((req, res) => res.end('ok')).listen(process.env.PORT, '127.0.0.1');",
+    );
+    const repo = makeProjectRepo();
+    const plugin = await service.installPlugin({ source: pluginDir });
+    const projectId = await insertProject(db, repo);
+
+    const started = await service.startView(plugin.id, "coverage", projectId);
+    expect(started.pid).toBeGreaterThan(0);
+
+    const rows = await db.select().from(schema.pluginViewProcesses);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ pluginRowId: plugin.id, viewId: "coverage", projectId, pid: started.pid });
+
+    await service.stopView(plugin.id, "coverage", projectId);
+    expect(await db.select().from(schema.pluginViewProcesses)).toHaveLength(0);
+  });
+
+  it("reapOrphanedPluginViewProcesses kills a view server left behind by a previous server generation and drops its record (#228)", async () => {
+    // Reproduces the bug: a backend restart (tsx watch) leaves the previously-spawned
+    // view server running with nothing left in-process to reap it. The only surviving
+    // record is the DB row `startView` persisted at spawn time — this is what the next
+    // server generation's startup reconciliation reads.
+    const pluginDir = makePluginDir();
+    writeFileSync(
+      join(pluginDir, "serve.mjs"),
+      "import http from 'node:http'; http.createServer((req, res) => res.end('ok')).listen(process.env.PORT, '127.0.0.1');",
+    );
+    const repo = makeProjectRepo();
+    const plugin = await service.installPlugin({ source: pluginDir });
+    const projectId = await insertProject(db, repo);
+
+    const started = await service.startView(plugin.id, "coverage", projectId);
+    const pid = started.pid;
+    expect(pid).toBeGreaterThan(0);
+    // Confirm the process is really alive before reaping it.
+    expect(() => process.kill(pid as number, 0)).not.toThrow();
+
+    // Simulate the fresh server generation's startup sweep — it never called
+    // stopView, it only has the persisted PID row to go on.
+    await reapOrphanedPluginViewProcesses(db as unknown as Database);
+
+    expect(await db.select().from(schema.pluginViewProcesses)).toHaveLength(0);
+    await vi.waitFor(() => {
+      expect(() => process.kill(pid as number, 0)).toThrow();
+    });
+    // The command-line cross-check enumerates all OS processes (Get-CimInstance on
+    // Windows), which routinely takes longer than vitest's 5s default.
+  }, 30000);
 
   /** Child server processes can take a moment to bind under load; poll instead of asserting on the first check. */
   async function waitForHealthy(pluginRowId: string, viewId: string, projectId: string) {

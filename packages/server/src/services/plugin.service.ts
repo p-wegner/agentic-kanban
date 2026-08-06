@@ -98,6 +98,11 @@ import {
   type PluginMarketplaceEntry,
   type InstalledPluginRow,
 } from "./plugin-marketplace.js";
+import {
+  upsertPluginViewProcess,
+  deletePluginViewProcess,
+  deletePluginViewProcessesForPlugin,
+} from "../repositories/plugin-view-processes.repository.js";
 
 // Re-exported so existing importers keep working after the split. `stopAllPluginViews` is the
 // shutdown handler's entry point (`startup/process-handlers.ts`) and several tests import it from
@@ -166,6 +171,9 @@ export function createPluginService(deps: {
     enabledSlugsByProject,
     listPluginRows: () => listPluginRows(database),
     parseManifest: parsePluginManifest,
+    // PID bookkeeping for the startup reap of orphaned view servers (#228).
+    persistViewProcess: (values) => upsertPluginViewProcess(values, database),
+    dropViewProcess: (pluginRowId, viewId, projectId) => deletePluginViewProcess(pluginRowId, viewId, projectId, database),
   });
 
   async function requirePlugin(id: string): Promise<PluginRow & { manifest: PluginManifest }> {
@@ -305,6 +313,7 @@ export function createPluginService(deps: {
     }
 
     const viewsStopped = headChanged ? stopPluginViews(row.id) : 0;
+    if (headChanged) await deletePluginViewProcessesForPlugin(row.id, undefined, database);
 
     const updated = await upsertPluginRow(
       {
@@ -367,6 +376,7 @@ export function createPluginService(deps: {
     const row = await getPluginRowById(id, database);
     if (!row) throw new PluginError("Plugin not found", "NOT_FOUND");
     stopPluginViews(id);
+    await deletePluginViewProcessesForPlugin(id, undefined, database);
     // Disable everywhere: flip every plugin_enabled_<slug>_* pref to "false" via the
     // checked write (skill junctions/scaffolds stay — the row is gone, the files inert).
     const prefs = await listPluginEnabledPreferences(database);
@@ -503,6 +513,7 @@ export function createPluginService(deps: {
 
     // Stop this plugin's serve processes for the project.
     stopPluginViews(pluginRowId, projectId);
+    await deletePluginViewProcessesForPlugin(pluginRowId, projectId, database);
 
     // Remove skill JUNCTIONS only — a path that is a real directory (copy fallback
     // or a pre-existing project skill) is NEVER deleted.

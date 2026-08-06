@@ -41,7 +41,7 @@ export { testRuns, flakyTestPins } from "./test-runs.js";
 export { boardHealthEvents, boardHealthEventsRelations } from "./board-health-events.js";
 export { qualityMetrics } from "./quality-metrics.js";
 export { workers } from "./workers.js";
-export { plugins } from "./plugins.js";
+export { plugins, pluginViewProcesses } from "./plugins.js";
 export { milestones, milestonesRelations } from "./milestones.js";
 export { issueTimeEntries, issueTimeEntriesRelations } from "./issue-time-entries.js";
 export { drives, drivesRelations, DRIVE_STATUSES } from "./drives.js";
