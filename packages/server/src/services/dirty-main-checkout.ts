@@ -2,7 +2,26 @@ import { existsSync } from "node:fs";
 import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
-import { getAllProjects } from "../repositories/project.repository.js";
+import { getAllProjects, setProjectArchived } from "../repositories/project.repository.js";
+
+/**
+ * After this many CONSECUTIVE missing-repo-path detections a project is auto-archived (#271).
+ * The warning used to name the fix ("Unregister the project or fix its repoPath") and then
+ * nothing performed it, so the monitor re-discovered the same dead path every cycle forever —
+ * scanning + spawning git for repos that cannot make progress, concurrently with real merges.
+ * Archiving removes the project from every default project listing (and thus from monitor
+ * scheduling) while staying fully reversible: fix the path, unarchive, done.
+ *
+ * In-memory on purpose: a restart resets the count, which only delays the archive by a few
+ * scan cycles. A repo that comes back resets its count immediately.
+ */
+const MISSING_REPO_ARCHIVE_THRESHOLD = 3;
+const consecutiveMissingScans = new Map<string, number>();
+
+/** Test seam. */
+export function resetMissingRepoScanCounts(): void {
+  consecutiveMissingScans.clear();
+}
 
 const SOURCE_PATHSPECS = [
   ":(glob)packages/**/*.ts",
@@ -42,6 +61,31 @@ export async function scanDirtyMainCheckouts(database: Database = db): Promise<D
     // stale registration) surfaces as `spawn git ENOENT` from a missing cwd — repeatedly, every
     // cycle, forever. Skip the spawn entirely and surface it as a warning instead.
     if (!existsSync(project.repoPath)) {
+      // An archived project with a dead path is already resolved — no warning churn (#271).
+      if (project.archivedAt) continue;
+      const misses = (consecutiveMissingScans.get(project.id) ?? 0) + 1;
+      consecutiveMissingScans.set(project.id, misses);
+      if (misses >= MISSING_REPO_ARCHIVE_THRESHOLD) {
+        try {
+          await setProjectArchived(project.id, true, database);
+          consecutiveMissingScans.delete(project.id);
+          console.warn(
+            `[dirty-main-checkout] auto-archived project "${project.name}" (${project.id}) — repoPath missing for ${MISSING_REPO_ARCHIVE_THRESHOLD} consecutive scans: ${project.repoPath}. Unarchive it after fixing the path.`,
+          );
+          warnings.push({
+            projectId: project.id,
+            projectName: project.name,
+            repoPath: project.repoPath,
+            detectedAt,
+            fileCount: 0,
+            files: [],
+            message: `Repo path missing for ${MISSING_REPO_ARCHIVE_THRESHOLD} consecutive scans — project auto-archived (#271). Unarchive it after fixing the path.`,
+          });
+        } catch (err) {
+          console.warn(`[dirty-main-checkout] failed to auto-archive project ${project.id} (non-fatal):`, err instanceof Error ? err.message : String(err));
+        }
+        continue;
+      }
       warnings.push({
         projectId: project.id,
         projectName: project.name,
@@ -49,10 +93,11 @@ export async function scanDirtyMainCheckouts(database: Database = db): Promise<D
         detectedAt,
         fileCount: 0,
         files: [],
-        message: `Repo path no longer exists on disk — skipping dirty-checkout scan. Unregister the project or fix its repoPath.`,
+        message: `Repo path no longer exists on disk — skipping dirty-checkout scan (${misses}/${MISSING_REPO_ARCHIVE_THRESHOLD} before auto-archive). Unregister the project or fix its repoPath.`,
       });
       continue;
     }
+    consecutiveMissingScans.delete(project.id);
     let files: string[];
     try {
       files = await getDirtyTrackedSourceFiles(project.repoPath);
