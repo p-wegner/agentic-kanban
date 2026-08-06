@@ -17,10 +17,8 @@ const VIEW_ROUTE_PATHS: Record<ViewMode, string> = {
   insights: "/insights",
   swimlane: "/swimlane",
   "flaky-tests": "/flaky-tests",
-  "monitor-history": "/monitor-history",
-  "health-events": "/health-events",
+  runtime: "/runtime",
   drive: "/drive",
-  digest: "/digest",
   strategy: "/strategy",
   focus: "/focus",
   runbooks: "/runbooks",
@@ -29,8 +27,6 @@ const VIEW_ROUTE_PATHS: Record<ViewMode, string> = {
   momentum: "/momentum",
   fireworks: "/fireworks",
   activity: "/activity",
-  "cross-repo-activity": "/cross-repo-activity",
-  "agent-flight-recorder": "/agent-flight-recorder",
   "stale-work": "/stale-work",
   analytics: "/analytics",
   calendar: "/calendar",
@@ -50,7 +46,7 @@ const ROUTE_ALIASES: Record<string, ViewMode> = {
 };
 
 /**
- * Legacy routes of views absorbed into tabbed containers (#234): the old
+ * Legacy routes of views absorbed into tabbed containers (#234/#235): the old
  * path keeps working as a deep link — it resolves to the container view AND
  * names the tab to preselect (useBoardPageRoute forwards it to viewTabStore).
  */
@@ -62,6 +58,11 @@ const LEGACY_TAB_ROUTES: Record<string, { view: ViewMode; tab: string }> = {
   "/provider-cost": { view: "analytics", tab: "provider-cost" },
   "/agent-throughput": { view: "analytics", tab: "agent-throughput" },
   "/scorecard-distribution": { view: "analytics", tab: "scorecard-distribution" },
+  "/digest": { view: "activity", tab: "digest" },
+  "/cross-repo-activity": { view: "activity", tab: "cross-repo" },
+  "/agent-flight-recorder": { view: "runtime", tab: "flight-recorder" },
+  "/monitor-history": { view: "runtime", tab: "monitor-cycles" },
+  "/health-events": { view: "runtime", tab: "health-events" },
 };
 
 const ROUTE_TO_VIEW: Record<string, ViewMode> = {

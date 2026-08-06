@@ -4,7 +4,14 @@ import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { apiPost } from "../lib/api.js";
 import { registerAction } from "../lib/actions.js";
 import { SHORTCUT_TO_VIEW, VIEW_REGISTRY, type ViewMode } from "../lib/viewRegistry.js";
-import { ANALYTICS_TABS, ANALYTICS_VIEW_ID } from "../lib/viewTabs.js";
+import {
+  ACTIVITY_TABS,
+  ACTIVITY_VIEW_ID,
+  ANALYTICS_TABS,
+  ANALYTICS_VIEW_ID,
+  RUNTIME_TABS,
+  RUNTIME_VIEW_ID,
+} from "../lib/viewTabs.js";
 import { viewTabActions } from "../stores/viewTabStore.js";
 import { computeNavTarget, type NavKey } from "../lib/boardKeyboardNav.js";
 import { showToast } from "../lib/toast.js";
@@ -329,20 +336,33 @@ export function useBoardKeyboardShortcuts(
       }));
     }
 
-    // Absorbed analytics charts (#234): each former single-chart view stays one
-    // palette hit away — the action opens the Analytics container at its tab.
-    for (const tab of ANALYTICS_TABS) {
-      unregisters.push(registerAction({
-        id: `view-analytics-${tab.id}`,
-        label: `Analytics: ${tab.paletteLabel}`,
-        description: tab.paletteDescription,
-        icon: tab.paletteIcon,
-        category: "navigation",
-        handler: () => {
-          viewTabActions.request(ANALYTICS_VIEW_ID, tab.id);
-          actions.handleViewModeChange("analytics");
-        },
-      }));
+    // Absorbed container tabs (#234/#235): each former single view stays one
+    // palette hit away — the action opens its container view at the right tab.
+    // Cross-repo activity is only offered on multi-repo projects (#235).
+    const containerTabActions: { viewId: string; view: ViewMode; prefix: string; tabs: typeof ANALYTICS_TABS }[] = [
+      { viewId: ANALYTICS_VIEW_ID, view: "analytics", prefix: "Analytics", tabs: ANALYTICS_TABS },
+      {
+        viewId: ACTIVITY_VIEW_ID,
+        view: "activity",
+        prefix: "Activity Feed",
+        tabs: state.hasAdditionalRepos ? ACTIVITY_TABS : ACTIVITY_TABS.filter((t) => t.id !== "cross-repo"),
+      },
+      { viewId: RUNTIME_VIEW_ID, view: "runtime", prefix: "Runtime Feed", tabs: RUNTIME_TABS },
+    ];
+    for (const { viewId, view, prefix, tabs } of containerTabActions) {
+      for (const tab of tabs) {
+        unregisters.push(registerAction({
+          id: `view-${viewId}-${tab.id}`,
+          label: `${prefix}: ${tab.paletteLabel}`,
+          description: tab.paletteDescription,
+          icon: tab.paletteIcon,
+          category: "navigation",
+          handler: () => {
+            viewTabActions.request(viewId, tab.id);
+            actions.handleViewModeChange(view);
+          },
+        }));
+      }
     }
 
     for (const col of state.columns) {

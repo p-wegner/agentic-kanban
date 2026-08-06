@@ -165,3 +165,49 @@ contract that can't name the board, is how this becomes a stalled epic.
   until usage data exists.
 - **Adding a plugin view kind that renders React in-bundle.** It would solve the rewrite
   cost by re-importing exactly the coupling the iframe boundary exists to prevent.
+
+## Decision (#235): which two event feeds are first-class
+
+Executed 2026-08-06 as step 3 of the sequence above (step 2, the Analytics
+consolidation, landed as #234).
+
+**The two survivors, split by DOMAIN rather than by table:**
+
+| First-class view | Registry id | Tabs (former views) |
+|---|---|---|
+| **Activity** (board feed) | `activity` | Activity (status changes/merges) · Digest (`digest`) · Cross-Repo (`cross-repo-activity`, offered only on multi-repo projects) |
+| **Runtime** (operational feed) | `runtime` (new id) | Flight Recorder (`agent-flight-recorder`) · Monitor Cycles (`monitor-history`) · Health Events (`health-events`) |
+
+**Rationale.** The six feeds answered two different questions: "what happened
+to the BOARD" (issues moved, merged, landed across repos — activity, digest,
+cross-repo) and "what is the MACHINERY doing" (agent runtime events, monitor
+cycle actions, health notifications — flight-recorder, monitor-history,
+health-events). Users arrive with one of those two questions, so that is the
+split — not endpoint kinship. Notably `monitor-history` and `health-events`
+read the same endpoint (`/api/projects/:id/board-health-events`) and were the
+most redundant pair; they become adjacent tabs of the Runtime feed. The
+Runtime feed keeps `monitor-history`'s former primary toolbar slot (one
+operational feed stays one click away); Activity stays in the More overflow.
+
+**No information is lost:**
+- Every prior feed is a tab, preselectable via command-palette actions
+  ("Activity Feed: Digest", "Runtime Feed: Health Events", …) and deep-linkable
+  via `?tab=`. Legacy routes (`/digest`, `/monitor-history`,
+  `/health-events`, `/agent-flight-recorder`, `/cross-repo-activity`) resolve
+  to the surviving view with the right tab preselected.
+- `cross-repo-activity` is gated on repo count (`useProjectRepos.isMultiRepo`):
+  the tab and its palette action are absent on single-repo projects, fixing the
+  "permanently occupies a slot while showing nothing" complaint from group D.
+- The digest's former `d` single-key shortcut is **freed** (not reassigned) —
+  reclaiming letters is the point of this epic; digest remains reachable via
+  palette and `?tab=digest`.
+
+Registry effect: 5 entries removed (`digest`, `cross-repo-activity`,
+`monitor-history`, `health-events`, `agent-flight-recorder`), 1 added
+(`runtime`) → 35 → 31 views, exactly 2 event-feed entries remaining.
+
+Rejected alternative: keeping `agent-flight-recorder` and `activity` as the two
+ids with monitor/health folded into flight-recorder's own filter bar. Rejected
+because monitor cycles and health events are lists with their own drill-downs
+and category filters, not flight-recorder severities — forcing them into one
+stream would rewrite three components; tabs re-parent them unchanged.

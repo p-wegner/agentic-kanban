@@ -29,18 +29,28 @@ describe("VIEW_REGISTRY", () => {
     // 41 → 35 (#234): the seven single-chart views (throughput, lead-time,
     // burndown, provider-mix, provider-cost, agent-throughput,
     // scorecard-distribution) were absorbed into the tabbed "analytics" view.
-    expect(VIEW_REGISTRY).toHaveLength(35);
+    // 35 → 31 (#235): the six event feeds collapsed to two — "activity"
+    // (+ digest & cross-repo tabs) and "runtime" (flight-recorder,
+    // monitor-cycles, health-events tabs).
+    expect(VIEW_REGISTRY).toHaveLength(31);
   });
 
   it("preserves the existing view ids", () => {
     const expected: ViewMode[] = [
       "kanban", "backlog", "graph", "table", "agents", "timeline", "metrics",
-      "quality-metrics", "digest", "strategy", "focus", "butler", "workflows", "workflow-analytics", "insights", "swimlane", "flaky-tests",
-      "monitor-history", "health-events", "drive", "runbooks", "capacity", "constellation", "momentum", "activity", "stale-work",
+      "quality-metrics", "strategy", "focus", "butler", "workflows", "workflow-analytics", "insights", "swimlane", "flaky-tests",
+      "runtime", "drive", "runbooks", "capacity", "constellation", "momentum", "activity", "stale-work",
       "analytics", "fireworks", "calendar",
-      "crime-scene", "milestones", "cross-repo-activity", "agent-flight-recorder", "garden", "plugin-views",
+      "crime-scene", "milestones", "garden", "plugin-views",
     ];
     expect(VIEW_IDS.slice().sort()).toEqual(expected.slice().sort());
+  });
+
+  it("keeps at most two event-feed registry entries (#235)", () => {
+    const feedIds = VIEW_IDS.filter((id) =>
+      ["activity", "runtime", "digest", "cross-repo-activity", "monitor-history", "health-events", "agent-flight-recorder"].includes(id),
+    );
+    expect(feedIds.sort()).toEqual(["activity", "runtime"]);
   });
 
   it("preserves the existing view shortcuts (b/g/t/f/l/m/i/p/u/h, etc.)", () => {
@@ -57,7 +67,6 @@ describe("VIEW_REGISTRY", () => {
     expect(byId.swimlane).toBe("p");
     expect(byId.insights).toBe("n");
     expect(byId["flaky-tests"]).toBe("k");
-    expect(byId.digest).toBe("d");
     expect(byId.strategy).toBe("z");
     expect(byId.focus).toBe("o");
     expect(byId.workflows).toBe("u");
@@ -84,16 +93,17 @@ describe("VIEW_REGISTRY", () => {
     for (const id of secondaryIds) expect(primaryIds.has(id)).toBe(false);
 
     // Primary views (no `group` or group === "primary") stay one click away.
+    // "runtime" (#235) inherited monitor-history's former primary slot.
     expect([...primaryIds].sort()).toEqual(
-      ["agents", "backlog", "butler", "calendar", "drive", "graph", "insights", "kanban", "monitor-history", "plugin-views", "strategy", "table", "timeline", "workflows"].sort(),
+      ["agents", "backlog", "butler", "calendar", "drive", "graph", "insights", "kanban", "runtime", "plugin-views", "strategy", "table", "timeline", "workflows"].sort(),
     );
     // Analytics/secondary views live behind the "More" overflow dropdown.
     expect([...secondaryIds].sort()).toEqual(
       [
-        "digest", "flaky-tests", "focus", "metrics", "quality-metrics", "swimlane", "workflow-analytics",
-        "health-events", "runbooks", "capacity", "constellation", "momentum", "activity", "stale-work",
+        "flaky-tests", "focus", "metrics", "quality-metrics", "swimlane", "workflow-analytics",
+        "runbooks", "capacity", "constellation", "momentum", "activity", "stale-work",
         "analytics", "fireworks",
-        "crime-scene", "milestones", "cross-repo-activity", "agent-flight-recorder", "garden",
+        "crime-scene", "milestones", "garden",
       ].sort(),
     );
   });
