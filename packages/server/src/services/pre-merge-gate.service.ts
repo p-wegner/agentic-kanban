@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
@@ -47,6 +47,61 @@ async function resolveVerifyTimeoutMs(projectId: string, database: Database): Pr
  * stdout+stderr of a failed verify run to decide whether a one-shot install+retry is
  * worth attempting before withholding the merge.
  */
+/**
+ * Lines in a verify run's output that carry ZERO diagnostic value but reliably occupy the
+ * FRONT of the stream (#221): `git init` default-branch hints and CRLF warnings emitted by
+ * test fixtures. When the stored gate error was a head slice, these consumed the entire
+ * budget and the actual test failure was never visible.
+ */
+const BENIGN_GIT_NOISE = /^\s*(hint:|warning: in the working copy of .+ (LF|CRLF) will be replaced|warning: (LF|CRLF) will be replaced)/i;
+
+/** How many chars of (noise-filtered) TAIL to keep in the stored gate message (#221). */
+const VERIFY_FAILURE_TAIL_CHARS = 1500;
+
+/**
+ * Build the human-facing summary of a failed verify run (#221): filter known-benign git
+ * noise, keep the TAIL (vitest prints failures and its summary at the END), and persist the
+ * FULL untruncated output to a log file whose path the message references — so the gate is
+ * diagnosable without re-running a 20+ minute suite.
+ */
+export function summarizeVerifyFailure(
+  stdout: string,
+  stderr: string,
+  workspaceId: string,
+  writeLog: (content: string) => string | null = (content) => {
+    try {
+      // Deterministic per workspace (no timestamp): the latest failure overwrites, and the
+      // resulting message stays STABLE so recordGateFailureNote's dedup-by-gateMessage (#170)
+      // still recognises an unchanged failure repeating across orchestrator ticks.
+      const path = join(tmpdir(), `kanban-verify-${workspaceId}.log`);
+      writeFileSync(path, content, "utf8");
+      return path;
+    } catch {
+      return null;
+    }
+  },
+): string {
+  const combined = [stderr, stdout].filter(Boolean).join("\n");
+  let logPath: string | null = null;
+  if (combined) {
+    try {
+      logPath = writeLog(combined);
+    } catch {
+      logPath = null;
+    }
+  }
+  const filtered = combined
+    .split(/\r?\n/)
+    .filter((line) => !BENIGN_GIT_NOISE.test(line))
+    .join("\n")
+    .trim();
+  const body = filtered || combined.trim();
+  const tail = body.length > VERIFY_FAILURE_TAIL_CHARS
+    ? `…${body.slice(-VERIFY_FAILURE_TAIL_CHARS)}`
+    : body;
+  return `${tail}${logPath ? `\n[full verify log: ${logPath}]` : ""}`;
+}
+
 const MISSING_DEPS_SIGNATURE =
   /cannot find module|could not resolve|err_module_not_found|module_not_found|unresolved_import|enoent.*node_modules|command not found|is not recognized as an internal or external command/i;
 
@@ -229,7 +284,7 @@ export async function runPreMergeGate(
           passed: false,
           skipped: false,
           stage: "verify",
-          message: `verify_script failed (exit ${result.exitCode})${suffix}: ${(result.stderr || result.stdout || "").slice(0, 300)}`,
+          message: `verify_script failed (exit ${result.exitCode})${suffix}: ${summarizeVerifyFailure(result.stdout || "", result.stderr || "", workspace.id)}`,
         };
       }
     }

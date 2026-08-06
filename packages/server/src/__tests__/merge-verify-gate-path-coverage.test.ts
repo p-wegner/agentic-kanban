@@ -13,8 +13,11 @@
 // prevalidation, before executeWorkspaceMerge) and WITHHOLDS the merge on failure. The two manual-path
 // tests below — which assert that gated behaviour — were `it.fails(...)` known-gap markers; now that the
 // path gates, they are flipped to `it(...)`.
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { randomUUID } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
@@ -80,6 +83,27 @@ function makeGit(overrides: Partial<Record<string, (...a: unknown[]) => unknown>
   };
 }
 
+/**
+ * A REAL repo directory (#264 family): the merge path's `tryAcquireRepoLock` refuses a
+ * repoPath with no `.git` and then POLLS, so every test that drives `mergeWorkspace`
+ * against the old `"/repo"` literal burned its full 60s timeout. The suite only ever
+ * passed because an earlier run had leaked an actual `C:\repo\.git` onto this machine —
+ * the same latent hang merge-queue.service.test.ts had.
+ */
+const tempRepos: string[] = [];
+function makeRepoPath(): string {
+  const dir = mkdtempSync(join(tmpdir(), "gate-path-"));
+  mkdirSync(join(dir, ".git"), { recursive: true });
+  tempRepos.push(dir);
+  return dir;
+}
+
+afterEach(() => {
+  while (tempRepos.length) {
+    try { rmSync(tempRepos.pop()!, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+});
+
 async function seedApprovedWorkspace(db: ReturnType<typeof createTestDb>["db"]) {
   const now = new Date().toISOString();
   const projectId = randomUUID();
@@ -89,7 +113,7 @@ async function seedApprovedWorkspace(db: ReturnType<typeof createTestDb>["db"]) 
   const workspaceId = randomUUID();
 
   await db.insert(projects).values({
-    id: projectId, name: "Test", repoPath: "/repo", repoName: "repo",
+    id: projectId, name: "Test", repoPath: makeRepoPath(), repoName: "repo",
     defaultBranch: "master", createdAt: now, updatedAt: now,
   });
   await db.insert(projectStatuses).values([
