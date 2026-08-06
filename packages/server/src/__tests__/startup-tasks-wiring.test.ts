@@ -85,7 +85,12 @@ vi.mock("../startup/merge-workflow.js", () => ({
   reconcileStrandedSiblingMerges: vi.fn(async () => ({ landed: 0, preserved: 0 })),
 }));
 
-import { runStartupTasks, runCriticalStartupTasks, runDeferredStartupTasks } from "../startup/startup-tasks.js";
+import {
+  runStartupTasks,
+  runCriticalStartupTasks,
+  runGatedDeferredStartupTasks,
+  runStartupAuditTasks,
+} from "../startup/startup-tasks.js";
 import { reconcileStrandedSiblingMerges } from "../startup/merge-workflow.js";
 import { reapTerminalWorkspaces } from "../startup/terminal-workspace-reaper.js";
 import { reconcileAncestorBranchWorkspaces } from "../startup/ancestor-branch-reconciler.js";
@@ -140,13 +145,30 @@ describe("startup phase split (#282)", () => {
     expect(vi.mocked(reapTerminalWorkspaces)).not.toHaveBeenCalled();
   });
 
-  it("runs every deferred reconciler in the deferred phase, without re-migrating", async () => {
-    await runDeferredStartupTasks();
+  it("runs every reconciler in the audit tail, without re-migrating", async () => {
+    await runStartupAuditTasks();
 
     expect(vi.mocked(reconcileStrandedSiblingMerges)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(reconcileAncestorBranchWorkspaces)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(scanDoneUnmergedWorkspaces)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(reapTerminalWorkspaces)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(applyMigrations)).not.toHaveBeenCalled();
+  });
+
+  it("keeps the WRITE-gating phase to the git-state repairs only", async () => {
+    // This is the phase every mutating request waits on, so anything slow that a write has
+    // no ordering relationship with belongs in the audit tail instead. On this checkout the
+    // tail runs for tens of minutes; if a reaper or scanner lands here, every write pays
+    // the readiness gate's full ceiling and then proceeds anyway — worse than the freeze.
+    // (The positive side — that the merge/rebase repairs DO run here — is not assertable
+    // against this suite's empty-DB mock: both iterate rows and no-op with none. What
+    // matters for the gate is the exclusion below.)
+    await runGatedDeferredStartupTasks();
+
+    expect(vi.mocked(reapTerminalWorkspaces)).not.toHaveBeenCalled();
+    expect(vi.mocked(scanDoneUnmergedWorkspaces)).not.toHaveBeenCalled();
+    expect(vi.mocked(reconcileAncestorBranchWorkspaces)).not.toHaveBeenCalled();
+    expect(vi.mocked(reconcileStrandedSiblingMerges)).not.toHaveBeenCalled();
+    expect(vi.mocked(gitService.getCurrentBranch)).not.toHaveBeenCalled();
   });
 });

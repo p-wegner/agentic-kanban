@@ -17,7 +17,7 @@ import { resolveFleetPort, startFleetListener } from "./services/fleet-listener.
 import { createFleetWorkersRoute } from "./routes/workers.js";
 import { setupRoutes } from "./startup/route-setup.js";
 import { BACKGROUND_SERVICES } from "./startup/background-services.js";
-import { runCriticalStartupTasks, runDeferredStartupTasks } from "./startup/startup-tasks.js";
+import { runCriticalStartupTasks, runGatedDeferredStartupTasks, runStartupAuditTasks } from "./startup/startup-tasks.js";
 import { createStartupReadinessGate, markStartupComplete } from "./startup/readiness.js";
 import { runSessionRestore } from "./startup/session-restore.js";
 import { cleanupExpiredRuntimeState } from "./repositories/runtime-state.repository.js";
@@ -190,12 +190,16 @@ export async function startServer(port?: number, hostname?: string) {
   // the serial prologue used to guarantee. Never awaited here: awaiting it would restore
   // exactly the 238 s time-to-first-response this change removes. A failure marks
   // readiness anyway — a broken reconciler must not leave the board permanently unwritable.
-  void runDeferredStartupTasks()
-    .catch((err) => console.warn("[startup] deferred startup phase failed (non-fatal):", err instanceof Error ? err.message : err))
+  void runGatedDeferredStartupTasks()
+    .catch((err) => console.warn("[startup] gated deferred startup phase failed (non-fatal):", err instanceof Error ? err.message : err))
     .finally(() => {
       markStartupComplete();
       console.log("[startup] deferred startup phase complete — mutating requests no longer gated");
-    });
+    })
+    // The audit tail converges state rather than gating it, and on a checkout with many
+    // worktrees it runs for tens of minutes. Nothing waits on it.
+    .then(() => runStartupAuditTasks())
+    .catch((err) => console.warn("[startup] startup audit tasks failed (non-fatal):", err instanceof Error ? err.message : err));
 
   // Start every background service (periodic reconcilers, schedulers, supervisors)
   // from the plugin registry. Each entry's start() returns an optional cleanup that

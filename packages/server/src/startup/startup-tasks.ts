@@ -699,17 +699,41 @@ export async function runCriticalStartupTasks(sessionManager: SessionManager, _d
 }
 
 /**
- * The deferrable half of startup (#282): self-healing git state and the reconcilers.
+ * The deferred work that a MUTATING request must not overtake (#282).
  *
- * Safe to run behind the listener because nothing here is required to SERVE — but several
- * entries do repair state that a mutating request would otherwise act on (an unaborted
- * rebase, a silently-merged workspace). Callers therefore mark readiness when this
- * resolves, and the readiness gate holds mutating API requests until then; read-only
- * traffic, which is what "the board takes minutes to load" was about, is never held.
+ * Everything here repairs state a write would otherwise act on: an unaborted merge or
+ * rebase left by a hot-reload, a remote worker's push that landed while the board was down,
+ * a workspace whose merge landed but whose close never did. Reads never wait for it; the
+ * readiness gate holds writes until it resolves.
+ *
+ * Kept deliberately SHORT. It was originally the whole deferred phase, which on this
+ * checkout runs for well over twenty minutes — long enough that every write spent the
+ * gate's full 120 s ceiling before proceeding anyway, which is worse than the problem being
+ * solved. The audit tail below has no ordering relationship to a write and must not gate one.
  */
-export async function runDeferredStartupTasks(): Promise<void> {
+export async function runGatedDeferredStartupTasks(): Promise<void> {
   await abortStaleMerges();
   await abortStaleRebases();
+  try {
+    // Worker fleet (epic #184): land any remote-worker pushes that arrived while
+    // the board was down. Must run AFTER cleanupStaleSessions — that sweep
+    // finalizes the pid-less remote session rows, and this recovers their work
+    // from the incoming ref so a restart mid-flight does not lose it.
+    const { sweepIncomingWorkerRefs } = await import("./worker-incoming-sweep.js");
+    await sweepIncomingWorkerRefs();
+  } catch (err) {
+    console.warn("[startup] sweepIncomingWorkerRefs failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
+  await reconcileSilentlyMergedWorkspaces();
+}
+
+/**
+ * The long audit tail (#282): reconcilers and reaps that CONVERGE state rather than gate
+ * it. Every entry is idempotent and has a periodic counterpart in BACKGROUND_SERVICES, so
+ * a write racing one of them sees the same outcome a minute later either way — which is
+ * why this runs ungated, with no request waiting on it.
+ */
+export async function runStartupAuditTasks(): Promise<void> {
   try {
     await reapOrphanedPluginViewProcesses();
   } catch (err) {
@@ -723,17 +747,6 @@ export async function runDeferredStartupTasks(): Promise<void> {
   } catch (err) {
     console.warn("[startup] reapParentlessChildServers failed (non-fatal):", err instanceof Error ? err.message : String(err));
   }
-  try {
-    // Worker fleet (epic #184): land any remote-worker pushes that arrived while
-    // the board was down. Must run AFTER cleanupStaleSessions — that sweep
-    // finalizes the pid-less remote session rows, and this recovers their work
-    // from the incoming ref so a restart mid-flight does not lose it.
-    const { sweepIncomingWorkerRefs } = await import("./worker-incoming-sweep.js");
-    await sweepIncomingWorkerRefs();
-  } catch (err) {
-    console.warn("[startup] sweepIncomingWorkerRefs failed (non-fatal):", err instanceof Error ? err.message : String(err));
-  }
-  await reconcileSilentlyMergedWorkspaces();
   try {
     // Multi-repo crash gap: a crash between the leading merge and the sibling merges
     // strands sibling repos unmerged on a mergedAt-stamped workspace — no other startup
@@ -773,13 +786,14 @@ export async function runDeferredStartupTasks(): Promise<void> {
 }
 
 /**
- * The full startup sequence, critical phase then deferred phase back to back.
+ * The full startup sequence: critical, then gated-deferred, then the audit tail.
  *
  * Retained for callers that genuinely want everything done before continuing (tests, and
  * any embedding that is not serving HTTP). `server-start.ts` does NOT use this — it runs
- * the two phases either side of `serve()` on purpose.
+ * the phases around `serve()` on purpose.
  */
 export async function runStartupTasks(sessionManager: SessionManager, deps?: { agentService?: typeof agentServiceType }): Promise<void> {
   await runCriticalStartupTasks(sessionManager, deps);
-  await runDeferredStartupTasks();
+  await runGatedDeferredStartupTasks();
+  await runStartupAuditTasks();
 }
