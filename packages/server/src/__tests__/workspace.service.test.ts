@@ -514,7 +514,9 @@ describe("workspace.service", () => {
 
       // Post-merge cleanup (worktree removal, workingDir clear) is deferred to the background
       // (#407) so the HTTP response returns immediately — flush it before asserting cleanup.
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      // One tick only starts the chain; it has several awaits (process kills, service
+      // teardown) before removeWorktree, so drain multiple turns like the provision chain.
+      await flushDeferred();
 
       expect(result.id).toBe(wsId);
       expect(result.mergeOutput).toContain("Merge made");
@@ -569,7 +571,8 @@ describe("workspace.service", () => {
       const result = await service.mergeWorkspace(wsId);
 
       // Post-merge cleanup is deferred to the background (#407) — flush before asserting it.
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      // Multiple turns: the deferred chain awaits several times before removeWorktree.
+      await flushDeferred();
 
       expect(result.mergeOutput).toContain("already merged");
       expect(gitService.mergeBranch).toHaveBeenCalledWith(
@@ -717,8 +720,9 @@ describe("workspace.service", () => {
       expect(result.mergeOutput).toContain("Merge made");
       expect((result as { warnings?: unknown }).warnings).toBeUndefined();
 
-      // Let the background task run.
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      // Let the background task run. The chain awaits several times before it reaches
+      // removeWorktree, so a single tick starts it without ever getting there.
+      await flushDeferred();
 
       // Workspace was already in "closed" state when the background cleanup fired.
       expect(dbStateWhenCleanupRan).not.toBeNull();
