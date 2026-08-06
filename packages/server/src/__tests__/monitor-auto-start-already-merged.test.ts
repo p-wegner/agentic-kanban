@@ -130,3 +130,80 @@ describe("runAutoStart already-merged guard (#190)", () => {
     expect(reconcileMergedIssueMock).not.toHaveBeenCalled();
   });
 });
+
+// #265: a reopen after merge used to be respected but INERT — the monitor left the status
+// alone and then skipped the issue forever, so on a monitor-driven project it sat in Todo
+// until a human made a workspace by hand. It must now start fresh work instead.
+describe("runAutoStart reopen-after-merge restart (#265)", () => {
+  beforeEach(() => {
+    reconcileMergedIssueMock.mockResolvedValue({
+      projectId: "proj-1",
+      issueTransitioned: false,
+      targetStatusId: "todo-1",
+      reopenedAfterMerge: true,
+    });
+  });
+
+  it("starts a NEW workspace on a fresh branch for an In-Progress issue reopened after its merge", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }])) // inProgressStatuses
+      .mockReturnValueOnce(makeSelectChain([{ active: 0, inactiveStale: 1 }])) // loop1 capacity
+      .mockReturnValueOnce(makeSelectChain([{ id: "issue-15", title: "Driver duty logs", description: "d", issueType: "bug", issueNumber: 15 }])) // inProgressIssues
+      .mockReturnValueOnce(makeSelectChain([{ id: "ws-1", status: "closed", mergedAt: "2026-08-01T01:00:42.000Z" }])) // issueWorkspaces
+      .mockReturnValueOnce(makeSelectChain([])) // hasSkipAutoStartTag -> none
+      .mockReturnValueOnce(makeSelectChain([{ active: 0, inactiveStale: 1 }])) // loop2 capacity
+      .mockReturnValueOnce(makeSelectChain([])) // todoStatus (none)
+      .mockReturnValue(makeSelectChain([])); // anything further: empty
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ id: "ws-new" }) } as Response);
+
+    await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "2"]]), makeDeps());
+
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+    const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    expect(body.issueId).toBe("issue-15");
+    // A FRESH branch: the merged one already contains the landed work, so reusing it would
+    // hand the agent a branch with nothing left to do.
+    expect(body.branch).toBe("feature/ak-15-driver-duty-logs-r2");
+  });
+
+  it("starts a NEW workspace for a Todo issue reopened after its merge", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }])) // inProgressStatuses
+      .mockReturnValueOnce(makeSelectChain([{ active: 0, inactiveStale: 0 }])) // loop1 capacity
+      .mockReturnValueOnce(makeSelectChain([])) // inProgressIssues (none)
+      .mockReturnValueOnce(makeSelectChain([{ active: 0, inactiveStale: 1 }])) // loop2 capacity
+      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }])) // todoStatus
+      .mockReturnValueOnce(makeSelectChain([{ id: "issue-15", title: "Driver duty logs", description: "d", projectId: "proj-1", issueNumber: 15 }])) // todoIssues
+      .mockReturnValueOnce(makeSelectChain([{ id: "done-1" }])) // doneStatuses
+      .mockReturnValueOnce(makeSelectChain([{ id: "ws-1", status: "closed", mergedAt: "2026-08-01T01:00:42.000Z" }])) // issueWorkspaces
+      .mockReturnValueOnce(makeSelectChain([])) // hasSkipAutoStartTag -> none
+      .mockReturnValueOnce(makeSelectChain([])) // issueDependencies -> none
+      .mockReturnValue(makeSelectChain([])); // anything further: empty
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ id: "ws-new" }) } as Response);
+
+    await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "2"]]), makeDeps());
+
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+    const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    expect(body.branch).toBe("feature/ak-15-driver-duty-logs-r2");
+  });
+
+  it("does NOT restart when the merge simply predates a stale status (not a reopen)", async () => {
+    // The #190 guard must survive: only a DELIBERATE reopen restarts work.
+    reconcileMergedIssueMock.mockResolvedValue({
+      projectId: "proj-1", issueTransitioned: true, targetStatusId: "done-1", reopenedAfterMerge: false,
+    });
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]))
+      .mockReturnValueOnce(makeSelectChain([{ active: 0, inactiveStale: 1 }]))
+      .mockReturnValueOnce(makeSelectChain([{ id: "issue-15", title: "Driver duty logs", description: "d", issueType: "bug", issueNumber: 15 }]))
+      .mockReturnValueOnce(makeSelectChain([{ id: "ws-1", status: "closed", mergedAt: "2026-08-01T01:00:42.000Z" }]))
+      .mockReturnValueOnce(makeSelectChain([{ active: 0, inactiveStale: 1 }]))
+      .mockReturnValueOnce(makeSelectChain([]))
+      .mockReturnValue(makeSelectChain([])); // anything further: empty
+
+    await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "2"]]), makeDeps());
+
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+});
