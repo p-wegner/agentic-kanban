@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { VIEW_IDS, type ViewMode } from "../lib/viewRegistry.js";
-import { getAppRouteView, getViewRoutePath } from "../lib/appRoutes.js";
+import { getAppRouteTab, getAppRouteView, getViewRoutePath } from "../lib/appRoutes.js";
+import { viewTabActions } from "../stores/viewTabStore.js";
 
 interface BoardPageRouteState {
   viewMode: ViewMode;
@@ -41,10 +42,20 @@ export function useBoardPageRoute(): BoardPageRouteState {
     }
   }, [navigateToViewRoute]);
 
+  // Legacy absorbed-view deep links (#234/#235): /burndown etc. resolve to a
+  // container view; forward the tab to preselect so no old bookmark loses
+  // information. One-shot on mount — the container consumes the request.
+  useEffect(() => {
+    const legacyTab = getAppRouteTab(window.location.pathname);
+    if (legacyTab) viewTabActions.request(legacyTab.view, legacyTab.tab);
+  }, []);
+
   useEffect(() => {
     function handlePopState() {
       const routeView = getAppRouteView(window.location.pathname);
       if (!routeView) return;
+      const legacyTab = getAppRouteTab(window.location.pathname);
+      if (legacyTab) viewTabActions.request(legacyTab.view, legacyTab.tab);
       setViewMode(routeView);
       localStorage.setItem("kanban-board-view", routeView);
     }

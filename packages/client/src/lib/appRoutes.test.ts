@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getAppRouteView, getViewRoutePath } from "./appRoutes";
+import { getAppRouteTab, getAppRouteView, getViewRoutePath } from "./appRoutes";
 
 describe("appRoutes", () => {
   it("maps key view modes to stable frontend paths", () => {
@@ -28,6 +28,22 @@ describe("appRoutes", () => {
   it("supports friendly aliases for workspace-oriented links", () => {
     expect(getAppRouteView("/workspaces")).toBe("agents");
     expect(getAppRouteView("/merge-queue")).toBe("agents");
+  });
+
+  it("redirects legacy absorbed-chart routes to the Analytics view with the right tab (#234)", () => {
+    expect(getAppRouteView("/throughput")).toBe("analytics");
+    expect(getAppRouteView("/burndown")).toBe("analytics");
+    expect(getAppRouteView("/provider-cost")).toBe("analytics");
+    expect(getAppRouteTab("/throughput")).toEqual({ view: "analytics", tab: "throughput" });
+    expect(getAppRouteTab("/lead-time")).toEqual({ view: "analytics", tab: "lead-time" });
+    expect(getAppRouteTab("/burndown")).toEqual({ view: "analytics", tab: "burndown" });
+    expect(getAppRouteTab("/provider-mix")).toEqual({ view: "analytics", tab: "provider-mix" });
+    expect(getAppRouteTab("/provider-cost")).toEqual({ view: "analytics", tab: "provider-cost" });
+    expect(getAppRouteTab("/agent-throughput")).toEqual({ view: "analytics", tab: "agent-throughput" });
+    expect(getAppRouteTab("/scorecard-distribution")).toEqual({ view: "analytics", tab: "scorecard-distribution" });
+    // Non-legacy routes carry no tab.
+    expect(getAppRouteTab("/analytics")).toBeNull();
+    expect(getAppRouteTab("/board")).toBeNull();
   });
 
   it("ignores unknown non-app paths", () => {

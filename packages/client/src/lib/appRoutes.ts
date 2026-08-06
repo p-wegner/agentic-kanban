@@ -32,14 +32,8 @@ const VIEW_ROUTE_PATHS: Record<ViewMode, string> = {
   "cross-repo-activity": "/cross-repo-activity",
   "agent-flight-recorder": "/agent-flight-recorder",
   "stale-work": "/stale-work",
-  throughput: "/throughput",
-  "provider-mix": "/provider-mix",
-  "lead-time": "/lead-time",
-  "scorecard-distribution": "/scorecard-distribution",
-  "provider-cost": "/provider-cost",
-  "agent-throughput": "/agent-throughput",
+  analytics: "/analytics",
   calendar: "/calendar",
-  burndown: "/burndown",
   garden: "/garden",
   "plugin-views": "/plugin-views",
 };
@@ -55,8 +49,26 @@ const ROUTE_ALIASES: Record<string, ViewMode> = {
   "/merge-queue": "agents",
 };
 
+/**
+ * Legacy routes of views absorbed into tabbed containers (#234): the old
+ * path keeps working as a deep link — it resolves to the container view AND
+ * names the tab to preselect (useBoardPageRoute forwards it to viewTabStore).
+ */
+const LEGACY_TAB_ROUTES: Record<string, { view: ViewMode; tab: string }> = {
+  "/throughput": { view: "analytics", tab: "throughput" },
+  "/lead-time": { view: "analytics", tab: "lead-time" },
+  "/burndown": { view: "analytics", tab: "burndown" },
+  "/provider-mix": { view: "analytics", tab: "provider-mix" },
+  "/provider-cost": { view: "analytics", tab: "provider-cost" },
+  "/agent-throughput": { view: "analytics", tab: "agent-throughput" },
+  "/scorecard-distribution": { view: "analytics", tab: "scorecard-distribution" },
+};
+
 const ROUTE_TO_VIEW: Record<string, ViewMode> = {
   ...ROUTE_ALIASES,
+  ...Object.fromEntries(
+    Object.entries(LEGACY_TAB_ROUTES).map(([path, target]) => [path, target.view]),
+  ),
   ...Object.fromEntries(
     VIEW_IDS.map((id) => [VIEW_ROUTE_PATHS[id], id]),
   ),
@@ -69,6 +81,14 @@ export function getViewRoutePath(viewMode: ViewMode): string {
 export function getAppRouteView(pathname: string): ViewMode | null {
   const normalized = normalizePath(pathname);
   return ROUTE_TO_VIEW[normalized] ?? null;
+}
+
+/**
+ * The tab a legacy absorbed-view route should preselect in its container view,
+ * or null when the path is not a legacy tab route.
+ */
+export function getAppRouteTab(pathname: string): { view: ViewMode; tab: string } | null {
+  return LEGACY_TAB_ROUTES[normalizePath(pathname)] ?? null;
 }
 
 export function isAppRoutePath(pathname: string): boolean {

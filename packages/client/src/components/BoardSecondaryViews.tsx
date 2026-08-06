@@ -10,9 +10,8 @@ import {
   WorkflowAnalyticsDashboard, InsightsPanel, DigestView, ActivityFeedView, CrossRepoActivityFeed, AgentFlightRecorder, FocusView,
   StrategyTargetsView, SwimlaneView, FlakyTestsPanel, MonitorCycleHistoryPanel,
   BoardHealthNotificationCenter, RunbooksView, SprintCapacityPlanner, ConstellationView,
-  MomentumView, FireworksView, StaleWorkDashboard, ThroughputChart, ProviderMixChart,
-  LeadTimeTrendChart, ScorecardDistributionChart, ProviderCostOverTimeChart, CalendarView,
-  AgentThroughputLeaderboard, BurndownChart, DriveDashboard, GardenView, PluginViewsPanel,
+  MomentumView, FireworksView, StaleWorkDashboard, AnalyticsView, CalendarView,
+  DriveDashboard, GardenView, PluginViewsPanel,
   PluginMarketplacePanel,
 } from "./boardLazyViews.js";
 import { usePluginViewStore } from "../stores/pluginViewStore.js";
@@ -265,39 +264,9 @@ export function BoardSecondaryViews({
           />
         </BoardErrorBoundary>
       )}
-      {viewMode === "throughput" && activeProjectId && (
-        <BoardErrorBoundary columnName="Throughput">
-          <ThroughputChart projectId={activeProjectId} />
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "provider-mix" && activeProjectId && (
-        <BoardErrorBoundary columnName="Provider Mix">
-          <ProviderMixChart projectId={activeProjectId} />
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "lead-time" && activeProjectId && (
-        <BoardErrorBoundary columnName="Lead Time Trend">
-          <LeadTimeTrendChart projectId={activeProjectId} />
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "scorecard-distribution" && activeProjectId && (
-        <BoardErrorBoundary columnName="Score Distribution">
-          <ScorecardDistributionChart projectId={activeProjectId} />
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "provider-cost" && activeProjectId && (
-        <BoardErrorBoundary columnName="Provider Cost Over Time">
-          <ProviderCostOverTimeChart projectId={activeProjectId} />
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "agent-throughput" && activeProjectId && (
-        <BoardErrorBoundary columnName="Agent Throughput Leaderboard">
-          <AgentThroughputLeaderboard projectId={activeProjectId} />
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "burndown" && activeProjectId && (
-        <BoardErrorBoundary columnName="Burndown">
-          <BurndownChart projectId={activeProjectId} />
+      {viewMode === "analytics" && activeProjectId && (
+        <BoardErrorBoundary columnName="Analytics">
+          <AnalyticsView projectId={activeProjectId} />
         </BoardErrorBoundary>
       )}
       {viewMode === "calendar" && (
