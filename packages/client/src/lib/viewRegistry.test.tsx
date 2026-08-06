@@ -26,15 +26,18 @@ describe("VIEW_REGISTRY", () => {
   });
 
   it("enumerates all board views", () => {
-    expect(VIEW_REGISTRY).toHaveLength(41);
+    // 41 → 35 (#234): the seven single-chart views (throughput, lead-time,
+    // burndown, provider-mix, provider-cost, agent-throughput,
+    // scorecard-distribution) were absorbed into the tabbed "analytics" view.
+    expect(VIEW_REGISTRY).toHaveLength(35);
   });
 
   it("preserves the existing view ids", () => {
     const expected: ViewMode[] = [
       "kanban", "backlog", "graph", "table", "agents", "timeline", "metrics",
       "quality-metrics", "digest", "strategy", "focus", "butler", "workflows", "workflow-analytics", "insights", "swimlane", "flaky-tests",
-      "monitor-history", "health-events", "drive", "runbooks", "capacity", "constellation", "momentum", "activity", "stale-work", "throughput",
-      "provider-mix", "lead-time", "scorecard-distribution", "provider-cost", "agent-throughput", "fireworks", "calendar", "burndown",
+      "monitor-history", "health-events", "drive", "runbooks", "capacity", "constellation", "momentum", "activity", "stale-work",
+      "analytics", "fireworks", "calendar",
       "crime-scene", "milestones", "cross-repo-activity", "agent-flight-recorder", "garden", "plugin-views",
     ];
     expect(VIEW_IDS.slice().sort()).toEqual(expected.slice().sort());
@@ -88,8 +91,8 @@ describe("VIEW_REGISTRY", () => {
     expect([...secondaryIds].sort()).toEqual(
       [
         "digest", "flaky-tests", "focus", "metrics", "quality-metrics", "swimlane", "workflow-analytics",
-        "health-events", "runbooks", "capacity", "constellation", "momentum", "activity", "stale-work", "throughput",
-        "provider-mix", "lead-time", "scorecard-distribution", "provider-cost", "agent-throughput", "fireworks", "burndown",
+        "health-events", "runbooks", "capacity", "constellation", "momentum", "activity", "stale-work",
+        "analytics", "fireworks",
         "crime-scene", "milestones", "cross-repo-activity", "agent-flight-recorder", "garden",
       ].sort(),
     );

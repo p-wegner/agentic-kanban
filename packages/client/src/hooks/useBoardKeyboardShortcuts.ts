@@ -4,6 +4,8 @@ import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { apiPost } from "../lib/api.js";
 import { registerAction } from "../lib/actions.js";
 import { SHORTCUT_TO_VIEW, VIEW_REGISTRY, type ViewMode } from "../lib/viewRegistry.js";
+import { ANALYTICS_TABS, ANALYTICS_VIEW_ID } from "../lib/viewTabs.js";
+import { viewTabActions } from "../stores/viewTabStore.js";
 import { computeNavTarget, type NavKey } from "../lib/boardKeyboardNav.js";
 import { showToast } from "../lib/toast.js";
 import type { BoardPanelState } from "./useBoardPanels.js";
@@ -324,6 +326,22 @@ export function useBoardKeyboardShortcuts(
         shortcut: view.shortcut,
         category: "navigation",
         handler: () => actions.handleViewModeChange(view.id),
+      }));
+    }
+
+    // Absorbed analytics charts (#234): each former single-chart view stays one
+    // palette hit away — the action opens the Analytics container at its tab.
+    for (const tab of ANALYTICS_TABS) {
+      unregisters.push(registerAction({
+        id: `view-analytics-${tab.id}`,
+        label: `Analytics: ${tab.paletteLabel}`,
+        description: tab.paletteDescription,
+        icon: tab.paletteIcon,
+        category: "navigation",
+        handler: () => {
+          viewTabActions.request(ANALYTICS_VIEW_ID, tab.id);
+          actions.handleViewModeChange("analytics");
+        },
       }));
     }
 

@@ -44,14 +44,8 @@ export type ViewMode =
   | "cross-repo-activity"
   | "agent-flight-recorder"
   | "stale-work"
-  | "throughput"
-  | "provider-mix"
-  | "lead-time"
-  | "scorecard-distribution"
-  | "provider-cost"
-  | "agent-throughput"
+  | "analytics"
   | "calendar"
-  | "burndown"
   | "garden"
   | "plugin-views";
 
@@ -287,48 +281,9 @@ const ICON = {
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
     </svg>
   ),
-  throughput: (
+  analytics: (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h4v7H3zM10 8h4v11h-4zM17 4h4v15h-4zM3 19h18" />
-    </svg>
-  ),
-  "provider-mix": (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 6h4v13H3zM10 10h4v9h-4zM17 3h4v16h-4zM3 19h18" />
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 6v13M12 10v9M19 3v16" opacity="0.3" />
-    </svg>
-  ),
-  "lead-time": (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 13l4-3 4 2 4-5 4 3" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 19h18" />
-      <circle cx="7" cy="10" r="1.5" fill="currentColor" stroke="none" />
-      <circle cx="11" cy="12" r="1.5" fill="currentColor" stroke="none" />
-      <circle cx="15" cy="7" r="1.5" fill="currentColor" stroke="none" />
-      <circle cx="19" cy="10" r="1.5" fill="currentColor" stroke="none" />
-    </svg>
-  ),
-  "scorecard-distribution": (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 19h18M5 19v-5h3v5M10 19V9h3v10M16 19V4h3v15" />
-    </svg>
-  ),
-  "provider-cost": (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 13l4-3 4 2 4-5 4 3M3 19h18" />
-    </svg>
-  ),
-  "agent-throughput": (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-      <circle cx="18" cy="5" r="1.5" fill="currentColor" stroke="none" />
-    </svg>
-  ),
-  burndown: (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 13l4-3 4 2 4-5 4 3" />
-      <path strokeLinecap="round" strokeLinejoin="round" strokeDasharray="3 3" d="M4 4l16 16" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 19h18" />
     </svg>
   ),
   calendar: (
@@ -728,79 +683,19 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     group: "secondary",
   },
   {
-    id: "throughput",
-    toolbarLabel: "Throughput",
-    label: "Throughput",
-    tooltip: "Throughput — daily count of issues completed over the last 14 days",
-    icon: ICON.throughput,
+    // Tabbed Analytics container (#234): absorbs the former single-chart views
+    // throughput, lead-time, burndown (Flow) and provider-mix, provider-cost,
+    // agent-throughput, scorecard-distribution (Agents) as tabs. Each chart is
+    // still reachable individually via the command palette ("Analytics: …"
+    // actions) and via `?tab=` deep links; legacy routes like /burndown
+    // redirect here with the right tab preselected (see appRoutes.ts).
+    id: "analytics",
+    toolbarLabel: "Analytics",
+    label: "Analytics",
+    tooltip: "Analytics — throughput, lead time, burndown, provider mix, cost, leaderboard, scores",
+    icon: ICON.analytics,
     paletteIcon: "▦",
-    paletteDescription: "Bar chart of issues moved to Done per day over the trailing window",
-    activeClass: "bg-emerald-600 text-white",
-    group: "secondary",
-  },
-  {
-    id: "provider-mix",
-    toolbarLabel: "Providers",
-    label: "Provider Mix",
-    tooltip: "Provider Mix — workspaces by agent provider over time",
-    icon: ICON["provider-mix"],
-    paletteIcon: "PM",
-    paletteDescription: "Stacked bar chart of workspaces grouped by agent provider (claude/codex/copilot)",
-    activeClass: "bg-emerald-600 text-white",
-    group: "secondary",
-  },
-  {
-    id: "lead-time",
-    toolbarLabel: "Lead Time",
-    label: "Lead Time Trend",
-    tooltip: "Lead Time Trend — median + p90 time from creation to Done over a selectable window",
-    icon: ICON["lead-time"],
-    paletteIcon: "LT",
-    paletteDescription: "Trend chart of issue lead time (creation → Done) with median and p90 lines",
-    activeClass: "bg-emerald-600 text-white",
-    group: "secondary",
-  },
-  {
-    id: "scorecard-distribution",
-    toolbarLabel: "Scores",
-    label: "Score Distribution",
-    tooltip: "Score Distribution — histogram of workspace scorecard scores",
-    icon: ICON["scorecard-distribution"],
-    paletteIcon: "SD",
-    paletteDescription: "Histogram of workspace scorecard scores across recent workspaces",
-    activeClass: "bg-emerald-600 text-white",
-    group: "secondary",
-  },
-  {
-    id: "provider-cost",
-    toolbarLabel: "Cost",
-    label: "Provider Cost Over Time",
-    tooltip: "Provider Cost Over Time — stacked daily token cost per agent provider",
-    icon: ICON["provider-cost"],
-    paletteIcon: "$",
-    paletteDescription: "Stacked bar chart of estimated token cost per day grouped by agent provider (claude/codex/copilot)",
-    activeClass: "bg-emerald-600 text-white",
-    group: "secondary",
-  },
-  {
-    id: "agent-throughput",
-    toolbarLabel: "Leaderboard",
-    label: "Agent Throughput Leaderboard",
-    tooltip: "Agent Throughput Leaderboard — issues merged per provider with median lead time",
-    icon: ICON["agent-throughput"],
-    paletteIcon: "AT",
-    paletteDescription: "Rank agent providers by issues merged, with median lead time",
-    activeClass: "bg-emerald-600 text-white",
-    group: "secondary",
-  },
-  {
-    id: "burndown",
-    toolbarLabel: "Burn",
-    label: "Burndown",
-    tooltip: "Burndown — remaining open issues per day vs. the ideal trend to zero",
-    icon: ICON.burndown,
-    paletteIcon: "BD",
-    paletteDescription: "Burndown chart of remaining open issues per day with an ideal target trend line",
+    paletteDescription: "Tabbed analytics charts: flow (throughput, lead time, burndown) and agents (provider mix, cost, leaderboard, score distribution)",
     activeClass: "bg-emerald-600 text-white",
     group: "secondary",
   },
