@@ -236,6 +236,12 @@ export type ResolveMergeStateDeps = {
    * leading repo's evidence alone. Optional so single-repo callers/tests are unchanged.
    */
   database?: Database;
+  /**
+   * Seam for the sibling repos' on-disk presence probe, forwarded to
+   * `listPendingSiblingMerges`. Production leaves it unset (real `existsSync`); a
+   * suite driving fake git over synthetic paths passes `() => true`.
+   */
+  pathExists?: (path: string) => boolean;
 };
 
 /**
@@ -337,7 +343,7 @@ export async function resolveMergeState(
     // leading merge is a no-op ("Already up to date") and the sibling pipeline
     // (prevalidateSiblingMerges → executeSiblingMerges) lands the real work.
     const pendingSiblings = deps.database
-      ? await listPendingSiblingMerges(gitService, deps.database, workspace.id)
+      ? await listPendingSiblingMerges(gitService, deps.database, workspace.id, { pathExists: deps.pathExists })
       : [];
     if (pendingSiblings.length > 0) {
       console.log(
@@ -420,7 +426,15 @@ export async function listPendingSiblingMerges(
   gitService: GitService,
   database: Database,
   workspaceId: string,
+  /**
+   * Seam for the on-disk presence probe. Production uses `existsSync`; suites that
+   * drive a FAKE git over synthetic repo paths (`/sibling-repo`) must be able to say
+   * "assume the repo is there" so they keep exercising the git-level semantics they
+   * are actually about, rather than tripping the missing-repo short-circuit.
+   */
+  deps: { pathExists?: (path: string) => boolean } = {},
 ): Promise<PendingSiblingMerge[]> {
+  const pathExists = deps.pathExists ?? existsSync;
   let rows: RepoRow[];
   try {
     rows = await listWorkspaceRepos(workspaceId, database);
@@ -443,10 +457,22 @@ export async function listPendingSiblingMerges(
     //  - branch unresolvable while baseBranch DOES resolve is the legitimate "already landed
     //    and cleaned up" case (the sibling merge pipeline force-deletes the branch after
     //    landing) — genuinely nothing left to land, so it stays "not pending".
+    // A repo whose directory is GONE cannot be verified, and spawning git to
+    // discover that is pure waste: this scan runs for every merged workspace on
+    // every reconciler pass, so a handful of deleted fixture repos re-paid
+    // hundreds of ~120ms `git` spawns per cycle — enough to stall the event loop
+    // for tens of seconds and make the whole API look frozen (#277). A stat is
+    // ~microseconds and yields the SAME fail-closed verdict.
+    const label = repo.name ?? repo.path;
+    if (!pathExists(repo.path)) {
+      const reason = `could not verify sibling repo '${label}' at '${repo.path}' (base branch '${repo.baseBranch}'): repo directory does not exist (deleted or moved?)`;
+      console.warn(`[workspace-merge] pending-sibling scan: ${reason}`);
+      pending.push({ repo, uniqueCommits: 0, unverifiable: true, unverifiableReason: reason });
+      continue;
+    }
     try {
       await gitService.revParse(repo.path, repo.baseBranch);
     } catch (err) {
-      const label = repo.name ?? repo.path;
       const reason = `could not verify sibling repo '${label}' at '${repo.path}' (base branch '${repo.baseBranch}'): ${err instanceof Error ? err.message : String(err)}`;
       console.warn(`[workspace-merge] pending-sibling scan: ${reason}`);
       pending.push({ repo, uniqueCommits: 0, unverifiable: true, unverifiableReason: reason });

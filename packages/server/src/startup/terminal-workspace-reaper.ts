@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { and, eq, inArray, ne } from "drizzle-orm";
 import { checkBranchTipIsAncestor, countUniqueCommits, isAncestor, revParse } from "@agentic-kanban/shared/lib/git-service";
 import { issues, projectStatuses, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
@@ -20,6 +21,11 @@ export interface TerminalWorkspaceReaperDeps {
   revParseRef?: typeof revParse;
   maxReapedPerRun?: number;
   onTick?: () => void;
+  /**
+   * On-disk presence probe for sibling repo paths (#277). Defaults to `existsSync`;
+   * suites driving fake git over synthetic paths inject `() => true`.
+   */
+  pathExists?: (path: string) => boolean;
 }
 
 export interface TerminalWorkspaceReapResult {
@@ -63,8 +69,17 @@ type Verification =
 async function findUnmergedSiblingBranches(
   workspaceId: string,
   database: Database,
-  deps: { countCommits: typeof countUniqueCommits; revParseRef: typeof revParse },
+  deps: {
+    countCommits: typeof countUniqueCommits;
+    revParseRef: typeof revParse;
+    /**
+     * On-disk presence probe for a sibling repo (#277). Defaults to `existsSync`;
+     * suites using synthetic repo paths inject `() => true`.
+     */
+    pathExists?: (path: string) => boolean;
+  },
 ): Promise<Array<{ label: string; branch: string; ahead: number }>> {
+  const pathExists = deps.pathExists ?? existsSync;
   let rows: RepoRow[];
   try {
     rows = await listWorkspaceRepos(workspaceId, database);
@@ -75,6 +90,10 @@ async function findUnmergedSiblingBranches(
   for (const repo of rows) {
     if (repo.mergedHeadSha) continue;
     if (!repo.branch || !repo.baseBranch) continue;
+    // Repo directory gone → both revParse calls below would spawn git only to fail.
+    // Same outcome ("nothing to report"), two fewer ~120ms event-loop stalls per
+    // repo per cycle (#277).
+    if (!pathExists(repo.path)) continue;
     try {
       await deps.revParseRef(repo.path, repo.baseBranch);
       await deps.revParseRef(repo.path, repo.branch);
@@ -148,6 +167,7 @@ export async function reapTerminalWorkspaces(
     countCommits: deps.countCommits ?? countUniqueCommits,
     isAncestorRef: deps.isAncestorRef ?? isAncestor,
     revParseRef: deps.revParseRef ?? revParse,
+    pathExists: deps.pathExists ?? existsSync,
   };
 
   const candidates = await database

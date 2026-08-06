@@ -113,7 +113,7 @@ describe("terminal workspace reaper", () => {
     const { workspaceId } = await seedWorkspace({ issueStatus: "Done", wsStatus: "idle" });
     const checkAncestor = makeCheckAncestor(true);
 
-    const result = await reapTerminalWorkspaces({ database: db, checkAncestor });
+    const result = await reapTerminalWorkspaces({ database: db, pathExists: () => true, checkAncestor });
 
     expect(result.reaped).toBe(1);
     expect(checkAncestor).toHaveBeenCalledTimes(1);
@@ -130,7 +130,7 @@ describe("terminal workspace reaper", () => {
     const checkAncestor = makeCheckAncestor(false);
     const countCommits = makeCountCommits(2);
 
-    const result = await reapTerminalWorkspaces({ database: db, checkAncestor, countCommits });
+    const result = await reapTerminalWorkspaces({ database: db, pathExists: () => true, checkAncestor, countCommits });
 
     expect(result.reaped).toBe(0);
     expect(result.skippedAhead).toBe(1);
@@ -145,7 +145,7 @@ describe("terminal workspace reaper", () => {
     const checkAncestor = makeCheckAncestor(false);
     const countCommits = makeCountCommits(0);
 
-    const result = await reapTerminalWorkspaces({ database: db, checkAncestor, countCommits });
+    const result = await reapTerminalWorkspaces({ database: db, pathExists: () => true, checkAncestor, countCommits });
 
     expect(result.reaped).toBe(1);
     const ws = await getWorkspace(workspaceId);
@@ -157,7 +157,7 @@ describe("terminal workspace reaper", () => {
     const { workspaceId } = await seedWorkspace({ issueStatus: "Done", wsStatus: "idle", withRunningSession: true });
     const checkAncestor = makeCheckAncestor(true);
 
-    const result = await reapTerminalWorkspaces({ database: db, checkAncestor });
+    const result = await reapTerminalWorkspaces({ database: db, pathExists: () => true, checkAncestor });
 
     expect(result.reaped).toBe(0);
     expect(result.skippedRunning).toBe(1);
@@ -169,7 +169,7 @@ describe("terminal workspace reaper", () => {
     const first = await seedWorkspace({ issueStatus: "Done", wsStatus: "idle" });
     const second = await seedWorkspace({ issueStatus: "Done", wsStatus: "idle" });
 
-    const result = await reapTerminalWorkspaces({ database: db, checkAncestor: makeCheckAncestor(true) });
+    const result = await reapTerminalWorkspaces({ database: db, pathExists: () => true, checkAncestor: makeCheckAncestor(true) });
 
     expect(result.reaped).toBe(1);
     const statuses = [(await getWorkspace(first.workspaceId)).status, (await getWorkspace(second.workspaceId)).status];
@@ -181,7 +181,7 @@ describe("terminal workspace reaper", () => {
     const { workspaceId } = await seedWorkspace({ issueStatus: "In Progress", wsStatus: "idle" });
     const checkAncestor = makeCheckAncestor(true);
 
-    const result = await reapTerminalWorkspaces({ database: db, checkAncestor });
+    const result = await reapTerminalWorkspaces({ database: db, pathExists: () => true, checkAncestor });
 
     expect(result.scanned).toBe(0);
     expect(result.reaped).toBe(0);
@@ -212,7 +212,7 @@ describe("terminal workspace reaper", () => {
       const revParseRef = vi.fn(async (_repo: string, ref: string) => `sha-${ref}`);
       const countCommits = vi.fn(async (repoPath: string) => (repoPath === SIBLING_PATH ? 3 : 0));
 
-      const result = await reapTerminalWorkspaces({ database: db, checkAncestor, countCommits, revParseRef });
+      const result = await reapTerminalWorkspaces({ database: db, pathExists: () => true, checkAncestor, countCommits, revParseRef });
 
       expect(result.reaped).toBe(1);
       const ws = await getWorkspace(workspaceId);
@@ -248,7 +248,7 @@ describe("terminal workspace reaper", () => {
 
       const checkAncestor = makeCheckAncestor(true);
 
-      const result = await reapTerminalWorkspaces({ database: db, checkAncestor });
+      const result = await reapTerminalWorkspaces({ database: db, pathExists: () => true, checkAncestor });
 
       expect(result.reaped).toBe(1);
       const comments = await db.select().from(issueComments).where(eq(issueComments.issueId, issueId));
