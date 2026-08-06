@@ -18,6 +18,22 @@ Active project is "agentic-kanban" — use it for all monitor/workspace/MCP oper
 Change only what the task requires. Don't fix unrelated issues, rename/reformat out of scope, or add features while refactoring. File a kanban ticket (`mcp__agentic-kanban__create_issue`) for unrelated issues instead of fixing inline. Run `scope-guard` before committing (creep signal: >3–4 files for a small task, or files unrelated to the ticket).
 For narrow tickets that name the expected files, compare the staged file list to that scope and treat unrelated deletions as a blocker before commit.
 
+### Several agents committing in ONE checkout — commit by pathspec, never via the index
+`git add <paths>` + `git commit` is NOT safe when other agents work in the same checkout: the index is
+shared process-wide, so a concurrent `git add`/`git reset` between your add and your commit sweeps
+THEIR files into YOUR commit under YOUR message — or drops yours. This happened: `0a7d00bef3` carries
+one agent's loop-convergence work plus another's monitor/git-exec work under a single misleading
+subject. It is not rewritable once someone has built on it.
+
+**Use a pathspec-limited commit, which ignores the shared index entirely:**
+```bash
+git commit -F msg.txt -- packages/server/src/services/foo.ts packages/server/src/__tests__/foo.test.ts
+```
+Never `git add -A`/`-a`/`.` in a shared checkout. On `index.lock` contention, wait and retry — do not
+`git reset` to "clean up", which is what destroys the other agent's staged state. Intermediate commits
+may then not typecheck standalone (a symbol can land one commit later); that is acceptable as long as
+HEAD is coherent — say so in the commit message.
+
 ## Board Feedback Conventions — what to do when you hit a flaw IN THE BOARD
 Using the board (driving a project, implementing a ticket, running the monitor) surfaces bugs and
 impediments in the board itself. There are four ways to route that feedback. Pick by CONTEXT, not by
