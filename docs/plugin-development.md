@@ -279,6 +279,63 @@ Then, per unit: derive `plugin-loop:<slug>:<loop>:<unitId>`, skip any unit whose
 a ticket, and create a ticket for the rest (up to the cap) carrying the loop's skill. The board's
 monitor starts them within the WIP limit.
 
+The plan may additionally carry four OPTIONAL structured fields (#286–#290) that the board
+renders natively on the loop pane — all forward-compatible, all ignored by older boards:
+
+```jsonc
+{
+  "units": [{ "id": "step-2:v1", "title": "…",
+              "artifacts": ["docs/pm/steps/step-2/prd.md"] }],   // repo-relative, rendered + diffed (#288)
+  "converged": false,
+  "note": "Step 1 awaits review.",
+  "gate": {                                                       // human-approval gate (#286)
+    "id": "step-1:v1",                                            // NEW id per decision round — it dedupes the notification
+    "question": "Approve step 1 — Market analysis (v1)?",
+    "artifacts": ["docs/pm/steps/step-1/analysis.md"],
+    "actions": [ { "id": "approve", "label": "Approve" },
+                 { "id": "revise", "label": "Needs revision", "input": "text" } ],
+    "resolve": { "command": "node tools/gate-resolve.mjs", "cwd": "plugin",
+                 "env": { "PM_ROOT": "{{repoPath}}" } }
+  },
+  "progress": { "steps": [                                        // pipeline stepper (#289)
+    { "id": "step-1", "label": "Market analysis", "state": "done", "version": "v2",
+      "artifacts": ["docs/pm/steps/step-1/analysis.md"] },
+    { "id": "step-2", "label": "PRD", "state": "generating" }     // done|generating|awaiting-approval|needs-revision|locked|failed|pending
+  ] },
+  "checks": [                                                     // CI-style badges (#290)
+    { "name": "Verification (step 1)", "verdict": "warn", "detail": "PASS WITH FIXES" }
+  ]
+}
+```
+
+**How the gate works.** A gate is the structured form of "blocked on a person": report it with
+`units: [], converged: false`. The board renders an approval card (question, artifact links,
+action buttons — an action with `input: "text"` gets a textarea), notifies the user ONCE per new
+gate id (toast + WS `plugin_gate` + desktop notification when permitted), and on a decision runs
+your `resolve` command like a plan command with `GATE_ID`, `GATE_ACTION` and — for text actions —
+`GATE_INPUT_FILE` (the human's text as a temp FILE, never shell-interpolated) in the env. Your
+resolver mutates your own state files (tick the checkbox, write the feedback), exits 0, and the
+board immediately re-plans, so the response already carries the gate's replacement state. A
+stale decision (the file moved on) should exit non-zero with a one-line reason.
+
+**Where this state is visible.** Every advance is persisted to the loop's timeline
+(`GET /api/plugins/:id/loops/:name/events?projectId=` — advances, gate-reached/resolved with the
+decision and feedback excerpt, pause/resume, convergence, plus a per-unit cost rollup folded from
+each session's `stats.totalCostUsd`). The latest advance's gate/progress/checks are also on every
+loop status (`GET .../loops`, the project surface), so the panel renders them without re-running
+your planner. Declared artifacts are served fresh from the output repo by
+`GET .../loops/:name/artifact?projectId=&path=` (content + the diff between its last two
+committed versions — commit each generation and revisions become reviewable diffs for free).
+Gate decisions go to `POST .../loops/:name/gate/resolve` `{projectId, gateId, actionId, input?}`.
+
+Two more authoring conveniences: `POST /api/plugins/validate {source}` parses a LOCAL plugin
+directory's manifest and checks every referenced file without installing, and `GET /api/plugins`
+reports `manifestDrift: true` when the manifest on disk differs from the cached copy the board
+runs (the fix is `POST /api/plugins/:id/update`). The scaffold's unresolved `TODO:` markers are
+also editable as a form (`GET|POST /api/plugins/:id/scaffold`) — the Plugins panel shows a
+"Setup" entry while any remain, so scaffold authors should write each marker as
+`TODO: <short label a form can show>`.
+
 Parsing is tolerant of noise **before** the JSON: the scan walks backwards for the last offset
 that parses, so npm notices and tsx warnings ahead of your output do not break you, and a bare
 array is accepted as `{units: [...]}`. Exit non-zero or print nothing and the advance fails loudly
