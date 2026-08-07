@@ -2,7 +2,8 @@ import { isSpecPlanningStageName, transitionIssueStatus } from "@agentic-kanban/
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { runUnderBuildGate } from "../services/jvm-build-gate.js";
-import { runPreMergeGate, resolveMergeGateShas, gateAlreadyPassed, gateSkipExplicit, type MergeGateToken } from "../services/pre-merge-gate.service.js";
+import { runPreMergeGate, resolveMergeGateShas, gateAlreadyPassed, gateSkipExplicit, RUN_GATE, type MergeGateToken } from "../services/pre-merge-gate.service.js";
+import { getAutoLandLoopTicket } from "../services/plugin-loop-hooks.service.js";
 import { movedDuringGate } from "../services/workspace-merge-gate.js";
 import { issues, preferences, projectStatuses, projects, scheduledRunHistory, scheduledRuns, sessions, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { desc, eq } from "drizzle-orm";
@@ -852,6 +853,17 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       await transitionIssueStatus(db, issueId, inReview.id, { now });
     }
     boardEvents.broadcast(projectId, "issue_updated");
+    // #297 — a loop whose manifest opted into autoLand lands its ticket NOW instead of
+    // parking it at In Review until a human (or the off-by-default auto_merge_in_review
+    // pref) merges it. Still gated: RUN_GATE makes autoMerge run the same verify/smoke
+    // pre-merge gate as every other landing. The post-merge loop advance (#298) then
+    // fires from the merge tail, so the loop's next gate appears without the monitor.
+    const autoLandLoop = await getAutoLandLoopTicket(issueId);
+    if (autoLandLoop) {
+      console.log(`[workflow] loop ticket for ${autoLandLoop.pluginSlug}:${autoLandLoop.loopName} (unit ${autoLandLoop.unitId}) auto-lands (manifest autoLand)`);
+      await autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now, RUN_GATE);
+      return;
+    }
     if (getBool(prefMap, "learning_step_after_agent") && workspace.workingDir) await launchLearningStep(db, sessionManager, learningSessionIds, workspace, prefMap, "after agent");
     const autoReview = !skipAutoReview && (workspace.requiresReview || isAutoReviewEnabled(prefMap.get(AUTO_REVIEW_PREF_KEY)));
     if (!autoReview) return;

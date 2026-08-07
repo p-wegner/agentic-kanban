@@ -19,7 +19,7 @@ import {
   type PluginPlaceholderVars,
 } from "@agentic-kanban/shared/lib/plugin-manifest";
 import type { Database } from "../db/index.js";
-import { listPluginLoopIssues } from "../repositories/plugins.repository.js";
+import { listPluginLoopIssues, listPluginLoopUnmergedWorkspaces } from "../repositories/plugins.repository.js";
 import {
   insertPluginLoopEvent,
   latestPluginLoopEvent,
@@ -172,6 +172,13 @@ export interface LoopStatus {
   progress: { steps: PluginLoopProgressStep[] } | null;
   /** Structured check results (#290), from the latest advance. */
   checks: PluginLoopCheck[] | null;
+  /**
+   * A finished-but-unlanded loop ticket (#299): the builder is done (In Review/Done) but
+   * its workspace has not merged, so the planner — which reads the MAIN checkout — cannot
+   * see the artifacts and every re-advance is a silent dedupe no-op. The UI renders this
+   * as its own state with a one-click Merge; null when nothing is stuck.
+   */
+  awaitingMerge: { workspaceId: string; issueNumber: number | null; issueTitle: string } | null;
 }
 
 export interface PluginLoopDeps {
@@ -247,6 +254,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
         { pluginSlug, loopName: loop.name, projectId }, "advance", database,
       );
       const payload = parseAdvancePayload(lastAdvance);
+      const unmerged = await listPluginLoopUnmergedWorkspaces(projectId, keyPrefix(pluginSlug, loop.name), database);
       out.push({
         name: loop.name,
         label: loop.label ?? loop.name,
@@ -261,6 +269,9 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
         gate: payload?.gate ?? null,
         progress: payload?.progress ?? null,
         checks: payload?.checks ?? null,
+        awaitingMerge: unmerged.length > 0
+          ? { workspaceId: unmerged[0].workspaceId, issueNumber: unmerged[0].issueNumber, issueTitle: unmerged[0].issueTitle }
+          : null,
       });
     }
     return out;

@@ -26,6 +26,7 @@ import { insertIssueComment } from "../repositories/issue-comments.repository.js
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { buildLearningStepPrompt } from "../services/merge-helpers.service.js";
 import { resolveMergeGate, type MergeGateToken } from "../services/pre-merge-gate.service.js";
+import { advanceLoopAfterMergedIssue } from "../services/plugin-loop-hooks.service.js";
 import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.repository.js";
 
 export type MergeWorkspace = Pick<typeof workspaces.$inferSelect, "id" | "isDirect" | "branch" | "workingDir" | "baseBranch" | "issueId">;
@@ -388,6 +389,11 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
               // Multi-repo: drop sibling worktrees + branches (no-op single-repo);
               // an unmerged sibling (failed post-prevalidation) is preserved.
               await cleanupSiblingWorktrees(gitService, workspace.id, db, { preserveUnmerged: true });
+
+              // #298 — merge-to-advance for plugin-loop tickets landing through THIS tail
+              // (the #297 autoLand path merges via autoMerge, not the workspace service, so
+              // the cleanup-service hook never sees it). Best-effort by contract.
+              await advanceLoopAfterMergedIssue(issueId, db);
 
               const verifyAgent = prefMapLearning.get("after_merge_verify_agent") || "none";
               const issueTagged = await db.select({ tagId: issueTags.tagId }).from(issueTags).where(eq(issueTags.issueId, issueId)).limit(100).then((rows) => rows.some((r) => r.tagId !== null));

@@ -95,6 +95,50 @@ export async function listPluginLoopIssues(
   );
 }
 
+export interface LoopUnmergedWorkspaceRow {
+  workspaceId: string;
+  issueId: string;
+  issueNumber: number | null;
+  issueTitle: string;
+  issueStatusName: string;
+}
+
+/**
+ * Loop tickets whose builder finished but whose workspace has not landed (#299).
+ *
+ * This is the loop's silent-stall state: the planner reads the MAIN checkout, so until
+ * the merge lands it keeps reporting the step as not-generated — and the external-key
+ * dedupe turns every re-advance into a no-op. Detected as: issue matches the loop's
+ * key prefix, its status is In Review / AI Reviewed / Done (i.e. the builder is finished),
+ * and a workspace for it is still open (not closed) and unmerged.
+ */
+export async function listPluginLoopUnmergedWorkspaces(
+  projectId: string,
+  keyPrefix: string,
+  database: Database = db,
+): Promise<LoopUnmergedWorkspaceRow[]> {
+  const pattern = `${escapeLikeLiteral(keyPrefix)}%`;
+  const rows = await database
+    .select({
+      workspaceId: workspaces.id,
+      issueId: issues.id,
+      issueNumber: issues.issueNumber,
+      issueTitle: issues.title,
+      issueStatusName: projectStatuses.name,
+    })
+    .from(workspaces)
+    .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+    .where(and(
+      eq(issues.projectId, projectId),
+      sql`${issues.externalKey} LIKE ${pattern} ESCAPE '\\'`,
+      sql`${workspaces.status} != 'closed'`,
+      sql`${workspaces.mergedAt} IS NULL`,
+      sql`${projectStatuses.name} IN ('In Review', 'AI Reviewed', 'Done')`,
+    ));
+  return rows;
+}
+
 /**
  * Session stats of every session that ran against a loop's unit tickets (#294).
  * The join is the same shape as the cost-over-time analytics: sessions →
