@@ -785,6 +785,13 @@
       "when": 1786112400000,
       "tag": "0111_review_preflight_block",
       "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "6",
+      "when": 1786198800000,
+      "tag": "0112_plugin_loop_events",
+      "breakpoints": true
     }
   ]
 }
