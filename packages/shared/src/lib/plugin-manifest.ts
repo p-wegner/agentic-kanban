@@ -191,6 +191,77 @@ export interface PluginLoopUnit {
   title: string;
   /** The ticket body — the brief the skill runs against. */
   description?: string;
+  /**
+   * Repo-relative paths (in the loop's OUTPUT repo) of the artifacts this unit
+   * produces (#288). The board renders them (markdown + version diff) on the
+   * loop pane, so a document-producing pipeline doesn't need its own view server.
+   */
+  artifacts?: string[];
+}
+
+/** One action a human can take on a loop gate (e.g. "Approve" / "Needs revision"). */
+export interface PluginLoopGateAction {
+  /** Stable action id, passed back to the plugin's resolve command ([a-z0-9-]+). */
+  id: string;
+  label: string;
+  /** `"text"` — this action carries a free-text input (e.g. revision feedback). */
+  input?: "text";
+}
+
+/**
+ * A human-approval gate (#286): the planner's structured way of saying "blocked on a
+ * person" instead of burying it in `note`. The board renders an approval card; a chosen
+ * action runs the plugin's deterministic `resolve` command (which mutates the plugin's
+ * own state files — status.md checkboxes, registers, …), then re-advances the loop.
+ * The doctrine holds: the plugin contributes deterministic commands, the board renders
+ * UI and runs agents.
+ */
+export interface PluginLoopGate {
+  /** Stable gate identity (e.g. "step-2:v1"). A NEW id is what re-notifies the user. */
+  id: string;
+  question: string;
+  /** Repo-relative artifact(s) under review, rendered next to the question. */
+  artifacts?: string[];
+  actions: PluginLoopGateAction[];
+  /**
+   * Deterministic command applying a chosen action. Runs like a plan command
+   * (same cwd/env/placeholder rules) with `GATE_ID`, `GATE_ACTION` env vars set
+   * and — when the action declared `input` — `GATE_INPUT_FILE` naming a temp
+   * file with the human's text (a file, never shell interpolation).
+   */
+  resolve: { command: string; cwd?: PluginCwd; env?: Record<string, string> };
+}
+
+export const PLUGIN_PROGRESS_STATES = [
+  "done",
+  "generating",
+  "awaiting-approval",
+  "needs-revision",
+  "locked",
+  "failed",
+  "pending",
+] as const;
+export type PluginProgressState = (typeof PLUGIN_PROGRESS_STATES)[number];
+
+/** One step of a pipeline plugin's declarative progress strip (#289). */
+export interface PluginLoopProgressStep {
+  id: string;
+  label: string;
+  state: PluginProgressState;
+  /** e.g. "v2" — shown on the step chip. */
+  version?: string;
+  /** Repo-relative artifacts this step produced, openable from the stepper. */
+  artifacts?: string[];
+}
+
+export const PLUGIN_CHECK_VERDICTS = ["pass", "warn", "fail"] as const;
+export type PluginCheckVerdict = (typeof PLUGIN_CHECK_VERDICTS)[number];
+
+/** A structured quality-check result (#290), rendered as a CI-style badge. */
+export interface PluginLoopCheck {
+  name: string;
+  verdict: PluginCheckVerdict;
+  detail?: string;
 }
 
 export interface PluginLoopPlan {
@@ -203,6 +274,12 @@ export interface PluginLoopPlan {
   converged?: boolean;
   /** Free-text note surfaced in the UI (e.g. "3/19 modules converged"). */
   note?: string;
+  /** Human-approval gate the loop is blocked on (#286). Meaningful with `units: []`. */
+  gate?: PluginLoopGate;
+  /** Declarative pipeline progress rendered natively on the loop card (#289). */
+  progress?: { steps: PluginLoopProgressStep[] };
+  /** Structured check results for the most recent unit's verification (#290). */
+  checks?: PluginLoopCheck[];
 }
 
 /** Cap on tickets one loop advance may create when the loop declares none. */
@@ -471,6 +548,7 @@ export function parsePluginLoopPlan(stdout: string): PluginLoopPlan {
       id: unitId,
       title: requireString(rec.title, `units[${i}].title`),
       description: optionalString(rec.description, `units[${i}].description`),
+      artifacts: optionalArtifactPaths(rec.artifacts, `units[${i}].artifacts`),
     };
   });
 
@@ -479,7 +557,85 @@ export function parsePluginLoopPlan(stdout: string): PluginLoopPlan {
     units,
     converged: (obj.converged as boolean | undefined) ?? units.length === 0,
     note: optionalString(obj.note, "note"),
+    gate: parseLoopGate(obj.gate),
+    progress: parseLoopProgress(obj.progress),
+    checks: parseLoopChecks(obj.checks),
   };
+}
+
+/** Repo-relative artifact paths — same escape rules as manifest paths. */
+function optionalArtifactPaths(value: unknown, field: string): string[] | undefined {
+  if (value == null) return undefined;
+  return requireArray(value, field).map((entry, i) => requireRelativePath(entry, `${field}[${i}]`));
+}
+
+const GATE_ACTION_ID_PATTERN = /^[a-z0-9-]+$/;
+
+function parseLoopGate(value: unknown): PluginLoopGate | undefined {
+  if (value == null) return undefined;
+  const rec = asRecord(value, "gate");
+  const actions = requireArray(rec.actions, "gate.actions").map((entry, i) => {
+    const a = asRecord(entry, `gate.actions[${i}]`);
+    const actionId = requireString(a.id, `gate.actions[${i}].id`);
+    if (!GATE_ACTION_ID_PATTERN.test(actionId)) {
+      fail(`"gate.actions[${i}].id" must match ${GATE_ACTION_ID_PATTERN} (got "${actionId}")`);
+    }
+    if (a.input != null && a.input !== "text") fail(`"gate.actions[${i}].input" must be "text" when present`);
+    return {
+      id: actionId,
+      label: requireString(a.label, `gate.actions[${i}].label`),
+      input: a.input as "text" | undefined,
+    };
+  });
+  if (actions.length === 0) fail(`"gate.actions" must not be empty`);
+  const resolve = asRecord(rec.resolve, "gate.resolve");
+  return {
+    id: requireString(rec.id, "gate.id"),
+    question: requireString(rec.question, "gate.question"),
+    artifacts: optionalArtifactPaths(rec.artifacts, "gate.artifacts"),
+    actions,
+    resolve: {
+      command: requireString(resolve.command, "gate.resolve.command"),
+      cwd: optionalCwd(resolve.cwd, "gate.resolve.cwd"),
+      env: optionalEnv(resolve.env, "gate.resolve.env"),
+    },
+  };
+}
+
+function parseLoopProgress(value: unknown): { steps: PluginLoopProgressStep[] } | undefined {
+  if (value == null) return undefined;
+  const rec = asRecord(value, "progress");
+  const steps = requireArray(rec.steps, "progress.steps").map((entry, i) => {
+    const s = asRecord(entry, `progress.steps[${i}]`);
+    const state = requireString(s.state, `progress.steps[${i}].state`);
+    if (!(PLUGIN_PROGRESS_STATES as readonly string[]).includes(state)) {
+      fail(`"progress.steps[${i}].state" must be one of ${PLUGIN_PROGRESS_STATES.join(", ")} (got "${state}")`);
+    }
+    return {
+      id: requireString(s.id, `progress.steps[${i}].id`),
+      label: requireString(s.label, `progress.steps[${i}].label`),
+      state: state as PluginProgressState,
+      version: optionalString(s.version, `progress.steps[${i}].version`),
+      artifacts: optionalArtifactPaths(s.artifacts, `progress.steps[${i}].artifacts`),
+    };
+  });
+  return { steps };
+}
+
+function parseLoopChecks(value: unknown): PluginLoopCheck[] | undefined {
+  if (value == null) return undefined;
+  return requireArray(value, "checks").map((entry, i) => {
+    const c = asRecord(entry, `checks[${i}]`);
+    const verdict = requireString(c.verdict, `checks[${i}].verdict`);
+    if (!(PLUGIN_CHECK_VERDICTS as readonly string[]).includes(verdict)) {
+      fail(`"checks[${i}].verdict" must be one of ${PLUGIN_CHECK_VERDICTS.join(", ")} (got "${verdict}")`);
+    }
+    return {
+      name: requireString(c.name, `checks[${i}].name`),
+      verdict: verdict as PluginCheckVerdict,
+      detail: optionalString(c.detail, `checks[${i}].detail`),
+    };
+  });
 }
 
 export interface PluginPlaceholderVars {
