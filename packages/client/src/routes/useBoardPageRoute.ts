@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { VIEW_IDS, type ViewMode } from "../lib/viewRegistry.js";
 import { getAppRouteTab, getAppRouteView, getViewRoutePath } from "../lib/appRoutes.js";
+import { NAVIGATE_VIEW_EVENT, type NavigateViewDetail } from "../lib/navigateView.js";
 import { viewTabActions } from "../stores/viewTabStore.js";
 
 interface BoardPageRouteState {
@@ -49,6 +50,17 @@ export function useBoardPageRoute(): BoardPageRouteState {
     const legacyTab = getAppRouteTab(window.location.pathname);
     if (legacyTab) viewTabActions.request(legacyTab.view, legacyTab.tab);
   }, []);
+
+  // Programmatic navigation from lib-layer code (#300): toast/notification clicks
+  // dispatch NAVIGATE_VIEW_EVENT because they cannot reach this hook's state.
+  useEffect(() => {
+    function handleNavigateEvent(e: Event) {
+      const view = (e as CustomEvent<NavigateViewDetail>).detail?.view;
+      if (view && VIEW_IDS.includes(view)) handleViewModeChange(view);
+    }
+    window.addEventListener(NAVIGATE_VIEW_EVENT, handleNavigateEvent);
+    return () => window.removeEventListener(NAVIGATE_VIEW_EVENT, handleNavigateEvent);
+  }, [handleViewModeChange]);
 
   useEffect(() => {
     function handlePopState() {

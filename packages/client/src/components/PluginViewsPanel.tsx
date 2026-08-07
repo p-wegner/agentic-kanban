@@ -101,6 +101,8 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
   const setStoreSelection = usePluginViewStore((s) => s.setSelection);
   const setStoreActiveProject = usePluginViewStore((s) => s.setActiveProject);
   const openMarketplace = usePluginViewStore((s) => s.openMarketplace);
+  const loopFocus = usePluginViewStore((s) => s.loopFocus);
+  const clearLoopFocus = usePluginViewStore((s) => s.clearLoopFocus);
   const startLatch = useRef(createStartLatch());
 
   const refetch = useCallback(async () => {
@@ -231,6 +233,18 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
       setSelection(null);
     }
   }, [loading, pluginSlug, projectId, filtered, startView]);
+
+  // Deep-link consumption (#300): a gate toast/notification/bell click asked for a
+  // specific loop. Runs after the surface has loaded; one-shot per focus request.
+  useEffect(() => {
+    if (loading || !loopFocus) return;
+    const target = surface.loops.find(
+      (l) => l.pluginSlug === loopFocus.slug && l.name === loopFocus.loopName,
+    );
+    if (!target) return; // plugin not enabled here (or another project) — keep the request pending
+    setSelection({ kind: "loop", key: ownerKey(target, target.name) });
+    clearLoopFocus();
+  }, [loading, loopFocus, surface.loops, clearLoopFocus]);
 
   // Latest selection, readable from an async continuation (state captured in a
   // closure is the selection as it was when the request went out).
@@ -407,7 +421,9 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
             loop.label,
             selection?.kind === "loop" && selection.key === ownerKey(loop, loop.name),
             () => setSelection({ kind: "loop", key: ownerKey(loop, loop.name) }),
-            loop.openTickets > 0 ? String(loop.openTickets) : undefined,
+            // A pending gate outranks the ticket count (#301): it is the one state
+            // that goes nowhere without the person looking at this rail.
+            loop.gate && loop.openTickets === 0 ? "✋" : loop.openTickets > 0 ? String(loop.openTickets) : undefined,
           ))}
         {railGroup("Scripts", filtered.scripts, (script) =>
           railButton(

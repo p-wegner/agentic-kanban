@@ -3,6 +3,7 @@ import { apiFetch, apiPost } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 import {
   ArtifactViewer,
+  AwaitingMergeCard,
   ChecksBadges,
   GateCard,
   LoopStateChips,
@@ -48,6 +49,10 @@ export type PluginLoop = PluginOwner & {
   progress: { steps: PluginProgressStep[] } | null;
   checks: PluginCheck[] | null;
   totalCostUsd?: number;
+  /** Finished-but-unlanded loop ticket (#299) — the silent-stall state, now named. */
+  awaitingMerge?: { workspaceId: string; issueNumber: number | null; issueTitle: string } | null;
+  /** The butler's pre-read verdict for the current gate (#309). */
+  gateRecommendation?: { actionId: string; reason: string } | null;
 };
 
 export type PluginScript = PluginOwner & {
@@ -116,6 +121,8 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null 
   const [result, setResult] = useState<LoopAdvanceResult | null>(null);
   const [openArtifact, setOpenArtifact] = useState<string | null>(null);
   const [timelineKey, setTimelineKey] = useState(0);
+  // Line-anchored review notes collected on the artifact diff (#304).
+  const [lineNotes, setLineNotes] = useState<string[]>([]);
 
   async function advance() {
     if (advancing) return;
@@ -180,6 +187,11 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null 
       <ProgressStepper steps={loop.progress?.steps} onOpenArtifact={setOpenArtifact} />
       <ChecksBadges checks={loop.checks} />
 
+      {/* A finished step whose merge hasn't landed (#299) — the loop's silent-stall state. */}
+      {loop.awaitingMerge && (
+        <AwaitingMergeCard awaitingMerge={loop.awaitingMerge} onMergeStarted={onChanged} />
+      )}
+
       {/* The human gate (#286): the single thing this loop needs from a person right now. */}
       {loop.gate && loop.openTickets === 0 && (
         <GateCard
@@ -187,8 +199,11 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null 
           loopName={loop.name}
           projectId={projectId}
           gate={loop.gate}
+          checks={loop.checks}
+          recommendation={loop.gateRecommendation ?? null}
+          lineNotes={lineNotes}
           onOpenArtifact={setOpenArtifact}
-          onResolved={() => { setTimelineKey((k) => k + 1); onChanged(); }}
+          onResolved={() => { setTimelineKey((k) => k + 1); setLineNotes([]); onChanged(); }}
         />
       )}
       {!loop.gate && loop.note && loop.openTickets === 0 && !loop.converged && (
@@ -290,6 +305,7 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null 
           projectId={projectId}
           path={openArtifact}
           onClose={() => setOpenArtifact(null)}
+          onLineNotesChange={setLineNotes}
         />
       )}
 

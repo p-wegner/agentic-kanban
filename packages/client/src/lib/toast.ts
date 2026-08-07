@@ -7,12 +7,20 @@
 export interface Toast {
   id: number;
   message: string;
-  type: "error" | "success";
+  type: "error" | "success" | "warning";
+  /** Sticky toasts stay until clicked or dismissed — for things that WAIT on the user (#300). */
+  sticky?: boolean;
+  /** Click handler (e.g. deep-link navigation); clicking also dismisses the toast. */
+  onClick?: () => void;
 }
 
 let toastId = 0;
 const listeners = new Set<(toasts: Toast[]) => void>();
 let toasts: Toast[] = [];
+
+function emit() {
+  listeners.forEach((fn) => fn([...toasts]));
+}
 
 /** Subscribe to toast-list changes; returns an unsubscribe fn. Used by ToastContainer. */
 export function subscribeToasts(fn: (toasts: Toast[]) => void): () => void {
@@ -22,12 +30,20 @@ export function subscribeToasts(fn: (toasts: Toast[]) => void): () => void {
   };
 }
 
-export function showToast(message: string, type: "error" | "success" = "error") {
+export function dismissToast(id: number) {
+  toasts = toasts.filter((t) => t.id !== id);
+  emit();
+}
+
+export function showToast(
+  message: string,
+  type: "error" | "success" | "warning" = "error",
+  opts?: { sticky?: boolean; onClick?: () => void },
+) {
   const id = ++toastId;
-  toasts = [...toasts, { id, message, type }];
-  listeners.forEach((fn) => fn([...toasts]));
-  setTimeout(() => {
-    toasts = toasts.filter((t) => t.id !== id);
-    listeners.forEach((fn) => fn([...toasts]));
-  }, 4000);
+  toasts = [...toasts, { id, message, type, sticky: opts?.sticky, onClick: opts?.onClick }];
+  emit();
+  if (!opts?.sticky) {
+    setTimeout(() => dismissToast(id), 4000);
+  }
 }

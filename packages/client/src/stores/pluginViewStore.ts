@@ -15,8 +15,16 @@ interface PluginViewState {
   installFocusNonce: number;
   /** Which project the current `selection` belongs to — see `setActiveProject`. */
   projectId: string | null;
+  /**
+   * One-shot deep-link request (#300): "show THIS loop when the Plugins view opens".
+   * Set by gate toast/notification/bell clicks, consumed (and cleared) by
+   * PluginViewsPanel once the loop is present in the loaded surface.
+   */
+  loopFocus: { slug: string; loopName: string; nonce: number } | null;
   setSelection: (selection: PluginViewSelection | null) => void;
   openMarketplace: (opts?: { focusInstall?: boolean }) => void;
+  focusLoop: (slug: string, loopName: string) => void;
+  clearLoopFocus: () => void;
   /**
    * Scope the selection to a project. A plugin pick is only meaningful for the
    * project it was made in: carried onto another project it names a plugin that
@@ -33,7 +41,14 @@ export const usePluginViewStore = create<PluginViewState>((set) => ({
   selection: null,
   installFocusNonce: 0,
   projectId: null,
+  loopFocus: null,
   setSelection: (selection) => set({ selection }),
+  focusLoop: (slug, loopName) =>
+    set((s) => ({
+      selection: { kind: "plugin", slug },
+      loopFocus: { slug, loopName, nonce: (s.loopFocus?.nonce ?? 0) + 1 },
+    })),
+  clearLoopFocus: () => set({ loopFocus: null }),
   setActiveProject: (projectId) =>
     set((s) => {
       if (s.projectId === projectId) return s;

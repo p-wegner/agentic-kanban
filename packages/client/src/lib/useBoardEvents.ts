@@ -1,6 +1,8 @@
 import { useEffect, useRef, useCallback } from "react";
 import { SESSION_ACTIVITY_WS_EVENT, type SessionActivityEventDetail } from "./sessionTranscriptEvents.js";
 import { showToast } from "./toast.js";
+import { requestViewNavigation } from "./navigateView.js";
+import { usePluginViewStore } from "../stores/pluginViewStore.js";
 
 /**
  * Low-frequency safety poll backing the board WebSocket. The WS is the single
@@ -90,11 +92,13 @@ interface ApprovalRequestedEvent {
 }
 
 /** A plugin loop reached a human-approval gate (#287) — fired once per NEW gate id. */
-interface PluginGateEvent {
+export interface PluginGateEvent {
   type: "plugin_gate";
   projectId: string;
   pluginSlug: string;
   pluginName: string;
+  /** Plugin ROW id (#300) — what deep-linking to the loop pane needs. */
+  pluginId: string | null;
   loopName: string;
   loopLabel: string;
   gateId: string;
@@ -117,6 +121,7 @@ export function useBoardEvents(
   onSessionStats?: (issueId: string, stats: LiveSessionStats) => void,
   onSessionTodos?: (issueId: string, todos: TodoItem[]) => void,
   onApprovalRequested?: (req: ApprovalRequest) => void,
+  onPluginGate?: (event: PluginGateEvent) => void,
 ) {
   const wsRef = useRef<WebSocket | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -128,6 +133,8 @@ export function useBoardEvents(
   const onSessionStatsRef = useRef(onSessionStats);
   const onSessionTodosRef = useRef(onSessionTodos);
   const onApprovalRequestedRef = useRef(onApprovalRequested);
+  const onPluginGateRef = useRef(onPluginGate);
+  onPluginGateRef.current = onPluginGate;
   onBoardChangeRef.current = onBoardChange;
   onSessionActivityRef.current = onSessionActivity;
   onSessionStatsRef.current = onSessionStats;
@@ -185,14 +192,26 @@ export function useBoardEvents(
           onApprovalRequestedRef.current?.({ id: msg.id, sessionId: msg.sessionId, toolName: msg.toolName, toolInput: msg.toolInput, workspaceId: msg.workspaceId });
         } else if (msg.type === "plugin_gate") {
           // A human gate is the one loop state that goes NOWHERE without a person —
-          // surface it actively (#287). The server already dedupes to one message per
-          // new gate id, so this never spams on the monitor's polling cadence.
-          showToast(`${msg.loopLabel}: ${msg.question} (Plugins tab)`, "success");
+          // surface it actively (#287/#300). The server already dedupes to one message
+          // per new gate id, so this never spams on the monitor's polling cadence.
+          // Warning tone + sticky + click-to-navigate: a green auto-fading toast
+          // understated a BLOCKING decision and left no way to reach it.
+          const navigateToGate = () => {
+            usePluginViewStore.getState().focusLoop(msg.pluginSlug, msg.loopName);
+            requestViewNavigation("plugin-views");
+          };
+          showToast(`✋ ${msg.loopLabel}: ${msg.question}`, "warning", { sticky: true, onClick: navigateToGate });
+          onPluginGateRef.current?.(msg);
           // Desktop notification only if the user has ALREADY granted permission —
           // requesting it outside a user gesture is browser-hostile.
           try {
             if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-              new Notification(`${msg.pluginName} — approval needed`, { body: msg.question, tag: `plugin-gate-${msg.gateId}` });
+              const notification = new Notification(`${msg.pluginName} — approval needed`, { body: msg.question, tag: `plugin-gate-${msg.gateId}` });
+              notification.onclick = () => {
+                window.focus();
+                navigateToGate();
+                notification.close();
+              };
             }
           } catch { /* notifications are best-effort */ }
           // Let panels (plugin surface) refetch so the approval card appears without a manual reload.

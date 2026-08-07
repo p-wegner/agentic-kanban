@@ -36,6 +36,7 @@ import { invalidateClientSurface, subscribeClientInvalidations } from "../lib/cl
 import { useBoardSelectionStore } from "../stores/boardSelectionStore.js";
 import { useBoardFilterStore, boardFilterActions } from "../stores/boardFilterStore.js";
 import { useBoardBulkSelectionStore } from "../stores/boardBulkSelectionStore.js";
+import { usePluginViewStore } from "../stores/pluginViewStore.js";
 import type {
   DependencyInfo,
   IssueWithStatus,
@@ -131,7 +132,7 @@ export function BoardPage() {
     tagsLoaded,
   } = useBoardDataController({ setError });
   const notifications = useActivityNotifications(activeProjectId);
-  const { addBoardEvent: addNotificationBoardEvent, addApprovalEvent: addNotificationApprovalEvent } = notifications;
+  const { addBoardEvent: addNotificationBoardEvent, addApprovalEvent: addNotificationApprovalEvent, addPluginGateEvent: addNotificationPluginGateEvent } = notifications;
   const [mutating, setMutating] = useState(false);
   // A prompt to seed the butler with when entering its view via "Chat about this
   // ticket" (#838). Cleared once ButlerView has consumed it.
@@ -198,6 +199,7 @@ export function BoardPage() {
     loadProjectsRef,
     addNotificationApprovalEvent,
     addNotificationBoardEvent,
+    addNotificationPluginGateEvent,
     setColumns,
   });
   useEffect(() => subscribeClientInvalidations((event) => {
@@ -513,6 +515,12 @@ export function BoardPage() {
   const canStartWorkspace = !!activeProject?.repoPath;
 
   function handleNotificationEventClick(event: NotificationEvent) {
+    // Gate entries deep-link to the loop pane (#301) — they carry no issue.
+    if (event.type === "plugin_gate" && event.pluginSlug && event.loopName) {
+      usePluginViewStore.getState().focusLoop(event.pluginSlug, event.loopName);
+      handleViewModeChange("plugin-views");
+      return;
+    }
     if (event.issueId) {
       const found = columns.flatMap((col) => col.issues).find((iss) => iss.id === event.issueId);
       if (found) {
