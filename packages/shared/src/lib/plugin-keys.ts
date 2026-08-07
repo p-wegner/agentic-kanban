@@ -34,6 +34,29 @@ export function pluginLoopUnitKey(pluginSlug: string, loopName: string, unitId: 
 }
 
 /**
+ * Inverse of {@link pluginLoopUnitKey}: recognise a loop-ticket `externalKey` and split it
+ * back into its parts. Returns null for anything that is not a loop key. The split is
+ * unambiguous because slug and loop name are colon-free by construction (#250) — only the
+ * unit-id TAIL may contain `:`. This is what lets merge/exit hooks (#297/#298) identify
+ * "this ticket belongs to loop X of plugin Y" without a second identity column (#201 debt).
+ */
+export function parsePluginLoopUnitKey(
+  externalKey: string | null | undefined,
+): { pluginSlug: string; loopName: string; unitId: string } | null {
+  if (!externalKey || !externalKey.startsWith("plugin-loop:")) return null;
+  const rest = externalKey.slice("plugin-loop:".length);
+  const firstColon = rest.indexOf(":");
+  if (firstColon <= 0) return null;
+  const secondColon = rest.indexOf(":", firstColon + 1);
+  if (secondColon <= firstColon + 1) return null;
+  const pluginSlug = rest.slice(0, firstColon);
+  const loopName = rest.slice(firstColon + 1, secondColon);
+  const unitId = rest.slice(secondColon + 1);
+  if (!unitId) return null;
+  return { pluginSlug, loopName, unitId };
+}
+
+/**
  * The name a `skills[].dir` is known by everywhere else: its basename.
  *
  * ONE derivation, because three hand-rolled ones disagreed: `runSkill` matched
