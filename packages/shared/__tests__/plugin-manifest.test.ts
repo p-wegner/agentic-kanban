@@ -349,3 +349,89 @@ describe("countScaffoldPlaceholders", () => {
     expect(countScaffoldPlaceholders(template)).toBe(1);
   });
 });
+
+describe("parsePluginLoopPlan — gate / progress / checks / artifacts (#286/#288/#289/#290)", () => {
+  const gate = {
+    id: "step-2:v1",
+    question: "Approve the PRD?",
+    artifacts: ["docs/pm/steps/step-2/prd.md"],
+    actions: [
+      { id: "approve", label: "Approve" },
+      { id: "revise", label: "Needs revision", input: "text" },
+    ],
+    resolve: { command: "node tools/gate-resolve.mjs", cwd: "plugin", env: { PM_ROOT: "{{repoPath}}" } },
+  };
+
+  it("parses a gate with actions, artifacts and resolve command", () => {
+    const plan = parsePluginLoopPlan(JSON.stringify({ units: [], converged: false, gate }));
+    expect(plan.gate).toMatchObject({
+      id: "step-2:v1",
+      question: "Approve the PRD?",
+      artifacts: ["docs/pm/steps/step-2/prd.md"],
+    });
+    expect(plan.gate?.actions).toHaveLength(2);
+    expect(plan.gate?.actions[1]).toMatchObject({ id: "revise", input: "text" });
+    expect(plan.gate?.resolve).toMatchObject({ command: "node tools/gate-resolve.mjs", cwd: "plugin" });
+  });
+
+  it("rejects a gate with no actions, a bad action id, or a missing resolve command", () => {
+    expect(() => parsePluginLoopPlan(JSON.stringify({ units: [], gate: { ...gate, actions: [] } })))
+      .toThrow(/gate\.actions/);
+    expect(() => parsePluginLoopPlan(JSON.stringify({
+      units: [], gate: { ...gate, actions: [{ id: "Bad Id!", label: "x" }] },
+    }))).toThrow(/actions\[0\]\.id/);
+    expect(() => parsePluginLoopPlan(JSON.stringify({ units: [], gate: { ...gate, resolve: {} } })))
+      .toThrow(/gate\.resolve\.command/);
+  });
+
+  it("parses progress steps and rejects an unknown state", () => {
+    const plan = parsePluginLoopPlan(JSON.stringify({
+      units: [],
+      progress: { steps: [
+        { id: "step-1", label: "Market analysis", state: "done", version: "v2" },
+        { id: "step-2", label: "PRD", state: "awaiting-approval", artifacts: ["docs/prd.md"] },
+      ] },
+    }));
+    expect(plan.progress?.steps).toHaveLength(2);
+    expect(plan.progress?.steps[1]).toMatchObject({ state: "awaiting-approval", artifacts: ["docs/prd.md"] });
+    expect(() => parsePluginLoopPlan(JSON.stringify({
+      units: [], progress: { steps: [{ id: "x", label: "x", state: "half-done" }] },
+    }))).toThrow(/state/);
+  });
+
+  it("parses checks and rejects an unknown verdict", () => {
+    const plan = parsePluginLoopPlan(JSON.stringify({
+      units: [],
+      checks: [
+        { name: "Completeness", verdict: "pass" },
+        { name: "Consistency", verdict: "warn", detail: "employee bounds differ" },
+      ],
+    }));
+    expect(plan.checks).toHaveLength(2);
+    expect(plan.checks?.[1]).toMatchObject({ verdict: "warn", detail: "employee bounds differ" });
+    expect(() => parsePluginLoopPlan(JSON.stringify({
+      units: [], checks: [{ name: "x", verdict: "maybe" }],
+    }))).toThrow(/verdict/);
+  });
+
+  it("parses unit artifacts and rejects escaping paths", () => {
+    const plan = parsePluginLoopPlan(JSON.stringify({
+      units: [{ id: "u1", title: "T", artifacts: ["docs/a.md", "docs/b.sql"] }],
+    }));
+    expect(plan.units[0].artifacts).toEqual(["docs/a.md", "docs/b.sql"]);
+    expect(() => parsePluginLoopPlan(JSON.stringify({
+      units: [{ id: "u1", title: "T", artifacts: ["../outside.md"] }],
+    }))).toThrow(/must not contain/);
+    expect(() => parsePluginLoopPlan(JSON.stringify({
+      units: [{ id: "u1", title: "T", artifacts: ["C:/abs.md"] }],
+    }))).toThrow(/relative/);
+  });
+
+  it("a plan with none of the new fields parses exactly as before", () => {
+    const plan = parsePluginLoopPlan(JSON.stringify({ units: [{ id: "a", title: "A" }], converged: false }));
+    expect(plan.gate).toBeUndefined();
+    expect(plan.progress).toBeUndefined();
+    expect(plan.checks).toBeUndefined();
+    expect(plan.units[0].artifacts).toBeUndefined();
+  });
+});
