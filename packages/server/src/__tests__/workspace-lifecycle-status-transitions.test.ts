@@ -13,6 +13,10 @@
 vi.mock("../db/index.js", () => ({ db: {} }));
 vi.mock("../services/git.service.js", () => ({
   prepareForReview: vi.fn(async () => ({ success: true, diffRef: "master", conflictingFiles: [], uncommittedChanges: [] })),
+  // Reached by the merge path's diff-derived cost decisions. Absent from this factory until
+  // #273 un-hung this suite, at which point every test here failed on the mock rather than
+  // on its assertion — the merge had never previously got this far.
+  getChangedFileNames: vi.fn(async () => [] as string[]),
 }));
 vi.mock("../services/butler-event-feed.js", () => ({ emitButlerSystemEvent: vi.fn() }));
 vi.mock("../services/agent-settings.service.js", () => {
@@ -84,6 +88,14 @@ import { createWorkflowEngine } from "../startup/exit-workflow.js";
 import { createWorkspaceSessionService } from "../services/workspace-session.service.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
 import { activeMerges } from "../services/workspace-internals.js";
+import { makeTempRepo } from "./helpers/temp-repo.js";
+
+/**
+ * A REAL repo path (#273). This suite drives the actual merge path, whose repo lock
+ * refuses a repoPath with no `.git` and then POLLS — so the old `"/repo"` literal made
+ * every test here burn its full timeout instead of running.
+ */
+const REPO_PATH = makeTempRepo();
 
 // Test isolation: the per-repoPath merge lock (activeMerges) is a module-level Map
 // (see workspace-merge-service.test.ts ~line 22). Clearing it before each test
@@ -167,7 +179,7 @@ async function seedLifecycleScenario(
   const inReviewNodeId = randomUUID();
 
   await db.insert(projects).values({
-    id: projectId, name: "Test", repoPath: "/repo", repoName: "repo",
+    id: projectId, name: "Test", repoPath: REPO_PATH, repoName: "repo",
     defaultBranch: "master", createdAt: now, updatedAt: now,
   });
   await db.insert(projectStatuses).values([
@@ -202,7 +214,7 @@ async function seedLifecycleScenario(
   await db.insert(workspaces).values({
     id: workspaceId, issueId,
     branch: "feature/ak-707-test",
-    workingDir: "/repo/.worktrees/ak-707-test",
+    workingDir: `${REPO_PATH}/.worktrees/ak-707-test`,
     baseBranch: "master",
     isDirect: false,
     status: wsStatus,

@@ -8,6 +8,14 @@ import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/s
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
 import { insertWorkspaceRepo, listWorkspaceRepos, setWorkspaceRepoMergedSha } from "../repositories/repo.repository.js";
+import { makeTempRepo } from "./helpers/temp-repo.js";
+
+/**
+ * A REAL repo path (#273). This suite drives the actual merge path, whose repo lock
+ * refuses a repoPath with no `.git` and then POLLS — so the old `"/repo"` literal made
+ * every test here burn its full timeout instead of running.
+ */
+const REPO_PATH = makeTempRepo();
 
 // Minimal git service fake
 function makeGitService(overrides: Partial<{
@@ -68,7 +76,7 @@ async function seedScenario(db: ReturnType<typeof createTestDb>["db"], opts: {
   await db.insert(projects).values({
     id: projectId,
     name: "Test",
-    repoPath: "/repo",
+    repoPath: REPO_PATH,
     repoName: "repo",
     defaultBranch: "master",
     createdAt: now,
@@ -97,7 +105,7 @@ async function seedScenario(db: ReturnType<typeof createTestDb>["db"], opts: {
     id: workspaceId,
     issueId,
     branch: opts.branch ?? "feature/ak-42-test",
-    workingDir: opts.workingDir !== undefined ? opts.workingDir : "/repo/.worktrees/ws",
+    workingDir: opts.workingDir !== undefined ? opts.workingDir : `${REPO_PATH}/.worktrees/ws`,
     baseBranch: "master",
     isDirect: opts.isDirect ?? false,
     status: opts.workspaceStatus ?? "idle",
@@ -212,7 +220,7 @@ describe("checkAlreadyMerged", () => {
     const result = await svc.checkAlreadyMerged(workspaceId);
 
     expect(result.isAlreadyMerged).toBe(true);
-    expect(getDiffFromRepo).toHaveBeenCalledWith("/repo", "feature/ak-42-test", "master");
+    expect(getDiffFromRepo).toHaveBeenCalledWith(REPO_PATH, "feature/ak-42-test", "master");
   });
 
   it("does not report already-merged when worktree is missing and branch equals base with 0 unique commits", async () => {
@@ -439,14 +447,14 @@ describe("reconcileAlreadyMerged", () => {
   });
 
   it("attempts to remove the worktree as best-effort cleanup", async () => {
-    const { workspaceId } = await seedScenario(db, { workingDir: "/repo/.worktrees/ws" });
+    const { workspaceId } = await seedScenario(db, { workingDir: `${REPO_PATH}/.worktrees/ws` });
     const removeWorktree = vi.fn(async () => {});
     const git = makeGitService({ getDiff: async () => "", isAncestor: async () => true, removeWorktree });
 
     const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
     await svc.reconcileAlreadyMerged(workspaceId);
 
-    expect(removeWorktree).toHaveBeenCalledWith("/repo", "/repo/.worktrees/ws");
+    expect(removeWorktree).toHaveBeenCalledWith(REPO_PATH, `${REPO_PATH}/.worktrees/ws`);
   });
 });
 

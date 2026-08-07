@@ -25,6 +25,14 @@ import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
 import { createAutoMerge } from "../startup/merge-workflow.js";
 import { createBoardEvents } from "../services/board-events.js";
+import { makeTempRepo } from "./helpers/temp-repo.js";
+
+/**
+ * A REAL repo path (#273). This suite drives the actual merge path, whose repo lock
+ * refuses a repoPath with no `.git` and then POLLS — so the old `"/repo"` literal made
+ * every test here burn its full timeout instead of running.
+ */
+const REPO_PATH = makeTempRepo();
 
 // ── shared seed helper ─────────────────────────────────────────────────────
 
@@ -39,7 +47,7 @@ async function seedMergeScenario(db: ReturnType<typeof createTestDb>["db"]) {
   await db.insert(projects).values({
     id: projectId,
     name: "Test",
-    repoPath: "/repo",
+    repoPath: REPO_PATH,
     repoName: "repo",
     defaultBranch: "master",
     createdAt: now,
@@ -64,7 +72,7 @@ async function seedMergeScenario(db: ReturnType<typeof createTestDb>["db"]) {
     id: workspaceId,
     issueId,
     branch: "feature/ak-588-test",
-    workingDir: "/repo/.worktrees/ws",
+    workingDir: `${REPO_PATH}/.worktrees/ws`,
     baseBranch: "master",
     isDirect: false,
     status: "idle",

@@ -19,6 +19,14 @@ import { createWorkspaceMergeService } from "../services/workspace-merge.service
 import { insertWorkspaceRepo } from "../repositories/repo.repository.js";
 import { resolveMergeState, WorkspaceError, activeMerges } from "../services/workspace-internals.js";
 import { createMockSessionManager } from "./helpers/mocks.js";
+import { makeTempRepo } from "./helpers/temp-repo.js";
+
+/**
+ * A REAL repo path (#273). This suite drives the actual merge path, whose repo lock
+ * refuses a repoPath with no `.git` and then POLLS — so the old `"/repo"` literal made
+ * every test here burn its full timeout instead of running.
+ */
+const REPO_PATH = makeTempRepo();
 
 // Test isolation: the per-repoPath merge lock (activeMerges) is a module-level Map.
 // If one test is killed by vitest's timeout while its mergePromise is still pending
@@ -82,7 +90,7 @@ async function seedWorkspace(
   await db.insert(projects).values({
     id: projectId,
     name: "Test",
-    repoPath: "/repo",
+    repoPath: REPO_PATH,
     repoName: "repo",
     defaultBranch: "master",
     createdAt: now,
@@ -107,7 +115,7 @@ async function seedWorkspace(
     id: workspaceId,
     issueId,
     branch: "feature/ak-548-test",
-    workingDir: "/repo/.worktrees/feature_ak-548-test",
+    workingDir: `${REPO_PATH}/.worktrees/feature_ak-548-test`,
     baseBranch: "master",
     isDirect: false,
     status: opts.status ?? (opts.mergedAt ? "closed" : "idle"),
@@ -176,7 +184,7 @@ describe("MergeService — clean merge advances base", () => {
     });
     const result = await svc.mergeWorkspace(workspaceId);
 
-    expect(git.mergeBranch).toHaveBeenCalledWith("/repo", "feature/ak-548-test", "master", { deferWorkingTreeSync: true, autoResolveAppendConflicts: true });
+    expect(git.mergeBranch).toHaveBeenCalledWith(REPO_PATH, "feature/ak-548-test", "master", { deferWorkingTreeSync: true, autoResolveAppendConflicts: true });
     expect(result.merged).toBe(true);
     expect(result.baseBranch).toBe("master");
     expect(result.mergeOutput).toContain("ort");
@@ -385,7 +393,7 @@ describe("MergeService — updateBase rebase uses preferLocalBase", () => {
     await svc.updateBase(workspaceId, "rebase");
 
     expect(rebaseOntoBase).toHaveBeenCalledWith(
-      "/repo/.worktrees/feature_ak-548-test",
+      `${REPO_PATH}/.worktrees/feature_ak-548-test`,
       "master",
       "feature/ak-548-test",
       { preferLocalBase: true },
@@ -405,7 +413,7 @@ describe("MergeService — updateBase rebase uses preferLocalBase", () => {
     const result = await svc.updateBase(workspaceId, "rebase");
 
     expect(result.success).toBe(true);
-    expect(rebaseOntoBase).toHaveBeenCalledWith("/repo/.worktrees/feature_ak-548-test", "master", "feature/ak-548-test", { preferLocalBase: true });
+    expect(rebaseOntoBase).toHaveBeenCalledWith(`${REPO_PATH}/.worktrees/feature_ak-548-test`, "master", "feature/ak-548-test", { preferLocalBase: true });
     expect(rebaseOntoBase).toHaveBeenCalledWith("/extra/.worktrees/ws", "main", "feature/ak-548-test", { preferLocalBase: true });
   });
 
@@ -441,7 +449,7 @@ describe("MergeService — updateBase rebase uses preferLocalBase", () => {
     await svc.updateBase(workspaceId, "merge");
 
     expect(mergeBaseIntoBranch).toHaveBeenCalledWith(
-      "/repo/.worktrees/feature_ak-548-test",
+      `${REPO_PATH}/.worktrees/feature_ak-548-test`,
       "master",
     );
   });
@@ -532,7 +540,7 @@ function makeWorkspace(overrides: Partial<typeof workspaces.$inferSelect> = {}):
     id: randomUUID(),
     issueId: randomUUID(),
     branch: "feature/ak-548-test",
-    workingDir: "/repo/.worktrees/feature_ak-548-test",
+    workingDir: `${REPO_PATH}/.worktrees/feature_ak-548-test`,
     baseBranch: "master",
     isDirect: false,
     status: "idle",
@@ -735,7 +743,7 @@ describe("resolveMergeState — already-merged (mergedAt set), git-verified (#82
     const git = makeGitForStateMachine({
       checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: true, branchSha: "sha-branch", baseSha: "sha-base" })),
     });
-    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    const result = await resolveMergeState(ws, REPO_PATH, "master", { gitService: git as never });
     expect(result.kind).toBe("already-merged");
     // The flag is now trust-but-verified: the ancestry check MUST run before honoring mergedAt.
     expect(git.checkBranchTipIsAncestor).toHaveBeenCalled();
@@ -746,7 +754,7 @@ describe("resolveMergeState — already-merged (mergedAt set), git-verified (#82
     const git = makeGitForStateMachine({
       checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: false, branchSha: null, reason: "branch-not-found" })),
     });
-    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    const result = await resolveMergeState(ws, REPO_PATH, "master", { gitService: git as never });
     expect(result.kind).toBe("already-merged");
   });
 
@@ -758,7 +766,7 @@ describe("resolveMergeState — already-merged (mergedAt set), git-verified (#82
     const git = makeGitForStateMachine({
       checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: false, branchSha: "sha-branch", baseSha: "sha-base" })),
     });
-    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    const result = await resolveMergeState(ws, REPO_PATH, "master", { gitService: git as never });
     expect(result.kind).not.toBe("already-merged");
     expect(result.kind).toBe("proceed"); // re-resolves to an actual merge, no silent loss
   });
@@ -768,7 +776,7 @@ describe("resolveMergeState — direct-close", () => {
   it("returns direct-close for isDirect workspaces", async () => {
     const ws = makeWorkspace({ isDirect: true });
     const git = makeGitForStateMachine();
-    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    const result = await resolveMergeState(ws, REPO_PATH, "master", { gitService: git as never });
     expect(result.kind).toBe("direct-close");
   });
 });
@@ -780,7 +788,7 @@ describe("resolveMergeState — reconcile (branch already ancestor)", () => {
       checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: true, branchSha: "sha-branch", baseSha: "sha-base" })),
       countUniqueCommits: vi.fn(async () => 3),
     });
-    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    const result = await resolveMergeState(ws, REPO_PATH, "master", { gitService: git as never });
     expect(result.kind).toBe("reconcile");
     if (result.kind === "reconcile") {
       expect(result.branchSha).toBe("sha-branch");
@@ -795,7 +803,7 @@ describe("resolveMergeState — reconcile (branch already ancestor)", () => {
       checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: true, branchSha: "sha-branch", baseSha: "sha-base" })),
       countUniqueCommits: vi.fn(async (_repo: string, baseSha: string) => baseSha === "base-sha" ? 1 : 0),
     });
-    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    const result = await resolveMergeState(ws, REPO_PATH, "master", { gitService: git as never });
     expect(result.kind).toBe("reconcile");
     if (result.kind === "reconcile") {
       expect(result.branchSha).toBe("sha-branch");
@@ -810,7 +818,7 @@ describe("resolveMergeState — reconcile (branch already ancestor)", () => {
       checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: true, branchSha: "same-sha", baseSha: "same-sha" })),
       countUniqueCommits: vi.fn(async () => 0),
     });
-    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    const result = await resolveMergeState(ws, REPO_PATH, "master", { gitService: git as never });
     expect(result.kind).toBe("clean-ancestor");
     if (result.kind === "clean-ancestor") {
       expect(result.branchSha).toBe("same-sha");
@@ -824,7 +832,7 @@ describe("resolveMergeState — reconcile (branch already ancestor)", () => {
     const checkBranchTipIsAncestor = vi.fn(async () => ({ isAncestor: true, branchSha: "sha-branch", baseSha: "sha-base" }));
     const countUniqueCommits = vi.fn(async (_repo: string, baseSha: string) => baseSha === "base-sha" ? 1 : 0);
     const git = makeGitForStateMachine({ checkBranchTipIsAncestor, countUniqueCommits });
-    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    const result = await resolveMergeState(ws, REPO_PATH, "master", { gitService: git as never });
     expect(result.kind).toBe("reconcile");
     expect(checkBranchTipIsAncestor).toHaveBeenCalled();
     expect(countUniqueCommits).toHaveBeenCalled();
@@ -837,7 +845,7 @@ describe("resolveMergeState — conflict-ready (direct conflict detection)", () 
     const git = makeGitForStateMachine({
       detectConflictsByBranch: vi.fn(async () => ({ hasConflicts: true, conflictingFiles: ["src/foo.ts", "src/bar.ts"] })),
     });
-    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    const result = await resolveMergeState(ws, REPO_PATH, "master", { gitService: git as never });
     expect(result.kind).toBe("conflict-ready");
     if (result.kind === "conflict-ready") {
       expect(result.conflictFiles).toEqual(["src/foo.ts", "src/bar.ts"]);
@@ -853,7 +861,7 @@ describe("resolveMergeState — conflict-ready (direct conflict detection)", () 
       countBehindCommits: vi.fn(async () => 0),
       detectConflictsByBranch: vi.fn(async () => ({ hasConflicts: true, conflictingFiles: ["src/x.ts"] })),
     });
-    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    const result = await resolveMergeState(ws, REPO_PATH, "master", { gitService: git as never });
     if (result.kind === "conflict-ready") {
       expect(result.behindCount).toBeUndefined();
     }
@@ -872,7 +880,7 @@ describe("resolveMergeState — conflict-ready (behind base), read-only detectio
       rebaseOntoBase,
       abortRebase,
     });
-    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    const result = await resolveMergeState(ws, REPO_PATH, "master", { gitService: git as never });
     expect(result.kind).toBe("conflict-ready");
     if (result.kind === "conflict-ready") {
       expect(result.behindCount).toBe(5);
@@ -893,7 +901,7 @@ describe("resolveMergeState — conflict-ready (behind base), read-only detectio
       detectConflictsByBranch: vi.fn(async () => ({ hasConflicts: false, conflictingFiles: [] })),
       rebaseOntoBase,
     });
-    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    const result = await resolveMergeState(ws, REPO_PATH, "master", { gitService: git as never });
     expect(result.kind).toBe("proceed");
     expect(rebaseOntoBase).not.toHaveBeenCalled();
   });
@@ -905,7 +913,7 @@ describe("resolveMergeState — error-skip (dirty main checkout)", () => {
     const git = makeGitForStateMachine({
       getUncommittedTrackedChanges: vi.fn(async () => ["packages/server/src/index.ts"]),
     });
-    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    const result = await resolveMergeState(ws, REPO_PATH, "master", { gitService: git as never });
     expect(result.kind).toBe("error-skip");
     if (result.kind === "error-skip") {
       expect(result.error.data).toMatchObject({ mergeReason: "dirty_main" });
@@ -918,7 +926,7 @@ describe("resolveMergeState — error-skip (dirty main checkout)", () => {
     const git = makeGitForStateMachine({
       getUncommittedTrackedChanges: vi.fn(async () => ["packages/server/src/index.ts"]),
     });
-    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    const result = await resolveMergeState(ws, REPO_PATH, "master", { gitService: git as never });
     expect(result.kind).toBe("error-skip");
     if (result.kind === "error-skip") {
       expect(result.error.data).toMatchObject({ mergeReason: "dirty_main" });
@@ -931,7 +939,7 @@ describe("resolveMergeState — error-skip (dirty main checkout)", () => {
     const git = makeGitForStateMachine({
       getUncommittedTrackedChanges: vi.fn(async () => []),
     });
-    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    const result = await resolveMergeState(ws, REPO_PATH, "master", { gitService: git as never });
     expect(result.kind).toBe("proceed");
   });
 });
@@ -940,7 +948,7 @@ describe("resolveMergeState — proceed (all checks pass)", () => {
   it("returns proceed when branch has no conflicts and is up-to-date", async () => {
     const ws = makeWorkspace();
     const git = makeGitForStateMachine();
-    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    const result = await resolveMergeState(ws, REPO_PATH, "master", { gitService: git as never });
     expect(result.kind).toBe("proceed");
   });
 });
@@ -951,21 +959,21 @@ describe("resolveMergeState — auto_merge_in_review bypasses readyForMerge gate
   it("returns not-approved when readyForMerge=false and autoMergeInReview=false (manual gate preserved)", async () => {
     const ws = makeWorkspace({ readyForMerge: false });
     const git = makeGitForStateMachine();
-    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never, autoMergeInReview: false });
+    const result = await resolveMergeState(ws, REPO_PATH, "master", { gitService: git as never, autoMergeInReview: false });
     expect(result.kind).toBe("not-approved");
   });
 
   it("returns not-approved when readyForMerge=false and autoMergeInReview omitted (default gate preserved)", async () => {
     const ws = makeWorkspace({ readyForMerge: false });
     const git = makeGitForStateMachine();
-    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    const result = await resolveMergeState(ws, REPO_PATH, "master", { gitService: git as never });
     expect(result.kind).toBe("not-approved");
   });
 
   it("proceeds past the readyForMerge gate when autoMergeInReview=true and readyForMerge=false", async () => {
     const ws = makeWorkspace({ readyForMerge: false });
     const git = makeGitForStateMachine();
-    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never, autoMergeInReview: true });
+    const result = await resolveMergeState(ws, REPO_PATH, "master", { gitService: git as never, autoMergeInReview: true });
     // Should not be not-approved — the gate is bypassed and the merge can proceed
     expect(result.kind).not.toBe("not-approved");
     // With a clean, non-conflicting branch it should reach proceed
@@ -975,7 +983,7 @@ describe("resolveMergeState — auto_merge_in_review bypasses readyForMerge gate
   it("does not bypass the gate for isDirect workspaces (they skip readyForMerge unconditionally)", async () => {
     const ws = makeWorkspace({ isDirect: true, readyForMerge: false });
     const git = makeGitForStateMachine();
-    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never, autoMergeInReview: false });
+    const result = await resolveMergeState(ws, REPO_PATH, "master", { gitService: git as never, autoMergeInReview: false });
     // isDirect always returns direct-close, regardless of readyForMerge / autoMergeInReview
     expect(result.kind).toBe("direct-close");
   });

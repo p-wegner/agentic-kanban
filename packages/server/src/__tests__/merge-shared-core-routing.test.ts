@@ -55,6 +55,14 @@ import { gateSkipExplicit } from "../services/pre-merge-gate.service.js";
 import { activeMerges } from "../services/workspace-internals.js";
 import type { createBoardEvents } from "../services/board-events.js";
 import type { createSessionManager } from "../services/session.manager.js";
+import { makeTempRepo } from "./helpers/temp-repo.js";
+
+/**
+ * A REAL repo path (#273). This suite drives the actual merge path, whose repo lock
+ * refuses a repoPath with no `.git` and then POLLS — so the old `"/repo"` literal made
+ * every test here burn its full timeout instead of running.
+ */
+const REPO_PATH = makeTempRepo();
 
 async function seedMergeScenario() {
   const now = new Date().toISOString();
@@ -65,7 +73,7 @@ async function seedMergeScenario() {
   const workspaceId = randomUUID();
 
   await db.insert(projects).values({
-    id: projectId, name: "Test", repoPath: "/repo", repoName: "repo",
+    id: projectId, name: "Test", repoPath: REPO_PATH, repoName: "repo",
     defaultBranch: "master", createdAt: now, updatedAt: now,
   });
   await db.insert(projectStatuses).values([
@@ -130,7 +138,7 @@ describe("#945: both merge entry paths route through the shared merge executor c
     expect(result.merged).toBe(true);
     expect(runMergeCore).toHaveBeenCalledTimes(1);
     expect(runMergeCore).toHaveBeenCalledWith(expect.objectContaining({
-      repoPath: "/repo",
+      repoPath: REPO_PATH,
       branch: "feature/ak-945-test",
       targetBranch: "master",
       deferWorkingTreeSync: true,
@@ -172,7 +180,7 @@ describe("#945: both merge entry paths route through the shared merge executor c
 
     expect(runMergeCore).toHaveBeenCalledTimes(1);
     expect(runMergeCore).toHaveBeenCalledWith(expect.objectContaining({
-      repoPath: "/repo",
+      repoPath: REPO_PATH,
       branch: "feature/ak-945-test",
       targetBranch: "master",
       deferWorkingTreeSync: false,

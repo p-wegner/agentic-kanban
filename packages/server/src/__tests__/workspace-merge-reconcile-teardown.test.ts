@@ -14,6 +14,14 @@ import { projects, workspaces, issues, projectStatuses } from "@agentic-kanban/s
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
 import { workspaceServicesService } from "../services/workspace-services.service.js";
+import { makeTempRepo } from "./helpers/temp-repo.js";
+
+/**
+ * A REAL repo path (#273). This suite drives the actual merge path, whose repo lock
+ * refuses a repoPath with no `.git` and then POLLS — so the old `"/repo"` literal made
+ * every test here burn its full timeout instead of running.
+ */
+const REPO_PATH = makeTempRepo();
 
 const SERVICE_STATE = JSON.stringify({ composeProjectName: "ak-ws-teardown-test", status: "up" });
 
@@ -52,7 +60,7 @@ async function seedScenario(db: ReturnType<typeof createTestDb>["db"], opts: {
   const workspaceId = randomUUID();
 
   await db.insert(projects).values({
-    id: projectId, name: "Test", repoPath: "/repo", repoName: "repo", defaultBranch: "master",
+    id: projectId, name: "Test", repoPath: REPO_PATH, repoName: "repo", defaultBranch: "master",
     createdAt: now, updatedAt: now,
   });
   await db.insert(projectStatuses).values([
@@ -65,7 +73,7 @@ async function seedScenario(db: ReturnType<typeof createTestDb>["db"], opts: {
   });
   await db.insert(workspaces).values({
     id: workspaceId, issueId, branch: "feature/ak-13-teardown",
-    workingDir: "/repo/.worktrees/ws", baseBranch: "master", isDirect: false,
+    workingDir: `${REPO_PATH}/.worktrees/ws`, baseBranch: "master", isDirect: false,
     status: opts.workspaceStatus ?? "idle",
     readyForMerge: opts.readyForMerge ?? false,
     mergedAt: opts.mergedAt ?? null,
@@ -104,7 +112,7 @@ describe("merge resolution paths tear down the workspace service stack (#13)", (
 
     expect(teardownSpy).toHaveBeenCalledWith({
       composeProjectName: "ak-ws-teardown-test",
-      composeWorktreePath: "/repo/.worktrees/ws",
+      composeWorktreePath: `${REPO_PATH}/.worktrees/ws`,
       releasedByWorkspaceId: workspaceId,
     });
   });
@@ -124,7 +132,7 @@ describe("merge resolution paths tear down the workspace service stack (#13)", (
 
     expect(teardownSpy).toHaveBeenCalledWith({
       composeProjectName: "ak-ws-teardown-test",
-      composeWorktreePath: "/repo/.worktrees/ws",
+      composeWorktreePath: `${REPO_PATH}/.worktrees/ws`,
       releasedByWorkspaceId: workspaceId,
     });
   });

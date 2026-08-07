@@ -1,12 +1,20 @@
 import { describe, it, expect } from "vitest";
 import { buildReconcilerPrompt, buildStrandedBatch, pickIntegrationWorkspace } from "../services/reconciler.service.js";
 import type { MergeQueuePlan } from "../services/merge-queue.service.js";
+import { makeTempRepo } from "./helpers/temp-repo.js";
+
+/**
+ * A REAL repo path (#273). This suite drives the actual merge path, whose repo lock
+ * refuses a repoPath with no `.git` and then POLLS — so the old `"/repo"` literal made
+ * every test here burn its full timeout instead of running.
+ */
+const REPO_PATH = makeTempRepo();
 
 const plan: MergeQueuePlan = {
   order: [
-    { id: "a", branch: "feature/a", workingDir: "/wt/a", baseBranch: "master", repoPath: "/repo", issueId: "ia", issueNumber: 1, issueTitle: "A", changedFiles: ["x.ts"], status: "idle", isDirect: false },
-    { id: "b", branch: "feature/b", workingDir: "/wt/b", baseBranch: "master", repoPath: "/repo", issueId: "ib", issueNumber: 2, issueTitle: "B", changedFiles: ["x.ts", "y.ts"], status: "idle", isDirect: false },
-    { id: "c", branch: "feature/c", workingDir: null, baseBranch: "master", repoPath: "/repo", issueId: "ic", issueNumber: 3, issueTitle: "C", changedFiles: ["z.ts"], status: "idle", isDirect: true },
+    { id: "a", branch: "feature/a", workingDir: "/wt/a", baseBranch: "master", repoPath: REPO_PATH, issueId: "ia", issueNumber: 1, issueTitle: "A", changedFiles: ["x.ts"], status: "idle", isDirect: false },
+    { id: "b", branch: "feature/b", workingDir: "/wt/b", baseBranch: "master", repoPath: REPO_PATH, issueId: "ib", issueNumber: 2, issueTitle: "B", changedFiles: ["x.ts", "y.ts"], status: "idle", isDirect: false },
+    { id: "c", branch: "feature/c", workingDir: null, baseBranch: "master", repoPath: REPO_PATH, issueId: "ic", issueNumber: 3, issueTitle: "C", changedFiles: ["z.ts"], status: "idle", isDirect: true },
   ],
   overlaps: [
     { workspaceIdA: "a", workspaceIdB: "b", overlapCount: 1, files: ["x.ts"] },

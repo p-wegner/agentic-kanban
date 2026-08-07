@@ -14,6 +14,14 @@ import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/s
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
 import type { BranchTipAncestryResult } from "@agentic-kanban/shared/lib/git-service";
+import { makeTempRepo } from "./helpers/temp-repo.js";
+
+/**
+ * A REAL repo path (#273). This suite drives the actual merge path, whose repo lock
+ * refuses a repoPath with no `.git` and then POLLS — so the old `"/repo"` literal made
+ * every test here burn its full timeout instead of running.
+ */
+const REPO_PATH = makeTempRepo();
 
 function makeGitService(
   checkBranchTipIsAncestor: (repo: string, branch: string, base: string, worktree?: string) => Promise<BranchTipAncestryResult>,
@@ -50,7 +58,7 @@ async function seedScenario(db: ReturnType<typeof createTestDb>["db"], opts: {
   const workspaceId = randomUUID();
 
   await db.insert(projects).values({
-    id: projectId, name: "Test", repoPath: "/repo", repoName: "repo",
+    id: projectId, name: "Test", repoPath: REPO_PATH, repoName: "repo",
     defaultBranch: "master", createdAt: now, updatedAt: now,
   });
   await db.insert(projectStatuses).values({
@@ -62,7 +70,7 @@ async function seedScenario(db: ReturnType<typeof createTestDb>["db"], opts: {
   });
   await db.insert(workspaces).values({
     id: workspaceId, issueId, branch: "feature/ak-549-test",
-    workingDir: opts.workingDir !== undefined ? opts.workingDir : "/repo/.worktrees/ws",
+    workingDir: opts.workingDir !== undefined ? opts.workingDir : `${REPO_PATH}/.worktrees/ws`,
     baseBranch: "master", isDirect: false,
     baseCommitSha: opts.baseCommitSha ?? null,
     status: opts.workspaceStatus ?? "idle",
@@ -167,7 +175,7 @@ describe("checkBranchTipIsAncestor helper — three AC paths", () => {
   });
 
   it("deleted branch with worktree fallback → checkBranchTipIsAncestor called with worktreeDir", async () => {
-    const { workspaceId } = await seedScenario(db, { workingDir: "/repo/.worktrees/ws" });
+    const { workspaceId } = await seedScenario(db, { workingDir: `${REPO_PATH}/.worktrees/ws` });
     const checkBranchTipIsAncestor = vi.fn(async (_repo: string, _branch: string, _base: string, _worktree?: string): Promise<BranchTipAncestryResult> =>
       ({ isAncestor: true, branchSha: "worktree-head-sha", baseSha: "base-sha" })
     );
@@ -177,10 +185,10 @@ describe("checkBranchTipIsAncestor helper — three AC paths", () => {
     await svc.checkAlreadyMerged(workspaceId);
 
     expect(checkBranchTipIsAncestor).toHaveBeenCalledWith(
-      "/repo",
+      REPO_PATH,
       "feature/ak-549-test",
       "master",
-      "/repo/.worktrees/ws",
+      `${REPO_PATH}/.worktrees/ws`,
     );
   });
 });

@@ -17,6 +17,14 @@ import { eq } from "drizzle-orm";
 import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
+import { makeTempRepo } from "./helpers/temp-repo.js";
+
+/**
+ * A REAL repo path (#273). This suite drives the actual merge path, whose repo lock
+ * refuses a repoPath with no `.git` and then POLLS — so the old `"/repo"` literal made
+ * every test here burn its full timeout instead of running.
+ */
+const REPO_PATH = makeTempRepo();
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -58,7 +66,7 @@ async function seedReadyForMergeWorkspace(db: ReturnType<typeof createTestDb>["d
   await db.insert(projects).values({
     id: projectId,
     name: "Test",
-    repoPath: "/repo",
+    repoPath: REPO_PATH,
     repoName: "repo",
     defaultBranch: "master",
     createdAt: now,
@@ -83,7 +91,7 @@ async function seedReadyForMergeWorkspace(db: ReturnType<typeof createTestDb>["d
     id: workspaceId,
     issueId,
     branch: "feature/ak-668-test",
-    workingDir: "/repo/.worktrees/feature_ak-668-test",
+    workingDir: `${REPO_PATH}/.worktrees/feature_ak-668-test`,
     baseBranch: "master",
     isDirect: false,
     status: "idle",
@@ -108,6 +116,28 @@ async function getIssueStatusName(
 
 // ─── tests ──────────────────────────────────────────────────────────────────
 
+/**
+ * Fail the workspace-CLOSE write while letting the early mergedAt stamp (the first write to
+ * `workspaces`) through.
+ *
+ * Targeted by TABLE, not by call ordinal. The ordinal version ("the 3rd db.update is the
+ * workspace close") silently stopped being true as the merge path grew writes: by the time
+ * these tests were un-hung (#273 — they had been burning their timeout against a repoPath
+ * with no `.git`, so nobody noticed) the 3rd update was the issue's Done transition, and the
+ * injected failure was hitting a legitimately-fatal write instead of the one under test.
+ */
+function failSecondWorkspaceWrite(db: ReturnType<typeof createTestDb>["db"], message: string) {
+  let workspaceWrites = 0;
+  const originalUpdate = db.update.bind(db);
+  return vi.spyOn(db, "update").mockImplementation((...args: Parameters<typeof db.update>) => {
+    if (args[0] === workspaces) {
+      workspaceWrites++;
+      if (workspaceWrites > 1) throw new Error(message);
+    }
+    return originalUpdate(...args);
+  });
+}
+
 describe("#668: atomic Done transition — issue stays Done when workspace DB update fails", () => {
   let db: ReturnType<typeof createTestDb>["db"];
 
@@ -121,16 +151,7 @@ describe("#668: atomic Done transition — issue stays Done when workspace DB up
     // Simulate: workspace update (the second write in finalizeMergeCleanup) fails.
     // This models a DB timeout / lock / crash that coincides with the HTTP response
     // being written — the client sees a dropped connection.
-    let updateCallCount = 0;
-    const originalUpdate = db.update.bind(db);
-    const updateSpy = vi.spyOn(db, "update").mockImplementation((...args: Parameters<typeof db.update>) => {
-      updateCallCount++;
-      // 1st update: early mergedAt stamp — let through
-      // 2nd update: issue → Done — let through
-      // 3rd update: workspace → closed — simulate failure (DB timeout / crash)
-      if (updateCallCount <= 2) return originalUpdate(...args);
-      throw new Error("Simulated DB timeout writing workspace close");
-    });
+    const updateSpy = failSecondWorkspaceWrite(db, "Simulated DB timeout writing workspace close");
 
     const git = makeGit();
     const svc = createWorkspaceMergeService({
@@ -166,16 +187,7 @@ describe("#668: atomic Done transition — issue stays Done when workspace DB up
     // The key assertion: DB state is correct regardless of HTTP delivery.
     const { workspaceId, issueId } = await seedReadyForMergeWorkspace(db);
 
-    let updateCallCount = 0;
-    const originalUpdate = db.update.bind(db);
-    const updateSpy = vi.spyOn(db, "update").mockImplementation((...args: Parameters<typeof db.update>) => {
-      updateCallCount++;
-      // Let the first 2 writes succeed (mergedAt stamp + issue Done).
-      // The 3rd write (workspace close) simulates a DB timeout that coincides
-      // with the HTTP socket being destroyed.
-      if (updateCallCount <= 2) return originalUpdate(...args);
-      throw new Error("Simulated connection drop mid-response");
-    });
+    const updateSpy = failSecondWorkspaceWrite(db, "Simulated connection drop mid-response");
 
     const git = makeGit();
     const svc = createWorkspaceMergeService({
