@@ -23,6 +23,7 @@ interface BoardRealtimeControllerParams {
   loadProjectsRef: MutableRefObject<() => Promise<string | undefined>>;
   addNotificationApprovalEvent: (key: string, issue?: NotificationIssue) => void;
   addNotificationBoardEvent: (reason: string, issue?: NotificationIssue) => void;
+  addNotificationPluginGateEvent?: (gate: { pluginSlug: string; pluginName: string; loopName: string; loopLabel: string; gateId: string; question: string }) => void;
   setColumns: Dispatch<SetStateAction<StatusWithIssues[]>>;
 }
 
@@ -34,6 +35,7 @@ export function useBoardRealtimeController({
   loadProjectsRef,
   addNotificationApprovalEvent,
   addNotificationBoardEvent,
+  addNotificationPluginGateEvent,
   setColumns,
 }: BoardRealtimeControllerParams) {
   const [sessionActivityRaw, setSessionActivityRaw] = useState<Record<string, Record<string, string>>>({});
@@ -84,6 +86,7 @@ export function useBoardRealtimeController({
     setApprovalRequests,
     addNotificationBoardEvent,
     addNotificationApprovalEvent,
+    addNotificationPluginGateEvent,
   });
 
   useEffect(() => {

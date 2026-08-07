@@ -28,6 +28,7 @@ export interface InboxItem {
   link: {
     view: "plugin-views" | "butler" | "board";
     pluginId?: string;
+    pluginSlug?: string;
     loopName?: string;
     workspaceId?: string;
     issueNumber?: number | null;
@@ -56,7 +57,7 @@ export async function listInbox(database: Database = db): Promise<{ items: Inbox
           title: loop.gate.question,
           detail: `${loop.pluginName} — ${loop.label}`
             + (loop.gateRecommendation ? ` · Butler recommends: ${loop.gateRecommendation.actionId}` : ""),
-          link: { view: "plugin-views", pluginId: loop.pluginId, loopName: loop.name },
+          link: { view: "plugin-views", pluginId: loop.pluginId, pluginSlug: loop.pluginSlug, loopName: loop.name },
           createdAt: loop.lastAdvanceAt,
         });
       }

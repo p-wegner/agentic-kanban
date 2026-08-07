@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import type { StatusWithIssues } from "@agentic-kanban/shared";
-import { useBoardEvents, type LiveSessionStats, type TodoItem, type ApprovalRequest } from "../lib/useBoardEvents.js";
+import { useBoardEvents, type LiveSessionStats, type TodoItem, type ApprovalRequest, type PluginGateEvent } from "../lib/useBoardEvents.js";
 import { sendDesktopNotification } from "../lib/desktop.js";
 import { showToast } from "../lib/toast.js";
 import { agentActivityActions } from "../stores/agentActivityStore.js";
@@ -22,6 +22,7 @@ interface UseBoardLiveHandlersDeps {
   setApprovalRequests: React.Dispatch<React.SetStateAction<ApprovalRequest[]>>;
   addNotificationBoardEvent: (reason: string, issue?: NotificationIssue) => void;
   addNotificationApprovalEvent: (key: string, issue?: NotificationIssue) => void;
+  addNotificationPluginGateEvent?: (gate: { pluginSlug: string; pluginName: string; loopName: string; loopLabel: string; gateId: string; question: string }) => void;
 }
 
 /**
@@ -46,6 +47,7 @@ export function useBoardLiveHandlers(deps: UseBoardLiveHandlersDeps) {
     setApprovalRequests,
     addNotificationBoardEvent,
     addNotificationApprovalEvent,
+    addNotificationPluginGateEvent,
   } = deps;
 
   const handleBoardChange = useCallback((reason: string) => {
@@ -199,5 +201,18 @@ export function useBoardLiveHandlers(deps: UseBoardLiveHandlersDeps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addNotificationApprovalEvent]);
 
-  useBoardEvents(activeProjectId, handleBoardChange, handleSessionActivity, handleSessionStats, handleSessionTodos, handleApprovalRequested);
+  const handlePluginGate = useCallback((event: PluginGateEvent) => {
+    // Durable bell entry (#301) — the toast + desktop notification are fired in
+    // useBoardEvents itself (lib layer); the bell needs the hook-owned store.
+    addNotificationPluginGateEvent?.({
+      pluginSlug: event.pluginSlug,
+      pluginName: event.pluginName,
+      loopName: event.loopName,
+      loopLabel: event.loopLabel,
+      gateId: event.gateId,
+      question: event.question,
+    });
+  }, [addNotificationPluginGateEvent]);
+
+  useBoardEvents(activeProjectId, handleBoardChange, handleSessionActivity, handleSessionStats, handleSessionTodos, handleApprovalRequested, handlePluginGate);
 }

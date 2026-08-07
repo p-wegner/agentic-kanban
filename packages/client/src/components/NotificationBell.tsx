@@ -1,6 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { NotificationEvent, NotificationEventType } from "../hooks/useActivityNotifications.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
+import { apiFetch } from "../lib/api.js";
+import { requestViewNavigation } from "../lib/navigateView.js";
+import { usePluginViewStore } from "../stores/pluginViewStore.js";
 
 function eventLabel(type: NotificationEventType): string {
   switch (type) {
@@ -12,8 +15,93 @@ function eventLabel(type: NotificationEventType): string {
     case "workflow_error": return "Workflow error";
     case "workflow_transition": return "Issue moved";
     case "approval_requested": return "Agent needs input";
+    case "plugin_gate": return "Approval gate";
     case "project_completed": return "Project complete 🎉";
   }
+}
+
+/** GET /api/inbox (#302) — everything blocked on a human, across ALL projects. */
+interface InboxItem {
+  kind: "plugin-gate" | "agent-question" | "tool-approval";
+  projectId: string;
+  projectName: string;
+  title: string;
+  detail: string | null;
+  link: {
+    view: "plugin-views" | "butler" | "board";
+    pluginId?: string;
+    pluginSlug?: string;
+    loopName?: string;
+    workspaceId?: string;
+    issueNumber?: number | null;
+  };
+  createdAt: string | null;
+}
+
+const INBOX_KIND_MARK: Record<InboxItem["kind"], string> = {
+  "plugin-gate": "✋",
+  "agent-question": "❓",
+  "tool-approval": "🔐",
+};
+
+/**
+ * The durable half of the dropdown (#302): pending DECISIONS read fresh from the
+ * server whenever the bell opens — unlike the activity feed below it, these are
+ * state, not events, so they survive reloads and disappear only when resolved.
+ */
+function InboxSection({ onNavigate }: { onNavigate: () => void }) {
+  const [items, setItems] = useState<InboxItem[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<{ items: InboxItem[] }>("/api/inbox")
+      .then((res) => { if (!cancelled) setItems(res.items); })
+      .catch(() => { if (!cancelled) setItems([]); });
+    return () => { cancelled = true; };
+  }, []);
+
+  function open(item: InboxItem) {
+    if (item.link.view === "plugin-views") {
+      if (item.link.pluginSlug && item.link.loopName) {
+        usePluginViewStore.getState().focusLoop(item.link.pluginSlug, item.link.loopName);
+      }
+      requestViewNavigation("plugin-views");
+    } else if (item.link.view === "butler") {
+      requestViewNavigation("butler");
+    } else {
+      requestViewNavigation("kanban");
+    }
+    onNavigate();
+  }
+
+  if (items === null) {
+    return <p className="px-3 py-2 text-xs text-gray-400 dark:text-gray-500">Checking what waits on you…</p>;
+  }
+  if (items.length === 0) return null;
+  return (
+    <div className="border-b border-gray-200 dark:border-gray-700" data-testid="inbox-section">
+      <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">
+        Waiting on you — all projects
+      </div>
+      <ul>
+        {items.slice(0, 8).map((item, i) => (
+          <li key={`${item.kind}-${i}`}>
+            <button
+              onClick={() => open(item)}
+              className="flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors"
+            >
+              <span className="shrink-0 text-sm" aria-hidden="true">{INBOX_KIND_MARK[item.kind]}</span>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-medium text-gray-900 dark:text-gray-100 truncate">{item.title}</p>
+                <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate">
+                  {item.projectName}{item.detail ? ` · ${item.detail}` : ""}
+                </p>
+              </div>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 function EventIcon({ type }: { type: NotificationEventType }) {
@@ -65,6 +153,8 @@ function EventIcon({ type }: { type: NotificationEventType }) {
           <path strokeLinecap="round" strokeLinejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
       );
+    case "plugin_gate":
+      return <span className="text-sm shrink-0" aria-hidden="true">✋</span>;
     case "project_completed":
       return (
         <svg className="h-4 w-4 text-emerald-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -155,6 +245,7 @@ export function NotificationBell({
           </div>
 
           <div className="max-h-80 overflow-y-auto">
+            <InboxSection onNavigate={onClose} />
             {events.length === 0 ? (
               <p className="px-3 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
                 No recent activity
