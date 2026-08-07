@@ -198,6 +198,32 @@ export function createPluginsRoute(
     return c.json(await service.getLoopArtifact(c.req.param("id"), projectId, path));
   });
 
+  // Edit-then-approve (#305): overwrite one of the current gate's artifacts and commit it.
+  router.put("/:id/loops/:name/artifact", async (c) => {
+    const body = await parseJsonBody<{ projectId?: string; gateId?: string; path?: string; content?: string }>(c);
+    const projectId = typeof body.projectId === "string" ? body.projectId.trim() : "";
+    if (!projectId) throw new PluginError("projectId is required", "BAD_REQUEST");
+    const gateId = typeof body.gateId === "string" ? body.gateId.trim() : "";
+    const path = typeof body.path === "string" ? body.path.trim() : "";
+    if (!gateId || !path || typeof body.content !== "string") {
+      throw new PluginError("gateId, path and content are required", "BAD_REQUEST");
+    }
+    return c.json(await service.saveLoopArtifact(c.req.param("id"), c.req.param("name"), projectId, {
+      gateId, path, content: body.content,
+    }));
+  });
+
+  // Draft-with-butler (#310): rough notes in, submit-ready revision feedback out.
+  router.post("/:id/loops/:name/gate/draft", async (c) => {
+    const body = await parseJsonBody<{ projectId?: string; gateId?: string; notes?: string }>(c);
+    const projectId = typeof body.projectId === "string" ? body.projectId.trim() : "";
+    if (!projectId) throw new PluginError("projectId is required", "BAD_REQUEST");
+    const gateId = typeof body.gateId === "string" ? body.gateId.trim() : "";
+    const notes = typeof body.notes === "string" ? body.notes : "";
+    if (!gateId) throw new PluginError("gateId is required", "BAD_REQUEST");
+    return c.json(await service.draftLoopGateFeedback(c.req.param("id"), c.req.param("name"), projectId, { gateId, notes }));
+  });
+
   // The scaffold's unresolved TODO markers as a form (#291).
   router.get("/:id/scaffold", async (c) => {
     const projectId = c.req.query("projectId")?.trim();

@@ -130,6 +130,9 @@ export interface PluginGateMessage {
   projectId: string;
   pluginSlug: string;
   pluginName: string;
+  /** Plugin ROW id (#300) — what a receiver needs to deep-link to the loop pane;
+   *  null only on advance paths that don't know their row (none in practice). */
+  pluginId: string | null;
   loopName: string;
   loopLabel: string;
   gateId: string;

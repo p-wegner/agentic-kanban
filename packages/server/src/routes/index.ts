@@ -11,6 +11,7 @@ import { createTagsRoute } from "./tags.js";
 import { createPreferencesRoute } from "./preferences.js";
 import { createAgentSkillsRoute } from "./agent-skills.js";
 import { createApprovalsRoute } from "./approvals.js";
+import { createInboxRoute } from "./inbox.js";
 import { createScheduledRunsRoute } from "./scheduled-runs.js";
 import { createButlerRoute } from "./butler.js";
 import { createButlerDefinitionsRoute } from "./butler-definitions.js";
@@ -109,6 +110,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/plugins", createPluginsRoute(database, { ...options, getSessionManager }));
   routes.route("/projects", createPluginProjectViewsRoute(database));
   routes.route("/health", createHealthRoute());
+  routes.route("/inbox", createInboxRoute(database));
   if (options?.boardEvents) {
     routes.route("/approvals", createApprovalsRoute(options.boardEvents));
   }

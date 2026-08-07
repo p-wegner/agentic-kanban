@@ -48,6 +48,7 @@ import { registerApproveToolUse } from "./tools/approve-tool-use.js";
 import { registerRelaunchWorkspace } from "./tools/relaunch-workspace.js";
 import { registerReviewWorkspace } from "./tools/review-workspace.js";
 import { registerAskButler } from "./tools/ask-butler.js";
+import { registerListPluginGates, registerGetPluginGate, registerResolvePluginGate, registerAdvancePluginLoop } from "./tools/plugin-gates.js";
 import { registerButlerInterrupt } from "./tools/butler-interrupt.js";
 import { registerButlerSetModel } from "./tools/butler-set-model.js";
 import { registerButlerSetProfile } from "./tools/butler-set-profile.js";
@@ -149,6 +150,10 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   relaunch_workspace: registerRelaunchWorkspace,
   review_workspace: registerReviewWorkspace,
   ask_butler: registerAskButler,
+  list_plugin_gates: registerListPluginGates,
+  get_plugin_gate: registerGetPluginGate,
+  resolve_plugin_gate: registerResolvePluginGate,
+  advance_plugin_loop: registerAdvancePluginLoop,
   butler_interrupt: registerButlerInterrupt,
   butler_set_model: registerButlerSetModel,
   butler_set_profile: registerButlerSetProfile,

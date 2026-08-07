@@ -112,6 +112,19 @@ export const SETTINGS_REGISTRY = {
   backup_keep_last: { type: "number", default: "" },
   butler_event_feed: { type: "bool", default: "false" },
   butler_event_feed_min_interval_ms: { type: "number", default: "30000" },
+  /**
+   * #307 — when a plugin loop reaches a human gate, wake the butler (starting it on
+   * demand) and inject a digest turn summarizing the gate so approval can happen as a
+   * conversation. Unlike the general event feed this is ON by default and not rate
+   * limited: a gate is by definition waiting on a person.
+   */
+  butler_gate_digest: { type: "bool", default: "true" },
+  /**
+   * #309 — have the butler pre-read a new gate's artifacts and store a structured
+   * approve/revise recommendation, shown as a chip on the gate card. One extra butler
+   * turn per gate.
+   */
+  butler_gate_recommendation: { type: "bool", default: "true" },
   butler_auto_answer: { type: "bool", default: "false" },
   butler_auto_answer_min_confidence: { type: "number", default: "" },
   monitor_butler_enabled: { type: "bool", default: "false" },

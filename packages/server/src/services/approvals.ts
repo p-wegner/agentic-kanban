@@ -32,6 +32,11 @@ export function getApproval(id: string): PendingApproval | undefined {
   return pending.get(id);
 }
 
+/** All approvals still awaiting a decision — for the cross-project inbox (#302). */
+export function listPendingApprovals(): PendingApproval[] {
+  return [...pending.values()].filter((a) => a.decision === undefined);
+}
+
 export function resolveApproval(id: string, decision: ApprovalDecision): boolean {
   const approval = pending.get(id);
   if (!approval) return false;

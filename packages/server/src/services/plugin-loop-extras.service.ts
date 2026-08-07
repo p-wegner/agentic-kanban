@@ -56,6 +56,7 @@ export function createPluginLoopExtras(ctx: PluginLoopExtrasCtx) {
       manifest: plugin.manifest,
       pluginSlug: plugin.pluginId,
       pluginName: plugin.name,
+      pluginRowId: plugin.id,
       pluginLocalPath: plugin.localPath,
       loopName,
       projectId,
@@ -184,7 +185,75 @@ export function createPluginLoopExtras(ctx: PluginLoopExtrasCtx) {
     return { targetPath: scaffold.targetPath, remaining, fields: parseScaffoldFields(content) };
   }
 
-  return { resolveLoopGate, listLoopEvents, getLoopArtifact, getScaffoldForm, fillScaffoldForm };
+  /** The loop's CURRENT gate + the context the concierge endpoints need. */
+  async function requireCurrentGate(pluginRowId: string, loopName: string, projectId: string) {
+    const plugin = await requirePlugin(pluginRowId);
+    const project = await requireProject(projectId);
+    const repoPath = await resolveOutputRepoPath(plugin, project);
+    const statuses = await loops.loopStatuses(plugin.manifest, plugin.pluginId, projectId);
+    const status = statuses.find((s) => s.name === loopName);
+    if (!status) throw new PluginError(`Loop "${loopName}" not found`, "NOT_FOUND");
+    if (!status.gate) throw new PluginError(`Loop "${loopName}" is not blocked on a gate`, "BAD_REQUEST");
+    return { plugin, project, repoPath, status, gate: status.gate };
+  }
+
+  /**
+   * Edit-then-approve (#305): overwrite ONE of the current gate's artifacts with the
+   * human's edited content and commit it pathspec-limited (retried — the board's own
+   * merge jobs contend on `.git/index.lock`, the #296 failure class). Restricted to
+   * the gate's declared artifacts: this endpoint is a review-time red pen, not a
+   * general file-write API.
+   */
+  async function saveLoopArtifact(
+    pluginRowId: string,
+    loopName: string,
+    projectId: string,
+    body: { gateId: string; path: string; content: string },
+  ) {
+    const { repoPath, gate } = await requireCurrentGate(pluginRowId, loopName, projectId);
+    if (gate.id !== body.gateId) {
+      throw new PluginError(`Gate "${body.gateId}" is stale — the loop's current gate is "${gate.id}"`, "BAD_REQUEST");
+    }
+    if (!(gate.artifacts ?? []).includes(body.path)) {
+      throw new PluginError(`"${body.path}" is not one of this gate's artifacts`, "BAD_REQUEST");
+    }
+    const abs = resolveInside(repoPath, body.path, `artifact path "${body.path}"`);
+    writeFileSync(abs, body.content, "utf8");
+    let committed = false;
+    for (let attempt = 0; attempt < 5 && !committed; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 1500 * attempt));
+      const add = await gitExec(["add", "--", body.path], { cwd: repoPath });
+      if (add.code !== 0) continue;
+      const commit = await gitExec(
+        ["commit", "-m", `plugin: human edit of ${body.path} at gate ${gate.id}`, "--", body.path],
+        { cwd: repoPath },
+      );
+      committed = commit.code === 0;
+    }
+    return { path: body.path, committed };
+  }
+
+  /** Draft-with-butler (#310): the human's rough notes → submit-ready revision feedback. */
+  async function draftLoopGateFeedback(
+    pluginRowId: string,
+    loopName: string,
+    projectId: string,
+    body: { gateId: string; notes: string },
+  ) {
+    const { repoPath, gate, status } = await requireCurrentGate(pluginRowId, loopName, projectId);
+    if (gate.id !== body.gateId) {
+      throw new PluginError(`Gate "${body.gateId}" is stale — the loop's current gate is "${gate.id}"`, "BAD_REQUEST");
+    }
+    if (!body.notes?.trim()) throw new PluginError("notes are required", "BAD_REQUEST");
+    const { draftGateFeedback } = await import("./plugin-gate-butler.service.js");
+    const draft = await draftGateFeedback(
+      { projectId, gate, checks: status.checks, notes: body.notes.trim(), repoPath },
+      database,
+    );
+    return { draft };
+  }
+
+  return { resolveLoopGate, listLoopEvents, getLoopArtifact, getScaffoldForm, fillScaffoldForm, saveLoopArtifact, draftLoopGateFeedback };
 }
 
 /**
