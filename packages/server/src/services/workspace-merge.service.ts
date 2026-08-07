@@ -29,6 +29,7 @@ import {
 import { toExecutorProvider } from "./agent-settings.service.js";
 import { buildConflictContext } from "./phase-context.service.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
+import { refreshWorkspaceBuildArtifacts } from "./workspace-build-refresh.service.js";
 import { insertIssueComment, getLatestIssueCommentByKind } from "../repositories/issue-comments.repository.js";
 import {
   WorkspaceError,
@@ -532,6 +533,8 @@ export function createWorkspaceMergeService(deps: {
     // others. A repo whose worktree/branch is gone (already landed/cleaned) is skipped. Overall
     // success requires every repo. Processes are killed around each history rewrite.
     const allRepos = await getAllWorkspaceRepos(id, database);
+    // #275 — pinned so the artifact refresh below can tell a real rebase from a no-op.
+    const headShaBefore = await gitService.revParse(workspace.workingDir, "HEAD").catch(() => null);
     let result: { success: boolean; conflictingFiles?: string[]; error?: string } = { success: true };
     for (const ref of allRepos) {
       const isLeading = ref.kind === "leading";
@@ -565,11 +568,23 @@ export function createWorkspaceMergeService(deps: {
 
     console.log(`[workspace-service] update-base: workspaceId=${id} mode=${mode} repos=${allRepos.length} success=${result.success} conflicts=${result.conflictingFiles?.length ?? 0}`);
 
+    const projectId = await resolveProjectId(id, database);
+
     if (result.success) {
+      // #275 — the rebase rewrote this worktree's SOURCE but nothing rebuilt its gitignored
+      // generated output, so the next verify gate would type-check fresh src against months-old
+      // artifacts and fail for reasons that have nothing to do with the branch. Repair it now,
+      // while it is cheap, instead of paying a 20-40 minute gate run to discover it.
+      await refreshWorkspaceBuildArtifacts({
+        workingDir: workspace.workingDir,
+        projectId,
+        database,
+        headShaBefore,
+        headShaAfter: await gitService.revParse(workspace.workingDir, "HEAD").catch(() => null),
+      });
       await computeWorkspaceCodeMetrics(id, database).catch(() => null);
     }
 
-    const projectId = await resolveProjectId(id, database);
     if (projectId) boardEvents?.broadcast(projectId, "board_changed");
 
     return result;
