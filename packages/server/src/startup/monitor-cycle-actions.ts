@@ -8,6 +8,7 @@ import type { MonitorAction } from "./monitor-helpers.js";
 import type { WorkspaceCandidate } from "./monitor-cycle.js";
 import type { MonitorWorkspaceActions } from "./monitor-workspace-actions.js";
 import type { MergeGateToken } from "../services/pre-merge-gate.service.js";
+import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.repository.js";
 
 export type LogMonitorActionFn = (action: MonitorActionName, workspaceId: string, issueId: string, extra?: Pick<MonitorAction, "endpoint" | "httpStatus" | "responseSummary" | "verificationResult">) => void;
 
@@ -64,7 +65,9 @@ export async function mergeWorkspaceWithFixFallback(
  */
 export async function closeDirectWorkspaceAsDone(ws: WorkspaceCandidate, logAction: LogMonitorActionFn): Promise<void> {
   const now = new Date().toISOString();
-  await setWorkspaceStatus(db, ws.wsId, "closed", { now, set: { workingDir: null } });
+  await setWorkspaceStatus(db, ws.wsId, "closed", { now });
+  // #226 — mirror column, cleared through the helper that also updates the leading repos row.
+  await clearWorkspaceWorkingDir(ws.wsId, now, db);
   const doneStatusId = await getProjectStatusIdByName(ws.projectId, "Done");
   if (doneStatusId) await transitionIssueStatus(db, ws.issueId, doneStatusId, { now }).catch((err) => console.warn(`[monitor] failed to move direct-workspace issue ${ws.issueId} to Done:`, err instanceof Error ? err.message : String(err)));
   logAction("merge", ws.wsId, ws.issueId, { verificationResult: "ok" });

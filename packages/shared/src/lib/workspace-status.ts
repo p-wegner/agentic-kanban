@@ -55,14 +55,44 @@ export function isTerminalWorkspaceStatus(status: string | null | undefined): bo
   return status != null && (TERMINAL_WORKSPACE_STATUSES as readonly string[]).includes(status);
 }
 
+/**
+ * Columns `setWorkspaceStatus` refuses to write through `opts.set`.
+ *
+ * `id`/`status`/`updatedAt` because the function owns them. The five mirror columns because it
+ * CANNOT own them: each has a counterpart on the workspace's leading `repos` row that only the
+ * server-side repository helpers keep in sync (#226).
+ */
+type WorkspaceStatusImmutableField =
+  | "id"
+  | "status"
+  | "updatedAt"
+  | "branch"
+  | "workingDir"
+  | "baseBranch"
+  | "baseCommitSha"
+  | "mergedHeadSha";
+
 export interface SetWorkspaceStatusOpts {
   /** Timestamp for updatedAt (defaults to now). */
   now?: string;
   /**
    * Extra columns to write atomically with the status
-   * (e.g. `workingDir: null` on close, `readyForMerge: false` on reset).
+   * (e.g. `readyForMerge: false` on reset).
+   *
+   * The five LEADING-REPO MIRROR columns are excluded (#226). They are mirrored into the
+   * workspace's `is_leading` repos row by the repository helpers, and `setWorkspaceStatus`
+   * cannot mirror: it lives in `packages/shared` and the mirror lives in the server's
+   * `repo.repository`, so a write through this escape hatch silently desynchronised the row.
+   * Four call sites were doing exactly that with `{ workingDir: null }` on close, which would
+   * have made `leadingRef` report a worktree that had already been torn down once the row
+   * becomes the source of truth.
+   *
+   * Excluding them at the TYPE level rather than fixing those four is deliberate: `set` is an
+   * open hatch, so a list of known offenders would go stale the moment someone adds a fifth.
+   * Use `clearWorkspaceWorkingDir` / the merge-cleanup repository helpers instead — they write
+   * both sides.
    */
-  set?: Partial<Omit<WorkspaceRow, "id" | "status" | "updatedAt">>;
+  set?: Partial<Omit<WorkspaceRow, WorkspaceStatusImmutableField>>;
   /**
    * Only apply the write when the workspace is currently in this status
    * (compare-and-set; e.g. auto-merge-orchestrator resets fixing → idle only

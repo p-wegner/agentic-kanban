@@ -106,26 +106,34 @@ describe("physical leading-repo row (#222 stage 1)", () => {
     expect(row?.worktreePath).toBeNull();
   });
 
-  it("leadingRef read-repair backfills a missing leading row and converges a diverged one (#224)", async () => {
+  it("leadingRef read-repair backfills a missing leading row, and no longer overwrites a diverged one (#224 -> #226)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { db } = createTestDb();
     const { workspaceId } = await seedWorkspace(db);
 
-    // No row yet (workspace created in the stage-1→2 window): a read repairs it.
+    // No row yet (workspace created in the stage-1→2 window): a read repairs it. This half is
+    // unchanged, and it is what makes the source flip safe — the fallback POPULATES the row.
     await getAllWorkspaceRepos(workspaceId, db as unknown as Database);
     await vi.waitFor(async () => {
       const row = await getLeadingRepoRow(workspaceId, db as unknown as Database);
       expect(row).toMatchObject({ path: "/main/repo", branch: "feature/ak-223", isLeading: true });
     });
 
-    // Diverge the row by hand; the next read converges it back to the workspace columns.
+    // The other half INVERTED at #226. Stage 2 converged a diverged row back to the workspace
+    // columns; now the ROW is the source, so a read must leave it alone and report the
+    // divergence instead. Converging was precisely what made the row unable to disagree — and
+    // therefore made the source flip a no-op by construction.
     const { repos: reposTable } = await import("@agentic-kanban/shared/schema");
     const { eq } = await import("drizzle-orm");
-    await db.update(reposTable).set({ branch: "stale-branch" }).where(eq(reposTable.workspaceId, workspaceId));
-    await getAllWorkspaceRepos(workspaceId, db as unknown as Database);
-    await vi.waitFor(async () => {
-      const row = await getLeadingRepoRow(workspaceId, db as unknown as Database);
-      expect(row?.branch).toBe("feature/ak-223");
-    });
+    await db.update(reposTable).set({ branch: "row-wins" }).where(eq(reposTable.workspaceId, workspaceId));
+
+    const all = await getAllWorkspaceRepos(workspaceId, db as unknown as Database);
+
+    expect(all.find((r) => r.kind === "leading")?.branch).toBe("row-wins");
+    const row = await getLeadingRepoRow(workspaceId, db as unknown as Database);
+    expect(row?.branch).toBe("row-wins");
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("diverged from the workspace mirror columns"));
+    warn.mockRestore();
   });
 
   it("a single-repo workspace with a backfilled leading row still takes the single-repo fast path", async () => {

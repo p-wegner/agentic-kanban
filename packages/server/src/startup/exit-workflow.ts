@@ -38,6 +38,7 @@ import { isColdCloneCheckEnabled, runColdCloneBuildCheckForProject } from "../se
 import type { ColdCloneCheckResult } from "../services/cold-clone-build-check.service.js";
 import type { ProviderId, ProviderName } from "../services/agent-provider.js";
 import type { RateLimitProvider } from "./rate-limit-exit-decision.js";
+import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.repository.js";
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
 
@@ -807,7 +808,10 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     // Direct workspaces WITH changes fall through to the review flow below.
     if (workspace.isDirect && !committedChanges) {
       const doneStatus = findStatus("Done");
-      await setWorkspaceStatus(db, workspaceId, "closed", { now, set: { workingDir: null } });
+      await setWorkspaceStatus(db, workspaceId, "closed", { now });
+      // #226 — workingDir is a leading-repo mirror column; clear it through the helper that
+      // writes the `repos` row too, not through setWorkspaceStatus (which cannot mirror).
+      await clearWorkspaceWorkingDir(workspaceId, now, db);
       if (doneStatus) {
         await transitionIssueStatus(db, issueId, doneStatus.id, { now });
       }
