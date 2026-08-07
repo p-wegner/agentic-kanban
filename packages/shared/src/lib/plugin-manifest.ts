@@ -36,6 +36,7 @@
  */
 export {
   pluginLoopUnitKey,
+  parsePluginLoopUnitKey,
   pluginSkillName,
   pluginEnabledPreferenceKey,
   pluginLoopPausedPreferenceKey,
@@ -169,6 +170,16 @@ export interface PluginLoopDef {
    * Defaults to `DEFAULT_LOOP_MAX_UNITS_PER_ADVANCE`.
    */
   maxUnitsPerAdvance?: number;
+  /**
+   * Opt-in auto-land (#297): when a ticket this loop created finishes with committed
+   * changes, the board merges its workspace automatically (still through the pre-merge
+   * gate) instead of parking it at In Review until someone enables the global
+   * `auto_merge_in_review` pref. For a document-producing loop the merge is what makes
+   * the artifact visible to the planner (it reads the MAIN checkout), so without this
+   * every round stalls on a human pressing Merge. Default false — landing product code
+   * without review remains a deliberate, per-loop authorial decision.
+   */
+  autoLand?: boolean;
 }
 
 export interface PluginLoopPlanDef {
@@ -470,6 +481,11 @@ export function parsePluginManifest(input: string | unknown): PluginManifest {
       }
       maxUnits = rec.maxUnitsPerAdvance;
     }
+    let autoLand: boolean | undefined;
+    if (rec.autoLand != null) {
+      if (typeof rec.autoLand !== "boolean") fail(`"loops[${i}].autoLand" must be a boolean`);
+      autoLand = rec.autoLand;
+    }
     return {
       name: loopName,
       label: optionalString(rec.label, `loops[${i}].label`),
@@ -477,6 +493,7 @@ export function parsePluginManifest(input: string | unknown): PluginManifest {
       skill,
       workflow: optionalString(rec.workflow, `loops[${i}].workflow`),
       maxUnitsPerAdvance: maxUnits,
+      autoLand,
       plan: {
         command: requireString(plan.command, `loops[${i}].plan.command`),
         cwd: optionalCwd(plan.cwd, `loops[${i}].plan.cwd`),

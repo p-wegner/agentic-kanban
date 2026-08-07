@@ -7,6 +7,7 @@ import {
   pluginEnabledPreferenceKey,
   parsePluginLoopPlan,
   pluginLoopUnitKey,
+  parsePluginLoopUnitKey,
   pluginLoopPausedPreferenceKey,
   pluginSkillName,
   countScaffoldPlaceholders,
@@ -284,6 +285,19 @@ describe("plugin manifest — converging loops", () => {
       loops: [{ ...LOOP_MANIFEST.loops[0], plan: { command: "x", cwd: "elsewhere" } }],
     })).toThrow(/must be "plugin" or "repo"/);
   });
+
+  // #297 — auto-land is per-loop and opt-in; anything but a boolean is a manifest error.
+  it("parses autoLand as an opt-in boolean and rejects non-boolean values", () => {
+    expect(parsePluginManifest(LOOP_MANIFEST).loops?.[0].autoLand).toBeUndefined();
+    expect(parsePluginManifest({
+      ...LOOP_MANIFEST,
+      loops: [{ ...LOOP_MANIFEST.loops[0], autoLand: true }],
+    }).loops?.[0].autoLand).toBe(true);
+    expect(() => parsePluginManifest({
+      ...LOOP_MANIFEST,
+      loops: [{ ...LOOP_MANIFEST.loops[0], autoLand: "yes" }],
+    })).toThrow(/autoLand.*boolean/);
+  });
 });
 
 describe("parsePluginLoopPlan", () => {
@@ -319,6 +333,17 @@ describe("pluginLoopUnitKey", () => {
       .toBe("plugin-loop:refactor-safety-net:requirement-extraction:billing:r1");
     // The empty-unit form is the prefix the loop engine dedupes on.
     expect(pluginLoopUnitKey("a", "b", "").endsWith(":")).toBe(true);
+  });
+
+  // #297/#298 — the merge/exit hooks recognise loop tickets by inverting the key.
+  it("parsePluginLoopUnitKey round-trips, keeps colons in the unit-id tail, and rejects non-loop keys", () => {
+    expect(parsePluginLoopUnitKey(pluginLoopUnitKey("pm-pipeline", "pipeline", "step-3:v1")))
+      .toEqual({ pluginSlug: "pm-pipeline", loopName: "pipeline", unitId: "step-3:v1" });
+    expect(parsePluginLoopUnitKey("JIRA-123")).toBeNull();
+    expect(parsePluginLoopUnitKey(null)).toBeNull();
+    expect(parsePluginLoopUnitKey("plugin-loop:slug-only")).toBeNull();
+    // The empty-unit PREFIX form is not a ticket key.
+    expect(parsePluginLoopUnitKey(pluginLoopUnitKey("a", "b", ""))).toBeNull();
   });
 });
 
