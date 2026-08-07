@@ -95,6 +95,17 @@ export async function listPluginLoopIssues(
   );
 }
 
+/** One issue's loop-hook identity (#297/#298): its external key + project. */
+export async function getIssueExternalKeyInfo(
+  issueId: string,
+  database: Database = db,
+): Promise<{ externalKey: string | null; projectId: string } | null> {
+  const rows = await database
+    .select({ externalKey: issues.externalKey, projectId: issues.projectId })
+    .from(issues).where(eq(issues.id, issueId)).limit(1);
+  return rows[0] ?? null;
+}
+
 export interface LoopUnmergedWorkspaceRow {
   workspaceId: string;
   issueId: string;

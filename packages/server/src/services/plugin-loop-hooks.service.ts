@@ -1,9 +1,7 @@
-import { eq } from "drizzle-orm";
-import { issues } from "@agentic-kanban/shared/schema";
 import { parsePluginLoopUnitKey, parsePluginManifest, type PluginLoopDef } from "@agentic-kanban/shared/lib/plugin-manifest";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
-import { getPluginRowBySlug } from "../repositories/plugins.repository.js";
+import { getIssueExternalKeyInfo, getPluginRowBySlug } from "../repositories/plugins.repository.js";
 
 /**
  * Board-side lifecycle hooks for plugin-loop tickets (#297/#298).
@@ -36,17 +34,15 @@ export interface LoopTicketRef {
  */
 export async function resolveLoopTicket(issueId: string, database: Database = db): Promise<LoopTicketRef | null> {
   try {
-    const rows = await database
-      .select({ externalKey: issues.externalKey, projectId: issues.projectId })
-      .from(issues).where(eq(issues.id, issueId)).limit(1);
-    const parsed = parsePluginLoopUnitKey(rows[0]?.externalKey);
-    if (!parsed || !rows[0]) return null;
+    const info = await getIssueExternalKeyInfo(issueId, database);
+    const parsed = parsePluginLoopUnitKey(info?.externalKey);
+    if (!parsed || !info) return null;
     const pluginRow = await getPluginRowBySlug(parsed.pluginSlug, database);
     if (!pluginRow) return null;
     const manifest = parsePluginManifest(JSON.parse(pluginRow.manifestJson));
     const loopDef = (manifest.loops ?? []).find((l) => l.name === parsed.loopName);
     if (!loopDef) return null;
-    return { ...parsed, pluginRowId: pluginRow.id, projectId: rows[0].projectId, loopDef };
+    return { ...parsed, pluginRowId: pluginRow.id, projectId: info.projectId, loopDef };
   } catch (err) {
     console.warn(`[plugin-loop-hooks] failed to resolve loop ticket for issue ${issueId}:`, err instanceof Error ? err.message : String(err));
     return null;
