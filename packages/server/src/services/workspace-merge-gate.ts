@@ -108,6 +108,17 @@ export async function runPreLockGate(args: {
 }): Promise<MergeGateToken> {
   const { workspaceId, workspace, projectId, baseBranch, token, database, recordMergeAttempt } = args;
   if (!projectId || token.kind !== "run-gate") return token;
+  // #276 — a DIRECT workspace's merge lands nothing. Its branch IS the default branch, and
+  // `doMerge` short-circuits it to a plain close (handleWorkspaceMergeResolution →
+  // "direct-closed"). But that short-circuit is evaluated inside the executor, i.e. AFTER
+  // this gate, so closing a direct workspace used to pay a full verify run first — observed
+  // on #232: a ~50-minute build+test that then timed out (`verify_script timed out after
+  // 3000000ms`) to close a workspace that was never going to merge anything. There is no
+  // diff to verify, so there is nothing here to gate.
+  if (workspace.isDirect) {
+    console.log(`[workspace-merge] skipping pre-lock gate for direct workspace ${workspaceId} — a direct merge lands nothing (#276)`);
+    return token;
+  }
 
   console.log(`[workspace-merge] pre-lock gate phase=start workspaceId=${workspaceId}`);
   // Pin the state the gate is ABOUT to test, BEFORE it runs (#243). The gate is a 20-40 minute
