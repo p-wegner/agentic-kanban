@@ -120,6 +120,22 @@ export interface ApprovalRequestMessage {
   workspaceId?: string;
 }
 
+/**
+ * A plugin loop reached a human-approval gate (#287). Emitted once per NEW gate
+ * id — the monitor re-plans a blocked loop every cycle, and re-notifying on
+ * every poll would train the user to ignore it.
+ */
+export interface PluginGateMessage {
+  type: "plugin_gate";
+  projectId: string;
+  pluginSlug: string;
+  pluginName: string;
+  loopName: string;
+  loopLabel: string;
+  gateId: string;
+  question: string;
+}
+
 interface BoardEventSubscriber {
   ws: WSContext;
 }
@@ -257,6 +273,18 @@ function createBoardEvents() {
     }
   }
 
+  function broadcastPluginGate(projectId: string, data: Omit<PluginGateMessage, "type" | "projectId">) {
+    const subs = subscribers.get(projectId);
+    if (!subs) return;
+    const message: PluginGateMessage = { type: "plugin_gate", projectId, ...data };
+    const payload = JSON.stringify(message);
+    for (const sub of subs.values()) {
+      if (sub.ws.readyState === 1) {
+        sub.ws.send(payload);
+      }
+    }
+  }
+
   function broadcastTodos(projectId: string, issueId: string, todos: TodoItem[]) {
     const subs = subscribers.get(projectId);
     if (!subs) return;
@@ -278,6 +306,7 @@ function createBoardEvents() {
     broadcastLiveStats,
     broadcastTodos,
     broadcastApprovalRequest,
+    broadcastPluginGate,
     startCleanup,
     stopCleanup,
     cleanupStaleConnections,
