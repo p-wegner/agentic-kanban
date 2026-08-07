@@ -55,8 +55,6 @@ export function ensureFixtureRepo(): string {
   mkdirSync(repoPath);
   const git = (...args: string[]) => execFileSync("git", args, { cwd: repoPath, stdio: "pipe" });
   git("init", "-b", "main");
-  git("config", "user.email", "test@test.com");
-  git("config", "user.name", "Test");
   writeFileSync(join(repoPath, "README.md"), "api test fixture\n", "utf8");
   git("add", "README.md");
   git("commit", "-m", "initial commit");

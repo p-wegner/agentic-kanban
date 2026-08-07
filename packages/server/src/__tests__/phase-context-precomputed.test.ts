@@ -22,8 +22,6 @@ beforeAll(() => {
   repo = mkdtempSync(join(tmpdir(), "ak-phase-ctx-"));
   const git = (...args: string[]) => gitExecSync(args, { cwd: repo, stdio: "pipe" });
   git("init", "-b", "master");
-  git("config", "user.email", "test@example.com");
-  git("config", "user.name", "Test");
   writeFileSync(join(repo, "base.ts"), "export const a = 1;\n");
   git("add", "-A");
   git("commit", "-m", "base");
@@ -69,8 +67,6 @@ describe("buildReviewContext", () => {
     try {
       const git = (...args: string[]) => gitExecSync(args, { cwd: clean, stdio: "pipe" });
       git("init", "-b", "master");
-      git("config", "user.email", "test@example.com");
-      git("config", "user.name", "Test");
       writeFileSync(join(clean, "only.ts"), "export const a = 1;\n");
       git("add", "-A");
       git("commit", "-m", "base");
@@ -88,8 +84,6 @@ describe("buildReviewContext", () => {
     try {
       const git = (...args: string[]) => gitExecSync(args, { cwd: direct, stdio: "pipe" });
       git("init", "-b", "master");
-      git("config", "user.email", "test@example.com");
-      git("config", "user.name", "Test");
       writeFileSync(join(direct, "tracked.ts"), "export const a = 1;\n");
       git("add", "-A");
       git("commit", "-m", "base");

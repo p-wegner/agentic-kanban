@@ -64,8 +64,6 @@ describe("bisect.service", () => {
     ({ db } = createTestDb());
     repoDir = await mkdtemp(join(tmpdir(), "ak-bisect-"));
     await execGit(["init", "-b", "main"], repoDir);
-    await execGit(["config", "user.email", "test@example.com"], repoDir);
-    await execGit(["config", "user.name", "Test User"], repoDir);
   });
 
   afterEach(async () => {

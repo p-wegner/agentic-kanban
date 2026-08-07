@@ -91,8 +91,6 @@ describe("#763 append-only hot-file merge auto-resolution", () => {
   beforeEach(async () => {
     repo = await mkdtemp(join(tmpdir(), "ak-763-"));
     await git(repo, ["init"]);
-    await git(repo, ["config", "user.email", "t@t.com"]);
-    await git(repo, ["config", "user.name", "Test"]);
     await writeRepoFile(SMOKE, SEED);
     await writeRepoFile("src/index.js", "export const x = 1;\n");
     await git(repo, ["add", "-A"]);

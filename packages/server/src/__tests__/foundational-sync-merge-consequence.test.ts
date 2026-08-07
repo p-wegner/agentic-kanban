@@ -117,8 +117,6 @@ describe("exit-workflow: foundational blocker merges SYNCHRONOUSLY so a dependen
     // --- Real git repo: an (almost) empty base + a feature branch that adds the scaffold.
     repo = await mkdtemp(join(tmpdir(), "kanban-foundational-repo-"));
     await git(["init"], repo);
-    await git(["config", "user.email", "t@t.com"], repo);
-    await git(["config", "user.name", "Test"], repo);
     // The PRE-merge base is intentionally "empty": it does NOT contain scaffold.ts.
     await commitFile(repo, "README.md", "placeholder base\n", "seed empty base");
     await git(["branch", "-M", "master"], repo).catch(() => {});

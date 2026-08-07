@@ -25,8 +25,6 @@ describe("get_workspace_diff tool", () => {
 
     try {
       await git(repoPath, ["init", "-b", "main"]);
-      await git(repoPath, ["config", "user.email", "test@example.com"]);
-      await git(repoPath, ["config", "user.name", "Test User"]);
       await writeFile(join(repoPath, "README.md"), "Before\n");
       await git(repoPath, ["add", "README.md"]);
       await git(repoPath, ["commit", "-m", "Initial commit"]);

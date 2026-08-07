@@ -37,8 +37,6 @@ async function initRepoAt(parent: string, name: string): Promise<string> {
   const dir = join(parent, name);
   await mkdir(dir, { recursive: true });
   await git(dir, ["init"]);
-  await git(dir, ["config", "user.email", "test@example.local"]);
-  await git(dir, ["config", "user.name", "Worktree Escape Test"]);
   await writeFile(join(dir, `${name}.txt`), `marker for ${name}\n`);
   await git(dir, ["add", "-A"]);
   await git(dir, ["commit", "-m", "initial commit"]);

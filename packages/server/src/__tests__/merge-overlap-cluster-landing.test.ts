@@ -56,8 +56,6 @@ describe("#761 overlap-cluster landing without re-conflict loop", () => {
   beforeEach(async () => {
     repo = await mkdtemp(join(tmpdir(), "kanban-761-repo-"));
     await exec(["init"], repo);
-    await exec(["config", "user.email", "t@t.com"], repo);
-    await exec(["config", "user.name", "Test"], repo);
     await exec(["branch", "-M", "master"], repo).catch(() => {});
 
     // Seed a shared file with several lines so two branches can edit non-adjacent

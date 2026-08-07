@@ -72,8 +72,6 @@ async function createRepo(): Promise<TempRepo> {
 }
 
 async function configureUser(repo: string): Promise<void> {
-  await git(repo, ["config", "user.email", "test@example.local"]);
-  await git(repo, ["config", "user.name", "Git Service Test"]);
 }
 
 async function writeRepoFile(repo: string, relativePath: string, content: string): Promise<void> {

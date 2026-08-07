@@ -32,8 +32,6 @@ describe("git-service branch refresh / force delete (#781)", () => {
     repoPath = join(tempRoot, "repo");
     await mkdir(repoPath, { recursive: true });
     await git(repoPath, ["init", "-b", "master"]);
-    await git(repoPath, ["config", "user.email", "test@example.com"]);
-    await git(repoPath, ["config", "user.name", "Test"]);
     await git(repoPath, ["config", "commit.gpgsign", "false"]);
     await writeFile(join(repoPath, "base.txt"), "v1\n");
     await git(repoPath, ["add", "."]);

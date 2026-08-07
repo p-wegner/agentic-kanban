@@ -26,8 +26,6 @@ describe("worker-remote-sync (phase 2)", () => {
   beforeEach(async () => {
     repo = mkdtempSync(join(tmpdir(), "sync-repo-"));
     await gitExecOrThrow(["init", "-b", "master", repo], {});
-    await gitExecOrThrow(["config", "user.email", "t@t"], { cwd: repo });
-    await gitExecOrThrow(["config", "user.name", "T"], { cwd: repo });
     await commit("base");
   });
 

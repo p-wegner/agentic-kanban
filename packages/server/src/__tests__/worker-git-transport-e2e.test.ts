@@ -54,8 +54,6 @@ describe("worker git transport e2e (phase 2)", () => {
     workerRoot = mkdtempSync(join(tmpdir(), "fleet-worker-root-"));
 
     await gitExecOrThrow(["init", "-b", "master", repoDir], {});
-    await gitExecOrThrow(["config", "user.email", "board@test"], { cwd: repoDir });
-    await gitExecOrThrow(["config", "user.name", "Board"], { cwd: repoDir });
     writeFileSync(join(repoDir, "README.md"), "board repo\n");
     await gitExecOrThrow(["add", "."], { cwd: repoDir });
     await gitExecOrThrow(["commit", "-m", "init"], { cwd: repoDir });
@@ -75,6 +73,9 @@ describe("worker git transport e2e (phase 2)", () => {
        const fs = require("fs");
        fs.writeFileSync("worker-output.txt", "written by the remote worker\\n");
        const g = (...a) => execFileSync("git", a, { stdio: "pipe" });
+       // Kept explicit (#285 moved the rest of the suite's identity to env): this script runs
+       // in a process the BOARD launches with its own environment, so it cannot rely on the
+       // vitest worker's env reaching it.
        g("config", "user.email", "worker@test"); g("config", "user.name", "Worker");
        g("add", "."); g("commit", "-m", "agent work from remote worker");
        console.log("AGENT-DONE:" + process.cwd());`,

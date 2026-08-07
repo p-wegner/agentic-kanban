@@ -92,8 +92,6 @@ describe("#980 update-ref compare-and-swap on the plumbing merge", { timeout: 12
     raceState.beforeCommitTree = null;
     repo = await mkdtemp(join(tmpdir(), "ak-980-"));
     await git(repo, ["init"]);
-    await git(repo, ["config", "user.email", "t@t.com"]);
-    await git(repo, ["config", "user.name", "Test"]);
     await writeRepoFile("src/index.js", "export const x = 1;\n");
     await git(repo, ["add", "-A"]);
     await git(repo, ["commit", "-m", "seed"]);

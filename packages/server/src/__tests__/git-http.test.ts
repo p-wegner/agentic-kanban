@@ -40,8 +40,6 @@ describe("git-http service (worker fleet phase 2)", () => {
     workDir = mkdtempSync(join(tmpdir(), "git-http-work-"));
 
     await gitExecOrThrow(["init", "-b", "master", repoDir], {});
-    await gitExecOrThrow(["config", "user.email", "test@test"], { cwd: repoDir });
-    await gitExecOrThrow(["config", "user.name", "Test"], { cwd: repoDir });
     writeFileSync(join(repoDir, "README.md"), "hello fleet\n");
     await gitExecOrThrow(["add", "."], { cwd: repoDir });
     await gitExecOrThrow(["commit", "-m", "init"], { cwd: repoDir });
@@ -78,8 +76,6 @@ describe("git-http service (worker fleet phase 2)", () => {
   it("accepts a push to the kanban incoming namespace and refuses refs/heads", async () => {
     const cloneDir = join(workDir, "clone");
     writeFileSync(join(cloneDir, "feature.txt"), "worker work\n");
-    await gitExecOrThrow(["config", "user.email", "w@w"], { cwd: cloneDir });
-    await gitExecOrThrow(["config", "user.name", "Worker"], { cwd: cloneDir });
     await gitExecOrThrow(["checkout", "-b", "feature/ak-42-test"], { cwd: cloneDir });
     await gitExecOrThrow(["add", "."], { cwd: cloneDir });
     await gitExecOrThrow(["commit", "-m", "worker commit"], { cwd: cloneDir });
