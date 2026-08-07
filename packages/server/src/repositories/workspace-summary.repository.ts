@@ -1,19 +1,32 @@
-import { workspaces, sessions, sessionMessages, showdowns, workflowEdges, workflowNodes } from "@agentic-kanban/shared/schema";
-import { eq, inArray, sql, desc } from "drizzle-orm";
+import { workspaces, sessions, sessionMessages, showdowns, workflowEdges, workflowNodes, repos } from "@agentic-kanban/shared/schema";
+import { and, eq, inArray, sql, desc } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+
+/**
+ * The workspace's LEADING repo row (#222 stage 1, migration 0110). Aliased so the join
+ * cannot pick up this workspace's SIBLING rows and multiply the result by them.
+ */
+const leadingRepo = alias(repos, "leading_repo");
+
+/** Join predicate for {@link leadingRepo}. */
+const onLeadingRepo = and(eq(leadingRepo.workspaceId, workspaces.id), eq(leadingRepo.isLeading, true));
 
 export async function aggregateWorkspaceCountRows(issueIds: string[], database: Database = db) {
   return database
     .select({
       issueId: workspaces.issueId,
       status: workspaces.status,
-      branch: workspaces.branch,
+      // #225 — branch comes from the leading repo row; the mirror column is only a fallback
+      // until stage 4 drops it (see workspace-reads.repository.ts for the full rationale).
+      branch: sql<string>`coalesce(${leadingRepo.branch}, ${workspaces.branch})`,
       count: sql<number>`count(*)`.as("count"),
     })
     .from(workspaces)
+    .leftJoin(leadingRepo, onLeadingRepo)
     .where(inArray(workspaces.issueId, issueIds))
-    .groupBy(workspaces.issueId, workspaces.status, workspaces.branch);
+    .groupBy(workspaces.issueId, workspaces.status, sql`coalesce(${leadingRepo.branch}, ${workspaces.branch})`);
 }
 
 export async function fetchWorkspaceDetailRows(issueIds: string[], database: Database = db) {
@@ -21,7 +34,8 @@ export async function fetchWorkspaceDetailRows(issueIds: string[], database: Dat
     .select({
       id: workspaces.id,
       issueId: workspaces.issueId,
-      branch: workspaces.branch,
+      // #225 — leading repo row first, mirror columns only as the stage-4 fallback.
+      branch: sql<string>`coalesce(${leadingRepo.branch}, ${workspaces.branch})`,
       status: workspaces.status,
       updatedAt: workspaces.updatedAt,
       claudeProfile: workspaces.claudeProfile,
@@ -30,8 +44,8 @@ export async function fetchWorkspaceDetailRows(issueIds: string[], database: Dat
       model: workspaces.model,
       pendingPlanPath: workspaces.pendingPlanPath,
       planMode: workspaces.planMode,
-      workingDir: workspaces.workingDir,
-      baseBranch: workspaces.baseBranch,
+      workingDir: sql<string | null>`coalesce(${leadingRepo.worktreePath}, ${workspaces.workingDir})`,
+      baseBranch: sql<string | null>`coalesce(${leadingRepo.baseBranch}, ${workspaces.baseBranch})`,
       isDirect: workspaces.isDirect,
       conflictCacheCheckedAt: workspaces.conflictCacheCheckedAt,
       conflictCacheHasConflicts: workspaces.conflictCacheHasConflicts,
@@ -50,6 +64,7 @@ export async function fetchWorkspaceDetailRows(issueIds: string[], database: Dat
       mergedAt: workspaces.mergedAt,
     })
     .from(workspaces)
+    .leftJoin(leadingRepo, onLeadingRepo)
     .where(inArray(workspaces.issueId, issueIds));
 }
 

@@ -3,8 +3,17 @@ import {
   issues,
   sessions,
   agentSkills,
+  repos,
 } from "@agentic-kanban/shared/schema";
-import { desc, eq, inArray, and } from "drizzle-orm";
+import { desc, eq, inArray, and, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
+
+/**
+ * The workspace's LEADING repo row (#222 stage 1, migration 0110). Aliased because `repos`
+ * also holds this workspace's SIBLING rows, and joining the table unaliased would multiply
+ * the result by them — the mistake every "sibling repos" query has to guard against.
+ */
+const leadingRepo = alias(repos, "leading_repo");
 import { findOpenUnmergedWorkspace as findOpenUnmergedWorkspaceShared } from "@agentic-kanban/shared/lib/issue-status-orchestration";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -107,9 +116,15 @@ export async function getWorkspaceDetails(
     .select({
       id: workspaces.id,
       issueId: workspaces.issueId,
-      branch: workspaces.branch,
-      workingDir: workspaces.workingDir,
-      baseBranch: workspaces.baseBranch,
+      // #225 (stage 3 of the #222 epic) — the client-facing DTO's git state comes from the
+      // LEADING REPO ROW, not the workspace mirror columns. `coalesce` keeps the columns as a
+      // fallback while stage 4 has not dropped them: a workspace created before migration
+      // 0110, or one whose row a dual-write missed, still projects correctly (and `leadingRef`
+      // read-repairs it on its next read). Once the columns go, the fallback goes with them
+      // and nothing downstream notices, which is the whole point of doing this first.
+      branch: sql<string | null>`coalesce(${leadingRepo.branch}, ${workspaces.branch})`,
+      workingDir: sql<string | null>`coalesce(${leadingRepo.worktreePath}, ${workspaces.workingDir})`,
+      baseBranch: sql<string | null>`coalesce(${leadingRepo.baseBranch}, ${workspaces.baseBranch})`,
       isDirect: workspaces.isDirect,
       planMode: workspaces.planMode,
       includeVisualProof: workspaces.includeVisualProof,
@@ -160,6 +175,7 @@ export async function getWorkspaceDetails(
     .from(workspaces)
     .innerJoin(issues, eq(workspaces.issueId, issues.id))
     .leftJoin(agentSkills, eq(workspaces.skillId, agentSkills.id))
+    .leftJoin(leadingRepo, and(eq(leadingRepo.workspaceId, workspaces.id), eq(leadingRepo.isLeading, true)))
     .where(eq(workspaces.id, workspaceId));
 
   if (result.length === 0) return null;
