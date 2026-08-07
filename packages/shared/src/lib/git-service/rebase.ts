@@ -99,7 +99,33 @@ export async function rebaseOntoBase(
   baseBranch: string,
   branch?: string,
   options: { preferLocalBase?: boolean } = {},
-): Promise<{ success: boolean; conflictingFiles?: string[]; error?: string }> {
+): Promise<{ success: boolean; conflictingFiles?: string[]; error?: string; branchSha?: string; baseSha?: string }> {
+  // #274 — a rebase left IN PROGRESS by an earlier attempt makes this one fail instantly
+  // ("a rebase is already in progress"), and the unmerged index entries `git diff
+  // --diff-filter=U` then reports belong to THAT attempt, against a base that has since
+  // moved. Observed live: the merge queue skipped two unrelated workspaces with the
+  // identical reason `rebase conflict: <three files>` — files neither branch touched, which
+  // were exactly the files another ticket had landed on master earlier that day. One of the
+  // two actually merged clean; the other did conflict, but in a different file entirely. So
+  // the queue refused mergeable work and pointed conflict resolution at the wrong files.
+  //
+  // `prepareForReview` has always aborted first; this path did not. Clear it here, and if
+  // the abort itself fails (an `index.lock` held by another git process is the usual cause)
+  // say THAT, rather than reporting a file list that describes a different rebase.
+  if (await isRebaseInProgress(worktreePath)) {
+    try {
+      await execGit(["rebase", "--abort"], worktreePath);
+      console.log(`[git] aborted a stale in-progress rebase in ${worktreePath} before rebasing onto ${baseBranch}`);
+    } catch (err) {
+      return {
+        success: false,
+        error:
+          `a previous rebase is still in progress in ${worktreePath} and could not be aborted ` +
+          `(${err instanceof Error ? err.message : String(err)}) — resolve or abort it before retrying`,
+      };
+    }
+  }
+
   // A dirty worktree makes `git rebase` fail with an empty conflict list ("rebase conflict: "),
   // which the merge queue then skips forever. Commit any leftover changes first. (#nnn)
   await commitLeftoverChanges(worktreePath);
@@ -116,22 +142,47 @@ export async function rebaseOntoBase(
     } catch { /* use local */ }
   }
 
+  // Pinned BEFORE the rebase so a reported conflict is attributable to a specific pair of
+  // tips (#274, fix direction (c)): a verdict that names its inputs can be checked, and a
+  // stale one is visible instead of merely wrong.
+  const tips = await resolveTips(worktreePath, source);
+
   try {
     await execGit(["rebase", source], worktreePath);
     // Rebase can leave worktree in detached HEAD — reattach
     if (branch) {
       await ensureOnBranch(worktreePath, branch);
     }
-    return { success: true };
+    return { success: true, ...tips };
   } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    // Only attribute unmerged index entries to THIS rebase when this rebase is the one that
+    // stopped. If it never started (it failed for some other reason), whatever is in the
+    // index belongs to something else and naming those files would be a fabrication.
+    if (!(await isRebaseInProgress(worktreePath))) {
+      return { success: false, error, ...tips };
+    }
     try {
       const unmerged = await execGit(["diff", "--name-only", "--diff-filter=U"], worktreePath);
       const conflictingFiles = unmerged.trim().split("\n").filter(Boolean);
-      return { success: false, conflictingFiles, error: err instanceof Error ? err.message : String(err) };
+      return { success: false, conflictingFiles, error, ...tips };
     } catch {
-      return { success: false, error: err instanceof Error ? err.message : String(err) };
+      return { success: false, error, ...tips };
     }
   }
+}
+
+/** Best-effort branch/base tips for conflict attribution — never throws. */
+async function resolveTips(worktreePath: string, baseRef: string): Promise<{ branchSha?: string; baseSha?: string }> {
+  const read = async (ref: string) => {
+    try {
+      return (await execGit(["rev-parse", ref], worktreePath)).trim() || undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const [branchSha, baseSha] = await Promise.all([read("HEAD"), read(baseRef)]);
+  return { branchSha, baseSha };
 }
 
 /** Abort an in-progress rebase. */
