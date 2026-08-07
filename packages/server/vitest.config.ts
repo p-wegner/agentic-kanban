@@ -32,6 +32,8 @@ const testTimeout = Number(process.env.VITEST_TEST_TIMEOUT) || 60_000;
 export default defineConfig({
   test: {
     globals: true,
+    // #285 — git committer identity via env, so no fixture pays two `git config` spawns.
+    setupFiles: [path.resolve(__dirname, "../../test-setup/git-identity.ts")],
     exclude: ["**/dist/**", "**/node_modules/**"],
     testTimeout,
     hookTimeout: testTimeout,

@@ -40,8 +40,6 @@ function git(cwd: string, ...args: string[]): string {
 }
 
 function gitSetup(repoPath: string) {
-  git(repoPath, "config", "user.email", "test@test.com");
-  git(repoPath, "config", "user.name", "Test");
 }
 
 /**

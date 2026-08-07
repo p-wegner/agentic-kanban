@@ -20,8 +20,6 @@ describe("detectRepoInfo", () => {
   beforeAll(async () => {
     tempDir = await mkdtemp(join(tmpdir(), "kanban-test-"));
     await exec("git", ["init"], tempDir);
-    await exec("git", ["config", "user.email", "test@test.com"], tempDir);
-    await exec("git", ["config", "user.name", "Test"], tempDir);
     // Create initial commit so HEAD exists
     await exec("git", ["commit", "--allow-empty", "-m", "init"], tempDir);
   });
@@ -40,7 +38,6 @@ describe("detectRepoInfo", () => {
 
   it("resolves to git root when called from a subdirectory", async () => {
     const subDir = join(tempDir, "sub", "nested");
-    await exec("git", ["config", "user.email", "test@test.com"], tempDir);
     const { mkdir } = await import("node:fs/promises");
     await mkdir(subDir, { recursive: true });
 
@@ -70,8 +67,6 @@ describe("detectRepoInfo", () => {
   it("leaves default branch unset when neither main nor master exists", async () => {
     const customDir = await mkdtemp(join(tmpdir(), "kanban-custom-"));
     await exec("git", ["init", "-b", "develop"], customDir);
-    await exec("git", ["config", "user.email", "test@test.com"], customDir);
-    await exec("git", ["config", "user.name", "Test"], customDir);
     await exec("git", ["commit", "--allow-empty", "-m", "init"], customDir);
 
     const info = await detectRepoInfo(customDir);
@@ -83,8 +78,6 @@ describe("detectRepoInfo", () => {
   it("prefers main over master when both branches exist", async () => {
     const bothDir = await mkdtemp(join(tmpdir(), "kanban-both-"));
     await exec("git", ["init", "-b", "master"], bothDir);
-    await exec("git", ["config", "user.email", "test@test.com"], bothDir);
-    await exec("git", ["config", "user.name", "Test"], bothDir);
     await exec("git", ["commit", "--allow-empty", "-m", "init"], bothDir);
     await exec("git", ["branch", "main"], bothDir);
 
@@ -101,8 +94,6 @@ describe("getProjectGitStats", () => {
   beforeAll(async () => {
     repoDir = await mkdtemp(join(tmpdir(), "kanban-stats-test-"));
     await exec("git", ["init"], repoDir);
-    await exec("git", ["config", "user.email", "test@test.com"], repoDir);
-    await exec("git", ["config", "user.name", "Test"], repoDir);
     await exec("git", ["commit", "--allow-empty", "-m", "first commit"], repoDir);
     await exec("git", ["commit", "--allow-empty", "-m", "second commit"], repoDir);
   });

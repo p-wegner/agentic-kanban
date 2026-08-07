@@ -55,8 +55,6 @@ function makeGitRepo(): string {
   const git = (...args: string[]) =>
     execFileSync("git", args, { cwd: dir, stdio: "pipe" });
   git("init", "-b", "main");
-  git("config", "user.email", "test@example.com");
-  git("config", "user.name", "Seed Status Test");
   git("config", "commit.gpgsign", "false");
   writeFileSync(join(dir, "README.md"), "# fixture\n");
   git("add", "README.md");

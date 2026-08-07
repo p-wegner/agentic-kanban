@@ -40,8 +40,6 @@ describe("Workspaces API", () => {
     const repoPath = mkdtempSync(join(tmpdir(), "kanban-clean-main-"));
     try {
       execFileSync("git", ["init", "-b", "main"], { cwd: repoPath });
-      execFileSync("git", ["config", "user.email", "test@test.com"], { cwd: repoPath });
-      execFileSync("git", ["config", "user.name", "Test"], { cwd: repoPath });
       writeFileSync(join(repoPath, "README.md"), "initial\n", "utf8");
       execFileSync("git", ["add", "README.md"], { cwd: repoPath });
       execFileSync("git", ["commit", "-m", "initial commit"], { cwd: repoPath });
@@ -76,8 +74,6 @@ describe("Workspaces API", () => {
       expect(createRes.status).toBe(201);
       const workspace = await createRes.json() as any;
 
-      execFileSync("git", ["config", "user.email", "test@test.com"], { cwd: workspace.workingDir });
-      execFileSync("git", ["config", "user.name", "Test"], { cwd: workspace.workingDir });
       writeFileSync(join(workspace.workingDir, "ticket.txt"), "done\n", "utf8");
       execFileSync("git", ["add", "ticket.txt"], { cwd: workspace.workingDir });
       execFileSync("git", ["commit", "-m", "feat: add workspace change"], { cwd: workspace.workingDir });
@@ -99,8 +95,6 @@ describe("Workspaces API", () => {
     const repoPath = mkdtempSync(join(tmpdir(), "kanban-board-merge-"));
     try {
       execFileSync("git", ["init", "-b", "main"], { cwd: repoPath });
-      execFileSync("git", ["config", "user.email", "test@test.com"], { cwd: repoPath });
-      execFileSync("git", ["config", "user.name", "Test"], { cwd: repoPath });
       writeFileSync(join(repoPath, "README.md"), "initial\n", "utf8");
       execFileSync("git", ["add", "README.md"], { cwd: repoPath });
       execFileSync("git", ["commit", "-m", "initial commit"], { cwd: repoPath });
@@ -144,8 +138,6 @@ describe("Workspaces API", () => {
       expect(createRes.status).toBe(201);
       const workspace = await createRes.json() as any;
 
-      execFileSync("git", ["config", "user.email", "test@test.com"], { cwd: workspace.workingDir });
-      execFileSync("git", ["config", "user.name", "Test"], { cwd: workspace.workingDir });
       writeFileSync(join(workspace.workingDir, "ticket.txt"), "done\n", "utf8");
       execFileSync("git", ["add", "ticket.txt"], { cwd: workspace.workingDir });
       execFileSync("git", ["commit", "-m", "feat: add workspace change"], { cwd: workspace.workingDir });
@@ -283,8 +275,6 @@ describe("Workspaces API", () => {
     const repoPath = join(repoParent, "test-repo");
     mkdirSync(repoPath);
     execFileSync("git", ["init", "-b", "main"], { cwd: repoPath });
-    execFileSync("git", ["config", "user.email", "test@test.com"], { cwd: repoPath });
-    execFileSync("git", ["config", "user.name", "Test"], { cwd: repoPath });
     execFileSync("git", ["commit", "--allow-empty", "-m", "initial"], { cwd: repoPath });
     const failProjectId = await createProjectDirectly(database, {
       name: "Setup Fail Project",
@@ -329,8 +319,6 @@ describe("Workspaces API", () => {
     const repoPath = join(repoParent, "test-repo");
     mkdirSync(repoPath);
     execFileSync("git", ["init", "-b", "main"], { cwd: repoPath });
-    execFileSync("git", ["config", "user.email", "test@test.com"], { cwd: repoPath });
-    execFileSync("git", ["config", "user.name", "Test"], { cwd: repoPath });
     execFileSync("git", ["commit", "--allow-empty", "-m", "initial"], { cwd: repoPath });
     const setupProjectId = await createProjectDirectly(database, {
       name: "Setup Status Project",

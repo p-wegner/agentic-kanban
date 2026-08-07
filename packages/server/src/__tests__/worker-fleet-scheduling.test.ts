@@ -220,8 +220,6 @@ describe("worker fleet scheduling (phase 3)", () => {
     beforeEach(async () => {
       repo = mkdtempSync(join(tmpdir(), "sweep-repo-"));
       await gitExecOrThrow(["init", "-b", "master", repo], {});
-      await gitExecOrThrow(["config", "user.email", "t@t"], { cwd: repo });
-      await gitExecOrThrow(["config", "user.name", "T"], { cwd: repo });
       writeFileSync(join(repo, "a.txt"), "base\n");
       await gitExecOrThrow(["add", "."], { cwd: repo });
       await gitExecOrThrow(["commit", "-m", "base"], { cwd: repo });

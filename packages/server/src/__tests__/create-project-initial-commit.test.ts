@@ -149,8 +149,6 @@ describe("commitProjectScaffoldArtifacts on an unborn branch (#47)", () => {
   it("commits the scaffold instead of dying in the non-fatal catch", async () => {
     const repo = makeBaseDir("scaffold-unborn");
     git(repo, "init", "-q", "-b", "main");
-    git(repo, "config", "user.name", "t");
-    git(repo, "config", "user.email", "t@t");
     writeFileSync(join(repo, "CLAUDE.md"), "# guide\n", "utf8");
 
     await commitProjectScaffoldArtifacts(repo);
@@ -162,8 +160,6 @@ describe("commitProjectScaffoldArtifacts on an unborn branch (#47)", () => {
   it("still skips a detached HEAD", async () => {
     const repo = makeBaseDir("scaffold-detached");
     git(repo, "init", "-q", "-b", "main");
-    git(repo, "config", "user.name", "t");
-    git(repo, "config", "user.email", "t@t");
     git(repo, "commit", "--allow-empty", "-m", "one");
     git(repo, "checkout", "-q", "--detach");
     writeFileSync(join(repo, "CLAUDE.md"), "# guide\n", "utf8");

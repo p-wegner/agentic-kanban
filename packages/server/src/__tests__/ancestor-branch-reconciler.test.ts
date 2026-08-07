@@ -506,13 +506,10 @@ async function createTempRepo(prefix: string): Promise<string> {
   const parent = await mkdtemp(join(tmpdir(), prefix));
   const dir = join(parent, "repo");
   mkdirSync(dir);
-  await exec("git", ["init"], dir);
-  await exec("git", ["config", "user.email", "test@test.com"], dir);
-  await exec("git", ["config", "user.name", "Test"], dir);
+  await exec("git", ["init", "-b", "main"], dir);
   await writeFile(join(dir, "README.md"), "# Test\n");
   await exec("git", ["add", "."], dir);
   await exec("git", ["commit", "-m", "Initial commit"], dir);
-  await exec("git", ["branch", "-M", "main"], dir);
   return dir;
 }
 

@@ -27,8 +27,6 @@ function makeDir(): string {
 function makeRepo(): string {
   const dir = makeDir();
   gitExecSync(["init", "-b", "master"], { cwd: dir, stdio: ["ignore", "ignore", "ignore"] });
-  gitExecSync(["config", "user.email", "test@example.com"], { cwd: dir, stdio: ["ignore", "ignore", "ignore"] });
-  gitExecSync(["config", "user.name", "Test"], { cwd: dir, stdio: ["ignore", "ignore", "ignore"] });
   return dir;
 }
 

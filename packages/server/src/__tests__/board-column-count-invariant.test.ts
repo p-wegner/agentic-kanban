@@ -77,8 +77,6 @@ function createTempGitRepo(): string {
   const repoPath = mkdtempSync(join(tmpdir(), "ak-invariant-"));
   tempRepos.push(repoPath);
   execFileSync("git", ["init", "-b", "main"], { cwd: repoPath });
-  execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: repoPath });
-  execFileSync("git", ["config", "user.name", "Test User"], { cwd: repoPath });
   execFileSync("git", ["commit", "--allow-empty", "-m", "init"], { cwd: repoPath });
   return repoPath;
 }

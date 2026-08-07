@@ -169,8 +169,6 @@ describe("plugin marketplace", () => {
     const origin = join(originParent, "origin");
     mkdirSync(origin, { recursive: true });
     gitExecSync(["init"], { cwd: origin });
-    gitExecSync(["config", "user.email", "test@test"], { cwd: origin });
-    gitExecSync(["config", "user.name", "test"], { cwd: origin });
     writeFileSync(join(origin, "kanban-plugin.json"), JSON.stringify({ id: "gitplug", name: "Git Plug", version: "1.0.0" }));
     gitExecSync(["add", "."], { cwd: origin });
     gitExecSync(["commit", "-m", "v1"], { cwd: origin });

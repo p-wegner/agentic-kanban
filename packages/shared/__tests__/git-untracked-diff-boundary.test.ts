@@ -73,8 +73,6 @@ describe("getUntrackedDiffEntries boundary cases", () => {
   beforeEach(async () => {
     repo = await mkdtemp(join(tmpdir(), "ak-untracked-boundary-"));
     await git(repo, ["init"]);
-    await git(repo, ["config", "user.email", "test@example.local"]);
-    await git(repo, ["config", "user.name", "Untracked Boundary Test"]);
     // Need at least one commit so `git diff HEAD` (the tracked half) has a HEAD.
     await writeRepoFile(repo, "README.md", "# seed\n");
     await git(repo, ["add", "-A"]);

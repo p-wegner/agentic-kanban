@@ -17,8 +17,6 @@ function exec(cmd: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv)
 async function initRepoWithSources(prefix: string): Promise<{ repoDir: string; branch: string }> {
   const repoDir = await mkdtemp(join(tmpdir(), prefix));
   await exec("git", ["init"], repoDir);
-  await exec("git", ["config", "user.email", "test@test.com"], repoDir);
-  await exec("git", ["config", "user.name", "Test"], repoDir);
 
   await mkdir(join(repoDir, "src", "__tests__"), { recursive: true });
   // 3 non-empty production lines, 2 non-empty test lines
@@ -111,8 +109,6 @@ describe("getProjectGitStatsAsync", () => {
     const customDir = await mkdtemp(join(tmpdir(), "kanban-stats-async-custom-"));
     try {
       await exec("git", ["init", "-b", "develop"], customDir);
-      await exec("git", ["config", "user.email", "test@test.com"], customDir);
-      await exec("git", ["config", "user.name", "Test"], customDir);
       await exec("git", ["commit", "--allow-empty", "-m", "init"], customDir);
 
       const stats = await getProjectGitStatsAsync(customDir, null);
@@ -150,8 +146,6 @@ describe("getProjectGitStatsAsync", () => {
     const oldDir = await mkdtemp(join(tmpdir(), "kanban-stats-async-old-"));
     try {
       await exec("git", ["init"], oldDir);
-      await exec("git", ["config", "user.email", "test@test.com"], oldDir);
-      await exec("git", ["config", "user.name", "Test"], oldDir);
       await mkdir(join(oldDir, "src"), { recursive: true });
       await writeFile(join(oldDir, "src", "legacy.ts"), "const a = 1;\nconst b = 2;\nexport { a, b };\n", "utf8");
       await exec("git", ["add", "."], oldDir);

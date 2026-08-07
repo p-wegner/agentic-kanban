@@ -89,8 +89,6 @@ function makeGitRepo(prefix: string, markers: Record<string, string> = {}): stri
   const git = (...args: string[]) =>
     execFileSync("git", args, { cwd: dir, stdio: "pipe", windowsHide: true });
   git("init", "-b", "main");
-  git("config", "user.email", "test@example.com");
-  git("config", "user.name", "Registration Test");
   git("config", "commit.gpgsign", "false");
   writeFileSync(join(dir, "README.md"), "# fixture\n");
   for (const [name, content] of Object.entries(markers)) {

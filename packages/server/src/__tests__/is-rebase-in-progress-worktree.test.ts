@@ -28,8 +28,6 @@ function exec(cmd: string, args: string[], cwd: string): Promise<string> {
 async function createTempRepo(): Promise<{ dir: string; base: string }> {
   const dir = await mkdtemp(join(tmpdir(), "kanban-rebase-inprogress-"));
   await exec("git", ["init"], dir);
-  await exec("git", ["config", "user.email", "test@test.com"], dir);
-  await exec("git", ["config", "user.name", "Test"], dir);
   writeFileSync(join(dir, "foo.txt"), "base\n");
   await exec("git", ["add", "."], dir);
   await exec("git", ["commit", "-m", "Initial commit"], dir);

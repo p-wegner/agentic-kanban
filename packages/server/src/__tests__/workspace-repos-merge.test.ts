@@ -37,8 +37,6 @@ async function createTempRepo(prefix: string): Promise<string> {
   const { mkdirSync } = await import("node:fs");
   mkdirSync(dir);
   await exec("git", ["init"], dir);
-  await exec("git", ["config", "user.email", "test@test.com"], dir);
-  await exec("git", ["config", "user.name", "Test"], dir);
   await writeFile(join(dir, "README.md"), "# Test\n");
   await exec("git", ["add", "."], dir);
   await exec("git", ["commit", "-m", "Initial commit"], dir);

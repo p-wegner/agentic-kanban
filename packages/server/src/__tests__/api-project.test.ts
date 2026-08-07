@@ -134,8 +134,6 @@ describe("Projects API", () => {
   it("PATCH /api/projects/:id validates defaultBranch exists locally", async () => {
     const repoPath = mkdtempSync(join(tmpdir(), "kanban-project-branch-"));
     execFileSync("git", ["init", "-b", "main"], { cwd: repoPath });
-    execFileSync("git", ["config", "user.email", "test@test.com"], { cwd: repoPath });
-    execFileSync("git", ["config", "user.name", "Test"], { cwd: repoPath });
     execFileSync("git", ["commit", "--allow-empty", "-m", "init"], { cwd: repoPath });
 
     const gitProjectId = await createProjectDirectly(database, { repoPath, defaultBranch: null });
@@ -299,8 +297,6 @@ describe("Projects API", () => {
   it("GET /api/projects/:id/stats includes code metrics and history", async () => {
     const repoPath = mkdtempSync(join(tmpdir(), "kanban-project-metrics-"));
     execFileSync("git", ["init", "-b", "main"], { cwd: repoPath });
-    execFileSync("git", ["config", "user.email", "test@test.com"], { cwd: repoPath });
-    execFileSync("git", ["config", "user.name", "Metrics Tester"], { cwd: repoPath });
     mkdirSync(join(repoPath, "src"), { recursive: true });
     mkdirSync(join(repoPath, "src", "__tests__"), { recursive: true });
     writeFileSync(join(repoPath, "src", "feature.ts"), "export const value = 1;\nexport const next = 2;\n");
