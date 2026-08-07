@@ -26,6 +26,7 @@ import { insertIssueComment } from "../repositories/issue-comments.repository.js
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { buildLearningStepPrompt } from "../services/merge-helpers.service.js";
 import { resolveMergeGate, type MergeGateToken } from "../services/pre-merge-gate.service.js";
+import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.repository.js";
 
 export type MergeWorkspace = Pick<typeof workspaces.$inferSelect, "id" | "isDirect" | "branch" | "workingDir" | "baseBranch" | "issueId">;
 
@@ -434,7 +435,10 @@ Server: http://localhost:${serverPort}`;
         }
       }
 
-      await setWorkspaceStatus(db, workspace.id, "closed", { now, set: { workingDir: null, readyForMerge: false } });
+      await setWorkspaceStatus(db, workspace.id, "closed", { now, set: { readyForMerge: false } });
+      // #226 — mirror column: goes through the repository helper so the leading `repos` row
+      // stops pointing at the worktree this close just tore down.
+      await clearWorkspaceWorkingDir(workspace.id, now, db);
       if (doneStatusId) {
         // transitionIssueStatus also advances the workflow node to the `end` node
         // matching Done status, so blocked_by/depends_on dependents can resolve

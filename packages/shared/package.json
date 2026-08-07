@@ -348,6 +348,12 @@
       "import": "./dist/lib/workspace-status.js",
       "default": "./src/lib/workspace-status.ts"
     },
+    "./lib/workspace-git-state": {
+      "development": "./src/lib/workspace-git-state.ts",
+      "types": "./dist/lib/workspace-git-state.d.ts",
+      "import": "./dist/lib/workspace-git-state.js",
+      "default": "./src/lib/workspace-git-state.ts"
+    },
     "./lib/status-transitions": {
       "development": "./src/lib/status-transitions.ts",
       "types": "./dist/lib/status-transitions.d.ts",

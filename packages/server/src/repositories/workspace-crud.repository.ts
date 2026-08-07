@@ -8,6 +8,7 @@ import { db } from "../db/index.js";
 import type { Database, TransactionClient } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
 import { mirrorWorkspaceColumnsToLeadingRepo } from "./repo.repository.js";
+import { setWorkspaceWorkingDir as setWorkspaceWorkingDirShared } from "@agentic-kanban/shared/lib/workspace-git-state";
 
 export async function updateLatestSetupRunFields(
   workspaceId: string,
@@ -193,11 +194,14 @@ export async function updateWorkspaceClosed(
   await setWorkspaceStatus(database, workspaceId, "closed", {
     now: values.updatedAt,
     set: {
-      workingDir: values.workingDir,
       closedAt: values.closedAt,
       ...(values.cleanupWarning !== undefined ? { cleanupWarning: values.cleanupWarning } : {}),
     },
   });
+  // #226 — `workingDir` is a leading-repo MIRROR column, so it must go through the writer that
+  // updates the `repos` row too. `setWorkspaceStatus` lives in packages/shared and cannot reach
+  // the mirror, which is why its `set` no longer accepts these columns at all.
+  await setWorkspaceWorkingDirShared(database, workspaceId, values.workingDir, values.updatedAt);
 }
 
 export async function getWorkspaceIssueId(
@@ -312,16 +316,20 @@ export async function listStaleWorktreeRows(
     .where(whereClause);
 }
 
+/**
+ * Clear a workspace's `workingDir` on BOTH sides — the column and the leading `repos` row
+ * (#226).
+ *
+ * The only sanctioned way to clear it. `setWorkspaceStatus`'s `set` escape hatch used to be
+ * the other way and could not mirror, so four close paths left the row pointing at a
+ * torn-down worktree; its type now rejects these columns outright, which routes them here.
+ */
 export async function clearWorkspaceWorkingDir(
   workspaceId: string,
   now: string,
   database: Database = db,
 ): Promise<void> {
-  await database
-    .update(workspaces)
-    .set({ workingDir: null, updatedAt: now })
-    .where(eq(workspaces.id, workspaceId));
-  await mirrorWorkspaceColumnsToLeadingRepo(workspaceId, { workingDir: null }, database);
+  await setWorkspaceWorkingDirShared(database, workspaceId, null, now);
 }
 
 export async function getAgentSkillNameById(

@@ -60,13 +60,24 @@ export interface WorkspaceRepoRef {
 }
 
 /**
- * Project the leading repo's state (workspace row + project row) into a uniform ref.
+ * Project the leading repo's state into a uniform ref.
  *
- * #222 stage 2: the synthesized projection stays AUTHORITATIVE (the workspace columns are
- * still the source of truth until stage 4's column drop), but a physical `is_leading` row
- * now exists (migration 0110 + dual-writes) and this function READ-REPAIRS it: a missing
- * row is backfilled, a diverging one is converged to the synthesis. Best-effort — repair
- * failures never break a read.
+ * #226 (stage 4): the physical `is_leading` row is the SOURCE; the workspace mirror columns
+ * are a per-field fallback. This is the flip stage 2 deferred, and it is what moves every
+ * `getAllWorkspaceRepos` consumer — the merge path, the reconcilers, rebase, merge-status —
+ * onto the row in ONE change instead of repointing ~109 direct column reads individually.
+ *
+ * Two things had to be true first, and neither was:
+ *  1. the repair had to stop converging row -> columns (it made the row unable to disagree,
+ *     so the flip would have been a no-op by construction); and
+ *  2. the dual-writes had to be complete. Four close paths were clearing `workingDir` through
+ *     `setWorkspaceStatus(..., { set })`, which cannot mirror — after the flip those would
+ *     have reported a worktree that had already been torn down. That hatch is now closed at
+ *     the TYPE level (`SetWorkspaceStatusOpts`), so the gap cannot reopen silently.
+ *
+ * The fallback is not a hedge against the row: it is what POPULATES it. A workspace predating
+ * migration 0110, or created in the stage-1->2 window, has no row until the repair below
+ * inserts one from the columns — on this very read, before the row is consulted.
  */
 async function leadingRef(workspaceId: string, database: Database): Promise<WorkspaceRepoRef | null> {
   const workspace = await getWorkspaceById(workspaceId, database);
@@ -79,21 +90,24 @@ async function leadingRef(workspaceId: string, database: Database): Promise<Work
   } catch (err) {
     console.warn(`[workspace-all-repos] leading-row read-repair failed for ${workspaceId} (non-fatal):`, err instanceof Error ? err.message : String(err));
   }
+  const row = await getLeadingRepoRow(workspaceId, database).catch(() => null);
   return {
     kind: "leading",
     id: workspaceId,
     workspaceId,
+    // `path`/`defaultBranch` stay PROJECT-derived. They describe the project's repo, not the
+    // workspace's git state, and are not among the columns this stage drops.
     path: repoPath,
     name: null,
-    worktreePath: workspace.workingDir ?? null,
-    branch: workspace.branch ?? null,
-    // The leading repo's base is its workspace baseBranch, falling back to the project's
-    // default branch (what it was cut from) — mirrors requireBaseBranch(baseBranch||defaultBranch)
+    worktreePath: row?.worktreePath ?? workspace.workingDir ?? null,
+    branch: row?.branch ?? workspace.branch ?? null,
+    // The leading repo's base is its own baseBranch, falling back to the project's default
+    // branch (what it was cut from) — mirrors requireBaseBranch(baseBranch||defaultBranch)
     // in the merge-status/rebase paths (|| so an empty string also falls back), so a uniform
     // loop reads the same base a hand-written leading block did.
-    baseBranch: workspace.baseBranch || defaultBranch,
-    baseCommitSha: workspace.baseCommitSha ?? null,
-    mergedHeadSha: workspace.mergedHeadSha ?? null,
+    baseBranch: row?.baseBranch || workspace.baseBranch || defaultBranch,
+    baseCommitSha: row?.baseCommitSha ?? workspace.baseCommitSha ?? null,
+    mergedHeadSha: row?.mergedHeadSha ?? workspace.mergedHeadSha ?? null,
     defaultBranch,
   };
 }
@@ -134,6 +148,11 @@ async function repairLeadingRepoRow(
     }
     return;
   }
+  // #226 — the row is now the SOURCE, so divergence is REPORTED, not overwritten. Converging
+  // row -> columns (the stage-2 behaviour) would make the row unable to disagree, which is
+  // exactly what made the source flip a no-op by construction. A warning here means a write
+  // path updated a column without mirroring; with the `setWorkspaceStatus` hatch closed at the
+  // type level that should be unreachable, so it is worth seeing rather than silently undoing.
   const diverged =
     row.worktreePath !== truth.workingDir ||
     row.branch !== truth.branch ||
@@ -141,8 +160,10 @@ async function repairLeadingRepoRow(
     row.baseCommitSha !== truth.baseCommitSha ||
     row.mergedHeadSha !== truth.mergedHeadSha;
   if (diverged) {
-    console.warn(`[workspace-all-repos] leading row for ${workspaceId} diverged from workspace columns — converging (a dual-write path may be missing)`);
-    await mirrorWorkspaceColumnsToLeadingRepo(workspaceId, truth, database);
+    console.warn(
+      `[workspace-all-repos] leading row for ${workspaceId} diverged from the workspace mirror columns — ` +
+      `the ROW wins (#226). A write path is updating a column without mirroring; find it rather than ignoring this.`,
+    );
   }
 }
 
