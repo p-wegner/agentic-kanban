@@ -50,6 +50,26 @@ export function verifyMaxWorkersPrefKey(projectId: string): string {
   return `verify_max_workers_${projectId}`;
 }
 
+/**
+ * Preference key for turning the gate's file-level test scoping OFF per project (#278).
+ *
+ * Defaults to ON. It is a real narrowing of what the gate proves — `vitest related` selects
+ * suites by import graph, so a test that exercises a change through a mechanism vitest cannot
+ * see (a spawned process, a fixture read off disk) is no longer selected. The filesystem
+ * ASSERTION suites, which are the ones that provably cannot be reached by import, are
+ * force-run by `scripts/test-mine.mjs` (`ALWAYS_RUN_TESTS`), so the residual gap is narrower
+ * than "everything not imported". A project that would rather pay the full suite sets this to
+ * "false".
+ */
+export function verifyFileScopePrefKey(projectId: string): string {
+  return `verify_file_scope_${projectId}`;
+}
+
+async function resolveVerifyFileScope(projectId: string, database: Database): Promise<boolean> {
+  const raw = await getPreference(verifyFileScopePrefKey(projectId), database).catch(() => null);
+  return raw?.trim().toLowerCase() !== "false";
+}
+
 const MAX_VERIFY_WORKERS = 32;
 
 async function resolveVerifyMaxWorkers(projectId: string, database: Database): Promise<number> {
@@ -254,7 +274,25 @@ export async function runPreMergeGate(
       AGENTIC_KANBAN_DIR: gateDataDir,
       KANBAN_TEST_MAX_WORKERS: String(gateMaxWorkers),
     };
-    const verifyEnv = testScope ? { ...isolationEnv, KANBAN_TEST_PACKAGES: testScope } : isolationEnv;
+    // #278 tier 1: narrow the test half from "every suite in the touched packages" to
+    // "every suite that imports the changed files". `KANBAN_TEST_PACKAGES` is
+    // package-granular, so any diff touching packages/server — most board tickets — still
+    // paid the full ~4,165-test server suite. `scripts/test-mine.mjs` turns this into
+    // `vitest related <files>`, which is dependency-aware, and still runs the full suite for
+    // any in-scope package the diff owns no files in. Only ever set alongside a package
+    // scope: when the diff is unreadable or spans un-modelled paths, `testScope` is null and
+    // this stays unset too, so ignorance keeps running everything.
+    const fileScope = testScope ? await resolveVerifyFileScope(projectId, database) : false;
+    const verifyEnv = testScope
+      ? {
+          ...isolationEnv,
+          KANBAN_TEST_PACKAGES: testScope,
+          ...(fileScope && changedFiles.length > 0 ? { KANBAN_TEST_FILES: changedFiles.join(",") } : {}),
+        }
+      : isolationEnv;
+    if (testScope && fileScope && changedFiles.length > 0) {
+      console.log(`[pre-merge-gate] file-scoping verify tests to ${changedFiles.length} changed file(s) for workspace ${workspace.id}`);
+    }
     const runVerify = () =>
       runUnderBuildGate(() =>
         runSetupScript(workingDir, verifyScript!, { timeoutMs: verifyTimeoutMs, env: verifyEnv }).catch((e) => ({

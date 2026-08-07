@@ -62,6 +62,7 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // worktrees' gates and the agent — the fan-out then causes the load-dependent
   // timeouts that fail gates and trigger whole-pipeline retries.
   "verify_max_workers",
+  "verify_file_scope",
 ] as const;
 
 /**

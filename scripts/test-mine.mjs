@@ -160,7 +160,70 @@ function resolveVitestEntry(pkgDir) {
   return candidates.find((p) => existsSync(p));
 }
 
-function runPackage({ dir, label, exclude }) {
+/**
+ * Test files that must run for EVERY diff that reaches their package, because what they
+ * check is not reachable through the module graph (#278).
+ *
+ * `vitest related <changed files>` selects tests that IMPORT the change. These suites import
+ * nothing they check — they read the filesystem and assert a property of the tree: no raw git
+ * spawn outside the adapter, no file over the god-module ceiling, no un-journaled migration,
+ * no unregistered settings key, no `repoPath: "/repo"` in a suite that drives the real lock.
+ * A change that breaks one of them is by definition a change none of their imports mention,
+ * so file-level scoping would silently stop enforcing exactly the rules that exist because
+ * review missed them once already.
+ *
+ * Only consulted when a run is file-scoped; a full-suite run includes them anyway.
+ */
+const ALWAYS_RUN_TESTS = {
+  shared: [
+    "__tests__/git-exec-single-spawn.test.ts",
+    "__tests__/max-file-size.test.ts",
+    "__tests__/barrel-client-safety.test.ts",
+    "__tests__/settings-registry.test.ts",
+  ],
+  server: [
+    "src/__tests__/migration-schema-drift.test.ts",
+    "src/__tests__/status-write-ratchet.test.ts",
+    "src/__tests__/settings-registry-keys.test.ts",
+    "src/__tests__/repo-path-literal-ratchet.test.ts",
+  ],
+  "mcp-server": [
+    "src/__tests__/mcp-catalog-parity.test.ts",
+  ],
+};
+
+/**
+ * File-level test scoping via `KANBAN_TEST_FILES` (comma-separated, repo-relative), the
+ * gate's tier 1 (#278).
+ *
+ * `KANBAN_TEST_PACKAGES` is package-granular, so any diff touching `packages/server` — the
+ * vast majority of board tickets — still paid the full ~4,165-test server suite. This narrows
+ * that to `vitest related <the files the diff actually changed>`, which is dependency-aware:
+ * vitest walks its own module graph and selects every suite that imports the change, directly
+ * or transitively.
+ *
+ * Scoping applies only to a package the diff OWNS files in. A package that is in scope purely
+ * as a downstream DEPENDENT (or via ALWAYS_RUN) has no changed files of its own to relate to,
+ * and `vitest related` with someone else's paths would select nothing — so those packages
+ * keep running their full suite. Same fail-open discipline as the package scope: unset, or a
+ * value naming no file in a package, means "run everything for that package".
+ */
+const fileScopeRaw = (process.env.KANBAN_TEST_FILES || "").trim();
+const scopedFiles = fileScopeRaw
+  ? fileScopeRaw.split(",").map((s) => s.trim().replace(/\\/g, "/")).filter(Boolean)
+  : [];
+
+/** The changed files under a package, as paths relative to that package's directory. */
+function ownedChangedFiles(pkgDir) {
+  const prefix = `${pkgDir.replace(/\\/g, "/")}/`;
+  return scopedFiles
+    .filter((f) => f.startsWith(prefix))
+    .map((f) => f.slice(prefix.length))
+    // A deleted file cannot be related to anything and makes `vitest related` error out.
+    .filter((rel) => existsSync(resolve(ROOT, pkgDir, rel)));
+}
+
+function runPackage({ dir, label, exclude }, mode = null) {
   return new Promise((resolvePromise) => {
     const pkgDir = resolve(ROOT, dir);
     const vitestEntry = resolveVitestEntry(pkgDir);
@@ -172,9 +235,14 @@ function runPackage({ dir, label, exclude }) {
       return;
     }
     const excludeArgs = exclude.flatMap((glob) => ["--exclude", glob]);
-    const args = [vitestEntry, "run", ...excludeArgs, ...workerCapArgs, ...passthrough];
+    const modeArgs = mode?.kind === "related"
+      ? ["related", ...mode.files, "--run", "--passWithNoTests"]
+      : mode?.kind === "guards"
+        ? ["run", ...mode.files, "--passWithNoTests"]
+        : ["run"];
+    const args = [vitestEntry, ...modeArgs, ...excludeArgs, ...workerCapArgs, ...passthrough];
     console.log(
-      `\n[test:mine] ${label}: node vitest run ${[...excludeArgs, ...workerCapArgs, ...passthrough].join(" ")}`
+      `\n[test:mine] ${label}: node vitest ${[...modeArgs, ...excludeArgs, ...workerCapArgs, ...passthrough].join(" ")}`
     );
     // No shell — pass argv as an array so globs reach vitest verbatim (vitest does
     // its own glob matching; the OS shell must NOT expand them). cwd = package dir
@@ -218,8 +286,16 @@ if (scopeLabels && toRun !== PACKAGES) {
 
 let failed = false;
 for (const pkg of toRun) {
-  const code = await runPackage(pkg);
-  if (code !== 0) failed = true;
+  const owned = scopedFiles.length > 0 ? ownedChangedFiles(pkg.dir) : [];
+  if (owned.length === 0) {
+    // Nothing of this package changed (or no file scope at all) — full suite, as before.
+    if (await runPackage(pkg) !== 0) failed = true;
+    continue;
+  }
+  console.log(`\n[test:mine] ${pkg.label}: file-scoped to ${owned.length} changed file(s) (KANBAN_TEST_FILES)`);
+  if (await runPackage(pkg, { kind: "related", files: owned }) !== 0) failed = true;
+  const guards = (ALWAYS_RUN_TESTS[pkg.label] ?? []).filter((f) => existsSync(resolve(ROOT, pkg.dir, f)));
+  if (guards.length > 0 && await runPackage(pkg, { kind: "guards", files: guards }) !== 0) failed = true;
 }
 
 if (failed) {
