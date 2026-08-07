@@ -73,6 +73,7 @@ export function createPluginsRoute(
   const service = getPluginService(database, {
     createIssue: issueService.createIssue,
     createWorkspace: workspaceService.createWorkspace,
+    boardEvents: options?.boardEvents,
   });
 
   router.get("/", async (c) => {
@@ -89,6 +90,13 @@ export function createPluginsRoute(
     const body = await parseJsonBody(c);
     const source = typeof body.source === "string" ? body.source : "";
     return c.json(await service.installPlugin({ source }), 201);
+  });
+
+  // Parse + reference-check a local plugin dir WITHOUT installing (#295).
+  router.post("/validate", async (c) => {
+    const body = await parseJsonBody(c);
+    const source = typeof body.source === "string" ? body.source : "";
+    return c.json(await service.validatePluginSource(source));
   });
 
   router.post("/:id/update", async (c) => {
@@ -156,6 +164,56 @@ export function createPluginsRoute(
   router.post("/:id/loops/:name/advance", async (c) => {
     const projectId = await requireProjectId(c);
     return c.json(await service.advanceLoop(c.req.param("id"), c.req.param("name"), projectId));
+  });
+
+  // Apply a human's gate decision (#286): run the plugin's resolve command, then re-plan.
+  router.post("/:id/loops/:name/gate/resolve", async (c) => {
+    const body = await parseJsonBody<{ projectId?: string; gateId?: string; actionId?: string; input?: string }>(c);
+    const projectId = typeof body.projectId === "string" ? body.projectId.trim() : "";
+    if (!projectId) throw new PluginError("projectId is required", "BAD_REQUEST");
+    const gateId = typeof body.gateId === "string" ? body.gateId.trim() : "";
+    const actionId = typeof body.actionId === "string" ? body.actionId.trim() : "";
+    if (!gateId || !actionId) throw new PluginError("gateId and actionId are required", "BAD_REQUEST");
+    return c.json(await service.resolveLoopGate(c.req.param("id"), c.req.param("name"), projectId, {
+      gateId,
+      actionId,
+      input: typeof body.input === "string" ? body.input : undefined,
+    }));
+  });
+
+  // Audit timeline + per-unit cost rollup for one loop (#292, #294).
+  router.get("/:id/loops/:name/events", async (c) => {
+    const projectId = c.req.query("projectId")?.trim();
+    if (!projectId) throw new PluginError("projectId query param is required", "BAD_REQUEST");
+    const limit = Math.min(500, Math.max(1, Number(c.req.query("limit") ?? 100) || 100));
+    return c.json(await service.listLoopEvents(c.req.param("id"), c.req.param("name"), projectId, limit));
+  });
+
+  // A declared loop artifact, read fresh from the output repo (#288).
+  router.get("/:id/loops/:name/artifact", async (c) => {
+    const projectId = c.req.query("projectId")?.trim();
+    const path = c.req.query("path")?.trim();
+    if (!projectId) throw new PluginError("projectId query param is required", "BAD_REQUEST");
+    if (!path) throw new PluginError("path query param is required", "BAD_REQUEST");
+    return c.json(await service.getLoopArtifact(c.req.param("id"), projectId, path));
+  });
+
+  // The scaffold's unresolved TODO markers as a form (#291).
+  router.get("/:id/scaffold", async (c) => {
+    const projectId = c.req.query("projectId")?.trim();
+    if (!projectId) throw new PluginError("projectId query param is required", "BAD_REQUEST");
+    return c.json(await service.getScaffoldForm(c.req.param("id"), projectId));
+  });
+
+  router.post("/:id/scaffold", async (c) => {
+    const body = await parseJsonBody<{ projectId?: string; values?: Array<{ index?: number; value?: string }> }>(c);
+    const projectId = typeof body.projectId === "string" ? body.projectId.trim() : "";
+    if (!projectId) throw new PluginError("projectId is required", "BAD_REQUEST");
+    if (!Array.isArray(body.values)) throw new PluginError("values must be an array", "BAD_REQUEST");
+    const values = body.values
+      .filter((v) => typeof v?.index === "number" && typeof v?.value === "string")
+      .map((v) => ({ index: v.index as number, value: v.value as string }));
+    return c.json(await service.fillScaffoldForm(c.req.param("id"), projectId, values));
   });
 
   router.post("/:id/loops/:name/pause", async (c) => {

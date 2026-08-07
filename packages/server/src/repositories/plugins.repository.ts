@@ -1,4 +1,4 @@
-import { issues, plugins, preferences, projectStatuses } from "@agentic-kanban/shared/schema";
+import { issues, plugins, preferences, projectStatuses, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { and, eq, like, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -93,6 +93,28 @@ export async function listPluginLoopIssues(
   return rows.flatMap((row) =>
     row.externalKey ? [{ ...row, externalKey: row.externalKey }] : [],
   );
+}
+
+/**
+ * Session stats of every session that ran against a loop's unit tickets (#294).
+ * The join is the same shape as the cost-over-time analytics: sessions →
+ * workspaces → issues, narrowed to this loop's `external_key` prefix. The
+ * caller folds `stats.totalCostUsd` / token counts — parsing the JSON belongs
+ * in the service, not the query.
+ */
+export async function listPluginLoopSessionStats(
+  projectId: string,
+  keyPrefix: string,
+  database: Database = db,
+): Promise<Array<{ externalKey: string; stats: string | null }>> {
+  const pattern = `${escapeLikeLiteral(keyPrefix)}%`;
+  const rows = await database
+    .select({ externalKey: issues.externalKey, stats: sessions.stats })
+    .from(sessions)
+    .innerJoin(workspaces, eq(sessions.workspaceId, workspaces.id))
+    .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    .where(and(eq(issues.projectId, projectId), sql`${issues.externalKey} LIKE ${pattern} ESCAPE '\\'`));
+  return rows.flatMap((row) => (row.externalKey ? [{ externalKey: row.externalKey, stats: row.stats }] : []));
 }
 
 /**

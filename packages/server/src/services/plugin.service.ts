@@ -84,7 +84,17 @@ import {
   removeLink,
 } from "./plugin-fs.js";
 import { PluginError } from "./plugin-errors.js";
-import { fanOutScaffold, scaffoldPlaceholderStatus, requireScaffoldReady } from "./plugin-scaffold.js";
+import {
+  fanOutScaffold,
+  scaffoldPlaceholderStatus,
+  requireScaffoldReady,
+  parseScaffoldFields,
+  applyScaffoldValues,
+} from "./plugin-scaffold.js";
+import { listPluginLoopSessionStats } from "../repositories/plugins.repository.js";
+import { getAllPreferences } from "../repositories/preferences.repository.js";
+import { resolveStartPolicy } from "./start-policy.service.js";
+import type { BoardEvents } from "./board-events.js";
 import {
   createPluginViewsRuntime,
   stopAllPluginViews,
@@ -161,10 +171,12 @@ export function createPluginService(deps: {
    *  public (proxy-fronted) URL derived from the runtime env — a worktree server on 3001+N
    *  produces its own URL. Injectable so tests need no env fiddling. */
   boardUrl?: string;
+  /** For the gate-reached WS notification (#287). */
+  boardEvents?: BoardEvents;
 }) {
-  const { database, createIssue, createWorkspace } = deps;
+  const { database, createIssue, createWorkspace, boardEvents } = deps;
   const boardUrl = deps.boardUrl ?? resolvePublicBoardUrl();
-  const loops = createPluginLoopEngine({ database, createIssue, boardUrl });
+  const loops = createPluginLoopEngine({ database, createIssue, boardUrl, boardEvents });
   /**
    * The view child-server lifecycle lives in `plugin-views.service.ts` — it owns the module-level
    * process map, so this is the only place it gets bound to a service closure. Do NOT reach for the
@@ -358,10 +370,19 @@ export function createPluginService(deps: {
       }
       // A peek only — never creates the sidecar repo (that happens on enable/run/setOutputLocation).
       const outputLocation = projectId ? await readOutputLocationPref(row.pluginId, projectId) : undefined;
+      // Drift (#295): the cached manifest is what the board RUNS; the file on disk is what the
+      // author EDITED. They only reconcile on POST /:id/update, and until then edits silently do
+      // nothing — so say so instead of letting the author chase a phantom bug.
+      let manifestDrift = false;
+      try {
+        const onDisk = readFileSync(join(row.localPath, PLUGIN_MANIFEST_FILENAME), "utf8");
+        manifestDrift = onDisk.trim() !== row.manifestJson.trim();
+      } catch { /* checkout gone or unreadable — surfaced elsewhere */ }
       return {
         ...row,
         manifest,
         manifestError,
+        manifestDrift,
         ...(projectId ? { enabled: enabledSlugs.has(row.pluginId), outputLocation } : {}),
       };
     }));
@@ -770,6 +791,7 @@ export function createPluginService(deps: {
     return loops.advanceLoop({
       manifest: plugin.manifest,
       pluginSlug: plugin.pluginId,
+      pluginName: plugin.name,
       pluginLocalPath: plugin.localPath,
       loopName,
       projectId,
@@ -778,6 +800,203 @@ export function createPluginService(deps: {
       leadingRepoPath: project.repoPath,
       workflowTemplateId,
     });
+  }
+
+  /** Apply a human's gate decision (#286), then re-plan. See plugin-loop.service. */
+  async function resolveLoopGate(
+    pluginRowId: string,
+    loopName: string,
+    projectId: string,
+    body: { gateId: string; actionId: string; input?: string },
+  ) {
+    const plugin = await requirePlugin(pluginRowId);
+    const project = await requireProject(projectId);
+    const outputRepoPath = await resolveOutputRepoPath(plugin, project);
+    const loopDef = (plugin.manifest.loops ?? []).find((l) => l.name === loopName);
+    const skillDef = (plugin.manifest.skills ?? []).find((s) => pluginSkillName(s.dir) === loopDef?.skill);
+    const workflowTemplateId = await resolveWorkflowTemplateId(projectId, loopDef?.workflow ?? skillDef?.workflow);
+    return loops.resolveGate({
+      manifest: plugin.manifest,
+      pluginSlug: plugin.pluginId,
+      pluginName: plugin.name,
+      pluginLocalPath: plugin.localPath,
+      loopName,
+      projectId,
+      projectName: project.name,
+      repoPath: outputRepoPath,
+      leadingRepoPath: project.repoPath,
+      workflowTemplateId,
+      gateId: body.gateId,
+      actionId: body.actionId,
+      input: body.input,
+    });
+  }
+
+  /**
+   * The loop's audit timeline (#292) plus the per-unit cost rollup (#294) — one
+   * read for the timeline pane. Costs fold each session's persisted
+   * `stats.totalCostUsd`/token counts, keyed back to unit ids via `external_key`.
+   */
+  async function listLoopEvents(pluginRowId: string, loopName: string, projectId: string, limit = 100) {
+    const plugin = await requirePlugin(pluginRowId);
+    await requireProject(projectId);
+    const events = await loops.loopEvents(plugin.pluginId, loopName, projectId, limit);
+    const prefix = `plugin-loop:${plugin.pluginId}:${loopName}:`;
+    const statRows = await listPluginLoopSessionStats(projectId, prefix, database);
+    const unitCosts = new Map<string, { unitId: string; costUsd: number; sessions: number }>();
+    let totalCostUsd = 0;
+    for (const row of statRows) {
+      const unitId = row.externalKey.slice(prefix.length);
+      let costUsd = 0;
+      try {
+        costUsd = Number((JSON.parse(row.stats ?? "{}") as { totalCostUsd?: unknown }).totalCostUsd ?? 0) || 0;
+      } catch { /* unparseable stats row — count the session, not the cost */ }
+      const entry = unitCosts.get(unitId) ?? { unitId, costUsd: 0, sessions: 0 };
+      entry.costUsd += costUsd;
+      entry.sessions += 1;
+      unitCosts.set(unitId, entry);
+      totalCostUsd += costUsd;
+    }
+    return {
+      events: events.map((e) => ({
+        id: e.id,
+        type: e.type,
+        payload: e.payloadJson ? (JSON.parse(e.payloadJson) as unknown) : null,
+        createdAt: e.createdAt,
+      })),
+      cost: {
+        totalUsd: totalCostUsd,
+        byUnit: [...unitCosts.values()].sort((a, b) => b.costUsd - a.costUsd),
+      },
+    };
+  }
+
+  /** Cap on artifact bytes returned to the panel — a doc, not a data dump. */
+  const ARTIFACT_CONTENT_CAP = 256 * 1024;
+
+  /**
+   * Read one declared loop artifact from the OUTPUT repo (#288): current content
+   * plus the diff between its last two committed versions. Content is read
+   * fresh per request — the artifact is the plugin's file, the board only renders it.
+   */
+  async function getLoopArtifact(pluginRowId: string, projectId: string, relPath: string) {
+    const plugin = await requirePlugin(pluginRowId);
+    const project = await requireProject(projectId);
+    const repoPath = await resolveOutputRepoPath(plugin, project);
+    // Same containment rule as every manifest path — no absolute paths, no `..` escapes.
+    const abs = resolveInside(repoPath, relPath, `artifact path "${relPath}"`);
+    if (!existsSync(abs)) {
+      return { path: relPath, exists: false as const, content: null, truncated: false, commits: [], diff: null };
+    }
+    const raw = readFileSync(abs, "utf8");
+    const truncated = raw.length > ARTIFACT_CONTENT_CAP;
+
+    // Last two commits touching the file → the v(N-1)→vN diff (#288). Best-effort:
+    // an artifact in a repo with no history is still renderable.
+    let commits: Array<{ sha: string; date: string }> = [];
+    let diff: string | null = null;
+    try {
+      const log = await gitExec(["log", "-n", "2", "--format=%H|%cI", "--", relPath], { cwd: repoPath });
+      commits = log.stdout.trim().split("\n").filter(Boolean).map((line) => {
+        const [sha, date] = line.split("|");
+        return { sha, date };
+      });
+      if (commits.length === 2) {
+        const d = await gitExec(["diff", commits[1].sha, commits[0].sha, "--", relPath], { cwd: repoPath });
+        diff = d.stdout.slice(0, ARTIFACT_CONTENT_CAP) || null;
+      }
+    } catch { /* not a git repo / git unavailable — content alone is still useful */ }
+
+    return {
+      path: relPath,
+      exists: true as const,
+      content: truncated ? raw.slice(0, ARTIFACT_CONTENT_CAP) : raw,
+      truncated,
+      commits,
+      diff,
+    };
+  }
+
+  /** The scaffold file as a form (#291): its unresolved TODO fields + full content. */
+  async function getScaffoldForm(pluginRowId: string, projectId: string) {
+    const plugin = await requirePlugin(pluginRowId);
+    const project = await requireProject(projectId);
+    const scaffold = plugin.manifest.scaffold;
+    if (!scaffold) throw new PluginError("This plugin declares no scaffold", "NOT_FOUND");
+    const repoPath = await resolveOutputRepoPath(plugin, project);
+    const target = resolveInside(repoPath, scaffold.targetPath, `scaffold targetPath "${scaffold.targetPath}"`);
+    if (!existsSync(target)) {
+      return { targetPath: scaffold.targetPath, exists: false as const, content: null, fields: [] };
+    }
+    const content = readFileSync(target, "utf8");
+    return { targetPath: scaffold.targetPath, exists: true as const, content, fields: parseScaffoldFields(content) };
+  }
+
+  /** Write form values into the scaffold's TODO markers in place (#291). */
+  async function fillScaffoldForm(
+    pluginRowId: string,
+    projectId: string,
+    values: Array<{ index: number; value: string }>,
+  ) {
+    const plugin = await requirePlugin(pluginRowId);
+    const project = await requireProject(projectId);
+    const scaffold = plugin.manifest.scaffold;
+    if (!scaffold) throw new PluginError("This plugin declares no scaffold", "NOT_FOUND");
+    const repoPath = await resolveOutputRepoPath(plugin, project);
+    const target = resolveInside(repoPath, scaffold.targetPath, `scaffold targetPath "${scaffold.targetPath}"`);
+    if (!existsSync(target)) throw new PluginError(`Scaffold file not found: ${scaffold.targetPath}`, "NOT_FOUND");
+    const { content, remaining } = applyScaffoldValues(readFileSync(target, "utf8"), values);
+    writeFileSync(target, content, "utf8");
+    return { targetPath: scaffold.targetPath, remaining, fields: parseScaffoldFields(content) };
+  }
+
+  /**
+   * Validate a plugin source WITHOUT installing (#295): parse the manifest and
+   * check that every file it references exists. Local directories only — a git
+   * URL would mean cloning, which is what install does.
+   */
+  async function validatePluginSource(source: string) {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    const dir = source.trim();
+    if (!dir) return { ok: false, errors: ["source is required"], warnings };
+    if (looksLikeGitUrl(dir)) {
+      return { ok: false, errors: ["validate takes a local directory — install clones git sources"], warnings };
+    }
+    if (!existsSync(dir)) return { ok: false, errors: [`directory not found: ${dir}`], warnings };
+
+    let manifest: PluginManifest;
+    try {
+      manifest = readManifestFromDir(dir).manifest;
+    } catch (err) {
+      return { ok: false, errors: [err instanceof Error ? err.message : String(err)], warnings };
+    }
+    for (const skill of manifest.skills ?? []) {
+      const skillDir = resolveInside(dir, skill.dir, `skill dir "${skill.dir}"`);
+      if (!existsSync(skillDir)) errors.push(`skill dir not found: ${skill.dir}`);
+      else if (!existsSync(join(skillDir, "SKILL.md"))) errors.push(`no SKILL.md in ${skill.dir}`);
+    }
+    if (manifest.butler?.promptFragment
+      && !existsSync(resolveInside(dir, manifest.butler.promptFragment, "butler.promptFragment"))) {
+      errors.push(`butler.promptFragment not found: ${manifest.butler.promptFragment}`);
+    }
+    if (manifest.scaffold
+      && !existsSync(resolveInside(dir, manifest.scaffold.profileTemplate, "scaffold.profileTemplate"))) {
+      errors.push(`scaffold.profileTemplate not found: ${manifest.scaffold.profileTemplate}`);
+    }
+    for (const loop of manifest.loops ?? []) {
+      if (!loop.plan.command.trim()) errors.push(`loop "${loop.name}" has an empty plan command`);
+    }
+    if ((manifest.loops ?? []).length === 0 && (manifest.skills ?? []).length === 0
+      && (manifest.views ?? []).length === 0 && (manifest.scripts ?? []).length === 0) {
+      warnings.push("manifest declares no skills, views, scripts or loops — enabling it will do nothing");
+    }
+    return {
+      ok: errors.length === 0,
+      manifest: { id: manifest.id, name: manifest.name, version: manifest.version ?? null },
+      errors,
+      warnings,
+    };
   }
 
   /** Pause/resume a loop's monitor-driven auto-advance. Manual "Advance now" still works. */
@@ -820,7 +1039,20 @@ export function createPluginService(deps: {
         });
       }
       for (const status of await loops.loopStatuses(manifest, row.pluginId, projectId)) {
-        projectLoops.push({ ...owner, ...status });
+        // Cost rollup (#294): sessions → workspaces → unit tickets, folded here so the
+        // panel can show "$X so far" without a second request.
+        let totalCostUsd = 0;
+        try {
+          const statRows = await listPluginLoopSessionStats(
+            projectId, `plugin-loop:${row.pluginId}:${status.name}:`, database,
+          );
+          for (const statRow of statRows) {
+            try {
+              totalCostUsd += Number((JSON.parse(statRow.stats ?? "{}") as { totalCostUsd?: unknown }).totalCostUsd ?? 0) || 0;
+            } catch { /* skip unparseable stats */ }
+          }
+        } catch { /* cost is decoration — never blank the panel for it */ }
+        projectLoops.push({ ...owner, ...status, totalCostUsd });
       }
       for (const script of manifest.scripts ?? []) {
         scripts.push({
@@ -838,7 +1070,17 @@ export function createPluginService(deps: {
         skills.push({ ...owner, name, description: skill.description ?? null, workflow: skill.workflow ?? null });
       }
     }
-    return { views, loops: projectLoops, scripts, skills };
+    // Start policy (#293): under `manual` the monitor never runs the planner, which is
+    // indistinguishable from convergence unless the panel says so explicitly.
+    const prefs = await getAllPreferences(database);
+    const policy = resolveStartPolicy(new Map(prefs.map((p) => [p.key, p.value])), projectId);
+    return {
+      views,
+      loops: projectLoops,
+      scripts,
+      skills,
+      startPolicy: { mode: policy.mode, autoStartUnblocked: policy.autoStartUnblocked },
+    };
   }
 
   /** Flat list of the ENABLED plugins' loops for a project (the board Plugins panel). */
@@ -870,6 +1112,12 @@ export function createPluginService(deps: {
     listProjectSurface,
     advanceLoop,
     setLoopPaused,
+    resolveLoopGate,
+    listLoopEvents,
+    getLoopArtifact,
+    getScaffoldForm,
+    fillScaffoldForm,
+    validatePluginSource,
     removePlugin,
     enableForProject,
     disableForProject,
@@ -894,6 +1142,7 @@ const singletonDeps = new Map<Database, PluginServiceSkillDeps>();
 export interface PluginServiceSkillDeps {
   createIssue?: (input: CreateIssueInput) => Promise<CreateIssueResult>;
   createWorkspace?: (input: CreateWorkspaceInput) => Promise<CreateWorkspaceResult>;
+  boardEvents?: BoardEvents;
 }
 
 /**
@@ -913,8 +1162,11 @@ export function getPluginService(database: Database, skillDeps?: PluginServiceSk
   const merged: PluginServiceSkillDeps = {
     createIssue: known.createIssue ?? skillDeps?.createIssue,
     createWorkspace: known.createWorkspace ?? skillDeps?.createWorkspace,
+    boardEvents: known.boardEvents ?? skillDeps?.boardEvents,
   };
-  const gainedDeps = merged.createIssue !== known.createIssue || merged.createWorkspace !== known.createWorkspace;
+  const gainedDeps = merged.createIssue !== known.createIssue
+    || merged.createWorkspace !== known.createWorkspace
+    || merged.boardEvents !== known.boardEvents;
 
   let service = singletons.get(database);
   if (!service || gainedDeps) {

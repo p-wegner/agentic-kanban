@@ -1,3 +1,7 @@
+import { randomUUID } from "node:crypto";
+import { unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { isTerminalStatusName } from "@agentic-kanban/shared";
 import {
   DEFAULT_LOOP_MAX_UNITS_PER_ADVANCE,
@@ -7,16 +11,26 @@ import {
   pluginLoopUnitKey,
   substitutePluginEnv,
   substitutePluginPlaceholders,
+  type PluginLoopCheck,
   type PluginLoopDef,
+  type PluginLoopGate,
+  type PluginLoopProgressStep,
   type PluginManifest,
   type PluginPlaceholderVars,
 } from "@agentic-kanban/shared/lib/plugin-manifest";
 import type { Database } from "../db/index.js";
 import { listPluginLoopIssues } from "../repositories/plugins.repository.js";
+import {
+  insertPluginLoopEvent,
+  latestPluginLoopEvent,
+  listPluginLoopEvents,
+  type PluginLoopEventRow,
+} from "../repositories/plugin-loop-events.repository.js";
 import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-preference-write";
 import { getAllPreferences, getPreference } from "../repositories/preferences.repository.js";
 import { resolveStartPolicy } from "./start-policy.service.js";
 import { runPluginCommand, STRUCTURED_STDOUT_CAP } from "./plugin-exec.js";
+import type { BoardEvents } from "./board-events.js";
 import type { CreateIssueInput, CreateIssueResult } from "./issue.service.js";
 
 /**
@@ -100,6 +114,8 @@ export interface LoopCreatedTicket {
   issueId: string;
   issueNumber: number | null;
   title: string;
+  /** Repo-relative artifacts the unit declared (#288). */
+  artifacts?: string[];
 }
 
 export interface LoopAdvanceResult {
@@ -121,6 +137,12 @@ export interface LoopAdvanceResult {
    */
   startMode: string;
   warnings: string[];
+  /** Human gate the plan reported (#286) — null when not blocked on a person. */
+  gate: PluginLoopGate | null;
+  /** Declarative progress strip (#289). */
+  progress: { steps: PluginLoopProgressStep[] } | null;
+  /** Structured check results (#290). */
+  checks: PluginLoopCheck[] | null;
 }
 
 export interface LoopStatus {
@@ -140,6 +162,16 @@ export interface LoopStatus {
    * now" still replans it and clears the flag if there is work again.
    */
   converged: boolean;
+  /** The planner's note from the most recent advance (persisted in the timeline). */
+  note: string | null;
+  /** When the loop last advanced (ISO), null before the first advance. */
+  lastAdvanceAt: string | null;
+  /** Human gate the loop is currently blocked on (#286), from the latest advance. */
+  gate: PluginLoopGate | null;
+  /** Declarative pipeline progress (#289), from the latest advance. */
+  progress: { steps: PluginLoopProgressStep[] } | null;
+  /** Structured check results (#290), from the latest advance. */
+  checks: PluginLoopCheck[] | null;
 }
 
 export interface PluginLoopDeps {
@@ -148,10 +180,42 @@ export interface PluginLoopDeps {
   /** Externally reachable board API base URL (`{{boardUrl}}` in planner command/env) —
    *  resolved by the composition root, not read from env here. */
   boardUrl: string;
+  /** For the one-shot gate-reached notification (#287); absent on dep-less routes. */
+  boardEvents?: BoardEvents;
+}
+
+/** What an advance persists into the timeline (`advance` event payload). */
+interface AdvanceEventPayload {
+  planned: number;
+  created: Array<{ unitId: string; issueId: string; issueNumber: number | null; title: string; artifacts?: string[] }>;
+  skippedExisting: number;
+  capped: number;
+  converged: boolean;
+  note: string | null;
+  gate: PluginLoopGate | null;
+  progress: { steps: PluginLoopProgressStep[] } | null;
+  checks: PluginLoopCheck[] | null;
+}
+
+export interface GateResolveResult {
+  gateId: string;
+  actionId: string;
+  resolve: { code: number | null; stdout: string; stderr: string; timedOut: boolean };
+  /** The re-plan run right after a successful resolve — the gate's replacement state. */
+  advance: LoopAdvanceResult | null;
 }
 
 export function createPluginLoopEngine(deps: PluginLoopDeps) {
-  const { database, createIssue, boardUrl } = deps;
+  const { database, createIssue, boardUrl, boardEvents } = deps;
+
+  function parseAdvancePayload(row: PluginLoopEventRow | null): AdvanceEventPayload | null {
+    if (!row?.payloadJson) return null;
+    try {
+      return JSON.parse(row.payloadJson) as AdvanceEventPayload;
+    } catch {
+      return null;
+    }
+  }
 
   function findLoop(manifest: PluginManifest, loopName: string): PluginLoopDef {
     const loop = (manifest.loops ?? []).find((l) => l.name === loopName);
@@ -176,6 +240,13 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
       const rows = await listPluginLoopIssues(projectId, keyPrefix(pluginSlug, loop.name), database);
       const pausedValue = await getPreference(pluginLoopPausedPreferenceKey(pluginSlug, loop.name, projectId), database);
       const convergedValue = await getPreference(pluginLoopConvergedPreferenceKey(pluginSlug, loop.name, projectId), database);
+      // The latest advance's persisted plan extras (gate/progress/checks/note) ARE the loop's
+      // current display state — surfacing them here is what lets the panel render an approval
+      // card or a stepper without re-running the (possibly slow) planner.
+      const lastAdvance = await latestPluginLoopEvent(
+        { pluginSlug, loopName: loop.name, projectId }, "advance", database,
+      );
+      const payload = parseAdvancePayload(lastAdvance);
       out.push({
         name: loop.name,
         label: loop.label ?? loop.name,
@@ -185,6 +256,11 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
         closedTickets: rows.filter((r) => isTerminalStatusName(r.statusName)).length,
         paused: pausedValue === "true",
         converged: convergedValue === "true",
+        note: payload?.note ?? null,
+        lastAdvanceAt: lastAdvance?.createdAt ?? null,
+        gate: payload?.gate ?? null,
+        progress: payload?.progress ?? null,
+        checks: payload?.checks ?? null,
       });
     }
     return out;
@@ -204,6 +280,9 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
     await setPreferenceChecked(database, [
       { key: pluginLoopPausedPreferenceKey(pluginSlug, loopName, projectId), value: paused ? "true" : "false" },
     ]);
+    await insertPluginLoopEvent(
+      { pluginSlug, loopName, projectId }, paused ? "paused" : "resumed", null, database,
+    );
   }
 
   /**
@@ -214,6 +293,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
   async function advanceLoop(args: {
     manifest: PluginManifest;
     pluginSlug: string;
+    pluginName?: string;
     pluginLocalPath: string;
     loopName: string;
     projectId: string;
@@ -231,6 +311,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
   async function advanceLoopSerialized(args: {
     manifest: PluginManifest;
     pluginSlug: string;
+    pluginName?: string;
     pluginLocalPath: string;
     loopName: string;
     projectId: string;
@@ -328,6 +409,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
         issueId: issue.id,
         issueNumber: issue.issueNumber ?? null,
         title: unit.title,
+        ...(unit.artifacts?.length ? { artifacts: unit.artifacts } : {}),
       });
     }
     if (capped > 0) {
@@ -350,12 +432,54 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
     // which is what makes a manual "Advance now" the restart path.
     const converged = plan.converged ?? plan.units.length === 0;
     const isDone = converged && plan.units.length === 0;
+    const wasDone = (await getPreference(
+      pluginLoopConvergedPreferenceKey(args.pluginSlug, loop.name, args.projectId), database,
+    )) === "true";
     await setPreferenceChecked(database, [
       {
         key: pluginLoopConvergedPreferenceKey(args.pluginSlug, loop.name, args.projectId),
         value: isDone ? "true" : "false",
       },
     ]);
+
+    // Timeline (#292): every advance leaves its result behind. The advance payload doubles as
+    // the loop's current display state (gate/progress/checks) — see loopStatuses.
+    const eventKey = { pluginSlug: args.pluginSlug, loopName: loop.name, projectId: args.projectId };
+    const priorGate = parseAdvancePayload(
+      await latestPluginLoopEvent(eventKey, "advance", database),
+    )?.gate ?? null;
+    const advancePayload: AdvanceEventPayload = {
+      planned: plan.units.length,
+      created,
+      skippedExisting: skippedExisting.length,
+      capped,
+      converged,
+      note: plan.note ?? null,
+      gate: plan.gate ?? null,
+      progress: plan.progress ?? null,
+      checks: plan.checks ?? null,
+    };
+    await insertPluginLoopEvent(eventKey, "advance", advancePayload, database);
+    if (isDone && !wasDone) {
+      await insertPluginLoopEvent(eventKey, "converged", { note: plan.note ?? null }, database);
+    }
+
+    // Gate-reached notification (#287): once per NEW gate id. The monitor re-plans a blocked
+    // loop every cycle; comparing against the PREVIOUS advance's gate is what keeps the
+    // notification from firing on every poll while the human hasn't acted yet.
+    if (plan.gate && plan.gate.id !== priorGate?.id) {
+      await insertPluginLoopEvent(eventKey, "gate-reached", {
+        gateId: plan.gate.id, question: plan.gate.question, artifacts: plan.gate.artifacts ?? [],
+      }, database);
+      boardEvents?.broadcastPluginGate(args.projectId, {
+        pluginSlug: args.pluginSlug,
+        pluginName: args.pluginName ?? args.pluginSlug,
+        loopName: loop.name,
+        loopLabel: loop.label ?? loop.name,
+        gateId: plan.gate.id,
+        question: plan.gate.question,
+      });
+    }
 
     return {
       loop: loop.name,
@@ -367,10 +491,138 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
       capped,
       startMode: policy.mode,
       warnings,
+      gate: plan.gate ?? null,
+      progress: plan.progress ?? null,
+      checks: plan.checks ?? null,
     };
   }
 
-  return { advanceLoop, loopStatuses, setLoopPaused };
+  /** Newest-first timeline for one loop (#292). */
+  async function loopEvents(pluginSlug: string, loopName: string, projectId: string, limit = 100) {
+    return listPluginLoopEvents({ pluginSlug, loopName, projectId }, limit, database);
+  }
+
+  const GATE_RESOLVE_TIMEOUT_MS = 60 * 1000;
+
+  /**
+   * Apply a human's gate decision (#286): run the plugin's deterministic `resolve`
+   * command with the chosen action (free text via a temp FILE, never shell
+   * interpolation), then immediately re-advance the loop so the gate's
+   * replacement state is in the response. Serialized on the same per-loop lock
+   * as advances — a resolve mutates exactly the state the planner reads.
+   */
+  async function resolveGate(args: {
+    manifest: PluginManifest;
+    pluginSlug: string;
+    pluginName?: string;
+    pluginLocalPath: string;
+    loopName: string;
+    projectId: string;
+    projectName: string;
+    repoPath: string;
+    leadingRepoPath: string;
+    workflowTemplateId?: string | null;
+    gateId: string;
+    actionId: string;
+    input?: string;
+  }): Promise<GateResolveResult> {
+    const loop = findLoop(args.manifest, args.loopName);
+    const eventKey = { pluginSlug: args.pluginSlug, loopName: loop.name, projectId: args.projectId };
+
+    const resolved = await withLoopAdvanceLock(
+      `${args.projectId}:${args.pluginSlug}:${args.loopName}`,
+      async () => {
+        const gate = parseAdvancePayload(
+          await latestPluginLoopEvent(eventKey, "advance", database),
+        )?.gate;
+        if (!gate) throw new PluginLoopError(`Loop "${loop.name}" is not blocked on a gate`, "BAD_REQUEST");
+        if (gate.id !== args.gateId) {
+          throw new PluginLoopError(
+            `Gate "${args.gateId}" is stale — the loop's current gate is "${gate.id}". Reload and decide again.`,
+            "BAD_REQUEST",
+          );
+        }
+        const action = gate.actions.find((a) => a.id === args.actionId);
+        if (!action) {
+          throw new PluginLoopError(
+            `Action "${args.actionId}" is not one of the gate's actions (${gate.actions.map((a) => a.id).join(", ")})`,
+            "BAD_REQUEST",
+          );
+        }
+        const text = args.input?.trim() ?? "";
+        if (action.input === "text" && !text) {
+          throw new PluginLoopError(`Action "${action.id}" requires a text input (e.g. revision feedback)`, "BAD_REQUEST");
+        }
+
+        const vars: PluginPlaceholderVars = {
+          repoPath: args.repoPath,
+          leadingRepoPath: args.leadingRepoPath,
+          projectName: args.projectName,
+          pluginPath: args.pluginLocalPath,
+          boardUrl,
+          projectId: args.projectId,
+        };
+        // The human's text goes through a FILE: it is arbitrary prose, and no amount of
+        // quoting makes interpolating it into a shell command safe.
+        const inputFile = action.input === "text"
+          ? join(tmpdir(), `kanban-gate-input-${randomUUID()}.txt`)
+          : null;
+        if (inputFile) writeFileSync(inputFile, text, "utf8");
+        try {
+          const result = await runPluginCommand(substitutePluginPlaceholders(gate.resolve.command, vars), {
+            cwd: gate.resolve.cwd === "repo" ? args.repoPath : args.pluginLocalPath,
+            env: {
+              ...substitutePluginEnv(gate.resolve.env, vars),
+              GATE_ID: gate.id,
+              GATE_ACTION: action.id,
+              ...(inputFile ? { GATE_INPUT_FILE: inputFile } : {}),
+            },
+            timeoutMs: GATE_RESOLVE_TIMEOUT_MS,
+          });
+          if (result.timedOut || result.code !== 0) {
+            throw new PluginLoopError(
+              `Gate resolve command ${result.timedOut ? "timed out" : `exited ${result.code}`}: `
+              + `${(result.stderr || result.stdout).slice(-800)}`,
+            );
+          }
+          await insertPluginLoopEvent(eventKey, "gate-resolved", {
+            gateId: gate.id,
+            actionId: action.id,
+            actionLabel: action.label,
+            // An excerpt is enough for the audit trail; the full text went to the plugin.
+            input: text ? text.slice(0, 500) : null,
+          }, database);
+          return { gate, action, result };
+        } finally {
+          if (inputFile) {
+            try { unlinkSync(inputFile); } catch { /* best effort */ }
+          }
+        }
+      },
+    );
+
+    // Re-plan outside the lock body above (advanceLoop takes the same lock itself).
+    let advance: LoopAdvanceResult | null = null;
+    try {
+      advance = await advanceLoop({ ...args });
+    } catch (err) {
+      // The resolve itself succeeded — a re-plan failure must not mask that.
+      console.warn(`[plugins] post-resolve advance of ${args.pluginSlug}:${loop.name} failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return {
+      gateId: resolved.gate.id,
+      actionId: resolved.action.id,
+      resolve: {
+        code: resolved.result.code,
+        stdout: resolved.result.stdout.slice(-2000),
+        stderr: resolved.result.stderr.slice(-2000),
+        timedOut: resolved.result.timedOut,
+      },
+      advance,
+    };
+  }
+
+  return { advanceLoop, loopStatuses, setLoopPaused, loopEvents, resolveGate };
 }
 
 export type PluginLoopEngine = ReturnType<typeof createPluginLoopEngine>;
