@@ -204,6 +204,16 @@ export function classifyReconcileStrategies(
   return { clusters, recommendedStrategy: hardest.strategy, strategyReason: hardest.reason };
 }
 
+/**
+ * Render the branch/base tips a rebase verdict was computed against (#274), e.g.
+ * ` (a1b2c3d onto 9f8e7d6)`. Empty when the tips could not be resolved — a missing
+ * annotation is better than an invented one.
+ */
+export function describeRebaseTips(result: { branchSha?: string; baseSha?: string }): string {
+  if (!result.branchSha || !result.baseSha) return "";
+  return ` (${result.branchSha.slice(0, 7)} onto ${result.baseSha.slice(0, 7)})`;
+}
+
 export type MergeQueueEvent =
   | { type: "planned"; plan: MergeQueuePlan }
   | { type: "rebasing"; workspaceId: string; issueNumber: number | null; issueTitle: string; position: number; total: number }
@@ -726,7 +736,10 @@ export function createMergeQueueService(deps: {
                     workspaceId: ws.id,
                     issueNumber: ws.issueNumber,
                     issueTitle: ws.issueTitle,
-                    reason: `rebase conflict: ${rebaseResult.conflictingFiles?.join(", ") ?? rebaseResult.error ?? "unknown"}`,
+                    // #274 — name the tips the verdict was computed against. A conflict
+                    // report that cannot be checked against a specific branch/base pair is
+                    // exactly how a stale one went unnoticed for a whole driving session.
+                    reason: `rebase conflict${describeRebaseTips(rebaseResult)}: ${rebaseResult.conflictingFiles?.join(", ") ?? rebaseResult.error ?? "unknown"}`,
                   };
                   rebaseOutcome = "continue";
                 } else {
