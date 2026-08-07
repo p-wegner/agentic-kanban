@@ -18,6 +18,7 @@ import { cleanupSiblingWorktrees } from "./workspace-repos.service.js";
 import { reapWorkspaceContainer } from "./devcontainer-workspace.service.js";
 import type { MergeWarning } from "./workspace-merge-prevalidation.service.js";
 import { applyDeferredWorkingTreeSync } from "@agentic-kanban/shared/lib/git-service";
+import { advanceLoopAfterMergedIssue } from "./plugin-loop-hooks.service.js";
 
 export type WorkspacePostMergeCleanupArgs = {
   workspaceId: string;
@@ -73,17 +74,47 @@ export async function runWorkspacePostMergeCleanup(
   // deferred working-tree sync FIRST — before teardown frees the worktree — so
   // git reset --hard runs after the HTTP response is already flushed and tsx
   // hot-reload can no longer drop the in-flight connection (#686).
+  //
+  // #296 — RETRIED, because a one-shot failure here is what left the main checkout with
+  // the just-merged files STAGED FOR DELETION (HEAD advanced by update-ref, index/tree
+  // still at the old commit): the usual cause is a transient `.git/index.lock` held by a
+  // concurrent git writer (a plugin gate-resolve commit, another agent). Reproduced 4×
+  // on the pm-pipeline live run. On final failure the warning is PERSISTED as an issue
+  // comment (via recordCleanupWarnings below) instead of only a console line.
   try {
     if (args.pendingWorkingTreeSyncSha) {
-      try {
-        await applyDeferredWorkingTreeSync(args.repoPath, args.pendingWorkingTreeSyncSha);
-      } catch (err) {
-        console.warn("[workspace-merge] deferred working-tree sync failed (non-fatal):", err instanceof Error ? err.message : String(err));
+      let syncError: unknown = null;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          if (attempt > 0) await new Promise((r) => setTimeout(r, 1500 * attempt));
+          await applyDeferredWorkingTreeSync(args.repoPath, args.pendingWorkingTreeSyncSha);
+          syncError = null;
+          break;
+        } catch (err) {
+          syncError = err;
+          console.warn(`[workspace-merge] deferred working-tree sync attempt ${attempt + 1}/5 failed:`, err instanceof Error ? err.message : String(err));
+        }
+      }
+      if (syncError) {
+        addRecoverableWarning(
+          warnings,
+          "deferred-working-tree-sync",
+          new Error(
+            `main checkout at ${args.repoPath} could not be synced to ${args.pendingWorkingTreeSyncSha} after 5 attempts — `
+            + `it may show the merged files as staged deletions until 'git reset --hard ${args.pendingWorkingTreeSyncSha}' is run (#296): `
+            + `${syncError instanceof Error ? syncError.message : String(syncError)}`,
+          ),
+        );
       }
     }
   } finally {
     hooks.onMainCheckoutSettled?.();
   }
+
+  // #298 — merge-to-advance: if this issue is a plugin-loop ticket, advance its loop now
+  // that the main checkout reflects the landed artifacts. Best-effort; non-loop issues
+  // return after one indexed select.
+  await advanceLoopAfterMergedIssue(args.issueId, deps.database);
 
   // ── Lock-free long tail: worktree/DB/orchestration cleanup ──
   // Every step is best-effort with its own guards; a failure here strands at most
