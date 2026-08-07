@@ -22,15 +22,40 @@ import { provisionSiblingWorktrees, insertSiblingWorktreeRecords } from "../serv
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
 import type { Database } from "../db/index.js";
 
+/**
+ * Committer identity for every git call in this suite, supplied by ENV rather than by two
+ * `git config` calls per repo. Env costs no process launches, and unlike repo-local config it
+ * also covers commits made inside the WORKTREES (which is where most of this suite's commits
+ * happen) without relying on them inheriting anything.
+ */
+const GIT_IDENTITY_ENV = {
+  GIT_AUTHOR_NAME: "Test",
+  GIT_AUTHOR_EMAIL: "test@test.com",
+  GIT_COMMITTER_NAME: "Test",
+  GIT_COMMITTER_EMAIL: "test@test.com",
+};
+
 function exec(cmd: string, args: string[], cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, { cwd }, (err, stdout, stderr) => {
+    execFile(cmd, args, { cwd, env: { ...process.env, ...GIT_IDENTITY_ENV } }, (err, stdout, stderr) => {
       if (err) reject(new Error(stderr || err.message));
       else resolve(stdout.toString());
     });
   });
 }
 
+/**
+ * Every `git` invocation here costs whatever a process launch costs on the host, and on a
+ * Windows box with real-time AV scanning an unsigned `git.exe` that is ~2 s — measured on the
+ * dev machine this suite was failing on: `git --version`, which does no work at all, took
+ * 0.75-3.3 s while `cmd /c exit` took 0.2 s. At seven spawns per repo and two repos, repo
+ * creation alone was ~28 s of the ~67 s setup, which is why all three tests hit their 60 s
+ * timeout without ever reaching the code under test (#284).
+ *
+ * So: three spawns instead of seven. `init -b main` replaces the trailing `branch -M`, and
+ * {@link GIT_IDENTITY_ENV} replaces the two `config` calls. Same repo, same starting state,
+ * less than half the process launches — and faster everywhere, not only on a slow host.
+ */
 async function createTempRepo(prefix: string): Promise<string> {
   // Repo nested one level below the mkdtemp dir so its .worktrees sibling stays inside
   // the unique temp dir instead of a shared %TEMP%/.worktrees parallel tests fight over.
@@ -38,15 +63,20 @@ async function createTempRepo(prefix: string): Promise<string> {
   const dir = join(parent, "repo");
   const { mkdirSync } = await import("node:fs");
   mkdirSync(dir);
-  await exec("git", ["init"], dir);
-  await exec("git", ["config", "user.email", "test@test.com"], dir);
-  await exec("git", ["config", "user.name", "Test"], dir);
+  await exec("git", ["init", "-b", "main"], dir);
   await writeFile(join(dir, "README.md"), "# Test\n");
   await exec("git", ["add", "."], dir);
   await exec("git", ["commit", "-m", "Initial commit"], dir);
-  await exec("git", ["branch", "-M", "main"], dir);
   return dir;
 }
+
+/**
+ * Per-test budget. The work itself is small; what it buys is headroom for ~30 git process
+ * launches on a host where each one can cost seconds (see {@link createTempRepo}). A tighter
+ * number does not make the suite faster, it makes it red on the machines that most need it
+ * to be honest.
+ */
+const REAL_GIT_TEST_TIMEOUT_MS = 180_000;
 
 interface Setup {
   db: TestDb;
@@ -125,7 +155,7 @@ describe("per-repo rebase (#93)", () => {
     expect(existsSync(join(siblingWorktree, "sibling.txt"))).toBe(true);
     // Rebase-only: nothing landed on the sibling's base — it still lacks the feature file.
     expect(existsSync(join(extraRepo, "sibling.txt"))).toBe(false);
-  }, 60000);
+  }, REAL_GIT_TEST_TIMEOUT_MS);
 
   it("aborts on conflict, leaving the sibling worktree clean, and reports the conflicting files", async () => {
     const { mergeService, extraRepo, workspaceId, siblingWorktree } = await setupWorkspaceWithSibling();
@@ -149,7 +179,7 @@ describe("per-repo rebase (#93)", () => {
     expect(await gitService.isRebaseInProgress(siblingWorktree)).toBe(false);
     const readme = await exec("git", ["show", "HEAD:README.md"], siblingWorktree);
     expect(readme.trim()).toBe("FEATURE");
-  }, 60000);
+  }, REAL_GIT_TEST_TIMEOUT_MS);
 
   it("rebases the leading repo via LEADING_REPO_KEY", async () => {
     const { mergeService, leadRepo, workspaceId, leadingWorktree } = await setupWorkspaceWithSibling();
@@ -167,5 +197,5 @@ describe("per-repo rebase (#93)", () => {
     expect(result).toMatchObject({ repo: "leading", success: true });
     expect(existsSync(join(leadingWorktree, "base.txt"))).toBe(true);
     expect(existsSync(join(leadingWorktree, "lead.txt"))).toBe(true);
-  }, 60000);
+  }, REAL_GIT_TEST_TIMEOUT_MS);
 });
