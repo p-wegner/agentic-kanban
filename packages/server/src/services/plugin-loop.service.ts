@@ -20,6 +20,7 @@ import {
 } from "@agentic-kanban/shared/lib/plugin-manifest";
 import type { Database } from "../db/index.js";
 import { listPluginLoopIssues, listPluginLoopUnmergedWorkspaces } from "../repositories/plugins.repository.js";
+import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 import {
   insertPluginLoopEvent,
   latestPluginLoopEvent,
@@ -179,6 +180,12 @@ export interface LoopStatus {
    * as its own state with a one-click Merge; null when nothing is stuck.
    */
   awaitingMerge: { workspaceId: string; issueNumber: number | null; issueTitle: string } | null;
+  /**
+   * The butler's pre-read verdict for the CURRENT gate (#309), from the latest
+   * `gate-recommendation` timeline event — null when there is no gate, the
+   * recommendation is for an older gate, or the feature is off.
+   */
+  gateRecommendation: { actionId: string; reason: string } | null;
 }
 
 export interface PluginLoopDeps {
@@ -255,6 +262,19 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
       );
       const payload = parseAdvancePayload(lastAdvance);
       const unmerged = await listPluginLoopUnmergedWorkspaces(projectId, keyPrefix(pluginSlug, loop.name), database);
+      const gate = payload?.gate ?? null;
+      let gateRecommendation: LoopStatus["gateRecommendation"] = null;
+      if (gate) {
+        const recoRow = await latestPluginLoopEvent(
+          { pluginSlug, loopName: loop.name, projectId }, "gate-recommendation", database,
+        );
+        try {
+          const reco = recoRow?.payloadJson ? JSON.parse(recoRow.payloadJson) as { gateId?: string; actionId?: string; reason?: string } : null;
+          if (reco?.gateId === gate.id && typeof reco.actionId === "string") {
+            gateRecommendation = { actionId: reco.actionId, reason: reco.reason ?? "" };
+          }
+        } catch { /* malformed event — no chip */ }
+      }
       out.push({
         name: loop.name,
         label: loop.label ?? loop.name,
@@ -272,6 +292,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
         awaitingMerge: unmerged.length > 0
           ? { workspaceId: unmerged[0].workspaceId, issueNumber: unmerged[0].issueNumber, issueTitle: unmerged[0].issueTitle }
           : null,
+        gateRecommendation,
       });
     }
     return out;
@@ -305,6 +326,8 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
     manifest: PluginManifest;
     pluginSlug: string;
     pluginName?: string;
+    /** Plugin ROW id — carried into the gate notification so receivers can deep-link (#300). */
+    pluginRowId?: string | null;
     pluginLocalPath: string;
     loopName: string;
     projectId: string;
@@ -323,6 +346,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
     manifest: PluginManifest;
     pluginSlug: string;
     pluginName?: string;
+    pluginRowId?: string | null;
     pluginLocalPath: string;
     loopName: string;
     projectId: string;
@@ -485,10 +509,33 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
       boardEvents?.broadcastPluginGate(args.projectId, {
         pluginSlug: args.pluginSlug,
         pluginName: args.pluginName ?? args.pluginSlug,
+        pluginId: args.pluginRowId ?? null,
         loopName: loop.name,
         loopLabel: loop.label ?? loop.name,
         gateId: plan.gate.id,
         question: plan.gate.question,
+      });
+      // Butler concierge (#307/#309): digest turn + pre-read recommendation, both
+      // best-effort and pref-gated. Deliberately NOT awaited — a gate must never
+      // block or fail an advance because an LLM was slow.
+      const conciergeArgs = {
+        projectId: args.projectId,
+        pluginRowId: args.pluginRowId ?? null,
+        pluginSlug: args.pluginSlug,
+        pluginName: args.pluginName ?? args.pluginSlug,
+        loopName: loop.name,
+        loopLabel: loop.label ?? loop.name,
+        gate: plan.gate,
+        checks: plan.checks ?? null,
+        note: plan.note ?? null,
+        repoPath: args.repoPath,
+        boardUrl,
+      };
+      void import("./plugin-gate-butler.service.js").then(async (m) => {
+        await m.notifyButlerOfGate(conciergeArgs, database);
+        await m.computeGateRecommendation(conciergeArgs, database);
+      }).catch((err) => {
+        console.warn(`[plugins] gate concierge failed for ${args.pluginSlug}:${loop.name}:`, err instanceof Error ? err.message : String(err));
       });
     }
 
@@ -526,6 +573,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
     manifest: PluginManifest;
     pluginSlug: string;
     pluginName?: string;
+    pluginRowId?: string | null;
     pluginLocalPath: string;
     loopName: string;
     projectId: string;
@@ -603,6 +651,27 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
             // An excerpt is enough for the audit trail; the full text went to the plugin.
             input: text ? text.slice(0, 500) : null,
           }, database);
+          // #306 — mirror the decision onto the loop TICKET's own history, where a human
+          // browsing the board actually looks; the loop timeline alone is a hidden pane.
+          // Best-effort: the newest ticket of this loop is the unit the gate belongs to
+          // under strict-linear loops; for fan-out loops it is still the round's anchor.
+          try {
+            const ticketRows = await listPluginLoopIssues(args.projectId, keyPrefix(args.pluginSlug, loop.name), database);
+            const newest = ticketRows.sort((a, b) => (b.issueNumber ?? 0) - (a.issueNumber ?? 0))[0];
+            if (newest) {
+              await insertIssueComment({
+                issueId: newest.id,
+                workspaceId: null,
+                kind: "gate-decision",
+                author: "user",
+                body: `Gate ${gate.id}: ${action.label}${text ? ` — ${text.slice(0, 500)}` : ""}`,
+                payload: { gateId: gate.id, actionId: action.id, loop: loop.name, pluginSlug: args.pluginSlug },
+                createdAt: new Date().toISOString(),
+              }, database);
+            }
+          } catch (err) {
+            console.warn(`[plugins] failed to record gate decision comment:`, err instanceof Error ? err.message : String(err));
+          }
           return { gate, action, result };
         } finally {
           if (inputFile) {

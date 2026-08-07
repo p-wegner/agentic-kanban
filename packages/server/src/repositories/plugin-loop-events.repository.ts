@@ -15,6 +15,8 @@ export type PluginLoopEventType =
   | "advance"
   | "gate-reached"
   | "gate-resolved"
+  /** Butler pre-read verdict for a gate (#309) — payload { gateId, actionId, reason }. */
+  | "gate-recommendation"
   | "paused"
   | "resumed"
   | "converged";

@@ -784,6 +784,7 @@ export function createPluginService(deps: {
       loopDef?.workflow ?? skillDef?.workflow,
     );
     return loops.advanceLoop({
+      pluginRowId: plugin.id,
       manifest: plugin.manifest,
       pluginSlug: plugin.pluginId,
       pluginName: plugin.name,
@@ -806,6 +807,8 @@ export function createPluginService(deps: {
     getLoopArtifact,
     getScaffoldForm,
     fillScaffoldForm,
+    saveLoopArtifact,
+    draftLoopGateFeedback,
   } = createPluginLoopExtras({
     database,
     loops,
@@ -934,6 +937,8 @@ export function createPluginService(deps: {
     getLoopArtifact,
     getScaffoldForm,
     fillScaffoldForm,
+    saveLoopArtifact,
+    draftLoopGateFeedback,
     validatePluginSource,
     removePlugin,
     enableForProject,
