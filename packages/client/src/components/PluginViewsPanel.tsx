@@ -11,6 +11,7 @@ import {
   type PluginScript,
   type PluginSkill,
 } from "./PluginActionPanes.js";
+import { PluginScaffoldPane, type ScaffoldForm } from "./PluginScaffoldPane.js";
 
 /** A plugin-served page, plus whether its server is currently up. */
 type PluginView = PluginOwner & {
@@ -31,15 +32,18 @@ type PluginSurface = {
   loops: PluginLoop[];
   scripts: PluginScript[];
   skills: PluginSkill[];
+  /** Project start policy (#293) — `manual` means the monitor never drives loops. */
+  startPolicy?: { mode: string; autoStartUnblocked: boolean } | null;
 };
 
-const EMPTY_SURFACE: PluginSurface = { views: [], loops: [], scripts: [], skills: [] };
+const EMPTY_SURFACE: PluginSurface = { views: [], loops: [], scripts: [], skills: [], startPolicy: null };
 
 type Selection =
   | { kind: "view"; key: string }
   | { kind: "loop"; key: string }
   | { kind: "script"; key: string }
-  | { kind: "skill"; key: string };
+  | { kind: "skill"; key: string }
+  | { kind: "scaffold"; key: string };
 
 const ownerKey = (o: PluginOwner, id: string) => `${o.pluginId}:${id}`;
 
@@ -178,8 +182,27 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
       loops: surface.loops.filter((l) => l.pluginSlug === pluginSlug),
       scripts: surface.scripts.filter((s) => s.pluginSlug === pluginSlug),
       skills: surface.skills.filter((s) => s.pluginSlug === pluginSlug),
+      startPolicy: surface.startPolicy ?? null,
     };
   }, [surface, pluginSlug]);
+
+  // The shown plugin's scaffold form state (#291): a "Setup" rail entry appears while
+  // TODO markers remain — the same gate that blocks its scripts and loops.
+  const shownPlugin = useMemo(
+    () => [...filtered.views, ...filtered.loops, ...filtered.scripts, ...filtered.skills][0] ?? null,
+    [filtered],
+  );
+  const [scaffold, setScaffold] = useState<ScaffoldForm | null>(null);
+  const refetchScaffold = useCallback(async () => {
+    if (!shownPlugin) { setScaffold(null); return; }
+    try {
+      setScaffold(await apiFetch<ScaffoldForm>(`/api/plugins/${shownPlugin.pluginId}/scaffold?projectId=${projectId}`));
+    } catch {
+      setScaffold(null); // 404 = the plugin declares no scaffold
+    }
+  }, [shownPlugin, projectId]);
+  useEffect(() => { void refetchScaffold(); }, [refetchScaffold]);
+  const scaffoldNeedsSetup = (scaffold?.exists && scaffold.fields.length > 0) ?? false;
 
   // No plugin picked yet (fresh navigation) → adopt the first plugin present.
   useEffect(() => {
@@ -356,6 +379,20 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
         >
           🧩 {pluginName}
         </div>
+        {shownPlugin && scaffold?.exists && (
+          <div className="space-y-0.5">
+            <div className="px-2 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+              Setup
+            </div>
+            {railButton(
+              "scaffold",
+              scaffoldNeedsSetup ? "Setup required" : "Project profile",
+              selection?.kind === "scaffold",
+              () => setSelection({ kind: "scaffold", key: "scaffold" }),
+              scaffoldNeedsSetup ? String(scaffold!.fields.length) : undefined,
+            )}
+          </div>
+        )}
         {railGroup("Views", filtered.views, (view) =>
           railButton(
             ownerKey(view, view.id),
@@ -464,10 +501,25 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
             )}
           </>
         )}
-        {activeLoop && <PluginLoopPane loop={activeLoop} projectId={projectId} onChanged={() => void refetch()} />}
+        {activeLoop && (
+          <PluginLoopPane
+            loop={activeLoop}
+            projectId={projectId}
+            onChanged={() => void refetch()}
+            startPolicy={surface.startPolicy ?? null}
+          />
+        )}
         {activeScript && <PluginScriptPane script={activeScript} projectId={projectId} />}
         {activeSkill && <PluginSkillPane skill={activeSkill} projectId={projectId} />}
-        {!activeView && !activeLoop && !activeScript && !activeSkill && (
+        {selection?.kind === "scaffold" && shownPlugin && (
+          <PluginScaffoldPane
+            pluginId={shownPlugin.pluginId}
+            pluginName={shownPlugin.pluginName}
+            projectId={projectId}
+            onFilled={() => { void refetchScaffold(); void refetch(); }}
+          />
+        )}
+        {!activeView && !activeLoop && !activeScript && !activeSkill && selection?.kind !== "scaffold" && (
           <div className="flex-1 flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">
             Select something on the left.
           </div>

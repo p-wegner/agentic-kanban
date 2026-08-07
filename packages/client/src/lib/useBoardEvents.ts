@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from "react";
 import { SESSION_ACTIVITY_WS_EVENT, type SessionActivityEventDetail } from "./sessionTranscriptEvents.js";
+import { showToast } from "./toast.js";
 
 /**
  * Low-frequency safety poll backing the board WebSocket. The WS is the single
@@ -88,7 +89,19 @@ interface ApprovalRequestedEvent {
   workspaceId?: string;
 }
 
-type BoardWsEvent = BoardChangedEvent | ProjectsChangedEvent | SessionActivityEvent | SessionStatsEvent | SessionTodosEvent | ApprovalRequestedEvent;
+/** A plugin loop reached a human-approval gate (#287) — fired once per NEW gate id. */
+interface PluginGateEvent {
+  type: "plugin_gate";
+  projectId: string;
+  pluginSlug: string;
+  pluginName: string;
+  loopName: string;
+  loopLabel: string;
+  gateId: string;
+  question: string;
+}
+
+type BoardWsEvent = BoardChangedEvent | ProjectsChangedEvent | SessionActivityEvent | SessionStatsEvent | SessionTodosEvent | ApprovalRequestedEvent | PluginGateEvent;
 
 export interface LiveSessionStats {
   model: string;
@@ -170,6 +183,25 @@ export function useBoardEvents(
           onSessionTodosRef.current?.(msg.issueId, msg.todos);
         } else if (msg.type === "approval_requested") {
           onApprovalRequestedRef.current?.({ id: msg.id, sessionId: msg.sessionId, toolName: msg.toolName, toolInput: msg.toolInput, workspaceId: msg.workspaceId });
+        } else if (msg.type === "plugin_gate") {
+          // A human gate is the one loop state that goes NOWHERE without a person —
+          // surface it actively (#287). The server already dedupes to one message per
+          // new gate id, so this never spams on the monitor's polling cadence.
+          showToast(`${msg.loopLabel}: ${msg.question} (Plugins tab)`, "success");
+          // Desktop notification only if the user has ALREADY granted permission —
+          // requesting it outside a user gesture is browser-hostile.
+          try {
+            if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+              new Notification(`${msg.pluginName} — approval needed`, { body: msg.question, tag: `plugin-gate-${msg.gateId}` });
+            }
+          } catch { /* notifications are best-effort */ }
+          // Let panels (plugin surface) refetch so the approval card appears without a manual reload.
+          onBoardChangeRef.current("plugin_gate");
+          window.dispatchEvent(
+            new CustomEvent<BoardWsEventDetail>(BOARD_WS_EVENT, {
+              detail: { projectId: msg.projectId, reason: "plugin_gate" },
+            }),
+          );
         }
       } catch {
         // Ignore malformed messages

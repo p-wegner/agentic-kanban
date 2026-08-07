@@ -1,6 +1,18 @@
 import { useEffect, useState } from "react";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { showToast } from "./Toast.js";
+import {
+  ArtifactViewer,
+  ChecksBadges,
+  GateCard,
+  LoopStateChips,
+  LoopTimeline,
+  ProgressStepper,
+  type PluginCheck,
+  type PluginGate,
+  type PluginProgressStep,
+  type StartPolicy,
+} from "./PluginLoopExtras.js";
 
 /**
  * The non-iframe halves of the board's Plugins panel: the panes for a plugin's
@@ -29,6 +41,13 @@ export type PluginLoop = PluginOwner & {
   openTickets: number;
   closedTickets: number;
   paused: boolean;
+  converged: boolean;
+  note: string | null;
+  lastAdvanceAt: string | null;
+  gate: PluginGate | null;
+  progress: { steps: PluginProgressStep[] } | null;
+  checks: PluginCheck[] | null;
+  totalCostUsd?: number;
 };
 
 export type PluginScript = PluginOwner & {
@@ -59,7 +78,7 @@ type LoopAdvanceResult = {
   converged: boolean;
   note: string | null;
   planned: number;
-  created: Array<{ unitId: string; issueId: string; issueNumber: number | null; title: string }>;
+  created: Array<{ unitId: string; issueId: string; issueNumber: number | null; title: string; artifacts?: string[] }>;
   skippedExisting: Array<{ unitId: string; issueNumber: number | null; statusName: string }>;
   capped: number;
   startMode: string;
@@ -86,10 +105,17 @@ function PaneHeading({ title, subtitle, mono }: { title: string; subtitle?: stri
 }
 
 /** Converging analysis loop: advance a round, then let the board's monitor run it. */
-export function PluginLoopPane({ loop, projectId, onChanged }: { loop: PluginLoop; projectId: string; onChanged: () => void }) {
+export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null }: {
+  loop: PluginLoop;
+  projectId: string;
+  onChanged: () => void;
+  startPolicy?: StartPolicy;
+}) {
   const [advancing, setAdvancing] = useState(false);
   const [pausing, setPausing] = useState(false);
   const [result, setResult] = useState<LoopAdvanceResult | null>(null);
+  const [openArtifact, setOpenArtifact] = useState<string | null>(null);
+  const [timelineKey, setTimelineKey] = useState(0);
 
   async function advance() {
     if (advancing) return;
@@ -100,6 +126,7 @@ export function PluginLoopPane({ loop, projectId, onChanged }: { loop: PluginLoo
         { projectId },
       );
       setResult(res);
+      setTimelineKey((k) => k + 1);
       showToast(
         res.created.length > 0
           ? `Planned ${res.created.length} ticket(s) for "${loop.label}"`
@@ -138,11 +165,7 @@ export function PluginLoopPane({ loop, projectId, onChanged }: { loop: PluginLoo
     <div className="p-6 space-y-4 overflow-y-auto" data-testid="plugin-loop-pane">
       <div className="flex items-start justify-between gap-3">
         <PaneHeading title={loop.label} subtitle={loop.description} />
-        {loop.paused && (
-          <span className="shrink-0 text-[11px] px-2 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
-            Paused
-          </span>
-        )}
+        <LoopStateChips loop={loop} startPolicy={startPolicy} />
       </div>
 
       <p className="text-xs text-gray-500 dark:text-gray-400 max-w-2xl">
@@ -153,6 +176,27 @@ export function PluginLoopPane({ loop, projectId, onChanged }: { loop: PluginLoo
         automatically, until the plugin reports nothing left to do — or until the loop is paused.
       </p>
 
+      {/* Declarative pipeline progress (#289) + verification badges (#290). */}
+      <ProgressStepper steps={loop.progress?.steps} onOpenArtifact={setOpenArtifact} />
+      <ChecksBadges checks={loop.checks} />
+
+      {/* The human gate (#286): the single thing this loop needs from a person right now. */}
+      {loop.gate && loop.openTickets === 0 && (
+        <GateCard
+          pluginId={loop.pluginId}
+          loopName={loop.name}
+          projectId={projectId}
+          gate={loop.gate}
+          onOpenArtifact={setOpenArtifact}
+          onResolved={() => { setTimelineKey((k) => k + 1); onChanged(); }}
+        />
+      )}
+      {!loop.gate && loop.note && loop.openTickets === 0 && !loop.converged && (
+        <p className="text-xs text-amber-700 dark:text-amber-400 max-w-2xl" data-testid="plugin-loop-note">
+          {loop.note}
+        </p>
+      )}
+
       <div className="flex items-center gap-4 text-sm">
         <div className="px-3 py-2 rounded border border-gray-200 dark:border-gray-700">
           <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">{loop.openTickets}</div>
@@ -162,6 +206,12 @@ export function PluginLoopPane({ loop, projectId, onChanged }: { loop: PluginLoo
           <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">{loop.closedTickets}</div>
           <div className="text-[11px] text-gray-500 dark:text-gray-400">closed rounds</div>
         </div>
+        {(loop.totalCostUsd ?? 0) > 0 && (
+          <div className="px-3 py-2 rounded border border-gray-200 dark:border-gray-700" data-testid="plugin-loop-cost">
+            <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">${loop.totalCostUsd!.toFixed(2)}</div>
+            <div className="text-[11px] text-gray-500 dark:text-gray-400">agent cost so far</div>
+          </div>
+        )}
         <button
           onClick={() => void advance()}
           disabled={advancing}
@@ -211,12 +261,39 @@ export function PluginLoopPane({ loop, projectId, onChanged }: { loop: PluginLoo
               {result.created.map((unit) => (
                 <li key={unit.issueId}>
                   <span className="font-mono text-gray-400 dark:text-gray-500">#{unit.issueNumber ?? "?"}</span> {unit.title}
+                  {(unit.artifacts?.length ?? 0) > 0 && (
+                    <span className="ml-1">
+                      {unit.artifacts!.map((path) => (
+                        <button
+                          key={path}
+                          type="button"
+                          onClick={() => setOpenArtifact(path)}
+                          className="text-[11px] font-mono text-brand-600 dark:text-brand-400 hover:underline ml-1"
+                        >
+                          📄 {path.split("/").pop()}
+                        </button>
+                      ))}
+                    </span>
+                  )}
                 </li>
               ))}
             </ul>
           )}
         </div>
       )}
+
+      {/* Inline artifact viewer (#288) — opened from the gate card, stepper, or unit list. */}
+      {openArtifact && (
+        <ArtifactViewer
+          pluginId={loop.pluginId}
+          loopName={loop.name}
+          projectId={projectId}
+          path={openArtifact}
+          onClose={() => setOpenArtifact(null)}
+        />
+      )}
+
+      <LoopTimeline pluginId={loop.pluginId} loopName={loop.name} projectId={projectId} refreshKey={timelineKey} />
     </div>
   );
 }

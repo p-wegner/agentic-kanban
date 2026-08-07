@@ -35,6 +35,8 @@ export interface PluginMarketplaceEntry {
   installedId: string | null;
   /** Enabled for the requested project (false when no projectId was given). */
   enabled: boolean;
+  /** The manifest file on disk differs from the cached copy the board runs (#295). */
+  manifestDrift: boolean;
   origin: "installed" | "catalog";
 }
 
@@ -50,6 +52,7 @@ export interface InstalledPluginRow {
   localPath: string | null;
   manifest?: { description?: string | null } | null;
   enabled?: boolean;
+  manifestDrift?: boolean;
 }
 
 export function readMarketplaceCatalog(): CatalogFileEntry[] {
@@ -100,6 +103,7 @@ export function buildMarketplaceEntries(rows: InstalledPluginRow[]): PluginMarke
     installed: true,
     installedId: row.id,
     enabled: row.enabled ?? false,
+    manifestDrift: row.manifestDrift ?? false,
     origin: "installed",
   }));
 
@@ -121,6 +125,7 @@ export function buildMarketplaceEntries(rows: InstalledPluginRow[]): PluginMarke
       installed: false,
       installedId: null,
       enabled: false,
+      manifestDrift: false,
       origin: "catalog",
     });
   }

@@ -14,7 +14,16 @@ type MarketplaceEntry = {
   installed: boolean;
   installedId: string | null;
   enabled: boolean;
+  /** Manifest on disk differs from the cached copy the board runs (#295). */
+  manifestDrift?: boolean;
   origin: "installed" | "catalog";
+};
+
+type ValidateResult = {
+  ok: boolean;
+  manifest?: { id: string; name: string; version: string | null };
+  errors: string[];
+  warnings: string[];
 };
 
 interface PluginMarketplacePanelProps {
@@ -34,6 +43,8 @@ export function PluginMarketplacePanel({ projectId }: PluginMarketplacePanelProp
   const [loading, setLoading] = useState(true);
   const [source, setSource] = useState("");
   const [installing, setInstalling] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const [validateResult, setValidateResult] = useState<ValidateResult | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const installInputRef = useRef<HTMLInputElement>(null);
   const setSelection = usePluginViewStore((s) => s.setSelection);
@@ -76,6 +87,20 @@ export function PluginMarketplacePanel({ projectId }: PluginMarketplacePanelProp
       showToast(err instanceof Error ? err.message : "Install failed", "error");
     } finally {
       setInstalling(false);
+    }
+  }
+
+  async function handleValidate() {
+    const trimmed = source.trim();
+    if (!trimmed || validating) return;
+    setValidating(true);
+    setValidateResult(null);
+    try {
+      setValidateResult(await apiPost<ValidateResult>(`/api/plugins/validate`, { source: trimmed }));
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Validation failed", "error");
+    } finally {
+      setValidating(false);
     }
   }
 
@@ -194,6 +219,15 @@ export function PluginMarketplacePanel({ projectId }: PluginMarketplacePanelProp
         {entry.description && (
           <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-3">{entry.description}</p>
         )}
+        {entry.manifestDrift && (
+          <div
+            className="text-[11px] px-2 py-1 rounded bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
+            data-testid="plugin-manifest-drift"
+          >
+            ⚠ The manifest on disk has changed — press <span className="font-semibold">Update</span> to apply it.
+            Until then the board runs the old version.
+          </div>
+        )}
         <div className="text-[11px] text-gray-400 dark:text-gray-500 space-y-0.5">
           {entry.gitUrl && (
             <div className="truncate" title={entry.gitUrl}>
@@ -290,6 +324,16 @@ export function PluginMarketplacePanel({ projectId }: PluginMarketplacePanelProp
               className="flex-1 text-xs rounded px-2 py-1.5 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 outline-none focus:border-violet-500"
             />
             <button
+              type="button"
+              onClick={() => void handleValidate()}
+              disabled={validating || !source.trim()}
+              className="text-xs px-3 py-1.5 rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+              title="Parse the manifest and check referenced files, without installing (local directories only)"
+              data-testid="plugin-validate"
+            >
+              {validating ? "Validating…" : "Validate"}
+            </button>
+            <button
               type="submit"
               disabled={installing || !source.trim()}
               className="text-xs px-3 py-1.5 rounded bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50"
@@ -297,6 +341,17 @@ export function PluginMarketplacePanel({ projectId }: PluginMarketplacePanelProp
               {installing ? "Installing…" : "Install"}
             </button>
           </div>
+          {validateResult && (
+            <div className="mt-2 text-[11px] space-y-0.5" data-testid="plugin-validate-result">
+              <div className={validateResult.ok ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400"}>
+                {validateResult.ok
+                  ? `✓ Manifest valid${validateResult.manifest ? ` — ${validateResult.manifest.id}${validateResult.manifest.version ? ` v${validateResult.manifest.version}` : ""}` : ""}`
+                  : "✕ Manifest invalid"}
+              </div>
+              {validateResult.errors.map((e) => <div key={e} className="text-red-600 dark:text-red-400">• {e}</div>)}
+              {validateResult.warnings.map((w) => <div key={w} className="text-amber-700 dark:text-amber-400">⚠ {w}</div>)}
+            </div>
+          )}
         </form>
 
         {/* Installed */}
