@@ -328,6 +328,34 @@ your planner. Declared artifacts are served fresh from the output repo by
 committed versions — commit each generation and revisions become reviewable diffs for free).
 Gate decisions go to `POST .../loops/:name/gate/resolve` `{projectId, gateId, actionId, input?}`.
 
+**Hands-off between gates (#296–#299).** Two hooks close the merge gap that used to need a
+human between "agent done" and "gate visible": a loop may declare `"autoLand": true` — its
+finished tickets (committed changes, builder exit 0) are then merged automatically, still
+through the pre-merge verify gate, without the global `auto_merge_in_review` pref; and every
+merge of a loop ticket (however it lands) advances the owning loop as soon as the main
+checkout is synced, so the next gate appears seconds after the merge instead of on the next
+monitor cycle. A finished-but-unlanded loop ticket is reported per loop as `awaitingMerge`
+(workspace id + issue) and rendered as its own card with a one-click Merge. `autoLand` is the
+right default for document-producing loops (the merge is what makes the artifact visible to
+your planner, which reads the MAIN checkout); leave it off when a loop's tickets change
+product code you want reviewed.
+
+**The butler as approval concierge (#307–#310).** On every NEW gate the board (pref
+`butler_gate_digest`, default on) wakes the project butler and injects a digest turn —
+question, verification verdict, artifact list, and the exact resolve call — so approving can
+happen conversationally; the hard rule that it resolves ONLY on an explicit user instruction
+rides in that prompt and in the MCP tool descriptions (`list_plugin_gates`,
+`get_plugin_gate`, `resolve_plugin_gate`, `advance_plugin_loop`). With
+`butler_gate_recommendation` (default on) the butler also pre-reads the gate's artifacts and
+stores a structured approve/revise verdict (`gate-recommendation` timeline event), which the
+gate card shows as a chip with one-click accept. Two more concierge endpoints:
+`POST .../loops/:name/gate/draft {gateId, notes}` turns rough notes into submit-ready
+revision feedback, and `PUT .../loops/:name/artifact {gateId, path, content}` lets the human
+edit a gate artifact in place (committed pathspec-limited) before approving — so a typo
+doesn't cost a full revision round. Gate decisions are also mirrored onto the loop ticket as
+`gate-decision` comments, and every pending decision across ALL projects is aggregated at
+`GET /api/inbox` (rendered in the notification bell's "Waiting on you" section).
+
 Two more authoring conveniences: `POST /api/plugins/validate {source}` parses a LOCAL plugin
 directory's manifest and checks every referenced file without installing, and `GET /api/plugins`
 reports `manifestDrift: true` when the manifest on disk differs from the cached copy the board
