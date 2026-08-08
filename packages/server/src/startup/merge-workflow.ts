@@ -28,6 +28,8 @@ import { buildLearningStepPrompt } from "../services/merge-helpers.service.js";
 import { resolveMergeGate, type MergeGateToken } from "../services/pre-merge-gate.service.js";
 import { advanceLoopAfterMergedIssue } from "../services/plugin-loop-hooks.service.js";
 import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.repository.js";
+import { stampWorkspaceMergedAt } from "../repositories/workspace-merge-execution.repository.js";
+import { getWorkspaceById } from "../repositories/workspace-reads.repository.js";
 
 export type MergeWorkspace = Pick<typeof workspaces.$inferSelect, "id" | "isDirect" | "branch" | "workingDir" | "baseBranch" | "issueId">;
 
@@ -228,6 +230,19 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
   }
 
   return async function autoMerge(workspace: MergeWorkspace, projectId: string, issueId: string, doneStatusId: string | null, now: string, gate: MergeGateToken) {
+    /**
+     * #356: set the instant this invocation actually LANDS the branch. This path used to close
+     * the workspace with `{ readyForMerge: false }` and nothing else — no `mergedAt`, no
+     * `mergedHeadSha`, no `closedAt` — even though it had just advanced the base ref. Measured on
+     * a live pm-pipeline run: 2 of 4 workspaces were `closed` with `mergedAt: null` while their
+     * merge commits sat on master. That silent gap is what makes #353 possible
+     * (`listPluginLoopUnmergedWorkspaces` keys on `mergedAt IS NULL`) and what corrupts every
+     * analytics/reconciler read of the merge record. `doMerge` has stamped it all along; this
+     * path is the one that did not.
+     */
+    // Holder object, not a bare `let`: the assignment happens inside the merge-lock callback, and
+    // TypeScript's control-flow analysis would otherwise narrow the outer variable to `null`.
+    const merge: { landed: { mergedAt: string; mergedHeadSha: string | null } | null } = { landed: null };
     try {
       const prefRowsLearning = await db.select().from(preferences);
       const prefMapLearning = new Map(prefRowsLearning.map((r) => [r.key, r.value]));
@@ -318,7 +333,7 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
               // merge with append-conflict auto-resolution (#763) → post-merge
               // ancestry verification) lives in the shared merge executor core (#945)
               // — the same core the manual/monitor doMerge path runs.
-              const { mergeOutput, mergeCommitSha } = await runMergeCore({
+              const { mergeOutput, mergeCommitSha, mergedHeadSha } = await runMergeCore({
                 repoPath,
                 branch: workspace.branch,
                 targetBranch,
@@ -339,12 +354,21 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
                   ),
               });
 
+              // #356: record the merge on the ROW, not only in a comment payload, and do it here
+              // — immediately after the core reports the ref advanced — so no later branch of this
+              // long tail can skip it. Timestamped fresh: `now` was captured before the learning
+              // step and the pre-merge gate, which can add 20-40 minutes, and backdating it is why
+              // `updatedAt` looked untouched while the status demonstrably moved twice.
+              const mergedNow = new Date().toISOString();
+              merge.landed = { mergedAt: mergedNow, mergedHeadSha: mergedHeadSha || null };
+              await stampWorkspaceMergedAt(workspace.id, mergedNow, mergedHeadSha || null, db);
+
               await recordMergeAttempt(
                 workspace,
                 "merged",
                 `Merged ${workspace.branch} into ${targetBranch}${mergeCommitSha ? ` at ${mergeCommitSha}` : ""}.`,
-                { targetBranch, commitSha: mergeCommitSha || null, mergedAt: now, mergeOutput },
-                now,
+                { targetBranch, commitSha: mergeCommitSha || null, mergedAt: mergedNow, mergeOutput },
+                mergedNow,
               );
 
               // Multi-repo: land the prevalidated sibling merges. Post-prevalidation
@@ -441,10 +465,34 @@ Server: http://localhost:${serverPort}`;
         }
       }
 
-      await setWorkspaceStatus(db, workspace.id, "closed", { now, set: { readyForMerge: false } });
+      // #356: close with the merge record intact. `mergedHeadSha` is a leading-repo mirror column
+      // and cannot be written through `setWorkspaceStatus`'s `set` escape hatch, which is exactly
+      // why it went through `stampWorkspaceMergedAt` above; here we only add `mergedAt`/`closedAt`.
+      const closedAt = new Date().toISOString();
+      await setWorkspaceStatus(db, workspace.id, "closed", {
+        now: closedAt,
+        set: { readyForMerge: false, closedAt, ...(merge.landed ? { mergedAt: merge.landed.mergedAt } : {}) },
+      });
+      // Verify the bookkeeping rather than assume it (#356's own suggested direction): a merge
+      // that landed but left `mergedAt` null must not be reported as a success, because nothing
+      // downstream can tell that state apart from "never merged".
+      if (merge.landed) {
+        const closedRow = await getWorkspaceById(workspace.id, db);
+        if (closedRow && !closedRow.mergedAt) {
+          throw new Error(
+            `Merge bookkeeping invariant violated (#356): workspace ${workspace.id} (branch ${workspace.branch}) `
+            + `landed on ${workspace.baseBranch ?? "the base branch"} but its row still has mergedAt=null. `
+            + `Anything keyed on the merge record — the plugin-loop awaitingMerge query, cost rollups, `
+            + `the ancestor/done-unmerged scanners — will treat this as unmerged work.`,
+          );
+        }
+      }
       // #226 — mirror column: goes through the repository helper so the leading `repos` row
       // stops pointing at the worktree this close just tore down.
-      await clearWorkspaceWorkingDir(workspace.id, now, db);
+      // `closedAt`, not `now` (#356): this write also stamps `updatedAt`, so passing the
+      // pre-gate `now` here rolled the row's `updatedAt` BACK to before the merge — which is
+      // exactly the "updatedAt stuck at 16:40 while status changed twice afterwards" observation.
+      await clearWorkspaceWorkingDir(workspace.id, closedAt, db);
       if (doneStatusId) {
         // transitionIssueStatus also advances the workflow node to the `end` node
         // matching Done status, so blocked_by/depends_on dependents can resolve
