@@ -1,5 +1,6 @@
 import { execFile, execFileSync, spawn, type ChildProcess, type ExecFileException, type StdioOptions } from "node:child_process";
 import { existsSync } from "node:fs";
+import { recordOperation } from "./operation-metrics.js";
 
 /**
  * The single sanctioned adapter for spawning the `git` CLI.
@@ -85,8 +86,10 @@ function exitCodeOf(err: ExecFileException | null, hadError: boolean): number | 
  */
 export function gitExec(args: string[], opts: GitExecOptions = {}): Promise<GitExecResult> {
   const { cwd, timeout = DEFAULT_GIT_TIMEOUT_MS, maxBuffer = DEFAULT_MAX_BUFFER, env, input } = opts;
+  const startedMs = Date.now();
   return new Promise((resolve) => {
     const child = execFile("git", args, { cwd, timeout, maxBuffer, windowsHide: true, env: nonInteractiveEnv(env) }, (err, stdout, stderr) => {
+      recordOperation(gitOperationLabel(args), Date.now() - startedMs);
       let error: Error | null = err;
       // `spawn git ENOENT` conflates two very different failures (#271): a missing WORKING
       // DIRECTORY (deleted repo — deterministic, act on the project) and the git BINARY not
@@ -133,8 +136,35 @@ export interface GitExecSyncOptions extends GitExecOptions {
  */
 export function gitExecSync(args: string[], opts: GitExecSyncOptions): string {
   const { cwd, timeout = DEFAULT_GIT_TIMEOUT_MS, maxBuffer = DEFAULT_MAX_BUFFER, env, stdio } = opts;
-  const out = execFileSync("git", args, { cwd, timeout, maxBuffer, windowsHide: true, encoding: "utf8", stdio, env: nonInteractiveEnv(env) });
-  return (out ?? "").toString();
+  const startedMs = Date.now();
+  try {
+    const out = execFileSync("git", args, { cwd, timeout, maxBuffer, windowsHide: true, encoding: "utf8", stdio, env: nonInteractiveEnv(env) });
+    return (out ?? "").toString();
+  } finally {
+    // `blocking: true` — this spawn holds the event loop for its whole duration, with a
+    // ten-minute default ceiling. The `finally` matters: the try/catch-as-boolean idiom
+    // (`diff --quiet`) throws on the interesting path, and an unrecorded throw would make the
+    // most expensive calls the invisible ones (#359).
+    recordOperation(gitOperationLabel(args), Date.now() - startedMs, true);
+  }
+}
+
+/**
+ * Low-cardinality label for one git invocation: `git:status`, `git:rev-list`.
+ *
+ * The subcommand only — never a path, a ref or an id. `operation-metrics` is a live map with no
+ * eviction, so an unbounded label set would be a slow leak, and "which git subcommand costs the
+ * seconds" is the question #359 needs answered anyway. A leading `-c core.foo=bar` is skipped so
+ * config-prefixed calls land on the same label as their bare equivalents.
+ */
+function gitOperationLabel(args: string[]): string {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "-c" || arg === "--git-dir" || arg === "-C" || arg === "--work-tree") { i++; continue; }
+    if (arg.startsWith("-")) continue;
+    return `git:${arg}`;
+  }
+  return "git:unknown";
 }
 
 /**

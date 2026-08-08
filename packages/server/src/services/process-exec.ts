@@ -1,5 +1,6 @@
 import { execFile, spawn, type ChildProcess, type SpawnOptions, type StdioOptions } from "node:child_process";
 import { promisify } from "node:util";
+import { recordOperation } from "@agentic-kanban/shared/lib/operation-metrics";
 
 const execFileAsync = promisify(execFile);
 
@@ -47,6 +48,33 @@ export function shellCommandSpec(command: string): { command: string; args: stri
 }
 
 export async function execCommand(
+  command: string,
+  args: string[],
+  options: ExecCommandOptions = {},
+): Promise<{ stdout: string; stderr: string }> {
+  // Counted (#359). This is the OTHER spawn adapter besides git-exec, and on Windows the calls it
+  // makes are the expensive ones the monitor's `resource-sweep` depends on: a full
+  // `Get-CimInstance Win32_Process` enumeration (documented as timing out at 225+ processes), a
+  // `netstat -ano`, and one `taskkill /T /F` per reaped tree. Attributing seconds to `exec:*`
+  // rather than to a phase name is the point of the instrumentation.
+  const startedMs = Date.now();
+  try {
+    return await execCommandInner(command, args, options);
+  } finally {
+    recordOperation(`exec:${execOperationLabel(command)}`, Date.now() - startedMs);
+  }
+}
+
+/**
+ * Low-cardinality label: the executable's base name, lowercased, with no path and no arguments.
+ * `operation-metrics` never evicts, so an unbounded label set would be a slow leak.
+ */
+function execOperationLabel(command: string): string {
+  const base = command.replace(/\\/g, "/").split("/").pop() ?? command;
+  return base.toLowerCase();
+}
+
+async function execCommandInner(
   command: string,
   args: string[],
   options: ExecCommandOptions = {},
