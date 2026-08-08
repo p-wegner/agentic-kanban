@@ -45,6 +45,13 @@ export async function getProjectWorkspacesWithIssue(
       status: workspaces.status,
       issueNumber: issues.issueNumber,
       issueTitle: issues.title,
+      // Diff-stat cache columns, maintained by the board summary path. getWorktrees
+      // serves them instead of spawning `git diff --shortstat` per worktree (#342).
+      diffStatCacheCheckedAt: workspaces.diffStatCacheCheckedAt,
+      diffStatCacheFilesChanged: workspaces.diffStatCacheFilesChanged,
+      diffStatCacheInsertions: workspaces.diffStatCacheInsertions,
+      diffStatCacheDeletions: workspaces.diffStatCacheDeletions,
+      diffStatCacheHeadSha: workspaces.diffStatCacheHeadSha,
     })
     .from(workspaces)
     .innerJoin(issues, eq(workspaces.issueId, issues.id))
