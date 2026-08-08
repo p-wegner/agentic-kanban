@@ -334,7 +334,8 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       }
       logMonitorAction("auto_start", "", issue.id);
       boardEvents.broadcast(inProgressSt.projectId, "board_changed");
-      console.log(`[monitor] Auto-started workspace for In Progress issue #${issue.issueNumber} (no open workspace)`);
+      // Same correction as below (#358): this is the 202 for an async create job, not a workspace.
+      console.log(`[monitor] Auto-start ACCEPTED for In Progress issue #${issue.issueNumber} (no open workspace) — provisioning takes minutes`);
     }
   }
 
@@ -481,7 +482,13 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
         // record whichever is available so the action stays traceable.
         const wsData = await resp.json().catch(() => null) as { id?: string; jobId?: string } | null;
         logMonitorAction("auto_start", wsData?.id ?? wsData?.jobId ?? "unknown", issue.id);
-        console.log(`[monitor] Auto-started workspace for unblocked issue "${issue.title}" (${issue.id})`);
+        // #358 — say what the 202 actually means. "Auto-started workspace" was logged here at the
+        // moment the create JOB was accepted: at that instant no workspace row exists, the issue is
+        // still in its pre-start lane, and no agent has been launched. Provisioning (worktree +
+        // AWAITED blocking setup script + context packer) then runs for 84s-8min before the row and
+        // the issue transition land in one transaction. That log line is the reason a working board
+        // read as "an agent has been running for over a minute while the ticket says Backlog".
+        console.log(`[monitor] Auto-start ACCEPTED for unblocked issue "${issue.title}" (${issue.id}) — provisioning a workspace (minutes); the issue moves to In Progress when it completes`);
         boardEvents.broadcast(issue.projectId, "board_changed");
         started++;
         noteStart(inProgressSt.projectId);
