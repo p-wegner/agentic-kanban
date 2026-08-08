@@ -650,6 +650,53 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     boardWarmupTimers.set(projectId, timer);
   }
 
+  /**
+   * The workspace-summary map for a project, via the shared cache: fresh hit served
+   * directly, stale entry served immediately with a background rebuild (SWR), cold miss
+   * blocking on a single coalesced rebuild.
+   *
+   * Extracted from getBoard so getGraph uses the SAME path (#345). getGraph used to call
+   * buildWorkspaceSummaryMap directly, bypassing the cache entirely, so EVERY graph
+   * request paid a full cold rebuild — per-workspace git spawns plus the synchronous
+   * transcript reads — measured at 13.2s, during which /api/health (pure JS) stalled
+   * 3.6-30s and the dev proxy started refusing connections with 503s. The graph does not
+   * need fresher summaries than the board.
+   */
+  function resolveSummaryMap(
+    projectId: string,
+    issueIds: string[],
+    defaultBranch: string | null,
+    archivedIssueIds: Set<string>,
+  ): Promise<Map<string, WorkspaceSummary>> {
+    const cacheResult = workspaceSummaryCache?.get(projectId) ?? null;
+    if (cacheResult && !cacheResult.stale) {
+      // Fresh cache hit — return immediately, no rebuild needed
+      return Promise.resolve(cacheResult.value);
+    }
+    if (cacheResult && cacheResult.stale) {
+      // Stale-while-revalidate: return stale data immediately, rebuild in background
+      if (workspaceSummaryCache && !workspaceSummaryCache.isRebuilding(projectId)) {
+        workspaceSummaryCache.markRebuilding(projectId);
+        buildWorkspaceSummaryMap(issueIds, defaultBranch, database, archivedIssueIds)
+          .then((m) => {
+            // Only write back if the cache entry still exists (not invalidated during rebuild).
+            // An invalidate() deletes the entry, so isRebuilding() returns false — meaning
+            // a status-change PATCH arrived while we were rebuilding and we must not overwrite
+            // with stale workspace-summary data.
+            if (workspaceSummaryCache.isRebuilding(projectId)) {
+              workspaceSummaryCache.set(projectId, m);
+            }
+          })
+          .catch(() => {})
+          .finally(() => { workspaceSummaryCache.clearRebuilding(projectId); });
+      }
+      return Promise.resolve(cacheResult.value);
+    }
+    // Cold miss — must block on a rebuild (no stale data available), but coalesce:
+    // concurrent cold requests share ONE in-flight rebuild instead of stacking duplicates.
+    return startSummaryRebuild(projectId, issueIds, defaultBranch, archivedIssueIds);
+  }
+
   async function getBoard(projectId: string, nowOverride?: string, opts?: { includeArchived?: boolean }) {
     const project = await getProjectById(projectId, database);
     if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
@@ -675,34 +722,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
         .map((i) => i.id),
     );
 
-    const cacheResult = workspaceSummaryCache?.get(projectId) ?? null;
-    let summaryMapPromise: Promise<Map<string, WorkspaceSummary>>;
-    if (cacheResult && !cacheResult.stale) {
-      // Fresh cache hit — return immediately, no rebuild needed
-      summaryMapPromise = Promise.resolve(cacheResult.value);
-    } else if (cacheResult && cacheResult.stale) {
-      // Stale-while-revalidate: return stale data immediately, rebuild in background
-      summaryMapPromise = Promise.resolve(cacheResult.value);
-      if (workspaceSummaryCache && !workspaceSummaryCache.isRebuilding(projectId)) {
-        workspaceSummaryCache.markRebuilding(projectId);
-        buildWorkspaceSummaryMap(issueIds, defaultBranch, database, archivedIssueIds)
-          .then((m) => {
-            // Only write back if the cache entry still exists (not invalidated during rebuild).
-            // An invalidate() deletes the entry, so isRebuilding() returns false — meaning
-            // a status-change PATCH arrived while we were rebuilding and we must not overwrite
-            // with stale workspace-summary data.
-            if (workspaceSummaryCache.isRebuilding(projectId)) {
-              workspaceSummaryCache.set(projectId, m);
-            }
-          })
-          .catch(() => {})
-          .finally(() => { workspaceSummaryCache.clearRebuilding(projectId); });
-      }
-    } else {
-      // Cold miss — must block on a rebuild (no stale data available), but coalesce:
-      // concurrent cold requests share ONE in-flight rebuild instead of stacking duplicates.
-      summaryMapPromise = startSummaryRebuild(projectId, issueIds, defaultBranch, archivedIssueIds);
-    }
+    const summaryMapPromise = resolveSummaryMap(projectId, issueIds, defaultBranch, archivedIssueIds);
 
     const [workspaceSummaryMap, blockedMap, issueTagMap, staleDaysRow, inProgressStaleDaysRow] = await Promise.all([
       summaryMapPromise,
@@ -736,10 +756,30 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     const projectIssues = await getGraphIssues(projectId, database);
 
     const issueIds = projectIssues.map((i) => i.id);
-    const [edges, workspaceSummaryMap] = await Promise.all([
+    const archivedIssueIds = new Set(
+      projectIssues
+        .filter((i) => i.statusName && ARCHIVE_STATUS_NAMES.has(i.statusName.toLowerCase()))
+        .map((i) => i.id),
+    );
+
+    // Same cached SWR path as getBoard (#345) instead of an unconditional cold rebuild.
+    const [edges, cachedSummaryMap] = await Promise.all([
       buildGraphEdges(issueIds, database),
-      buildWorkspaceSummaryMap(issueIds, project.defaultBranch, database),
+      resolveSummaryMap(projectId, issueIds, project.defaultBranch, archivedIssueIds),
     ]);
+
+    // The graph's issue set is a SUPERSET of the board's: getBoardIssues excludes the
+    // "Archived" column, getGraphIssues includes everything. So a map built by a board
+    // request can be missing those ids, and dropping their workspaceSummary would be a
+    // silent regression. Build a supplement for just the gap — normally empty, and never
+    // more than the Archived column, so this is not a second full rebuild.
+    const missingIds = issueIds.filter((id) => !cachedSummaryMap.has(id));
+    const workspaceSummaryMap = missingIds.length === 0
+      ? cachedSummaryMap
+      : new Map([
+        ...cachedSummaryMap,
+        ...await buildWorkspaceSummaryMap(missingIds, project.defaultBranch, database, archivedIssueIds),
+      ]);
 
     const blockedIds = new Set(
       edges
