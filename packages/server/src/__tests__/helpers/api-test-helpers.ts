@@ -9,7 +9,7 @@ import { createRoutes } from "../../routes/index.js";
 import * as schema from "@agentic-kanban/shared/schema";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTestApp as _createTestApp } from "./test-app.js";
@@ -45,12 +45,34 @@ export function createTestAppWithBoardEvents() {
 // The repo is nested one level inside the mkdtemp parent so worktrees created by the
 // product code (`dirname(repoPath)/.worktrees/...`) land inside the same throwaway
 // parent — hermetic per process, no cross-suite or cross-run collisions in os.tmpdir().
+//
+// #364: the parent is removed on process exit. Before this there was no teardown of any kind —
+// one `kanban-api-fixture-*` directory leaked per FORK of every `api-*.test.ts` suite, plus every
+// `.worktrees` entry the product code created inside it. That made this the single largest
+// contributor to the measured 8,448 live `kanban-*` dirs. An `exit` hook rather than an
+// `afterAll` because the repo is a per-process lazy singleton shared by ~10 suites: whichever
+// suite finished first would otherwise delete the repo the others are still using.
 let fixtureRepoPath: string | null = null;
+let fixtureRepoParent: string | null = null;
+let fixtureExitHookInstalled = false;
 export function ensureFixtureRepo(): string {
   if (fixtureRepoPath && existsSync(join(fixtureRepoPath, ".git", "HEAD"))) {
     return fixtureRepoPath;
   }
   const parent = mkdtempSync(join(tmpdir(), "kanban-api-fixture-"));
+  fixtureRepoParent = parent;
+  if (!fixtureExitHookInstalled) {
+    fixtureExitHookInstalled = true;
+    process.on("exit", () => {
+      if (!fixtureRepoParent) return;
+      try {
+        // Best-effort: on Windows a git worktree admin file or a just-exited child can still
+        // hold this open, and #352 established that is a real cause here rather than a
+        // hypothetical. The globalSetup sweep reaps whatever survives on the next run.
+        rmSync(fixtureRepoParent, { recursive: true, force: true, maxRetries: 1 });
+      } catch { /* the globalSetup sweep is the backstop */ }
+    });
+  }
   const repoPath = join(parent, "test-repo");
   mkdirSync(repoPath);
   const git = (...args: string[]) => execFileSync("git", args, { cwd: repoPath, stdio: "pipe" });
