@@ -6,7 +6,6 @@ import { isTerminalStatusName } from "@agentic-kanban/shared";
 import {
   DEFAULT_LOOP_MAX_UNITS_PER_ADVANCE,
   parsePluginLoopPlan,
-  parsePluginLoopUnitKey,
   pluginLoopConvergedPreferenceKey,
   pluginLoopPausedPreferenceKey,
   pluginLoopUnitKey,
@@ -36,6 +35,7 @@ import type { BoardEvents } from "./board-events.js";
 import type { CreateIssueInput, CreateIssueResult } from "./issue.service.js";
 import type { CreateWorkspaceInput, CreateWorkspaceResult } from "./workspace-internals.js";
 import { describeLoopStartOutcome, startPlannedLoopTickets, type LoopStartOutcome } from "./plugin-loop-start.service.js";
+import { selectLoopStall, type LoopStall } from "./plugin-loop-stall.js";
 
 /**
  * Board-owned converging analysis loops (plugin manifest `loops`).
@@ -206,8 +206,13 @@ export interface LoopStatus {
    * its workspace has not merged, so the planner — which reads the MAIN checkout — cannot
    * see the artifacts and every re-advance is a silent dedupe no-op. The UI renders this
    * as its own state with a one-click Merge; null when nothing is stuck.
+   *
+   * #336/#363 widened this to a second, differently-shaped stall — a workspace parked
+   * `ready_for_merge` whose issue never left In Progress — so the value now carries a `reason`
+   * and a `mergeSafe` flag. Read `mergeSafe` before offering a merge: #363's parked branch had
+   * ZERO commits, and landing it would have closed the unit without its artifacts.
    */
-  awaitingMerge: { workspaceId: string; issueNumber: number | null; issueTitle: string } | null;
+  awaitingMerge: LoopStall | null;
   /**
    * The butler's pre-read verdict for the CURRENT gate (#309), from the latest
    * `gate-recommendation` timeline event — null when there is no gate, the
@@ -260,37 +265,8 @@ export interface GateResolveResult {
   advance: LoopAdvanceResult | null;
 }
 
-/**
- * Has the PLANNER already accounted for this unit's work? (#353, generalising #326.)
- *
- * #326 removed one instance of a contradiction — a "waiting for merge / Merge now" banner
- * rendered directly above a gate card for the SAME unit — with the reasoning "a gate means the
- * planner has SEEN this unit's artifacts in the main checkout, so 'the planner cannot see them
- * until the merge lands' is false". But it only compared against the CURRENT gate's id, so a unit
- * from an EARLIER step never aged out: measured on `kassenbuch`, step 1's long-merged workspace
- * kept claiming the banner while the pipeline sat at the step-3 gate, and would have kept it for
- * all six remaining steps.
- *
- * The same reasoning applies verbatim to every step the planner reports `done` — that IS the
- * planner saying it has seen the artifacts. `progress.steps[]` is already persisted in the advance
- * payload, so this needs no new state and no git call.
- *
- * Unit ids and step ids live in different namespaces (`step-3:v1` vs `step-3`), so a unit belongs
- * to a step when it equals the step id or is that id followed by a separator. That is a convention,
- * not a contract — hence the exact-match branch first, and no attempt to parse a version.
- */
-export function isLoopUnitAccountedForByPlanner(
-  unitId: string,
-  gate: PluginLoopGate | null,
-  progress: { steps: PluginLoopProgressStep[] } | null,
-): boolean {
-  if (gate && unitId === gate.id) return true;
-  for (const step of progress?.steps ?? []) {
-    if (step.state !== "done") continue;
-    if (unitId === step.id || unitId.startsWith(`${step.id}:`)) return true;
-  }
-  return false;
-}
+/** Re-exported from its own module (#363) — see `plugin-loop-accounting.ts` for why. */
+export { isLoopUnitAccountedForByPlanner } from "./plugin-loop-accounting.js";
 
 export function createPluginLoopEngine(deps: PluginLoopDeps) {
   const { database, createIssue, createWorkspace, boardUrl, boardEvents } = deps;
@@ -376,25 +352,10 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
         // What the last advance did about starting its tickets (#357). The surface must be able to
         // say "step 5 planned, starting now" rather than leaving a blank where the gate card was.
         startNotices: payload?.startNotices ?? [],
-        // An unmerged workspace row is STALE once the planner has accounted for its unit — the
-        // current gate's unit (#326) OR any step the planner reports `done` (#353). See
-        // `isLoopUnitAccountedForByPlanner` for why those are the same claim.
-        awaitingMerge: (() => {
-          const relevant = unmerged
-            .filter((w) => {
-              const unitId = parsePluginLoopUnitKey(w.externalKey)?.unitId;
-              // A row we cannot attribute to a unit is kept: it is genuinely unmerged loop work,
-              // and silently hiding it is the failure mode #336 is about.
-              if (!unitId) return true;
-              return !isLoopUnitAccountedForByPlanner(unitId, gate, payload?.progress ?? null);
-            })
-            // The repository has no ORDER BY, so which row surfaced used to be arbitrary. Oldest
-            // ticket first: on a sequential pipeline that is the one actually blocking progress.
-            .sort((a, b) => (a.issueNumber ?? Number.MAX_SAFE_INTEGER) - (b.issueNumber ?? Number.MAX_SAFE_INTEGER));
-          return relevant.length > 0
-            ? { workspaceId: relevant[0].workspaceId, issueNumber: relevant[0].issueNumber, issueTitle: relevant[0].issueTitle }
-            : null;
-        })(),
+        // Staleness filtering, ordering and CLASSIFICATION all live in `plugin-loop-stall.ts`
+        // (#363): the query now returns two genuinely different stalls and they need different
+        // affordances, so the surface has to be told which one it is looking at.
+        awaitingMerge: selectLoopStall(unmerged, gate, payload?.progress ?? null),
         gateRecommendation,
       });
     }
