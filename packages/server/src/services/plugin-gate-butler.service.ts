@@ -166,9 +166,56 @@ export type GateRecommendationSkipReason =
   | "disabled"
   | "no-warm-butler"
   | "ask-failed"
+  | "auth-failed"
   | "reply-not-json"
   | "action-not-offered"
   | "threw";
+
+/**
+ * #355 — classify an unparseable reply before falling through to `reply-not-json`.
+ *
+ * The butler `ask` does NOT throw for a logged-out profile or an inaccessible model: it SUCCEEDS
+ * and returns the provider's human-readable error text as the reply body. That text then fails the
+ * JSON extraction, so both landed on `reply-not-json` and `ask-failed` was never used for the
+ * failures it was named for. Real events measured on the live board:
+ *
+ *   {"gateId":"step-1:v1","reason":"reply-not-json","detail":"Not logged in · Please run /login"}
+ *   {"gateId":"step-1:v1","reason":"reply-not-json","detail":"There's an issue with the selected
+ *    model (Fable). It may not exist or you may not have access to it."}
+ *
+ * Neither is a malformed-JSON problem, and the whole point of #333's typed reasons is triage
+ * without reading prose. `auth-failed` is separate from `ask-failed` because "run /login" is a
+ * different human action from "pick another model".
+ *
+ * Matching is on provider wording, which can change — hence the fallback to `reply-not-json`
+ * rather than an assertion, and hence patterns kept short and lowercased.
+ */
+const AUTH_ERROR_PATTERNS = [
+  "not logged in",
+  "please run /login",
+  "invalid api key",
+  "authentication_error",
+  "unauthorized",
+  "401",
+];
+const PROVIDER_ERROR_PATTERNS = [
+  "issue with the selected model",
+  "you may not have access to it",
+  "usage limit",
+  "quota",
+  "rate limit",
+  "overloaded",
+  "insufficient_quota",
+  "service unavailable",
+];
+
+export function classifyUnparseableButlerReply(text: string): "auth-failed" | "ask-failed" | "reply-not-json" {
+  const haystack = text.toLowerCase();
+  if (AUTH_ERROR_PATTERNS.some((p) => haystack.includes(p))) return "auth-failed";
+  if (PROVIDER_ERROR_PATTERNS.some((p) => haystack.includes(p))) return "ask-failed";
+  // Genuinely the model's own prose — the only case `reply-not-json` was ever meant to name.
+  return "reply-not-json";
+}
 
 async function noteRecommendationSkip(
   args: GateNotifyArgs,
@@ -217,10 +264,20 @@ export async function computeGateRecommendation(args: GateNotifyArgs, database: 
     }
     const m = answer.text.match(/\{[\s\S]*\}/);
     if (!m) {
-      await noteRecommendationSkip(args, "reply-not-json", answer.text, database);
+      await noteRecommendationSkip(args, classifyUnparseableButlerReply(answer.text), answer.text, database);
       return;
     }
-    const parsed = JSON.parse(m[0]) as { actionId?: unknown; reason?: unknown };
+    // #355: a reply containing braces that are not valid JSON (prose with a `{`, or two objects so
+    // the greedy match spans both) used to throw out of here and be recorded as `threw` — the
+    // least actionable bucket — even though it is exactly the malformed-reply case
+    // `reply-not-json` names. Classify it the same way as the no-braces case instead.
+    let parsed: { actionId?: unknown; reason?: unknown };
+    try {
+      parsed = JSON.parse(m[0]) as { actionId?: unknown; reason?: unknown };
+    } catch {
+      await noteRecommendationSkip(args, classifyUnparseableButlerReply(answer.text), answer.text, database);
+      return;
+    }
     const actionId = typeof parsed.actionId === "string" && actionIds.includes(parsed.actionId) ? parsed.actionId : null;
     if (!actionId) {
       await noteRecommendationSkip(
@@ -287,4 +344,74 @@ export async function summarizeGateArtifacts(
   const answer = await oneShotButlerAsk(args.projectId, prompt, 90_000);
   if (answer.isError) throw new Error(`Butler summary failed: ${answer.text.slice(0, 200)}`);
   return answer.text.trim();
+}
+
+/**
+ * #357/#354 — the butler's post-resolution turn.
+ *
+ * The moment after a decision is the ONE moment the user is guaranteed to be looking, and it was
+ * the only part of the exchange where the butler said nothing: the gate card vanishes on approval
+ * and nothing replaces it. From the user's seat "a ticket was planned and will start", "nothing
+ * will ever start" and "something failed" are indistinguishable — and the user's own report was
+ * "i approved but nothing happens, the butler didnt say anything/ask".
+ *
+ * Two rules make this reporting trustworthy rather than another over-claim:
+ *
+ * 1. **Every state claim comes from what the board DID, not from a pipeline-level word.** The turn
+ *    is built from the advance's `startOutcomes` (see plugin-loop-start.service.ts), which record
+ *    the actual decision per ticket. The previous failure here was the mirror image of silence: the
+ *    butler asserted "State: generating" for a ticket parked in Backlog with no workspace (#354),
+ *    because it paraphrased the planner's note as an execution state it had never read.
+ * 2. **It does NOT read `issues.statusName`.** That field is demonstrably late — measured at ≥84s
+ *    behind the workspace row (#358) — so guidance derived from it would inherit the very bug it is
+ *    meant to fix. Workspace-derived truth only.
+ *
+ * The prompt CARRIES the sentences rather than asking the butler to compose them from raw state:
+ * an LLM handed a state blob is exactly what produced the "generating" over-claim.
+ */
+export interface GateResolutionNotifyArgs {
+  projectId: string;
+  pluginName: string;
+  loopLabel: string;
+  gateId: string;
+  actionLabel: string;
+  /** Pre-rendered, falsifiable sentences — one per ticket the advance planned. */
+  startSentences: string[];
+  /** The planner's note for the new state, if any. Presented AS a plan, never as execution state. */
+  note: string | null;
+  converged: boolean;
+}
+
+export async function notifyButlerOfGateResolution(args: GateResolutionNotifyArgs, database: Database = db): Promise<void> {
+  try {
+    const prefs = new Map((await getAllPreferences(database)).map((p) => [p.key, p.value]));
+    // Same opt-out as the digest turn: a user who silenced the gate concierge does not want a
+    // resolution turn either.
+    if (!getBool(prefs, "butler_gate_digest")) return;
+    if (!(await ensureWarmButler(args.projectId, database))) return;
+
+    const outcomeBlock = args.startSentences.length > 0
+      ? "What the board did next (these are FACTS from the board — report them as-is):\n"
+        + args.startSentences.map((line) => `- ${line}`).join("\n") + "\n"
+      : args.converged
+        ? "The loop is now CONVERGED — no further units were planned. There is nothing left to start.\n"
+        : "No new ticket was planned by this decision (the loop is waiting on something else, not on you).\n";
+
+    sendButlerTurn(
+      args.projectId,
+      `[gate-resolved] ${args.pluginName} — "${args.loopLabel}": gate ${args.gateId} was resolved as `
+      + `"${args.actionLabel}" by the user.\n`
+      + outcomeBlock
+      + (args.note ? `Planner note about the NEW state (this is a PLAN, not something that is running): ${args.note}\n` : "")
+      + "\nTell the user, in two or three sentences: that their decision was recorded, and exactly what "
+      + "happens next using the facts above.\n"
+      + "HARD RULES for this turn:\n"
+      + "- Do NOT claim any ticket is \"generating\", \"running\", \"in progress\" or \"working\" — you have not "
+      + "observed that. The facts above are the ONLY execution claims you may make.\n"
+      + "- If a fact above says a ticket will not start on its own, OFFER to start it and say how.\n"
+      + "- Do not re-summarise the artifacts you already digested; the user just decided on them.",
+    );
+  } catch (err) {
+    console.warn(`[plugin-gate-butler] gate-resolution turn failed for ${args.pluginName}:`, err instanceof Error ? err.message : String(err));
+  }
 }

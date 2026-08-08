@@ -34,6 +34,8 @@ import { resolveStartPolicy } from "./start-policy.service.js";
 import { runPluginCommand, STRUCTURED_STDOUT_CAP } from "./plugin-exec.js";
 import type { BoardEvents } from "./board-events.js";
 import type { CreateIssueInput, CreateIssueResult } from "./issue.service.js";
+import type { CreateWorkspaceInput, CreateWorkspaceResult } from "./workspace-internals.js";
+import { describeLoopStartOutcome, startPlannedLoopTickets, type LoopStartOutcome } from "./plugin-loop-start.service.js";
 
 /**
  * Board-owned converging analysis loops (plugin manifest `loops`).
@@ -133,6 +135,13 @@ export interface LoopAdvanceResult {
   /** Units dropped because the advance hit `maxUnitsPerAdvance` — replanned next time. */
   capped: number;
   /**
+   * What this advance DID about starting each ticket it created (#351/#354/#357). The surface and
+   * the butler must report from this, never from a pipeline-level word like "generating": the two
+   * previous reporting bugs were an over-claim ("State: generating" for a parked ticket) and a
+   * silence (nothing at all after an approval).
+   */
+  startOutcomes: LoopStartOutcome[];
+  /**
    * Who will actually start the created tickets. `manual` means nobody will —
    * the tickets sit in the backlog until the user sets Start Mode or launches
    * them by hand, so the UI has to say so rather than imply the loop is running.
@@ -186,6 +195,13 @@ export interface LoopStatus {
   /** Structured check results (#290), from the latest advance. */
   checks: PluginLoopCheck[] | null;
   /**
+   * #357 — what the last advance DID about starting the tickets it planned, as pre-rendered
+   * sentences. The surface needs this because the gate card VANISHES on approval and nothing took
+   * its place: `note` alone ("Planned step 5/9 …") states that a plan exists and says nothing about
+   * what happens next, which is indistinguishable from "nothing will ever happen".
+   */
+  startNotices: string[];
+  /**
    * A finished-but-unlanded loop ticket (#299): the builder is done (In Review/Done) but
    * its workspace has not merged, so the planner — which reads the MAIN checkout — cannot
    * see the artifacts and every re-advance is a silent dedupe no-op. The UI renders this
@@ -203,6 +219,12 @@ export interface LoopStatus {
 export interface PluginLoopDeps {
   database: Database;
   createIssue?: (input: CreateIssueInput) => Promise<CreateIssueResult>;
+  /**
+   * Injected so a freshly planned loop ticket can be STARTED in the advance path instead of
+   * waiting for a monitor cycle to notice it (#351). Absent on dep-less route constructions, which
+   * degrade to the old poll-dependent behaviour and say so via a `queued-no-starter` outcome.
+   */
+  createWorkspace?: (input: CreateWorkspaceInput) => Promise<CreateWorkspaceResult>;
   /** Externally reachable board API base URL (`{{boardUrl}}` in planner command/env) —
    *  resolved by the composition root, not read from env here. */
   boardUrl: string;
@@ -221,6 +243,13 @@ interface AdvanceEventPayload {
   gate: PluginLoopGate | null;
   progress: { steps: PluginLoopProgressStep[] } | null;
   checks: PluginLoopCheck[] | null;
+  /**
+   * #357 — pre-rendered, falsifiable sentences about what happened to the tickets this advance
+   * planned. Persisted so the loop panel has something to SHOW where the gate card used to be: a
+   * freshly planned unit previously left the surface with `note` alone ("Planned step 5/9 …"), a
+   * statement that a plan exists with nothing about what the human should do about it.
+   */
+  startNotices?: string[];
 }
 
 export interface GateResolveResult {
@@ -231,8 +260,40 @@ export interface GateResolveResult {
   advance: LoopAdvanceResult | null;
 }
 
+/**
+ * Has the PLANNER already accounted for this unit's work? (#353, generalising #326.)
+ *
+ * #326 removed one instance of a contradiction — a "waiting for merge / Merge now" banner
+ * rendered directly above a gate card for the SAME unit — with the reasoning "a gate means the
+ * planner has SEEN this unit's artifacts in the main checkout, so 'the planner cannot see them
+ * until the merge lands' is false". But it only compared against the CURRENT gate's id, so a unit
+ * from an EARLIER step never aged out: measured on `kassenbuch`, step 1's long-merged workspace
+ * kept claiming the banner while the pipeline sat at the step-3 gate, and would have kept it for
+ * all six remaining steps.
+ *
+ * The same reasoning applies verbatim to every step the planner reports `done` — that IS the
+ * planner saying it has seen the artifacts. `progress.steps[]` is already persisted in the advance
+ * payload, so this needs no new state and no git call.
+ *
+ * Unit ids and step ids live in different namespaces (`step-3:v1` vs `step-3`), so a unit belongs
+ * to a step when it equals the step id or is that id followed by a separator. That is a convention,
+ * not a contract — hence the exact-match branch first, and no attempt to parse a version.
+ */
+export function isLoopUnitAccountedForByPlanner(
+  unitId: string,
+  gate: PluginLoopGate | null,
+  progress: { steps: PluginLoopProgressStep[] } | null,
+): boolean {
+  if (gate && unitId === gate.id) return true;
+  for (const step of progress?.steps ?? []) {
+    if (step.state !== "done") continue;
+    if (unitId === step.id || unitId.startsWith(`${step.id}:`)) return true;
+  }
+  return false;
+}
+
 export function createPluginLoopEngine(deps: PluginLoopDeps) {
-  const { database, createIssue, boardUrl, boardEvents } = deps;
+  const { database, createIssue, createWorkspace, boardUrl, boardEvents } = deps;
 
   function parseAdvancePayload(row: PluginLoopEventRow | null): AdvanceEventPayload | null {
     if (!row?.payloadJson) return null;
@@ -312,16 +373,24 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
         gateSince,
         progress: payload?.progress ?? null,
         checks: payload?.checks ?? null,
-        // #326: an unmerged workspace row is STALE when the planner already reports a
-        // gate for that very unit — a gate means the planner has SEEN the unit's
-        // artifacts in the main checkout, so "until the merge lands, the planner
-        // cannot see the artifacts" is false and the Merge-now banner contradicts
-        // the gate card right below it (observed with a duplicate/empty workspace
-        // left over from an earlier run of the same ticket).
+        // What the last advance did about starting its tickets (#357). The surface must be able to
+        // say "step 5 planned, starting now" rather than leaving a blank where the gate card was.
+        startNotices: payload?.startNotices ?? [],
+        // An unmerged workspace row is STALE once the planner has accounted for its unit — the
+        // current gate's unit (#326) OR any step the planner reports `done` (#353). See
+        // `isLoopUnitAccountedForByPlanner` for why those are the same claim.
         awaitingMerge: (() => {
-          const relevant = gate
-            ? unmerged.filter((w) => parsePluginLoopUnitKey(w.externalKey)?.unitId !== gate.id)
-            : unmerged;
+          const relevant = unmerged
+            .filter((w) => {
+              const unitId = parsePluginLoopUnitKey(w.externalKey)?.unitId;
+              // A row we cannot attribute to a unit is kept: it is genuinely unmerged loop work,
+              // and silently hiding it is the failure mode #336 is about.
+              if (!unitId) return true;
+              return !isLoopUnitAccountedForByPlanner(unitId, gate, payload?.progress ?? null);
+            })
+            // The repository has no ORDER BY, so which row surfaced used to be arbitrary. Oldest
+            // ticket first: on a sequential pipeline that is the one actually blocking progress.
+            .sort((a, b) => (a.issueNumber ?? Number.MAX_SAFE_INTEGER) - (b.issueNumber ?? Number.MAX_SAFE_INTEGER));
           return relevant.length > 0
             ? { workspaceId: relevant[0].workspaceId, issueNumber: relevant[0].issueNumber, issueTitle: relevant[0].issueTitle }
             : null;
@@ -493,6 +562,18 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
         + `Set the project's Start Mode to "monitor" (Monitor view) to let the loop run hands-off.`,
       );
     }
+    // #351 — start what we just planned, here, instead of minting a Backlog ticket and hoping a
+    // monitor phase notices it. Approval is an event; depending on a poll is what produced the
+    // measured 2.5-10 minute "the board is frozen after I approved" window. `startPlannedLoopTickets`
+    // owns the honesty: it returns a per-ticket outcome the caller reports verbatim, and it does NOT
+    // claim the agent is running (provisioning is minutes long — see its module header).
+    const startOutcomes: LoopStartOutcome[] = await startPlannedLoopTickets({
+      database,
+      projectId: args.projectId,
+      policy,
+      tickets: created.map((c) => ({ issueId: c.issueId, issueNumber: c.issueNumber })),
+      createWorkspace,
+    });
 
     // Persist the terminal verdict so the loop stops being replanned forever. Only a plan with NO
     // units and an affirmative `converged` counts: `units: [], converged: false` is the
@@ -527,6 +608,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
       gate: plan.gate ?? null,
       progress: plan.progress ?? null,
       checks: plan.checks ?? null,
+      startNotices: startOutcomes.map(describeLoopStartOutcome),
     };
     await insertPluginLoopEvent(eventKey, "advance", advancePayload, database);
     if (isDone && !wasDone) {
@@ -586,6 +668,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
       skippedExisting,
       capped,
       startMode: policy.mode,
+      startOutcomes,
       warnings,
       gate: plan.gate ?? null,
       progress: plan.progress ?? null,
@@ -726,6 +809,30 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
     } catch (err) {
       // The resolve itself succeeded — a re-plan failure must not mask that.
       console.warn(`[plugins] post-resolve advance of ${args.pluginSlug}:${loop.name} failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    // #357 — say something. Until now the butler produced the gate digest and the recommendation
+    // BEFORE the decision and then went silent at the one moment the user is guaranteed to be
+    // looking: the gate card disappears on approval and nothing replaces it. The user's report was
+    // "i approved but nothing happens, the butler didnt say anything/ask".
+    //
+    // The sentences are pre-rendered from what the advance actually DID (`startOutcomes`), never
+    // from `issues.statusName` — that field is measured ≥84s late (#358), so guidance built on it
+    // would inherit the bug it is meant to fix. Fire-and-forget: a gate resolve must never fail or
+    // block because an LLM was slow.
+    {
+      const startSentences = (advance?.startOutcomes ?? []).map(describeLoopStartOutcome);
+      void import("./plugin-gate-butler.service.js").then((m) => m.notifyButlerOfGateResolution({
+        projectId: args.projectId,
+        pluginName: args.pluginName ?? args.pluginSlug,
+        loopLabel: loop.label ?? loop.name,
+        gateId: resolved.gate.id,
+        actionLabel: resolved.action.label,
+        startSentences,
+        note: advance?.note ?? null,
+        converged: advance?.converged ?? false,
+      }, database)).catch((err) => {
+        console.warn(`[plugins] gate-resolution butler turn failed for ${args.pluginSlug}:${loop.name}:`, err instanceof Error ? err.message : String(err));
+      });
     }
     return {
       gateId: resolved.gate.id,

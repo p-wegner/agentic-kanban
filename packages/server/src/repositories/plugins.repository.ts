@@ -189,3 +189,20 @@ export async function listPluginEnabledPreferences(
     .from(preferences)
     .where(like(preferences.key, "plugin_enabled_%"));
 }
+
+/**
+ * The project's "In Progress" lane id, or null when it has none.
+ *
+ * Lives here rather than in the service because `services-bypass-repositories` (dependency-cruiser)
+ * is the rule that keeps drizzle out of the service layer. Used by the loop's direct-start path to
+ * measure WIP through `countActiveWip` (#351).
+ */
+export async function getInProgressStatusId(
+  projectId: string,
+  database: Database = db,
+): Promise<string | null> {
+  const rows = await database.select({ id: projectStatuses.id }).from(projectStatuses)
+    .where(and(eq(projectStatuses.projectId, projectId), eq(projectStatuses.name, "In Progress")))
+    .limit(1);
+  return rows[0]?.id ?? null;
+}
