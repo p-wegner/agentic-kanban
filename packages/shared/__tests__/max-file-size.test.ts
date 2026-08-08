@@ -69,6 +69,8 @@ const COHESION_BASELINE: Record<string, number> = {
   // session.repository.ts decomposed into ./session/* sub-modules (#45); the facade
   // barrel re-exports only, so its baseline entry is removed.
   // stack-profile.service.ts decomposed behind a facade barrel (#911) — entry removed.
+  // git-info.service.ts: the source-tree walk moved to ./git-info/code-metrics.ts (#340),
+  // taking it under the flat threshold — entry removed.
   "packages/server/src/services/agent.service.ts": 28, // #167 added a legitimate write site
   "packages/server/src/services/insights.service.ts": 23,
   // agent-questions.service.ts decomposed into ./agent-questions/* sub-modules (#912);
@@ -80,7 +82,6 @@ const COHESION_BASELINE: Record<string, number> = {
   "packages/server/src/repositories/workflow-fork.repository.ts": 33,
   "packages/server/src/repositories/issue-ai.repository.ts": 31,
   "packages/server/src/repositories/issue-service.repository.ts": 30,
-  "packages/server/src/services/git-info.service.ts": 28,
   "packages/server/src/repositories/workspace-crud.repository.ts": 27,
   "packages/server/src/scripts/mock-agent.ts": 23,
   // workspace.repository.ts decomposed into ./workspace-{reads,mutations,analytics,
