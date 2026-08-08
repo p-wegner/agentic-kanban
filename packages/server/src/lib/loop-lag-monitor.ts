@@ -37,6 +37,17 @@ export interface LoopLagStats {
   windowStartedAt: string;
   /** When these numbers were read. */
   sampledAt: string;
+  /**
+   * Worst lag seen since the process started, and when. NEVER reset.
+   *
+   * Without this the gauge is actively misleading: the warning timer resets the shared
+   * window every LOOP_LAG_WARN_INTERVAL_MS, so a scrape that lands just after a reset
+   * reports `count: 0, max: 0` — observed for real while /api/health was taking 25-54s.
+   * Someone investigating a stall would read zero lag and wrongly rule out blocking.
+   * The high-water mark always carries evidence that a stall happened.
+   */
+  allTimeMax: number;
+  allTimeMaxAt: string | null;
 }
 
 function toMs(nanoseconds: number): number {
@@ -76,8 +87,20 @@ export function startLoopLagMonitor(options?: {
   const histogram: IntervalHistogram = monitorEventLoopDelay({ resolution: LOOP_LAG_RESOLUTION_MS });
   histogram.enable();
   let windowStartedAt = now().toISOString();
+  let allTimeMax = 0;
+  let allTimeMaxAt: string | null = null;
+
+  /** Fold the current window's max into the never-reset high-water mark. */
+  function captureHighWater(): void {
+    const windowMax = toMs(histogram.max);
+    if (windowMax > allTimeMax) {
+      allTimeMax = windowMax;
+      allTimeMaxAt = now().toISOString();
+    }
+  }
 
   function stats(): LoopLagStats {
+    captureHighWater();
     return {
       p50: toMs(histogram.percentile(50)),
       p90: toMs(histogram.percentile(90)),
@@ -87,11 +110,13 @@ export function startLoopLagMonitor(options?: {
       count: histogram.count,
       windowStartedAt,
       sampledAt: now().toISOString(),
+      allTimeMax,
+      allTimeMaxAt,
     };
   }
 
   function statsAndReset(): LoopLagStats {
-    const snapshot = stats();
+    const snapshot = stats(); // also folds this window into the high-water mark
     histogram.reset();
     windowStartedAt = now().toISOString();
     return snapshot;

@@ -59,6 +59,44 @@ describe("loop lag monitor (#347)", () => {
     }
   });
 
+  it("keeps a never-reset high-water mark, so a scrape after a reset cannot report zero lag", async () => {
+    // The gauge was actively misleading without this: the warning timer resets the shared
+    // window every interval, so a read landing just after a reset returns
+    // `count: 0, max: 0`. Observed for real while /api/health was taking 25-54s — someone
+    // investigating a stall would read zero and wrongly rule out event-loop blocking.
+    const monitor = startLoopLagMonitor({ warnIntervalMs: 60_000 });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      blockEventLoop(250);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      const stalled = monitor.statsAndReset();
+      expect(stalled.max).toBeGreaterThan(100);
+      expect(stalled.allTimeMax).toBeGreaterThanOrEqual(stalled.max);
+      expect(stalled.allTimeMaxAt).not.toBeNull();
+
+      // A fresh, quiet window: the WINDOW is clean but the evidence survives.
+      const after = monitor.stats();
+      expect(after.max).toBeLessThan(stalled.max);
+      expect(after.allTimeMax).toBe(stalled.allTimeMax);
+      expect(after.allTimeMaxAt).toBe(stalled.allTimeMaxAt);
+    } finally {
+      monitor.stop();
+    }
+  });
+
+  it("reports a zeroed high-water mark on an idle loop rather than null noise", async () => {
+    const monitor = startLoopLagMonitor({ warnIntervalMs: 60_000 });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      const stats = monitor.stats();
+      expect(stats.allTimeMax).toBeGreaterThanOrEqual(0);
+      expect(stats.allTimeMax).toBeLessThan(LOOP_LAG_WARN_MS);
+    } finally {
+      monitor.stop();
+    }
+  });
+
   it("warns once per window when max lag crosses the threshold, with a correlatable timestamp", async () => {
     const onWarn = vi.fn();
     const monitor = startLoopLagMonitor({ warnThresholdMs: 100, warnIntervalMs: 40, onWarn });
