@@ -22,6 +22,12 @@ import { workspaceServicesService, parseStoredComposeProjectName } from "./works
 import type { WorkspaceSummaryCache } from "./workspace-summary-cache.service.js";
 import type { WorkspaceSummary } from "./workspace-summary.service.js";
 import { buildBoardColumns } from "../lib/board-view.js";
+import { selectCachedDiffStats } from "../lib/workspace-diff-cache.js";
+import {
+  cachedWorktreeDiffStats,
+  scheduleWorktreeDiffStatsRefresh,
+  type DiffStats,
+} from "../lib/worktree-diff-stats.js";
 
 import { ProjectError } from "./project-error.js";
 import { createInitialCommit, createSiblingRepoDir, promoteRepoToLeading } from "./project-repos.service.js";
@@ -448,48 +454,63 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       }
     }
 
-    return Promise.all(
-      gitWorktrees.map(async (wt, index) => {
-        const isMain = index === 0;
-        const normalizedWtPath = wt.path.replace(/\//g, sep);
+    // Synchronous per-worktree mapping: with the inline git spawns gone there is
+    // nothing left to await, which is also why no per-request wall-clock budget is
+    // needed here (see #342 note below) — the request is now one git spawn
+    // (listWorktrees) plus one DB query, both already bounded.
+    return gitWorktrees.map((wt, index) => {
+      const isMain = index === 0;
+      const normalizedWtPath = wt.path.replace(/\//g, sep);
 
-        let ws = wsByDir.get(normalizedWtPath);
-        if (!ws && isMain) {
-          for (const [, candidate] of wsByDir) {
-            if (candidate.isDirect && candidate.workingDir && candidate.workingDir.startsWith(normalizedWtPath)) {
-              ws = candidate;
-              break;
-            }
+      let ws = wsByDir.get(normalizedWtPath);
+      if (!ws && isMain) {
+        for (const [, candidate] of wsByDir) {
+          if (candidate.isDirect && candidate.workingDir && candidate.workingDir.startsWith(normalizedWtPath)) {
+            ws = candidate;
+            break;
           }
         }
+      }
 
-        let diffStats: { filesChanged: number; insertions: number; deletions: number } | undefined;
-        if (!isMain) {
-          const base = ws?.baseBranch || defaultBranch;
-          if (base) {
-            diffStats = await getDiffShortstat(wt.path, base);
-            if (diffStats.filesChanged === 0 && diffStats.insertions === 0 && diffStats.deletions === 0) {
-              diffStats = undefined;
-            }
+      // Diff stats are NEVER computed inline here (#342). This used to await one
+      // `git diff --shortstat` subprocess per non-main worktree inside a Promise.all:
+      // with ~45 active worktrees, 40+ parallel git spawns against one repo serialize
+      // on Windows disk/index-lock contention and the endpoint measured 112.7s
+      // followed by two 120s timeouts.
+      //
+      // A worktree that maps to a workspace is served from the diff_stat_cache_*
+      // columns the board summary path already maintains. The rest are served from a
+      // last-known-good in-process cache refreshed by a bounded background queue, so a
+      // first sighting returns undefined — which the UI already renders the same as a
+      // zero diff.
+      let diffStats: DiffStats | undefined;
+      if (!isMain) {
+        const base = ws?.baseBranch || defaultBranch;
+        if (base) {
+          diffStats = ws
+            ? (selectCachedDiffStats(ws) ?? undefined)
+            : cachedWorktreeDiffStats(wt.path, base);
+          if (!ws) {
+            scheduleWorktreeDiffStatsRefresh(wt.path, base, () => getDiffShortstat(wt.path, base));
           }
         }
+      }
 
-        return {
-          path: wt.path,
-          branch: isMain ? (defaultBranch ?? (wt.branch.replace(/^refs\/heads\//, "") || "(unset)")) : wt.branch.replace(/^refs\/heads\//, ""),
-          isMain,
-          workspace: ws ? {
-            id: ws.id,
-            status: ws.status,
-            isDirect: ws.isDirect,
-            issueId: ws.issueId,
-            issueNumber: ws.issueNumber,
-            issueTitle: ws.issueTitle,
-          } : undefined,
-          diffStats,
-        };
-      }),
-    );
+      return {
+        path: wt.path,
+        branch: isMain ? (defaultBranch ?? (wt.branch.replace(/^refs\/heads\//, "") || "(unset)")) : wt.branch.replace(/^refs\/heads\//, ""),
+        isMain,
+        workspace: ws ? {
+          id: ws.id,
+          status: ws.status,
+          isDirect: ws.isDirect,
+          issueId: ws.issueId,
+          issueNumber: ws.issueNumber,
+          issueTitle: ws.issueTitle,
+        } : undefined,
+        diffStats,
+      };
+    });
   }
 
   async function removeWorktreeById(projectId: string, body: { path?: string; workspaceId?: string }) {
