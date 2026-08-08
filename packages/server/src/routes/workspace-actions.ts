@@ -180,7 +180,11 @@ export function createWorkspaceActionsRoute(
     const wantsAsync = ["1", "true", "yes"].includes((c.req.query("async") || "").toLowerCase());
     const job = startMergeJob(id);
     const run = workspaceService
-      .mergeWorkspaceDeduped(id)
+      // Only THIS caller defers the main checkout's `git reset --hard` past the merge result
+      // (#686: the reset rewrites files → tsx hot-reload → the in-flight response is dropped).
+      // Every non-interactive caller syncs inline instead, because that deferral is what left
+      // the main checkout showing the merged files as staged deletions for ~32s (#350).
+      .mergeWorkspaceDeduped(id, { deferMainCheckoutSync: true })
       .then((result) => {
         completeMergeJob(job.jobId, id, result);
         return result;

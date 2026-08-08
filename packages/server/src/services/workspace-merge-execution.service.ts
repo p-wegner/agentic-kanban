@@ -37,6 +37,19 @@ export async function executeWorkspaceMerge(args: {
   gitService: GitService;
   createBackup: (reason: string) => Promise<unknown>;
   recordMergeAttempt: RecordMergeAttempt;
+  /**
+   * Defer the MAIN checkout's `git reset --hard` to post-response cleanup (#686: the reset
+   * rewrites files, tsx hot-reload restarts the server, and an in-flight HTTP response is
+   * dropped). Only the interactive `POST /api/workspaces/:id/merge` route needs that — it is
+   * the only caller with a connection to protect.
+   *
+   * Every other caller (monitor auto-merge, merge queue, orchestrator) syncs INLINE, because
+   * deferring is what created #350: for ~32s the main checkout showed the just-merged files
+   * as staged deletions, which silently stalled the pm-pipeline planner reading artifacts from
+   * it and would have failed the next merge's dirty-main precondition. Those callers have no
+   * response to lose, so they pay the reset before reporting success.
+   */
+  deferMainCheckoutSync?: boolean;
 }): Promise<WorkspaceMergeExecutionResult> {
   const { id, workspace, repoPath, targetBranch, database, boardEvents, gitService } = args;
   console.log(`[workspace-service] merge: workspaceId=${id} branch=${workspace.branch} targetBranch=${targetBranch} repoPath=${repoPath}`);
@@ -58,7 +71,7 @@ export async function executeWorkspaceMerge(args: {
     targetBranch,
     gitService,
     createBackup: args.createBackup,
-    deferWorkingTreeSync: true,
+    deferWorkingTreeSync: args.deferMainCheckoutSync === true,
     onMergeError: async (err) => {
       await args.recordMergeAttempt(
         workspace,

@@ -1,12 +1,11 @@
 import type { projects, workspaces } from "@agentic-kanban/shared/schema";
 import { LEADING_REPO_KEY, type RepoRebaseResponse } from "@agentic-kanban/shared";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
-import { isFailedLaunchSession } from "@agentic-kanban/shared/lib/workspace-activity-state.js";
 import {
-  getLatestSessionForWorkspace,
-  getLatestSessionStatusForWorkspace,
-  markSessionStopped,
-  countSessionMessages,
+  recoverFailedFixAndMergeSessionIfNeeded as recoverFailedFixAndMergeSession,
+  recoverZeroOutputRunningFixAndMergeSession as recoverZeroOutputRunningFixAndMerge,
+} from "./fix-and-merge-session-recovery.service.js";
+import {
 } from "../repositories/workspace-merge.repository.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
@@ -30,7 +29,7 @@ import { toExecutorProvider } from "./agent-settings.service.js";
 import { buildConflictContext } from "./phase-context.service.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import { refreshWorkspaceBuildArtifacts } from "./workspace-build-refresh.service.js";
-import { insertIssueComment, getLatestIssueCommentByKind } from "../repositories/issue-comments.repository.js";
+import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 import {
   WorkspaceError,
   resolveRelaunchAgentSelection,
@@ -100,7 +99,15 @@ export function createWorkspaceMergeService(deps: {
    *     not double an expensive build/boot — but stale/absent proof forces the gate anyway;
    *   - `skip-explicit`       → a documented, deliberate ungated merge.
    */
-  type MergeOptions = { gate?: MergeGateToken };
+  type MergeOptions = {
+    gate?: MergeGateToken;
+    /**
+     * Defer the MAIN checkout's post-merge `git reset --hard` past this call (#686). Only the
+     * interactive HTTP merge route sets it — see `executeWorkspaceMerge`. Every other caller
+     * syncs inline so the main checkout can never be observed contradicting HEAD (#350).
+     */
+    deferMainCheckoutSync?: boolean;
+  };
 
   function warningMessage(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
@@ -154,66 +161,14 @@ export function createWorkspaceMergeService(deps: {
     }
   }
 
-  async function recoverFailedFixAndMergeSessionIfNeeded(workspace: typeof workspaces.$inferSelect) {
-    if (workspace.status !== "fixing") return;
-    if (!getSessionManager) return;
-
-    const latestSession = await getLatestSessionForWorkspace(workspace.id, database);
-    if (!latestSession) return;
-
-    const isFailed = isFailedLaunchSession({
-      status: latestSession.status,
-      startedAt: latestSession.startedAt,
-      endedAt: latestSession.endedAt,
-      stats: latestSession.stats,
-    });
-    if (!isFailed) return;
-
-    await forceStopSession(latestSession.id, "stale session");
-    await updateWorkspaceStatus(workspace.id, "idle", {}, database);
-  }
-
-  async function forceStopSession(sessionId: string, label: string): Promise<void> {
-    try {
-      await getSessionManager?.().stopSession(sessionId);
-    } catch (err) {
-      console.warn(`[workspace-merge] failed to force-stop ${label} ${sessionId}:`, err instanceof Error ? err.message : String(err));
-    }
-    await markSessionStopped(sessionId, new Date().toISOString(), database);
-  }
-
-  async function recoverZeroOutputRunningFixAndMergeSession(workspace: typeof workspaces.$inferSelect) {
-    if (!getSessionManager) return;
-    const latestSession = await getLatestSessionStatusForWorkspace(workspace.id, database);
-    if (!latestSession) return;
-    if (latestSession.triggerType !== "fix-and-merge") return;
-    const ageMs = Date.now() - new Date(latestSession.startedAt).getTime();
-    if (ageMs < 60_000) return;
-    if (latestSession.status !== "running") return;
-
-    const msgCount = await countSessionMessages(latestSession.id, database);
-    if (msgCount !== 0) return;
-
-    try {
-      console.log(
-        `[workspace-merge] stopping stale zero-output fix-and-merge session ${latestSession.id} for workspace ${workspace.id} ` +
-          `after ${Math.round(ageMs / 1000)}s with no messages`,
-      );
-      await forceStopSession(latestSession.id, "stale zero-output session");
-    } catch (err) {
-      console.warn(
-        `[workspace-merge] failed to force-stop stale zero-output session ${latestSession.id}:`,
-        err instanceof Error ? err.message : String(err),
-      );
-    }
-    // A stranded fix-and-merge may have left the worktree detached mid-rebase; un-wedge it so a
-    // retry launches into an attached, non-rebasing worktree instead of re-stranding.
-    if (workspace.workingDir && !workspace.isDirect && workspace.branch) {
-      await gitService.abortRebase(workspace.workingDir).catch(() => { /* nothing to abort */ });
-      await gitService.ensureOnBranch(workspace.workingDir, workspace.branch).catch(() => { /* best effort */ });
-    }
-    await updateWorkspaceStatus(workspace.id, "idle", {}, database);
-  }
+  // Stranded fix-and-merge session recovery lives in its own module (god-module ceiling):
+  // see services/fix-and-merge-session-recovery.service.ts. Bound here so the call sites below
+  // read unchanged.
+  const recoveryDeps = { database, getSessionManager, gitService };
+  const recoverFailedFixAndMergeSessionIfNeeded = (workspace: typeof workspaces.$inferSelect) =>
+    recoverFailedFixAndMergeSession(workspace, recoveryDeps);
+  const recoverZeroOutputRunningFixAndMergeSession = (workspace: typeof workspaces.$inferSelect) =>
+    recoverZeroOutputRunningFixAndMerge(workspace, recoveryDeps);
 
   async function mergeWorkspace(id: string, opts: MergeOptions = {}) {
     let workspace = await getWorkspaceById(id, database);
@@ -403,6 +358,7 @@ export function createWorkspaceMergeService(deps: {
       gitService,
       createBackup,
       recordMergeAttempt,
+      deferMainCheckoutSync: opts.deferMainCheckoutSync === true,
     });
 
     // Multi-repo: land the prevalidated sibling merges (leading repo first — just
