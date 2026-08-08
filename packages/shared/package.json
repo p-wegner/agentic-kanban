@@ -96,6 +96,12 @@
       "import": "./dist/lib/git-exec.js",
       "default": "./src/lib/git-exec.ts"
     },
+    "./lib/temp-dir": {
+      "development": "./src/lib/temp-dir.ts",
+      "types": "./dist/lib/temp-dir.d.ts",
+      "import": "./dist/lib/temp-dir.js",
+      "default": "./src/lib/temp-dir.ts"
+    },
     "./lib/docker-exec": {
       "development": "./src/lib/docker-exec.ts",
       "types": "./dist/lib/docker-exec.d.ts",

@@ -1,6 +1,7 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createManagedTempDir, type ManagedTempDir } from "@agentic-kanban/shared/lib/temp-dir";
 import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { runSmokeCheck } from "@agentic-kanban/shared/lib/smoke-check";
 import { gradleUserHomeForWorktree } from "@agentic-kanban/shared/lib/gradle-env";
@@ -255,12 +256,22 @@ export async function runPreMergeGate(
     // projects into real data. An explicit AGENTIC_KANBAN_DIR outranks every on-disk probe.
     // Belt-and-suspenders with db-path.ts's test-throwaway redirect, which covers vitest even
     // when the verify script is invoked outside this gate.
-    let gateDataDir: string;
+    //
+    // #362: creation and removal now live in ONE place. Before this, `mkdtempSync` was called
+    // here and the directory was never removed on any path — 710 `kanban-verify-gate-*` dirs
+    // over two days, each potentially holding a throwaway SQLite DB. The removal is in a
+    // `finally` below rather than before each `return` because this branch has four early
+    // returns and grew them one at a time; a per-return `rm` would leak again on the fifth.
+    // The `mkdtempSync` fallback is preserved and must NEVER be given a real disposer:
+    // falling back means `gateDataDir === tmpdir()`, and removing that would be catastrophic.
+    let gateDir: ManagedTempDir;
     try {
-      gateDataDir = mkdtempSync(join(tmpdir(), "kanban-verify-gate-"));
+      gateDir = createManagedTempDir("kanban-verify-gate-");
     } catch {
-      gateDataDir = tmpdir();
+      gateDir = { path: tmpdir(), dispose: () => true };
     }
+    const gateDataDir = gateDir.path;
+    try {
     // #278: cap the gate's vitest fan-out. vitest's default `maxWorkers = cpus/2`
     // under `pool: "forks"` is tuned for a machine doing nothing else; a gate shares
     // the box with the dev server, other worktrees' gates and the agent, and the
@@ -356,6 +367,15 @@ export async function runPreMergeGate(
           stage: "verify",
           message: `verify_script failed (exit ${result.exitCode})${suffix}: ${summarizeVerifyFailure(result.stdout || "", result.stderr || "", workspace.id)}`,
         };
+      }
+    }
+    } finally {
+      // Best-effort by design (#352's root cause): on Windows the directory cannot be removed
+      // while any surviving grandchild of the verify run still holds it as its cwd. Log it so a
+      // recurring failure is visible instead of silently accumulating again; never throw, because
+      // a leaked directory must not turn a PASSING gate into a withheld merge.
+      if (!gateDir.dispose()) {
+        console.warn(`[pre-merge-gate] could not remove gate data dir ${gateDataDir} for workspace ${workspace.id} — a verify child may still hold it as its cwd`);
       }
     }
   }

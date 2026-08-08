@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createTestDb } from "./helpers/test-db.js";
 import { setPreference } from "../repositories/preferences.repository.js";
@@ -185,5 +186,59 @@ describe("runPreMergeGate (#821) — shared verify+smoke gate the monitor's auto
     expect(res.passed).toBe(true);
     expect(runSetupScript).toHaveBeenCalledTimes(1);
     expect(runSmokeCheck).toHaveBeenCalledTimes(1);
+  });
+
+  // ---- #362: the gate's AGENTIC_KANBAN_DIR must not survive the gate ----------------------
+  //
+  // Measured before the fix: 710 `kanban-verify-gate-*` directories in %TEMP% over two days,
+  // one per gate run, each able to hold a throwaway SQLite DB. The directory is created for
+  // the verify child's `AGENTIC_KANBAN_DIR` (#231) and was never removed on ANY path — and
+  // this branch has four early returns, so the two that matter most are the FAILING ones.
+  function gateDataDirFromLastCall(): string {
+    const env = (runSetupScript.mock.calls.at(-1)?.[2] as { env?: Record<string, string> } | undefined)?.env;
+    const dir = env?.AGENTIC_KANBAN_DIR;
+    expect(dir, "the gate must pass AGENTIC_KANBAN_DIR to the verify child").toBeTruthy();
+    return dir as string;
+  }
+
+  it("#362: removes the gate data dir after a PASSING verify run", async () => {
+    await setPreference(verifyScriptPrefKey("p"), ".\\gradlew.bat test", db);
+    runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "" });
+    const res = await runPreMergeGate({ id: "ws", workingDir: "/tmp/wt" }, "p", db);
+    expect(res.passed).toBe(true);
+    const dir = gateDataDirFromLastCall();
+    expect(dir).toContain("kanban-verify-gate-");
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  it("#362: removes the gate data dir when verify FAILS (an early-return path)", async () => {
+    await setPreference(verifyScriptPrefKey("p"), ".\\gradlew.bat test", db);
+    runSetupScript.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "compile error" });
+    const res = await runPreMergeGate({ id: "ws", workingDir: "/tmp/wt" }, "p", db);
+    expect(res.passed).toBe(false);
+    expect(existsSync(gateDataDirFromLastCall())).toBe(false);
+  });
+
+  it("#362: removes the gate data dir when verify TIMES OUT (the other early-return path)", async () => {
+    await setPreference(verifyScriptPrefKey("p"), ".\\gradlew.bat test", db);
+    runSetupScript.mockResolvedValue({ exitCode: 124, stdout: "", stderr: "", timedOut: true });
+    const res = await runPreMergeGate({ id: "ws", workingDir: "/tmp/wt" }, "p", db);
+    expect(res.timedOut).toBe(true);
+    expect(existsSync(gateDataDirFromLastCall())).toBe(false);
+  });
+
+  it("#362: removes the gate data dir when the verify script THROWS", async () => {
+    await setPreference(verifyScriptPrefKey("p"), ".\\gradlew.bat test", db);
+    // `runSetupScript` rejecting is already caught inside the gate, so capture the dir the
+    // gate handed the child and assert the `finally` still ran.
+    let captured = "";
+    runSetupScript.mockImplementation((_wd: string, _script: string, opts: { env?: Record<string, string> }) => {
+      captured = opts.env?.AGENTIC_KANBAN_DIR ?? "";
+      return Promise.reject(new Error("spawn failed"));
+    });
+    const res = await runPreMergeGate({ id: "ws", workingDir: "/tmp/wt" }, "p", db);
+    expect(res.passed).toBe(false);
+    expect(captured).toContain("kanban-verify-gate-");
+    expect(existsSync(captured)).toBe(false);
   });
 });
