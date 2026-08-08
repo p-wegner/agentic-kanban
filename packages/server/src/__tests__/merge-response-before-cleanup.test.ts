@@ -309,13 +309,19 @@ describe("merge endpoint response before cleanup", () => {
     // — the important thing is mergedAt is set so it CAN be reconciled
   });
 
-  it("mergeBranch is called with deferWorkingTreeSync:true so git reset --hard runs after the response (#686)", async () => {
+  it("deferWorkingTreeSync is now OPT-IN per caller: on by request (#686), off by default (#350)", async () => {
     // Regression for #686: git reset --hard (syncWorkingTreeHard) was called synchronously
     // inside mergeBranch() during the HTTP request. On every merge tsx hot-reload detected
     // the new .ts files and restarted the server before the response was flushed, dropping
     // the connection mid-request (~10s outage). The fix: deferWorkingTreeSync:true skips
     // the reset inside mergeBranch and embeds a [pending-wt-sync:<sha>] tag in the output;
     // runWorkspacePostMergeCleanup calls applyDeferredWorkingTreeSync after setImmediate.
+    //
+    // #350 narrowed it: that deferral is also what left the main checkout showing the merged
+    // files as staged DELETIONS for ~32s, which silently stalled a pm-pipeline planner reading
+    // artifacts from that checkout. Only a caller with a live HTTP response to protect gets the
+    // deferral now, and it must ASK — hence `deferMainCheckoutSync: true` below, which is what
+    // the `POST /:id/merge` route passes. Everything else syncs inline.
     const { workspaceId } = await seedWorkspace(db);
 
     let mergeBranchOptions: Record<string, unknown> | undefined;
@@ -334,10 +340,11 @@ describe("merge endpoint response before cleanup", () => {
       createBackup: async () => {},
     });
 
-    await svc.mergeWorkspace(workspaceId);
-
-    // mergeBranch must have been called with deferWorkingTreeSync:true
+    await svc.mergeWorkspace(workspaceId, { deferMainCheckoutSync: true });
     expect(mergeBranchOptions).toMatchObject({ deferWorkingTreeSync: true });
+    // The default-OFF half of the contract is asserted in merge-shared-core-routing.test.ts
+    // ("doMerge syncs the main checkout INLINE by default"), where the merge core is stubbed and
+    // a second merge in one test does not have to re-satisfy the whole git pre-flight.
   });
 
   it("working-tree sync is deferred: applyDeferredWorkingTreeSync runs after mergeWorkspace resolves (#686)", async () => {
@@ -373,7 +380,8 @@ describe("merge endpoint response before cleanup", () => {
       processKiller,
     });
 
-    const result = await svc.mergeWorkspace(workspaceId);
+    // Opts into the deferral explicitly (#350): this test is ABOUT the deferred ordering.
+    const result = await svc.mergeWorkspace(workspaceId, { deferMainCheckoutSync: true });
     mergeResolved = true;
     void syncCalledAt; // suppress lint
 

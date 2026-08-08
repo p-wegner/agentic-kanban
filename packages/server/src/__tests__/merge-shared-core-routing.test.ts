@@ -109,7 +109,7 @@ beforeEach(() => {
 });
 
 describe("#945: both merge entry paths route through the shared merge executor core", () => {
-  it("doMerge (manual/monitor/merge-queue path) calls runMergeCore with deferWorkingTreeSync", async () => {
+  it("doMerge syncs the main checkout INLINE by default, and defers only when the caller asks (#350)", async () => {
     const { workspaceId, issueId, doneStatusId } = await seedMergeScenario();
 
     const gitService = {
@@ -141,7 +141,11 @@ describe("#945: both merge entry paths route through the shared merge executor c
       repoPath: REPO_PATH,
       branch: "feature/ak-945-test",
       targetBranch: "master",
-      deferWorkingTreeSync: true,
+      // #350: the default flipped. Deferring the main checkout's `git reset --hard` is what left
+      // the just-merged files staged for DELETION for ~32s, which silently stalled a pm-pipeline
+      // planner reading artifacts from that checkout. Only the interactive HTTP route defers now
+      // (it has a response to protect from a tsx hot-reload, #686) — see the case below.
+      deferWorkingTreeSync: false,
     }));
 
     const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));

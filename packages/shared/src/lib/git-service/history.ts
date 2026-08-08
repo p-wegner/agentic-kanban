@@ -48,6 +48,33 @@ export async function getUncommittedTrackedChanges(repoPath: string): Promise<st
   }
 }
 
+/**
+ * Paths that are DELETED relative to HEAD in `repoPath` — in the index, in the working
+ * tree, or both. This is the exact signature of the #350 corruption: a merge advances
+ * `refs/heads/<base>` via `update-ref` while that branch is checked out here, and until
+ * the working tree is hard-synced every file the merge brought in reads as `D  path`,
+ * present in HEAD but absent from index and disk.
+ *
+ * Deliberately narrower than `getUncommittedTrackedChanges`: an operator's own edits are
+ * not this bug, and asserting on them would make the merge path refuse legitimate merges.
+ * Only *deletions vs HEAD* mean "this checkout undoes what HEAD says landed".
+ */
+export async function getDeletedPathsVsHead(repoPath: string): Promise<string[]> {
+  try {
+    const output = await execGit(["status", "--porcelain", "--untracked-files=no"], repoPath);
+    const deleted: string[] = [];
+    for (const line of output.split(/\r?\n/)) {
+      if (line.length < 4) continue;
+      // Porcelain v1: XY<space>path — X = index status, Y = working-tree status.
+      if (line[0] !== "D" && line[1] !== "D") continue;
+      deleted.push(line.slice(3).trim());
+    }
+    return deleted;
+  } catch {
+    return [];
+  }
+}
+
 /** List commit summaries between two refs, newest first. */
 export async function getCommitSummariesBetween(
   repoPath: string,
