@@ -64,7 +64,20 @@ export function applyWorkspaceAgentSelection(
   const provider = workspace.provider;
   if (provider !== "claude" && provider !== "codex" && provider !== "copilot" && provider !== "pi") return settings;
 
-  const profileName = workspace.claudeProfile || undefined;
+  // A profile pinned on the RECORD wins; otherwise inherit the board's current default
+  // (which `resolveAgentSettings` already resolved from `claude_profile`) instead of
+  // dropping it. Overwriting unconditionally meant a workspace row with a null profile —
+  // the normal case, since nothing pins one — silently erased the configured default, so
+  // the launch fell through to whatever CLAUDE_CONFIG_DIR the SERVER process happened to
+  // inherit. Symptom: setting the default profile had no effect on builders at all, and
+  // the resulting agent ran under a different (possibly quota-exhausted) subscription
+  // than the one configured. `profile` is what `resolveProviderRotation` keys off to set
+  // CLAUDE_CONFIG_DIR, so erasing it also disabled OAuth-subscription selection entirely.
+  //
+  // Only inherit a selection tagged for THIS workspace's provider — a claude profile name
+  // must never leak into a codex/copilot/pi launch.
+  const inheritedProfile = settings.profile?.provider === provider ? settings.profile.name : undefined;
+  const profileName = (workspace.claudeProfile || undefined) ?? inheritedProfile;
   const agentArgs = provider === "claude"
     ? settings.agentArgs
     : settings.agentArgs
