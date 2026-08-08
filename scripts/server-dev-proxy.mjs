@@ -395,6 +395,35 @@ async function main() {
   await listen(proxy, publicPort, publicHost);
   console.log(`[dev-proxy] API proxy listening at http://${publicHost}:${publicPort} -> ${internalPort}`);
 
+  // #343 — also listen on the IPv6 loopback so `http://localhost:PORT` stops paying a
+  // flat ~206ms tax on EVERY request. Measured: time_connect via `localhost` 0.204-0.216s,
+  // via `127.0.0.1` 0.0009s. Windows resolves `localhost` to `::1` first; with only
+  // 127.0.0.1 bound, every client attempts the IPv6 connect, waits for the refusal, and
+  // falls back to IPv4. That is a hard floor under time_total, not proxy or server time.
+  //
+  // This listener is the one that matters in DEV: the proxy owns the public port that
+  // everything the board generates points agents at (ticket-context files, CLAUDE.md,
+  // the board-navigator skill, MCP notifyBoard, the docs all say `localhost:3001`), so
+  // every agent curl and every board-notify paid the tax here. server-start.ts does the
+  // same for the non-proxied/production listener.
+  //
+  // Deliberately `::1`, never `::`: the board API has no auth, so loopback-only is a
+  // security invariant. Only added when the public host is the IPv4 loopback default — an
+  // operator who set KANBAN_HOST has chosen their binding and we must not widen it.
+  // Non-fatal on failure: the IPv4 listener is the one of record.
+  if (publicHost === DEFAULT_HOST) {
+    const ipv6Proxy = createStableDevProxy({ publicPort, publicHost, backendPort: internalPort, backendHost });
+    try {
+      await listen(ipv6Proxy, publicPort, "::1");
+      ipv6Proxy.on("error", (err) => {
+        console.warn(`[dev-proxy] IPv6 loopback listener error (non-fatal, IPv4 still serving): ${err.message}`);
+      });
+      console.log(`[dev-proxy] also listening at http://[::1]:${publicPort} (removes the ~206ms IPv6-fallback tax on \`localhost\`)`);
+    } catch (err) {
+      console.warn(`[dev-proxy] could not bind [::1]:${publicPort} (non-fatal, IPv4 still serving): ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   const backend = spawnWatchedBackend({ serverDir, publicPort, internalPort });
   let shuttingDown = false;
 

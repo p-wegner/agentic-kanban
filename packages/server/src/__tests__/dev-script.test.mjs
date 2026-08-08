@@ -33,9 +33,17 @@ function serverPort(server) {
   return address.port;
 }
 
+// Repo root, for the source-level guard on the IPv6 binding (#343).
+const repoRootDir = join(import.meta.dirname, "..", "..", "..", "..");
+
 function requestText(port, path = "/health") {
+  return requestTextOn("127.0.0.1", port, path);
+}
+
+/** Like requestText but against an explicit loopback address (IPv4 or IPv6). */
+function requestTextOn(hostname, port, path = "/health") {
   return new Promise((resolveRequest, rejectRequest) => {
-    const req = httpRequest({ hostname: "127.0.0.1", port, path, timeout: 5000 }, (res) => {
+    const req = httpRequest({ hostname, port, path, timeout: 5000 }, (res) => {
       const chunks = [];
       res.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
       res.on("end", () => resolveRequest({ status: res.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
@@ -390,6 +398,49 @@ describe("server dev proxy", () => {
     expect(env.KANBAN_SERVER_PORT).toBe("3222");
     expect(env.SERVER_PORT).toBe("3222");
     expect(env.PORT).toBe("3222");
+  });
+
+  // #343: with only 127.0.0.1 bound, `http://localhost:PORT` pays a flat ~206ms tax on
+  // EVERY request — Windows resolves `localhost` to `::1` first, so every client attempts
+  // the IPv6 connect, waits for the refusal, and falls back to IPv4. Measured
+  // time_connect: 0.204-0.216s via `localhost` vs 0.0009s via `127.0.0.1`. Everything the
+  // board generates points agents at `localhost:3001`, and the proxy owns that port.
+  it("serves the same public port over BOTH loopback families, so `localhost` needs no IPv6 fallback", async () => {
+    const backend = createBackend("dual-stack");
+    let ipv4Proxy = null;
+    let ipv6Proxy = null;
+
+    try {
+      await listen(backend, 0);
+      const backendPort = serverPort(backend);
+
+      const proxyOptions = { publicPort: 0, backendPort, retryTimeoutMs: 2000, retryDelayMs: 25 };
+      ipv4Proxy = createStableDevProxy(proxyOptions);
+      await listen(ipv4Proxy, 0, "127.0.0.1");
+      const publicPort = serverPort(ipv4Proxy);
+
+      // Binding ::1 on the SAME port as 127.0.0.1 must not conflict — they are distinct
+      // sockets. This is the assertion that the production wiring depends on.
+      ipv6Proxy = createStableDevProxy({ ...proxyOptions, publicPort });
+      await listen(ipv6Proxy, publicPort, "::1");
+
+      await expect(requestText(publicPort)).resolves.toMatchObject({ status: 200, body: "dual-stack" });
+      // Same port, IPv6 loopback — this is the request that used to be refused and cost
+      // a `localhost` client its ~206ms fallback.
+      await expect(requestTextOn("::1", publicPort)).resolves.toMatchObject({ status: 200, body: "dual-stack" });
+    } finally {
+      if (ipv6Proxy) await closeServer(ipv6Proxy).catch(() => {});
+      if (ipv4Proxy) await closeServer(ipv4Proxy).catch(() => {});
+      if (backend.listening) await closeServer(backend).catch(() => {});
+    }
+  });
+
+  it("binds the IPv6 loopback only, never the wildcard — the board API has no auth", () => {
+    // Guards the security invariant: `::` would expose the unauthenticated board API to
+    // the network. The source must say `"::1"`.
+    const source = readFileSync(join(repoRootDir, "scripts", "server-dev-proxy.mjs"), "utf8");
+    expect(source).toContain('"::1"');
+    expect(source).not.toMatch(/listen\([^)]*,\s*"::"\s*\)/);
   });
 });
 
