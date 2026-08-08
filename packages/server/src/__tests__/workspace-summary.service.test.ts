@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi, beforeEach, afterAll } from "vitest";
+import { sessionOutputPath } from "@agentic-kanban/shared/lib/session-files";
 import { issues, projects, projectStatuses, sessions, workflowEdges, workflowNodes, workflowTemplates, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 
@@ -16,9 +17,15 @@ function makeTempWorktree(label: string): string {
   tempWorktrees.push(dir);
   return dir;
 }
+// Session .out transcript fixtures (#341) written into %TEMP% under the real
+// sessionOutputPath scheme, so the service's bounded reader is exercised for real.
+const tempOutFiles: string[] = [];
 afterAll(() => {
   while (tempWorktrees.length > 0) {
     try { rmSync(tempWorktrees.pop()!, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+  while (tempOutFiles.length > 0) {
+    try { unlinkSync(tempOutFiles.pop()!); } catch { /* best effort */ }
   }
 });
 
@@ -638,5 +645,91 @@ describe("workspace-summary.service", () => {
     expect(summary!.main).not.toBeNull();
     expect(summary!.main!.id).toBe(activeWorkspaceId);
     expect(summary!.main!.status).toBe("active");
+  });
+
+  // #341: the transcript read is BOUNDED to a tail window. Before the fix this was a
+  // full readFileSync of a multi-MB .out file on the event loop, and — because the
+  // extractors return the FIRST match in whatever window they get — lastTool reported
+  // the session's opening tool forever. Both properties are asserted here: the recent
+  // (tail) activity is what surfaces, and the >256KB head is never consulted.
+  it("derives lastTool/lastAssistantMessage from the tail of a >256KB .out transcript (#341)", async () => {
+    const { db } = createTestDb();
+    const now = new Date().toISOString();
+    const projectId = randomUUID();
+    const statusId = randomUUID();
+    const issueId = randomUUID();
+    const workspaceId = randomUUID();
+    const sessionId = randomUUID();
+
+    await db.insert(projects).values({
+      id: projectId,
+      name: "Tail Project",
+      repoPath: "/tmp/tail-project",
+      repoName: "tail-project",
+      defaultBranch: "main",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(projectStatuses).values({
+      id: statusId,
+      projectId,
+      name: "In Progress",
+      position: 1,
+      createdAt: now,
+    });
+    await db.insert(issues).values({
+      id: issueId,
+      projectId,
+      statusId,
+      issueNumber: 1,
+      title: "Tail read",
+      position: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(workspaces).values({
+      id: workspaceId,
+      issueId,
+      branch: "feature/tail",
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(sessions).values({
+      id: sessionId,
+      workspaceId,
+      executor: "claude",
+      status: "running",
+      startedAt: now,
+    });
+
+    const jsonl = (tool: string, text: string) =>
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "tool_use", name: tool }, { type: "text", text }] },
+      }) + "\n";
+
+    // The session's OPENING activity, then >256KB of unparseable filler (real
+    // transcripts are full of it), then the RECENT activity. The head event is thus
+    // outside the tail window: a full-file read reports "Glob" (what this used to do),
+    // a bounded tail read reports "Bash".
+    const filler = "not-a-json-stream-line padding padding padding\n".repeat(7000);
+    expect(filler.length).toBeGreaterThan(256 * 1024);
+    const outPath = sessionOutputPath(sessionId);
+    writeFileSync(
+      outPath,
+      jsonl("Glob", "Opening move — must not be reported.")
+        + filler
+        + jsonl("Bash", "Recent activity — this is the tail."),
+      "utf-8",
+    );
+    tempOutFiles.push(outPath);
+
+    const summaryMap = await buildWorkspaceSummaryMap([issueId], "main", db);
+    const main = summaryMap.get(issueId)?.main;
+
+    expect(main).toBeTruthy();
+    expect(main!.lastTool).toBe("Bash");
+    expect(main!.lastAssistantMessage).toBe("Recent activity — this is the tail.");
   });
 });

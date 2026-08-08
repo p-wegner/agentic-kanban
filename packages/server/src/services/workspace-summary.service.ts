@@ -6,7 +6,7 @@ import { isAnalyticsNoise } from "./session-filter.js";
 import { computeWorkspaceCodeMetrics, parseStoredWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import type { WorkspaceCodeMetrics, WorkspaceSummary } from "@agentic-kanban/shared";
 import { ACTIVE_WORKSPACE_STATUSES, workspaceStatusPriority } from "@agentic-kanban/shared";
-import { readSessionStdoutFile } from "../lib/session-output-reader.js";
+import { readSessionStdoutFileTail } from "../lib/session-output-reader.js";
 import { extractAssistantMessage, extractToolName, safeParseStringArray } from "../lib/session-message-extraction.js";
 import { selectLatestSessionsByWorkspace, parseContextTokensFromStats } from "../lib/workspace-summary-session.js";
 import { selectCachedDiffStats, isPlanOnlySession, isDiffCacheStale } from "../lib/workspace-diff-cache.js";
@@ -486,10 +486,24 @@ async function collectLastToolAndMessages(
   const lastAssistantMsgBySession = new Map<string, string>();
   if (latestSessionIds.length === 0) return { lastToolBySession, lastAssistantMsgBySession };
 
-  // Prefer .out file for stdout; fall back to DB for historical sessions
+  // Prefer .out file for stdout; fall back to DB for historical sessions.
+  //
+  // BOUNDED read (#341): this used to be a full readFileSync of every candidate
+  // session's transcript on the event loop. %TEMP% holds multi-MB .out files
+  // (5.5 MB measured), and a board/graph rebuild does this for every non-closed
+  // main workspace — tens of MB of synchronous I/O per cold rebuild, which
+  // blocks the single Node thread for every other request. The last tool /
+  // assistant message lives in the final JSONL lines by construction, so a
+  // 256 KB tail is sufficient; readSessionStdoutFileTail drops the partial
+  // first line so callers only ever see complete lines.
+  //
+  // Side effect, deliberate: extractToolName/extractAssistantMessage return the
+  // FIRST match in the window they are given, so with a whole-file read
+  // `lastTool` was really the session's FIRST tool. Over a tail window it now
+  // reflects recent activity, which is what the field name promises.
   const needsDb: string[] = [];
   for (const sid of latestSessionIds) {
-    const fileContent = readSessionStdoutFile(sid);
+    const fileContent = readSessionStdoutFileTail(sid);
     if (fileContent === null) {
       needsDb.push(sid);
       continue;
