@@ -61,10 +61,16 @@ export function useBoardDataController({ setError }: UseBoardDataControllerParam
       setActiveProjectId(null);
       return;
     }
+    // #327: don't fall back to projs[0] while the active-project preference is
+    // still loading — the `current ?? nextId` guard below makes the first pick
+    // sticky, so racing the preference query dumped users into the wrong
+    // project on every reload. Wait until the preference has resolved (success
+    // OR error) before choosing.
+    if (activeProjectPreferenceQuery.isLoading) return;
     const preferredId = activeProjectPreferenceQuery.data?.projectId;
     const nextId = preferredId && projs.some((p) => p.id === preferredId) ? preferredId : projs[0].id;
     setActiveProjectId((current) => current ?? nextId);
-  }, [activeProjectPreferenceQuery.data?.projectId, projectsQuery.data]);
+  }, [activeProjectPreferenceQuery.isLoading, activeProjectPreferenceQuery.data?.projectId, projectsQuery.data]);
 
   useEffect(() => {
     if (projectsQuery.error) setError(projectsQuery.error instanceof Error ? projectsQuery.error.message : "Failed to load projects");

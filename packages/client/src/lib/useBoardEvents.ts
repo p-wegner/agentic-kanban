@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from "react";
 import { SESSION_ACTIVITY_WS_EVENT, type SessionActivityEventDetail } from "./sessionTranscriptEvents.js";
 import { showToast } from "./toast.js";
-import { requestViewNavigation } from "./navigateView.js";
+import { requestProjectSelection, requestViewNavigation } from "./navigateView.js";
 import { usePluginViewStore } from "../stores/pluginViewStore.js";
 
 /**
@@ -197,6 +197,10 @@ export function useBoardEvents(
           // Warning tone + sticky + click-to-navigate: a green auto-fading toast
           // understated a BLOCKING decision and left no way to reach it.
           const navigateToGate = () => {
+            // #323: the gate may belong to a project that is not active (the
+            // "__projects" meta-subscription, or the user switched away since
+            // the toast appeared) — switch first, then focus the loop pane.
+            requestProjectSelection(msg.projectId);
             usePluginViewStore.getState().focusLoop(msg.pluginSlug, msg.loopName);
             requestViewNavigation("plugin-views");
           };
