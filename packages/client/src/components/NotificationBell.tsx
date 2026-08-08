@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { NotificationEvent, NotificationEventType } from "../hooks/useActivityNotifications.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { apiFetch } from "../lib/api.js";
-import { requestViewNavigation } from "../lib/navigateView.js";
+import { requestProjectSelection, requestViewNavigation } from "../lib/navigateView.js";
 import { usePluginViewStore } from "../stores/pluginViewStore.js";
 
 function eventLabel(type: NotificationEventType): string {
@@ -48,18 +48,15 @@ const INBOX_KIND_MARK: Record<InboxItem["kind"], string> = {
  * The durable half of the dropdown (#302): pending DECISIONS read fresh from the
  * server whenever the bell opens — unlike the activity feed below it, these are
  * state, not events, so they survive reloads and disappear only when resolved.
+ * Items are fetched by the bell itself (#328) so the badge can count them even
+ * while the dropdown is closed; this section only renders them.
  */
-function InboxSection({ onNavigate }: { onNavigate: () => void }) {
-  const [items, setItems] = useState<InboxItem[] | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    apiFetch<{ items: InboxItem[] }>("/api/inbox")
-      .then((res) => { if (!cancelled) setItems(res.items); })
-      .catch(() => { if (!cancelled) setItems([]); });
-    return () => { cancelled = true; };
-  }, []);
-
+function InboxSection({ items, onNavigate }: { items: InboxItem[] | null; onNavigate: () => void }) {
   function open(item: InboxItem) {
+    // #323: an inbox item may belong to ANOTHER project — switch first, then
+    // navigate. The loopFocus request survives the project switch, so the loop
+    // pane picks it up once the target project's plugin surface loads.
+    requestProjectSelection(item.projectId);
     if (item.link.view === "plugin-views") {
       if (item.link.pluginSlug && item.link.loopName) {
         usePluginViewStore.getState().focusLoop(item.link.pluginSlug, item.link.loopName);
@@ -185,6 +182,26 @@ export function NotificationBell({
 }: NotificationBellProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // #328: pending decisions (cross-project inbox) are STATE, not events — they
+  // must light the badge on a fresh page load, independent of the activity
+  // feed's lastReadAt bookkeeping. Fetched here (not in InboxSection) so the
+  // count exists while the dropdown is closed; refreshed on open and on a slow
+  // poll so a resolved gate clears the badge without a reload.
+  const [inboxItems, setInboxItems] = useState<InboxItem[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      apiFetch<{ items: InboxItem[] }>("/api/inbox")
+        .then((res) => { if (!cancelled) setInboxItems(res.items); })
+        .catch(() => { if (!cancelled) setInboxItems((prev) => prev ?? []); });
+    };
+    load();
+    const timer = setInterval(load, 60_000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [isOpen]);
+  const inboxCount = inboxItems?.length ?? 0;
+  const badgeCount = unreadCount + inboxCount;
+
   useEffect(() => {
     if (!isOpen) return;
     function handleClick(e: MouseEvent) {
@@ -218,14 +235,14 @@ export function NotificationBell({
         onClick={handleBellClick}
         className="relative p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
         title="Notifications"
-        aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ""}`}
+        aria-label={`Notifications${badgeCount > 0 ? ` (${badgeCount} unread)` : ""}`}
       >
         <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
         </svg>
-        {unreadCount > 0 && (
+        {badgeCount > 0 && (
           <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-semibold leading-none">
-            {unreadCount > 9 ? "9+" : unreadCount}
+            {badgeCount > 9 ? "9+" : badgeCount}
           </span>
         )}
       </button>
@@ -245,7 +262,7 @@ export function NotificationBell({
           </div>
 
           <div className="max-h-80 overflow-y-auto">
-            <InboxSection onNavigate={onClose} />
+            <InboxSection items={inboxItems} onNavigate={onClose} />
             {events.length === 0 ? (
               <p className="px-3 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
                 No recent activity

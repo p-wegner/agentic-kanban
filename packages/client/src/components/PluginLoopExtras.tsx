@@ -224,9 +224,11 @@ export function GateCard({ pluginId, loopName, projectId, gate, checks, recommen
   const [resolving, setResolving] = useState(false);
   const [drafting, setDrafting] = useState(false);
   const [editing, setEditing] = useState<{ path: string; content: string; loading: boolean; saving: boolean } | null>(null);
+  const [summary, setSummary] = useState<string | null>(null);
+  const [summarizing, setSummarizing] = useState(false);
 
   // A fresh gate (new id) must not inherit the previous gate's half-typed feedback.
-  useEffect(() => { setSelected(null); setInput(""); setEditing(null); }, [gate.id]);
+  useEffect(() => { setSelected(null); setInput(""); setEditing(null); setSummary(null); }, [gate.id]);
 
   async function act(action: PluginGateAction) {
     if (action.input === "text" && selected?.id !== action.id) {
@@ -278,6 +280,23 @@ export function GateCard({ pluginId, loopName, projectId, gate, checks, recommen
       showToast(err instanceof Error ? err.message : "Draft failed", "error");
     } finally {
       setDrafting(false);
+    }
+  }
+
+  /** Summarize-for-me (#330): one click → decision-ready butler digest, rendered on the card. */
+  async function summarize() {
+    if (summarizing) return;
+    setSummarizing(true);
+    try {
+      const res = await apiPost<{ summary: string }>(
+        `/api/plugins/${pluginId}/loops/${encodeURIComponent(loopName)}/gate/summarize`,
+        { projectId, gateId: gate.id },
+      );
+      setSummary(res.summary);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Summary failed", "error");
+    } finally {
+      setSummarizing(false);
     }
   }
 
@@ -359,6 +378,15 @@ export function GateCard({ pluginId, loopName, projectId, gate, checks, recommen
           >
             Accept
           </button>
+        </div>
+      )}
+      {/* Summarize-for-me (#330) — butler digest rendered in place. */}
+      {summary && (
+        <div
+          className="text-xs whitespace-pre-wrap rounded border border-amber-200 dark:border-amber-800 bg-white/60 dark:bg-gray-900/40 px-2.5 py-2 text-amber-900 dark:text-amber-200"
+          data-testid="plugin-gate-summary"
+        >
+          {summary}
         </div>
       )}
       {(gate.artifacts?.length ?? 0) > 0 && (
@@ -462,6 +490,15 @@ export function GateCard({ pluginId, loopName, projectId, gate, checks, recommen
             {resolving ? "Applying…" : selected?.id === action.id && action.input === "text" ? `Confirm: ${action.label}` : action.label}
           </button>
         ))}
+        <button
+          onClick={() => void summarize()}
+          disabled={summarizing}
+          className="text-sm px-3 py-1.5 rounded border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/40 disabled:opacity-50"
+          data-testid="plugin-gate-summarize"
+          title="Butler reads the artifacts and posts a decision-ready digest here (#330)"
+        >
+          {summarizing ? "Summarizing…" : "🤵 Summarize for me"}
+        </button>
       </div>
     </div>
   );

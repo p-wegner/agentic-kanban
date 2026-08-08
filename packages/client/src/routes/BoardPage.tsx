@@ -37,6 +37,7 @@ import { useBoardSelectionStore } from "../stores/boardSelectionStore.js";
 import { useBoardFilterStore, boardFilterActions } from "../stores/boardFilterStore.js";
 import { useBoardBulkSelectionStore } from "../stores/boardBulkSelectionStore.js";
 import { usePluginViewStore } from "../stores/pluginViewStore.js";
+import { SELECT_PROJECT_EVENT, type SelectProjectDetail } from "../lib/navigateView.js";
 import type {
   DependencyInfo,
   IssueWithStatus,
@@ -248,6 +249,23 @@ export function BoardPage() {
     refetchBoard,
     loadProjects,
   });
+
+  // #323: cross-project deep links (inbox gate entries, sticky gate toasts,
+  // desktop notifications) dispatch SELECT_PROJECT_EVENT from lib-layer code;
+  // BoardPage owns handleProjectChange, so it performs the actual switch here.
+  const projectChangeRef = useRef(handleProjectChange);
+  projectChangeRef.current = handleProjectChange;
+  const activeProjectIdSelectRef = useRef(activeProjectId);
+  activeProjectIdSelectRef.current = activeProjectId;
+  useEffect(() => {
+    function onSelectProject(e: Event) {
+      const detail = (e as CustomEvent<SelectProjectDetail>).detail;
+      if (!detail?.projectId || detail.projectId === activeProjectIdSelectRef.current) return;
+      void projectChangeRef.current(detail.projectId);
+    }
+    window.addEventListener(SELECT_PROJECT_EVENT, onSelectProject);
+    return () => window.removeEventListener(SELECT_PROJECT_EVENT, onSelectProject);
+  }, []);
 
 
   const { handleQuickPriorityChange, handleQuickAddTag, handleQuickRemoveTag, handleQuickTogglePinned } =
