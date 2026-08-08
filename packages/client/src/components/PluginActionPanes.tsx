@@ -9,6 +9,7 @@ import {
   LoopStateChips,
   LoopTimeline,
   ProgressStepper,
+  type LoopStall,
   type PluginCheck,
   type PluginGate,
   type PluginProgressStep,
@@ -55,8 +56,12 @@ export type PluginLoop = PluginOwner & {
   progress: { steps: PluginProgressStep[] } | null;
   checks: PluginCheck[] | null;
   totalCostUsd?: number;
-  /** Finished-but-unlanded loop ticket (#299) — the silent-stall state, now named. */
-  awaitingMerge?: { workspaceId: string; issueNumber: number | null; issueTitle: string } | null;
+  /**
+   * Finished-but-unlanded loop ticket (#299) — the silent-stall state, now named. Since #363 it
+   * also carries a workspace parked `ready_for_merge` whose issue never advanced; check
+   * `mergeSafe` before offering to land it.
+   */
+  awaitingMerge?: LoopStall | null;
   /** The butler's pre-read verdict for the current gate (#309). */
   gateRecommendation?: { actionId: string; reason: string } | null;
 };

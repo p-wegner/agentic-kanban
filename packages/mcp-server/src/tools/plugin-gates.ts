@@ -33,7 +33,20 @@ interface SurfaceLoop {
   gate: { id: string; question: string; artifacts?: string[]; actions: Array<{ id: string; label: string; input?: string }> } | null;
   checks: Array<{ name: string; verdict: string; detail?: string }> | null;
   gateRecommendation: { actionId: string; reason: string } | null;
-  awaitingMerge: { workspaceId: string; issueNumber: number | null; issueTitle: string } | null;
+  /**
+   * #299's finished-but-unlanded stall, plus (#363) a workspace parked `ready_for_merge` whose
+   * issue never left In Progress. `mergeSafe: false` marks the second kind: do NOT merge it —
+   * the measured instance's branch had zero commits, and landing it would close the unit
+   * without its artifacts.
+   */
+  awaitingMerge: {
+    workspaceId: string;
+    issueNumber: number | null;
+    issueTitle: string;
+    reason?: string;
+    mergeSafe?: boolean;
+    detail?: string;
+  } | null;
   note: string | null;
 }
 

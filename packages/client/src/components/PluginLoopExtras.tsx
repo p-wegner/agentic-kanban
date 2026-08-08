@@ -30,6 +30,24 @@ export type PluginProgressStep = {
 export type PluginCheck = { name: string; verdict: "pass" | "warn" | "fail"; detail?: string };
 export type StartPolicy = { mode: string; autoStartUnblocked: boolean } | null;
 
+/**
+ * The loop's "work exists but nothing landed it" state (#299/#336/#363).
+ *
+ * `mergeSafe` is load-bearing, not decoration: on #363's live stall the parked branch had ZERO
+ * commits, so a one-click Merge would have closed the unit without its artifacts. Read it before
+ * offering the button.
+ */
+export type LoopStall = {
+  workspaceId: string;
+  issueNumber: number | null;
+  issueTitle: string;
+  reason?: "builder-finished-unmerged" | "workspace-parked-issue-unfinished";
+  mergeSafe?: boolean;
+  detail?: string;
+  since?: string;
+  contradictoryReadyFlag?: boolean;
+};
+
 // ── State chips (#293) ────────────────────────────────────────────────
 
 /** Why the loop planned nothing — four look-alike states, told apart explicitly. */
@@ -37,13 +55,20 @@ export function LoopStateChips({ loop, startPolicy }: {
   loop: {
     paused: boolean; converged: boolean; openTickets: number;
     gate: PluginGate | null; note: string | null; closedTickets: number;
-    awaitingMerge?: { workspaceId: string; issueNumber: number | null; issueTitle: string } | null;
+    awaitingMerge?: LoopStall | null;
   };
   startPolicy: StartPolicy;
 }) {
   const chips: Array<{ text: string; tone: "gray" | "amber" | "green" | "blue" | "red" }> = [];
   if (loop.paused) chips.push({ text: "Paused", tone: "amber" });
-  if (loop.awaitingMerge) chips.push({ text: "Step done — waiting for merge", tone: "amber" });
+  // #363: two different stalls reach this field now, and calling the parked one "step done"
+  // is the misreport the ticket was filed for — that workspace's ticket never finished and its
+  // branch may hold nothing at all.
+  if (loop.awaitingMerge) {
+    chips.push(loop.awaitingMerge.mergeSafe === false
+      ? { text: "Step parked — ticket never finished", tone: "red" }
+      : { text: "Step done — waiting for merge", tone: "amber" });
+  }
   else if (loop.openTickets > 0) chips.push({ text: "Round running", tone: "blue" });
   else if (loop.converged) chips.push({ text: "Converged", tone: "green" });
   else if (loop.gate) chips.push({ text: "Waiting on you", tone: "amber" });
@@ -155,9 +180,15 @@ export function ProgressStepper({ steps, onOpenArtifact }: {
  * workspace never landed, so the planner (reading the MAIN checkout) is blind
  * and every advance is a dedupe no-op. One click triggers the board merge; the
  * merge-to-advance hook (#298) then surfaces the gate on its own.
+ *
+ * #363 added a SECOND stall to the same field — a workspace parked `ready_for_merge` whose
+ * issue never left In Progress — and it must NOT get the merge button. The live instance's
+ * branch had zero commits; merging it would close the unit without its artifacts and deadlock
+ * the loop, which is the outcome `exit-workflow.ts` already refuses by name. So when
+ * `mergeSafe === false` this card reports and links, and does not offer to land anything.
  */
 export function AwaitingMergeCard({ awaitingMerge, onMergeStarted }: {
-  awaitingMerge: { workspaceId: string; issueNumber: number | null; issueTitle: string };
+  awaitingMerge: LoopStall;
   onMergeStarted: () => void;
 }) {
   const [merging, setMerging] = useState(false);
@@ -174,24 +205,48 @@ export function AwaitingMergeCard({ awaitingMerge, onMergeStarted }: {
       setMerging(false);
     }
   }
+  const parked = awaitingMerge.mergeSafe === false;
+  const ref = awaitingMerge.issueNumber != null ? `#${awaitingMerge.issueNumber} ` : "";
   return (
     <div
-      className="rounded border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 p-3 max-w-2xl flex items-center gap-3"
+      className={parked
+        ? "rounded border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20 p-3 max-w-2xl flex items-center gap-3"
+        : "rounded border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 p-3 max-w-2xl flex items-center gap-3"}
       data-testid="plugin-loop-awaiting-merge"
+      data-stall-reason={awaitingMerge.reason ?? "builder-finished-unmerged"}
     >
-      <div className="flex-1 text-xs text-amber-900 dark:text-amber-200">
-        <span className="font-medium">Step finished but not landed:</span>{" "}
-        {awaitingMerge.issueNumber != null ? `#${awaitingMerge.issueNumber} ` : ""}{awaitingMerge.issueTitle}.
-        {" "}Until the merge lands, the planner cannot see the artifacts.
+      <div className={parked
+        ? "flex-1 text-xs text-red-900 dark:text-red-200"
+        : "flex-1 text-xs text-amber-900 dark:text-amber-200"}>
+        <span className="font-medium">
+          {parked ? "Step parked, ticket never finished:" : "Step finished but not landed:"}
+        </span>{" "}
+        {ref}{awaitingMerge.issueTitle}.
+        {" "}{awaitingMerge.detail ?? "Until the merge lands, the planner cannot see the artifacts."}
+        {awaitingMerge.contradictoryReadyFlag && (
+          <>{" "}<span className="font-medium">
+            The workspace also reports ready_for_merge and readyForMerge=false at the same time — treat both as unreliable.
+          </span></>
+        )}
       </div>
-      <button
-        onClick={() => void merge()}
-        disabled={merging}
-        className="text-sm px-3 py-1.5 rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 shrink-0"
-        data-testid="plugin-loop-merge-now"
-      >
-        {merging ? "Merging…" : "Merge now"}
-      </button>
+      {parked ? (
+        <a
+          href={`/workspaces/${awaitingMerge.workspaceId}`}
+          className="text-sm px-3 py-1.5 rounded border border-red-400 dark:border-red-600 text-red-800 dark:text-red-200 hover:bg-red-100 dark:hover:bg-red-900/40 shrink-0"
+          data-testid="plugin-loop-inspect-stall"
+        >
+          Inspect workspace
+        </a>
+      ) : (
+        <button
+          onClick={() => void merge()}
+          disabled={merging}
+          className="text-sm px-3 py-1.5 rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 shrink-0"
+          data-testid="plugin-loop-merge-now"
+        >
+          {merging ? "Merging…" : "Merge now"}
+        </button>
+      )}
     </div>
   );
 }

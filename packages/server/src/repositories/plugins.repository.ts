@@ -115,17 +115,50 @@ export interface LoopUnmergedWorkspaceRow {
   /** The ticket's full loop unit key (`plugin-loop:<slug>:<loop>:<unitId>`) — lets the
    *  service correlate this row with the CURRENT gate's unit (#326). */
   externalKey: string | null;
+  /** `workspaces.status` — the service classifies the stall from this vs `issueStatusName` (#363). */
+  workspaceStatus: string;
+  /**
+   * `workspaces.ready_for_merge`. Deliberately surfaced beside `workspaceStatus`: a live row was
+   * measured with `status: "ready_for_merge"` and `readyForMerge: false` at the same time (#363),
+   * so a consumer that reads only one of the two gets the opposite answer. The service reports
+   * the contradiction rather than picking a winner.
+   */
+  workspaceReadyForMerge: boolean;
+  /** When the workspace row last changed — how long the stall has been held. */
+  workspaceUpdatedAt: string;
 }
 
 /**
- * Loop tickets whose builder finished but whose workspace has not landed (#299).
+ * Loop tickets that are finished-or-parked but whose workspace has not landed (#299/#336/#363).
  *
- * This is the loop's silent-stall state: the planner reads the MAIN checkout, so until
- * the merge lands it keeps reporting the step as not-generated — and the external-key
- * dedupe turns every re-advance into a no-op. Detected as: issue matches the loop's
- * key prefix, its status is In Review / AI Reviewed / Done (i.e. the builder is finished),
- * and a workspace for it is still open (not closed) and unmerged.
+ * This is the loop's silent-stall state: the planner reads the MAIN checkout, so until the merge
+ * lands it keeps reporting the step as not-generated — and the external-key dedupe turns every
+ * re-advance into a no-op.
+ *
+ * ── Why the issue-status filter is not enough on its own (#336/#363) ──
+ *
+ * The original WHERE required `projectStatuses.name IN ('In Review','AI Reviewed','Done')`, i.e. it
+ * assumed a stalled workspace always has a ticket whose builder is finished BY ISSUE STATUS. Two
+ * measured stalls are invisible to that:
+ *
+ * - **#336 variant 1** — the exit workflow never ran (crash, reboot, SIGTERM in the agent's exit
+ *   window). The startup sweep sets the WORKSPACE to `ready_for_merge` but nothing transitions the
+ *   issue, so it sits In Progress with completed work on a branch and master never advances.
+ * - **#363** — issue #7 of a live pipeline: workspace `ready_for_merge` since 20:18:13Z, issue
+ *   `In Progress` and never advanced, held 12+ minutes. `awaitingMerge` was null the whole time,
+ *   so the ONE indicator built to catch a silent loop stall was blind to the stall.
+ *
+ * Both are "finished by WORKSPACE status while the issue never left In Progress" — a combination
+ * the old query could not represent. So the workspace's own terminal-ish statuses are now an
+ * ALTERNATIVE to the issue-status filter, not an additional requirement.
+ *
+ * The row still says which of the two matched (`workspaceStatus` vs `issueStatusName`), because
+ * the two states need DIFFERENT affordances: #299's is safe to one-click merge, and #363's branch
+ * turned out to have zero commits — offering "Merge now" there would be a fix built on the
+ * assumption that parked means finished. Classification lives in the service.
  */
+const WORKSPACE_PARKED_STATUSES = ["ready_for_merge"] as const;
+
 export async function listPluginLoopUnmergedWorkspaces(
   projectId: string,
   keyPrefix: string,
@@ -140,6 +173,9 @@ export async function listPluginLoopUnmergedWorkspaces(
       issueTitle: issues.title,
       issueStatusName: projectStatuses.name,
       externalKey: issues.externalKey,
+      workspaceStatus: workspaces.status,
+      workspaceReadyForMerge: workspaces.readyForMerge,
+      workspaceUpdatedAt: workspaces.updatedAt,
     })
     .from(workspaces)
     .innerJoin(issues, eq(workspaces.issueId, issues.id))
@@ -149,7 +185,8 @@ export async function listPluginLoopUnmergedWorkspaces(
       sql`${issues.externalKey} LIKE ${pattern} ESCAPE '\\'`,
       sql`${workspaces.status} != 'closed'`,
       sql`${workspaces.mergedAt} IS NULL`,
-      sql`${projectStatuses.name} IN ('In Review', 'AI Reviewed', 'Done')`,
+      sql`(${projectStatuses.name} IN ('In Review', 'AI Reviewed', 'Done')
+        OR ${workspaces.status} IN ${WORKSPACE_PARKED_STATUSES})`,
     ));
   return rows;
 }
