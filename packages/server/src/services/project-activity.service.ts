@@ -171,7 +171,7 @@ function collectCommentEvents(commentRows: CommentRow[], issueMap: Map<string, I
     events.push({
       id: `comment-${cmt.id}`,
       type: "comment",
-      summary: commentSummary(cmt.kind, cmt.body),
+      summary: commentSummary(cmt.kind, cmt.body, cmt.bodyLength),
       actor: cmt.author,
       timestamp: cmt.createdAt,
       issueId: issue.id,
@@ -219,9 +219,16 @@ export async function getProjectActivity(
   };
 }
 
-function commentSummary(kind: string, body: string): string {
+/**
+ * @param body        A bounded PREFIX of the comment body (#346) — the repository no
+ *                    longer fetches whole bodies (2.07MB on the dev project) to render
+ *                    an 80-char preview.
+ * @param bodyLength  The TRUE length of the full body, so the "..." suffix is decided
+ *                    by the real comment and the prefix truncation stays invisible.
+ */
+function commentSummary(kind: string, body: string, bodyLength: number): string {
   const preview = body.replace(/\s+/g, " ").trim().slice(0, 80);
-  const suffix = body.length > 80 ? "..." : "";
+  const suffix = bodyLength > 80 ? "..." : "";
   switch (kind) {
     case "preflight-verdict": return preview + suffix;
     case "preflight-clarification": return `Preflight clarification: ${preview}${suffix}`;
