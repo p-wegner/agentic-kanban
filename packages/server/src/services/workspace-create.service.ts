@@ -622,13 +622,24 @@ export function createWorkspaceCreateService(deps: {
       const setupFailedBlocking = !isDirect && setupConfig.setupBlocking && latestSetup.state === "failed";
 
       t = Date.now();
+      // #358 — timestamp the row when it is WRITTEN, not when the request began.
+      //
+      // `now` is captured at the top of `createWorkspace`, before the whole provisioning pipeline
+      // (`git worktree add` → devcontainer → the AWAITED blocking setup script → sibling worktrees
+      // → context packer), measured at 84s to 8+ minutes. Stamping `createdAt`/`statusChangedAt`
+      // with it BACKDATED both to the start of provisioning, which is why an approve→start hop
+      // measured from `workspaces.createdAt` came out at 104s when the agent had not launched yet,
+      // and why the row looked like it had coexisted with a `Backlog` issue for 84 seconds. It never
+      // did — the row and the issue transition land in ONE transaction, right here. The backdating
+      // was the whole illusion, and it silently corrupted every latency number taken from it.
+      const committedAt = new Date().toISOString();
       await withTransaction(database, async (tx) => {
         await insertWorkspaceRecord({
           id, issueId: input.issueId, branch, worktreePath, baseBranch, isDirect,
           baseCommitSha, requiresReview, thoroughReview, planMode, tddMode, includeVisualProof,
           skillId: effectiveSkillId, claudeProfile, agentCommand, resolvedProvider, model: agentConfig.model,
           contextPrimer, serviceState: null,
-          latestSetup, latestSymlink, now, database: tx,
+          latestSetup, latestSymlink, now: committedAt, database: tx,
           status: setupFailedBlocking ? "blocked" : "active",
         });
 
@@ -643,7 +654,9 @@ export function createWorkspaceCreateService(deps: {
         if (hasWorkflowStart) {
           await initWorkspaceWorkflow(tx as unknown as WorkflowDb, { workspaceId: id, issueId: input.issueId });
         } else {
-          await moveIssueToInProgressStrict(input.issueId, issue.projectId, now, tx);
+          // `committedAt`, not `now`: backdating `statusChangedAt` to before provisioning hid the
+          // delay entirely on this path, so the board could not even show how long a start took.
+          await moveIssueToInProgressStrict(input.issueId, issue.projectId, committedAt, tx);
         }
       }, "workspace create db writes");
       timing("db-writes", t);
