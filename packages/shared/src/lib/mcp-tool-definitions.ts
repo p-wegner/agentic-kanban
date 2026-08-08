@@ -45,7 +45,7 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
   { name: "find_similar_failures", description: "Search the failure-pattern memory for past incidents similar to a given error text. Returns top matches with root-cause and fix information. Use this when an agent session fails or encounters errors to find known solutions.", category: "board" },
   { name: "delete_status", description: "Delete a project status. Fails if any issues are linked to it.", category: "board" },
   // issues
-  { name: "list_issues", description: "List all issues for a project, optionally filtered by status name, priority, tag, blocked status, or issue number", category: "issues" },
+  { name: "list_issues", description: "List issues for a project, optionally filtered by status name, priority, tag, blocked status, or issue number. Descriptions are OMITTED by default — use get_issue for one issue's full text, or pass includeDescription when you genuinely need every description at once.", category: "issues" },
   { name: "get_issue", description: "Get detailed information about a specific issue, including workspaces and dependencies. Accepts either a UUID issue ID or a numeric issue number (e.g. 42). When resolving by number, pass projectId to scope to the correct project.", category: "issues" },
   { name: "get_issue_summary", description: "Get a summary of the latest completed agent session for an issue. Resolves issue number → workspace → latest session → parsed summary in one call. Shows agent summary text, files touched, commands run, duration, cost, and key excerpts. Complements get_board_status (live state) with completed-work history.", category: "issues" },
   { name: "create_issue", description: "Create a new issue on the kanban board", category: "issues" },
