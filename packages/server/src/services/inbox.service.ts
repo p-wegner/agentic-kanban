@@ -36,16 +36,23 @@ export interface InboxItem {
   createdAt: string | null;
 }
 
-export async function listInbox(database: Database = db): Promise<{ items: InboxItem[] }> {
+/**
+ * Plugin-gate + agent-question items for ONE project. Split out of listInbox so the
+ * per-project work can be fanned out (#348) instead of awaited in series.
+ *
+ * The two try/catch blocks are per-source on purpose: one project's broken plugin
+ * surface must not empty the whole inbox.
+ */
+async function collectProjectInboxItems(
+  project: { id: string; name: string },
+  database: Database,
+  pluginService: ReturnType<typeof getPluginService>,
+): Promise<InboxItem[]> {
   const items: InboxItem[] = [];
-  const projectRows = await database
-    .select({ id: projects.id, name: projects.name })
-    .from(projects);
-  const pluginService = getPluginService(database);
 
-  for (const project of projectRows) {
-    // Plugin gates: same visibility rule as the gate card — a gate with round tickets
-    // still open is not actionable yet.
+  // Plugin gates: same visibility rule as the gate card — a gate with round tickets
+  // still open is not actionable yet.
+  const gates = (async () => {
     try {
       const surface = await pluginService.listProjectSurface(project.id);
       for (const loop of surface.loops) {
@@ -67,8 +74,10 @@ export async function listInbox(database: Database = db): Promise<{ items: Inbox
     } catch (err) {
       console.warn(`[inbox] plugin surface failed for project ${project.id}:`, err instanceof Error ? err.message : String(err));
     }
+  })();
 
-    // Agent questions (cached per project by the listing service).
+  // Agent questions (cached per project by the listing service).
+  const questions = (async () => {
     try {
       for (const set of await listPendingQuestionsForProject(project.id, database)) {
         if (set.staleness) continue; // likely no longer actionable — not "waiting on you"
@@ -85,7 +94,28 @@ export async function listInbox(database: Database = db): Promise<{ items: Inbox
     } catch (err) {
       console.warn(`[inbox] agent questions failed for project ${project.id}:`, err instanceof Error ? err.message : String(err));
     }
-  }
+  })();
+
+  await Promise.all([gates, questions]);
+  return items;
+}
+
+export async function listInbox(database: Database = db): Promise<{ items: InboxItem[] }> {
+  const projectRows = await database
+    .select({ id: projects.id, name: projects.name })
+    .from(projects);
+  const pluginService = getPluginService(database);
+
+  // #348: this used to be `for (const project of projectRows) { await ...; await ...; }`
+  // — strictly serial, so the cost was O(projects x plugins x loops x ~8 awaits) with
+  // every round-trip's latency stacking, on an endpoint the UI POLLS. There is no
+  // ordering dependency between projects (or between the two sources within a project):
+  // everything is sorted by createdAt at the end. This DB has 20 projects, so the fan-out
+  // is bounded by the project count and the work is DB-read-bound, not CPU-bound.
+  const perProject = await Promise.all(
+    projectRows.map((project) => collectProjectInboxItems(project, database, pluginService)),
+  );
+  const items: InboxItem[] = perProject.flat();
 
   // Tool approvals are in-memory and already carry their projectId.
   const nameById = new Map(projectRows.map((p) => [p.id, p.name]));
