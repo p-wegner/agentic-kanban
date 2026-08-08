@@ -46,6 +46,12 @@ export type PluginLoop = PluginOwner & {
   note: string | null;
   lastAdvanceAt: string | null;
   gate: PluginGate | null;
+  /**
+   * When the current gate was first reached. Use this — never `lastAdvanceAt` — to show how
+   * long a decision has been waiting: the monitor re-plans a gated loop every cycle, so
+   * `lastAdvanceAt` keeps moving while nobody has acted.
+   */
+  gateSince?: string | null;
   progress: { steps: PluginProgressStep[] } | null;
   checks: PluginCheck[] | null;
   totalCostUsd?: number;
@@ -199,6 +205,7 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null 
           loopName={loop.name}
           projectId={projectId}
           gate={loop.gate}
+          gateSince={loop.gateSince ?? null}
           checks={loop.checks}
           recommendation={loop.gateRecommendation ?? null}
           lineNotes={lineNotes}

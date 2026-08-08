@@ -152,12 +152,54 @@ export interface GateRecommendation {
   reason: string;
 }
 
+/**
+ * Why no recommendation was produced for a gate. Persisted as its own timeline event so a
+ * missing chip is diagnosable after the fact.
+ *
+ * Every path here used to `return` silently and at most `console.warn` to a stdout nobody
+ * captures. The cost was concrete: a live project reached two gates and produced ZERO
+ * recommendations, and because no trace existed it was impossible to tell a disabled pref
+ * from a cold butler from a malformed LLM reply — the reordering fix for #317 could not even
+ * be evaluated, since "no event" looked identical before and after it.
+ */
+export type GateRecommendationSkipReason =
+  | "disabled"
+  | "no-warm-butler"
+  | "ask-failed"
+  | "reply-not-json"
+  | "action-not-offered"
+  | "threw";
+
+async function noteRecommendationSkip(
+  args: GateNotifyArgs,
+  reason: GateRecommendationSkipReason,
+  detail: string,
+  database: Database,
+): Promise<void> {
+  try {
+    await insertPluginLoopEvent(
+      { pluginSlug: args.pluginSlug, loopName: args.loopName, projectId: args.projectId },
+      "gate-recommendation-skipped",
+      { gateId: args.gate.id, reason, detail: detail.slice(0, 240) },
+      database,
+    );
+  } catch {
+    /* the trace is best-effort — never let it break the (already fire-and-forget) caller */
+  }
+}
+
 /** #309 — compute + persist a structured recommendation for a NEW gate. Fire-and-forget. */
 export async function computeGateRecommendation(args: GateNotifyArgs, database: Database = db): Promise<void> {
   try {
     const prefs = new Map((await getAllPreferences(database)).map((p) => [p.key, p.value]));
-    if (!getBool(prefs, "butler_gate_recommendation")) return;
-    if (!(await ensureWarmButler(args.projectId, database))) return;
+    if (!getBool(prefs, "butler_gate_recommendation")) {
+      await noteRecommendationSkip(args, "disabled", "butler_gate_recommendation is off", database);
+      return;
+    }
+    if (!(await ensureWarmButler(args.projectId, database))) {
+      await noteRecommendationSkip(args, "no-warm-butler", "could not start a butler for this project", database);
+      return;
+    }
 
     const excerpts = readArtifactExcerpts(args.repoPath, args.gate);
     const actionIds = args.gate.actions.map((a) => a.id);
@@ -169,12 +211,24 @@ export async function computeGateRecommendation(args: GateNotifyArgs, database: 
       + `{"actionId":"<one of: ${actionIds.join(", ")}>","reason":"<under 140 chars, grounded in the verification/artifacts>"}. `
       + `Recommend the revise-style action only when you can name a concrete defect.`;
     const answer = await oneShotButlerAsk(args.projectId, prompt, 60_000);
-    if (answer.isError) return;
+    if (answer.isError) {
+      await noteRecommendationSkip(args, "ask-failed", answer.text || "butler ask returned an error", database);
+      return;
+    }
     const m = answer.text.match(/\{[\s\S]*\}/);
-    if (!m) return;
+    if (!m) {
+      await noteRecommendationSkip(args, "reply-not-json", answer.text, database);
+      return;
+    }
     const parsed = JSON.parse(m[0]) as { actionId?: unknown; reason?: unknown };
     const actionId = typeof parsed.actionId === "string" && actionIds.includes(parsed.actionId) ? parsed.actionId : null;
-    if (!actionId) return;
+    if (!actionId) {
+      await noteRecommendationSkip(
+        args, "action-not-offered",
+        `replied ${JSON.stringify(parsed.actionId)}; gate offers ${actionIds.join(", ")}`, database,
+      );
+      return;
+    }
     const reason = typeof parsed.reason === "string" ? parsed.reason.trim().slice(0, 240) : "";
     await insertPluginLoopEvent(
       { pluginSlug: args.pluginSlug, loopName: args.loopName, projectId: args.projectId },
@@ -183,7 +237,9 @@ export async function computeGateRecommendation(args: GateNotifyArgs, database: 
       database,
     );
   } catch (err) {
-    console.warn(`[plugin-gate-butler] recommendation failed for ${args.pluginSlug}:${args.loopName}:`, err instanceof Error ? err.message : String(err));
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[plugin-gate-butler] recommendation failed for ${args.pluginSlug}:${args.loopName}:`, message);
+    await noteRecommendationSkip(args, "threw", message, database);
   }
 }
 

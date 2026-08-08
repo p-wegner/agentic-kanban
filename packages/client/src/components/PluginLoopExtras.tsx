@@ -205,11 +205,24 @@ type GateResolveResponse = {
   advance: { note: string | null; created: Array<{ issueNumber: number | null; title: string }> } | null;
 };
 
-export function GateCard({ pluginId, loopName, projectId, gate, checks, recommendation, lineNotes, onResolved, onOpenArtifact }: {
+/** Compact age for the gate badge — minutes under an hour, then hours, then days. */
+function formatGateAge(since: string): string {
+  const ms = Date.now() - new Date(since).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return "an unknown time";
+  const min = Math.floor(ms / 60_000);
+  if (min < 60) return `${min}m`;
+  const hours = Math.floor(min / 60);
+  if (hours < 24) return `${hours}h ${min % 60}m`;
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+}
+
+export function GateCard({ pluginId, loopName, projectId, gate, gateSince, checks, recommendation, lineNotes, onResolved, onOpenArtifact }: {
   pluginId: string;
   loopName: string;
   projectId: string;
   gate: PluginGate;
+  /** When this gate was first reached — drives the "waiting Xm" badge. */
+  gateSince?: string | null;
   /** Verification checks rendered EXPANDED on the card (#303) — the human should read the verdict without opening anything. */
   checks?: PluginCheck[] | null;
   /** The butler's pre-read verdict (#309). */
@@ -346,6 +359,13 @@ export function GateCard({ pluginId, loopName, projectId, gate, checks, recommen
       <div className="text-sm font-medium text-amber-900 dark:text-amber-200">
         ✋ {gate.question}
       </div>
+      {/* How long this decision has been blocking the pipeline. Sourced from the gate's own
+          `gate-reached` event, so a re-planned loop cannot make an old gate look fresh. */}
+      {gateSince && (
+        <div className="text-xs text-amber-800 dark:text-amber-300" data-testid="plugin-gate-age">
+          Waiting {formatGateAge(gateSince)} · since {new Date(gateSince).toLocaleString("en-US")}
+        </div>
+      )}
       {/* Verification digest (#303) — verdict + detail readable on the card itself. */}
       {(checks?.length ?? 0) > 0 && (
         <div className="space-y-1" data-testid="plugin-gate-checks-digest">
@@ -695,6 +715,14 @@ function eventSummary(event: LoopEventsResponse["events"][number]): string {
       const input = typeof p.input === "string" && p.input ? ` — "${p.input.slice(0, 120)}"` : "";
       return `Decision: ${String(p.actionLabel ?? p.actionId ?? "?")}${input}`;
     }
+    case "gate-recommendation":
+      return `Butler pre-read: ${typeof p.actionId === "string" ? p.actionId : "?"}`
+        + (typeof p.reason === "string" && p.reason ? ` — ${p.reason}` : "");
+    // Why a gate got no pre-read. Without this the absence of a chip was indistinguishable
+    // from the feature being off, the butler being cold, or the model replying garbage.
+    case "gate-recommendation-skipped":
+      return `No butler pre-read (${typeof p.reason === "string" ? p.reason : "unknown"})`
+        + (typeof p.detail === "string" && p.detail ? ` — ${p.detail}` : "");
     case "paused": return "Paused by a human";
     case "resumed": return "Resumed";
     case "converged": return "Converged — nothing left to do";
@@ -706,6 +734,8 @@ const EVENT_MARK: Record<string, string> = {
   "advance": "▸",
   "gate-reached": "✋",
   "gate-resolved": "✔",
+  "gate-recommendation": "🤵",
+  "gate-recommendation-skipped": "◌",
   "paused": "⏸",
   "resumed": "▶",
   "converged": "★",

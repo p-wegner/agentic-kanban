@@ -166,6 +166,40 @@ describe("scanAutodriveStallWarnings", () => {
     await expect(scanAutodriveStallWarnings(db, undefined, NOW)).resolves.toEqual([]);
   });
 
+  // A quota death is a stall that self-heals at a known reset time, so it must not be
+  // reported as the generic "no_progress". Both providers record the same stats shape;
+  // only Codex used to be recognised, which made a Claude quota death indistinguishable
+  // from a genuinely wedged workspace.
+  for (const { provider, executor, rateLimitKind } of [
+    { provider: "Claude", executor: "claude", rateLimitKind: "claude-usage-limit" },
+    { provider: "Codex", executor: "codex", rateLimitKind: "codex-usage-limit" },
+  ]) {
+    it(`classifies a ${provider} usage-limit death as provider_usage_limit, not no_progress`, async () => {
+      const { db } = createTestDb();
+      const { projectId, inProgressId } = await seedProject(db);
+      const issueId = await addIssue(db, projectId, inProgressId, minutesAgo(55));
+      // The real shape: the agent exited seconds after launch having produced nothing, so
+      // the workspace is "blocked" and the session "stopped" — no running zero-token
+      // session, hence nothing else in the classifier can claim this row.
+      const workspaceId = await addWorkspace(db, issueId, "blocked", minutesAgo(55));
+      await db.insert(sessions).values({
+        id: randomUUID(),
+        workspaceId,
+        executor,
+        status: "stopped",
+        startedAt: minutesAgo(55),
+        stats: JSON.stringify({ rateLimited: true, rateLimitKind, retryAfter: minutesAgo(-100) }),
+        triggerType: "agent",
+      });
+
+      const warnings = await scanAutodriveStallWarnings(db, undefined, NOW);
+
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0].cause).toBe("provider_usage_limit");
+      expect(warnings[0].message).toContain("provider usage limit");
+    });
+  }
+
   it("classifies an In-Review auto-merge stall", async () => {
     const { db } = createTestDb();
     const { projectId, inReviewId } = await seedProject(db);
