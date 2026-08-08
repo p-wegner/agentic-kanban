@@ -35,6 +35,7 @@ import type { BoardEvents } from "./board-events.js";
 import type { CreateIssueInput, CreateIssueResult } from "./issue.service.js";
 import type { CreateWorkspaceInput, CreateWorkspaceResult } from "./workspace-internals.js";
 import { describeLoopStartOutcome, startPlannedLoopTickets, type LoopStartOutcome } from "./plugin-loop-start.service.js";
+import { describeExistingUnits } from "./plugin-loop-unit-state.js";
 import { selectLoopStall, type LoopStall } from "./plugin-loop-stall.js";
 
 /**
@@ -130,8 +131,12 @@ export interface LoopAdvanceResult {
   /** Units the planner reported this advance. */
   planned: number;
   created: LoopCreatedTicket[];
-  /** Units already ticketed by an earlier advance. */
-  skippedExisting: Array<{ unitId: string; issueNumber: number | null; statusName: string }>;
+  /**
+   * Units already ticketed by an earlier advance. `issueId` is carried (#360) because the
+   * post-resolve report has to resolve each of these units' REAL state, and it must not do that
+   * through `issues.statusName` (measured ≥84s late, #358).
+   */
+  skippedExisting: Array<{ unitId: string; issueId: string; issueNumber: number | null; statusName: string }>;
   /** Units dropped because the advance hit `maxUnitsPerAdvance` — replanned next time. */
   capped: number;
   /**
@@ -141,6 +146,17 @@ export interface LoopAdvanceResult {
    * silence (nothing at all after an approval).
    */
   startOutcomes: LoopStartOutcome[];
+  /**
+   * #357/#360 — the pre-rendered, falsifiable sentences the butler and the HTTP reply report,
+   * covering EVERY unit this advance planned: the ones it created (from `startOutcomes`) AND the
+   * ones it found already ticketed, each resolved from its real workspace/provisioning state.
+   *
+   * `startOutcomes` alone was the defect: it is built from `created` only, so when another advance
+   * queued behind a gate resolve won the lock and created the unit first, this advance reported
+   * `skippedExisting` with an EMPTY `startOutcomes` and the butler's fallback branch asserted that
+   * nothing was planned — while the unit was 80s from a live workspace. 2 of 3 live approvals.
+   */
+  startNotices: string[];
   /**
    * Who will actually start the created tickets. `manual` means nobody will —
    * the tickets sit in the backlog until the user sets Start Mode or launches
@@ -481,7 +497,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
       const key = pluginLoopUnitKey(args.pluginSlug, loop.name, unit.id);
       const prior = byKey.get(key);
       if (prior) {
-        skippedExisting.push({ unitId: unit.id, issueNumber: prior.issueNumber, statusName: prior.statusName });
+        skippedExisting.push({ unitId: unit.id, issueId: prior.id, issueNumber: prior.issueNumber, statusName: prior.statusName });
         continue;
       }
       if (created.length >= cap) {
@@ -559,6 +575,16 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
     const priorGate = parseAdvancePayload(
       await latestPluginLoopEvent(eventKey, "advance", database),
     )?.gate ?? null;
+    // #357/#360 — one sentence per PLANNED unit, not per CREATED unit. The units this advance
+    // found already ticketed are resolved from their real workspace/provisioning state, so the
+    // report is identical whichever advance won the lock.
+    const startNotices = [
+      ...startOutcomes.map(describeLoopStartOutcome),
+      ...await describeExistingUnits(
+        skippedExisting.map((s) => ({ issueId: s.issueId, issueNumber: s.issueNumber })),
+        database,
+      ),
+    ];
     const advancePayload: AdvanceEventPayload = {
       planned: plan.units.length,
       created,
@@ -569,7 +595,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
       gate: plan.gate ?? null,
       progress: plan.progress ?? null,
       checks: plan.checks ?? null,
-      startNotices: startOutcomes.map(describeLoopStartOutcome),
+      startNotices,
     };
     await insertPluginLoopEvent(eventKey, "advance", advancePayload, database);
     if (isDone && !wasDone) {
@@ -630,6 +656,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
       capped,
       startMode: policy.mode,
       startOutcomes,
+      startNotices,
       warnings,
       gate: plan.gate ?? null,
       progress: plan.progress ?? null,
@@ -781,7 +808,11 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
     // would inherit the bug it is meant to fix. Fire-and-forget: a gate resolve must never fail or
     // block because an LLM was slow.
     {
-      const startSentences = (advance?.startOutcomes ?? []).map(describeLoopStartOutcome);
+      // #360 — the union of created AND already-ticketed units, each resolved from its real
+      // state. Reading `startOutcomes` here (created only) is what made the message false on 2 of
+      // 3 approvals: the happy path was already right, and only this branch fell through to the
+      // butler's "nothing was planned" fallback.
+      const startSentences = advance?.startNotices ?? [];
       void import("./plugin-gate-butler.service.js").then((m) => m.notifyButlerOfGateResolution({
         projectId: args.projectId,
         pluginName: args.pluginName ?? args.pluginSlug,

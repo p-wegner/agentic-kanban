@@ -119,6 +119,26 @@ export function getCreateJob(jobId: string): CreateJob | null {
   return jobsById.get(jobId) ?? null;
 }
 
+/**
+ * The newest RUNNING create job for this issue, or null (#357/#360).
+ *
+ * Why this read exists: provisioning is 80s to 8+ minutes, and for that whole window the
+ * workspace ROW does not exist yet (the insert and the issue's move to In Progress are one
+ * transaction at the END of provisioning). So "no workspace row" is ambiguous between "a launch
+ * is in flight" and "nothing will ever start" — and the butler's post-approval message got that
+ * distinction exactly backwards on 2 of 3 live approvals, telling the user nothing was planned
+ * while the next step was 80s from having a live workspace. This registry is the only in-process
+ * evidence that separates the two.
+ */
+export function findRunningCreateJobForIssue(issueId: string): CreateJob | null {
+  let newest: CreateJob | null = null;
+  for (const job of jobsById.values()) {
+    if (job.issueId !== issueId || job.state !== "running") continue;
+    if (!newest || job.startedAt > newest.startedAt) newest = job;
+  }
+  return newest;
+}
+
 /** Test seam: drop all tracked jobs. */
 export function resetCreateJobs(): void {
   jobsById.clear();
