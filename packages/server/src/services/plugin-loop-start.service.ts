@@ -1,6 +1,7 @@
 import type { Database } from "../db/index.js";
 import { getInProgressStatusId } from "../repositories/plugins.repository.js";
 import { countActiveWip } from "../startup/monitor-auto-start.js";
+import { completeCreateJob, failCreateJob, startCreateJob } from "./create-job.service.js";
 import type { StartPolicy } from "./start-policy.service.js";
 import type { CreateWorkspaceInput, CreateWorkspaceResult } from "./workspace-internals.js";
 
@@ -69,16 +70,26 @@ export async function startPlannedLoopTickets(args: StartPlannedLoopTicketsArgs)
       continue;
     }
     try {
+      // #357/#360 — register the launch so it is OBSERVABLE while it provisions. The workspace row
+      // does not exist until provisioning finishes (80s to 8+ min), so without this the board has
+      // no way to tell "a launch is in flight" from "nothing will ever start" — and it told the
+      // user the wrong one of those on 2 of 3 live approvals. Same registry the `?async=1` route
+      // uses, so `findRunningCreateJobForIssue` sees both paths.
+      const job = startCreateJob(ticket.issueId);
       // Fired, not awaited — see limit 1 in the module header. The rejection handler is attached
       // synchronously so a provisioning failure can never surface as an unhandled rejection (this
       // server logs those as [fatal]).
-      void createWorkspace({ issueId: ticket.issueId }).catch((err: unknown) => {
-        console.warn(
-          `[plugin-loop] direct start of issue ${ticket.issueNumber ?? ticket.issueId} failed `
-          + `(the monitor's auto-start pass remains the fallback):`,
-          err instanceof Error ? err.message : String(err),
-        );
-      });
+      void createWorkspace({ issueId: ticket.issueId }).then(
+        (result) => completeCreateJob(job.jobId, result as { id?: string; status?: string; error?: string }),
+        (err: unknown) => {
+          failCreateJob(job.jobId, err);
+          console.warn(
+            `[plugin-loop] direct start of issue ${ticket.issueNumber ?? ticket.issueId} failed `
+            + `(the monitor's auto-start pass remains the fallback):`,
+            err instanceof Error ? err.message : String(err),
+          );
+        },
+      );
       // Counted optimistically: the ticket is on its way to In Progress, and counting it keeps a
       // batch of planned units from all starting past the cap in one pass.
       active += 1;

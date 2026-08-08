@@ -395,7 +395,15 @@ export async function notifyButlerOfGateResolution(args: GateResolutionNotifyArg
         + args.startSentences.map((line) => `- ${line}`).join("\n") + "\n"
       : args.converged
         ? "The loop is now CONVERGED — no further units were planned. There is nothing left to start.\n"
-        : "No new ticket was planned by this decision (the loop is waiting on something else, not on you).\n";
+        // #360: this branch used to assert "the loop is waiting on something else, not on you" — a
+        // cause the board had NOT checked, and which was false on 2 of 3 live approvals (the next
+        // step's ticket already existed and was 80s from a live workspace). With `startNotices` now
+        // covering already-ticketed units too, reaching this branch means the re-plan produced
+        // nothing at all, usually because it FAILED. Say that, and say nothing about why.
+        : "The re-plan after this decision reported no units, and the board could not determine what "
+          + "happens next. Do NOT tell the user a ticket was or was not planned — say the decision is "
+          + "recorded, that the next step is not visible yet, and that reloading the loop panel (or "
+          + "\"Advance now\") will show it.\n";
 
     sendButlerTurn(
       args.projectId,
