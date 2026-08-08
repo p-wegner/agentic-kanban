@@ -3,7 +3,14 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
-import { getProjectGitStats, getProjectGitStatsAsync, hotspotLogArgs, HOTSPOT_FALLBACK_COMMIT_LIMIT_FOR_TEST } from "../services/git-info.service.js";
+import {
+  collectCurrentCodeMetricsAsyncForTest,
+  getProjectGitStats,
+  getProjectGitStatsAsync,
+  hotspotLogArgs,
+  HOTSPOT_FALLBACK_COMMIT_LIMIT_FOR_TEST,
+  WALK_QUEUE_FLUSH_AT_FOR_TEST,
+} from "../services/git-info.service.js";
 
 function exec(cmd: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -197,5 +204,86 @@ describe("getProjectGitStatsAsync", () => {
     const rewarmedStats = await getProjectGitStatsAsync(repoDir, branchName);
     expect(rewarmedStats.codeMetrics.generatedAt).toBe(generatedAtBefore);
     expect(rewarmedStats.codeMetrics).toBe(asyncStats.codeMetrics);
+  });
+
+  // #340: the 60s cache and the in-flight dedupe used to key on `git rev-parse <branch>`
+  // and give up (cacheKey = null) when it failed — i.e. they switched themselves OFF
+  // exactly under the load that makes rev-parse time out, so every concurrent stats
+  // request started its own full source walk (the measured 132-509s, 4-deep pile-up).
+  // An unresolvable head must now fall back to a deterministic repo+branch key.
+  describe("unresolvable HEAD (#340)", () => {
+    it("still caches the metrics blob under a repo+branch fallback key", async () => {
+      const { repoDir: dir } = await initRepoWithSources("kanban-stats-async-nohead-");
+      try {
+        // A branch that does not exist: `git rev-parse <branch>` fails, so head is null.
+        const first = await getProjectGitStatsAsync(dir, "no-such-branch");
+        const second = await getProjectGitStatsAsync(dir, "no-such-branch");
+        // Identical object reference => served from cache, not recomputed.
+        expect(second.codeMetrics).toBe(first.codeMetrics);
+        expect(second.codeMetrics.generatedAt).toBe(first.codeMetrics.generatedAt);
+        expect(first.codeMetrics.sourceFilesScanned).toBe(2);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("still coalesces concurrent cold computes into one in-flight promise", async () => {
+      const { repoDir: dir } = await initRepoWithSources("kanban-stats-async-nohead-dedupe-");
+      try {
+        const [a, b, c] = await Promise.all([
+          getProjectGitStatsAsync(dir, "no-such-branch"),
+          getProjectGitStatsAsync(dir, "no-such-branch"),
+          getProjectGitStatsAsync(dir, "no-such-branch"),
+        ]);
+        expect(b.codeMetrics).toBe(a.codeMetrics);
+        expect(c.codeMetrics).toBe(a.codeMetrics);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  // #340: the walk had no wall-clock budget — only the individual git calls were capped
+  // — so a contended libuv pool let it run for minutes, monopolising the single thread.
+  describe("bounded source walk (#340)", () => {
+    it("stops at the wall-clock budget and reports only what it actually scanned", async () => {
+      const { repoDir: dir } = await initRepoWithSources("kanban-stats-async-budget-");
+      try {
+        const exhausted = await collectCurrentCodeMetricsAsyncForTest(dir, 0);
+        // Partial, and visibly partial: the counters reflect reality rather than
+        // silently claiming a complete scan.
+        expect(exhausted.sourceFilesScanned).toBe(0);
+        expect(exhausted.totalLoc).toBe(0);
+        expect(exhausted.testRatio).toBe(0);
+
+        // With a real budget the same repo is scanned in full.
+        const complete = await collectCurrentCodeMetricsAsyncForTest(dir, 30_000);
+        expect(complete.sourceFilesScanned).toBe(2);
+        expect(complete.totalLoc).toBe(5);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("tallies every file across mid-walk queue flushes (bounded parallelism, not per-directory batches)", async () => {
+      // More files than WALK_QUEUE_FLUSH_AT, spread over several directories, so the
+      // queue is flushed mid-walk and refilled — the path a small fixture never reaches.
+      const dir = await mkdtemp(join(tmpdir(), "kanban-stats-async-parallel-"));
+      const fileCount = WALK_QUEUE_FLUSH_AT_FOR_TEST * 2 + 7;
+      try {
+        for (let i = 0; i < fileCount; i++) {
+          const sub = join(dir, `pkg${i % 5}`);
+          await mkdir(sub, { recursive: true });
+          await writeFile(join(sub, `mod${i}.ts`), "const x = 1;\nexport { x };\n", "utf8");
+        }
+
+        const metrics = await collectCurrentCodeMetricsAsyncForTest(dir, 60_000);
+        expect(metrics.sourceFilesScanned).toBe(fileCount);
+        expect(metrics.productionFiles).toBe(fileCount);
+        expect(metrics.totalLoc).toBe(fileCount * 2);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
   });
 });
