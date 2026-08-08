@@ -9,8 +9,7 @@ import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
 import {
   getAllPreferences,
   getActiveAutodriveWorkspaceRows,
-  getLatestSessionForWorkspace,
-  getFixAndMergeSessionCount,
+  getSessionSummariesForWorkspaces,
   getProgressIssueRows,
   getProgressWorkspaceRows,
   getProgressSessionRows,
@@ -215,17 +214,17 @@ export function buildAutoStartSkipWarnings(
 }
 
 async function attachSessions(database: Database, rows: ActiveWorkspaceRow[]): Promise<ActiveWorkspaceWithSessions[]> {
-  const result: ActiveWorkspaceWithSessions[] = [];
-  for (const row of rows) {
-    const latestSession = await getLatestSessionForWorkspace(row.workspaceId, database);
-    const fixAndMergeSessionCount = await getFixAndMergeSessionCount(row.workspaceId, database);
-    result.push({
+  // Two round trips for the whole batch, not two per workspace (#349) — see
+  // `getSessionSummariesForWorkspaces`.
+  const summaries = await getSessionSummariesForWorkspaces(rows.map((row) => row.workspaceId), database);
+  return rows.map((row) => {
+    const summary = summaries.get(row.workspaceId);
+    return {
       ...row,
-      latestSession,
-      fixAndMergeSessionCount,
-    });
-  }
-  return result;
+      latestSession: summary?.latestSession ?? null,
+      fixAndMergeSessionCount: summary?.fixAndMergeSessionCount ?? 0,
+    };
+  });
 }
 
 async function collectProjectProgress(database: Database, projectIds: string[]): Promise<Map<string, string[]>> {

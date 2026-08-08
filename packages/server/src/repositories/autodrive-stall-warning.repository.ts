@@ -40,6 +40,49 @@ export async function getActiveAutodriveWorkspaceRows(
     ));
 }
 
+export interface WorkspaceSessionSummary {
+  id: string;
+  status: string;
+  startedAt: string;
+  endedAt: string | null;
+  stats: string | null;
+  triggerType: string | null;
+}
+
+/**
+ * Batched replacement for `getLatestSessionForWorkspace` + `getFixAndMergeSessionCount` (#349).
+ * Those were called once EACH per active workspace from a serial loop — 2N synchronous libsql
+ * round trips (82 on a board with 41 active workspaces) inside a phase measured at 203-265s.
+ * One query for the whole set, reduced in JS, is the same answer with two round trips.
+ */
+export async function getSessionSummariesForWorkspaces(
+  workspaceIds: string[],
+  database: Database = db,
+): Promise<Map<string, { latestSession: WorkspaceSessionSummary | null; fixAndMergeSessionCount: number }>> {
+  const result = new Map<string, { latestSession: WorkspaceSessionSummary | null; fixAndMergeSessionCount: number }>();
+  for (const id of workspaceIds) result.set(id, { latestSession: null, fixAndMergeSessionCount: 0 });
+  if (workspaceIds.length === 0) return result;
+  const rows = await database.select({
+    workspaceId: sessions.workspaceId,
+    id: sessions.id,
+    status: sessions.status,
+    startedAt: sessions.startedAt,
+    endedAt: sessions.endedAt,
+    stats: sessions.stats,
+    triggerType: sessions.triggerType,
+  }).from(sessions).where(inArray(sessions.workspaceId, workspaceIds));
+  for (const row of rows) {
+    const entry = result.get(row.workspaceId ?? "");
+    if (!entry) continue;
+    if (row.triggerType === "fix-and-merge") entry.fixAndMergeSessionCount += 1;
+    // `ORDER BY started_at DESC LIMIT 1` per workspace, done once over the batch.
+    if (!entry.latestSession || String(row.startedAt) > String(entry.latestSession.startedAt)) {
+      entry.latestSession = { id: row.id, status: row.status, startedAt: row.startedAt, endedAt: row.endedAt, stats: row.stats, triggerType: row.triggerType };
+    }
+  }
+  return result;
+}
+
 export async function getLatestSessionForWorkspace(
   workspaceId: string,
   database: Database = db,
@@ -67,16 +110,24 @@ export async function getFixAndMergeSessionCount(
   return Number(fixCountRows[0]?.count ?? 0);
 }
 
+// The three progress queries below feed a per-project `MAX(timestamp)` reduction and nothing
+// else. They used to SELECT every issue, workspace and SESSION row of every auto-driven project
+// and materialise them as JS objects — on the dev board that is thousands of rows per scan, all
+// of it discarded except one maximum per column, and all of it synchronous libsql work on the
+// event loop (#349). Aggregating in SQL returns one row per project with the same maxima, so the
+// `addProgress`/`maxIso` reduction downstream is unchanged.
+
 export async function getProgressIssueRows(
   projectIds: string[],
   database: Database = db,
 ) {
   return database.select({
     projectId: issues.projectId,
-    updatedAt: issues.updatedAt,
-    statusChangedAt: issues.statusChangedAt,
+    updatedAt: sql<string | null>`max(${issues.updatedAt})`,
+    statusChangedAt: sql<string | null>`max(${issues.statusChangedAt})`,
   }).from(issues)
-    .where(inArray(issues.projectId, projectIds));
+    .where(inArray(issues.projectId, projectIds))
+    .groupBy(issues.projectId);
 }
 
 export async function getProgressWorkspaceRows(
@@ -85,12 +136,13 @@ export async function getProgressWorkspaceRows(
 ) {
   return database.select({
     projectId: issues.projectId,
-    createdAt: workspaces.createdAt,
-    updatedAt: workspaces.updatedAt,
-    mergedAt: workspaces.mergedAt,
+    createdAt: sql<string | null>`max(${workspaces.createdAt})`,
+    updatedAt: sql<string | null>`max(${workspaces.updatedAt})`,
+    mergedAt: sql<string | null>`max(${workspaces.mergedAt})`,
   }).from(workspaces)
     .innerJoin(issues, eq(workspaces.issueId, issues.id))
-    .where(inArray(issues.projectId, projectIds));
+    .where(inArray(issues.projectId, projectIds))
+    .groupBy(issues.projectId);
 }
 
 export async function getProgressSessionRows(
@@ -99,10 +151,11 @@ export async function getProgressSessionRows(
 ) {
   return database.select({
     projectId: issues.projectId,
-    startedAt: sessions.startedAt,
-    endedAt: sessions.endedAt,
+    startedAt: sql<string | null>`max(${sessions.startedAt})`,
+    endedAt: sql<string | null>`max(${sessions.endedAt})`,
   }).from(sessions)
     .innerJoin(workspaces, eq(sessions.workspaceId, workspaces.id))
     .innerJoin(issues, eq(workspaces.issueId, issues.id))
-    .where(inArray(issues.projectId, projectIds));
+    .where(inArray(issues.projectId, projectIds))
+    .groupBy(issues.projectId);
 }
