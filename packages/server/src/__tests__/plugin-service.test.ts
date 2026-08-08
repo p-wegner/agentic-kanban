@@ -8,7 +8,7 @@ import * as schema from "@agentic-kanban/shared/schema";
 import { gitExecSync } from "@agentic-kanban/shared/lib/git-exec";
 import { pluginEnabledPreferenceKey } from "@agentic-kanban/shared/lib/plugin-manifest";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
-import { createPluginService, PluginError, stopAllPluginViews } from "../services/plugin.service.js";
+import { createPluginService, PluginError, stopAllPluginViewsAsync } from "../services/plugin.service.js";
 import type { PluginSkillRunProgress } from "../services/plugin.service.js";
 import type { Database } from "../db/index.js";
 import { reapOrphanedPluginViewProcesses } from "../startup/startup-tasks.js";
@@ -141,8 +141,12 @@ describe("plugin.service", () => {
     service = createPluginService({ database: db as unknown as Database });
   });
 
-  afterEach(() => {
-    stopAllPluginViews();
+  // ASYNC + awaited (#352): the sync `stopAllPluginViews()` fire-and-forgets the Windows tree
+  // kill, so this hook used to `rmSync` the temp dir while the real `node serve.mjs` grandchild
+  // was still alive holding it as `cwd` — EBUSY, swallowed as "best effort", and 330 stale dirs
+  // plus 22 live orphans accumulated. Wait for the kills, THEN remove.
+  afterEach(async () => {
+    await stopAllPluginViewsAsync();
     for (const dir of tempDirs.splice(0)) {
       try {
         rmSync(dir, { recursive: true, force: true });

@@ -34,6 +34,10 @@ export default defineConfig({
     globals: true,
     // #285 — git committer identity via env, so no fixture pays two `git config` spawns.
     setupFiles: [path.resolve(__dirname, "../../test-setup/git-identity.ts")],
+    // #352 — reap orphaned fixture child servers (`serve.mjs`) and their temp dirs once before
+    // the first fork and once after the last. NOT a setupFile: that runs per fork and would let
+    // concurrent sweeps reap a sibling fork's live fixture. See the module header.
+    globalSetup: [path.resolve(__dirname, "src/__tests__/helpers/reap-fixture-child-servers.ts")],
     exclude: ["**/dist/**", "**/node_modules/**"],
     testTimeout,
     hookTimeout: testTimeout,

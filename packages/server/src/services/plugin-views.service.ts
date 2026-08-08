@@ -71,6 +71,17 @@ export interface PluginViewProcess {
  * no service/db instance. Keyed `pluginRowId:viewId:projectId`.
  */
 const viewChildren = new Map<string, PluginViewProcess>();
+/**
+ * Every pid this process has ever spawned as a view server (#352).
+ *
+ * `viewChildren` is not sufficient to guarantee cleanup: the tracked child is a `cmd.exe`/`sh`
+ * WRAPPER and the real server is a grandchild, and the wrapper's `exit` handler drops the map
+ * entry — so a grandchild that outlives its wrapper becomes invisible to `stopAllPluginViews*`
+ * and nothing ever kills it. Measured consequence: 22 live orphaned `node serve.mjs` processes,
+ * each holding a port and its cwd (a fixture temp dir, hence 330 undeletable directories).
+ * Keeping the pid means the awaited shutdown/teardown sweep can still reach the tree.
+ */
+const spawnedViewPids = new Set<number>();
 
 /**
  * In-flight `startView` calls, keyed exactly like `viewChildren` — #251.
@@ -117,6 +128,47 @@ function killChild(entry: PluginViewProcess): void {
   } catch {
     /* already gone */
   }
+}
+
+/**
+ * Awaitable, tree-complete kill (#352).
+ *
+ * `killChild` above `void`s the taskkill and returns synchronously, so a caller that is about to
+ * exit the process — or to delete the child's cwd — races it. On Windows the tracked pid is the
+ * `cmd.exe` wrapper and the real server is a GRANDCHILD, so `child.kill()` alone reparents the
+ * server instead of killing it. That is how 22 orphaned `node serve.mjs` processes and 330 stale
+ * `plugin-test-plugin-*` temp directories accumulated: the orphan holds its temp dir as cwd, so
+ * the directory removal fails with EBUSY and is swallowed as "best effort".
+ */
+async function killChildAsync(entry: PluginViewProcess): Promise<void> {
+  if (process.platform === "win32" && entry.pid) {
+    await taskkillTree(entry.pid).catch(() => { /* already gone, or taskkill unavailable */ });
+  }
+  try {
+    entry.child.kill();
+  } catch {
+    /* already gone */
+  }
+}
+
+/**
+ * Kill every supervised plugin-view server and WAIT for the tree kills to complete.
+ * Use this wherever the caller's next action depends on the children actually being dead —
+ * process shutdown, and test teardown that then removes the child's working directory.
+ */
+export async function stopAllPluginViewsAsync(): Promise<number> {
+  const entries = [...viewChildren.values()];
+  viewChildren.clear();
+  await Promise.all(entries.map((entry) => killChildAsync(entry)));
+  // Then sweep every pid we ever spawned, including wrappers whose exit handler already dropped
+  // their map entry while a grandchild survived. This is the half that actually removes the
+  // orphan class; the loop above only covers children still tracked.
+  const strays = [...spawnedViewPids];
+  spawnedViewPids.clear();
+  if (process.platform === "win32") {
+    await Promise.all(strays.map((pid) => taskkillTree(pid).catch(() => { /* already gone */ })));
+  }
+  return entries.length;
 }
 
 /** Kill every supervised plugin-view server. Called from the server shutdown path. */
@@ -251,12 +303,23 @@ export function createPluginViewsRuntime<P extends PluginWithManifest, Pr extend
     child.on("exit", (code) => {
       const entry = viewChildren.get(key);
       if (entry?.child === child) viewChildren.delete(key);
+      // #352 — the tracked child is a `cmd.exe`/`sh` WRAPPER; the real server is a grandchild.
+      // When the wrapper exits, the grandchild can survive as a reparented orphan — and since the
+      // line above just dropped the map entry, `stopAllPluginViews*` can no longer see it, so
+      // NOTHING would ever kill it. It then holds a port and its cwd (a temp dir for a test
+      // fixture) indefinitely: measured 22 live `node serve.mjs` orphans and 330 undeletable temp
+      // dirs. Kill the tree of the pid we recorded, on the way out. Harmless if we are the ones
+      // who killed it — taskkill on a dead pid just fails and is swallowed.
+      if (process.platform === "win32" && child.pid) {
+        void taskkillTree(child.pid).catch(() => { /* already gone */ });
+      }
       void dropViewProcess?.(pluginRowId, viewId, projectId).catch(() => {});
       if (code !== 0 && code !== null) {
         console.warn(`[plugins] view ${plugin.pluginId}:${viewId} exited with code ${code}${stderrTail ? `: ${stderrTail.slice(-500)}` : ""}`);
       }
     });
 
+    if (child.pid) spawnedViewPids.add(child.pid);
     viewChildren.set(key, {
       child,
       port,
@@ -291,7 +354,12 @@ export function createPluginViewsRuntime<P extends PluginWithManifest, Pr extend
     const key = viewKey(pluginRowId, viewId, projectId);
     const entry = viewChildren.get(key);
     if (!entry) return { stopped: false };
-    killChild(entry);
+    // AWAITED (#352): `stopView` is already async and every caller awaits it, so there is no
+    // reason to fire-and-forget the tree kill — and doing so meant a caller that exits right
+    // afterwards (a test's last statement, a CLI) took the pending `taskkill` down with it and
+    // left the grandchild server alive. That is one of the two ways the orphan class arose.
+    await killChildAsync(entry);
+    if (entry.pid) spawnedViewPids.delete(entry.pid);
     viewChildren.delete(key);
     await dropViewProcess?.(pluginRowId, viewId, projectId).catch(() => {});
     return { stopped: true };
