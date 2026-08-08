@@ -25,6 +25,7 @@ import { invalidateAgentQuestionsCache } from "./services/agent-questions.servic
 import { domainErrorHandler } from "./middleware/error-handler.js";
 import { jsonGzip } from "./middleware/compress.js";
 import { slowRequestLogger } from "./middleware/slow-request-logger.js";
+import { ensureLoopLagMonitor, stopLoopLagMonitor } from "./lib/loop-lag-registry.js";
 import { assertNoCommittedConflictMarkers } from "./startup/conflict-marker-scanner.js";
 import { checkHealthDeps } from "./services/health-deps.service.js";
 import { reapOrphanServiceStacksOnce } from "./startup/service-stack-reaper.js";
@@ -54,6 +55,17 @@ export function replaceStartupTimerCleanup(cleanupCallbacks: Array<() => void>):
 export async function startServer(port?: number, hostname?: string) {
   const cleanupCallbacks: Array<() => void> = [];
   replaceStartupTimerCleanup(cleanupCallbacks);
+
+  // Start sampling event-loop delay before anything else runs (#347). The board's
+  // dominant slowness is loop BLOCKING — /api/health, pure JS with no I/O, measured
+  // 3.6-30s while CPU sat at 25% — and until now it was unattributable at runtime:
+  // the slow-request log conflates "this handler was slow" with "this handler sat behind
+  // someone else's block". Exposed on GET /api/metrics/loop-lag; a window whose max lag
+  // crosses the threshold logs a timestamped `[loop-lag]` warning that can be lined up
+  // against the slow-request ring buffer and the monitor's per-phase timings.
+  // Idempotent, so a tsx hot-reload does not stack histograms or timers.
+  ensureLoopLagMonitor();
+  cleanupCallbacks.push(() => { stopLoopLagMonitor(); });
 
   const app = new Hono();
   // Reflect only trusted local UI origins, never `*` — the wildcard let any
