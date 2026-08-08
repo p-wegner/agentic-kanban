@@ -224,6 +224,16 @@ export function createPluginsRoute(
     return c.json(await service.draftLoopGateFeedback(c.req.param("id"), c.req.param("name"), projectId, { gateId, notes }));
   });
 
+  // Summarize-for-me (#330): decision-ready butler digest of the current gate's artifacts.
+  router.post("/:id/loops/:name/gate/summarize", async (c) => {
+    const body = await parseJsonBody<{ projectId?: string; gateId?: string }>(c);
+    const projectId = typeof body.projectId === "string" ? body.projectId.trim() : "";
+    if (!projectId) throw new PluginError("projectId is required", "BAD_REQUEST");
+    const gateId = typeof body.gateId === "string" ? body.gateId.trim() : "";
+    if (!gateId) throw new PluginError("gateId is required", "BAD_REQUEST");
+    return c.json(await service.summarizeLoopGate(c.req.param("id"), c.req.param("name"), projectId, { gateId }));
+  });
+
   // The scaffold's unresolved TODO markers as a form (#291).
   router.get("/:id/scaffold", async (c) => {
     const projectId = c.req.query("projectId")?.trim();

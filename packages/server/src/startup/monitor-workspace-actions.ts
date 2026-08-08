@@ -46,6 +46,13 @@ export interface MonitorWorkspaceActions {
   fixAndMerge(workspaceId: string, mergeError: string): Promise<void>;
   /** Delete a (ghost) workspace and cascade. (DELETE /api/workspaces/:id) */
   delete(workspaceId: string): Promise<void>;
+  /**
+   * Rebase/merge the workspace onto its moved base branch (#324) — what the UI's
+   * "Update Base" button does. Used before relaunching a 0-commit workspace whose
+   * base moved, so the relaunched agent sees the current base instead of re-failing
+   * against a stale tree. (POST /api/workspaces/:id/update-base)
+   */
+  updateBase(workspaceId: string, mode: "rebase" | "merge"): Promise<void>;
 }
 
 export function createMonitorWorkspaceActions(deps: {
@@ -86,6 +93,9 @@ export function createMonitorWorkspaceActions(deps: {
     },
     async delete(workspaceId) {
       await workspaceService.deleteWorkspace(workspaceId);
+    },
+    async updateBase(workspaceId, mode) {
+      await workspaceService.updateBase(workspaceId, mode);
     },
   };
 }

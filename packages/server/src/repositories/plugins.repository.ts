@@ -112,6 +112,9 @@ export interface LoopUnmergedWorkspaceRow {
   issueNumber: number | null;
   issueTitle: string;
   issueStatusName: string;
+  /** The ticket's full loop unit key (`plugin-loop:<slug>:<loop>:<unitId>`) — lets the
+   *  service correlate this row with the CURRENT gate's unit (#326). */
+  externalKey: string | null;
 }
 
 /**
@@ -136,6 +139,7 @@ export async function listPluginLoopUnmergedWorkspaces(
       issueNumber: issues.issueNumber,
       issueTitle: issues.title,
       issueStatusName: projectStatuses.name,
+      externalKey: issues.externalKey,
     })
     .from(workspaces)
     .innerJoin(issues, eq(workspaces.issueId, issues.id))

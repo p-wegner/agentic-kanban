@@ -284,6 +284,23 @@ async function hasStaleBaseWithCommits(ws: WorkspaceCandidate, deps: ProcessWork
   return behind > 0;
 }
 
+/**
+ * #324 — the sibling shape: NO commits ahead, but the base moved (`behind > 0`).
+ * A blocked builder (e.g. a loop step agent that halted on a missing input file)
+ * left the worktree empty; meanwhile the missing input landed on the base branch.
+ * A bare relaunch re-runs the agent against the SAME stale tree and fails
+ * identically, burning a session per monitor cycle. Rebasing first (a no-op
+ * fast-forward — there are no local commits) gives the relaunched agent the
+ * current base. Best-effort like its sibling: git failures mean "not this shape".
+ */
+async function hasMovedBaseNoCommits(ws: WorkspaceCandidate, deps: ProcessWorkspaceDeps): Promise<boolean> {
+  if (ws.isDirect || !ws.workingDir || !ws.baseBranch) return false;
+  const ahead = await (deps.getCommitCountAhead ?? getCommitCountAhead)(ws.workingDir, ws.baseBranch).catch(() => null);
+  if (ahead == null || ahead > 0) return false;
+  const behind = await (deps.countBehindCommits ?? countBehindCommits)(ws.workingDir, "HEAD", ws.baseBranch).catch(() => 0);
+  return behind > 0;
+}
+
 async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession | undefined, sessionCount: number, ctx: CycleContext): Promise<void> {
   const { deps, stats, logAction, canStartRelaunch, canStartMerge } = ctx;
   if (isCodexUsageLimitStats(sess?.stats)) {
@@ -400,6 +417,20 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
     }
   } else {
     if (!canStartRelaunch(ws)) return;
+    // #324: an empty workspace whose base moved gets rebased BEFORE the relaunch —
+    // otherwise the agent re-runs against the same stale tree it already failed on
+    // (observed: a loop step agent halting on an input file that had since landed
+    // on the base branch; every bare relaunch failed identically). Best-effort:
+    // a failed rebase falls through to the plain relaunch.
+    let rebased = false;
+    if (await hasMovedBaseNoCommits(ws, deps)) {
+      try {
+        await deps.workspaceActions.updateBase(ws.wsId, "rebase");
+        rebased = true;
+      } catch (err) {
+        console.warn(`[monitor] update-base before relaunch failed for workspace ${ws.wsId}:`, err instanceof Error ? err.message : String(err));
+      }
+    }
     let launchOk = true;
     try {
       await deps.workspaceActions.launch(ws.wsId);
@@ -409,8 +440,9 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
     logAction("relaunch", ws.wsId, ws.issueId, {
       endpoint: `POST /api/workspaces/${ws.wsId}/launch`,
       verificationResult: launchOk ? "ok" : "failed",
+      ...(rebased ? { responseSummary: "rebased onto moved base before relaunch" } : {}),
     });
-    console.log(`[monitor] Relaunched idle workspace ${ws.wsId}`);
+    console.log(`[monitor] Relaunched idle workspace ${ws.wsId}${rebased ? " (rebased onto moved base first)" : ""}`);
     deps.boardEvents.broadcast(ws.projectId, "board_changed");
   }
 }

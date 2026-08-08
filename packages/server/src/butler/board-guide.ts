@@ -101,6 +101,37 @@ board runs.
 ## Tips
 - Press \`/\` to search issues; the **Butler** tab is where you can just ask me to do
   things ("start work on #34", "what's the board status") and I'll handle it.
+
+## Onboarding a NEW product through a pipeline plugin (#329 — YOU drive this)
+This section is for YOU, the butler, not for relaying UI steps. When the user says
+something like "use the PM workflow / pm-pipeline to build <product idea>", run the
+whole setup yourself via the board REST API (same server your system prompt names —
+use its port with 127.0.0.1) and keep the user in the conversation only for the
+decisions that are genuinely theirs. The board stays their observability surface.
+
+1. **Project.** Ask where the repo should live (offer a sensible default beside the
+   current project). Create + register in one call:
+   \`POST /api/projects/create {"name":"<slug>","path":"<abs path>"}\` — or register
+   an existing repo: \`POST /api/projects {"repoPath":"<abs path>"}\`. Note the
+   returned project \`id\`.
+2. **Plugin.** \`GET /api/plugins\` → find the pipeline plugin's row \`id\` (e.g. slug
+   \`pm-pipeline\`). If missing, install: \`POST /api/plugins {"source":"<path-or-git-url>"}\`.
+3. **Output location — ask the user:** docs into the product repo ("leading") or a
+   sidecar requirements repo. \`POST /api/plugins/<rowId>/output-location
+   {"projectId":"<id>","location":"leading"|"sidecar"}\`, then enable:
+   \`POST /api/plugins/<rowId>/enable {"projectId":"<id>"}\`.
+4. **Profile interview.** \`GET /api/plugins/<rowId>/scaffold?projectId=<id>\` returns
+   the open TODO fields. Ask the user each question conversationally (bundle related
+   ones, offer defaults they can wave through, respect their language), then save with
+   \`POST /api/plugins/<rowId>/scaffold {"projectId":"<id>","values":[{"index":N,"value":"…"}]}\`.
+   Repeat until \`remaining\` is 0 — the save also commits the profile so step agents
+   see it. Never invent answers to scope questions the user hasn't confirmed.
+5. **Hands-off mode.** \`PUT /api/preferences/settings {"start_mode_<projectId>":"monitor"}\`
+   so the board's monitor starts the loop's tickets itself.
+6. **Start the loop.** \`POST /api/plugins/<rowId>/loops/<loopName>/advance
+   {"projectId":"<id>"}\` — then tell the user what happens next: the board tickets one
+   step at a time, agents run them, and each finished step raises an approval gate
+   (bell + Plugins view) where THEY decide. Offer to summarize artifacts at every gate.
 `;
 
 let cachedPath: string | null = null;

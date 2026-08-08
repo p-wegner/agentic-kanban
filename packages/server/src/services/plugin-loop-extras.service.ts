@@ -182,7 +182,32 @@ export function createPluginLoopExtras(ctx: PluginLoopExtrasCtx) {
     if (!existsSync(target)) throw new PluginError(`Scaffold file not found: ${scaffold.targetPath}`, "NOT_FOUND");
     const { content, remaining } = applyScaffoldValues(readFileSync(target, "utf8"), values);
     writeFileSync(target, content, "utf8");
-    return { targetPath: scaffold.targetPath, remaining, fields: parseScaffoldFields(content) };
+    // #324: COMMIT the filled scaffold. Loop step agents run in worktrees branched
+    // from the base branch, so an uncommitted profile is invisible to them — the
+    // planner (main checkout) passes its TODO check while every step ticket halts
+    // on a missing profile. Best-effort: a non-git output repo still gets the file.
+    const committed = await commitPathWithRetry(
+      repoPath,
+      scaffold.targetPath,
+      `plugin: fill ${plugin.pluginId} scaffold ${scaffold.targetPath}`,
+    );
+    return { targetPath: scaffold.targetPath, remaining, fields: parseScaffoldFields(content), committed };
+  }
+
+  /**
+   * Pathspec-limited add+commit with the #296 index.lock retry — the board's own
+   * merge jobs contend on `.git/index.lock`. Returns false when the repo has no
+   * git / nothing changed / all attempts failed; callers treat that as non-fatal.
+   */
+  async function commitPathWithRetry(repoPath: string, relPath: string, message: string): Promise<boolean> {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 1500 * attempt));
+      const add = await gitExec(["add", "--", relPath], { cwd: repoPath });
+      if (add.code !== 0) continue;
+      const commit = await gitExec(["commit", "-m", message, "--", relPath], { cwd: repoPath });
+      if (commit.code === 0) return true;
+    }
+    return false;
   }
 
   /** The loop's CURRENT gate + the context the concierge endpoints need. */
@@ -219,17 +244,9 @@ export function createPluginLoopExtras(ctx: PluginLoopExtrasCtx) {
     }
     const abs = resolveInside(repoPath, body.path, `artifact path "${body.path}"`);
     writeFileSync(abs, body.content, "utf8");
-    let committed = false;
-    for (let attempt = 0; attempt < 5 && !committed; attempt++) {
-      if (attempt > 0) await new Promise((r) => setTimeout(r, 1500 * attempt));
-      const add = await gitExec(["add", "--", body.path], { cwd: repoPath });
-      if (add.code !== 0) continue;
-      const commit = await gitExec(
-        ["commit", "-m", `plugin: human edit of ${body.path} at gate ${gate.id}`, "--", body.path],
-        { cwd: repoPath },
-      );
-      committed = commit.code === 0;
-    }
+    const committed = await commitPathWithRetry(
+      repoPath, body.path, `plugin: human edit of ${body.path} at gate ${gate.id}`,
+    );
     return { path: body.path, committed };
   }
 
@@ -253,7 +270,26 @@ export function createPluginLoopExtras(ctx: PluginLoopExtrasCtx) {
     return { draft };
   }
 
-  return { resolveLoopGate, listLoopEvents, getLoopArtifact, getScaffoldForm, fillScaffoldForm, saveLoopArtifact, draftLoopGateFeedback };
+  /** Summarize-for-me (#330): one-click decision-ready digest of the current gate's artifacts. */
+  async function summarizeLoopGate(
+    pluginRowId: string,
+    loopName: string,
+    projectId: string,
+    body: { gateId: string },
+  ) {
+    const { repoPath, gate, status } = await requireCurrentGate(pluginRowId, loopName, projectId);
+    if (gate.id !== body.gateId) {
+      throw new PluginError(`Gate "${body.gateId}" is stale — the loop's current gate is "${gate.id}"`, "BAD_REQUEST");
+    }
+    const { summarizeGateArtifacts } = await import("./plugin-gate-butler.service.js");
+    const summary = await summarizeGateArtifacts(
+      { projectId, gate, checks: status.checks, repoPath },
+      database,
+    );
+    return { summary };
+  }
+
+  return { resolveLoopGate, listLoopEvents, getLoopArtifact, getScaffoldForm, fillScaffoldForm, saveLoopArtifact, draftLoopGateFeedback, summarizeLoopGate };
 }
 
 /**

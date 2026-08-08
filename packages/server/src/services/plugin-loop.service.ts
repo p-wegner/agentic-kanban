@@ -6,6 +6,7 @@ import { isTerminalStatusName } from "@agentic-kanban/shared";
 import {
   DEFAULT_LOOP_MAX_UNITS_PER_ADVANCE,
   parsePluginLoopPlan,
+  parsePluginLoopUnitKey,
   pluginLoopConvergedPreferenceKey,
   pluginLoopPausedPreferenceKey,
   pluginLoopUnitKey,
@@ -289,9 +290,20 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
         gate: payload?.gate ?? null,
         progress: payload?.progress ?? null,
         checks: payload?.checks ?? null,
-        awaitingMerge: unmerged.length > 0
-          ? { workspaceId: unmerged[0].workspaceId, issueNumber: unmerged[0].issueNumber, issueTitle: unmerged[0].issueTitle }
-          : null,
+        // #326: an unmerged workspace row is STALE when the planner already reports a
+        // gate for that very unit — a gate means the planner has SEEN the unit's
+        // artifacts in the main checkout, so "until the merge lands, the planner
+        // cannot see the artifacts" is false and the Merge-now banner contradicts
+        // the gate card right below it (observed with a duplicate/empty workspace
+        // left over from an earlier run of the same ticket).
+        awaitingMerge: (() => {
+          const relevant = gate
+            ? unmerged.filter((w) => parsePluginLoopUnitKey(w.externalKey)?.unitId !== gate.id)
+            : unmerged;
+          return relevant.length > 0
+            ? { workspaceId: relevant[0].workspaceId, issueNumber: relevant[0].issueNumber, issueTitle: relevant[0].issueTitle }
+            : null;
+        })(),
         gateRecommendation,
       });
     }
@@ -532,8 +544,12 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
         boardUrl,
       };
       void import("./plugin-gate-butler.service.js").then(async (m) => {
-        await m.notifyButlerOfGate(conciergeArgs, database);
+        // Recommendation FIRST (#317): its one-shot ask subscribes to the butler event
+        // stream and resolves on the next `result` — if the digest turn were already in
+        // flight, ITS result (prose, no JSON) would be misattributed to the ask and the
+        // recommendation silently dropped. Reco completes, then the digest turn goes out.
         await m.computeGateRecommendation(conciergeArgs, database);
+        await m.notifyButlerOfGate(conciergeArgs, database);
       }).catch((err) => {
         console.warn(`[plugins] gate concierge failed for ${args.pluginSlug}:${loop.name}:`, err instanceof Error ? err.message : String(err));
       });
