@@ -170,6 +170,17 @@ export interface LoopStatus {
   lastAdvanceAt: string | null;
   /** Human gate the loop is currently blocked on (#286), from the latest advance. */
   gate: PluginLoopGate | null;
+  /**
+   * When the CURRENT gate was first reached (ISO), from its one-time `gate-reached` event;
+   * null when there is no gate (or it predates this field being recorded).
+   *
+   * Not the same as `lastAdvanceAt` and not interchangeable with it: the monitor re-plans a
+   * gated loop every cycle, so `lastAdvanceAt` keeps moving while the human has not acted.
+   * Anything that wants to say how long a decision has been waiting — the inbox, an
+   * age badge, a nag — must use THIS. Reading `lastAdvanceAt` instead makes a gate that has
+   * sat untouched for an hour look like it appeared moments ago (observed on a live run).
+   */
+  gateSince: string | null;
   /** Declarative pipeline progress (#289), from the latest advance. */
   progress: { steps: PluginLoopProgressStep[] } | null;
   /** Structured check results (#290), from the latest advance. */
@@ -265,7 +276,17 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
       const unmerged = await listPluginLoopUnmergedWorkspaces(projectId, keyPrefix(pluginSlug, loop.name), database);
       const gate = payload?.gate ?? null;
       let gateRecommendation: LoopStatus["gateRecommendation"] = null;
+      let gateSince: string | null = null;
       if (gate) {
+        // `gate-reached` is written once per NEW gate id, so its timestamp is the gate's
+        // true birth — unlike the advance row, which is restamped every monitor cycle.
+        const reachedRow = await latestPluginLoopEvent(
+          { pluginSlug, loopName: loop.name, projectId }, "gate-reached", database,
+        );
+        try {
+          const reached = reachedRow?.payloadJson ? JSON.parse(reachedRow.payloadJson) as { gateId?: string } : null;
+          if (reached?.gateId === gate.id) gateSince = reachedRow?.createdAt ?? null;
+        } catch { /* malformed event — fall back to no age */ }
         const recoRow = await latestPluginLoopEvent(
           { pluginSlug, loopName: loop.name, projectId }, "gate-recommendation", database,
         );
@@ -288,6 +309,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
         note: payload?.note ?? null,
         lastAdvanceAt: lastAdvance?.createdAt ?? null,
         gate: payload?.gate ?? null,
+        gateSince,
         progress: payload?.progress ?? null,
         checks: payload?.checks ?? null,
         // #326: an unmerged workspace row is STALE when the planner already reports a

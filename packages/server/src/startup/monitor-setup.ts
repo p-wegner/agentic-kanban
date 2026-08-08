@@ -341,6 +341,18 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       // workspace started this cycle already forks from the branch the pass committed to.
       setPhase("compounding-setup");
       await runCompoundingSetup(prefMap, { allowProject: shouldAutoStartProject });
+      // Board-owned plugin loops (manifest `loops`): plan the next round of a converging
+      // analysis loop once the previous round's tickets are all terminal — same WIP limit,
+      // same provider selection, same auth-rotation-on-quota as any other ticket.
+      //
+      // Runs BEFORE the auto-start fan-out, and after the candidate pass that lands merges,
+      // so one cycle can do the whole hop: this cycle's merge makes the round terminal, the
+      // advance plans the next unit, and this cycle's `runAutoStart` launches it. It used to
+      // run last, which guaranteed a freshly-planned loop ticket missed the auto-start pass
+      // and had to wait for the NEXT cycle — a floor of one full cycle (~4 min by default,
+      // and far worse under load: a measured pm-pipeline step waited 27 min to start).
+      setPhase("plugin-loops");
+      await advanceDuePluginLoops(db, { allowProject: shouldAutoStartProject });
       setPhase("auto-start");
       const autoStartSkips = await runAutoStart(prefMap, { serverPort, boardEvents, allowProject: shouldAutoStartProject, isAutoDrivenProject: (projectId) => resolveStartPolicy(prefMap, projectId).mode !== "manual", logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
       if (autoStartSkips.size > 0) {
@@ -354,15 +366,10 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
           for (const warning of skipWarnings) console.warn(`[monitor] ${warning.message}`);
         }
       }
+      // After the plugin-loop advance above, so a loop ticket planned this cycle counts as
+      // real backlog work and the refill does not generate spurious tickets beside it.
       setPhase("backlog-refill");
       await runBacklogEmptyStrategy(prefMap, { serverPort, boardEvents, allowProject: allowBacklogRefill, logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
-      // Board-owned plugin loops (manifest `loops`): plan the next round of a
-      // converging analysis loop once the previous round's tickets are all
-      // terminal, so the tickets it creates are picked up by the auto-start pass
-      // above on the NEXT cycle — same WIP limit, same provider selection, same
-      // auth-rotation-on-quota as any other ticket.
-      setPhase("plugin-loops");
-      await advanceDuePluginLoops(db, { allowProject: shouldAutoStartProject });
     } catch (err) {
       console.warn("[monitor] Cycle error:", err);
     } finally {

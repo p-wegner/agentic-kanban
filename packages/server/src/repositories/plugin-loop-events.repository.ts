@@ -17,6 +17,12 @@ export type PluginLoopEventType =
   | "gate-resolved"
   /** Butler pre-read verdict for a gate (#309) — payload { gateId, actionId, reason }. */
   | "gate-recommendation"
+  /**
+   * Why a gate got NO pre-read — payload { gateId, reason, detail }. Recorded because every
+   * bail-out in `computeGateRecommendation` is a silent return, which made a missing chip
+   * impossible to attribute (feature off? cold butler? malformed model reply?).
+   */
+  | "gate-recommendation-skipped"
   | "paused"
   | "resumed"
   | "converged";

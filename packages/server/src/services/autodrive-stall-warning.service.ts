@@ -1,6 +1,7 @@
 import type { Database } from "../db/index.js";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { db } from "../db/index.js";
+import { isClaudeUsageLimitStats } from "./claude-rate-limit.js";
 import { isCodexUsageLimitStats } from "./codex-rate-limit.js";
 import { resolveStartPolicy } from "./start-policy.service.js";
 import { parseSessionStats } from "../startup/monitor-cycle-rules.js";
@@ -124,7 +125,13 @@ function sessionTokenTotal(stats: string | null): number | null {
 }
 
 function classifyCause(rows: ActiveWorkspaceWithSessions[], prefMap: Map<string, string>): AutodriveStallCause {
-  if (rows.some((row) => isCodexUsageLimitStats(row.latestSession?.stats))) return "provider_usage_limit";
+  // Both providers, not just Codex. A Claude quota death used to fall through to
+  // "no_progress" — the least actionable bucket — so a stall that self-heals at a known
+  // reset time read identically to a genuinely wedged workspace. Measured: a step agent
+  // died on a Claude session limit and its stall warning said "no recent progress" for
+  // 55 minutes while the real cause (and its reset time) sat in the session stats.
+  if (rows.some((row) => isCodexUsageLimitStats(row.latestSession?.stats)
+    || isClaudeUsageLimitStats(row.latestSession?.stats))) return "provider_usage_limit";
 
   if (rows.some((row) => {
     const sess = row.latestSession;

@@ -58,7 +58,10 @@ export async function listInbox(database: Database = db): Promise<{ items: Inbox
           detail: `${loop.pluginName} — ${loop.label}`
             + (loop.gateRecommendation ? ` · Butler recommends: ${loop.gateRecommendation.actionId}` : ""),
           link: { view: "plugin-views", pluginId: loop.pluginId, pluginSlug: loop.pluginSlug, loopName: loop.name },
-          createdAt: loop.lastAdvanceAt,
+          // The gate's own birth, NOT `lastAdvanceAt` — the monitor re-plans a gated loop
+          // every cycle, so `lastAdvanceAt` keeps moving while the human has not acted and
+          // an hour-old decision showed up here as if it had just arrived.
+          createdAt: loop.gateSince ?? loop.lastAdvanceAt,
         });
       }
     } catch (err) {
