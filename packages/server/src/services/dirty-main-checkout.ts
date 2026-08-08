@@ -105,6 +105,10 @@ export async function scanDirtyMainCheckouts(database: Database = db): Promise<D
       console.warn(`[dirty-main-checkout] failed to inspect ${project.repoPath}:`, err instanceof Error ? err.message : String(err));
       continue;
     }
+    // Hand the event loop back between repos (#349). This scan is purely diagnostic but walks
+    // ~20 registered repos with a `git diff` each; without a yield the whole walk is one
+    // uninterrupted macrotask chain competing with every request, WS broadcast and SSE stream.
+    await new Promise<void>((resolve) => setImmediate(resolve));
     if (files.length === 0) continue;
 
     const preview = files.slice(0, 5).join(", ");

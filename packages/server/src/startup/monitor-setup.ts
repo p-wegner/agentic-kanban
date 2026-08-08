@@ -106,6 +106,22 @@ export interface MonitorState {
 
 export type MonitorWarning = DirtyMainCheckoutWarning | AutodriveStallWarning;
 
+/**
+ * #349: the health-warning refresh (`scanDirtyMainCheckouts` + `scanAutodriveStallWarnings`)
+ * is PURELY DIAGNOSTIC — nothing in the cycle reads its output — yet it measured 203-265s per
+ * cycle and was the single slowest phase of a cycle that never stops running (measured 5-8s
+ * gaps between cycles, so `auto_monitor_interval` does not pace this board at all). It was
+ * therefore blocking the event loop for ~45% of all wall-clock time, permanently, which is the
+ * p50-15ms/max-18s "single long synchronous block" signature #322/#347 recorded on EVERY
+ * endpoint. It was ALSO being kicked unguarded every 30s from `syncMonitorState`, with no
+ * re-entrancy guard, so a scan that takes minutes had several copies of itself in flight.
+ *
+ * It is now (a) off the monitor cycle's critical path entirely — the cycle neither awaits nor
+ * schedules it — and (b) rate-limited to at most one run per this interval with a single-flight
+ * guard, so a slow scan can never again pace the board or pile up on itself.
+ */
+const HEALTH_WARNING_REFRESH_INTERVAL_MS = 10 * 60_000;
+
 export interface MonitorResourceSummary {
   processCount: number;
   listenerCount: number;
@@ -172,6 +188,19 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
     fixAndMergeSessionIds,
   });
   let lastWarningFingerprint = "";
+  // `monitorState.warnings` is the UNION of two independently-produced sets, and the refresh
+  // REPLACES its half rather than adding to it. Before #349 that was expressed as strict phase
+  // ordering inside the cycle (refresh, then append) — which is unrepresentable now that the
+  // refresh is off the cycle. Keeping the two halves separately and recomposing on every write
+  // means neither can silently drop the other whatever order they land in.
+  let lastScannedWarnings: MonitorWarning[] = [];
+  let autoStartSkipWarnings: MonitorWarning[] = [];
+  let lastWarningRefreshAt = 0;
+  let warningRefreshRunning = false;
+  function composeWarnings(): MonitorWarning[] {
+    monitorState.warnings = [...lastScannedWarnings, ...autoStartSkipWarnings];
+    return monitorState.warnings;
+  }
 
   // Event-driven trigger state. The deterministic monitor is poll-based by default
   // (auto_monitor_interval), but most of its work is a reaction to a board mutation we
@@ -201,7 +230,8 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       ...await scanDirtyMainCheckouts(db),
       ...await scanAutodriveStallWarnings(db, prefs),
     ];
-    monitorState.warnings = warnings;
+    lastScannedWarnings = warnings;
+    composeWarnings();
     monitorState.lastHealthCheckAt = new Date().toISOString();
     const warningFingerprint = warnings
       .map((warning) => {
@@ -218,7 +248,26 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       }
     }
     lastWarningFingerprint = warningFingerprint;
-    return warnings;
+    return monitorState.warnings;
+  }
+
+  /**
+   * The ONLY sanctioned entry point for the diagnostic scan (#349). Single-flight + rate-limited,
+   * and never throws — a diagnostic must not be able to fail or delay its caller. Callers do not
+   * await it; they fire and forget.
+   */
+  function refreshMonitorWarningsThrottled(prefMap?: Map<string, string>, force = false): void {
+    if (stopped) return;
+    if (warningRefreshRunning) return;
+    if (!force && Date.now() - lastWarningRefreshAt < HEALTH_WARNING_REFRESH_INTERVAL_MS) return;
+    warningRefreshRunning = true;
+    // Stamped BEFORE the scan, not after: stamping on completion would let a scan that takes
+    // longer than the interval re-arm the instant it finished, restoring the back-to-back
+    // behaviour this guard exists to remove.
+    lastWarningRefreshAt = Date.now();
+    void refreshMonitorWarnings(prefMap)
+      .catch((err) => console.warn("[monitor] health warning refresh failed (diagnostics only):", err instanceof Error ? err.message : String(err)))
+      .finally(() => { warningRefreshRunning = false; });
   }
 
   function isInMaintenanceWindow(prefMap: Map<string, string>): boolean {
@@ -269,7 +318,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       const allowBacklogRefill = (projectId: string) => resolveStartPolicy(prefMap, projectId).backlogRefill;
       if (isInMaintenanceWindow(prefMap)) {
         setPhase("maintenance-window");
-        warningCount = (await refreshMonitorWarnings(prefMap)).length;
+        refreshMonitorWarningsThrottled(prefMap);
         const endTime = prefMap.get("monitor_maintenance_window_end");
         console.log(`[monitor] Maintenance window active — skipping disruptive actions${endTime ? ` until ${endTime}` : ""}`);
         return;
@@ -385,23 +434,26 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       await advanceDuePluginLoops(db, { allowProject: shouldAutoStartProject });
       setPhase("auto-start");
       const autoStartSkips = await runAutoStart(prefMap, { serverPort, boardEvents, allowProject: shouldAutoStartProject, isAutoDrivenProject: (projectId) => resolveStartPolicy(prefMap, projectId).mode !== "manual", logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
-      // Diagnostics AFTER the productive phases (moved from third-of-eleven, see the note above).
-      // It must still run BEFORE the skip-warning append below, because it REPLACES
-      // `monitorState.warnings` rather than adding to it — reversing these two silently drops
-      // every auto-start skip warning.
-      setPhase("refreshing-warnings");
-      warningCount = (await refreshMonitorWarnings(prefMap)).length;
+      // #349: the diagnostic scan used to be a phase HERE and was awaited. It is now on its own
+      // rate-limited timer (see `HEALTH_WARNING_REFRESH_INTERVAL_MS`) and the cycle does not wait
+      // for it — 203-265s of purely diagnostic work per cycle is off the critical path. Do not
+      // reintroduce an `await` here: nothing in the cycle reads the warnings, and the only thing
+      // that awaiting bought was blocking the event loop for minutes on every pass. The two halves
+      // of `monitorState.warnings` are now recomposed rather than ordered (`composeWarnings`), so
+      // the append below can no longer be clobbered by a refresh that lands beside it.
+      setPhase("auto-start-skip-warnings");
+      autoStartSkipWarnings = [];
       if (autoStartSkips.size > 0) {
         const projectRows = await db.select({ id: projects.id, name: projects.name }).from(projects)
           .where(inArray(projects.id, [...autoStartSkips.keys()]));
         const projectNames = new Map(projectRows.map((p) => [p.id, p.name]));
         const skipWarnings = buildAutoStartSkipWarnings(autoStartSkips, projectNames, new Date());
         if (skipWarnings.length > 0) {
-          monitorState.warnings = [...monitorState.warnings, ...skipWarnings];
-          warningCount = monitorState.warnings.length;
+          autoStartSkipWarnings = skipWarnings;
           for (const warning of skipWarnings) console.warn(`[monitor] ${warning.message}`);
         }
       }
+      warningCount = composeWarnings().length;
       // After the plugin-loop advance above, so a loop ticket planned this cycle counts as
       // real backlog work and the refill does not generate spurious tickets beside it.
       setPhase("backlog-refill");
@@ -435,7 +487,11 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
   async function syncMonitorState() {
     const prefRows = await db.select().from(preferences).catch(() => []);
     const prefMap = new Map(prefRows.map((r: { key: string; value: string }) => [r.key, r.value]));
-    await refreshMonitorWarnings(prefMap).catch((err) => console.warn("[monitor] Monitor warning health check failed:", err));
+    // #349: this ran every 30s (the `syncMonitorInterval` period) and was AWAITED, with no
+    // re-entrancy guard — so a scan measured at 203-265s had ~8 copies of itself in flight at
+    // any moment, each blocking the event loop, and it also delayed the timer re-arm below.
+    // Now fire-and-forget through the shared throttle.
+    refreshMonitorWarningsThrottled(prefMap);
     if (stopped) return;
     const enabled = monitorShouldRun(prefMap);
     const intervalMin = parseInt(prefMap.get("auto_monitor_interval") || "4", 10);
