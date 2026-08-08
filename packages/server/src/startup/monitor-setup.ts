@@ -20,6 +20,7 @@ import { scanDirtyMainCheckouts, type DirtyMainCheckoutWarning } from "../servic
 import { scanAutodriveStallWarnings, buildAutoStartSkipWarnings, type AutodriveStallWarning } from "../services/autodrive-stall-warning.service.js";
 import { resolveMergeStrategy } from "./merge-strategy.js";
 import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
+import { createMonitorPhaseRecorder, type MonitorCycleTimings } from "../lib/monitor-phase-timings.js";
 
 /**
  * Per-project hands-off mode. A `board_autodrive_<projectId>` preference set to
@@ -94,6 +95,13 @@ export interface MonitorState {
    * identical to "never ran" (#208; `lastRun` only reflects the last COMPLETED cycle).
    */
   currentCycle: { startedAt: string; phase: string } | null;
+  /**
+   * Per-phase durations of the last COMPLETED cycle (#347). Stall windows correlated with
+   * monitor cycle starts, but from outside the process the culprit phase could not be
+   * pinned: `setPhase` knew every transition and threw the timing away. Read this back
+   * alongside `/api/metrics/loop-lag` and the slow-request ring buffer to name the blocker.
+   */
+  lastCyclePhaseTimings: MonitorCycleTimings | null;
 }
 
 export type MonitorWarning = DirtyMainCheckoutWarning | AutodriveStallWarning;
@@ -148,12 +156,12 @@ export function setupMonitorRoutes(app: Hono, monitorState: MonitorState, runMon
     const maintenanceEnabled = getBool(prefMap, "monitor_maintenance_window_enabled");
     const maintenanceEnd = prefMap.get("monitor_maintenance_window_end") || null;
     const maintenanceActive = maintenanceEnabled && (!maintenanceEnd || new Date(maintenanceEnd).getTime() > Date.now());
-    return c.json({ enabled: getBool(prefMap, "auto_monitor"), intervalMin: parseInt(prefMap.get("auto_monitor_interval") || "4", 10), active: monitorState.timer !== null, lastRun: monitorState.lastRun, currentCycle: monitorState.currentCycle, nextRunAt: monitorState.nextRunAt, recentActions: monitorState.recentActions, resourceSnapshot: monitorState.lastResourceSnapshot, warnings: monitorState.warnings, lastHealthCheckAt: monitorState.lastHealthCheckAt, maintenanceActive, maintenanceEnd });
+    return c.json({ enabled: getBool(prefMap, "auto_monitor"), intervalMin: parseInt(prefMap.get("auto_monitor_interval") || "4", 10), active: monitorState.timer !== null, lastRun: monitorState.lastRun, currentCycle: monitorState.currentCycle, nextRunAt: monitorState.nextRunAt, recentActions: monitorState.recentActions, resourceSnapshot: monitorState.lastResourceSnapshot, warnings: monitorState.warnings, lastHealthCheckAt: monitorState.lastHealthCheckAt, lastCyclePhaseTimings: monitorState.lastCyclePhaseTimings, maintenanceActive, maintenanceEnd });
   });
 }
 
 export function createMonitorSetup({ sessionManager, boardEvents, serverPort, reviewSessionIds, fixAndMergeSessionIds }: MonitorSetupDeps) {
-  const monitorState: MonitorState = { timer: null, nextRunAt: null, lastRun: null, currentIntervalMin: null, recentActions: [], lastResourceSnapshot: null, warnings: [], lastHealthCheckAt: null, currentCycle: null };
+  const monitorState: MonitorState = { timer: null, nextRunAt: null, lastRun: null, currentIntervalMin: null, recentActions: [], lastResourceSnapshot: null, warnings: [], lastHealthCheckAt: null, currentCycle: null, lastCyclePhaseTimings: null };
   // One workspace-actions port for the monitor's relaunch/merge/fix/delete drives,
   // wired here in the composition root so the cycle calls the application service
   // directly instead of self-HTTP. (serverPort is still used by auto-start/backlog.)
@@ -229,7 +237,10 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
     if (cycleRunning) { rerunRequested = true; return; }
     cycleRunning = true;
     monitorState.currentCycle = { startedAt: new Date().toISOString(), phase: "starting" };
+    // Time every phase transition, not just name the current one (#347).
+    const phaseRecorder = createMonitorPhaseRecorder("starting");
     const setPhase = (phase: string) => {
+      phaseRecorder.enter(phase);
       if (monitorState.currentCycle) monitorState.currentCycle = { ...monitorState.currentCycle, phase };
     };
     const cycleStats = { relaunched: 0, merged: 0, nudged: 0 };
@@ -400,6 +411,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
     } finally {
       cycleRunning = false;
       monitorState.currentCycle = null;
+      monitorState.lastCyclePhaseTimings = phaseRecorder.finish();
       monitorState.lastRun = { at: new Date().toISOString(), ...cycleStats, resources: resourceSummary, warnings: warningCount, ...(deferredProjectIds.length > 0 ? { deferredProjectIds } : {}) };
       const prefRows = await db.select().from(preferences).catch(() => []);
       const prefMap = new Map(prefRows.map((r: { key: string; value: string }) => [r.key, r.value]));
