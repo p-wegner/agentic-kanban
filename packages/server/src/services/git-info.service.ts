@@ -95,6 +95,14 @@ const HEAD_RESOLVE_TIMEOUT_MS = 5_000;
 const HISTORY_WEEKS = 12;
 const MAX_SOURCE_FILES = 6000;
 const MAX_SOURCE_BYTES = 750_000;
+// Bounds on the async source walk (#340). The walk is latency-bound on the libuv
+// thread pool, so a modest amount of parallelism collapses minutes into seconds;
+// the wall-clock budget is the backstop that guarantees a stats request can never
+// again occupy the process for 500s. Files are queued across directories and
+// flushed once the queue is deep enough to actually saturate WALK_CONCURRENCY.
+const WALK_CONCURRENCY = 12;
+const WALK_QUEUE_FLUSH_AT = 96;
+const WALK_BUDGET_MS = 10_000;
 const MAX_HOTSPOTS = 8;
 // Per-commit `--numstat` is the expensive part of the history scan. On a very
 // active repo (thousands of commits inside the HISTORY_WEEKS window) the full
@@ -214,12 +222,59 @@ function collectCurrentCodeMetrics(repoPath: string): ProjectStatsResponse["code
   return finalizeCodeMetrics(codeMetrics);
 }
 
-/** Async twin of collectCurrentCodeMetrics — same walk, same limits, but never blocks the event loop. */
-async function collectCurrentCodeMetricsAsync(repoPath: string): Promise<ProjectStatsResponse["codeMetrics"]> {
+/**
+ * Async twin of collectCurrentCodeMetrics — same walk and same limits, but never
+ * blocks the event loop AND is bounded in both time and I/O shape (#340).
+ *
+ * The original version awaited one stat() + one readFile() per file, strictly
+ * serially, for up to MAX_SOURCE_FILES files. Every fs.promises op goes through the
+ * 4-thread libuv pool, which on a busy board is shared with dozens of agent
+ * output-file watchers polling every 500ms; under that contention each file costs
+ * tens of ms and the walk measured 75-509s server-side (and, with several requests
+ * piling up, stalled every other endpoint).
+ *
+ * Two bounds fix that:
+ *  - **Bounded parallelism.** The walk is latency-bound, not CPU-bound, so files are
+ *    tallied WALK_CONCURRENCY at a time. Files are queued across directories rather
+ *    than batched per-directory, so a repo of many small directories still gets full
+ *    parallelism.
+ *  - **A wall-clock budget.** On expiry the walk stops and returns what it scanned.
+ *    sourceFilesScanned reflects the truth, so a partial result is visibly partial
+ *    rather than silently wrong, and an unbounded recompute can never again monopolise
+ *    the single Node thread for minutes.
+ */
+async function collectCurrentCodeMetricsAsync(
+  repoPath: string,
+  budgetMs = WALK_BUDGET_MS,
+): Promise<ProjectStatsResponse["codeMetrics"]> {
   const codeMetrics = emptyCodeMetrics();
+  const deadline = Date.now() + budgetMs;
   const stack = [repoPath];
+  const pending: string[] = [];
 
-  while (stack.length > 0 && codeMetrics.sourceFilesScanned < MAX_SOURCE_FILES) {
+  const outOfBudget = (): boolean =>
+    Date.now() >= deadline || codeMetrics.sourceFilesScanned >= MAX_SOURCE_FILES;
+
+  /** Tally `pending` with at most WALK_CONCURRENCY reads in flight, then clear it. */
+  const drainPending = async (): Promise<void> => {
+    while (pending.length > 0 && !outOfBudget()) {
+      const batch = pending.splice(0, WALK_CONCURRENCY);
+      const tallies = await Promise.all(batch.map(async (path) => {
+        try {
+          if ((await stat(path)).size > MAX_SOURCE_BYTES) return null;
+          return { rel: normalizePath(relative(repoPath, path)), loc: countLoc(await readFile(path, "utf8")) };
+        } catch {
+          return null; // Ignore unreadable generated or transient files.
+        }
+      }));
+      for (const tally of tallies) {
+        if (tally) tallySourceFile(codeMetrics, tally.rel, tally.loc);
+      }
+    }
+    pending.length = 0;
+  };
+
+  while (stack.length > 0 && !outOfBudget()) {
     const dir = stack.pop()!;
     let entries;
     try {
@@ -235,17 +290,13 @@ async function collectCurrentCodeMetricsAsync(repoPath: string): Promise<Project
         continue;
       }
       if (!entry.isFile() || !isSourceFile(path)) continue;
-
-      try {
-        if ((await stat(path)).size > MAX_SOURCE_BYTES) continue;
-        const rel = normalizePath(relative(repoPath, path));
-        const loc = countLoc(await readFile(path, "utf8"));
-        tallySourceFile(codeMetrics, rel, loc);
-      } catch {
-        // Ignore unreadable generated or transient files.
-      }
+      pending.push(path);
     }
+
+    if (pending.length >= WALK_QUEUE_FLUSH_AT) await drainPending();
   }
+
+  await drainPending();
 
   return finalizeCodeMetrics(codeMetrics);
 }
@@ -333,6 +384,9 @@ function historyLogArgs(since: string, branch: string): string[] {
 
 /** Exported for tests: the commit cap that keeps the fallback hotspot scan bounded/fast. */
 export const HOTSPOT_FALLBACK_COMMIT_LIMIT_FOR_TEST = HOTSPOT_FALLBACK_COMMIT_LIMIT;
+/** Test hook for the bounded source walk (#340) — lets a test inject the wall-clock budget. */
+export const collectCurrentCodeMetricsAsyncForTest = collectCurrentCodeMetricsAsync;
+export const WALK_QUEUE_FLUSH_AT_FOR_TEST = WALK_QUEUE_FLUSH_AT;
 
 /**
  * Full-history (capped) variant used to populate hotspots for dormant repos.
@@ -422,34 +476,54 @@ async function collectHistoryMetricsAsync(repoPath: string, branch: string): Pro
   return result;
 }
 
+/**
+ * Cache key for a repo+branch metrics blob.
+ *
+ * Prefers the resolved HEAD sha, so a new commit invalidates immediately. When
+ * rev-parse could not be resolved it falls back to a DETERMINISTIC repo+branch key
+ * rather than refusing to cache (#340).
+ *
+ * The previous behaviour — key `null`, i.e. no caching and no in-flight dedupe — was
+ * exactly backwards: rev-parse only times out when the machine is already loaded, so
+ * the cache and the dedupe both switched themselves off precisely when they were
+ * needed, and every concurrent stats request started its own full source walk (the
+ * measured 4-way, 132-509s pile-up). A blob keyed on repo+branch can be at most one
+ * TTL (60s) stale; an uncached recompute storm costs minutes and blocks the whole
+ * event loop. Both paths derive the fallback key the same way, so sync and async
+ * still agree on it and continue to share one entry.
+ */
+function metricsCacheKey(repoPath: string, branch: string, head: string | null): string {
+  return head != null ? `${repoPath}:${head}` : `${repoPath}@${branch}`;
+}
+
 function collectProjectCodeAndHistory(repoPath: string, branch: string): CachedMetrics {
-  // Returns null (never a fallback value like the branch name) when rev-parse fails, so a
-  // transient timeout can't silently key the cache on something other than the true commit —
-  // that would let the sync and async paths (whichever one happens to time out) diverge onto
-  // two different cache keys for the same repo+branch and defeat the shared cache entirely.
   let head: string | null;
   try {
     head = gitExecSync(["rev-parse", branch], { cwd: repoPath, timeout: HEAD_RESOLVE_TIMEOUT_MS }).trim();
   } catch {
     head = null;
   }
-  const cacheKey = head != null ? `${repoPath}:${head}` : null;
-  const cached = cacheKey != null ? metricsCache.get(cacheKey) : undefined;
+  const cacheKey = metricsCacheKey(repoPath, branch, head);
+  const cached = metricsCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < METRICS_CACHE_TTL_MS) return cached.metrics;
 
   const codeMetrics = collectCurrentCodeMetrics(repoPath);
   const { history, hotspots } = collectHistoryMetrics(repoPath, branch);
   const metrics = { codeMetrics, history, hotspots };
-  // Only a reliably-resolved head is safe to cache under; an unresolved head means
-  // this result must not be stored (there's no trustworthy key to store it under).
-  if (cacheKey != null) metricsCache.set(cacheKey, { timestamp: Date.now(), metrics });
+  metricsCache.set(cacheKey, { timestamp: Date.now(), metrics });
   return metrics;
 }
 
 /**
- * Async twin of collectProjectCodeAndHistory. Shares the same 60s HEAD-keyed cache;
- * concurrent cold computes for the same repo+head share one in-flight promise instead
- * of each spawning the full source walk + git history scan.
+ * Async twin of collectProjectCodeAndHistory. Shares the same 60s cache; concurrent
+ * cold computes for the same key share one in-flight promise instead of each spawning
+ * the full source walk + git history scan.
+ *
+ * Stale-while-revalidate (#340): an EXPIRED entry is served immediately (last known
+ * good) while a background refresh replaces it — the same philosophy the board summary
+ * cache already uses. Only a true first sighting, with nothing cached at all, waits for
+ * the walk. This is what keeps a poll-path request off the walk entirely in steady
+ * state; values may be one refresh cycle behind.
  */
 async function collectProjectCodeAndHistoryAsync(repoPath: string, branch: string): Promise<CachedMetrics> {
   let head: string | null;
@@ -458,28 +532,31 @@ async function collectProjectCodeAndHistoryAsync(repoPath: string, branch: strin
   } catch {
     head = null;
   }
-  const cacheKey = head != null ? `${repoPath}:${head}` : null;
-  const cached = cacheKey != null ? metricsCache.get(cacheKey) : undefined;
+  const cacheKey = metricsCacheKey(repoPath, branch, head);
+  const cached = metricsCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < METRICS_CACHE_TTL_MS) return cached.metrics;
 
-  const inflight = cacheKey != null ? inflightMetrics.get(cacheKey) : undefined;
-  if (inflight) return inflight;
+  const inflight = inflightMetrics.get(cacheKey);
+  if (inflight) return cached ? cached.metrics : inflight;
 
   const compute = (async () => {
     const codeMetrics = await collectCurrentCodeMetricsAsync(repoPath);
     const { history, hotspots } = await collectHistoryMetricsAsync(repoPath, branch);
     const metrics = { codeMetrics, history, hotspots };
-    // Only a reliably-resolved head is safe to cache under; an unresolved head means
-    // this result must not be stored (there's no trustworthy key to store it under).
-    if (cacheKey != null) metricsCache.set(cacheKey, { timestamp: Date.now(), metrics });
+    metricsCache.set(cacheKey, { timestamp: Date.now(), metrics });
     return metrics;
   })();
-  if (cacheKey == null) return compute;
   // Clear the in-flight slot regardless of outcome; the cache write above is the success path.
   const tracked = compute.finally(() => {
     inflightMetrics.delete(cacheKey);
   });
   inflightMetrics.set(cacheKey, tracked);
+  if (cached) {
+    // Serve last-known-good now; the refresh above lands in the cache for the next caller.
+    // Its rejection must not surface as an unhandled rejection on this detached path.
+    void tracked.catch(() => {});
+    return cached.metrics;
+  }
   return tracked;
 }
 
