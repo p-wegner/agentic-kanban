@@ -264,8 +264,13 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
         return;
       }
       const mergeStrategy = resolveMergeStrategy(prefMap);
-      setPhase("refreshing-warnings");
-      warningCount = (await refreshMonitorWarnings(prefMap)).length;
+      // NOTE: the warnings refresh used to run HERE, third of eleven phases, ahead of every
+      // productive phase. It is pure diagnostics — nothing in the cycle reads its output — but
+      // it scans every project's active workspaces, so on a busy board it became a multi-minute
+      // serial prefix that delayed auto-start on EVERY cycle. Measured: `currentCycle.phase`
+      // parked at `refreshing-warnings` for minutes at a time with 44 active workspaces, while a
+      // freshly-planned ticket sat unstarted. It now runs after auto-start (see below), so a
+      // slow diagnostic can no longer hold up starting real work.
       setPhase("resource-sweep");
       const resourceSnapshot = await snapshotAndCleanStaleDevProcesses(db);
       monitorState.lastResourceSnapshot = resourceSnapshot;
@@ -355,6 +360,12 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       await advanceDuePluginLoops(db, { allowProject: shouldAutoStartProject });
       setPhase("auto-start");
       const autoStartSkips = await runAutoStart(prefMap, { serverPort, boardEvents, allowProject: shouldAutoStartProject, isAutoDrivenProject: (projectId) => resolveStartPolicy(prefMap, projectId).mode !== "manual", logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
+      // Diagnostics AFTER the productive phases (moved from third-of-eleven, see the note above).
+      // It must still run BEFORE the skip-warning append below, because it REPLACES
+      // `monitorState.warnings` rather than adding to it — reversing these two silently drops
+      // every auto-start skip warning.
+      setPhase("refreshing-warnings");
+      warningCount = (await refreshMonitorWarnings(prefMap)).length;
       if (autoStartSkips.size > 0) {
         const projectRows = await db.select({ id: projects.id, name: projects.name }).from(projects)
           .where(inArray(projects.id, [...autoStartSkips.keys()]));
