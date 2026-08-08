@@ -3,7 +3,7 @@
 // date-axis / bucketing / rollup computation over the returned rows.
 
 import { workspaces, issues, sessions } from "@agentic-kanban/shared/schema";
-import { eq, and, gte, inArray, isNotNull } from "drizzle-orm";
+import { eq, and, gte, inArray, isNotNull, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
@@ -33,12 +33,15 @@ export async function countMergedWorkspacesForProject(
   projectId: string,
   database: Database = db,
 ): Promise<number> {
+  // `count(*)`, not `rows.length` (#359): this runs once per project per monitor cycle inside
+  // `compounding-setup`, and materialising every merged workspace row only to measure its length
+  // makes the cost grow with the project's lifetime history rather than staying constant.
   const rows = await database
-    .select({ id: workspaces.id })
+    .select({ count: sql<number>`count(*)` })
     .from(workspaces)
     .innerJoin(issues, eq(workspaces.issueId, issues.id))
     .where(and(eq(issues.projectId, projectId), isNotNull(workspaces.mergedAt)));
-  return rows.length;
+  return Number(rows[0]?.count ?? 0);
 }
 
 /** Sessions started since `cutoffIso` for a project, with the workspace provider + stats blob (cost-over-time chart). */

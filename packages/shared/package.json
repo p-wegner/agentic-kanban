@@ -96,6 +96,12 @@
       "import": "./dist/lib/git-exec.js",
       "default": "./src/lib/git-exec.ts"
     },
+    "./lib/operation-metrics": {
+      "development": "./src/lib/operation-metrics.ts",
+      "types": "./dist/lib/operation-metrics.d.ts",
+      "import": "./dist/lib/operation-metrics.js",
+      "default": "./src/lib/operation-metrics.ts"
+    },
     "./lib/temp-dir": {
       "development": "./src/lib/temp-dir.ts",
       "types": "./dist/lib/temp-dir.d.ts",
