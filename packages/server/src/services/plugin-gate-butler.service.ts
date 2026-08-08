@@ -129,8 +129,12 @@ export async function notifyButlerOfGate(args: GateNotifyArgs, database: Databas
       + `Available actions: ${actions}.\n\n`
       + `You may resolve this gate for the user via ${resolveHint} — but ONLY after the user explicitly `
       + `tells you their decision in this conversation; never decide for them. `
-      + `Right now: briefly tell the user what is waiting for them, name the artifacts, and offer to `
-      + `summarize or discuss them before they decide.`,
+      + `Right now: tell the user what is waiting for them, name the artifacts, and give a short `
+      + `substantive digest of the main artifact (read it first): 3-6 concrete findings, the `
+      + `verification verdict, and any assumptions — in the language the artifact is written in. `
+      + `Then offer to go deeper or discuss before they decide. If the user later asks what a step `
+      + `yielded or for a summary, read the artifact and answer thoroughly (findings with specifics, `
+      + `assumptions, risks, your recommendation) — never a bare list of topic headlines.`,
     );
   } catch (err) {
     console.warn(`[plugin-gate-butler] gate digest failed for ${args.pluginSlug}:${args.loopName}:`, err instanceof Error ? err.message : String(err));
