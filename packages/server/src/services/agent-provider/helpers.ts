@@ -176,6 +176,23 @@ export function profileDefinesCustomEndpoint(profileName: string | undefined, fs
   }
 }
 
+/**
+ * An OAuth (Max/Pro-plan) profile is a whole config DIRECTORY `~/.claude-<name>`, not a
+ * `settings_<name>.json` — the login lives in its `.credentials.json`, and the only lever to
+ * select it is `CLAUDE_CONFIG_DIR`. Returns that dir when the profile is one, else undefined.
+ *
+ * Deliberately fs-only (no DB, no rotation ring) so `buildSpawnEnv` stays synchronous and
+ * dependency-free; an explicit `configDir` override in the ring is handled by the launch-path
+ * resolver, which layers its env on top of this.
+ */
+function oauthProfileConfigDir(profileName: string, fs: FileSystem): string | undefined {
+  if (fs.existsSync(join(homedir(), ".claude", `settings_${profileName}.json`))) return undefined;
+  const dir = join(homedir(), `.claude-${profileName}`);
+  if (!fs.existsSync(dir)) return undefined;
+  const hasAuth = fs.existsSync(join(dir, ".credentials.json")) || fs.existsSync(join(dir, "settings.json"));
+  return hasAuth ? dir : undefined;
+}
+
 export function buildSpawnEnv(claudeProfile?: string, fs: FileSystem = nodeFileSystem): Record<string, string> {
   const spawnEnv: Record<string, string> = { ...process.env as Record<string, string> };
 
@@ -184,6 +201,19 @@ export function buildSpawnEnv(claudeProfile?: string, fs: FileSystem = nodeFileS
   }
 
   if (!claudeProfile) return spawnEnv;
+
+  // An OAuth profile carries no settings file, so the old code returned here having stripped
+  // nothing back in — leaving whatever CLAUDE_CONFIG_DIR the SERVER process inherited. Callers
+  // that spawn the CLI get the right dir anyway (the launch path layers it on via extraEnv),
+  // but the in-process butler SDK calls this function directly and had no such correction: it
+  // reported the selected profile in its status while actually authenticating as the server's
+  // ambient account. When that account was logged out, every butler feature failed with
+  // "Not logged in · Please run /login" on a board whose configured profile was perfectly valid.
+  const oauthDir = oauthProfileConfigDir(claudeProfile, fs);
+  if (oauthDir) {
+    spawnEnv.CLAUDE_CONFIG_DIR = oauthDir;
+    return spawnEnv;
+  }
 
   const settingsPath = join(homedir(), ".claude", `settings_${claudeProfile}.json`);
   if (!fs.existsSync(settingsPath)) return spawnEnv;
