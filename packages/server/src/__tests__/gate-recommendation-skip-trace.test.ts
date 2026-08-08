@@ -4,7 +4,7 @@ import { preferences } from "@agentic-kanban/shared/schema";
 import type { PluginLoopGate } from "@agentic-kanban/shared/lib/plugin-manifest";
 import { createTestDb } from "./helpers/test-db.js";
 import type { Database } from "../db/index.js";
-import { computeGateRecommendation, type GateNotifyArgs } from "../services/plugin-gate-butler.service.js";
+import { classifyUnparseableButlerReply, computeGateRecommendation, type GateNotifyArgs } from "../services/plugin-gate-butler.service.js";
 import { listPluginLoopEvents } from "../repositories/plugin-loop-events.repository.js";
 
 /**
@@ -86,5 +86,37 @@ describe("computeGateRecommendation — skip trace", () => {
       gateId: "step-2:v1",
       reason: "no-warm-butler",
     });
+  });
+});
+
+/**
+ * #355 — the typed reason must name the ACTIONABLE cause, not just "the reply wasn't JSON".
+ *
+ * The butler `ask` does not throw for a logged-out profile or an inaccessible model: it succeeds
+ * and hands back the provider's error text as the reply body, which then fails JSON extraction. So
+ * the two most common and most actionable causes — your profile is logged out, your configured
+ * model is inaccessible — were indistinguishable by `reason` from a model that returned prose,
+ * while the `ask-failed` reason that was declared for exactly them went unused. Both strings below
+ * are verbatim from real `gate-recommendation-skipped` events on the live board.
+ */
+describe("classifyUnparseableButlerReply (#355)", () => {
+  it("types an auth failure as auth-failed, not reply-not-json", () => {
+    expect(classifyUnparseableButlerReply("Not logged in · Please run /login")).toBe("auth-failed");
+    expect(classifyUnparseableButlerReply("Invalid API key provided")).toBe("auth-failed");
+  });
+
+  it("types a provider/model failure as ask-failed, not reply-not-json", () => {
+    expect(classifyUnparseableButlerReply(
+      "There's an issue with the selected model (Fable). It may not exist or you may not have access to it. "
+      + "Run --model to pick a different model.",
+    )).toBe("ask-failed");
+    expect(classifyUnparseableButlerReply("You have hit your usage limit; resets at 5pm")).toBe("ask-failed");
+  });
+
+  it("reserves reply-not-json for a reply that really is the model's own prose", () => {
+    expect(classifyUnparseableButlerReply(
+      "I'd recommend approving this step — the PRD covers all nine sections and the checks passed.",
+    )).toBe("reply-not-json");
+    expect(classifyUnparseableButlerReply("")).toBe("reply-not-json");
   });
 });

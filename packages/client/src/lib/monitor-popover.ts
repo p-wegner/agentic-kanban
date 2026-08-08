@@ -87,9 +87,20 @@ export type MonitorAction = {
 };
 
 export type MonitorStatus = {
+  /**
+   * #357 — "will work start on its own?". This is the global toggle OR any monitor-mode project,
+   * NOT the raw `auto_monitor` pref: reporting the raw pref made the board say "monitor off" while
+   * cycles were running and starting tickets, which is what convinced a user they were stranded.
+   * The raw toggle is `globalToggle`.
+   */
   enabled: boolean;
+  globalToggle?: boolean;
+  monitorDrivenProjectCount?: number;
   intervalMin: number;
+  /** A timer is armed for a FUTURE cycle. Not the same as "a cycle is running" — see cycleInFlight. */
   active: boolean;
+  /** A cycle is executing right now. `nextRunAt` is null while this is true. */
+  cycleInFlight?: boolean;
   lastRun: {
     at: string;
     relaunched: number;

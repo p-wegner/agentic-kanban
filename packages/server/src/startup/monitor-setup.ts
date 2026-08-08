@@ -172,7 +172,47 @@ export function setupMonitorRoutes(app: Hono, monitorState: MonitorState, runMon
     const maintenanceEnabled = getBool(prefMap, "monitor_maintenance_window_enabled");
     const maintenanceEnd = prefMap.get("monitor_maintenance_window_end") || null;
     const maintenanceActive = maintenanceEnabled && (!maintenanceEnd || new Date(maintenanceEnd).getTime() > Date.now());
-    return c.json({ enabled: getBool(prefMap, "auto_monitor"), intervalMin: parseInt(prefMap.get("auto_monitor_interval") || "4", 10), active: monitorState.timer !== null, lastRun: monitorState.lastRun, currentCycle: monitorState.currentCycle, nextRunAt: monitorState.nextRunAt, recentActions: monitorState.recentActions, resourceSnapshot: monitorState.lastResourceSnapshot, warnings: monitorState.warnings, lastHealthCheckAt: monitorState.lastHealthCheckAt, lastCyclePhaseTimings: monitorState.lastCyclePhaseTimings, maintenanceActive, maintenanceEnd });
+    // #357 — each field answers ONE honest question.
+    //
+    // This endpoint used to report `enabled: false` and `active: true` simultaneously, with a
+    // populated `currentCycle` and cycles demonstrably running every ~8 minutes — because
+    // `enabled` was the raw GLOBAL `auto_monitor` pref while scheduling actually depends on
+    // `monitorShouldRun` (global OR any project whose resolved Start Mode is `monitor`). A user
+    // read "monitor off" beside an idle-looking board and reasonably concluded they were stranded;
+    // the monitor described as "off" was the thing that had just started their ticket.
+    //
+    // `enabled` now answers the only question the UI is really asking — WILL work start on its own?
+    // The raw toggle is still available as `globalToggle` for the settings control that owns it, and
+    // the two are no longer conflated.
+    const cycleInFlight = monitorState.currentCycle !== null;
+    return c.json({
+      /** Will the monitor run on its own? (global toggle OR a monitor-mode project) */
+      enabled: monitorShouldRun(prefMap),
+      /** The raw `auto_monitor` pref — the state of the settings toggle, nothing more. */
+      globalToggle: getBool(prefMap, "auto_monitor"),
+      /** Projects whose resolved Start Mode makes them monitor-driven regardless of the toggle. */
+      monitorDrivenProjectCount: monitorDrivenProjectIds(prefMap).size,
+      intervalMin: parseInt(prefMap.get("auto_monitor_interval") || "4", 10),
+      /** Is a timer armed for a future cycle? (NOT "is a cycle running" — see cycleInFlight.) */
+      active: monitorState.timer !== null,
+      /** Is a cycle executing right now? */
+      cycleInFlight,
+      lastRun: monitorState.lastRun,
+      currentCycle: monitorState.currentCycle,
+      // While a cycle is in flight this was misleading: the armed timer's fire time was reported as
+      // "next run" even though the re-entrancy guard will drop that trigger, and the end-of-cycle
+      // rerun fires within seconds instead (measured 5-8s gaps between cycles, not the configured
+      // 4 minutes). A countdown of "4 min" beside a cycle that has been running for 7 is worse than
+      // no countdown, so the honest answer while a cycle runs is "as soon as this one finishes".
+      nextRunAt: cycleInFlight ? null : monitorState.nextRunAt,
+      recentActions: monitorState.recentActions,
+      resourceSnapshot: monitorState.lastResourceSnapshot,
+      warnings: monitorState.warnings,
+      lastHealthCheckAt: monitorState.lastHealthCheckAt,
+      lastCyclePhaseTimings: monitorState.lastCyclePhaseTimings,
+      maintenanceActive,
+      maintenanceEnd,
+    });
   });
 }
 
