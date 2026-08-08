@@ -119,12 +119,17 @@ export async function notifyButlerOfGate(args: GateNotifyArgs, database: Databas
       ? `POST ${args.boardUrl}/api/plugins/${args.pluginRowId}/loops/${args.loopName}/gate/resolve with JSON `
         + `{"projectId":"${args.projectId}","gateId":"${args.gate.id}","actionId":"<action>","input":"<feedback when required>"}`
       : `the board's gate/resolve endpoint for plugin "${args.pluginSlug}", loop "${args.loopName}"`;
+    // #330: ground the digest — the butler's first message should already contain
+    // substance from the artifact, not just its file name. Small cap: this turn
+    // fires unconditionally per gate.
+    const excerpts = readArtifactExcerpts(args.repoPath, args.gate, 2, 3000);
     sendButlerTurn(
       args.projectId,
       `[gate] ${args.pluginName} — "${args.loopLabel}" reached a human approval gate.\n`
       + `Question: ${args.gate.question}\n`
       + `Verification: ${describeChecks(args.checks)}\n`
       + `Artifacts: ${artifactList}\n`
+      + (excerpts ? `Artifact excerpts:\n${excerpts}\n\n` : "")
       + (args.note ? `Planner note: ${args.note}\n` : "")
       + `Available actions: ${actions}.\n\n`
       + `You may resolve this gate for the user via ${resolveHint} — but ONLY after the user explicitly `
@@ -201,5 +206,29 @@ export async function draftGateFeedback(
     + `User's rough notes:\n${args.notes}`;
   const answer = await oneShotButlerAsk(args.projectId, prompt, 60_000);
   if (answer.isError) throw new Error(`Butler draft failed: ${answer.text.slice(0, 200)}`);
+  return answer.text.trim();
+}
+
+/** #330 — one-click decision-ready digest of the CURRENT gate's artifacts. Synchronous
+ *  (the UI awaits it and renders the summary on the gate card); throws so the route
+ *  can 502 honestly. */
+export async function summarizeGateArtifacts(
+  args: { projectId: string; gate: PluginLoopGate; checks: PluginLoopCheck[] | null; repoPath: string },
+  database: Database = db,
+): Promise<string> {
+  if (!(await ensureWarmButler(args.projectId, database))) {
+    throw new Error("No butler available for this project");
+  }
+  const excerpts = readArtifactExcerpts(args.repoPath, args.gate, 3, 6000);
+  const prompt =
+    `The user must decide an approval gate and wants a decision-ready summary of the artifact under review. `
+    + `Write it in the artifact's own language. Include: the key findings as CONCRETE statements (names, `
+    + `numbers — not topic headlines), the verification verdict and what was fixed, every assumption, open `
+    + `risks or gaps worth weighing, and one closing recommendation line. Aim for 10-20 substantive lines. `
+    + `Reply with ONLY the summary (no preamble).\n\n`
+    + `Gate: ${args.gate.question}\nVerification: ${describeChecks(args.checks)}\n`
+    + (excerpts ? `Artifact excerpts:\n${excerpts}\n` : "");
+  const answer = await oneShotButlerAsk(args.projectId, prompt, 90_000);
+  if (answer.isError) throw new Error(`Butler summary failed: ${answer.text.slice(0, 200)}`);
   return answer.text.trim();
 }

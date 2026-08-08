@@ -860,6 +860,33 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     // fires from the merge tail, so the loop's next gate appears without the monitor.
     const autoLandLoop = await getAutoLandLoopTicket(issueId);
     if (autoLandLoop) {
+      // #325: `committedChanges` above is a working-tree diff against the base BRANCH TIP,
+      // so a workspace with ZERO unique commits reads as "changed" whenever the base moved
+      // under it. Auto-landing such an empty loop workspace closes the unit's ticket with
+      // no artifacts — and the planner's external-key dedupe then deadlocks the loop
+      // ("Waiting on input", every re-advance a no-op, no gate to revise). Refuse to land
+      // an empty loop workspace: surface it and leave the ticket open so the monitor can
+      // recover the workspace (update-base + relaunch, #324) instead.
+      const aheadOut = workspace.workingDir && workspace.baseBranch
+        ? await gitExec(["rev-list", "--count", `${workspace.baseBranch}..HEAD`], { cwd: workspace.workingDir }).catch(() => null)
+        : null;
+      const commitsAhead = aheadOut && aheadOut.code === 0 ? parseInt(aheadOut.stdout.trim(), 10) : null;
+      if (commitsAhead === 0) {
+        console.log(`[workflow] NOT auto-landing loop ticket for ${autoLandLoop.pluginSlug}:${autoLandLoop.loopName} (unit ${autoLandLoop.unitId}) — workspace has no unique commits; leaving the ticket open for recovery`);
+        // Back out of the In Review transition made above: In Review + zero diff is a
+        // monitor dead-end ("needs attention"), while In Progress re-enters the
+        // relaunch path (which now rebases a moved base first, #324).
+        const inProgress = findStatus("In Progress");
+        if (inProgress) await transitionIssueStatus(db, issueId, inProgress.id, { now });
+        emitButlerSystemEvent({
+          projectId,
+          kind: "merge_failed",
+          workspaceId,
+          text: `Loop unit ${autoLandLoop.pluginSlug}:${autoLandLoop.loopName}:${autoLandLoop.unitId} finished with NO unique commits — not landing the empty workspace (would close the unit without its artifacts and deadlock the loop). The monitor will rebase and relaunch it.`,
+        });
+        boardEvents.broadcast(projectId, "workflow_error");
+        return;
+      }
       console.log(`[workflow] loop ticket for ${autoLandLoop.pluginSlug}:${autoLandLoop.loopName} (unit ${autoLandLoop.unitId}) auto-lands (manifest autoLand)`);
       await autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now, RUN_GATE);
       return;

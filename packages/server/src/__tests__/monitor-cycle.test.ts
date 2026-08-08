@@ -63,6 +63,7 @@ function makeWorkspaceActions() {
     merge: vi.fn<(id: string) => Promise<void>>(async () => {}),
     fixAndMerge: vi.fn<(id: string, mergeError: string) => Promise<void>>(async () => {}),
     delete: vi.fn<(id: string) => Promise<void>>(async () => {}),
+    updateBase: vi.fn<(id: string, mode: "rebase" | "merge") => Promise<void>>(async () => {}),
   };
 }
 
@@ -650,10 +651,43 @@ describe("processWorkspaceCandidates — idle workspace with committed work on a
 
     const stats = await processWorkspaceCandidates([staleBaseCandidate], deps);
 
-    // Falls through to the ordinary idle+not-ready relaunch path.
+    // Falls through to the ordinary idle+not-ready relaunch path — no merge.
     expect(stats.relaunched).toBe(1);
     expect(stats.merged).toBe(0);
-    expect(vi.mocked(deps.countBehindCommits)).not.toHaveBeenCalled();
+    // #324: 0 commits ahead + base moved (behind > 0) → the relaunch rebases first
+    // so the agent sees the current base instead of re-failing on a stale tree.
+    expect(vi.mocked(deps.workspaceActions.updateBase)).toHaveBeenCalledWith("ws-1", "rebase");
+    expect(vi.mocked(deps.workspaceActions.launch)).toHaveBeenCalledWith("ws-1");
+  });
+
+  it("#324: relaunches WITHOUT update-base when the base has not moved", async () => {
+    const deps = {
+      ...makeDeps(),
+      autoMergeEnabled: true,
+      getCommitCountAhead: vi.fn().mockResolvedValue(0),
+      countBehindCommits: vi.fn().mockResolvedValue(0),
+    } satisfies ProcessWorkspaceDeps;
+
+    const stats = await processWorkspaceCandidates([staleBaseCandidate], deps);
+
+    expect(stats.relaunched).toBe(1);
+    expect(vi.mocked(deps.workspaceActions.updateBase)).not.toHaveBeenCalled();
+    expect(vi.mocked(deps.workspaceActions.launch)).toHaveBeenCalledWith("ws-1");
+  });
+
+  it("#324: a failed update-base still falls through to the plain relaunch", async () => {
+    const deps = {
+      ...makeDeps(),
+      autoMergeEnabled: true,
+      getCommitCountAhead: vi.fn().mockResolvedValue(0),
+      countBehindCommits: vi.fn().mockResolvedValue(2),
+    } satisfies ProcessWorkspaceDeps;
+    vi.mocked(deps.workspaceActions.updateBase).mockRejectedValueOnce(new Error("rebase conflict"));
+
+    const stats = await processWorkspaceCandidates([staleBaseCandidate], deps);
+
+    expect(stats.relaunched).toBe(1);
+    expect(vi.mocked(deps.workspaceActions.launch)).toHaveBeenCalledWith("ws-1");
   });
 
   it("does NOT treat an idle workspace with commits but a NON-stale (up to date) base as a recovery case", async () => {
