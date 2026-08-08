@@ -3,6 +3,7 @@ import { drives, issueDependencies, issues, issueTags, projectStatuses, tags, wo
 import { and, eq, sql, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { createBoardEvents } from "../services/board-events.js";
+import { parsePluginLoopUnitKey } from "@agentic-kanban/shared/lib/plugin-manifest";
 import { reconcileMergedIssue } from "../services/merge-cleanup.service.js";
 import type { MonitorActionName } from "../services/monitor-nudge.js";
 import { resolveMonitorTunables } from "../services/strategy-objective.service.js";
@@ -138,7 +139,26 @@ export type AutoStartSkipReason =
    * spawn a SECOND workspace for already-merged work (#190). Instead of starting a
    * duplicate, the issue is reconciled to Done here and no launch happens this cycle.
    */
-  | "already_merged";
+  | "already_merged"
+  /**
+   * The issue is a PLUGIN-LOOP UNIT ticket whose workspace already merged, and the reopen-retry
+   * path (#265) would have started a fresh workspace for it (#361).
+   *
+   * Measured on kassenbuch step-6: a unit that was merged (`cd4aae9`, `mergedAt` 20:06:58) AND
+   * gate-approved (20:11:44) AND Done went back to In Progress at 20:18:22, got a whole second
+   * workspace and branch (`…-skel-r2`, 20:22:16), and had both abandoned ~3 minutes later when the
+   * ticket reverted to Done. Loop `openTickets` read 2 for 6m24s while `progress` reported that
+   * same step `done`.
+   *
+   * Why declining is right regardless of WHAT set the status (still unproven, see the ticket): a
+   * loop unit's identity is its `external_key`, and the loop's dedupe never re-plans a unit that
+   * already has a ticket. So work done in a fresh workspace for that unit can never be represented
+   * in the loop — while it inflates `openTickets`, the value the monitor gates advancing on, and
+   * leaves a branch and a worktree behind. A loop that genuinely wants another pass at a subject
+   * mints a FRESH unit id (a gate's "revise" action does exactly that); reopening the old ticket is
+   * never how a loop asks for more work.
+   */
+  | "loop_unit_reopen_declined";
 
 export interface AutoStartSkipInfo {
   issueNumbers: number[];
@@ -287,7 +307,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
     // #119: one snapshot per project per loop, then a cheap synchronous check per candidate.
     const contentionGate = await buildContentionGate(prefMap, inProgressSt.projectId);
 
-    const inProgressIssues = await db.select({ id: issues.id, title: issues.title, description: issues.description, issueType: issues.issueType, issueNumber: issues.issueNumber }).from(issues)
+    const inProgressIssues = await db.select({ id: issues.id, title: issues.title, description: issues.description, issueType: issues.issueType, issueNumber: issues.issueNumber, externalKey: issues.externalKey }).from(issues)
       .where(and(eq(issues.statusId, inProgressSt.id), notDriveOrEpicMetaSql())); // #824: don't backfill a builder onto a meta created directly In Progress
     for (const issue of inProgressIssues) {
       if (currentWip >= wipLimit) break;
@@ -302,6 +322,12 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
         // status simply had not caught up is still reconciled and skipped as before.
         ({ reopenedAfterMerge: isReopenRetry } = await reconcileStaleMergedIssue(inProgressSt.projectId, issue.id, issue.issueNumber, boardEvents, noteSkip, mergedWs.mergedAt));
         if (!isReopenRetry) continue;
+        // #361 — but never for a plugin-loop unit. See `loop_unit_reopen_declined`.
+        if (parsePluginLoopUnitKey(issue.externalKey)) {
+          console.log(`[monitor] Declining reopen-retry for plugin-loop unit issue #${issue.issueNumber} — its workspace already merged and the loop cannot represent a second one (#361)`);
+          noteSkip(inProgressSt.projectId, issue.issueNumber, "loop_unit_reopen_declined");
+          continue;
+        }
       }
       if (!isMonitorEligibleIssue(issue, allowFeatureTypes)) continue;
       if (await hasSkipAutoStartTag(issue.id)) continue;
@@ -396,7 +422,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
     // per-issue gates below decide; the slotsAvailable / startsRemaining caps still bound
     // how many actually launch this cycle.
     // #773: skip the feature/enhancement type-exclusion for auto-driven projects.
-    const todoIssues = await db.select({ id: issues.id, title: issues.title, description: issues.description, issueType: issues.issueType, projectId: issues.projectId, issueNumber: issues.issueNumber }).from(issues)
+    const todoIssues = await db.select({ id: issues.id, title: issues.title, description: issues.description, issueType: issues.issueType, projectId: issues.projectId, issueNumber: issues.issueNumber, externalKey: issues.externalKey }).from(issues)
       .where(and(inArray(issues.statusId, candidateStatusIds), monitorEligibleIssueSql(allowFeatureTypes), notDriveOrEpicMetaSql()))
       .orderBy(issues.issueNumber);
     const doneStatuses = await db.select({ id: projectStatuses.id }).from(projectStatuses)
@@ -419,6 +445,13 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
         // #265: a deliberate reopen starts fresh work; a stale status is reconciled and skipped.
         ({ reopenedAfterMerge: isReopenRetry } = await reconcileStaleMergedIssue(issue.projectId, issue.id, issue.issueNumber, boardEvents, noteSkip, mergedWs.mergedAt));
         if (!isReopenRetry) continue;
+        // #361 — same guard as the In-Progress backfill loop above. Both loops reach the reopen
+        // retry, so guarding only one of them would leave the defect reachable by the other.
+        if (parsePluginLoopUnitKey(issue.externalKey)) {
+          console.log(`[monitor] Declining reopen-retry for plugin-loop unit issue #${issue.issueNumber} — its workspace already merged and the loop cannot represent a second one (#361)`);
+          noteSkip(inProgressSt.projectId, issue.issueNumber, "loop_unit_reopen_declined");
+          continue;
+        }
       }
       if (!isMonitorEligibleIssue(issue, allowFeatureTypes)) { noteSkip(inProgressSt.projectId, issue.issueNumber, "feature_type_excluded"); continue; }
       if (await hasSkipAutoStartTag(issue.id)) { noteSkip(inProgressSt.projectId, issue.issueNumber, "no_auto_start_tag"); continue; }
