@@ -42,13 +42,14 @@ export async function seedIssue(
   db: TestDb,
   projectId: string,
   statusId: string,
-  opts: { title?: string; priority?: string; issueNumber?: number } = {},
+  opts: { title?: string; priority?: string; issueNumber?: number; description?: string } = {},
 ): Promise<{ id: string; issueNumber: number }> {
   const now = new Date().toISOString();
   const id = randomUUID();
   const issueNumber = opts.issueNumber ?? 1;
   await db.insert(schema.issues).values({
     id, issueNumber, title: opts.title ?? "Issue", priority: opts.priority ?? "medium",
+    description: opts.description,
     sortOrder: 0, statusId, projectId, createdAt: now, updatedAt: now,
   });
   return { id, issueNumber };

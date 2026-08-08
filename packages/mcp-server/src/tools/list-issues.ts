@@ -8,7 +8,9 @@ export function registerListIssues(server: McpServer, deps: ToolDeps = prodDeps)
   const { db, schema } = deps;
   server.tool(
     "list_issues",
-    "List all issues for a project, optionally filtered by status name, priority, tag, blocked status, or issue number",
+    "List issues for a project, optionally filtered by status name, priority, tag, blocked status, or issue number. "
+      + "Descriptions are OMITTED by default — use get_issue for one issue's full text, or pass includeDescription "
+      + "when you genuinely need every description at once.",
     {
       projectId: z.string().describe("The project ID"),
       status: z.string().optional().describe("Filter by status name (e.g., 'Todo', 'In Progress')"),
@@ -16,13 +18,24 @@ export function registerListIssues(server: McpServer, deps: ToolDeps = prodDeps)
       tag: z.string().optional().describe("Filter by tag name (e.g., 'bug', 'feature')"),
       blocked: z.boolean().optional().describe("Filter by blocked status (true = only blocked, false = only unblocked)"),
       issueNumber: z.number().optional().describe("Filter by issue number (e.g., 42)"),
+      includeDescription: z.boolean().optional().describe(
+        "Include each issue's full description. Off by default: descriptions are ~70% of the payload "
+        + "(509 KB across 323 issues on a mature project) and this tool's output goes straight into an "
+        + "agent's context. Prefer get_issue for the one issue you actually need.",
+      ),
     },
-    async ({ projectId, status, priority, tag, blocked, issueNumber }) => {
+    async ({ projectId, status, priority, tag, blocked, issueNumber, includeDescription }) => {
+      // #344: `description` used to be selected unconditionally. On the dev project that is
+      // 509 KB of description text across 323 issues — ~70% of the payload — and unlike the
+      // HTTP route (where a `slim=1` opt-in existed but no ecosystem consumer passed it),
+      // this tool's output is serialized into an AGENT'S CONTEXT on every call. Listing is
+      // for finding an issue; reading one is what get_issue is for. Kept recoverable via an
+      // explicit opt-in rather than removed, so nothing that truly needs it is stranded.
       const query = db.select({
         id: schema.issues.id,
         issueNumber: schema.issues.issueNumber,
         title: schema.issues.title,
-        description: schema.issues.description,
+        ...(includeDescription ? { description: schema.issues.description } : {}),
         priority: schema.issues.priority,
         sortOrder: schema.issues.sortOrder,
         statusId: schema.issues.statusId,

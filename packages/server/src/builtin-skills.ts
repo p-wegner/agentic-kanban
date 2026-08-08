@@ -19,7 +19,7 @@ export const BUILTIN_SKILLS = [
 
 ## Available Tools
 - get_context — see active project, issue counts, running workspaces
-- list_issues — list issues (filter by status, priority, tag)
+- list_issues — list issues (filter by status, priority, tag); descriptions omitted, use get_issue for full text
 - get_issue — get full issue details including workspaces and dependencies
 - create_issue / update_issue / delete_issue — issue CRUD
 - move_issue — move issue to a different status column
@@ -315,7 +315,7 @@ Todo → In Progress → In Review → AI Reviewed → Done / Cancelled
 |------|---------|
 | \`get_context\` | Active project, issue counts, running workspaces |
 | \`get_board_status\` | Full dashboard: issues, workspace state, diff stats, session stats |
-| \`list_issues\` | List issues (filter by status, priority, tag) |
+| \`list_issues\` | List issues (filter by status, priority, tag). Descriptions omitted — use \`get_issue\` for one issue's full text |
 | \`get_issue\` | Full issue details including workspaces and dependencies |
 | \`create_issue\` / \`update_issue\` / \`delete_issue\` | Issue CRUD |
 | \`move_issue\` | Move issue to a different status |
