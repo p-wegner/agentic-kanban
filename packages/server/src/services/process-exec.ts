@@ -185,8 +185,22 @@ export function parsePsProcessList(stdout: string): OsProcessRecord[] {
 export async function listOsProcesses(): Promise<OsProcessRecord[]> {
   if (process.platform === "win32") {
     const script = "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress";
-    const { stdout } = await execCommand("powershell.exe", ["-NoProfile", "-Command", script], { timeout: 10000 });
-    return parsePowerShellProcessList(stdout);
+    try {
+      const { stdout } = await execCommand("powershell.exe", ["-NoProfile", "-Command", script], { timeout: 10000 });
+      return parsePowerShellProcessList(stdout);
+    } catch (err) {
+      // Same best-effort rule as the POSIX branch below — but this is the branch that
+      // actually bites, because the board runs on Windows. Enumerating every process with
+      // its full CommandLine through CIM + ConvertTo-Json is expensive: on a loaded box
+      // (measured: 225+ processes) it exceeded the 10s timeout and threw, which aborted the
+      // WHOLE monitor cycle at the resource-sweep phase — before auto-start ever ran. The
+      // observable effect was a board that silently stopped starting tickets: freshly
+      // planned work parked for tens of minutes until some cycle happened to win the race,
+      // and every cycle logged only "[monitor] Cycle error: Command failed: powershell.exe".
+      // Hygiene must never be able to stop the monitor from doing its actual job.
+      console.warn(`[resource-sweep] process enumeration failed, skipping stale-process hygiene this cycle: ${err instanceof Error ? err.message : String(err)}`);
+      return [];
+    }
   }
 
   try {

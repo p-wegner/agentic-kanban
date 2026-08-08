@@ -271,21 +271,35 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       // parked at `refreshing-warnings` for minutes at a time with 44 active workspaces, while a
       // freshly-planned ticket sat unstarted. It now runs after auto-start (see below), so a
       // slow diagnostic can no longer hold up starting real work.
+      // Stale-process hygiene is best-effort and must NEVER abort the cycle: it runs BEFORE
+      // the productive phases, so anything it throws costs the board an entire round of
+      // relaunches, merges, loop advances and auto-starts. Measured: process enumeration
+      // timing out on a loaded box killed cycle after cycle, and the only symptom was a board
+      // that quietly stopped starting planned tickets (see #339). The shell-outs inside also
+      // include netstat, so catching at this level covers every one of them, not just the
+      // process list.
       setPhase("resource-sweep");
-      const resourceSnapshot = await snapshotAndCleanStaleDevProcesses(db);
-      monitorState.lastResourceSnapshot = resourceSnapshot;
-      resourceSummary = {
-        processCount: resourceSnapshot.processes.length,
-        listenerCount: resourceSnapshot.listeners.length,
-        activeWorkspaceCount: resourceSnapshot.activeWorkspaces.length,
-        keptCount: resourceSnapshot.kept.length,
-        cleanedCount: resourceSnapshot.cleaned.filter((item) => item.action === "cleaned").length,
-        cleanupFailedCount: resourceSnapshot.cleaned.filter((item) => item.action === "cleanup_failed").length,
-      };
-      console.log(
-        `[monitor] Resource snapshot: processes=${resourceSummary.processCount} listeners=${resourceSummary.listenerCount} ` +
-        `activeWorkspaces=${resourceSummary.activeWorkspaceCount} kept=${resourceSummary.keptCount} cleaned=${resourceSummary.cleanedCount} failed=${resourceSummary.cleanupFailedCount}`,
-      );
+      const resourceSnapshot = await snapshotAndCleanStaleDevProcesses(db).catch((err: unknown) => {
+        console.warn(`[monitor] resource sweep failed (continuing with the cycle): ${err instanceof Error ? err.message : String(err)}`);
+        return null;
+      });
+      if (resourceSnapshot) {
+        monitorState.lastResourceSnapshot = resourceSnapshot;
+        resourceSummary = {
+          processCount: resourceSnapshot.processes.length,
+          listenerCount: resourceSnapshot.listeners.length,
+          activeWorkspaceCount: resourceSnapshot.activeWorkspaces.length,
+          keptCount: resourceSnapshot.kept.length,
+          cleanedCount: resourceSnapshot.cleaned.filter((item) => item.action === "cleaned").length,
+          cleanupFailedCount: resourceSnapshot.cleaned.filter((item) => item.action === "cleanup_failed").length,
+        };
+      }
+      if (resourceSummary) {
+        console.log(
+          `[monitor] Resource snapshot: processes=${resourceSummary.processCount} listeners=${resourceSummary.listenerCount} ` +
+          `activeWorkspaces=${resourceSummary.activeWorkspaceCount} kept=${resourceSummary.keptCount} cleaned=${resourceSummary.cleanedCount} failed=${resourceSummary.cleanupFailedCount}`,
+        );
+      }
       setPhase("loading-candidates");
       const activeStatuses = await db.select({ id: projectStatuses.id }).from(projectStatuses).where(sql`${projectStatuses.name} NOT IN ('Done', 'Cancelled')`);
       const activeStatusIds = activeStatuses.map((s) => s.id);
