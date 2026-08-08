@@ -4,7 +4,7 @@ import { createBackup } from "../db/backup.js";
 import { isTransientNetworkError } from "./transient-errors.js";
 import { activeMerges } from "../services/workspace-internals.js";
 import { stopMcpHttpBridge } from "../services/mcp-http-bridge.service.js";
-import { stopAllPluginViews } from "../services/plugin.service.js";
+import { stopAllPluginViewsAsync } from "../services/plugin.service.js";
 
 /** Checkpoint the WAL and take a verified shutdown backup, bounded so it can't hang exit. */
 async function checkpointAndBackup(): Promise<void> {
@@ -79,7 +79,11 @@ export function setupProcessHandlers(
     stopMcpHttpBridge();
     // Plugin view servers are non-detached children of THIS process holding ports —
     // like the MCP bridge, they must go on any shutdown (cheap to restart on demand).
-    const pluginViews = stopAllPluginViews();
+    // AWAITED (#352): the tree kill spawns `taskkill /T /F`, and the old fire-and-forget call
+    // raced `process.exit(0)` below — so a shutdown could exit before the grandchild
+    // `node serve.mjs` was actually killed, leaving exactly the orphan class this fixes. The
+    // 70s hard-exit timer above still bounds the whole shutdown.
+    const pluginViews = await stopAllPluginViewsAsync();
     if (pluginViews > 0) console.log(`[shutdown] stopped ${pluginViews} plugin view server(s)`);
     console.log(`[shutdown] Received ${signal} — closing server (${activeCount} agent process(es) terminated, survivors continue)...`);
     // Hard cap so shutdown work can never block exit indefinitely.

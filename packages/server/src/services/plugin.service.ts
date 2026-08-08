@@ -93,6 +93,7 @@ import type { BoardEvents } from "./board-events.js";
 import {
   createPluginViewsRuntime,
   stopAllPluginViews,
+  stopAllPluginViewsAsync,
   stopPluginViews,
   type PluginViewProcess,
 } from "./plugin-views.service.js";
@@ -113,7 +114,7 @@ import {
 // Re-exported so existing importers keep working after the split. `stopAllPluginViews` is the
 // shutdown handler's entry point (`startup/process-handlers.ts`) and several tests import it from
 // here; the view child-process map now lives in ONE place, `plugin-views.service.ts`.
-export { pluginsHomeDir, marketplaceCatalogPath, stopAllPluginViews };
+export { pluginsHomeDir, marketplaceCatalogPath, stopAllPluginViews, stopAllPluginViewsAsync };
 export type { PluginMarketplaceEntry, PluginViewProcess };
 
 export type PluginScriptResult = PluginCommandResult;
@@ -171,7 +172,7 @@ export function createPluginService(deps: {
 }) {
   const { database, createIssue, createWorkspace, boardEvents } = deps;
   const boardUrl = deps.boardUrl ?? resolvePublicBoardUrl();
-  const loops = createPluginLoopEngine({ database, createIssue, boardUrl, boardEvents });
+  const loops = createPluginLoopEngine({ database, createIssue, createWorkspace, boardUrl, boardEvents });
   /**
    * The view child-server lifecycle lives in `plugin-views.service.ts` — it owns the module-level
    * process map, so this is the only place it gets bound to a service closure. Do NOT reach for the
