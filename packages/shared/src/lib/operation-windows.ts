@@ -58,6 +58,28 @@ export interface OperationWindowStat {
    * never be a duplicate and must not dilute the share.
    */
   keyedCalls: number;
+  /**
+   * Summed lifetime of the CHILD PROCESS itself, for the calls that can measure it (#359).
+   *
+   * `totalMs` above is call-to-CALLBACK, and for an async spawn that includes however long Node
+   * took to deliver the callback — so on a saturated event loop a 90ms git process is recorded as
+   * a multi-second "git call". That is not a hypothesis: `rev-parse` was reported averaging
+   * 9,231ms and 9,153ms across two independent cycles (1% apart, implausibly stable for disk
+   * work) with `blockingMs: 0`, while a clean out-of-process harness measures `git --version` at
+   * 88-138ms on the same machine. Every per-operation duration gathered before this field existed
+   * therefore mixes "the call was slow" with "the call waited", under a name that implies the
+   * first — and conclusions drawn from those numbers should be treated as suspect.
+   *
+   * Measured from the child's `exit` event rather than from the `execFile` callback, so it
+   * excludes stdio drain and the callback's queue wait. It is still delivered through the event
+   * loop, so it is a much tighter bound, not a perfect one — read it together with the event-loop
+   * delay the caller reports for the same window.
+   */
+  childMs: number;
+  /** Worst single measured child lifetime in this window. */
+  maxChildMs: number;
+  /** Calls that reported a child lifetime — the denominator for `childMs`. */
+  childMeasuredCalls: number;
 }
 
 export type OperationWindowReport = Record<string, OperationWindowStat>;
@@ -105,12 +127,21 @@ export function openOperationWindow(): OperationWindow {
  *                  operations that have no meaningful identity (a preference read is not a repeat
  *                  of another preference read just because both were reads).
  */
-export function feedOperationWindows(label: string, durationMs: number, blocking: boolean, dedupeKey?: string): void {
+export function feedOperationWindows(
+  label: string,
+  durationMs: number,
+  blocking: boolean,
+  dedupeKey?: string,
+  childMs?: number,
+): void {
   if (openWindows.size === 0) return;
   for (const state of openWindows) {
     let stat = state.stats.get(label);
     if (!stat) {
-      stat = { calls: 0, totalMs: 0, maxMs: 0, blockingCalls: 0, blockingMs: 0, duplicateCalls: 0, keyedCalls: 0 };
+      stat = {
+        calls: 0, totalMs: 0, maxMs: 0, blockingCalls: 0, blockingMs: 0,
+        duplicateCalls: 0, keyedCalls: 0, childMs: 0, maxChildMs: 0, childMeasuredCalls: 0,
+      };
       state.stats.set(label, stat);
     }
     stat.calls += 1;
@@ -119,6 +150,11 @@ export function feedOperationWindows(label: string, durationMs: number, blocking
     if (blocking) {
       stat.blockingCalls += 1;
       stat.blockingMs += durationMs;
+    }
+    if (childMs !== undefined) {
+      stat.childMeasuredCalls += 1;
+      stat.childMs += childMs;
+      if (childMs > stat.maxChildMs) stat.maxChildMs = childMs;
     }
     if (dedupeKey === undefined) continue;
     stat.keyedCalls += 1;
