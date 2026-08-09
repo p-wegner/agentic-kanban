@@ -18,13 +18,20 @@
 // question "is this the same synchronous-round-trip pattern #349 found?" is answerable from the
 // monitor-status payload instead of by guessing.
 
+// #359 (second round) replaced the snapshot-diff reading of those counters with explicit
+// measurement WINDOWS. Two numbers a cumulative diff cannot produce, and both were needed:
+// `maxMs` (a max is not differenceable, so every window after the first slow one reported 0 —
+// disclosed on the ticket, and it is the number that would confirm or kill a tail-latency story
+// for a 9-second average `git rev-parse`), and `duplicateCalls` (how many spawns in the window
+// repeated one the window had already seen — the ceiling on what any per-cycle memo could remove,
+// which is what refuted this ticket's recommended fix).
 import {
-  diffOperations,
-  snapshotOperations,
-  topOperations,
-  type OperationSnapshot,
-  type OperationStat,
-} from "@agentic-kanban/shared/lib/operation-metrics";
+  openOperationWindow,
+  topWindowOperations,
+  type OperationWindow,
+  type OperationWindowReport,
+  type OperationWindowStat,
+} from "@agentic-kanban/shared/lib/operation-windows";
 
 export interface MonitorPhaseTiming {
   phase: string;
@@ -34,7 +41,7 @@ export interface MonitorPhaseTiming {
    * The costliest operations inside this phase, worst first (#359). Truncated — this rides in the
    * `/api/internal/monitor-status` payload, which a human reads.
    */
-  operations: Array<OperationStat & { label: string }>;
+  operations: Array<OperationWindowStat & { label: string }>;
   /**
    * Summed duration of the calls inside this phase that BLOCKED the event loop (synchronous
    * spawns, synchronous file reads). This is the number that explains a bimodal `/api/health`:
@@ -58,9 +65,20 @@ export interface MonitorCycleTimings {
    * the dominant phase moved between measurement windows while the cycle total barely did, so a
    * cost that recurs across phases is only visible when the cycle is summed as well as split.
    */
-  operations: Array<OperationStat & { label: string }>;
+  operations: Array<OperationWindowStat & { label: string }>;
   /** Summed event-loop-blocking time across the whole cycle. */
   blockingMs: number;
+  /**
+   * Git spawns in this cycle whose `(cwd, argv)` had already been spawned earlier in the SAME
+   * cycle — the exact number a perfect per-cycle memo could have removed, beside the total so the
+   * share is readable without arithmetic.
+   *
+   * This is the number that settles #359's recommended fix instead of arguing about it: measured
+   * over five consecutive live cycles at 57 active workspaces it was 5-19 of 65-120 spawns (7-25%,
+   * median 12%), of which `rev-parse` contributed 5-9 of 33-58 (12-16%) — far short of the "most
+   * of them" the fix assumed, and well inside the 46-85s cycle-to-cycle spread of the totals.
+   */
+  duplicateSpawns: { duplicateCalls: number; totalCalls: number };
 }
 
 export interface MonitorPhaseRecorder {
@@ -81,19 +99,22 @@ export function createMonitorPhaseRecorder(
   const phases: MonitorPhaseTiming[] = [];
   let currentPhase = initialPhase;
   let currentStartMs = startMs;
-  const cycleOpsBefore: OperationSnapshot = snapshotOperations();
-  let phaseOpsBefore: OperationSnapshot = cycleOpsBefore;
+  // One window for the whole cycle plus one per phase, nested: both see every operation, each with
+  // its own duplicate set, so "repeated within this phase" and "repeated anywhere in this cycle"
+  // are different — and correct — numbers. Both are always closed (`finish` runs in the cycle's
+  // `finally`), which is what keeps their key sets short-lived.
+  const cycleWindow: OperationWindow = openOperationWindow();
+  let phaseWindow: OperationWindow = openOperationWindow();
 
   function close(atMs: number): void {
-    const after = snapshotOperations();
-    const diff = diffOperations(phaseOpsBefore, after);
-    phaseOpsBefore = after;
+    const report = phaseWindow.close();
+    phaseWindow = openOperationWindow();
     phases.push({
       phase: currentPhase,
       startedAt: new Date(currentStartMs).toISOString(),
       durationMs: atMs - currentStartMs,
-      operations: topOperations(diff),
-      blockingMs: Object.values(diff).reduce((sum, stat) => sum + stat.blockingMs, 0),
+      operations: topWindowOperations(report),
+      blockingMs: sumOf(report, (stat) => stat.blockingMs),
     });
   }
 
@@ -114,16 +135,27 @@ export function createMonitorPhaseRecorder(
         (worst, candidate) => (worst === null || candidate.durationMs > worst.durationMs ? candidate : worst),
         null,
       );
-      const cycleDiff = diffOperations(cycleOpsBefore, snapshotOperations());
+      // The phase window opened by the last `close` is never entered again — close it so an
+      // abandoned window can never outlive the cycle that created it.
+      phaseWindow.close();
+      const cycleReport = cycleWindow.close();
       return {
         startedAt: new Date(startMs).toISOString(),
         endedAt: new Date(at).toISOString(),
         totalMs: at - startMs,
         phases,
         slowestPhase: slowest,
-        operations: topOperations(cycleDiff, 12),
-        blockingMs: Object.values(cycleDiff).reduce((sum, stat) => sum + stat.blockingMs, 0),
+        operations: topWindowOperations(cycleReport, 12),
+        blockingMs: sumOf(cycleReport, (stat) => stat.blockingMs),
+        duplicateSpawns: {
+          duplicateCalls: sumOf(cycleReport, (stat) => stat.duplicateCalls),
+          totalCalls: sumOf(cycleReport, (stat) => stat.keyedCalls),
+        },
       };
     },
   };
+}
+
+function sumOf(report: OperationWindowReport, pick: (stat: OperationWindowStat) => number): number {
+  return Object.values(report).reduce((sum, stat) => sum + pick(stat), 0);
 }

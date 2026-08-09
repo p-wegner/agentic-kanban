@@ -32,6 +32,8 @@
  * would let two readers silently zero each other's baseline.
  */
 
+import { feedOperationWindows } from "./operation-windows.js";
+
 export interface OperationStat {
   /** How many times the operation ran in this window. */
   calls: number;
@@ -50,6 +52,12 @@ export interface OperationStat {
 }
 
 export type OperationSnapshot = Record<string, OperationStat>;
+
+/**
+ * `maxMs` and duplicate-call counts cannot be derived from cumulative counters (a max is not
+ * differenceable, and a repeat is a property of a window, not of a running total). Both live in
+ * `operation-windows`, which every `recordOperation` also feeds — see that module's header.
+ */
 
 const counters = new Map<string, OperationStat>();
 
@@ -70,8 +78,14 @@ function statFor(label: string): OperationStat {
  *                   map with no eviction, so unbounded labels would be a slow leak.
  * @param durationMs Wall clock for the call.
  * @param blocking   True when the call ran synchronously on the event loop.
+ * @param dedupeKey  Identity of this exact call (for git: the cwd plus the argv). Only ever used
+ *                   by an open measurement window, to count how many calls in that window were an
+ *                   exact repeat of an earlier one — i.e. the ceiling on what a window-scoped memo
+ *                   could remove. Never stored in the cumulative registry: that map has no
+ *                   eviction and a key carries paths, refs and sometimes SHAs.
  */
-export function recordOperation(label: string, durationMs: number, blocking = false): void {
+export function recordOperation(label: string, durationMs: number, blocking = false, dedupeKey?: string): void {
+  feedOperationWindows(label, durationMs, blocking, dedupeKey);
   const stat = statFor(label);
   stat.calls += 1;
   stat.totalMs += durationMs;

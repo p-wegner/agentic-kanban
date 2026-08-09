@@ -102,6 +102,12 @@
       "import": "./dist/lib/operation-metrics.js",
       "default": "./src/lib/operation-metrics.ts"
     },
+    "./lib/operation-windows": {
+      "development": "./src/lib/operation-windows.ts",
+      "types": "./dist/lib/operation-windows.d.ts",
+      "import": "./dist/lib/operation-windows.js",
+      "default": "./src/lib/operation-windows.ts"
+    },
     "./lib/temp-dir": {
       "development": "./src/lib/temp-dir.ts",
       "types": "./dist/lib/temp-dir.d.ts",

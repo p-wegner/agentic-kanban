@@ -7,6 +7,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { startLoopLagMonitor, LOOP_LAG_WARN_MS } from "../lib/loop-lag-monitor.js";
 import { createMonitorPhaseRecorder } from "../lib/monitor-phase-timings.js";
+import { recordOperation } from "@agentic-kanban/shared/lib/operation-metrics";
 
 /** Block the event loop synchronously for at least `ms`, the thing being measured. */
 function blockEventLoop(ms: number): void {
@@ -173,8 +174,10 @@ describe("monitor phase timings (#347)", () => {
       ["processing-candidates", 20],
     ]);
     expect(timings.totalMs).toBe(530);
-    // This is the payload's reason to exist: which phase to look at.
-    expect(timings.slowestPhase).toEqual({
+    // This is the payload's reason to exist: which phase to look at. `toMatchObject`, not
+    // `toEqual`: a phase also carries its per-operation attribution (#359), and pinning the exact
+    // object shape here is what silently broke this assertion when that was added.
+    expect(timings.slowestPhase).toMatchObject({
       phase: "loading-candidates",
       startedAt: new Date(1_010).toISOString(),
       durationMs: 500,
@@ -199,9 +202,33 @@ describe("monitor phase timings (#347)", () => {
     const recorder = createMonitorPhaseRecorder("starting", scriptedClock(0, [7]));
     const timings = recorder.finish();
 
-    expect(timings.phases).toEqual([{ phase: "starting", startedAt: new Date(0).toISOString(), durationMs: 7 }]);
+    expect(timings.phases).toHaveLength(1);
+    expect(timings.phases[0]).toMatchObject({ phase: "starting", startedAt: new Date(0).toISOString(), durationMs: 7 });
     expect(timings.slowestPhase!.phase).toBe("starting");
     expect(timings.totalMs).toBe(7);
+  });
+
+  it("reports a TRUE per-phase max and per-cycle duplicate spawns (#359)", () => {
+    // Both numbers were unavailable from the previous snapshot-diff implementation: a cumulative
+    // max is not differenceable (so every phase after the first slow one read `maxMs: 0`), and a
+    // repeat is a property of a window, not of a running total.
+    recordOperation("git:rev-parse", 9_000, false, "C:\\repo rev-parse master");
+    const recorder = createMonitorPhaseRecorder("starting");
+    recordOperation("git:rev-parse", 40, false, "C:\\repo rev-parse master");
+    recorder.enter("processing-candidates");
+    recordOperation("git:rev-parse", 30, false, "C:\\repo rev-parse master"); // repeat within the cycle
+    recordOperation("git:rev-parse", 20, false, "C:\\other rev-parse master"); // different repo
+    recordOperation("db:getPreference", 1); // no call identity — never a duplicate, never counted
+    const timings = recorder.finish();
+
+    const starting = timings.phases.find((p) => p.phase === "starting")!;
+    // 40ms, not 0 and not the earlier 9s: the window's own worst call, charged to the right phase.
+    expect(starting.operations.find((o) => o.label === "git:rev-parse")!.maxMs).toBe(40);
+    const processing = timings.phases.find((p) => p.phase === "processing-candidates")!;
+    // Phase-scoped duplicates: within THIS phase the two rev-parses differ, so neither repeats.
+    expect(processing.operations.find((o) => o.label === "git:rev-parse")!.duplicateCalls).toBe(0);
+    // Cycle-scoped: the third call repeats the first. One spawn, and only one, was removable.
+    expect(timings.duplicateSpawns).toEqual({ duplicateCalls: 1, totalCalls: 3 });
   });
 
   it("uses a real clock by default and produces non-negative durations", () => {
