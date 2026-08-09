@@ -82,6 +82,46 @@ export async function recordGateFailureNote(args: {
 }
 
 /**
+ * Record that a merge was verified by NOTHING, because the project has nothing to verify with (#377).
+ *
+ * MEASURED reason this exists: eight tickets were auto-merged into a project with no `verify_script`
+ * and an all-null stack profile. One carried a test that could never pass, master went 38/38 green to
+ * 40-with-1-permanently-failing, and no signal was produced anywhere — because "no gate configured"
+ * and "gate passed" were both `passed: true` with identical silence. A merge nothing checked is a
+ * fact about that merge and belongs on the timeline beside it.
+ *
+ * Deduped like {@link recordGateFailureNote}: the state is a property of the PROJECT, so it repeats on
+ * every merge and would otherwise become noise nobody reads. Non-fatal throughout — an unrecordable
+ * note must never be the thing that stops a merge.
+ */
+export async function recordUnverifiedMergeNote(args: {
+  workspace: WorkspaceRow;
+  gateMessage: string;
+  targetBranch: string;
+  database: Database;
+  recordMergeAttempt: RecordMergeAttempt;
+}): Promise<void> {
+  const { workspace, gateMessage, targetBranch, database, recordMergeAttempt } = args;
+  try {
+    const latest = await getLatestIssueCommentByKind(workspace.issueId, "merge-attempt", database);
+    const latestPayload = latest?.payload ? (JSON.parse(latest.payload) as Record<string, unknown>) : null;
+    if (latestPayload?.mergeReason === "merged_without_verification") return;
+    await recordMergeAttempt(
+      workspace,
+      "warning",
+      "Merging WITHOUT verification: this project has no verify_script and no smoke check, so no test "
+      + `suite gated this merge. ${gateMessage}`,
+      { mergeReason: "merged_without_verification", gateStage: "none", gateMessage, targetBranch },
+    );
+  } catch (err) {
+    console.warn(
+      "[workspace-merge] failed to record unverified-merge note (non-fatal):",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+}
+
+/**
  * Run the pre-merge gate OUTSIDE the repo lock and return the token the merge executor should
  * use.
  *
@@ -151,6 +191,20 @@ export async function runPreLockGate(args: {
       "CONFLICT",
       { mergeReason: "pre_merge_gate_failed", gateStage: preGate.stage },
     );
+  }
+
+  if (preGate.unverified) {
+    // Say it out loud on the timeline AND in the log. Deliberately not a block: plenty of projects
+    // legitimately have nothing to gate on, and refusing their merges would be a worse defect than
+    // the silence. What was missing was the SAYING (#377).
+    console.warn(`[workspace-merge] merging workspace ${workspaceId} with NO verification configured for project ${projectId} (#377)`);
+    await recordUnverifiedMergeNote({
+      workspace,
+      gateMessage: preGate.message,
+      targetBranch: baseBranch,
+      database,
+      recordMergeAttempt,
+    });
   }
 
   if (!preGate.ran) return token;

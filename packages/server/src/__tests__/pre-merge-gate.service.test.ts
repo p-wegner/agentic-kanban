@@ -1,7 +1,10 @@
-import { existsSync } from "node:fs";
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createTestDb } from "./helpers/test-db.js";
-import { setPreference } from "../repositories/preferences.repository.js";
+import { createProjectDirectly } from "./helpers/api-test-helpers.js";
+import { getPreference, setPreference } from "../repositories/preferences.repository.js";
 import { saveStackProfile, verifyScriptPrefKey } from "../services/stack-profile.service.js";
 import type { StackProfile } from "@agentic-kanban/shared";
 
@@ -240,5 +243,87 @@ describe("runPreMergeGate (#821) — shared verify+smoke gate the monitor's auto
     expect(res.passed).toBe(false);
     expect(captured).toContain("kanban-verify-gate-");
     expect(existsSync(captured)).toBe(false);
+  });
+});
+
+/**
+ * #377 — MEASURED: an autonomous fix loop merged 8 tickets into the `kassenbuch` project, one of them
+ * carrying `assert.ok(text.startsWith('\ufeff'))`, an assertion that can NEVER pass because
+ * `fetch().text()` strips a BOM. Master went from 38 tests / 38 passing to 40 tests with 1
+ * permanently failing, and nothing flagged it.
+ *
+ * The framing the ticket left open, now MEASURED and settled: that project had **no**
+ * `verify_script_<projectId>` preference at all and an all-null stack profile, having been registered
+ * from an empty repo before the pipeline generated any code. So the gate did not misjudge a test run
+ * — there was no test run. "No gate configured" and "gate passed" were both reported as
+ * `passed: true` with identical silence, and that indistinguishability is the defect.
+ */
+describe("runPreMergeGate: an unverified merge must be SAYABLE (#377)", () => {
+  let db: ReturnType<typeof createTestDb>["db"];
+  let repoDir: string;
+
+  beforeEach(() => {
+    ({ db } = createTestDb());
+    runSetupScript.mockReset();
+    runSmokeCheck.mockReset();
+    getChangedFileNames.mockReset();
+    getChangedFileNames.mockResolvedValue([]);
+    repoDir = mkdtempSync(join(tmpdir(), "gate-rederive-"));
+  });
+
+  afterEach(() => {
+    rmSync(repoDir, { recursive: true, force: true });
+  });
+
+  it("flags a merge that NOTHING checked, instead of reporting it exactly like a passing gate", async () => {
+    const res = await runPreMergeGate({ id: "ws", workingDir: "/tmp/wt" }, "proj-no-gate", db);
+    expect(res.passed).toBe(true); // still permitted — plenty of projects legitimately have no gate
+    expect(res.unverified).toBe(true);
+    expect(res.message).toContain("NOT VERIFIED");
+  });
+
+  it("does NOT flag a project that HAS a gate which deliberately skipped for a docs-only diff", async () => {
+    // The distinction that makes the flag worth having: `skipped` covers both states, `unverified`
+    // only the one where nothing exists to run.
+    await setPreference(verifyScriptPrefKey("p"), "gradlew.bat test", db);
+    getChangedFileNames.mockResolvedValue(["docs/state.md"]);
+    const res = await runPreMergeGate({ id: "ws", workingDir: "/tmp/wt", baseBranch: "master" }, "p", db);
+    expect(res.skipped).toBe(true);
+    expect(res.unverified).toBeUndefined();
+  });
+
+  it("does NOT flag a gate that actually ran", async () => {
+    await setPreference(verifyScriptPrefKey("p"), "gradlew.bat test", db);
+    runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "" });
+    const res = await runPreMergeGate({ id: "ws", workingDir: "/tmp/wt" }, "p", db);
+    expect(res.unverified).toBeUndefined();
+  });
+
+  it("derives a verify_script AT GATE TIME for a project registered before its code existed", async () => {
+    // The pipeline case: registration ran against an empty repo, so nothing was derivable then, and
+    // `populateVerifyScript` was never called again however many suites the repo later grew.
+    writeFileSync(join(repoDir, "package.json"), JSON.stringify({ name: "grown", scripts: { test: "node --test" } }), "utf8");
+    const projectId = await createProjectDirectly(db, { repoPath: repoDir });
+    runSetupScript.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "1 test failed" });
+
+    const res = await runPreMergeGate({ id: "ws", workingDir: "/tmp/wt" }, projectId, db);
+    // The whole point: this merge is now BLOCKED by a real test run, where before it sailed through.
+    expect(runSetupScript).toHaveBeenCalledTimes(1);
+    expect(res.passed).toBe(false);
+    expect(res.stage).toBe("verify");
+    expect(res.unverified).toBeUndefined();
+    // ...and it is persisted, so the next merge does not pay for detection again.
+    expect(await getPreference(verifyScriptPrefKey(projectId), db)).toBeTruthy();
+  });
+
+  it("still reports unverified when the repo offers nothing to derive from", async () => {
+    // Honest limit, stated as a test: detection reads the repo ROOT only. The project from the ticket
+    // keeps its `package.json` in `src/`, so re-derivation cannot rescue it — the flag has to.
+    mkdirSync(join(repoDir, "src"), { recursive: true });
+    writeFileSync(join(repoDir, "src", "package.json"), JSON.stringify({ scripts: { test: "node --test" } }), "utf8");
+    const projectId = await createProjectDirectly(db, { repoPath: repoDir });
+    const res = await runPreMergeGate({ id: "ws", workingDir: "/tmp/wt" }, projectId, db);
+    expect(runSetupScript).not.toHaveBeenCalled();
+    expect(res.unverified).toBe(true);
   });
 });
