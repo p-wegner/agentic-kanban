@@ -27,6 +27,25 @@
  * That is a decision procedure, not a log. Memory figures ride along on both kinds of line so the
  * OOM hypothesis can be judged from the trend approaching the gap rather than guessed at.
  *
+ * ── The correction that makes the above usable at all ──
+ *
+ * The first version of this module shipped with only those two record kinds, and reading its own live
+ * output within the hour showed the design was broken in practice: **five consecutive `start` records
+ * with no exit record between any of them.** The dev server runs under a watch/restart wrapper that
+ * KILLS the child rather than signalling it, so on this platform an ordinary file-edit reload produces
+ * the identical signature to an OOM kill. An indicator that fires on every routine event is exactly as
+ * useless as one that never fires — the same failure #374/#375 were about, in the other direction.
+ *
+ * A HEARTBEAT is what separates them, and it is the figure the ticket actually asked for. The process
+ * overwrites a single-line "alive at T" file every {@link HEARTBEAT_INTERVAL_MS}; the next process
+ * reads the stale one and can state the OUTAGE:
+ *
+ *   last alive T1, next process started T2  =>  the board was DOWN for T2 - T1
+ *
+ * A watch reload gives seconds. The event that prompted the ticket gave 15+ minutes. Start-to-start
+ * spacing cannot substitute: it includes the next process's ~20s startup and, when a human is editing
+ * files, minutes of idle time — MEASURED at 135s between two reloads here, with no outage at all.
+ *
  * ── Constraints this file lives under ──
  *
  * - **Synchronous writes only.** `process.on("exit")` and the tail of a signal handler cannot await
@@ -86,6 +105,89 @@ export function exitLogPath(): string {
   const override = process.env.KANBAN_EXIT_LOG_FILE;
   if (override && override.trim()) return override.trim();
   return join(DATA_DIR, EXIT_LOG_FILENAME);
+}
+
+/** Single-line liveness file: the last moment this process is known to have been running. */
+export const HEARTBEAT_FILENAME = "process-alive.json";
+
+/**
+ * How often liveness is stamped. The outage figure is only accurate to this interval, and 30s is fine
+ * against the 15+ minute outage that prompted the ticket while costing one small overwrite per
+ * half-minute.
+ */
+export const HEARTBEAT_INTERVAL_MS = 30_000;
+
+/**
+ * Below this, a gap is a restart rather than an outage, and nothing is reported.
+ *
+ * MEASURED basis: this server's own startup takes ~20s before handlers install, so anything under a
+ * minute cannot be distinguished from a reload and must not be announced as a death.
+ */
+export const OUTAGE_REPORT_THRESHOLD_MS = 60_000;
+
+export interface Heartbeat {
+  at: string;
+  pid: number;
+  uptimeMs: number;
+}
+
+export function heartbeatPath(): string {
+  const override = process.env.KANBAN_HEARTBEAT_FILE;
+  if (override && override.trim()) return override.trim();
+  return join(DATA_DIR, HEARTBEAT_FILENAME);
+}
+
+/** Stamp liveness. Overwrites, so the file stays one line forever. Never throws. */
+export function writeHeartbeat(path: string = heartbeatPath()): void {
+  const beat: Heartbeat = {
+    at: new Date().toISOString(),
+    pid: process.pid,
+    uptimeMs: Math.round(process.uptime() * 1000),
+  };
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify(beat)}\n`, "utf8");
+  } catch {
+    // Best effort by design.
+  }
+}
+
+/** Read the previous process's last known liveness, or null when absent/unusable. */
+export function readHeartbeat(path: string = heartbeatPath()): Heartbeat | null {
+  try {
+    const raw = JSON.parse(readFileSync(path, "utf8")) as Partial<Heartbeat>;
+    if (typeof raw.at !== "string" || Number.isNaN(Date.parse(raw.at))) return null;
+    return { at: raw.at, pid: typeof raw.pid === "number" ? raw.pid : -1, uptimeMs: typeof raw.uptimeMs === "number" ? raw.uptimeMs : -1 };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * How long the board was DOWN before this process started, from the previous process's last
+ * heartbeat. Null when there is no usable heartbeat, or when it belongs to THIS process (a re-entrant
+ * call), or when the stamp is in the future (clock skew — not evidence of anything).
+ */
+export function outageBeforeStartMs(
+  beat: Heartbeat | null,
+  nowMs: number = Date.now(),
+  currentPid: number = process.pid,
+): number | null {
+  if (!beat || beat.pid === currentPid) return null;
+  const gap = nowMs - Date.parse(beat.at);
+  return gap >= 0 ? gap : null;
+}
+
+/**
+ * Install the liveness timer. `unref`'d so it can never hold the process open, and it stamps once
+ * immediately so a process that dies inside its first interval still leaves a lower bound on when it
+ * was last alive. Returns the timer for teardown in tests.
+ */
+export function startHeartbeat(intervalMs: number = HEARTBEAT_INTERVAL_MS, path: string = heartbeatPath()): NodeJS.Timeout {
+  writeHeartbeat(path);
+  const timer = setInterval(() => writeHeartbeat(path), intervalMs);
+  timer.unref();
+  return timer;
 }
 
 function memorySnapshot(): ExitRecord["memory"] {
@@ -190,20 +292,38 @@ export function trimExitLog(path: string = exitLogPath(), maxLines: number = EXI
 }
 
 /**
- * Write this process's START record, trim the log, and report any previous death that left no
- * record — the "the board stopped and nothing noticed" case, said out loud at the next boot.
+ * Write this process's START record, trim the log, start the heartbeat, and report a preceding OUTAGE
+ * — "the board stopped and nothing noticed", said out loud at the next boot.
+ *
+ * Reports on the OUTAGE, not on the missing exit record. On this platform the watch wrapper kills the
+ * child, so a missing exit record is the NORM and announcing it every time would be pure noise
+ * (MEASURED: five consecutive starts, zero exit records, all ordinary reloads). The gap since the
+ * previous process last stamped liveness is what separates a reload from the 15+ minute outage the
+ * ticket is about.
  */
-export function recordProcessStart(path: string = exitLogPath()): ExitRecord[] {
+export function recordProcessStart(
+  path: string = exitLogPath(),
+  beatPath: string = heartbeatPath(),
+): { unexplained: ExitRecord[]; outageMs: number | null } {
   trimExitLog(path);
   const unexplained = findUnexplainedExits(readExitRecords(path));
+  const outageMs = outageBeforeStartMs(readHeartbeat(beatPath));
   appendExitRecord({ kind: "start" }, path);
-  for (const start of unexplained) {
+  startHeartbeat(HEARTBEAT_INTERVAL_MS, beatPath);
+
+  if (outageMs !== null && outageMs >= OUTAGE_REPORT_THRESHOLD_MS) {
+    const last = unexplained[unexplained.length - 1];
     console.warn(
-      `[exit-record] a previous server (pid ${start.pid}, started ${start.at}) left NO exit record — `
-      + "it was killed without notice (OOM / hard kill / power loss are the candidates that cannot "
-      + `write one). Memory at ITS start (not at death): rss ${Math.round(start.memory.rssBytes / 1e6)}MB, `
-      + `os free ${Math.round(start.memory.osFreeBytes / 1e6)}MB. #373`,
+      `[exit-record] the board was DOWN for ${Math.round(outageMs / 1000)}s before this process started `
+      + `— nothing stamped liveness in that window. ${
+        last
+          ? `The previous server (pid ${last.pid}) left NO exit record, so it was killed without notice; `
+            + "OOM, hard kill and power loss are the candidates that cannot write one. Memory at ITS "
+            + `start (not at death): rss ${Math.round(last.memory.rssBytes / 1e6)}MB, os free `
+            + `${Math.round(last.memory.osFreeBytes / 1e6)}MB.`
+          : "The previous server did record its exit — read the log for the signal or code."
+      } Log: ${path}. #373`,
     );
   }
-  return unexplained;
+  return { unexplained, outageMs };
 }
