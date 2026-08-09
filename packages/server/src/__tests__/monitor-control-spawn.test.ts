@@ -14,12 +14,20 @@
  * invented one. What CANNOT be tested here is catching a live stall — the machine has to be in a
  * burst for that, so it is an out-of-process acceptance check, not a unit test.
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   buildControlSpawnReport,
   createSpawnControlProbe,
+  loadPersistedBaselineForTest,
+  readBaselineStore,
   resetSpawnControlBaselineForTest,
+  writeBaselineStore,
   type ControlSpawnSample,
+  BASELINE_PERSIST_MAX_AGE_MS,
+  BASELINE_PLAUSIBILITY_CEILING_MS,
   MAX_SAMPLES_PER_CYCLE,
   MIN_BASELINE_SAMPLES,
   STALL_RATIO,
@@ -108,6 +116,136 @@ describe("control-spawn stall indicator (#368)", () => {
     const report = buildControlSpawnReport(failed, baseline);
     expect(report.stalled).toBeNull();
     expect(report.note).toContain("cannot say");
+  });
+});
+
+/**
+ * #375/#374 — the indicator produced `stalled: null` on **14 of 14** monitor cycles on this machine,
+ * with `baselineMs` pinned at 2346ms while `baselineSamples` rose 14 -> 84 with no restart, because
+ * `BASELINE_PLAUSIBILITY_CEILING_MS` is 2000 and **0 of 75 samples** came in under it (window min
+ * 2696ms). These are that window's real numbers, replayed, so the acceptance property — "it must be
+ * ABLE to answer on this machine" — is locked rather than asserted in prose.
+ */
+describe("baseline plausibility is relative to the process's own distribution (#375)", () => {
+  /** MEASURED, n=75 in-process control samples, 14 cycles: the distribution that never answered. */
+  const LOADED_BOX = {
+    baselineMs: 2346,
+    // Quantiles as measured: min 2696 (this process's window min), p10 10007, p25 15095, p50 19955,
+    // p75 26293, p90 35834, max 51818. Enough of them to put the median at the measured 19955.
+    observedMs: [2696, 10007, 15095, 19955, 19955, 26293, 35834, 51818, 19955, 19955],
+    worstMs: 51818,
+  };
+
+  it("CAN produce a non-null answer on the MEASURED loaded box, where the absolute ceiling never could", () => {
+    const samples = LOADED_BOX.observedMs.map((ms) => sample(ms));
+    const withAbsoluteOnly = buildControlSpawnReport(samples, { ms: LOADED_BOX.baselineMs, samples: 84 });
+    // Even without the process window it answers, because the CYCLE's own median qualifies the
+    // baseline. This is the whole point: the verdict is no longer hostage to one constant.
+    expect(LOADED_BOX.baselineMs).toBeGreaterThan(BASELINE_PLAUSIBILITY_CEILING_MS);
+    expect(withAbsoluteOnly.baselineTrusted).toBe(true);
+    expect(withAbsoluteOnly.baselineTrustBasis).toBe("relative-to-median");
+    expect(withAbsoluteOnly.stalled).not.toBeNull();
+
+    const report = buildControlSpawnReport(samples, {
+      ms: LOADED_BOX.baselineMs,
+      samples: 84,
+      observedMs: LOADED_BOX.observedMs,
+    });
+    expect(report.observedMedianMs).toBe(19955);
+    // A zero-work `git --version` that took 51.8 SECONDS is a stall, and it now says so.
+    expect(report.stalled).toBe(true);
+    expect(report.inflationRatio).toBe(Math.round((LOADED_BOX.worstMs / LOADED_BOX.baselineMs) * 10) / 10);
+    expect(report.note).toContain("median");
+  });
+
+  it("does NOT regress the MEASURED live false negative the absolute ceiling was added for", () => {
+    // Same window as the test above in the previous describe: baseline 5215 against a cycle of
+    // 8998/9022/14600/19618 (median 11811). 5215 is only 2.3x faster than that median, so it is not
+    // a demonstrated floor and the answer must stay withheld — NOT "clean".
+    const live = [14600, 19618, 9022, 8998];
+    const report = buildControlSpawnReport(live.map((ms) => sample(ms)), {
+      ms: 5215,
+      samples: 9,
+      observedMs: live,
+    });
+    expect(report.baselineTrusted).toBe(false);
+    expect(report.baselineTrustBasis).toBeNull();
+    expect(report.stalled).toBeNull();
+    expect(report.note).toContain("cannot say");
+  });
+
+  it("still trusts a quiet-box baseline via the absolute ceiling, which the relative test alone would reject", () => {
+    // MEASURED quiet box: min 428, p50 917. 428 is only 2.1x faster than its own median, so the
+    // relative test FAILS here — the two tests are OR'd precisely so this case still answers.
+    const report = buildControlSpawnReport(IN_PROCESS_QUIET.map((ms) => sample(ms)), {
+      ms: 428,
+      samples: 80,
+      observedMs: IN_PROCESS_QUIET,
+    });
+    expect(report.baselineTrustBasis).toBe("absolute-ceiling");
+    expect(report.stalled).toBe(false);
+  });
+
+  it("never lets the relative test manufacture an answer the sample count has not earned", () => {
+    const report = buildControlSpawnReport(LOADED_BOX.observedMs.map((ms) => sample(ms)), {
+      ms: LOADED_BOX.baselineMs,
+      samples: MIN_BASELINE_SAMPLES - 1,
+      observedMs: LOADED_BOX.observedMs,
+    });
+    expect(report.baselineTrusted).toBe(false);
+    expect(report.stalled).toBeNull();
+  });
+});
+
+describe("the baseline survives a process restart (#375)", () => {
+  let dir: string;
+  let storePath: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "spawn-baseline-"));
+    storePath = join(dir, "store.json");
+    process.env.KANBAN_SPAWN_BASELINE_FILE = storePath;
+    resetSpawnControlBaselineForTest({ persist: true });
+  });
+
+  afterEach(() => {
+    delete process.env.KANBAN_SPAWN_BASELINE_FILE;
+    resetSpawnControlBaselineForTest();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("seeds a fresh process from a baseline learned in a quiet moment, sample count included", () => {
+    // The `tsx watch` gap in the ticket: a quiet-moment 428ms baseline must not be thrown away by a
+    // reload, or a process that restarts inside a burst can never judge anything again.
+    writeBaselineStore(storePath, { ms: 428, samples: 80, at: new Date().toISOString() });
+    const seeded = loadPersistedBaselineForTest();
+    expect(seeded.ms).toBe(428);
+    expect(seeded.samples).toBe(80);
+    expect(seeded.seededFrom).toBe(428);
+
+    // ...and that seeded baseline is immediately usable: a burst cycle in a brand-new process now
+    // gets a verdict on its FIRST cycle instead of `null` until it happens to see a fast spawn.
+    const report = buildControlSpawnReport([2696, 19955, 51818].map((ms) => sample(ms)), {
+      ms: seeded.ms,
+      samples: seeded.samples,
+      seededFromMs: seeded.seededFrom,
+    });
+    expect(report.baselineSeededFromMs).toBe(428);
+    expect(report.stalled).toBe(true);
+  });
+
+  it("discards a store that is stale, malformed or non-positive rather than trusting it", () => {
+    const stale = new Date(Date.now() - BASELINE_PERSIST_MAX_AGE_MS - 60_000).toISOString();
+    writeBaselineStore(storePath, { ms: 428, samples: 80, at: stale });
+    expect(readBaselineStore(storePath)).toBeNull();
+
+    writeBaselineStore(storePath, { ms: 0, samples: 80, at: new Date().toISOString() });
+    expect(readBaselineStore(storePath)).toBeNull();
+
+    writeBaselineStore(storePath, { ms: 428, samples: 80, at: "not-a-date" });
+    expect(readBaselineStore(storePath)).toBeNull();
+
+    expect(readBaselineStore(join(dir, "absent.json"))).toBeNull();
   });
 });
 
