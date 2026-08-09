@@ -99,3 +99,29 @@ export async function latestPluginLoopEvent(
     .limit(1);
   return rows[0] ?? null;
 }
+
+/**
+ * The newest `limit` events of one type, newest first (#367).
+ *
+ * Needed because "how many recommendation attempts has this gate already had?" is a COUNT over
+ * one type, and reading the whole 500-event timeline to answer it would put a large scan on every
+ * advance — and a blocked loop advances every monitor cycle.
+ */
+export async function listPluginLoopEventsOfType(
+  key: LoopEventKey,
+  type: PluginLoopEventType,
+  limit = 20,
+  database: Database = db,
+): Promise<PluginLoopEventRow[]> {
+  return database
+    .select()
+    .from(pluginLoopEvents)
+    .where(and(
+      eq(pluginLoopEvents.pluginSlug, key.pluginSlug),
+      eq(pluginLoopEvents.loopName, key.loopName),
+      eq(pluginLoopEvents.projectId, key.projectId),
+      eq(pluginLoopEvents.type, type),
+    ))
+    .orderBy(desc(pluginLoopEvents.createdAt), desc(pluginLoopEvents.id))
+    .limit(limit);
+}
