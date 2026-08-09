@@ -12,7 +12,8 @@ export type McpToolCategory =
   | "drives"
   | "projects"
   | "settings"
-  | "butler";
+  | "butler"
+  | "plugins";
 
 export interface McpToolDefinition {
   name: string;
@@ -35,6 +36,7 @@ export const MCP_TOOL_CATEGORIES: { id: McpToolCategory; label: string }[] = [
   { id: "projects", label: "Projects" },
   { id: "settings", label: "Settings" },
   { id: "butler", label: "Butler" },
+  { id: "plugins", label: "Plugin Loops & Gates" },
 ];
 
 export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
@@ -146,4 +148,13 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
   { name: "butler_set_profile", description: "Switch the butler's Claude profile. This restarts the warm session (different auth/endpoint cannot resume). Pass an empty profile to revert to the global default.", category: "butler" },
   { name: "get_butler_skill", description: "Get the butler's editable system prompt (skill) for a project. Returns the prompt text and whether it is a project-scoped override or the global default. Equivalent to CLI `butler skill get`.", category: "butler" },
   { name: "set_butler_skill", description: "Set (upsert) the butler's system prompt (skill) for a project, creating a project-scoped override. Pass an empty string to reset to the global default. Equivalent to CLI `butler skill set <prompt>`.", category: "butler" },
+
+  // plugins — the four plugin-gate tools were registered at runtime but absent here for a week (#371),
+  // so `mcp-catalog-parity` was red and any agent that consulted the catalog concluded the gate tools
+  // did not exist. Descriptions are byte-identical to `mcp-server/src/tools/plugin-gates.ts`, which the
+  // parity test asserts — copy from there, never paraphrase.
+  { name: "list_plugin_gates", description: "List plugin-loop approval gates currently waiting on a HUMAN decision for a project (question, verification checks, artifacts, the butler's recommendation if any). Also reports loops whose finished ticket is still waiting for its merge to land.", category: "plugins" },
+  { name: "get_plugin_gate", description: "Get the full detail of one pending plugin gate: question, actions, verification checks, artifact paths (read those files for the content), and the butler's recommendation.", category: "plugins" },
+  { name: "resolve_plugin_gate", description: "Apply a HUMAN's decision to a pending plugin gate (approve / request revisions). HARD RULE: only call this after the user has EXPLICITLY stated their decision in the current conversation — never resolve a gate on your own judgment or a recommendation alone. Revision-style actions require the user's feedback text.", category: "plugins" },
+  { name: "advance_plugin_loop", description: "Re-run a plugin loop's planner now (plan → dedupe → create tickets). Safe and idempotent; use after a merge landed or to refresh a loop's gate/progress state.", category: "plugins" },
 ];
