@@ -126,6 +126,22 @@ export interface LoopUnmergedWorkspaceRow {
   workspaceReadyForMerge: boolean;
   /** When the workspace row last changed — how long the stall has been held. */
   workspaceUpdatedAt: string;
+  /**
+   * Whether ANOTHER workspace on the same issue already merged (`mergedAt IS NOT NULL`) — i.e. this
+   * unit's work is already on the base branch and THIS row is a leftover (#337).
+   *
+   * Why it has to be selected here rather than decided in the service: the query keys only on
+   * `status != 'closed' AND mergedAt IS NULL`, which is true of an after-merge REVIEW workspace and
+   * of any second workspace on the issue. MEASURED on kassenbuch round 3: for ~5 minutes after a
+   * step landed, `awaitingMerge` pointed at such a row and the loop card rendered a literal "Merge
+   * now" button for a unit whose merge commit was already on master — and "click Merge now" is
+   * exactly what the operator documentation says to do in that state. The operator checked
+   * `git log` first and did nothing; a less careful one, or the butler, would have poked it.
+   *
+   * Deliberately an EXISTS over the workspaces table, not a git call: `loopStatuses` runs on every
+   * plugin-surface read, and the classifier is DB-only by design (#359).
+   */
+  issueHasMergedWorkspace: boolean;
 }
 
 /**
@@ -176,6 +192,16 @@ export async function listPluginLoopUnmergedWorkspaces(
       workspaceStatus: workspaces.status,
       workspaceReadyForMerge: workspaces.readyForMerge,
       workspaceUpdatedAt: workspaces.updatedAt,
+      // #337 — does the issue already have a LANDED workspace? Correlated EXISTS rather than a
+      // second round trip, and `sibling.id != workspaces.id` so a row can never vouch for itself
+      // (it cannot anyway, given the `mergedAt IS NULL` filter, but the join must not depend on
+      // that filter staying).
+      issueHasMergedWorkspace: sql<boolean>`EXISTS (
+        SELECT 1 FROM ${workspaces} AS sibling
+        WHERE sibling.issue_id = ${issues.id}
+          AND sibling.merged_at IS NOT NULL
+          AND sibling.id != ${workspaces.id}
+      )`,
     })
     .from(workspaces)
     .innerJoin(issues, eq(workspaces.issueId, issues.id))

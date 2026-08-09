@@ -41,7 +41,7 @@ export type LoopStall = {
   workspaceId: string;
   issueNumber: number | null;
   issueTitle: string;
-  reason?: "builder-finished-unmerged" | "workspace-parked-issue-unfinished";
+  reason?: "builder-finished-unmerged" | "workspace-parked-issue-unfinished" | "unit-already-landed";
   mergeSafe?: boolean;
   detail?: string;
   since?: string;
@@ -65,9 +65,14 @@ export function LoopStateChips({ loop, startPolicy }: {
   // is the misreport the ticket was filed for — that workspace's ticket never finished and its
   // branch may hold nothing at all.
   if (loop.awaitingMerge) {
-    chips.push(loop.awaitingMerge.mergeSafe === false
-      ? { text: "Step parked — ticket never finished", tone: "red" }
-      : { text: "Step done — waiting for merge", tone: "amber" });
+    // #337: three states reach this field. Calling an ALREADY-LANDED leftover "waiting for merge"
+    // is the misreport that ticket was filed for — the operator docs map that wording to "click
+    // Merge now", which on already-merged work is the wrong action.
+    chips.push(loop.awaitingMerge.reason === "unit-already-landed"
+      ? { text: "Step landed — leftover workspace closing", tone: "gray" }
+      : loop.awaitingMerge.mergeSafe === false
+        ? { text: "Step parked — ticket never finished", tone: "red" }
+        : { text: "Step done — waiting for merge", tone: "amber" });
   }
   else if (loop.openTickets > 0) chips.push({ text: "Round running", tone: "blue" });
   else if (loop.converged) chips.push({ text: "Converged", tone: "green" });
@@ -205,21 +210,33 @@ export function AwaitingMergeCard({ awaitingMerge, onMergeStarted }: {
       setMerging(false);
     }
   }
-  const parked = awaitingMerge.mergeSafe === false;
+  // #337 — an already-landed leftover is neither "parked" (nothing is wrong) nor mergeable
+  // (the work is already on the base branch). It gets its own, calm copy: the previous wording
+  // told the operator to click Merge now on a step whose merge commit was already on master.
+  const landed = awaitingMerge.reason === "unit-already-landed";
+  const parked = !landed && awaitingMerge.mergeSafe === false;
   const ref = awaitingMerge.issueNumber != null ? `#${awaitingMerge.issueNumber} ` : "";
   return (
     <div
       className={parked
         ? "rounded border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20 p-3 max-w-2xl flex items-center gap-3"
-        : "rounded border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 p-3 max-w-2xl flex items-center gap-3"}
+        : landed
+          ? "rounded border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/40 p-3 max-w-2xl flex items-center gap-3"
+          : "rounded border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 p-3 max-w-2xl flex items-center gap-3"}
       data-testid="plugin-loop-awaiting-merge"
       data-stall-reason={awaitingMerge.reason ?? "builder-finished-unmerged"}
     >
       <div className={parked
         ? "flex-1 text-xs text-red-900 dark:text-red-200"
-        : "flex-1 text-xs text-amber-900 dark:text-amber-200"}>
+        : landed
+          ? "flex-1 text-xs text-gray-700 dark:text-gray-300"
+          : "flex-1 text-xs text-amber-900 dark:text-amber-200"}>
         <span className="font-medium">
-          {parked ? "Step parked, ticket never finished:" : "Step finished but not landed:"}
+          {parked
+            ? "Step parked, ticket never finished:"
+            : landed
+              ? "Step already landed — nothing to merge:"
+              : "Step finished but not landed:"}
         </span>{" "}
         {ref}{awaitingMerge.issueTitle}.
         {" "}{awaitingMerge.detail ?? "Until the merge lands, the planner cannot see the artifacts."}
@@ -233,6 +250,14 @@ export function AwaitingMergeCard({ awaitingMerge, onMergeStarted }: {
         <a
           href={`/workspaces/${awaitingMerge.workspaceId}`}
           className="text-sm px-3 py-1.5 rounded border border-red-400 dark:border-red-600 text-red-800 dark:text-red-200 hover:bg-red-100 dark:hover:bg-red-900/40 shrink-0"
+          data-testid="plugin-loop-inspect-stall"
+        >
+          Inspect workspace
+        </a>
+      ) : landed ? (
+        <a
+          href={`/workspaces/${awaitingMerge.workspaceId}`}
+          className="text-sm px-3 py-1.5 rounded border border-gray-400 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 shrink-0"
           data-testid="plugin-loop-inspect-stall"
         >
           Inspect workspace
