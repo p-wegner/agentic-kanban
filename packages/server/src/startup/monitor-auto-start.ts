@@ -1,4 +1,4 @@
-import { computeBlockerReadiness, isTerminalStatusIdView, type BlockerWorkspaceLanding } from "@agentic-kanban/shared";
+import { computeBlockerReadiness, isTerminalStatusIdView, suggestBranchName, type BlockerWorkspaceLanding } from "@agentic-kanban/shared";
 import { drives, issueDependencies, issues, issueTags, projectStatuses, tags, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { and, eq, sql, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
@@ -158,7 +158,23 @@ export type AutoStartSkipReason =
    * mints a FRESH unit id (a gate's "revise" action does exactly that); reopening the old ticket is
    * never how a loop asks for more work.
    */
-  | "loop_unit_reopen_declined";
+  | "loop_unit_reopen_declined"
+  /**
+   * Another AUTOMATIC starter already holds the per-issue auto-start claim and is provisioning a
+   * workspace for this issue right now (#366).
+   *
+   * The workspace row and the move to In Progress land in one transaction at the END of
+   * provisioning (80s to 8+ minutes), so the table-based "does this issue already have an open
+   * workspace?" check that every starter used is blind for that whole window. Two starters both
+   * read "no workspace" and both provisioned. Measured live, on a server that already carried the
+   * first fix: kassenbuch #9 got two workspaces sharing ONE worktree and branch (two agents
+   * writing the same files concurrently for ~5 minutes), and linklocker #3 got three rows across
+   * two branch slugs, leaving two full agent runs stranded on an unmerged branch.
+   *
+   * This is not a failure and not a consumed WIP slot — the OTHER starter's launch is the one
+   * that counts, so the cycle records the decline and moves on.
+   */
+  | "create_in_flight";
 
 export interface AutoStartSkipInfo {
   issueNumbers: number[];
@@ -332,8 +348,11 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       if (!isMonitorEligibleIssue(issue, allowFeatureTypes)) continue;
       if (await hasSkipAutoStartTag(issue.id)) continue;
       if (shouldDeferForContention(contentionGate, issue.id, issue.issueNumber)) continue;
-      const branchSlug = issue.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").substring(0, 40);
-      const baseBranchName = `feature/ak-${issue.issueNumber}-${branchSlug}`;
+      // #366: ONE branch-name producer for the whole board (`suggestBranchName`). This site had
+      // its own inline slug expression, and the Todo-pull loop below had a THIRD one that
+      // stripped punctuation instead of turning it into `-` — that is where the observed
+      // `8-9-ci-cd` vs `89-cicd` pair came from.
+      const baseBranchName = suggestBranchName({ issueNumber: issue.issueNumber, title: issue.title });
       const branch = isReopenRetry ? reopenRetryBranch(baseBranchName, issueWorkspaces.length) : baseBranchName;
       const prompt = issue.description ? `${issue.title}\n\n${issue.description}` : issue.title;
       const launchBody: Record<string, unknown> = { issueId: issue.id, branch, customPrompt: prompt };
@@ -341,11 +360,21 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       if (isAutoDrivenProject(inProgressSt.projectId)) launchBody.planMode = false;
       // #269: `?async=1` — provisioning is minutes-long (measured 8+ min); a synchronous
       // launch blocked the whole monitor cycle for the duration. 202 + create-job instead.
-      const resp = await fetch(`${baseUrl}/api/workspaces?async=1`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(launchBody) }).catch((err) => {
+      // #366: `&autoStart=1` — declare this an automatic starter so the route claims the issue
+      // atomically and answers 409 when another starter is already provisioning it.
+      const resp = await fetch(`${baseUrl}/api/workspaces?async=1&autoStart=1`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(launchBody) }).catch((err) => {
         // #775: surface a thrown launch instead of swallowing it.
         console.warn(`[monitor] Auto-start launch threw for In Progress issue #${issue.issueNumber} (${issue.id}): ${err instanceof Error ? err.message : String(err)}`);
         return null;
       });
+      // #366: 409 means another automatic starter holds the claim and is provisioning this very
+      // issue right now. That is not a failure and not a consumed slot — the other starter's
+      // launch is the one that counts. Recorded as a skip so it stays visible.
+      if (resp?.status === 409) {
+        console.log(`[monitor] Auto-start declined for In Progress issue #${issue.issueNumber} — a workspace creation is already in flight for it (#366)`);
+        noteSkip(inProgressSt.projectId, issue.issueNumber, "create_in_flight");
+        continue;
+      }
       // Count the slot as consumed regardless (we attempted a launch this cycle), but
       // only record SUCCESS as an auto_start action; a failed launch records a failure
       // (#775) so it is no longer invisible in the monitor logs / recentActions.
@@ -496,15 +525,19 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
         if (!allResolved) continue;
       }
 
-      const slug = issue.title.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, "-").slice(0, 40).replace(/-+$/, "");
-      const baseBranchName = `feature/ak-${issue.issueNumber}-${slug}`;
+      // #366: the THIRD slug producer used to live here — `[^a-z0-9\s] -> ""` instead of
+      // `[^a-z0-9]+ -> "-"`, which is exactly what turned `PM pipeline 8/9: CI/CD & Deployment`
+      // into `...-89-cicd-deployment` while `suggestBranchName` produced `...-8-9-ci-cd-deployment`
+      // for the same issue. Both names were observed on duplicate workspaces of one issue.
+      const baseBranchName = suggestBranchName({ issueNumber: issue.issueNumber, title: issue.title });
       const branch = isReopenRetry ? reopenRetryBranch(baseBranchName, issueWorkspaces.length) : baseBranchName;
       const launchBody: Record<string, unknown> = { issueId: issue.id, branch };
       // Auto-driven projects must not stall in plan-only mode (#666).
       if (isAutoDrivenProject(issue.projectId)) launchBody.planMode = false;
       // #269: `?async=1` — same as the backfill loop above; the cycle must not block
       // ~8 minutes per launch while the worktree provisions.
-      const resp = await fetch(`${baseUrl}/api/workspaces?async=1`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(launchBody) }).catch((err) => {
+      // #366: `&autoStart=1` — claim the issue atomically; 409 = another starter has it.
+      const resp = await fetch(`${baseUrl}/api/workspaces?async=1&autoStart=1`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(launchBody) }).catch((err) => {
         // #775: surface a thrown launch (network/connection error) instead of silently
         // dropping it — record a failure action so it shows in the monitor logs.
         console.warn(`[monitor] Auto-start launch threw for issue "${issue.title}" (${issue.id}): ${err instanceof Error ? err.message : String(err)}`);
@@ -526,6 +559,10 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
         started++;
         noteStart(inProgressSt.projectId);
         contentionGate.noteStarted(issue.id);
+      } else if (resp?.status === 409) {
+        // #366: another automatic starter already holds the claim for this issue.
+        console.log(`[monitor] Auto-start declined for unblocked issue "${issue.title}" (${issue.id}) — a workspace creation is already in flight for it (#366)`);
+        noteSkip(inProgressSt.projectId, issue.issueNumber, "create_in_flight");
       } else if (resp) {
         // #775: a non-ok response (e.g. HTTP 400 "No default branch") was previously
         // invisible — no log, no recorded action. Warn with the status + body and record

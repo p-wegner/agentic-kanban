@@ -1,7 +1,8 @@
 import type { Database } from "../db/index.js";
 import { getInProgressStatusId } from "../repositories/plugins.repository.js";
 import { countActiveWip } from "../startup/monitor-auto-start.js";
-import { completeCreateJob, failCreateJob, startCreateJob } from "./create-job.service.js";
+import { claimIssueForAutoStart } from "./auto-start-claim.js";
+import { completeCreateJob, failCreateJob } from "./create-job.service.js";
 import type { StartPolicy } from "./start-policy.service.js";
 import type { CreateWorkspaceInput, CreateWorkspaceResult } from "./workspace-internals.js";
 
@@ -33,6 +34,7 @@ export type LoopStartOutcome =
   | { issueId: string; issueNumber: number | null; outcome: "queued-manual"; startMode: string }
   | { issueId: string; issueNumber: number | null; outcome: "queued-wip"; activeAgents: number; activeAgentsTarget: number }
   | { issueId: string; issueNumber: number | null; outcome: "queued-no-starter" }
+  | { issueId: string; issueNumber: number | null; outcome: "queued-in-flight" }
   | { issueId: string; issueNumber: number | null; outcome: "start-failed"; detail: string };
 
 export interface StartPlannedLoopTicketsArgs {
@@ -75,7 +77,18 @@ export async function startPlannedLoopTickets(args: StartPlannedLoopTicketsArgs)
       // no way to tell "a launch is in flight" from "nothing will ever start" — and it told the
       // user the wrong one of those on 2 of 3 live approvals. Same registry the `?async=1` route
       // uses, so `findRunningCreateJobForIssue` sees both paths.
-      const job = startCreateJob(ticket.issueId);
+      //
+      // #366 round 8 — this used to `startCreateJob` unconditionally: it WROTE the registry and
+      // never READ it, so it was one of the two producers the first fix left unguarded. Measured
+      // live afterwards: kassenbuch #9 got two workspaces sharing one worktree, linklocker #3 got
+      // three across two branch slugs, and two full agent runs were stranded on an unmerged
+      // branch. Claiming instead makes the check-and-register atomic against every other
+      // automatic starter (the monitor's `?async=1&autoStart=1` launches included).
+      const job = claimIssueForAutoStart(ticket.issueId);
+      if (!job) {
+        outcomes.push({ ...ticket, outcome: "queued-in-flight" });
+        continue;
+      }
       // Fired, not awaited — see limit 1 in the module header. The rejection handler is attached
       // synchronously so a provisioning failure can never surface as an unhandled rejection (this
       // server logs those as [fatal]).
@@ -116,6 +129,9 @@ export function describeLoopStartOutcome(outcome: LoopStartOutcome): string {
         + `It starts when a slot frees up.`;
     case "queued-no-starter":
       return `${ref} is queued for the next monitor pass.`;
+    case "queued-in-flight":
+      return `${ref} is already being started by another path — its workspace is provisioning now. `
+        + `No second workspace was created (#366).`;
     case "start-failed":
       return `${ref} could not be started (${outcome.detail}); the monitor's next auto-start pass will retry.`;
   }

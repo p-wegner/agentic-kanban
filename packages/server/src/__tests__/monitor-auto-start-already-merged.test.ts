@@ -111,7 +111,7 @@ describe("runAutoStart already-merged guard (#190)", () => {
 
     await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "2"]]), makeDeps());
 
-    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces?async=1", expect.any(Object));
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces?async=1&autoStart=1", expect.any(Object));
     expect(reconcileMergedIssueMock).not.toHaveBeenCalled();
   });
 

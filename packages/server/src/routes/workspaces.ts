@@ -18,6 +18,7 @@ import {
 } from "../lib/workspace-stats.js";
 import { clampDays, cutoffDayFor, subDays, buildDateAxis } from "../lib/analytics-window.js";
 import { startCreateJob, completeCreateJob, failCreateJob, getCreateJob } from "../services/create-job.service.js";
+import { claimIssueForAutoStart } from "../services/auto-start-claim.js";
 
 export function createWorkspacesRoute(
   database: Database,
@@ -258,7 +259,27 @@ export function createWorkspacesRoute(
 
     const wantsAsync = ["1", "true", "yes"].includes((c.req.query("async") || "").toLowerCase());
     if (wantsAsync) {
-      const job = startCreateJob(input.issueId);
+      // #366 — `?autoStart=1` marks the caller as an AUTOMATIC starter (today: the monitor's
+      // auto-start passes). Automatic starters must be mutually exclusive per issue: the
+      // workspace row lands only at the END of provisioning, so the table-based
+      // "does this issue already have a workspace?" check every starter used is blind for
+      // minutes, and two starters both read "no workspace" and both provisioned. Measured
+      // live: one issue with two workspaces sharing a worktree, another with three rows
+      // across two branch slugs, two agent runs stranded on an unmerged branch.
+      //
+      // The claim is taken HERE rather than in the caller so the check and the registration
+      // stay in one synchronous pair (atomic on a single-threaded loop) — a caller that
+      // checked and then did an `await fetch` would race again. Deliberate multi-workspace
+      // creation (human New Workspace, provider showdown, scheduled runs) does NOT pass the
+      // flag and is unaffected.
+      const isAutoStarter = ["1", "true", "yes"].includes((c.req.query("autoStart") || "").toLowerCase());
+      const job = isAutoStarter ? claimIssueForAutoStart(input.issueId) : startCreateJob(input.issueId);
+      if (!job) {
+        return c.json(
+          { accepted: false, issueId: input.issueId, reason: "create_in_flight", error: "A workspace creation is already in flight for this issue" },
+          409,
+        );
+      }
       // Nothing awaits this promise; the job record IS the report. createWorkspace
       // resolves with status:"error" for most failures (completeCreateJob maps that to
       // a failed job) and only throws WorkspaceErrors (failCreateJob path).
