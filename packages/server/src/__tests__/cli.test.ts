@@ -393,6 +393,10 @@ describe("CLI issue create", () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Created issue #1");
     expect(result.stdout).toContain("My New Issue");
+    // `issue create` has no --project flag: the project came from the global mutable
+    // activeProjectId preference. It must NAME the board it filed into (#335), or a
+    // mis-filing stays invisible.
+    expect(result.stdout).toMatch(/project: Test Project \([0-9a-f-]{36}\)/);
   });
 
   it("creates with description and priority", async () => {
@@ -695,6 +699,10 @@ describe("CLI issue delete (#858 — FK-safe cascade)", () => {
     const result = runCli(["issue", "delete", String(issue.issueNumber), "--force"], ctx.dbPath);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain(`Deleted issue #${issue.issueNumber}`);
+    // The cascade target project was resolved implicitly (no --project flag), so the
+    // destructive path must NAME the board it hit — even under --force, which
+    // suppresses the warning (#335).
+    expect(result.stdout).toMatch(new RegExp(`project: .+ \\(${projectId}\\)`));
     // Regression: the old cascade FK-failed with a raw "Failed query: delete from issues ...".
     expect(result.stderr).not.toContain("Failed query");
 

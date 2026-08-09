@@ -3,7 +3,7 @@ import { z } from "zod";
 import { eq, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { nextIssueNumber, resolveActiveProjectId } from "../db-utils.js";
+import { nextIssueNumber, resolveActiveProjectId, resolveProjectName } from "../db-utils.js";
 
 const issueInputSchema = z.object({
   title: z.string(),
@@ -223,7 +223,11 @@ export function registerCreateIssuesBatch(server: McpServer, deps: ToolDeps = pr
       notifyBoard(pid, "mcp_create_issues_batch");
       if (parentIssueId || edges.length > 0) notifyBoard(pid, "mcp_dependency_added");
 
-      return { content: [{ type: "text" as const, text: JSON.stringify({ issues: created, dependenciesCreated: edges.length }, null, 2) }] };
+      // Echo the RESOLVED project (#335): a batch is the most expensive thing to
+      // mis-file, so the response names the board the issues landed in.
+      const projectName = await resolveProjectName(db, schema, pid);
+
+      return { content: [{ type: "text" as const, text: JSON.stringify({ issues: created, dependenciesCreated: edges.length, projectId: pid, projectName }, null, 2) }] };
     },
   );
 }

@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
+import { resolveProjectName } from "../db-utils.js";
 import {
   listWorkflowTemplates,
   getTemplateGraph,
@@ -96,7 +97,11 @@ export function registerCreateWorkflowTemplate(server: McpServer, deps: ToolDeps
       });
       if (!res.ok) return json({ error: "Invalid workflow graph", errors: res.errors });
       deps.notifyBoard(pid, "mcp_create_workflow_template");
-      return json({ id: res.id, name });
+      // Echo the RESOLVED project (#335): `projectId` is optional here and falls back
+      // to the global mutable activeProjectId, so name the project the durable
+      // template is scoped to rather than leaving the caller to guess.
+      const projectName = await resolveProjectName(deps.db, deps.schema, pid);
+      return json({ id: res.id, name, projectId: pid, projectName });
     },
   );
 }

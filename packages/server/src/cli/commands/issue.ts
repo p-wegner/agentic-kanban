@@ -27,7 +27,7 @@ import { getWorkspacesByIssueId, findOpenUnmergedWorkspace } from "../../reposit
 import { getSessionsForWorkspacesDesc } from "../../repositories/workspace-launch-failures.repository.js";
 import { getSessionMessagesByIdDesc, getSessionMessagesByIdAsc } from "../../repositories/session.repository.js";
 import { getWorkspaceArtifactTarget } from "../../repositories/phase-artifacts.repository.js";
-import { buildIssueSummaryLines, buildIssueStatusLines, validateAttachArtifactOptions, formatAttachArtifactOutput, selectSummarySession, buildIssueSummaryJson, buildIssueStatusJson } from "../../lib/issue-cli-format.js";
+import { buildIssueSummaryLines, buildIssueStatusLines, validateAttachArtifactOptions, formatAttachArtifactOutput, selectSummarySession, buildIssueSummaryJson, buildIssueStatusJson, formatResolvedProjectLine } from "../../lib/issue-cli-format.js";
 import { computeSessionDuration } from "../../lib/issue-summary-projection.js";
 import { extractLastAgentMessageFromRows } from "../../lib/session-message-extraction.js";
 import { openWorkspaceBlockMessage } from "../../lib/terminal-move-guard.js";
@@ -181,6 +181,10 @@ Examples:
 
         console.log(`Created issue #${issueNumber}: ${title}`);
         console.log(`  id: ${id}`);
+        // Name the project the issue actually landed in (#335) — there is no
+        // --project flag, so this is the only feedback that the implicit
+        // active-project fallback filed it where the caller meant.
+        console.log(formatResolvedProjectLine(projectId, (await getProjectById(projectId))?.name));
         process.exit(0);
       } catch (err) {
         console.error("Error:", err instanceof Error ? err.message : String(err));
@@ -605,6 +609,9 @@ Examples:
           console.log(`  id: ${id}`);
           console.log(`  parent: #${parent.issueNumber} (${parent.title})`);
           console.log(`  dependency: ${dependencyId} (child_of)`);
+          // The child lands in the PARENT's project, itself resolved from the
+          // implicit active project — name it (#335).
+          console.log(formatResolvedProjectLine(parent.projectId, (await getProjectById(parent.projectId))?.name));
         }
         process.exit(0);
       } catch (err) {
@@ -644,18 +651,27 @@ Note: deletion is permanent. There is no undo. The issue number will not be reus
           process.exit(1);
         }
 
+        // The project was resolved IMPLICITLY from the global active-project
+        // preference — `issue delete` takes no project argument, so "#42" means #42 of
+        // whatever board a human last clicked. Name it on the destructive path (#335):
+        // the warning says which board is about to be cascaded, and the result names it
+        // even under --force, so a scripted delete still leaves a record.
+        const project = await getProjectById(projectId);
+        const projectLine = formatResolvedProjectLine(projectId, project?.name);
+
         if (!options.force) {
-          console.log(`Warning: This will permanently delete issue #${num} "${issue.title}" and ALL associated workspaces, sessions, and messages. Use --force to suppress this message.`);
+          console.log(`Warning: This will permanently delete issue #${num} "${issue.title}" from project ${project?.name ?? "<unknown>"} (${projectId}) and ALL associated workspaces, sessions, and messages. Use --force to suppress this message.`);
         }
 
         // Cascade workspaces (+ their sessions/messages/comments/artifacts) → tags → issue.
         await deleteIssueCascade(issue.id);
 
-        const result = { id: issue.id, issueNumber: num, title: issue.title, deleted: true };
+        const result = { id: issue.id, issueNumber: num, title: issue.title, deleted: true, projectId, projectName: project?.name ?? null };
         if (options.json) {
           console.log(JSON.stringify(result, null, 2));
         } else {
           console.log(`Deleted issue #${num}: ${issue.title}`);
+          console.log(projectLine);
         }
         process.exit(0);
       } catch (err) {
@@ -847,7 +863,9 @@ Each dependency: issueIndex, dependsOnIndex (0-based indices), type (optional, d
           throw new Error("Could not allocate unique issue numbers");
         }
 
-        for (const line of formatBatchCreateResult(created, dependencyInputs.length, options.json ?? false)) {
+        // Name the project the batch landed in (#335) — resolved implicitly, no flag.
+        const batchProject = await getProjectById(projectId);
+        for (const line of formatBatchCreateResult(created, dependencyInputs.length, options.json ?? false, { id: projectId, name: batchProject?.name ?? null })) {
           console.log(line);
         }
         process.exit(0);
