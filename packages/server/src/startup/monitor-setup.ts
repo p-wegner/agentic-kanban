@@ -21,6 +21,7 @@ import { scanAutodriveStallWarnings, buildAutoStartSkipWarnings, type AutodriveS
 import { resolveMergeStrategy } from "./merge-strategy.js";
 import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
 import { createMonitorPhaseRecorder, type MonitorCycleTimings } from "../lib/monitor-phase-timings.js";
+import { createSpawnControlProbe } from "../lib/monitor-spawn-control.js";
 
 /**
  * Per-project hands-off mode. A `board_autodrive_<projectId>` preference set to
@@ -328,10 +329,20 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
     monitorState.currentCycle = { startedAt: new Date().toISOString(), phase: "starting" };
     // Time every phase transition, not just name the current one (#347).
     const phaseRecorder = createMonitorPhaseRecorder("starting");
+    // ...and carry this cycle's own ENVIRONMENTAL BASELINE (#368). On this machine the same
+    // zero-repository-work git spawn MEASURED 68ms to 10203ms in bursts, so a cycle's timings mean
+    // nothing without a simultaneous control taken through the same adapter. Sampled at cycle start,
+    // at throttled phase transitions, and at cycle end — a single sample cannot see a burst that
+    // starts mid-cycle. See `monitor-spawn-control.ts`.
+    const controlProbe = createSpawnControlProbe();
     const setPhase = (phase: string) => {
       phaseRecorder.enter(phase);
+      controlProbe.requestSample(phase);
       if (monitorState.currentCycle) monitorState.currentCycle = { ...monitorState.currentCycle, phase };
     };
+    // Only cycles that do work get sampled: a tick that bails on `monitorShouldRun` should not spawn
+    // anything at all, and one lone end-of-cycle sample would be a control with nothing to control.
+    let cycleDidWork = false;
     const cycleStats = { relaunched: 0, merged: 0, nudged: 0 };
     let deferredProjectIds: string[] = [];
     let resourceSummary: MonitorResourceSummary | null = null;
@@ -341,6 +352,15 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       const prefRows = await db.select().from(preferences);
       const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
       if (!force && !monitorShouldRun(prefMap)) return;
+      cycleDidWork = true;
+      // Deliberately NOT awaited. Instrumentation must not sit on the cycle's critical path: awaiting
+      // it here delayed the cycle's first real action by one git spawn — MEASURED at 1.9-10.4s inside
+      // a stall — which is both a real slowdown and a self-fulfilling one (the probe would lengthen
+      // the very cycle it is measuring). Fire-and-forget still lands the sample in this cycle's
+      // measurement window, and `finish()` awaits it. Its `totalMs` then overlaps the cycle's early
+      // work, which is correct: that is exactly the queue latency the real operations also pay, and
+      // `childMs` still isolates the process's own cost.
+      void controlProbe.sample("cycle-start");
       // Scope this cycle's actions: when the global toggle is on, act on every project
       // (legacy behaviour); otherwise act only on projects whose resolved Start Mode is
       // `monitor`. Routing through `resolveStartPolicy` (not the raw `board_autodrive` flag)
@@ -501,9 +521,20 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
     } catch (err) {
       console.warn("[monitor] Cycle error:", err);
     } finally {
+      // The closing control sample must be taken BEFORE `finish()` closes the cycle's measurement
+      // window, so it lands in the same window as the work it qualifies (#368). `finish()` stays
+      // synchronous; the probe's report is awaited and handed to it.
+      //
+      // It must also be taken before `currentCycle` is cleared. Awaiting a spawn AFTER clearing it
+      // opened a window in which `currentCycle` was null and `lastRun` was still null — the exact
+      // "a wedged cycle looks identical to never ran" state #208 exists to prevent, and on this
+      // machine that window is as long as a stalled `git --version` (MEASURED up to 10.2s). Holding
+      // the re-entrancy guard across it is correct: the cycle is not finished until it is recorded.
+      if (cycleDidWork) await controlProbe.sample("cycle-end");
+      const controlReport = await controlProbe.finish();
       cycleRunning = false;
       monitorState.currentCycle = null;
-      monitorState.lastCyclePhaseTimings = phaseRecorder.finish();
+      monitorState.lastCyclePhaseTimings = phaseRecorder.finish(controlReport);
       monitorState.lastRun = { at: new Date().toISOString(), ...cycleStats, resources: resourceSummary, warnings: warningCount, ...(deferredProjectIds.length > 0 ? { deferredProjectIds } : {}) };
       const prefRows = await db.select().from(preferences).catch(() => []);
       const prefMap = new Map(prefRows.map((r: { key: string; value: string }) => [r.key, r.value]));

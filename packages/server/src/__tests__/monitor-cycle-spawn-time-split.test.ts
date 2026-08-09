@@ -43,7 +43,7 @@ describe("monitor cycle spawn-time split (#359)", () => {
     recordOperation("git:status", 300, true, "cwd s", 300);
     const timings = recorder.finish();
     expect(timings.spawnTime.queueMs).toBe(0);
-    expect(timings.blockingMs).toBe(300);
+    expect(timings.syncBlockingMs).toBe(300);
   });
 
   it("never reports a negative wait when a child time lands without its outer figure", () => {

@@ -59,6 +59,19 @@ export interface GitExecOptions {
   env?: NodeJS.ProcessEnv;
   /** Written to the process's stdin and closed (e.g. `hash-object --stdin`). Async variants only. */
   input?: string;
+  /**
+   * INSTRUMENTATION ONLY — override the metric label for this call and exclude it from
+   * duplicate-spawn accounting. Changes nothing about how git is spawned or what it is asked to do.
+   *
+   * Exists for the monitor's environmental CONTROL spawn (#368): `git --version` does no repository
+   * work, so it must be readable on its own line rather than blended into a real subcommand's
+   * figures, and N identical control spawns inside one cycle would otherwise read as N-1 spawns a
+   * per-cycle memo could have removed — corrupting the `duplicateSpawns` number that refuted #359's
+   * recommended fix. The DURATION still flows through the same `recordOperation` call as every real
+   * git operation, which is the whole point of a control: a control timed by a different mechanism
+   * than the thing it controls for proves nothing.
+   */
+  probeLabel?: string;
 }
 
 export interface GitExecResult {
@@ -72,7 +85,26 @@ export interface GitExecResult {
   code: number | null;
   /** The raw child_process error when git failed to run or exited non-zero, else `null`. */
   error: Error | null;
+  /**
+   * INSTRUMENTATION ONLY — the two durations this call contributed to `operation-metrics`, handed
+   * back so a caller that needs the INDIVIDUAL sample (rather than a window aggregate) reads the
+   * same numbers the registry got instead of re-timing the call its own way.
+   *
+   * Optional so the many hand-built `GitExecResult` fixtures in tests stay valid; `gitExec` always
+   * populates it. `totalMs` is call-to-callback, `childMs` is the child's own lifetime from its
+   * `exit` event (null when the process never spawned, e.g. ENOENT) — see the split's caveat in
+   * `gitExec`.
+   */
+  timing?: { totalMs: number; childMs: number | null };
 }
+
+/**
+ * Metric label of the monitor's environmental CONTROL spawn (#368).
+ *
+ * Exported because two readers must agree on it: the probe that emits it and the cycle report that
+ * must EXCLUDE it from aggregates describing the cycle's real work.
+ */
+export const GIT_CONTROL_OPERATION_LABEL = "git:control";
 
 function exitCodeOf(err: ExecFileException | null, hadError: boolean): number | null {
   if (!err) return hadError ? null : 0;
@@ -85,7 +117,7 @@ function exitCodeOf(err: ExecFileException | null, hadError: boolean): number | 
  * `diff --quiet`, allowed-exit-code probes) or when failures should be swallowed.
  */
 export function gitExec(args: string[], opts: GitExecOptions = {}): Promise<GitExecResult> {
-  const { cwd, timeout = DEFAULT_GIT_TIMEOUT_MS, maxBuffer = DEFAULT_MAX_BUFFER, env, input } = opts;
+  const { cwd, timeout = DEFAULT_GIT_TIMEOUT_MS, maxBuffer = DEFAULT_MAX_BUFFER, env, input, probeLabel } = opts;
   const startedMs = Date.now();
   // #359 — the child's OWN lifetime, captured on its `exit` event, separately from the
   // call-to-callback figure below.
@@ -105,12 +137,15 @@ export function gitExec(args: string[], opts: GitExecOptions = {}): Promise<GitE
   let childExitMs: number | undefined;
   return new Promise((resolve) => {
     const child = execFile("git", args, { cwd, timeout, maxBuffer, windowsHide: true, env: nonInteractiveEnv(env) }, (err, stdout, stderr) => {
+      const totalMs = Date.now() - startedMs;
+      const childMs = childExitMs === undefined ? undefined : childExitMs - startedMs;
       recordOperation(
-        gitOperationLabel(args),
-        Date.now() - startedMs,
+        probeLabel ?? gitOperationLabel(args),
+        totalMs,
         false,
-        spawnDedupeKey(args, cwd),
-        childExitMs === undefined ? undefined : childExitMs - startedMs,
+        // A control probe carries no call identity on purpose — see `probeLabel`.
+        probeLabel === undefined ? spawnDedupeKey(args, cwd) : undefined,
+        childMs,
       );
       let error: Error | null = err;
       // `spawn git ENOENT` conflates two very different failures (#271): a missing WORKING
@@ -127,6 +162,7 @@ export function gitExec(args: string[], opts: GitExecOptions = {}): Promise<GitE
         stderr: stderr == null ? "" : stderr.toString(),
         code: exitCodeOf(err, err != null),
         error,
+        timing: { totalMs, childMs: childMs ?? null },
       });
     });
     // Registered before any await point so a fast-exiting child cannot beat the listener.
