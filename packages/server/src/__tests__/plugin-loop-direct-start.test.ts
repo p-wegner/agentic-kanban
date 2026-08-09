@@ -12,13 +12,15 @@
  * Backlog with no workspace (#354), and after a UI approval it said nothing at all (#357). So every
  * outcome here is a distinct, falsifiable sentence — never one optimistic phrasing.
  */
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { projectStatuses, projects } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import type { Database } from "../db/index.js";
 import { describeLoopStartOutcome, startPlannedLoopTickets } from "../services/plugin-loop-start.service.js";
 import type { StartPolicy } from "../services/start-policy.service.js";
+import { claimIssueForAutoStart, isAutoStartClaimed } from "../services/auto-start-claim.js";
+import { resetCreateJobs } from "../services/create-job.service.js";
 
 function policy(overrides: Partial<StartPolicy> = {}): StartPolicy {
   return {
@@ -52,6 +54,10 @@ async function seedProject(db: ReturnType<typeof createTestDb>["db"], withInProg
 const TICKETS = [{ issueId: "issue-a", issueNumber: 5 }];
 
 describe("#351: the advance path starts the ticket it just planned", () => {
+  // The advance path now CLAIMS the issue in the shared create-job registry (#366), so each test
+  // must start from an empty registry or a previous test's claim would refuse the next launch.
+  beforeEach(() => resetCreateJobs());
+
   it("launches the planned ticket immediately and reports `starting`", async () => {
     const { db } = createTestDb();
     const projectId = await seedProject(db);
@@ -167,5 +173,69 @@ describe("#351: the advance path starts the ticket it just planned", () => {
 
     expect(outcomes[0].outcome).toBe("starting");
     await new Promise((r) => setTimeout(r, 10));
+  });
+});
+
+describe("#366 round 8: the advance path READS the claim it writes", () => {
+  beforeEach(() => resetCreateJobs());
+
+  it("declines to provision when another automatic starter already holds the claim", async () => {
+    const { db } = createTestDb();
+    const projectId = await seedProject(db);
+    const createWorkspace = vi.fn(async () => ({ id: "ws-1" }) as never);
+
+    // The monitor's auto-start pass got there first and is mid-provisioning. For the whole
+    // provisioning window the workspaces table still holds no row, so the table-based check this
+    // path used to rely on reads "no workspace" — which is how one issue ended up with two
+    // workspaces sharing a single worktree and two agents writing the same files.
+    claimIssueForAutoStart("issue-a");
+
+    const outcomes = await startPlannedLoopTickets({
+      database: db as unknown as Database,
+      projectId,
+      policy: policy(),
+      tickets: TICKETS,
+      createWorkspace,
+    });
+
+    expect(createWorkspace).not.toHaveBeenCalled();
+    expect(outcomes[0]).toMatchObject({ outcome: "queued-in-flight" });
+    expect(describeLoopStartOutcome(outcomes[0])).toMatch(/already being started/);
+  });
+
+  it("holds the claim while its own launch provisions, so a concurrent starter is refused", async () => {
+    const { db } = createTestDb();
+    const projectId = await seedProject(db);
+    // Never resolves: models the 80s-to-8-minute provisioning window in which the duplicate
+    // starters used to fire.
+    const createWorkspace = vi.fn(() => new Promise<never>(() => {}));
+
+    await startPlannedLoopTickets({
+      database: db as unknown as Database,
+      projectId,
+      policy: policy(),
+      tickets: TICKETS,
+      createWorkspace: createWorkspace as never,
+    });
+
+    expect(isAutoStartClaimed("issue-a")).toBe(true);
+    expect(claimIssueForAutoStart("issue-a")).toBeNull();
+  });
+
+  it("does not claim anything when the policy declines the start", async () => {
+    const { db } = createTestDb();
+    const projectId = await seedProject(db);
+
+    await startPlannedLoopTickets({
+      database: db as unknown as Database,
+      projectId,
+      policy: policy({ mode: "manual", autoStartUnblocked: false }),
+      tickets: TICKETS,
+      createWorkspace: vi.fn(async () => ({ id: "ws-1" }) as never),
+    });
+
+    // A declined start must not leave a claim behind — that would wedge the issue against the
+    // monitor's next pass, converting one bug into another.
+    expect(isAutoStartClaimed("issue-a")).toBe(false);
   });
 });
