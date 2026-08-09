@@ -130,7 +130,7 @@ export interface ControlSpawnSample {
 }
 
 export interface ControlSpawnReport {
-  /** Every sample, in order. Read these before any derived figure. */
+  /** Every sample, ordered by when it STARTED. Read these before any derived figure. */
   samples: ControlSpawnSample[];
   /** Fastest / slowest sample in THIS cycle, or null when no sample was taken. */
   minMs: number | null;
@@ -248,9 +248,13 @@ export interface SpawnControlBaseline {
  * anything — and so the baseline is an explicit input rather than hidden module state.
  */
 export function buildControlSpawnReport(
-  samples: ControlSpawnSample[],
+  unordered: ControlSpawnSample[],
   baseline: SpawnControlBaseline,
 ): ControlSpawnReport {
+  // Sorted by START time, because samples are appended when they COMPLETE and a slow one finishes
+  // after a later, faster one. The live endpoint showed `cycle-end` listed before the `auto-start`
+  // sample that began two seconds earlier, which makes a reader misjudge when a burst began.
+  const samples = [...unordered].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
   const usable = samples.filter((s) => s.ok);
   const durations = usable.map((s) => s.totalMs);
   const minMs = durations.length ? Math.min(...durations) : null;
@@ -287,14 +291,17 @@ function describeControlSpawnReport(
 ): string {
   if (total === 0) return "no control spawn was taken for this cycle — its timings have no environmental baseline";
   if (usable === 0) return `all ${total} control spawns failed — cannot say whether this cycle was stalled; read the samples`;
+  // ASCII only. These notes are read back out of JSON by humans and agents through several layers
+  // (PowerShell console, curl, the board UI), and an em dash came back through the live endpoint as
+  // mojibake the first time this shipped.
   if (!baselineTrusted) {
-    return "cannot say: this process has no credible fast-mode reference to judge against — either "
+    return "cannot say: this process has no credible fast-mode reference to judge against - either "
       + `fewer than ${MIN_BASELINE_SAMPLES} control spawns so far, or its own fastest spawn is above `
       + `${BASELINE_PLAUSIBILITY_CEILING_MS}ms and was itself taken during a burst. Read the raw `
       + "samples and baselineMs.";
   }
   const basis = "relative to this process's own fastest control spawn, which may itself have been "
-    + "taken during a burst — check baselineMs";
+    + "taken during a burst - check baselineMs";
   if (stalled) {
     return `STALLED: at least one control spawn did no repository work and still ran ${STALL_RATIO}x+ slow `
       + `(${basis}). Every duration in this cycle is inflated by the environment; do not compare it `
