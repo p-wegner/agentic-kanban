@@ -25,7 +25,12 @@
 // for a 9-second average `git rev-parse`), and `duplicateCalls` (how many spawns in the window
 // repeated one the window had already seen — the ceiling on what any per-cycle memo could remove,
 // which is what refuted this ticket's recommended fix).
+// #368 added an environmental CONTROL spawn per cycle, because on this machine the SPREAD of the
+// spawn-duration distribution exceeds the differences these timings were being used to compare.
+// See `monitor-spawn-control.ts` for the 25-sample measurement and the design.
 import { monitorEventLoopDelay } from "node:perf_hooks";
+import { GIT_CONTROL_OPERATION_LABEL } from "@agentic-kanban/shared/lib/git-exec";
+import type { ControlSpawnReport } from "./monitor-spawn-control.js";
 import {
   openOperationWindow,
   topWindowOperations,
@@ -44,13 +49,28 @@ export interface MonitorPhaseTiming {
    */
   operations: Array<OperationWindowStat & { label: string }>;
   /**
-   * Summed duration of the calls inside this phase that BLOCKED the event loop (synchronous
-   * spawns, synchronous file reads). This is the number that explains a bimodal `/api/health`:
-   * pure-JS with no DB access, it can only be slow while the loop is blocked, and the measured
-   * distribution was 9 of 24 samples under 15ms with 8 over 3s — the signature of long
-   * synchronous blocks, not of general load.
+   * Summed duration of the INSTRUMENTED SYNCHRONOUS calls inside this phase (`gitExecSync`, a
+   * synchronous file read) — i.e. loop-blocking time this codebase can account for BY NAME.
+   *
+   * ── #368: this field, not `eventLoopDelay`, was the broken half of a reported contradiction ──
+   *
+   * Every phase reported `blockingMs: 0` while the same cycle's `eventLoopDelay` reported maxMs of
+   * 11241 / 21274 / 12910, and that was read as "one of these two instruments is wrong". Neither
+   * measurement was wrong; the NAME and the documented claim were. `blockingMs` never measured how
+   * long the loop was blocked — it summed only the calls we happen to record with `blocking: true`,
+   * so anything that stalls the process without going through `recordOperation` contributes zero:
+   * the OS descheduling the whole process, a filter driver holding an IO, GC, native work inside a
+   * dependency. On this machine that is exactly what happens (a `git --version` doing no repository
+   * work MEASURED 68ms to 10203ms), and the old doc comment invited the reader to conclude from
+   * `blockingMs: 0` that the loop was healthy while it was stalled for eleven seconds.
+   *
+   * Renamed to say what it actually counts. `eventLoopDelay` is the authority on loop health — it is
+   * sampled by libuv and keeps measuring while JS is not running. A large `eventLoopDelay` beside a
+   * zero `syncBlockingMs` is not a contradiction, it is a FINDING: the stall came from outside our
+   * instrumented synchronous calls. Read the control spawn (`MonitorCycleTimings.controlSpawn`) to
+   * see whether it came from outside this process altogether.
    */
-  blockingMs: number;
+  syncBlockingMs: number;
   /**
    * How congested the event loop was during this phase (#359) — the number that decides whether a
    * multi-second recorded git call means "the command was slow" or "the callback waited".
@@ -85,8 +105,8 @@ export interface MonitorCycleTimings {
    * cost that recurs across phases is only visible when the cycle is summed as well as split.
    */
   operations: Array<OperationWindowStat & { label: string }>;
-  /** Summed event-loop-blocking time across the whole cycle. */
-  blockingMs: number;
+  /** Summed INSTRUMENTED-SYNCHRONOUS time across the whole cycle — see the per-phase field (#368). */
+  syncBlockingMs: number;
   /**
    * Git spawns in this cycle whose `(cwd, argv)` had already been spawned earlier in the SAME
    * cycle — the exact number a perfect per-cycle memo could have removed, beside the total so the
@@ -109,15 +129,42 @@ export interface MonitorCycleTimings {
    * `queueMs` share means every per-operation number gathered before this split is inflated, and
    * conclusions drawn from them — a per-spawn tax, a git-specific penalty, an antivirus story —
    * do not follow from the data.
+   *
+   * VERIFIED in #368: `queueMs` is now derived per-CALL (`childMeasuredTotalMs - childMs`) rather
+   * than by pairing `childMs` with the whole label's `totalMs`, which let a call that never spawned
+   * (ENOENT, no `exit` event, hence no `childMs`) donate its full duration to the wait side and
+   * nothing to the child side. The control spawns are excluded, so the split describes the cycle's
+   * real work only.
+   *
+   * The honest caveat stands: `exit` is still delivered through the event loop, so `childMs` is a
+   * TIGHTER bound on the child's own cost, not a perfect one. Read it beside `eventLoopDelay` for
+   * the same window, and beside `controlSpawn` to see whether the machine was stalled at all.
    */
   spawnTime: { childMs: number; queueMs: number; measuredCalls: number };
+  /**
+   * This cycle's own ENVIRONMENTAL BASELINE (#368) — control git spawns that do no repository work,
+   * taken at cycle start, cycle end and throttled phase transitions, so a consumer can ask "was
+   * this cycle measured during a stall?" instead of guessing. Null for a cycle that took none.
+   *
+   * Read this FIRST. On this machine the same zero-work command MEASURED 68ms to 10203ms in bursts,
+   * which means the spread of the distribution exceeds the differences every other field here has
+   * been used to compare. `controlSpawn.stalled === true` invalidates cross-cycle comparison of
+   * everything else in this object.
+   */
+  controlSpawn: ControlSpawnReport | null;
 }
 
 export interface MonitorPhaseRecorder {
   /** Close the current phase (if any) and open `phase`. */
   enter(phase: string): void;
-  /** Close the final phase and return the completed cycle's timings. */
-  finish(): MonitorCycleTimings;
+  /**
+   * Close the final phase and return the completed cycle's timings.
+   *
+   * @param controlSpawn This cycle's environmental control report (#368), or null when none was
+   *                     taken. Passed in rather than gathered here so the recorder stays pure and
+   *                     synchronous — the probe is async and belongs to the cycle, not to the timer.
+   */
+  finish(controlSpawn?: ControlSpawnReport | null): MonitorCycleTimings;
 }
 
 /**
@@ -150,7 +197,7 @@ export function createMonitorPhaseRecorder(
       startedAt: new Date(currentStartMs).toISOString(),
       durationMs: atMs - currentStartMs,
       operations: topWindowOperations(report),
-      blockingMs: sumOf(report, (stat) => stat.blockingMs),
+      syncBlockingMs: sumOf(report, (stat) => stat.blockingMs),
       eventLoopDelay: delay,
     });
   }
@@ -165,7 +212,7 @@ export function createMonitorPhaseRecorder(
       currentPhase = phase;
       currentStartMs = at;
     },
-    finish(): MonitorCycleTimings {
+    finish(controlSpawn: ControlSpawnReport | null = null): MonitorCycleTimings {
       const at = nowMs();
       close(at);
       const slowest = phases.reduce<MonitorPhaseTiming | null>(
@@ -177,19 +224,25 @@ export function createMonitorPhaseRecorder(
       phaseWindow.close();
       phaseLoopDelay.close();
       const cycleReport = cycleWindow.close();
-      const childMs = sumOf(cycleReport, (stat) => stat.childMs);
-      const measuredTotalMs = sumOf(cycleReport, (stat) => (stat.childMeasuredCalls > 0 ? stat.totalMs : 0));
+      // The control probe's own spawns are excluded from every aggregate that describes the cycle's
+      // REAL work — otherwise the instrument that exists to qualify these numbers would be inside
+      // them, and its identical repeats would read as removable duplicate spawns (#368).
+      const workReport = withoutControlSpawns(cycleReport);
+      const childMs = sumOf(workReport, (stat) => stat.childMs);
+      const measuredTotalMs = sumOf(workReport, (stat) => stat.childMeasuredTotalMs);
       return {
         startedAt: new Date(startMs).toISOString(),
         endedAt: new Date(at).toISOString(),
         totalMs: at - startMs,
         phases,
         slowestPhase: slowest,
+        // The control label stays VISIBLE in the operation list — a reader should see it beside the
+        // real subcommands — and is excluded only from the derived aggregates below.
         operations: topWindowOperations(cycleReport, 12),
-        blockingMs: sumOf(cycleReport, (stat) => stat.blockingMs),
+        syncBlockingMs: sumOf(workReport, (stat) => stat.blockingMs),
         duplicateSpawns: {
-          duplicateCalls: sumOf(cycleReport, (stat) => stat.duplicateCalls),
-          totalCalls: sumOf(cycleReport, (stat) => stat.keyedCalls),
+          duplicateCalls: sumOf(workReport, (stat) => stat.duplicateCalls),
+          totalCalls: sumOf(workReport, (stat) => stat.keyedCalls),
         },
         eventLoopDelay: cycleLoopDelay.close(),
         spawnTime: {
@@ -197,8 +250,9 @@ export function createMonitorPhaseRecorder(
           // Never negative: a `childMs` recorded for a call whose `totalMs` landed in a different
           // window would otherwise read as a nonsense negative wait.
           queueMs: Math.max(0, measuredTotalMs - childMs),
-          measuredCalls: sumOf(cycleReport, (stat) => stat.childMeasuredCalls),
+          measuredCalls: sumOf(workReport, (stat) => stat.childMeasuredCalls),
         },
+        controlSpawn,
       };
     },
   };
@@ -206,6 +260,14 @@ export function createMonitorPhaseRecorder(
 
 function sumOf(report: OperationWindowReport, pick: (stat: OperationWindowStat) => number): number {
   return Object.values(report).reduce((sum, stat) => sum + pick(stat), 0);
+}
+
+/** The window report minus the control probe's own spawns (#368). */
+function withoutControlSpawns(report: OperationWindowReport): OperationWindowReport {
+  if (!(GIT_CONTROL_OPERATION_LABEL in report)) return report;
+  const out: OperationWindowReport = { ...report };
+  delete out[GIT_CONTROL_OPERATION_LABEL];
+  return out;
 }
 
 /**

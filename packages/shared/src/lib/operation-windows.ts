@@ -80,6 +80,17 @@ export interface OperationWindowStat {
   maxChildMs: number;
   /** Calls that reported a child lifetime — the denominator for `childMs`. */
   childMeasuredCalls: number;
+  /**
+   * Summed `totalMs` of exactly the calls that also reported a `childMs` — the correct partner for
+   * `childMs` when deriving "how long did the callback WAIT" (`childMeasuredTotalMs - childMs`).
+   *
+   * Added because the cycle report previously paired `childMs` with the whole LABEL's `totalMs`
+   * whenever any call under that label happened to measure a child. A git call that never spawned
+   * (ENOENT: no `exit` event, so no `childMs`) therefore donated its entire duration to the "queue
+   * wait" side of the split while donating nothing to the child side — inflating the very number
+   * the split exists to make trustworthy. Per-call accounting cannot mismatch that way.
+   */
+  childMeasuredTotalMs: number;
 }
 
 export type OperationWindowReport = Record<string, OperationWindowStat>;
@@ -141,6 +152,7 @@ export function feedOperationWindows(
       stat = {
         calls: 0, totalMs: 0, maxMs: 0, blockingCalls: 0, blockingMs: 0,
         duplicateCalls: 0, keyedCalls: 0, childMs: 0, maxChildMs: 0, childMeasuredCalls: 0,
+        childMeasuredTotalMs: 0,
       };
       state.stats.set(label, stat);
     }
@@ -154,6 +166,7 @@ export function feedOperationWindows(
     if (childMs !== undefined) {
       stat.childMeasuredCalls += 1;
       stat.childMs += childMs;
+      stat.childMeasuredTotalMs += durationMs;
       if (childMs > stat.maxChildMs) stat.maxChildMs = childMs;
     }
     if (dedupeKey === undefined) continue;

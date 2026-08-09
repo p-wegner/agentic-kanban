@@ -131,7 +131,10 @@ describe("monitor health-warning refresh is off the cycle's critical path (#349)
     // The cycle must reach `lastRun` — i.e. finish — with the scan still unresolved. Before #349
     // this awaited the scan and would hang here forever.
     let done = false;
-    for (let i = 0; i < 200 && !done; i++) {
+    // Budget deliberately generous: a cycle's teardown now takes a closing environmental CONTROL
+    // spawn (#368) — a real `git --version`, MEASURED between 68ms and 10203ms on this machine — so a
+    // two-second budget here would be exactly the kind of load-sensitive assertion #368 is about.
+    for (let i = 0; i < 2000 && !done; i++) {
       await flush(10);
       const s = await status();
       done = s.lastRun !== null && s.currentCycle === null;
@@ -156,7 +159,10 @@ describe("monitor health-warning refresh is off the cycle's critical path (#349)
 
     triggerCycle();
     let done = false;
-    for (let i = 0; i < 200 && !done; i++) {
+    // Budget deliberately generous: a cycle's teardown now takes a closing environmental CONTROL
+    // spawn (#368) — a real `git --version`, MEASURED between 68ms and 10203ms on this machine — so a
+    // two-second budget here would be exactly the kind of load-sensitive assertion #368 is about.
+    for (let i = 0; i < 2000 && !done; i++) {
       await flush(10);
       const s = await status();
       done = s.lastRun !== null && s.currentCycle === null;

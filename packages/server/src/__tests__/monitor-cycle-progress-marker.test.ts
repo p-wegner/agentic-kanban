@@ -152,9 +152,14 @@ describe("monitor cycle progress marker (#208)", () => {
     expect(midStatus.lastRun).toBeNull();
 
     releaseFetch();
-    await flush(150);
-
-    const afterStatus = await status();
+    // Poll rather than wait a fixed 150ms: the cycle's teardown now takes a closing environmental
+    // CONTROL spawn (#368) — a real `git --version`, MEASURED between 68ms and 10203ms on this
+    // machine — and a fixed budget here would be the same load-sensitive assertion #368 is about.
+    let afterStatus = await status();
+    for (let i = 0; i < 2000 && afterStatus.currentCycle !== null; i++) {
+      await flush(10);
+      afterStatus = await status();
+    }
     expect(afterStatus.currentCycle).toBeNull();
     expect(afterStatus.lastRun).not.toBeNull();
   });
