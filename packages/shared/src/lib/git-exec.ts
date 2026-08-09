@@ -89,7 +89,7 @@ export function gitExec(args: string[], opts: GitExecOptions = {}): Promise<GitE
   const startedMs = Date.now();
   return new Promise((resolve) => {
     const child = execFile("git", args, { cwd, timeout, maxBuffer, windowsHide: true, env: nonInteractiveEnv(env) }, (err, stdout, stderr) => {
-      recordOperation(gitOperationLabel(args), Date.now() - startedMs);
+      recordOperation(gitOperationLabel(args), Date.now() - startedMs, false, spawnDedupeKey(args, cwd));
       let error: Error | null = err;
       // `spawn git ENOENT` conflates two very different failures (#271): a missing WORKING
       // DIRECTORY (deleted repo — deterministic, act on the project) and the git BINARY not
@@ -145,8 +145,26 @@ export function gitExecSync(args: string[], opts: GitExecSyncOptions): string {
     // ten-minute default ceiling. The `finally` matters: the try/catch-as-boolean idiom
     // (`diff --quiet`) throws on the interesting path, and an unrecorded throw would make the
     // most expensive calls the invisible ones (#359).
-    recordOperation(gitOperationLabel(args), Date.now() - startedMs, true);
+    recordOperation(gitOperationLabel(args), Date.now() - startedMs, true, spawnDedupeKey(args, cwd));
   }
+}
+
+/**
+ * Identity of one git invocation — the working directory plus the full argv.
+ *
+ * Only an open measurement window reads this, to count how many spawns inside that window repeated
+ * a spawn it had already seen: the exact ceiling on what a window-scoped memo could remove. It
+ * exists because #359's recommended fix (memoize per-cycle `rev-parse`) rested on an unmeasured
+ * claim about that ceiling, and measuring it required patching this file. The answer, over five
+ * consecutive live monitor cycles on 57 active workspaces: 5-9 of 33-58 `rev-parse` spawns per
+ * cycle were exact repeats (12-16%), and 5-19 of 65-120 git spawns per cycle overall (7-25%,
+ * median 12%) — against a cycle total that varied 46-85s between neighbouring cycles. So the memo
+ * was NOT implemented: it could not have produced a measurable win, and it would have put a
+ * cycle-lifetime cache next to the merge-gate SHAs that `#243` compares before and after a gate
+ * run to prove nothing moved. Anyone tempted to retry it should re-read this counter first.
+ */
+function spawnDedupeKey(args: string[], cwd: string | undefined): string {
+  return `${cwd ?? ""} ${args.join(" ")}`;
 }
 
 /**
