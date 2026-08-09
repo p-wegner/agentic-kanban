@@ -25,7 +25,29 @@ describe("recordOperation / snapshotOperations", () => {
     recordOperation("git:status", 40);
     expect(snapshotOperations()["git:status"]).toEqual({
       calls: 2, totalMs: 50, maxMs: 40, blockingCalls: 0, blockingMs: 0,
+      // #359: a call that reported no child lifetime must not be counted in the child-time
+      // denominator — otherwise the child/queue split would read as "0ms of child time" rather
+      // than "not measured".
+      childMs: 0, maxChildMs: 0, childMeasuredCalls: 0,
     });
+  });
+
+  it("records the child-process lifetime separately from call-to-callback (#359)", () => {
+    // The defect this splits apart: the async git adapter timed from BEFORE the spawn to INSIDE
+    // the execFile callback, which Node delivers after stdio close and after whatever else is
+    // queued on the loop. So a 90ms git process on a congested loop was recorded as a
+    // multi-second git call — the shape behind `rev-parse` averaging 9,231ms and 9,153ms across
+    // two independent cycles with `blockingMs: 0`, while an out-of-process harness measures
+    // `git --version` at 88-138ms on the same machine.
+    recordOperation("git:rev-parse", 9_200, false, "cwd rev-parse HEAD", 90);
+    recordOperation("git:rev-parse", 100, false, "cwd rev-parse other", 80);
+    const stat = snapshotOperations()["git:rev-parse"];
+    expect(stat.totalMs).toBe(9_300);
+    expect(stat.childMs).toBe(170);
+    expect(stat.maxChildMs).toBe(90);
+    expect(stat.childMeasuredCalls).toBe(2);
+    // The number that was previously invisible: almost all of the recorded "git time" was waiting.
+    expect(stat.totalMs - stat.childMs).toBe(9_130);
   });
 
   it("tracks blocking calls separately from wall clock", () => {

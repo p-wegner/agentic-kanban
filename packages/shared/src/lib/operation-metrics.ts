@@ -49,9 +49,29 @@ export interface OperationStat {
   blockingCalls: number;
   /** Summed duration of the blocking calls only. */
   blockingMs: number;
+  /**
+   * Summed lifetime of the CHILD PROCESS itself, for the calls that can measure it (#359).
+   *
+   * `totalMs` for an ASYNC spawn is call-to-callback, which includes the event-loop wait before
+   * Node delivers the callback — so on a saturated loop a 90ms git process is recorded as a
+   * multi-second git call. That inflation is what made `rev-parse` read as a 9.2s average with
+   * `blockingMs: 0`, while an out-of-process harness measures `git --version` at 88-138ms on the
+   * same machine. Keep both numbers: `childMs` is what the command cost, `totalMs - childMs` is
+   * what it WAITED, and only the split is actionable.
+   */
+  childMs: number;
+  /** Worst single measured child lifetime. */
+  maxChildMs: number;
+  /** Calls that reported a child lifetime — the denominator for `childMs`. */
+  childMeasuredCalls: number;
 }
 
 export type OperationSnapshot = Record<string, OperationStat>;
+
+const EMPTY_STAT: OperationStat = {
+  calls: 0, totalMs: 0, maxMs: 0, blockingCalls: 0, blockingMs: 0,
+  childMs: 0, maxChildMs: 0, childMeasuredCalls: 0,
+};
 
 /**
  * `maxMs` and duplicate-call counts cannot be derived from cumulative counters (a max is not
@@ -64,7 +84,7 @@ const counters = new Map<string, OperationStat>();
 function statFor(label: string): OperationStat {
   let stat = counters.get(label);
   if (!stat) {
-    stat = { calls: 0, totalMs: 0, maxMs: 0, blockingCalls: 0, blockingMs: 0 };
+    stat = { ...EMPTY_STAT };
     counters.set(label, stat);
   }
   return stat;
@@ -84,8 +104,14 @@ function statFor(label: string): OperationStat {
  *                   could remove. Never stored in the cumulative registry: that map has no
  *                   eviction and a key carries paths, refs and sometimes SHAs.
  */
-export function recordOperation(label: string, durationMs: number, blocking = false, dedupeKey?: string): void {
-  feedOperationWindows(label, durationMs, blocking, dedupeKey);
+export function recordOperation(
+  label: string,
+  durationMs: number,
+  blocking = false,
+  dedupeKey?: string,
+  childMs?: number,
+): void {
+  feedOperationWindows(label, durationMs, blocking, dedupeKey, childMs);
   const stat = statFor(label);
   stat.calls += 1;
   stat.totalMs += durationMs;
@@ -93,6 +119,11 @@ export function recordOperation(label: string, durationMs: number, blocking = fa
   if (blocking) {
     stat.blockingCalls += 1;
     stat.blockingMs += durationMs;
+  }
+  if (childMs !== undefined) {
+    stat.childMeasuredCalls += 1;
+    stat.childMs += childMs;
+    if (childMs > stat.maxChildMs) stat.maxChildMs = childMs;
   }
 }
 
@@ -114,7 +145,7 @@ export function snapshotOperations(): OperationSnapshot {
 export function diffOperations(before: OperationSnapshot, after: OperationSnapshot): OperationSnapshot {
   const out: OperationSnapshot = {};
   for (const [label, now] of Object.entries(after)) {
-    const then = before[label] ?? { calls: 0, totalMs: 0, maxMs: 0, blockingCalls: 0, blockingMs: 0 };
+    const then = before[label] ?? EMPTY_STAT;
     const calls = now.calls - then.calls;
     if (calls <= 0) continue;
     out[label] = {
@@ -123,6 +154,9 @@ export function diffOperations(before: OperationSnapshot, after: OperationSnapsh
       maxMs: now.maxMs > then.maxMs ? now.maxMs : 0,
       blockingCalls: now.blockingCalls - then.blockingCalls,
       blockingMs: now.blockingMs - then.blockingMs,
+      childMs: now.childMs - then.childMs,
+      maxChildMs: now.maxChildMs > then.maxChildMs ? now.maxChildMs : 0,
+      childMeasuredCalls: now.childMeasuredCalls - then.childMeasuredCalls,
     };
   }
   return out;

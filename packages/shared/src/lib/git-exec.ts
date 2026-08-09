@@ -87,9 +87,31 @@ function exitCodeOf(err: ExecFileException | null, hadError: boolean): number | 
 export function gitExec(args: string[], opts: GitExecOptions = {}): Promise<GitExecResult> {
   const { cwd, timeout = DEFAULT_GIT_TIMEOUT_MS, maxBuffer = DEFAULT_MAX_BUFFER, env, input } = opts;
   const startedMs = Date.now();
+  // #359 — the child's OWN lifetime, captured on its `exit` event, separately from the
+  // call-to-callback figure below.
+  //
+  // Why this exists: `recordOperation` used to receive only `Date.now() - startedMs` measured
+  // INSIDE the execFile callback, which Node delivers after stdio close AND after whatever else is
+  // queued on the event loop. So a 90ms git process behind a congested loop was recorded as a
+  // multi-second "git call", and with ~130 spawns per monitor cycle the metric inflated
+  // arbitrarily. That is what produced `rev-parse` averages of 9,231ms and 9,153ms on two
+  // independent cycles — 1% apart, implausibly stable for disk work — alongside `blockingMs: 0`,
+  // while an out-of-process harness measures `git --version` at 88-138ms on this machine. Several
+  // confident conclusions (a per-spawn tax, a git-specific penalty, an antivirus story) were drawn
+  // from that number and are invalidated by this split.
+  //
+  // `exit` still arrives through the event loop, so this is a tighter bound rather than a perfect
+  // one; read it beside the event-loop delay the monitor reports for the same window.
+  let childExitMs: number | undefined;
   return new Promise((resolve) => {
     const child = execFile("git", args, { cwd, timeout, maxBuffer, windowsHide: true, env: nonInteractiveEnv(env) }, (err, stdout, stderr) => {
-      recordOperation(gitOperationLabel(args), Date.now() - startedMs, false, spawnDedupeKey(args, cwd));
+      recordOperation(
+        gitOperationLabel(args),
+        Date.now() - startedMs,
+        false,
+        spawnDedupeKey(args, cwd),
+        childExitMs === undefined ? undefined : childExitMs - startedMs,
+      );
       let error: Error | null = err;
       // `spawn git ENOENT` conflates two very different failures (#271): a missing WORKING
       // DIRECTORY (deleted repo — deterministic, act on the project) and the git BINARY not
@@ -107,6 +129,8 @@ export function gitExec(args: string[], opts: GitExecOptions = {}): Promise<GitE
         error,
       });
     });
+    // Registered before any await point so a fast-exiting child cannot beat the listener.
+    child.once("exit", () => { childExitMs = Date.now(); });
     if (input != null) child.stdin?.end(input);
   });
 }
@@ -145,7 +169,11 @@ export function gitExecSync(args: string[], opts: GitExecSyncOptions): string {
     // ten-minute default ceiling. The `finally` matters: the try/catch-as-boolean idiom
     // (`diff --quiet`) throws on the interesting path, and an unrecorded throw would make the
     // most expensive calls the invisible ones (#359).
-    recordOperation(gitOperationLabel(args), Date.now() - startedMs, true, spawnDedupeKey(args, cwd));
+    // A synchronous spawn has no callback queue to wait in, so its wall clock IS the child's
+    // lifetime — reported as both so `totalMs - childMs` reads 0 for sync calls and isolates the
+    // async queue wait (#359).
+    const elapsed = Date.now() - startedMs;
+    recordOperation(gitOperationLabel(args), elapsed, true, spawnDedupeKey(args, cwd), elapsed);
   }
 }
 

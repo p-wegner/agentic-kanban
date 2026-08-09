@@ -25,6 +25,7 @@
 // for a 9-second average `git rev-parse`), and `duplicateCalls` (how many spawns in the window
 // repeated one the window had already seen — the ceiling on what any per-cycle memo could remove,
 // which is what refuted this ticket's recommended fix).
+import { monitorEventLoopDelay } from "node:perf_hooks";
 import {
   openOperationWindow,
   topWindowOperations,
@@ -50,6 +51,24 @@ export interface MonitorPhaseTiming {
    * synchronous blocks, not of general load.
    */
   blockingMs: number;
+  /**
+   * How congested the event loop was during this phase (#359) — the number that decides whether a
+   * multi-second recorded git call means "the command was slow" or "the callback waited".
+   *
+   * The per-operation `totalMs` for an async spawn is call-to-CALLBACK, so it absorbs event-loop
+   * delay. That is how `rev-parse` came to be reported at a 9.2s average with `blockingMs: 0`,
+   * while a clean out-of-process harness measures `git --version` at 88-138ms on this machine. With
+   * this beside it, an inflated operation figure is attributable instead of mysterious: high delay
+   * plus a small `childMs` means the loop, not git.
+   */
+  eventLoopDelay: EventLoopDelayReport;
+}
+
+/** Event-loop delay over one window, in milliseconds. */
+export interface EventLoopDelayReport {
+  meanMs: number;
+  maxMs: number;
+  p99Ms: number;
 }
 
 export interface MonitorCycleTimings {
@@ -79,6 +98,19 @@ export interface MonitorCycleTimings {
    * of them" the fix assumed, and well inside the 46-85s cycle-to-cycle spread of the totals.
    */
   duplicateSpawns: { duplicateCalls: number; totalCalls: number };
+  /** Event-loop congestion across the whole cycle — see the per-phase field. */
+  eventLoopDelay: EventLoopDelayReport;
+  /**
+   * The child-process time inside this cycle versus the call-to-callback time recorded against the
+   * same calls (#359).
+   *
+   * `childMs` is what the spawned commands actually cost; `queueMs` is what their callbacks spent
+   * waiting on the event loop and used to be reported as part of the command's duration. A large
+   * `queueMs` share means every per-operation number gathered before this split is inflated, and
+   * conclusions drawn from them — a per-spawn tax, a git-specific penalty, an antivirus story —
+   * do not follow from the data.
+   */
+  spawnTime: { childMs: number; queueMs: number; measuredCalls: number };
 }
 
 export interface MonitorPhaseRecorder {
@@ -105,16 +137,21 @@ export function createMonitorPhaseRecorder(
   // `finally`), which is what keeps their key sets short-lived.
   const cycleWindow: OperationWindow = openOperationWindow();
   let phaseWindow: OperationWindow = openOperationWindow();
+  const cycleLoopDelay = openEventLoopDelayWindow();
+  let phaseLoopDelay = openEventLoopDelayWindow();
 
   function close(atMs: number): void {
     const report = phaseWindow.close();
     phaseWindow = openOperationWindow();
+    const delay = phaseLoopDelay.close();
+    phaseLoopDelay = openEventLoopDelayWindow();
     phases.push({
       phase: currentPhase,
       startedAt: new Date(currentStartMs).toISOString(),
       durationMs: atMs - currentStartMs,
       operations: topWindowOperations(report),
       blockingMs: sumOf(report, (stat) => stat.blockingMs),
+      eventLoopDelay: delay,
     });
   }
 
@@ -138,7 +175,10 @@ export function createMonitorPhaseRecorder(
       // The phase window opened by the last `close` is never entered again — close it so an
       // abandoned window can never outlive the cycle that created it.
       phaseWindow.close();
+      phaseLoopDelay.close();
       const cycleReport = cycleWindow.close();
+      const childMs = sumOf(cycleReport, (stat) => stat.childMs);
+      const measuredTotalMs = sumOf(cycleReport, (stat) => (stat.childMeasuredCalls > 0 ? stat.totalMs : 0));
       return {
         startedAt: new Date(startMs).toISOString(),
         endedAt: new Date(at).toISOString(),
@@ -151,6 +191,14 @@ export function createMonitorPhaseRecorder(
           duplicateCalls: sumOf(cycleReport, (stat) => stat.duplicateCalls),
           totalCalls: sumOf(cycleReport, (stat) => stat.keyedCalls),
         },
+        eventLoopDelay: cycleLoopDelay.close(),
+        spawnTime: {
+          childMs,
+          // Never negative: a `childMs` recorded for a call whose `totalMs` landed in a different
+          // window would otherwise read as a nonsense negative wait.
+          queueMs: Math.max(0, measuredTotalMs - childMs),
+          measuredCalls: sumOf(cycleReport, (stat) => stat.childMeasuredCalls),
+        },
       };
     },
   };
@@ -158,4 +206,49 @@ export function createMonitorPhaseRecorder(
 
 function sumOf(report: OperationWindowReport, pick: (stat: OperationWindowStat) => number): number {
   return Object.values(report).reduce((sum, stat) => sum + pick(stat), 0);
+}
+
+/**
+ * Event-loop delay over one window, via `perf_hooks.monitorEventLoopDelay` (#359).
+ *
+ * Deliberately an INDEPENDENT instrument: it is sampled by libuv, not derived from any operation
+ * we time, so it can adjudicate the operation numbers rather than share their bias. That is the
+ * whole point — a recorded 9-second `git rev-parse` with a 90ms child and seconds of loop delay is
+ * a queueing report, not a git report, and nothing in the previous instrumentation could tell those
+ * apart.
+ *
+ * The histogram is `disable()`d on close so a cycle cannot leave a sampler running, and its values
+ * are nanoseconds (hence the /1e6).
+ */
+interface EventLoopDelayWindow {
+  close(): EventLoopDelayReport;
+}
+
+function openEventLoopDelayWindow(): EventLoopDelayWindow {
+  let histogram: ReturnType<typeof monitorEventLoopDelay> | null = null;
+  try {
+    histogram = monitorEventLoopDelay({ resolution: 20 });
+    histogram.enable();
+  } catch {
+    // A runtime without the sampler must not take the monitor down; the report degrades to zeros.
+    histogram = null;
+  }
+  let closed: EventLoopDelayReport | null = null;
+  return {
+    close(): EventLoopDelayReport {
+      if (closed) return closed;
+      if (!histogram) {
+        closed = { meanMs: 0, maxMs: 0, p99Ms: 0 };
+        return closed;
+      }
+      histogram.disable();
+      const ms = (ns: number) => (Number.isFinite(ns) ? Math.round(ns / 1e6) : 0);
+      closed = {
+        meanMs: ms(histogram.mean),
+        maxMs: ms(histogram.max),
+        p99Ms: ms(histogram.percentile(99)),
+      };
+      return closed;
+    },
+  };
 }
