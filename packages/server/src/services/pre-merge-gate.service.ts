@@ -12,7 +12,8 @@ import { getChangedFileNames } from "./git.service.js";
 import type { Database } from "../db/index.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
-import { buildSmokeCheck, getStackProfile, verifyScriptPrefKey } from "./stack-profile.service.js";
+import { getProjectById } from "../repositories/project.repository.js";
+import { buildSmokeCheck, getStackProfile, populateVerifyScript, verifyScriptPrefKey } from "./stack-profile.service.js";
 import { runUnderBuildGate } from "./jvm-build-gate.js";
 
 /**
@@ -179,6 +180,18 @@ export interface PreMergeGateResult {
    * deciding whether to surface a "fix the failing build" nudge to an autonomous monitor).
    */
   timedOut?: boolean;
+  /**
+   * True when this merge was verified by NOTHING because the project has nothing configured to
+   * verify with (#377) — distinct from `skipped`, which also covers the deliberate docs-only skip of
+   * a project that DOES have a gate.
+   *
+   * MEASURED motivation: an autonomous fix loop merged 8 tickets into a project that had no
+   * `verify_script` pref and an all-null stack profile, one of them carrying a test that could never
+   * pass. Master went from 38/38 green to 40 tests with 1 permanently failing and **nothing said
+   * anything**, because "no gate configured" and "gate passed" were both reported as `passed: true`
+   * with no visible difference. This flag is what makes that state sayable; callers surface it.
+   */
+  unverified?: boolean;
 }
 
 /**
@@ -211,7 +224,25 @@ export async function runPreMergeGate(
   // A read error here means we can't tell whether a gate is configured — treat as "no verify gate"
   // (never block a merge on a gate-DETECTION error; fail-closed applies only to a CONFIGURED gate
   // that can't RUN). Mirrors projectHasMergeGate's defensive catch.
-  const verifyScript = await getPreference(verifyScriptPrefKey(projectId), database).catch(() => null);
+  let verifyScript = await getPreference(verifyScriptPrefKey(projectId), database).catch(() => null);
+  if (!verifyScript || !verifyScript.trim()) {
+    // #377 — re-derive ONCE at gate time when nothing is configured. `verify_script` is otherwise
+    // only ever derived at REGISTRATION, and a project registered from an empty repo (every
+    // pipeline-scaffolded project: the code arrives in later step commits) therefore has no gate
+    // forever, however many test suites it later grows. `populateVerifyScript` is idempotent and
+    // never clobbers an existing value or writes an empty one, so this can only ever ADD a gate.
+    //
+    // Honest limit, MEASURED on the project from the ticket: detection reads the repo ROOT only, and
+    // that project's `package.json` lives in `src/`, so this recovers nothing there. It closes the
+    // common root-layout case; the `unverified` flag below is what covers the rest.
+    const project = await getProjectById(projectId, database).catch(() => null);
+    if (project?.repoPath) {
+      verifyScript = await populateVerifyScript(projectId, project.repoPath, database).catch(() => null);
+      if (verifyScript) {
+        console.log(`[pre-merge-gate] derived a verify_script for project ${projectId} at gate time — the repo has grown one since registration (#377): ${verifyScript}`);
+      }
+    }
+  }
   const verifyConfigured = Boolean(verifyScript && verifyScript.trim());
   if (verifyConfigured && !workspace.workingDir) {
     // Fail-closed: a gate we were told to run can't run without a worktree (#826).
@@ -417,6 +448,10 @@ export async function runPreMergeGate(
   // `mergeGateStage`, which is exactly the dishonesty #182 set out to remove.
   const verifyRan = verifyConfigured && !docsOnly;
   const ranSomething = verifyRan || smokeApplies;
+  // #377 — "nothing is configured" is NOT the same state as "the configured gate was skipped for a
+  // docs-only diff", and conflating them is how eight unverified merges went unremarked. A project
+  // with no gate at all is `unverified`; a project with a gate that deliberately skipped is not.
+  const unverified = !ranSomething && !verifyConfigured;
   return {
     passed: true,
     skipped: !ranSomething,
@@ -425,7 +460,8 @@ export async function runPreMergeGate(
       ? "pre-merge gate passed"
       : docsOnly
         ? `pre-merge gate skipped — docs-only diff (${changedFiles.length} file(s))`
-        : "no pre-merge gate configured",
+        : "NOT VERIFIED: this project has no verify_script and no smoke check, so nothing checked this merge (#377)",
+    ...(unverified ? { unverified: true } : {}),
   };
 }
 
@@ -532,6 +568,8 @@ export interface ResolvedMergeGate {
   message: string;
   /** How the decision was reached (for logs/tests). */
   decision: "run-gate" | "already-passed" | "skip-explicit" | "run-gate-stale-evidence";
+  /** See {@link PreMergeGateResult.unverified} — nothing checked this merge at all (#377). */
+  unverified?: boolean;
 }
 
 function evidenceIsFresh(evidence: MergeGateEvidence, now: number): boolean {
@@ -589,7 +627,13 @@ async function runGateAsResolved(
     return { passed: true, ran: false, stage: "none", message: "no project — no pre-merge gate applies" };
   }
   const gate = await runPreMergeGate(workspace, projectId, database);
-  return { passed: gate.passed, ran: !gate.skipped, stage: gate.stage, message: gate.message };
+  return {
+    passed: gate.passed,
+    ran: !gate.skipped,
+    stage: gate.stage,
+    message: gate.message,
+    ...(gate.unverified ? { unverified: true } : {}),
+  };
 }
 
 /**
