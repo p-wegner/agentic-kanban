@@ -4,6 +4,9 @@ import type { BoardEvents } from "./board-events.js";
 import type { SessionManager } from "./session.manager.js";
 import type { GitService } from "./workspace-internals.js";
 import { createWorkspaceCrudService } from "./workspace-crud.service.js";
+import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
+import { claimIssueForAutoStart, isAutoStartClaimed } from "./auto-start-claim.js";
+import { completeCreateJob, failCreateJob } from "./create-job.service.js";
 import {
   getWipLimitPref,
   getInProgressStatusIds,
@@ -45,15 +48,6 @@ export interface DependencyWaveStartDeps {
     issue: { id: string; issueNumber: number | null; title: string },
     options: { planMode: boolean },
   ) => Promise<{ id?: string; error?: string }>;
-}
-
-function slugifyTitle(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, "")
-    .replace(/\s+/g, "-")
-    .slice(0, 40)
-    .replace(/^-+|-+$/g, "") || "issue";
 }
 
 function toPlanIssue(issue: IssueRow, extras: {
@@ -136,7 +130,13 @@ export async function buildDependencyWavePlan(
   const openIssueIds = openIssues.map((issue) => issue.id);
 
   const openWorkspaceRows = await getOpenWorkspaceIssueIds(openIssueIds, database);
-  const issueIdsWithOpenWorkspace = new Set(openWorkspaceRows.map((row) => row.issueId));
+  // #366: a workspace ROW appears only at the END of provisioning (80s to 8+ min), so the
+  // rows alone are blind to a start another path already began — and the wave would launch a
+  // second workspace for the same issue. An in-flight create counts as having one.
+  const issueIdsWithOpenWorkspace = new Set([
+    ...openWorkspaceRows.map((row) => row.issueId),
+    ...openIssueIds.filter((issueId) => isAutoStartClaimed(issueId)),
+  ]);
 
   const dependencyRows = await getWaveDependencyRows(projectId, projectIssues.length > 0, database);
 
@@ -245,6 +245,14 @@ export async function startNextDependencyWave(
     });
 
   for (const issue of candidates) {
+    // #366: claim the issue in the create-job registry before provisioning. The plan above was
+    // built over several awaits, so re-assert atomically here; a claim that appeared in
+    // between means another starter is already provisioning this issue.
+    const claim = claimIssueForAutoStart(issue.id);
+    if (!claim) {
+      failed.push({ issueId: issue.id, issueNumber: issue.issueNumber, error: "a workspace creation for this issue is already in flight (#366)" });
+      continue;
+    }
     let result: { id?: string; error?: string };
     try {
       // Wave-launched builders go straight to implementing — match the normal
@@ -253,13 +261,19 @@ export async function startNextDependencyWave(
       // first, which is indistinguishable from a stalled session (see #767).
       result = deps.createWorkspace
         ? await deps.createWorkspace(issue, { planMode: false })
+        // #366: `suggestBranchName` is the ONE branch-naming function. The private
+        // `slugifyTitle` this used to call stripped non-alphanumerics instead of turning them
+        // into separators, so the same issue got a different branch name depending on which
+        // starter won — which is exactly how the duplicate pair was fingerprinted.
         : await workspaceService!.createWorkspace({
           issueId: issue.id,
-          branch: `feature/ak-${issue.issueNumber ?? "next"}-${slugifyTitle(issue.title)}`,
+          branch: suggestBranchName(issue),
           planMode: false,
         });
+      completeCreateJob(claim.jobId, result);
     } catch (err) {
       result = { error: err instanceof Error ? err.message : String(err) };
+      failCreateJob(claim.jobId, err);
     }
 
     if (result.error) {

@@ -5,6 +5,9 @@ import type { SessionManager } from "./session.manager.js";
 import type { GitService } from "./workspace-internals.js";
 import { createWorkspaceCrudService } from "./workspace-crud.service.js";
 import { resolveStartPolicy } from "./start-policy.service.js";
+import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
+import { claimIssueForAutoStart, isAutoStartClaimed } from "./auto-start-claim.js";
+import { completeCreateJob, failCreateJob } from "./create-job.service.js";
 import {
   getProjectStatusesForAutoChain,
   getActiveWipCount,
@@ -42,15 +45,6 @@ type DependencyRow = {
   dependsOnId: string;
   type: string;
 };
-
-function slugifyTitle(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, "")
-    .replace(/\s+/g, "-")
-    .slice(0, 40)
-    .replace(/^-+|-+$/g, "") || "issue";
-}
 
 function findCycleIssueIds(issueIds: string[], deps: DependencyRow[]): Set<string> {
   const scopedIds = new Set(issueIds);
@@ -140,6 +134,11 @@ export async function findAutoStartableDependencyIssue(args: {
     }
 
     if (await hasExistingOpenWorkspace(candidate.id, database)) continue;
+    // #366: the workspace ROW does not exist for the whole 80s-to-8min provisioning window,
+    // so the table check above is blind to a start another path already began. Without this
+    // the cascade picked an issue the plugin-loop starter was already provisioning and
+    // provisioned a SECOND workspace + worktree for it.
+    if (isAutoStartClaimed(candidate.id)) continue;
 
     const blockerIds = await getBlockingDependencyIds(candidate.id, BLOCKING_DEPENDENCY_TYPES, database);
     if (blockerIds.length === 0) {
@@ -239,14 +238,29 @@ export async function autoStartUnblockedDependencyIssue(args: {
   }
 
   const candidate = decision.candidate;
-  const branch = `feature/ak-${candidate.issueNumber ?? "next"}-${slugifyTitle(candidate.title)}`;
+  // #366: ONE naming function for the whole board. This used to be a private `slugifyTitle`
+  // that stripped non-alphanumerics ("PM pipeline 8/9: CI/CD" -> `pm-pipeline-89-cicd`) while
+  // `suggestBranchName` turned them into separators (`pm-pipeline-8-9-ci-cd`). Two producers
+  // meant two different branch names for the same issue, which is why the create service's
+  // branch-collision check could never notice the cascade racing another starter.
+  const branch = suggestBranchName(candidate);
+  // Claim the issue in the create-job registry BEFORE provisioning. `decision` was computed
+  // over several awaits, so re-assert here in the one atomic (await-free) step; a claim that
+  // appeared in between means another starter got there first and we must not duplicate it.
+  const claim = claimIssueForAutoStart(candidate.id);
+  if (!claim) {
+    console.log(`[dependency-auto-chain] NOT starting issue #${candidate.issueNumber ?? "?"} — a workspace creation for it is already in flight (#366)`);
+    return;
+  }
   let workspace: { id?: string; error?: string };
   try {
     workspace = args.createWorkspace
       ? await args.createWorkspace(candidate, branch)
       : await createWorkspaceCrudService({ database, getSessionManager, boardEvents, gitService }).createWorkspace({ issueId: candidate.id, branch });
+    completeCreateJob(claim.jobId, workspace);
   } catch (err) {
     workspace = { error: err instanceof Error ? err.message : String(err) };
+    failCreateJob(claim.jobId, err);
   }
   if (workspace.error) {
     await addAutoChainAuditComment({
