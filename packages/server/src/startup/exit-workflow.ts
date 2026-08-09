@@ -8,6 +8,7 @@ import { movedDuringGate } from "../services/workspace-merge-gate.js";
 import { issues, preferences, projectStatuses, projects, scheduledRunHistory, scheduledRuns, sessions, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { desc, eq } from "drizzle-orm";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
+import { commitsAhead, hasCommitsAhead } from "./branch-commits.js";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { db as defaultDb } from "../db/index.js";
@@ -175,14 +176,20 @@ async function hasCommittedChanges(workspace: WorkspaceRow, defaultBranch: strin
   try {
     if (workspace.isDirect) {
       const baseRef = workspace.baseCommitSha || "HEAD~1";
-      return (await gitExec(["diff", "--quiet", baseRef, "HEAD"], { cwd: workspace.workingDir! })).code !== 0;
+      return await hasCommitsAhead(workspace.workingDir, baseRef);
     }
     const baseBranch = workspace.baseBranch || defaultBranch;
     if (!baseBranch) {
       console.warn(`[workflow] workspace ${workspaceId} has no base/default branch; treating as no committed changes`);
       return false;
     }
-    if ((await gitExec(["diff", "--quiet", baseBranch], { cwd: workspace.workingDir! })).code !== 0) return true;
+    // #365: `git diff --quiet <base>` (one ref) diffs the WORKING TREE against the base
+    // branch TIP, so it reported "has changes" for a workspace with zero commits of its own
+    // that was merely BEHIND its base. That false positive parked empty workspaces at
+    // ready_for_merge and stalled pipeline units (#363), and it is why the #629 guard below
+    // — which re-checks with this same function — could never catch the case it was written
+    // for. Count commits instead; the base moving no longer affects the answer.
+    if (await hasCommitsAhead(workspace.workingDir, baseBranch)) return true;
     // Multi-repo: the leading repo being clean does NOT mean the workspace did nothing —
     // a sibling-only ticket commits entirely in a sibling repo (#69). Without this, the
     // exit workflow reads the sibling work as "no committed changes", never routes it to
@@ -193,8 +200,9 @@ async function hasCommittedChanges(workspace: WorkspaceRow, defaultBranch: strin
 
 /**
  * True when any sibling repo of the workspace has committed changes against its base
- * branch. Mirrors the leading-repo `git diff --quiet <base>` probe per sibling worktree,
- * falling back to a branch-vs-base commit count when the worktree is already gone.
+ * branch. Mirrors the leading-repo commits-ahead probe per sibling worktree (#365), falling
+ * back to a branch-vs-base commit count when the worktree is already gone — both are now
+ * the same `rev-list --count` question, just from a different cwd.
  * Best-effort: a git error on one sibling reads as "no change" (safe direction).
  */
 async function hasSiblingCommittedChanges(workspaceId: string, defaultBranch: string | null, database: Database): Promise<boolean> {
@@ -207,10 +215,9 @@ async function hasSiblingCommittedChanges(workspaceId: string, defaultBranch: st
     if (!base) continue;
     try {
       if (repo.worktreePath) {
-        if ((await gitExec(["diff", "--quiet", base], { cwd: repo.worktreePath })).code !== 0) return true;
+        if ((await commitsAhead(repo.worktreePath, base) ?? 0) > 0) return true;
       } else if (repo.branch) {
-        const out = (await gitExec(["rev-list", "--count", `${base}..${repo.branch}`], { cwd: repo.path })).stdout.trim();
-        if (Number(out) > 0) return true;
+        if ((await commitsAhead(repo.path, base, repo.branch) ?? 0) > 0) return true;
       }
     } catch { /* non-fatal: treat this sibling as no-change */ }
   }
@@ -860,18 +867,17 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     // fires from the merge tail, so the loop's next gate appears without the monitor.
     const autoLandLoop = await getAutoLandLoopTicket(issueId);
     if (autoLandLoop) {
-      // #325: `committedChanges` above is a working-tree diff against the base BRANCH TIP,
-      // so a workspace with ZERO unique commits reads as "changed" whenever the base moved
-      // under it. Auto-landing such an empty loop workspace closes the unit's ticket with
-      // no artifacts — and the planner's external-key dedupe then deadlocks the loop
-      // ("Waiting on input", every re-advance a no-op, no gate to revise). Refuse to land
-      // an empty loop workspace: surface it and leave the ticket open so the monitor can
-      // recover the workspace (update-base + relaunch, #324) instead.
-      const aheadOut = workspace.workingDir && workspace.baseBranch
-        ? await gitExec(["rev-list", "--count", `${workspace.baseBranch}..HEAD`], { cwd: workspace.workingDir }).catch(() => null)
+      // #325 kept a local commits-ahead re-check here because `committedChanges` above was a
+      // working-tree diff against the base BRANCH TIP, so a workspace with ZERO unique
+      // commits read as "changed" whenever the base moved under it. #365 fixed that at the
+      // source (hasCommittedChanges now counts commits), so this is now belt-and-braces
+      // rather than the only line of defence — kept because auto-landing an empty loop
+      // workspace closes the unit's ticket with no artifacts, and the planner's external-key
+      // dedupe then deadlocks the loop ("Waiting on input", every re-advance a no-op).
+      const unitCommitsAhead = workspace.workingDir && workspace.baseBranch
+        ? await commitsAhead(workspace.workingDir, workspace.baseBranch)
         : null;
-      const commitsAhead = aheadOut && aheadOut.code === 0 ? parseInt(aheadOut.stdout.trim(), 10) : null;
-      if (commitsAhead === 0) {
+      if (unitCommitsAhead === 0) {
         console.log(`[workflow] NOT auto-landing loop ticket for ${autoLandLoop.pluginSlug}:${autoLandLoop.loopName} (unit ${autoLandLoop.unitId}) — workspace has no unique commits; leaving the ticket open for recovery`);
         // Back out of the In Review transition made above: In Review + zero diff is a
         // monitor dead-end ("needs attention"), while In Progress re-enters the

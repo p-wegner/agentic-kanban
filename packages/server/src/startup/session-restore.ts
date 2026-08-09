@@ -1,8 +1,8 @@
 import { db } from "../db/index.js";
 import { sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { eq, inArray } from "drizzle-orm";
-import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { setWorkspaceStatus, type WorkspaceStatus } from "../repositories/workspace-status.repository.js";
+import { hasCommitsAhead } from "./branch-commits.js";
 
 interface WorkflowSets {
   reviewSessionIds: Set<string>;
@@ -42,11 +42,13 @@ async function restoreWorkflowSets({ reviewSessionIds, fixAndMergeSessionIds, le
 }
 
 /** Whether the workspace branch has commits its base branch lacks.
- * Mirrors hasCommittedChanges() in exit-workflow.ts: `git diff --quiet <base>`
- * exits non-zero when there is a diff, so a non-null err means "has changes".
+ * Mirrors hasCommittedChanges() in exit-workflow.ts. #365: this used to ask
+ * `git diff --quiet <base>`, which is a working-tree diff against the base TIP and so
+ * answered "has changes" for a workspace that had made ZERO commits and was merely
+ * BEHIND its base — parking an empty workspace at ready_for_merge (#363).
  */
 async function workspaceHasCommits(workingDir: string, baseBranch: string): Promise<boolean> {
-  return (await gitExec(["diff", "--quiet", baseBranch], { cwd: workingDir })).code !== 0;
+  return hasCommitsAhead(workingDir, baseBranch);
 }
 
 /** Reset workspaces stuck in active/reviewing/fixing with no running session.

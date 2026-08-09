@@ -26,13 +26,20 @@ vi.mock("../startup/review-helpers.js", () => ({
 vi.mock("../startup/merge-strategy.js", () => ({
   isAutomaticMergeEnabled: vi.fn(() => false),
 }));
-// hasCommittedChanges uses execFile — make it return exit code 0 (no diff = 0 commits)
+// hasCommittedChanges counts commits with `git rev-list --count <base>..HEAD` (#365) — make
+// it report ZERO, the 0-commit branch this guard exists for. Before #365 the predicate was
+// `git diff --quiet <base>`, whose "no diff" answer this mock used to fake with a clean exit;
+// that form could never report zero for a branch BEHIND its base, which is why the guard
+// never fired in production even though this test passed.
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
   return {
     ...actual,
     execFile: vi.fn(
-      (_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null) => void) => cb(null),
+      (_cmd: string, args: string[], _opts: unknown, cb: (err: Error | null, stdout: string, stderr: string) => void) =>
+        // Only the commits-ahead probe is answered meaningfully; every other git call keeps
+        // the pre-#365 blanket clean-exit so this test stays like-for-like.
+        args[0] === "rev-list" ? cb(null, "0\n", "") : cb(null, "", ""),
     ),
   };
 });
