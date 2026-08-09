@@ -42,4 +42,17 @@ describe("create_issue tool", () => {
     const rows = await db.select().from(schema.issues).where(eq(schema.issues.id, data.id));
     expect(rows[0].projectId).toBe(projectId);
   });
+
+  it("ECHOES the resolved project (id + name) so an implicit-fallback mis-filing is visible (#335)", async () => {
+    const { invoke, db } = setupTool(registerCreateIssue);
+    const { projectId } = await seedProject(db, "habitloop");
+    await setActiveProject(db, projectId);
+
+    // The caller omitted projectId, so the project came from the global mutable
+    // activeProjectId preference. The response must NAME it — previously the
+    // response carried no project at all, which is what made mis-filing silent.
+    const data = parseResult(await invoke({ title: "board bug filed from another repo" }));
+    expect(data.projectId).toBe(projectId);
+    expect(data.projectName).toBe("habitloop");
+  });
 });

@@ -300,4 +300,16 @@ describe("create_issues_batch tool", () => {
     const rows = await db.select().from(schema.issues).where(eq(schema.issues.projectId, projectId));
     expect(rows).toHaveLength(0);
   });
+
+  it("ECHOES the resolved project (id + name) in the batch response (#335)", async () => {
+    const { invoke, db } = setupTool(registerCreateIssuesBatch);
+    const { projectId } = await seedProject(db, "bookvault");
+
+    // A batch is the most expensive thing to mis-file into the wrong backlog, and
+    // `projectId` is optional (it falls back to the global activeProjectId), so the
+    // response names the board the issues landed in.
+    const data = parseResult(await invoke({ projectId, issues: [{ title: "A" }, { title: "B" }] }));
+    expect(data.projectId).toBe(projectId);
+    expect(data.projectName).toBe("bookvault");
+  });
 });

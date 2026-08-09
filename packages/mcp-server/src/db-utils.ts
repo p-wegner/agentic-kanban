@@ -128,6 +128,29 @@ export async function resolveActiveProjectId(
 }
 
 /**
+ * Project name for a resolved project id, or `null` when the id names no row.
+ *
+ * Exists so every scoped WRITE can ECHO the project it actually landed in (#335,
+ * remedy R2's complement). `resolveActiveProjectId` silently falls back to the
+ * global mutable `activeProjectId` preference, so an agent that forgot `projectId`
+ * files into whatever project a human last clicked. Naming the project in the
+ * response does not prevent that mis-filing, but it makes it VISIBLE instead of
+ * silent — the caller sees `projectName` and can move the issue.
+ */
+export async function resolveProjectName(
+  db: ToolDb,
+  schema: typeof schemaModule,
+  projectId: string,
+): Promise<string | null> {
+  const rows = await db
+    .select({ name: schema.projects.name })
+    .from(schema.projects)
+    .where(eq(schema.projects.id, projectId))
+    .limit(1);
+  return rows[0]?.name ?? null;
+}
+
+/**
  * Resolves a status column by name within a project.
  * Returns the status ID on success, or an MCP error response listing available
  * statuses on failure.

@@ -307,3 +307,24 @@ export function buildIssueStatusJson(input: IssueStatusJsonInput): Record<string
     diffStats,
   };
 }
+
+/**
+ * One line naming the project a scoped WRITE actually resolved to (#335).
+ *
+ * No `issue` subcommand accepts a project: they all resolve it implicitly from the
+ * global mutable `activeProjectId` preference, which is whatever a human last
+ * clicked in the UI project switcher. That fallback stays (this is remedy R2, not
+ * R1), but every write now NAMES the board it hit, so a mis-filing is visible in
+ * the output instead of silent.
+ *
+ * `name` is null when the id names no project row — printed as `<unknown>` rather
+ * than omitted, because a write against a dangling id is exactly the case a caller
+ * needs to see.
+ */
+export function formatResolvedProjectLine(
+  projectId: string,
+  name: string | null | undefined,
+  indent = "  ",
+): string {
+  return `${indent}project: ${name ?? "<unknown>"} (${projectId})`;
+}
