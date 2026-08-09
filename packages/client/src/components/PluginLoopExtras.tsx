@@ -5,6 +5,13 @@ import { apiFetch, apiPost, apiPut } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { DiffViewer } from "./DiffViewer.js";
+import {
+  canSubmitGateAction,
+  gateFeedbackText,
+  gateInputPlaceholder,
+  gateInputRequirementHint,
+  viewGateRecommendation,
+} from "./gateCardPolicy.js";
 
 /**
  * The loop pane's structured extras (#286–#294): approval gate card, pipeline
@@ -328,10 +335,11 @@ export function GateCard({ pluginId, loopName, projectId, gate, gateSince, check
       setSelected(action); // first click arms the textarea; the confirm button submits
       return;
     }
-    const notes = lineNotes ?? [];
-    const feedback = [input.trim(), ...notes].filter(Boolean).join("\n");
-    if (action.input === "text" && !feedback) {
-      showToast("This action needs text (e.g. what should change)", "error");
+    const feedback = gateFeedbackText(input, lineNotes);
+    if (!canSubmitGateAction(action, input, lineNotes)) {
+      // Belt-and-braces: the Confirm button is disabled in this state (#378 B), so reaching
+      // here means a programmatic call. Keep the toast rather than failing silently.
+      showToast(gateInputRequirementHint(action), "error");
       return;
     }
     setResolving(true);
@@ -425,6 +433,10 @@ export function GateCard({ pluginId, loopName, projectId, gate, gateSince, check
     }
   }
 
+  // #378 A — validated at READ time against the currently-offered actions, not at
+  // recommendation time (which is what `action-not-offered` already covers, #333).
+  const recommendationView = viewGateRecommendation(gate, recommendation);
+
   const checkTone = {
     pass: "text-green-800 dark:text-green-300",
     warn: "text-amber-800 dark:text-amber-300",
@@ -457,27 +469,36 @@ export function GateCard({ pluginId, loopName, projectId, gate, gateSince, check
           ))}
         </div>
       )}
-      {/* Butler recommendation chip (#309) — a pre-read, never a decision. */}
-      {recommendation && (
+      {/* Butler recommendation chip (#309) — a pre-read, never a decision.
+          A recommendation whose action is no longer offered stays visible but loses its Accept
+          button (#378 A): the chip was handing out a one-click path to an action the gate had
+          deliberately withdrawn, and the click was silently inert. */}
+      {recommendation && recommendationView && (
         <div
           className="flex items-start gap-2 text-xs rounded border border-amber-200 dark:border-amber-800 bg-white/60 dark:bg-gray-900/40 px-2 py-1.5"
           data-testid="plugin-gate-recommendation"
+          data-recommendation-state={recommendationView.actionable ? "actionable" : recommendationView.skipReason}
         >
           <span aria-hidden="true">🤵</span>
           <span className="flex-1 text-amber-900 dark:text-amber-200">
             Butler recommends <span className="font-medium">{recommendation.actionId}</span>
             {recommendation.reason ? ` — ${recommendation.reason}` : ""}
+            {!recommendationView.actionable && (
+              <span className="block mt-0.5 text-amber-800 dark:text-amber-300" data-testid="plugin-gate-recommendation-stale">
+                ⚠ That action is no longer offered on this gate — this is a pre-read only. Choose
+                one of the actions below.
+              </span>
+            )}
           </span>
-          <button
-            onClick={() => {
-              const action = gate.actions.find((a) => a.id === recommendation.actionId);
-              if (action) void act(action);
-            }}
-            disabled={resolving}
-            className="shrink-0 text-[11px] px-2 py-0.5 rounded border border-amber-400 dark:border-amber-600 hover:bg-amber-100 dark:hover:bg-amber-900/40 text-amber-900 dark:text-amber-200"
-          >
-            Accept
-          </button>
+          {recommendationView.actionable && (
+            <button
+              onClick={() => void act(recommendationView.action)}
+              disabled={resolving}
+              className="shrink-0 text-[11px] px-2 py-0.5 rounded border border-amber-400 dark:border-amber-600 hover:bg-amber-100 dark:hover:bg-amber-900/40 text-amber-900 dark:text-amber-200"
+            >
+              Accept
+            </button>
+          )}
         </div>
       )}
       {/* Summarize-for-me (#330) — butler digest rendered in place. */}
@@ -559,10 +580,17 @@ export function GateCard({ pluginId, loopName, projectId, gate, gateSince, check
             onChange={(e) => setInput(e.target.value)}
             rows={4}
             autoFocus
-            placeholder={`${selected.label} — what should change? (rough notes are fine — the butler can polish them)`}
+            placeholder={gateInputPlaceholder(selected)}
             className="w-full text-sm px-2 py-1.5 rounded border border-amber-300 dark:border-amber-700 bg-white dark:bg-gray-900"
             data-testid="plugin-gate-input"
           />
+          {/* #378 B — the Confirm button below is disabled until there is something to submit;
+              say WHY, so a disabled button is never a puzzle either. */}
+          {!canSubmitGateAction(selected, input, lineNotes) && (
+            <div className="text-[11px] text-amber-800 dark:text-amber-300" data-testid="plugin-gate-input-required">
+              {gateInputRequirementHint(selected)}
+            </div>
+          )}
           <button
             onClick={() => void draftFeedback()}
             disabled={drafting}
@@ -579,8 +607,10 @@ export function GateCard({ pluginId, loopName, projectId, gate, gateSince, check
           <button
             key={action.id}
             onClick={() => void act(action)}
-            disabled={resolving}
-            className={`text-sm px-3 py-1.5 rounded disabled:opacity-50 ${
+            // #378 B — once the textarea is armed this button IS the confirm; a required-input
+            // action with an empty box must not look clickable and then do nothing.
+            disabled={resolving || (selected?.id === action.id && !canSubmitGateAction(action, input, lineNotes))}
+            className={`text-sm px-3 py-1.5 rounded disabled:opacity-50 disabled:cursor-not-allowed ${
               action.input === "text"
                 ? "border border-amber-400 dark:border-amber-600 text-amber-900 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/40"
                 : "bg-brand-600 text-white hover:bg-brand-700"
