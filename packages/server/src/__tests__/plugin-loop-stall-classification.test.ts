@@ -30,6 +30,7 @@ function row(overrides: Partial<LoopUnmergedWorkspaceRow> = {}): LoopUnmergedWor
     workspaceStatus: "ready_for_merge",
     workspaceReadyForMerge: false,
     workspaceUpdatedAt: "2026-08-08T20:18:13.402Z",
+    issueHasMergedWorkspace: false,
     ...overrides,
   };
 }
@@ -110,5 +111,57 @@ describe("selectLoopStall (#363) — pre-existing behaviour preserved", () => {
 
   it("returns null when there is nothing stuck", () => {
     expect(selectLoopStall([], null, null)).toBeNull();
+  });
+});
+
+describe("#337: an ALREADY-LANDED unit must never be offered a merge", () => {
+  /**
+   * MEASURED on kassenbuch round 3, in the ~5-minute window between "step agent finished" and
+   * "after-merge review workspace closed": `awaitingMerge` pointed at that review workspace while
+   * the ticket was already Done and the merge commit was already on master, and the loop card
+   * rendered a literal "Merge now" button. That is the worst possible affordance there, because the
+   * operator documentation maps this exact state to "click Merge now on the loop card". The operator
+   * checked `git log` first and did nothing — the guard is what makes that care unnecessary.
+   *
+   * The evidence is DB-only by design: a SIBLING workspace on the same issue with `mergedAt` set.
+   * `loopStatuses` runs on every plugin-surface read, so a git reachability check here would feed
+   * exactly the cost #359 is about.
+   */
+  const landedLeftover = () => row({
+    workspaceId: "ws-review",
+    issueStatusName: "Done",
+    workspaceStatus: "reviewing",
+    issueHasMergedWorkspace: true,
+  });
+
+  it("classifies it as unit-already-landed and refuses the merge affordance", () => {
+    const stall = classifyLoopStall(landedLeftover());
+    expect(stall.reason).toBe("unit-already-landed");
+    expect(stall.mergeSafe).toBe(false);
+    expect(stall.detail).toContain("MERGED workspace");
+  });
+
+  it("overrides the finished-by-issue branch, which is where the wrong answer came from", () => {
+    // A Done issue with an open unmerged workspace took `builder-finished-unmerged` with
+    // mergeSafe: true. That verdict is right when nothing landed and wrong when something did, and
+    // the row alone could not tell those apart before `issueHasMergedWorkspace`.
+    expect(classifyLoopStall(row({ issueStatusName: "Done", issueHasMergedWorkspace: false })).mergeSafe).toBe(true);
+    expect(classifyLoopStall(row({ issueStatusName: "Done", issueHasMergedWorkspace: true })).mergeSafe).toBe(false);
+  });
+
+  it("does not let a landed leftover mask a LATER unit that genuinely never landed", () => {
+    // Selection ordered purely by issue number, so an earlier unit's leftover would win the single
+    // stall slot and hide the real one — trading a misleading card for a missing one.
+    const stall = selectLoopStall([
+      landedLeftover(),
+      row({ workspaceId: "ws-real", issueNumber: 9, issueStatusName: "In Review", workspaceStatus: "idle" }),
+    ], null, null);
+    expect(stall?.workspaceId).toBe("ws-real");
+    expect(stall?.mergeSafe).toBe(true);
+  });
+
+  it("still reports the leftover when it is the only row — 'nothing to do here' is a real answer", () => {
+    const stall = selectLoopStall([landedLeftover()], null, null);
+    expect(stall?.reason).toBe("unit-already-landed");
   });
 });

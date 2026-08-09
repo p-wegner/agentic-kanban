@@ -29,7 +29,25 @@ import { parsePluginLoopUnitKey } from "@agentic-kanban/shared/lib/plugin-manife
  * is about. The classification therefore says "parked, and the ticket never finished — go look",
  * which is falsifiable from the row alone, rather than guessing whether the branch has content.
  */
-export type LoopStallReason = "builder-finished-unmerged" | "workspace-parked-issue-unfinished";
+export type LoopStallReason =
+  | "builder-finished-unmerged"
+  | "workspace-parked-issue-unfinished"
+  /**
+   * The unit ALREADY LANDED and this open workspace is a leftover (#337) — most often the
+   * after-merge review workspace, which is non-closed and has no `mergedAt` of its own, so the
+   * query cannot tell it apart from the builder workspace that never merged.
+   *
+   * MEASURED on kassenbuch round 3, in the ~5-minute window between "step agent finished" and
+   * "review workspace closed": `awaitingMerge` pointed at such a row while the ticket was already
+   * Done and the merge commit was already on master, and the card rendered a literal "Merge now"
+   * button. That is the single worst affordance available here, because the operator documentation
+   * maps this exact state to "click Merge now on the loop card". Merging the leftover is at best a
+   * no-op and at worst lands a branch nobody reviewed.
+   *
+   * Still DB-only: the evidence is a SIBLING workspace on the same issue with `mergedAt` set, not
+   * a git reachability check — `loopStatuses` runs on every plugin-surface read (#359).
+   */
+  | "unit-already-landed";
 
 export interface LoopStall {
   workspaceId: string;
@@ -59,6 +77,26 @@ export function classifyLoopStall(row: LoopUnmergedWorkspaceRow): LoopStall {
     || row.issueStatusName === "AI Reviewed"
     || row.issueStatusName === "Done";
   const ref = row.issueNumber != null ? `#${row.issueNumber}` : row.issueId;
+
+  // #337 — checked FIRST, and it overrides the finished-by-issue branch below. A Done unit whose
+  // work already merged reaches that branch today and gets `mergeSafe: true`, which is how an
+  // already-landed step came to be advertised with a "Merge now" button for five minutes. If a
+  // sibling workspace on this issue carries `mergedAt`, the unit's artifacts ARE on the base branch
+  // and merging this row is never the right next action.
+  if (row.issueHasMergedWorkspace) {
+    return {
+      workspaceId: row.workspaceId,
+      issueNumber: row.issueNumber,
+      issueTitle: row.issueTitle,
+      reason: "unit-already-landed",
+      mergeSafe: false,
+      detail: `${ref} already has a MERGED workspace, so this step's work is on the base branch — `
+        + `this open workspace is a leftover (typically the after-merge review). Do not merge it; `
+        + `it closes on its own, and the loop advances from the merge that already landed.`,
+      since: row.workspaceUpdatedAt,
+      contradictoryReadyFlag: parkedByWorkspace && !row.workspaceReadyForMerge,
+    };
+  }
 
   // Issue status wins when BOTH hold: an In-Review ticket whose workspace also reached
   // `ready_for_merge` is #299's ordinary state, and its branch is the one with the work.
@@ -117,6 +155,14 @@ export function selectLoopStall(
       if (!unitId) return true;
       return !isLoopUnitAccountedForByPlanner(unitId, gate, progress);
     })
-    .sort((a, b) => (a.issueNumber ?? Number.MAX_SAFE_INTEGER) - (b.issueNumber ?? Number.MAX_SAFE_INTEGER));
+    // #337 — an ALREADY-LANDED leftover sorts last, whatever its issue number. Ordering was purely
+    // by issue number, so a leftover review workspace on an earlier unit could win the slot and
+    // hide a later unit that genuinely never landed — swapping a misleading card for a missing one.
+    // It is still reported when it is the only row, because "nothing to do here" is a real answer.
+    .sort((a, b) => {
+      const landed = Number(a.issueHasMergedWorkspace) - Number(b.issueHasMergedWorkspace);
+      if (landed !== 0) return landed;
+      return (a.issueNumber ?? Number.MAX_SAFE_INTEGER) - (b.issueNumber ?? Number.MAX_SAFE_INTEGER);
+    });
   return relevant.length > 0 ? classifyLoopStall(relevant[0]) : null;
 }
