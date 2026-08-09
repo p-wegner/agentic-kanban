@@ -37,6 +37,12 @@ import type { CreateWorkspaceInput, CreateWorkspaceResult } from "./workspace-in
 import { describeLoopStartOutcome, startPlannedLoopTickets, type LoopStartOutcome } from "./plugin-loop-start.service.js";
 import { describeExistingUnits } from "./plugin-loop-unit-state.js";
 import { selectLoopStall, type LoopStall } from "./plugin-loop-stall.js";
+import {
+  beginGateRecommendationAttempt,
+  endGateRecommendationAttempt,
+  shouldRetryGateRecommendation,
+  GATE_RECOMMENDATION_MAX_ATTEMPTS,
+} from "./gate-recommendation-retry.js";
 
 /**
  * Board-owned converging analysis loops (plugin manifest `loops`).
@@ -605,19 +611,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
     // Gate-reached notification (#287): once per NEW gate id. The monitor re-plans a blocked
     // loop every cycle; comparing against the PREVIOUS advance's gate is what keeps the
     // notification from firing on every poll while the human hasn't acted yet.
-    if (plan.gate && plan.gate.id !== priorGate?.id) {
-      await insertPluginLoopEvent(eventKey, "gate-reached", {
-        gateId: plan.gate.id, question: plan.gate.question, artifacts: plan.gate.artifacts ?? [],
-      }, database);
-      boardEvents?.broadcastPluginGate(args.projectId, {
-        pluginSlug: args.pluginSlug,
-        pluginName: args.pluginName ?? args.pluginSlug,
-        pluginId: args.pluginRowId ?? null,
-        loopName: loop.name,
-        loopLabel: loop.label ?? loop.name,
-        gateId: plan.gate.id,
-        question: plan.gate.question,
-      });
+    if (plan.gate) {
       // Butler concierge (#307/#309): digest turn + pre-read recommendation, both
       // best-effort and pref-gated. Deliberately NOT awaited — a gate must never
       // block or fail an advance because an LLM was slow.
@@ -634,16 +628,55 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
         repoPath: args.repoPath,
         boardUrl,
       };
-      void import("./plugin-gate-butler.service.js").then(async (m) => {
-        // Recommendation FIRST (#317): its one-shot ask subscribes to the butler event
-        // stream and resolves on the next `result` — if the digest turn were already in
-        // flight, ITS result (prose, no JSON) would be misattributed to the ask and the
-        // recommendation silently dropped. Reco completes, then the digest turn goes out.
-        await m.computeGateRecommendation(conciergeArgs, database);
-        await m.notifyButlerOfGate(conciergeArgs, database);
-      }).catch((err) => {
-        console.warn(`[plugins] gate concierge failed for ${args.pluginSlug}:${loop.name}:`, err instanceof Error ? err.message : String(err));
-      });
+      const gateId = plan.gate.id;
+      if (gateId !== priorGate?.id) {
+        await insertPluginLoopEvent(eventKey, "gate-reached", {
+          gateId, question: plan.gate.question, artifacts: plan.gate.artifacts ?? [],
+        }, database);
+        boardEvents?.broadcastPluginGate(args.projectId, {
+          pluginSlug: args.pluginSlug,
+          pluginName: args.pluginName ?? args.pluginSlug,
+          pluginId: args.pluginRowId ?? null,
+          loopName: loop.name,
+          loopLabel: loop.label ?? loop.name,
+          gateId,
+          question: plan.gate.question,
+        });
+        if (beginGateRecommendationAttempt(eventKey, gateId)) {
+          void import("./plugin-gate-butler.service.js").then(async (m) => {
+            // Recommendation FIRST (#317): its one-shot ask subscribes to the butler event
+            // stream and resolves on the next `result` — if the digest turn were already in
+            // flight, ITS result (prose, no JSON) would be misattributed to the ask and the
+            // recommendation silently dropped. Reco completes, then the digest turn goes out.
+            await m.computeGateRecommendation(conciergeArgs, database);
+            await m.notifyButlerOfGate(conciergeArgs, database);
+          }).catch((err) => {
+            console.warn(`[plugins] gate concierge failed for ${args.pluginSlug}:${loop.name}:`, err instanceof Error ? err.message : String(err));
+          }).finally(() => endGateRecommendationAttempt(eventKey, gateId));
+        }
+      } else {
+        // #367 — the SAME gate, still open, on a later advance. The recommendation used to be a
+        // one-shot on the id transition: one transient butler failure ("Not logged in", "issue
+        // with the selected model", a usage limit) cost that gate its chip permanently. MEASURED:
+        // linklocker held `step-2:v1` for 23 hours with a null recommendation across 350 further
+        // advances, and its single attempt predated the skip-trace so it left no evidence either.
+        //
+        // Only the recommendation is retried — NOT the gate-reached broadcast or the butler digest
+        // turn, which are genuinely once-per-gate notifications and would be spam on a re-ask.
+        const decision = await shouldRetryGateRecommendation(eventKey, gateId, undefined, database);
+        if (decision.retry && beginGateRecommendationAttempt(eventKey, gateId)) {
+          console.log(
+            `[plugins] retrying the gate recommendation for ${args.pluginSlug}:${loop.name} gate ${gateId} `
+            + `(attempt ${decision.attemptNumber}/${GATE_RECOMMENDATION_MAX_ATTEMPTS}) — #367`,
+          );
+          void import("./plugin-gate-butler.service.js")
+            .then((m) => m.computeGateRecommendation(conciergeArgs, database))
+            .catch((err) => {
+              console.warn(`[plugins] gate recommendation retry failed for ${args.pluginSlug}:${loop.name}:`, err instanceof Error ? err.message : String(err));
+            })
+            .finally(() => endGateRecommendationAttempt(eventKey, gateId));
+        }
+      }
     }
 
     return {
