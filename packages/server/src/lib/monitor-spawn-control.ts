@@ -63,9 +63,15 @@ import { gitExec, GIT_CONTROL_OPERATION_LABEL } from "@agentic-kanban/shared/lib
  * indicator is purely RELATIVE to what this process has itself observed, and the raw samples are
  * always exposed beside it.
  *
- * The honest limitation, stated rather than hidden: the baseline is the fastest control spawn THIS
- * PROCESS has seen. A process that has only ever run inside a burst has an inflated baseline and
- * will report `stalled: false` — read `baselineMs` and `baselineSamples` before trusting the flag.
+ * The remaining limitation is real, and it BIT on the live board: the baseline is the fastest control
+ * spawn THIS PROCESS has seen, so a server started inside a long burst has an inflated reference.
+ * MEASURED — a live cycle whose control spawns took 8998/9022/14600/19618ms was reported
+ * `stalled: false`, because that process's own fastest sample was 5215ms and the ratio came to 3.8.
+ * The samples disclosed it; the boolean did not.
+ *
+ * The fix is for the indicator to REFUSE TO ANSWER when its own reference is not credible, rather
+ * than answer "false" — see `BASELINE_PLAUSIBILITY_CEILING_MS`. It still never asserts a stall on an
+ * absolute threshold; the absolute number only ever downgrades an answer to "cannot say".
  */
 
 /**
@@ -80,6 +86,19 @@ export const STALL_RATIO = 4;
  * "cannot say" rather than offering a ratio against a baseline that has not been established.
  */
 export const MIN_BASELINE_SAMPLES = 8;
+
+/**
+ * A baseline above this cannot be this machine's fast mode, so it is not fit to judge anything
+ * against — the report says "cannot say" instead of comparing to it.
+ *
+ * This is the ONE absolute number in the module and it is deliberately one-directional: it can only
+ * withhold an answer, never produce a `stalled: true`. MEASURED derivation, same in-process code
+ * path: over 80 consecutive control spawns on a quiet box the WHOLE distribution was 428-2411ms with
+ * p50 917ms, so a supposed fast-mode reference above 2000ms sits at the very top of (or outside) the
+ * entire observed range and is far more likely to be a burst sample than a floor. The live example in
+ * the module header had a 5215ms baseline.
+ */
+export const BASELINE_PLAUSIBILITY_CEILING_MS = 2000;
 
 /** Minimum gap between throttled (phase-transition) samples, so a short cycle stays cheap. */
 export const SAMPLE_MIN_GAP_MS = 5_000;
@@ -124,9 +143,9 @@ export interface ControlSpawnReport {
   /** How many control samples the process baseline was drawn from. */
   baselineSamples: number;
   /**
-   * True once the baseline rests on at least `MIN_BASELINE_SAMPLES` samples. It does NOT claim the
-   * baseline is this machine's true fast mode — see the module header: a process that only ever ran
-   * inside a burst has an inflated baseline and no way to know it.
+   * True once the baseline rests on at least `MIN_BASELINE_SAMPLES` samples AND is itself plausible
+   * as a fast-mode reading (<= `BASELINE_PLAUSIBILITY_CEILING_MS`). When false, `stalled` is `null`
+   * rather than `false`: an untrustworthy reference must not be allowed to certify a cycle as clean.
    */
   baselineTrusted: boolean;
   /** `maxMs / baselineMs`, rounded to 1dp. Null without an established baseline. */
@@ -237,7 +256,10 @@ export function buildControlSpawnReport(
   const minMs = durations.length ? Math.min(...durations) : null;
   const maxMs = durations.length ? Math.max(...durations) : null;
   const baselineMs = baseline.ms;
-  const baselineTrusted = baselineMs !== null && baselineMs > 0 && baseline.samples >= MIN_BASELINE_SAMPLES;
+  const baselineTrusted = baselineMs !== null
+    && baselineMs > 0
+    && baseline.samples >= MIN_BASELINE_SAMPLES
+    && baselineMs <= BASELINE_PLAUSIBILITY_CEILING_MS;
   const inflationRatio = baselineTrusted && maxMs !== null
     ? Math.round((maxMs / baselineMs) * 10) / 10
     : null;
@@ -266,8 +288,10 @@ function describeControlSpawnReport(
   if (total === 0) return "no control spawn was taken for this cycle — its timings have no environmental baseline";
   if (usable === 0) return `all ${total} control spawns failed — cannot say whether this cycle was stalled; read the samples`;
   if (!baselineTrusted) {
-    return `cannot say: fewer than ${MIN_BASELINE_SAMPLES} control spawns observed in this process, `
-      + "so there is no established reference to judge these against. Read the raw samples.";
+    return "cannot say: this process has no credible fast-mode reference to judge against — either "
+      + `fewer than ${MIN_BASELINE_SAMPLES} control spawns so far, or its own fastest spawn is above `
+      + `${BASELINE_PLAUSIBILITY_CEILING_MS}ms and was itself taken during a burst. Read the raw `
+      + "samples and baselineMs.";
   }
   const basis = "relative to this process's own fastest control spawn, which may itself have been "
     + "taken during a burst — check baselineMs";

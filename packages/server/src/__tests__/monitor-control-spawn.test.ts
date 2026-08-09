@@ -83,12 +83,22 @@ describe("control-spawn stall indicator (#368)", () => {
     expect(thin.note).toContain("cannot say");
   });
 
-  it("discloses the baseline it judged against, because an inflated baseline cannot detect itself", () => {
-    // A process that has only ever run inside a burst will report `stalled: false`. That limitation
-    // is exposed rather than hidden: the consumer can see the baseline is 2229ms and disbelieve it.
-    const report = buildControlSpawnReport(IN_PROCESS_BURST.map((ms) => sample(ms)), { ms: 2229, samples: 40 });
-    expect(report.stalled).toBe(false);
-    expect(report.baselineMs).toBe(2229);
+  it("refuses to answer when its own reference was taken during a burst", () => {
+    // MEASURED on the live board: a cycle whose control spawns took 8998/9022/14600/19618ms was
+    // reported `stalled: false`, because that server process had started inside a long burst and its
+    // own fastest sample was 5215ms — a ratio of 3.8. A boolean derived from an untrustworthy
+    // reference must read "cannot say", never "clean".
+    const live = [14600, 19618, 9022, 8998].map((ms) => sample(ms));
+    const report = buildControlSpawnReport(live, { ms: 5215, samples: 9 });
+    expect(report.baselineTrusted).toBe(false);
+    expect(report.stalled).toBeNull();
+    expect(report.baselineMs).toBe(5215);
+    expect(report.note).toContain("taken during a burst");
+  });
+
+  it("still discloses the baseline it judged against when it DID answer", () => {
+    const report = buildControlSpawnReport(IN_PROCESS_BURST.map((ms) => sample(ms)), baseline);
+    expect(report.baselineMs).toBe(428);
     expect(report.note).toContain("may itself have been taken during a burst");
   });
 
