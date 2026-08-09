@@ -7,7 +7,8 @@
  *   start with NO exit record          => killed without notice (OOM / taskkill /F / power loss)
  *
  * OOM was the ticket's leading unverified candidate precisely because it leaves no trace, so the
- * absence of a record has to be the signal. That is what these tests pin.
+ * absence of a record is part of the signal. Only part, though — see the heartbeat block at the bottom
+ * of this file for why absence ALONE turned out to be worthless here, and what replaced it.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -17,8 +18,13 @@ import {
   appendExitRecord,
   findUnexplainedExits,
   readExitRecords,
+  outageBeforeStartMs,
+  readHeartbeat,
   recordProcessStart,
+  startHeartbeat,
   trimExitLog,
+  writeHeartbeat,
+  OUTAGE_REPORT_THRESHOLD_MS,
   type ExitRecord,
 } from "../lib/exit-record.js";
 
@@ -121,11 +127,78 @@ describe("exit record survives process death (#373)", () => {
 
   it("reports the previous notice-less death at the next boot, then records its own start", () => {
     writeFileSync(path, `${JSON.stringify(record("start", 7777))}\n`, "utf8");
-    const unexplained = recordProcessStart(path);
+    const { unexplained } = recordProcessStart(path, join(dir, "alive.json"));
     expect(unexplained.map((r) => r.pid)).toEqual([7777]);
     const after = readExitRecords(path);
     expect(after).toHaveLength(2);
     expect(after[1].kind).toBe("start");
     expect(after[1].pid).toBe(process.pid);
+  });
+});
+
+/**
+ * The correction that made the above usable. The first version shipped with only start/exit records,
+ * and its own live output within the hour showed **five consecutive `start` records with no exit
+ * record between any of them** — because the dev watch wrapper KILLS the child instead of signalling
+ * it, so an ordinary file-edit reload is indistinguishable from an OOM kill. An indicator that fires
+ * on every routine event is as useless as one that never fires.
+ *
+ * The heartbeat is what separates them, and it is the figure the ticket actually asked for: the board
+ * was DOWN for N seconds. A reload gives seconds; the reported incident gave 15+ minutes.
+ */
+describe("heartbeat turns 'no exit record' into an OUTAGE DURATION (#373)", () => {
+  let beatPath: string;
+
+  beforeEach(() => {
+    beatPath = join(dir, "process-alive.json");
+  });
+
+  it("round-trips liveness, and a process's own heartbeat is never evidence that IT was down", () => {
+    writeHeartbeat(beatPath);
+    const beat = readHeartbeat(beatPath);
+    expect(beat?.pid).toBe(process.pid);
+    expect(outageBeforeStartMs(beat)).toBeNull();
+  });
+
+  it("measures the gap since ANOTHER process was last alive — the 15-minute outage figure", () => {
+    const fifteenAgo = new Date(Date.now() - 15 * 60_000).toISOString();
+    const gap = outageBeforeStartMs({ at: fifteenAgo, pid: 4242, uptimeMs: 1 }, Date.now(), 999);
+    expect(gap).not.toBeNull();
+    expect(gap!).toBeGreaterThan(14 * 60_000);
+    expect(gap!).toBeGreaterThan(OUTAGE_REPORT_THRESHOLD_MS);
+  });
+
+  it("does NOT call a watch reload an outage — the whole reason this exists", () => {
+    const twoSecondsAgo = new Date(Date.now() - 2_000).toISOString();
+    const gap = outageBeforeStartMs({ at: twoSecondsAgo, pid: 4242, uptimeMs: 1 }, Date.now(), 999);
+    expect(gap!).toBeLessThan(OUTAGE_REPORT_THRESHOLD_MS);
+  });
+
+  it("treats a missing, malformed or future heartbeat as no evidence rather than as an outage", () => {
+    expect(readHeartbeat(join(dir, "absent.json"))).toBeNull();
+    writeFileSync(beatPath, "not json", "utf8");
+    expect(readHeartbeat(beatPath)).toBeNull();
+    const future = new Date(Date.now() + 60_000).toISOString();
+    expect(outageBeforeStartMs({ at: future, pid: 1, uptimeMs: 1 }, Date.now(), 999)).toBeNull();
+  });
+
+  it("stamps immediately and cannot hold the process open", () => {
+    const timer = startHeartbeat(30_000, beatPath);
+    try {
+      // The immediate stamp matters: a process that dies inside its first interval must still leave a
+      // lower bound on when it was last alive.
+      expect(readHeartbeat(beatPath)).not.toBeNull();
+      expect(timer.hasRef()).toBe(false);
+    } finally {
+      clearInterval(timer);
+    }
+  });
+
+  it("recordProcessStart reports the outage alongside the unexplained start", () => {
+    writeFileSync(path, JSON.stringify(record("start", 8888)) + "\n", "utf8");
+    writeFileSync(beatPath, JSON.stringify({ at: new Date(Date.now() - 20 * 60_000).toISOString(), pid: 8888, uptimeMs: 1 }), "utf8");
+    const { unexplained, outageMs } = recordProcessStart(path, beatPath);
+    expect(unexplained.map((r) => r.pid)).toEqual([8888]);
+    expect(outageMs!).toBeGreaterThan(19 * 60_000);
   });
 });
