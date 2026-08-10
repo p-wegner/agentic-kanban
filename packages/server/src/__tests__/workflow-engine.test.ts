@@ -499,6 +499,72 @@ describe("workflow-engine", () => {
     expect(wsNode.statusName).toBe("Done");
   });
 
+  it("syncCurrentNodeToStatus clears the node on a BACKWARDS move to a status with no node (#381)", async () => {
+    // #381: the workflow template has no node for "Todo", so moving an issue back
+    // there used to leave issues/workspaces.currentNodeId pointing at the "Review"
+    // node. buildBoardColumns then derived "In Review" from that stale node and
+    // rendered the issue in the In Review column forever — surviving a full server
+    // restart, because the stale node is DB state, not a cache.
+    const { syncCurrentNodeToStatus } = await import("@agentic-kanban/shared/lib/workflow-engine");
+    const { projectId, statusIds } = await seedProject(db);
+    const issueId = await seedIssue(db, projectId, statusIds["Todo"], "bug");
+    const wsId = await seedWorkspace(db, issueId);
+    await initWorkspaceWorkflow(db as any, { workspaceId: wsId, issueId });
+
+    // Advance to In Review, so there is a non-terminal node to go stale.
+    await db.update(schema.issues).set({ statusId: statusIds["In Review"] }).where(eq(schema.issues.id, issueId));
+    await syncCurrentNodeToStatus(db as any, issueId);
+    const wsAtReview = (await db.select().from(schema.workspaces).where(eq(schema.workspaces.id, wsId)))[0];
+    const reviewNode = (await db.select().from(schema.workflowNodes).where(eq(schema.workflowNodes.id, wsAtReview.currentNodeId!)))[0];
+    expect(reviewNode.statusName).toBe("In Review");
+
+    // Now move BACKWARDS to Todo — a status the template has no node for.
+    await db.update(schema.issues).set({ statusId: statusIds["Todo"] }).where(eq(schema.issues.id, issueId));
+    await syncCurrentNodeToStatus(db as any, issueId);
+
+    const issueAfter = (await db.select().from(schema.issues).where(eq(schema.issues.id, issueId)))[0];
+    const wsAfter = (await db.select().from(schema.workspaces).where(eq(schema.workspaces.id, wsId)))[0];
+    expect(issueAfter.currentNodeId).toBeNull();
+    expect(wsAfter.currentNodeId).toBeNull();
+  });
+
+  it("syncCurrentNodeToStatus KEEPS the node on a FORWARD move to a status with no node (#381)", async () => {
+    // Negative control for the clearing rule above. A status that sorts AFTER the
+    // current node's status but has no node of its own (the real board's
+    // "AI Reviewed") must not lose the node — advancing the workflow reads
+    // currentNodeId to find its outgoing transitions.
+    const { syncCurrentNodeToStatus } = await import("@agentic-kanban/shared/lib/workflow-engine");
+    const { projectId, statusIds } = await seedProject(db);
+    const aiReviewedId = randomUUID();
+    // Insert "AI Reviewed" between "In Review" (2) and "Done" (3) by pushing Done to 4.
+    await db.update(schema.projectStatuses).set({ sortOrder: 4 }).where(eq(schema.projectStatuses.id, statusIds["Done"]));
+    await db.insert(schema.projectStatuses).values({
+      id: aiReviewedId,
+      projectId,
+      name: "AI Reviewed",
+      sortOrder: 3,
+      isDefault: false,
+      createdAt: new Date().toISOString(),
+    });
+    const issueId = await seedIssue(db, projectId, statusIds["Todo"], "bug");
+    const wsId = await seedWorkspace(db, issueId);
+    await initWorkspaceWorkflow(db as any, { workspaceId: wsId, issueId });
+
+    await db.update(schema.issues).set({ statusId: statusIds["In Review"] }).where(eq(schema.issues.id, issueId));
+    await syncCurrentNodeToStatus(db as any, issueId);
+    const wsAtReview = (await db.select().from(schema.workspaces).where(eq(schema.workspaces.id, wsId)))[0];
+    const reviewNodeId = wsAtReview.currentNodeId;
+    expect(reviewNodeId).toBeTruthy();
+
+    await db.update(schema.issues).set({ statusId: aiReviewedId }).where(eq(schema.issues.id, issueId));
+    await syncCurrentNodeToStatus(db as any, issueId);
+
+    const issueAfter = (await db.select().from(schema.issues).where(eq(schema.issues.id, issueId)))[0];
+    const wsAfter = (await db.select().from(schema.workspaces).where(eq(schema.workspaces.id, wsId)))[0];
+    expect(issueAfter.currentNodeId).toBe(reviewNodeId);
+    expect(wsAfter.currentNodeId).toBe(reviewNodeId);
+  });
+
   it("syncCurrentNodeToStatus does not update closed workspaces", async () => {
     const { syncCurrentNodeToStatus } = await import("@agentic-kanban/shared/lib/workflow-engine");
     const { projectId, statusIds } = await seedProject(db);
