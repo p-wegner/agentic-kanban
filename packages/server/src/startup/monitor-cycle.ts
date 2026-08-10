@@ -21,6 +21,7 @@ import {
   hasRepeatedFailedCommand,
   isBuilderSession,
   isZeroDiffInReviewAwaiting,
+  orderCandidatesForWalk,
   parseStuckBuilderTimeoutMs,
   type LatestSession,
 } from "./monitor-cycle-rules.js";
@@ -683,7 +684,9 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
     });
   }
 
-  async function processProjectGroup(projectId: string, wsList: WorkspaceCandidate[]): Promise<void> {
+  async function processProjectGroup(projectId: string, unordered: WorkspaceCandidate[]): Promise<void> {
+    // Zero-cost decisions first, so the time budget below cannot starve them (#387).
+    const wsList = orderCandidatesForWalk(unordered);
     const deadline = now() + projectTimeBudgetMs;
     for (let i = 0; i < wsList.length; i++) {
       if (now() > deadline) {

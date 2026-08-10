@@ -22,7 +22,7 @@ vi.mock("../repositories/workspace-status.repository.js", () => ({
 
 import { db } from "../db/index.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
-import { QUOTA_BLOCK_PROBE_FALLBACK_MS } from "../startup/monitor-cycle-rules.js";
+import { QUOTA_BLOCK_PROBE_FALLBACK_MS, orderCandidatesForWalk } from "../startup/monitor-cycle-rules.js";
 import {
   MAX_MONITOR_MERGES_PER_CYCLE,
   MAX_MONITOR_RELAUNCHES_PER_CYCLE,
@@ -958,5 +958,29 @@ describe("processWorkspaceCandidates — blocked on a provider usage limit (#387
 
     expect(vi.mocked(setWorkspaceStatus)).not.toHaveBeenCalled();
     expectNoWorkspaceAction(deps);
+  });
+});
+
+// #387 residual: the per-project time budget cut the walk off before the blocked
+// candidates were ever reached, so the quota-release transition existed but was starved.
+// Measured on `eventhub`: 6-21 candidates deferred EVERY cycle, and two releasable
+// workspaces stayed blocked for several cycles purely because of their position.
+describe("orderCandidatesForWalk", () => {
+  it("puts blocked candidates first, since their decision costs no git", () => {
+    const input = [
+      { wsId: "a", wsStatus: "idle" },
+      { wsId: "b", wsStatus: "blocked" },
+      { wsId: "c", wsStatus: "active" },
+      { wsId: "d", wsStatus: "blocked" },
+    ];
+    expect(orderCandidatesForWalk(input).map((c) => c.wsId)).toEqual(["b", "d", "a", "c"]);
+  });
+
+  it("is stable within each group and returns the input untouched when nothing is blocked", () => {
+    const input = [
+      { wsId: "a", wsStatus: "idle" },
+      { wsId: "b", wsStatus: "reviewing" },
+    ];
+    expect(orderCandidatesForWalk(input)).toBe(input);
   });
 });
