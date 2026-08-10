@@ -256,12 +256,17 @@ function mergeSettingsHooks(
       ? { matcher, hooks: [hookObj] }
       : { hooks: [hookObj] };
 
-    // Skip if an entry with this exact command already exists under this event
-    const commandAlreadyPresent = arr.some((e) => {
+    // Skip if this exact command is already wired for this event UNDER THE SAME MATCHER.
+    // Keying on the command alone was a silent wiring bug (#369): one script legitimately
+    // needs two matchers (the worktree guard runs on Write|Edit|… *and* on Bash|PowerShell),
+    // and command-only dedupe dropped the second one without a word — leaving the shell
+    // vector uncovered while the settings file looked like the guard was installed.
+    const alreadyPresent = arr.some((e) => {
+      if ((e.matcher ?? undefined) !== matcher) return false;
       const innerHooks = (e.hooks as Record<string, unknown>[] | undefined) ?? [];
       return innerHooks.some((h) => h.command === command);
     });
-    if (commandAlreadyPresent) continue;
+    if (alreadyPresent) continue;
 
     arr.push(wrapperEntry);
   }
@@ -356,6 +361,14 @@ export function ensureHookScaffold(repoPath: string, options: HookScaffoldOption
       newEntries.push({
         event: "PreToolUse",
         matcher: "Write|Edit|MultiEdit|NotebookEdit",
+        command: "node $CLAUDE_PROJECT_DIR/.claude/hooks/prevent-cross-worktree-writes.js",
+      });
+      // Shell vector (#369): the incident commit was made by `cd <main checkout>; git commit -F`,
+      // which the Write/Edit matcher above never sees. The guard now inspects shell commands
+      // too, so it must ALSO be wired on the shell matcher or the vector stays open.
+      newEntries.push({
+        event: "PreToolUse",
+        matcher: "Bash|PowerShell",
         command: "node $CLAUDE_PROJECT_DIR/.claude/hooks/prevent-cross-worktree-writes.js",
       });
     }

@@ -4,9 +4,10 @@
  * git worktree.
  *
  * Runs as a PreToolUse hook on structured file-writing tools (Write, Edit,
- * MultiEdit, NotebookEdit) and Codex patch tools. It blocks any write whose
- * target path lives inside a *different* git worktree of the same repo than the
- * one this instance is operating in.
+ * MultiEdit, NotebookEdit), Codex patch tools, AND shell tools (Bash/PowerShell/
+ * Codex shell). It blocks any write — structured or shelled-out — whose target
+ * lives inside a *different* git worktree of the same repo than the one this
+ * instance is authorized for.
  *
  * Why: agents are launched in a dedicated worktree (cwd = worktree). When an
  * agent writes into the main checkout or a sibling worktree, that work lands
@@ -15,13 +16,23 @@
  * invariant "stay in your own worktree".
  *
  * Scope / behaviour:
- *   - ALLOW writes inside the current worktree (CLAUDE_PROJECT_DIR / cwd's git toplevel).
+ *   - ALLOW writes inside the authorized worktree.
  *   - ALLOW writes outside every worktree (e.g. %TEMP%, ~/.claude) — not our concern.
  *   - BLOCK writes inside any OTHER worktree of the same repo.
+ *   - BLOCK a shell command (Bash/PowerShell/Codex shell) that both references another
+ *     worktree of the same repo AND carries a mutating verb (`git commit`, a `>` redirect,
+ *     `Set-Content`, `rm`, …). Read-only inspection of a sibling worktree stays allowed.
  *   - No-op when cwd isn't a git repo or the repo has a single worktree.
  *
- * Known gap: Bash/PowerShell file writes (redirects, cp/mv) are NOT covered here
- * — only the structured write tools, which are the primary and reliable vector.
+ * The two gaps this closes (#369) — both were real, and the incident used the first:
+ *   (i)  Shell writes used to be UNCOVERED: only the structured write tools were guarded,
+ *        so `cd <other-worktree>; git commit -F msg` walked straight past. SHELL_TOOLS +
+ *        `shellViolation()` below cover that vector now.
+ *   (ii) The authorized worktree used to be derived from the PROCESS'S OWN cwd, i.e. the
+ *        guard self-authorized: an agent sitting in the wrong repo declared that repo
+ *        authorized. `authorizedRoot()` now prefers KANBAN_WORKTREE_DIR — injected by the
+ *        board at agent launch and therefore NOT under the agent's control — and only
+ *        falls back to CLAUDE_PROJECT_DIR/cwd when no board-supplied root exists.
  *
  * Override: set ALLOW_CROSS_WORKTREE_WRITE=1 (explicit, for the rare legit case).
  */
@@ -40,6 +51,37 @@ const WRITE_TOOLS = new Set([
   "functions.apply_patch",
 ]);
 const PATCH_TOOLS = new Set(["apply_patch", "apply_patch_freeform", "functions.apply_patch"]);
+
+/** Shell-ish tools across Claude Code and Codex, whose payload is a raw command string. */
+const SHELL_TOOLS = new Set([
+  "Bash",
+  "PowerShell",
+  "shell",
+  "shell_command",
+  "exec_command",
+  "command_execution",
+]);
+
+/**
+ * Verbs that MUTATE something. A shell command is only blocked when it both reaches into a
+ * sibling worktree AND matches one of these — so `cd <other>; git log` (read-only triage,
+ * which agents legitimately do) is still allowed, while `cd <other>; git commit` is not.
+ *
+ * Deliberately includes the git verbs that move refs/index, not just `commit`: the incident
+ * commit was produced by `git commit -F`, but `git add`/`apply`/`reset`/`checkout` in another
+ * worktree are the same class of damage.
+ */
+const MUTATING_PATTERNS = [
+  // git verbs that write objects, refs, the index, or the working tree
+  /\bgit\b[^\n;|&]*\b(commit|add|apply|am|cherry-pick|revert|reset|checkout|switch|restore|merge|rebase|stash|clean|rm|mv|push|tag|worktree|update-ref|gc|prune)\b/i,
+  // POSIX-ish file mutation
+  /(^|[\s;|&(])(cp|mv|rm|rmdir|mkdir|touch|tee|dd|truncate|install|ln|chmod|chown)\s/,
+  /\bsed\s+(-[^\s]*\s+)*-i\b/,
+  // shell output redirection into a file
+  />>?\s*[^\s|&;]/,
+  // PowerShell file mutation cmdlets
+  /\b(Set-Content|Add-Content|Out-File|Remove-Item|New-Item|Copy-Item|Move-Item|Clear-Content|Rename-Item|Set-ItemProperty|Write-File)\b/i,
+];
 
 /** Normalise a path for case-insensitive, separator-insensitive comparison (Windows-friendly). */
 function norm(p) {
@@ -114,6 +156,66 @@ function patchTargetPaths(input) {
   return paths;
 }
 
+/**
+ * The worktree this instance is AUTHORIZED to write in.
+ *
+ * Order matters (#369 gap ii): KANBAN_WORKTREE_DIR is set by the board when it launches the
+ * agent, so it is external to the agent and cannot be moved by cd-ing somewhere else. Only
+ * when it is absent (a hand-run session, another harness) do we fall back to the process's
+ * own view — which is the self-authorizing behaviour we no longer rely on.
+ */
+function authorizedRoot(inputCwd) {
+  const declared = process.env.KANBAN_WORKTREE_DIR;
+  if (declared && declared.trim()) {
+    return { root: norm(gitToplevel(declared) || declared), source: "KANBAN_WORKTREE_DIR", cwd: declared };
+  }
+  const cwd = process.env.CLAUDE_PROJECT_DIR || inputCwd || process.cwd();
+  return { root: norm(gitToplevel(cwd) || cwd), source: "cwd", cwd };
+}
+
+/** Split a shell command into candidate path-ish tokens (quotes stripped). */
+function commandPathTokens(command) {
+  const tokens = [];
+  const re = /"([^"]+)"|'([^']+)'|([^\s;|&()]+)/g;
+  let m;
+  while ((m = re.exec(command)) !== null) {
+    const raw = m[1] || m[2] || m[3];
+    if (raw && (raw.includes("/") || raw.includes("\\") || raw.includes(".."))) tokens.push(raw);
+  }
+  return tokens;
+}
+
+/**
+ * Decide whether a shell command reaches into another worktree in a MUTATING way.
+ * Returns the offending worktree root, or null.
+ *
+ * Two independent detections, because agents write paths both ways:
+ *  - a raw substring hit on another worktree's absolute path (covers `cd C:\...\other-repo`,
+ *    `git -C C:/…/other-repo commit`, a redirect into an absolute path), and
+ *  - a relative token (`../../other-repo/x`) resolved against the authorized root.
+ */
+function shellViolation(command, currentRoot, others, cwd) {
+  if (!command || others.length === 0) return null;
+  if (!MUTATING_PATTERNS.some((re) => re.test(command))) return null;
+
+  const haystack = normText(command);
+  for (const other of others) {
+    if (haystack.includes(other)) return other;
+  }
+  for (const token of commandPathTokens(command)) {
+    const resolved = norm(path.isAbsolute(token) ? token : path.join(cwd, token));
+    if (isInside(resolved, currentRoot)) continue;
+    const offending = others.find((w) => isInside(resolved, w));
+    if (offending) return offending;
+  }
+  return null;
+}
+
+/** Lowercase + forward-slash a free-text command so absolute paths compare like norm() output. */
+function normText(text) {
+  return String(text).replace(/\\/g, "/").toLowerCase();
+}
+
 async function readInput() {
   const rl = readline.createInterface({ input: process.stdin });
   const lines = [];
@@ -141,14 +243,17 @@ async function main() {
   if (!input) allow();
 
   const toolName = input.tool_name || input.toolName;
-  if (!WRITE_TOOLS.has(toolName)) allow();
+  const isShell = SHELL_TOOLS.has(toolName);
+  if (!WRITE_TOOLS.has(toolName) && !isShell) allow();
 
-  const targets = targetPaths(toolName, input.tool_input || input.toolInput);
-  if (targets.length === 0) allow();
+  const toolInput = input.tool_input || input.toolInput;
+  const command = isShell ? (toolInput && (toolInput.command || toolInput.script)) || "" : "";
+  const targets = isShell ? [] : targetPaths(toolName, toolInput);
+  if (!isShell && targets.length === 0) allow();
+  if (isShell && !command) allow();
 
-  // The worktree this instance is operating in.
-  const cwd = process.env.CLAUDE_PROJECT_DIR || input.cwd || process.cwd();
-  const currentRoot = norm(gitToplevel(cwd) || cwd);
+  // The worktree this instance is AUTHORIZED to operate in — board-declared where possible.
+  const { root: currentRoot, source: rootSource, cwd } = authorizedRoot(input.cwd);
   const worktrees = listWorktrees(cwd).map(norm);
   if (worktrees.length <= 1) {
     // Inside a builder container this is usually because only ONE worktree's git dir is
@@ -168,6 +273,25 @@ async function main() {
 
   const others = worktrees.filter((w) => w !== currentRoot);
 
+  if (isShell) {
+    const offending = shellViolation(command, currentRoot, others, cwd);
+    if (offending) {
+      block(
+        "⛔ Cross-worktree shell command blocked.\n\n" +
+          `This session is authorized for (via ${rootSource}):\n  ${currentRoot}\n\n` +
+          `but the command mutates a DIFFERENT git worktree:\n  ${offending}\n\n` +
+          `Command:\n  ${String(command).split(/\r?\n/).slice(0, 6).join("\n  ")}\n\n` +
+          "This is the #369 vector: an agent cd-ing into the main checkout (or a sibling\n" +
+          "worktree) and committing there bypasses the ticket's branch/merge gate entirely.\n" +
+          "Reading another worktree is fine; mutating it is not.\n\n" +
+          "Fix: do the work in your own worktree above and commit there. If you genuinely\n" +
+          "need to mutate another worktree, set ALLOW_CROSS_WORKTREE_WRITE=1 for that one\n" +
+          "call. Do NOT bypass by editing this hook."
+      );
+    }
+    allow();
+  }
+
   for (const target of targets) {
     const t = norm(path.isAbsolute(target) ? target : path.join(cwd, target));
     // Writing inside our own worktree is always fine.
@@ -177,7 +301,7 @@ async function main() {
     if (offending) {
       block(
         "⛔ Cross-worktree write blocked.\n\n" +
-          `This Claude instance is operating in:\n  ${currentRoot}\n\n` +
+          `This Claude instance is authorized for (via ${rootSource}):\n  ${currentRoot}\n\n` +
           `but the write targets a DIFFERENT git worktree:\n  ${t}\n  (worktree: ${offending})\n\n` +
           "Each agent must stay inside its own worktree. Writing into another worktree\n" +
           "(or the main checkout) leaves work uncommitted in someone else's tree, blocks\n" +
