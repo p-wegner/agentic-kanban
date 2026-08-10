@@ -8,9 +8,11 @@
 //  1. createWorktree never deletes an existing directory that is another repo's
 //     checkout (or a registered worktree of this repo under a different branch) —
 //     it falls back to a numeric-suffix path instead.
-//  2. The opt-in `pathNamespace` option places a worktree at
-//     .worktrees/<namespace>/<branch> so sibling repos can't collide at all.
-//  3. The single-repo path scheme (<parent>/.worktrees/<branch>) is UNCHANGED.
+//  2. EVERY worktree is namespaced by its repo's directory name (#385):
+//     .worktrees/<repoDirName>/<branch>, so sibling repos can't collide at all and a
+//     path states its own owner. `pathNamespace` adds a further sub-segment.
+//  3. Old-layout worktrees (.worktrees/<branch>, pre-#385) still RESOLVE — the reuse
+//     path goes through `git worktree list`, not the computed path.
 //  4. A plain leftover directory (no .git) at the target is still removed and reused.
 
 import { execFile } from "node:child_process";
@@ -72,18 +74,51 @@ describe("createWorktree collision safety (repos sharing a parent directory)", (
     await rm(parent, { recursive: true, force: true });
   });
 
-  it("keeps the single-repo path scheme unchanged: <parent>/.worktrees/<sanitized-branch>", async () => {
+  it("namespaces the single-repo path by the repo directory: <parent>/.worktrees/<repoDir>/<sanitized-branch> (#385)", async () => {
     const wt = await createWorktree(appRepo, "feature/solo", "main");
 
-    expect(resolve(wt)).toBe(resolve(join(parent, ".worktrees", "feature_solo")));
+    expect(resolve(wt)).toBe(resolve(join(parent, ".worktrees", "app", "feature_solo")));
     expect(existsSync(join(wt, "app.txt"))).toBe(true);
   }, GIT_IO_TIMEOUT_MS);
 
   it("shortens the on-disk leaf to just ak-<N> for a branch carrying an issue number (#193)", async () => {
     const wt = await createWorktree(appRepo, "feature/ak-1-a-very-long-descriptive-slug-goes-here", "main");
 
-    expect(resolve(wt)).toBe(resolve(join(parent, ".worktrees", "ak-1")));
+    expect(resolve(wt)).toBe(resolve(join(parent, ".worktrees", "app", "ak-1")));
     expect(existsSync(join(wt, "app.txt"))).toBe(true);
+  }, GIT_IO_TIMEOUT_MS);
+
+  it("gives two projects' identical issue number DISTINCT, self-identifying paths — no numeric suffix (#385)", async () => {
+    // The #385 hazard verbatim: issue numbers are allocated PER PROJECT, so both
+    // sibling repos have an issue #6 and both branches sanitize to the leaf `ak-6`.
+    // Pre-#385 the second claimant got `.worktrees/ak-6-2` and the un-suffixed
+    // `.worktrees/ak-6` belonged to whichever repo got there first.
+    const branch = "feature/ak-6-same-slug-different-project";
+    const wtApp = await createWorktree(appRepo, branch, "main");
+    const wtLib = await createWorktree(libRepo, branch, "main");
+
+    expect(resolve(wtApp)).toBe(resolve(join(parent, ".worktrees", "app", "ak-6")));
+    expect(resolve(wtLib)).toBe(resolve(join(parent, ".worktrees", "lib", "ak-6")));
+    // Neither path needed a collision suffix, and each names its owner.
+    expect(existsSync(join(wtApp, "app.txt"))).toBe(true);
+    expect(existsSync(join(wtLib, "lib.txt"))).toBe(true);
+  }, GIT_IO_TIMEOUT_MS);
+
+  it("still resolves (reuses) an OLD-LAYOUT worktree at .worktrees/<branch> instead of creating a second one (#385 migration)", async () => {
+    // Simulate a worktree created before the layout change by registering it at the
+    // flat pre-#385 path directly with git.
+    const oldLayoutPath = join(parent, ".worktrees", "ak-9");
+    await git(appRepo, ["branch", "feature/ak-9-legacy", "main"]);
+    await git(appRepo, ["worktree", "add", oldLayoutPath, "feature/ak-9-legacy"]);
+
+    const wt = await createWorktree(appRepo, "feature/ak-9-legacy", "main");
+
+    // Resolution goes through `git worktree list`, so the existing checkout is reused
+    // where it already sits — the new layout applies only to NEW worktrees.
+    expect(resolve(wt)).toBe(resolve(oldLayoutPath));
+    expect(existsSync(join(parent, ".worktrees", "app", "ak-9"))).toBe(false);
+    const registered = await listWorktrees(appRepo);
+    expect(registered.filter((w) => w.branch.endsWith("feature/ak-9-legacy")).length).toBe(1);
   }, GIT_IO_TIMEOUT_MS);
 
   it("does not destroy the first repo's worktree when a sibling repo uses the same branch", async () => {
@@ -109,17 +144,18 @@ describe("createWorktree collision safety (repos sharing a parent directory)", (
     expect((await git(wtLib, ["rev-parse", "--abbrev-ref", "HEAD"])).trim()).toBe("feature/shared");
   }, GIT_IO_TIMEOUT_MS);
 
-  it("pathNamespace places the worktree under .worktrees/<namespace>/<branch>, avoiding collision entirely", async () => {
+  it("pathNamespace adds a further sub-segment under the repo namespace", async () => {
     const wtApp = await createWorktree(appRepo, "feature/multi", "main");
-    const wtLib = await createWorktree(libRepo, "feature/multi", "main", { pathNamespace: "lib" });
+    const wtLib = await createWorktree(libRepo, "feature/multi", "main", { pathNamespace: "train" });
 
-    expect(resolve(wtLib)).toBe(resolve(join(parent, ".worktrees", "lib", "feature_multi")));
+    expect(resolve(wtApp)).toBe(resolve(join(parent, ".worktrees", "app", "feature_multi")));
+    expect(resolve(wtLib)).toBe(resolve(join(parent, ".worktrees", "lib", "train", "feature_multi")));
     expect(existsSync(join(wtApp, "app.txt"))).toBe(true);
     expect(existsSync(join(wtLib, "lib.txt"))).toBe(true);
   }, GIT_IO_TIMEOUT_MS);
 
   it("still removes and reuses a plain leftover directory (no .git) at the target path", async () => {
-    const target = join(parent, ".worktrees", "feature_leftover");
+    const target = join(parent, ".worktrees", "app", "feature_leftover");
     await mkdir(target, { recursive: true });
     await writeFile(join(target, "junk.txt"), "leftover from a deleted workspace\n");
 

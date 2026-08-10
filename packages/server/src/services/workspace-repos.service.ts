@@ -61,10 +61,11 @@ export interface SiblingWorktree {
  * Create a worktree on `branch` in every additional repo of the project (same branch
  * name as the leading repo). Worktrees land at `dirname(repoPath)/.worktrees/...`,
  * which repos sharing a parent directory SHARE — the guaranteed layout for
- * clone-from-URL repos — so sibling worktrees are additionally namespaced by the
- * repo's directory name (`.worktrees/<repoDirName>/<branch>`) to keep them from
- * colliding with the leading repo's worktree (which keeps the un-namespaced
- * single-repo scheme). Throws on the first failure: full-peers semantics require
+ * clone-from-URL repos — so every worktree is namespaced by its repo's directory
+ * name (`.worktrees/<repoDirName>/<branch>`). That is now `createWorktree`'s DEFAULT
+ * for the leading repo too (#385 — the un-namespaced single-repo scheme made a path
+ * ambiguous about which project owned it), so no explicit `pathNamespace` is passed
+ * here any more. Throws on the first failure: full-peers semantics require
  * every repo present. Siblings already provisioned in earlier iterations are rolled
  * back HERE before the throw — the caller never sees the partial list (the throw
  * prevents the assignment), so an internal rollback is the only way they get removed.
@@ -114,9 +115,8 @@ export async function provisionSiblingWorktrees(params: {
         );
       }
       const baseCommitSha = await gitService.revParse(repo.path, baseBranch);
-      const worktreePath = await gitService.createWorktree(repo.path, branch, baseBranch, {
-        pathNamespace: basename(repo.path),
-      });
+      // No pathNamespace: createWorktree already namespaces by basename(repo.path).
+      const worktreePath = await gitService.createWorktree(repo.path, branch, baseBranch);
       // Per-repo setup/install (#71): each additional repo may need its own deps ready in
       // its worktree before the agent runs (`pnpm install`, `cargo fetch`, `uv sync`, …).
       // Best-effort + non-fatal, mirroring the leading-repo setup script's semantics — a
