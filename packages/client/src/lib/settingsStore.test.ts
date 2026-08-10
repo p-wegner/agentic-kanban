@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
-import { getSettings, invalidateSettings, setSettings, setProjectPref } from "./settingsStore.js";
+import { getSettings, invalidateSettings, setSettings, setProjectPref, subscribeSettingsInvalidated } from "./settingsStore.js";
 import { apiFetch } from "./api.js";
 
 vi.mock("./api.js", () => ({ apiFetch: vi.fn() }));
@@ -106,6 +106,44 @@ describe("settingsStore", () => {
     // Still served from cache — no refetch triggered.
     expect((await getSettings()).a).toBe("cached");
     expect(apiFetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  // #320 — the Loop pane's "Start mode is Manual" chip is rendered from the plugin surface's
+  // server-resolved startPolicy, not from this cache, so dropping the cache alone left it stale.
+  // Subscribers exist so a preference write can tell such a surface to refetch.
+  it("notifies subscribers on invalidation, and stops after unsubscribe", () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeSettingsInvalidated(listener);
+    invalidateSettings();
+    expect(listener).toHaveBeenCalledTimes(1);
+    unsubscribe();
+    invalidateSettings();
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("notifies subscribers after a start_mode write, so surfaces derived from it converge", async () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeSettingsInvalidated(listener);
+    try {
+      apiFetchMock.mockResolvedValueOnce(undefined); // the PUT
+      await setProjectPref("p1", "start_mode", "manual");
+      expect(listener).toHaveBeenCalledTimes(1);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("keeps notifying the remaining subscribers when one throws", () => {
+    const boom = vi.fn(() => { throw new Error("subscriber blew up"); });
+    const ok = vi.fn();
+    const un1 = subscribeSettingsInvalidated(boom);
+    const un2 = subscribeSettingsInvalidated(ok);
+    try {
+      expect(() => invalidateSettings()).not.toThrow();
+      expect(ok).toHaveBeenCalledTimes(1);
+    } finally {
+      un1(); un2();
+    }
   });
 
   it("setProjectPref scopes the key by project id", async () => {
