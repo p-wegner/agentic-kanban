@@ -28,7 +28,13 @@ import {
   GATE_RECOMMENDATION_RETRY_DELAYS_MS,
 } from "../services/gate-recommendation-retry.js";
 
-const NOW = "2026-08-09T12:00:00.000Z";
+/**
+ * Relative on purpose. A hardcoded ISO literal here ROTTED overnight: the DB-backed cases below
+ * insert events whose `created_at` is the real wall clock, so once the literal fell into the past
+ * every `gate-reached` row looked like it lay in the FUTURE and each expected retry came back
+ * `backoff`. Six hours ahead clears the longest delay in the table.
+ */
+const NOW = new Date(Date.now() + 6 * 60 * 60_000).toISOString();
 const ago = (ms: number) => new Date(Date.parse(NOW) - ms).toISOString();
 
 function facts(overrides: Partial<Parameters<typeof decideGateRecommendationRetry>[0]> = {}) {
