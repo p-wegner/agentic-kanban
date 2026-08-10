@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { mkdir, rm, stat, lstat, unlink, readdir, readFile } from "node:fs/promises";
-import { join, dirname, sep, resolve, parse, relative } from "node:path";
+import { join, dirname, basename, sep, resolve, parse, relative } from "node:path";
 import { gitExec } from "../git-exec.js";
 import { execGit } from "./internal.js";
 import { ensureOnBranch } from "./branch-attach.js";
@@ -53,16 +53,61 @@ function shortenWorktreeLeaf(safeName: string): string {
 }
 
 /**
- * Create a git worktree for a branch. The worktree is created in a
- * `.worktrees/<branch>` directory sibling to the repo root — or, when
- * `opts.pathNamespace` is given, in `.worktrees/<namespace>/<branch>`.
+ * Sanitize one path segment for use as a directory name under `.worktrees`, or
+ * return null when nothing safe is left (`""`, `.`, `..` would resolve to the
+ * `.worktrees` dir itself or its parent).
+ */
+function safePathSegment(raw: string | undefined): string | null {
+  const safe = (raw ?? "").replace(/[^a-zA-Z0-9._-]/g, "_");
+  if (safe === "" || safe === "." || safe === "..") return null;
+  return safe;
+}
+
+/**
+ * The directory a repo's worktrees live in: `<parent>/.worktrees/<repoDirName>`
+ * (plus an optional extra namespace segment).
  *
- * The namespace exists for multi-repo workspaces: every repo of a workspace uses
- * the SAME branch name, and repos sharing a parent directory (the guaranteed
- * layout for clone-from-URL repos) share the same `.worktrees` root — without a
- * per-repo namespace the sibling repos' worktrees would collide on disk with the
- * leading repo's. Single-repo callers pass no namespace, so their path scheme
- * (`<parent>/.worktrees/<branch>`) is unchanged.
+ * The `<repoDirName>` segment is what makes a worktree path SELF-IDENTIFYING (#385).
+ * `.worktrees` is shared by every repo under one parent directory (the guaranteed
+ * layout for clone-from-URL repos), and the leaf carries only the issue number —
+ * which is allocated PER PROJECT, so five sibling projects all have an issue #6.
+ * Collision handling was correct (the second claimant got a `-2` suffix), but the
+ * resulting path was ambiguous to a human or agent reading it, and it resolved in
+ * the most misleading direction: un-suffixed `ak-6` belonged to whichever project
+ * got there first, not to the project being inspected. That MEASURABLY induced the
+ * same false catastrophic diagnosis ("the board dispatched the wrong project's
+ * work") in three consecutive review rounds. Namespacing by the repo directory
+ * makes collisions impossible instead of suffixed, and makes the path state its
+ * own owner.
+ *
+ * This is the shape multi-repo siblings already used (`.worktrees/<repoDirName>/…`,
+ * `workspace-repos.service.ts`); the single-repo path was the inconsistent one.
+ * Siblings therefore no longer pass a namespace of their own — the default per-repo
+ * segment is exactly what they were asking for.
+ */
+function worktreesDirFor(repoPath: string, extraNamespace?: string): string {
+  const segments = [safePathSegment(basename(repoPath)), safePathSegment(extraNamespace)]
+    .filter((s): s is string => s !== null);
+  return join(dirname(repoPath), ".worktrees", ...segments);
+}
+
+/**
+ * Create a git worktree for a branch, in `<parent>/.worktrees/<repoDirName>/<branch>`
+ * — or `<parent>/.worktrees/<repoDirName>/<namespace>/<branch>` when
+ * `opts.pathNamespace` is given (see {@link worktreesDirFor} for why the repo
+ * directory is always part of the path).
+ *
+ * OLD-LAYOUT worktrees (`.worktrees/<branch>`, created before #385) keep working and
+ * are NOT migrated — they age out as their workspaces merge/close:
+ *  - reads use the DB's `workingDir`, which is authoritative;
+ *  - this function's reuse path resolves through `git worktree list`, so an existing
+ *    worktree on the branch is returned wherever it sits on disk;
+ *  - every containment guard (`removeLeftoverWorktreeDirectory` here,
+ *    `removeStaleWorktree`, `removeDirWithRetry`) tests "inside `.worktrees`", which a
+ *    nested and a flat path both satisfy;
+ *  - dev-port derivation reads only the LEAF, which is unchanged.
+ * Consequence, accepted deliberately: during the transition `.worktrees/` holds a MIX
+ * of both layouts, so the ambiguity survives for leaves that already exist.
  *
  * If the branch doesn't exist yet, it is created from the given baseBranch
  * (or HEAD if no baseBranch is specified).
@@ -111,10 +156,7 @@ export async function createWorktree(
       `Refusing to create worktree for branch "${branch}": sanitized name "${safeName}" is not a safe directory leaf`,
     );
   }
-  const safeNamespace = (opts.pathNamespace ?? "").replace(/[^a-zA-Z0-9._-]/g, "_");
-  const worktreesDir = safeNamespace && safeNamespace !== "." && safeNamespace !== ".."
-    ? join(dirname(repoPath), ".worktrees", safeNamespace)
-    : join(dirname(repoPath), ".worktrees");
+  const worktreesDir = worktreesDirFor(repoPath, opts.pathNamespace);
   const dirLeaf = shortenWorktreeLeaf(safeName);
   let worktreePath = join(worktreesDir, dirLeaf);
 
