@@ -21,6 +21,8 @@ vi.mock("../repositories/workspace-status.repository.js", () => ({
 }));
 
 import { db } from "../db/index.js";
+import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
+import { QUOTA_BLOCK_PROBE_FALLBACK_MS } from "../startup/monitor-cycle-rules.js";
 import {
   MAX_MONITOR_MERGES_PER_CYCLE,
   MAX_MONITOR_RELAUNCHES_PER_CYCLE,
@@ -825,5 +827,136 @@ describe("processWorkspaceCandidates — preemptive per-candidate timeout (#208 
 
     expect(stats.deferredProjectIds).toContain("proj-hung");
     expect(vi.mocked(secondDeps.workspaceActions.launch).mock.calls.map(([id]) => id)).toContain("healthy-1");
+  });
+});
+
+// #387: `blocked` was an absorbing state. A workspace parked there by a provider usage
+// limit is waiting on a CLOCK, not on a person, but the cycle logged "skipping automation"
+// and did nothing — so its latest session never changed, the stall classifier kept re-reading
+// the same immutable usage-limit stats row, and the workspace stayed blocked indefinitely.
+// Measured on `eventhub`: 18 workspaces blocked for up to 5 days while the same provider
+// profile billed successful sessions in the same project.
+describe("processWorkspaceCandidates — blocked on a provider usage limit (#387)", () => {
+  const blockedCandidate: WorkspaceCandidate = {
+    ...baseCandidate,
+    wsId: "ws-blocked",
+    wsStatus: "blocked",
+    issueStatusName: "In Progress",
+    readyForMerge: false,
+  };
+
+  // `setWorkspaceStatus` is a file-level mock shared with every earlier test in this suite,
+  // and nothing clears it globally — so the "must NOT transition" assertions below would read
+  // an earlier test's calls without this.
+  beforeEach(() => {
+    vi.mocked(setWorkspaceStatus).mockClear();
+  });
+
+  function quotaStats(retryAfter: string | null) {
+    return JSON.stringify({
+      rateLimited: true,
+      rateLimitKind: "claude-usage-limit",
+      ...(retryAfter === null ? {} : { retryAfter }),
+    });
+  }
+
+  /** Replaces the default beforeEach queue with one session row for the single candidate. */
+  function queueSession(session: Record<string, unknown> | null) {
+    vi.mocked(db.select).mockReset();
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain(session ? [session] : []) as ReturnType<typeof db.select>)
+      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]) as ReturnType<typeof db.select>);
+  }
+
+  it("returns a blocked workspace to idle once its retryAfter has passed", async () => {
+    queueSession({
+      id: "sess-1",
+      status: "stopped",
+      startedAt: new Date(Date.now() - 40 * 60 * 60 * 1000).toISOString(),
+      triggerType: "agent",
+      stats: quotaStats(new Date(Date.now() - 38 * 60 * 60 * 1000).toISOString()),
+    });
+    const deps = makeDeps();
+
+    await processWorkspaceCandidates([blockedCandidate], deps);
+
+    expect(vi.mocked(setWorkspaceStatus)).toHaveBeenCalledWith(db, "ws-blocked", "idle");
+    expect(vi.mocked(deps.boardEvents.broadcast)).toHaveBeenCalledWith("proj-1", "board_changed");
+  });
+
+  it("keeps a blocked workspace blocked while its retryAfter is still in the future", async () => {
+    queueSession({
+      id: "sess-1",
+      status: "stopped",
+      startedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+      triggerType: "agent",
+      stats: quotaStats(new Date(Date.now() + 90 * 60 * 1000).toISOString()),
+    });
+    const deps = makeDeps();
+
+    await processWorkspaceCandidates([blockedCandidate], deps);
+
+    expect(vi.mocked(setWorkspaceStatus)).not.toHaveBeenCalled();
+    expectNoWorkspaceAction(deps);
+  });
+
+  // A quota death with no parseable reset time must not become the same permanent block by
+  // another route: it is honoured for a bounded probe window measured from the death.
+  it("releases a quota block with no retryAfter after the fallback probe window", async () => {
+    queueSession({
+      id: "sess-1",
+      status: "stopped",
+      startedAt: new Date(Date.now() - (QUOTA_BLOCK_PROBE_FALLBACK_MS + 60_000)).toISOString(),
+      triggerType: "agent",
+      stats: quotaStats(null),
+    });
+    const deps = makeDeps();
+
+    await processWorkspaceCandidates([blockedCandidate], deps);
+
+    expect(vi.mocked(setWorkspaceStatus)).toHaveBeenCalledWith(db, "ws-blocked", "idle");
+  });
+
+  it("still honours a no-retryAfter quota block inside the fallback probe window", async () => {
+    queueSession({
+      id: "sess-1",
+      status: "stopped",
+      startedAt: new Date(Date.now() - 60_000).toISOString(),
+      triggerType: "agent",
+      stats: quotaStats(null),
+    });
+    const deps = makeDeps();
+
+    await processWorkspaceCandidates([blockedCandidate], deps);
+
+    expect(vi.mocked(setWorkspaceStatus)).not.toHaveBeenCalled();
+  });
+
+  // `blocked` still means "needs a human" for every other reason — this fix adds ONE
+  // clock-driven exception, it does not make `blocked` self-clearing in general.
+  it("leaves a workspace blocked for a non-quota reason alone", async () => {
+    queueSession({
+      id: "sess-1",
+      status: "stopped",
+      startedAt: new Date(Date.now() - 40 * 60 * 60 * 1000).toISOString(),
+      triggerType: "agent",
+      stats: JSON.stringify({ success: false, failureReason: "verify_failed" }),
+    });
+    const deps = makeDeps();
+
+    await processWorkspaceCandidates([blockedCandidate], deps);
+
+    expect(vi.mocked(setWorkspaceStatus)).not.toHaveBeenCalled();
+    expectNoWorkspaceAction(deps);
+  });
+
+  it("leaves a workspace blocked with NO session rows alone", async () => {
+    queueSession(null);
+    const deps = makeDeps();
+
+    await processWorkspaceCandidates([blockedCandidate], deps);
+
+    expect(vi.mocked(setWorkspaceStatus)).not.toHaveBeenCalled();
+    expectNoWorkspaceAction(deps);
   });
 });

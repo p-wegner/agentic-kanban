@@ -198,6 +198,33 @@ describe("scanAutodriveStallWarnings", () => {
       expect(warnings[0].cause).toBe("provider_usage_limit");
       expect(warnings[0].message).toContain("provider usage limit");
     });
+
+    // #387: the stats row is immutable and a blocked workspace never gets a new session, so
+    // this label kept claiming "waiting on quota" for DAYS after the quota had reset — the
+    // one report that tells a reader to do nothing. Measured on `eventhub`: reset times
+    // 1.5-2.5 days in the past, while the same profile billed successful sessions.
+    it(`distinguishes a ${provider} usage-limit whose reset time has already passed`, async () => {
+      const { db } = createTestDb();
+      const { projectId, inProgressId } = await seedProject(db);
+      const issueId = await addIssue(db, projectId, inProgressId, minutesAgo(3000));
+      const workspaceId = await addWorkspace(db, issueId, "blocked", minutesAgo(3000));
+      await db.insert(sessions).values({
+        id: randomUUID(),
+        workspaceId,
+        executor,
+        status: "stopped",
+        startedAt: minutesAgo(3000),
+        // Reset time in the PAST relative to NOW — the quota is demonstrably usable again.
+        stats: JSON.stringify({ rateLimited: true, rateLimitKind, retryAfter: minutesAgo(2900) }),
+        triggerType: "agent",
+      });
+
+      const warnings = await scanAutodriveStallWarnings(db, undefined, NOW);
+
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0].cause).toBe("provider_usage_limit_expired");
+      expect(warnings[0].message).toContain("already passed");
+    });
   }
 
   it("classifies an In-Review auto-merge stall", async () => {

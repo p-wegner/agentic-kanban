@@ -17,6 +17,7 @@ import { runPreMergeGate, gateAlreadyPassed, RUN_GATE, type MergeGateToken, type
 import {
   MAX_SESSIONS,
   NON_TRIVIAL_WORKTREE_DIFF_CHARS,
+  classifyQuotaBlock,
   hasRepeatedFailedCommand,
   isBuilderSession,
   isZeroDiffInReviewAwaiting,
@@ -516,6 +517,37 @@ async function handleReviewingWorkspace(ws: WorkspaceCandidate, sess: LatestSess
   }
 }
 
+/**
+ * `blocked` means "needs a human" — with ONE exception, which used to be missing entirely
+ * and is #387: a workspace parked here by `handleUsageLimitExit` is waiting on a clock, not
+ * on a person. Before this, the cycle logged "skipping automation" and did nothing else, so
+ * `latestSession` never changed, the stall classifier kept re-reading the same days-old
+ * usage-limit stats row, and the workspace was wedged for good — measured on `eventhub`,
+ * 18 workspaces blocked for up to 5 days while the same provider profile billed successful
+ * sessions in the same project.
+ *
+ * Returning it to `idle` is the whole recovery: `handleIdleWorkspace` then relaunches or
+ * merges it by the normal rules (including the WIP/relaunch caps), so this adds a state
+ * transition rather than a second automation path. A workspace whose quota is genuinely
+ * still exhausted simply dies on the limit again and re-blocks with a newer deadline.
+ */
+async function handleBlockedWorkspace(ws: WorkspaceCandidate, sess: LatestSession | undefined, ctx: CycleContext): Promise<void> {
+  const { deps, logAction } = ctx;
+  const quotaBlock = classifyQuotaBlock(sess, (deps.now ?? Date.now)());
+  if (quotaBlock?.expired) {
+    await setWorkspaceStatus(db, ws.wsId, "idle");
+    logAction("mark_idle", ws.wsId, ws.issueId, {
+      responseSummary: `provider quota block elapsed (release ${quotaBlock.releaseAt}) — returned to automation`,
+      verificationResult: "ok",
+    });
+    console.log(`[monitor] Quota block elapsed for blocked workspace ${ws.wsId} (issue #${ws.issueNumber ?? "?"}, release ${quotaBlock.releaseAt}); marking idle`);
+    deps.boardEvents.broadcast(ws.projectId, "board_changed");
+    return;
+  }
+  const waiting = quotaBlock ? ` (provider quota block until ${quotaBlock.releaseAt})` : "";
+  console.log(`[monitor] Needs attention: blocked workspace ${ws.wsId} for issue #${ws.issueNumber ?? "?"}; skipping automation${waiting}`);
+}
+
 async function handleActiveStoppedWorkspace(ws: WorkspaceCandidate, sess: LatestSession, ctx: CycleContext): Promise<void> {
   const { deps, logAction } = ctx;
   if (isCodexUsageLimitStats(sess.stats)) {
@@ -612,7 +644,7 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
       } else if (ws.wsStatus === "reviewing") {
         await handleReviewingWorkspace(ws, sess, ctx);
       } else if (ws.wsStatus === "blocked") {
-        console.log(`[monitor] Needs attention: blocked workspace ${ws.wsId} for issue #${ws.issueNumber ?? "?"}; skipping automation`);
+        await handleBlockedWorkspace(ws, sess, ctx);
       } else if (ws.wsStatus === "active" && sess?.status === "stopped") {
         await handleActiveStoppedWorkspace(ws, sess, ctx);
       } else if (ws.wsStatus === "active" && sess?.status === "running") {
