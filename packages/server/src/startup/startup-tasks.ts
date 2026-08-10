@@ -142,10 +142,30 @@ export async function migrateGlobalDefaultModelToProviderScope(database: Databas
 
 /** Run database migrations, seed built-in tags and skills, deduplicate projects, disable auto_monitor, and backfill failure patterns. */
 export async function runMigrations(): Promise<void> {
-  // Cheap insurance: a verified snapshot before any schema change.
+  // Insurance: a verified snapshot before any schema change — but only when there
+  // IS a schema change (#322). This ran unconditionally on every boot, and a
+  // backup is a full-size `VACUUM INTO` of the live DB (~103 MB here: one full
+  // read, ~two full writes). Under `tsx watch` the process boots on every source
+  // edit, so a development session turned into a continuous whole-database
+  // copy loop while the API was serving. Measured on the dev board: five backups
+  // in seven minutes (three `pre-migration`, two post-boot `periodic`) with reads
+  // still fast and WRITES hanging past 25s.
+  //
+  // `pendingMigrationTags` returns null on ANY uncertainty (unreadable journal,
+  // fresh DB with no tracking table), and null takes the backup — the cheap side
+  // of the trade is the one that runs when we don't know.
   try {
     const { createBackup } = await import("../db/backup.js");
-    await createBackup("pre-migration");
+    const { pendingMigrationTags } = await import("../db/manual-migrate.js");
+    const pending = await pendingMigrationTags(rawClient);
+    if (pending === null || pending.length > 0) {
+      console.log(
+        `[backup] pre-migration backup: ${pending === null ? "pending migrations unknown" : `${pending.length} pending (${pending.join(", ")})`}`,
+      );
+      await createBackup("pre-migration");
+    } else {
+      console.log("[backup] skipping pre-migration backup — schema is up to date, nothing to insure");
+    }
   } catch (err) {
     console.warn("[backup] pre-migration backup failed (non-fatal):", err instanceof Error ? err.message : String(err));
   }

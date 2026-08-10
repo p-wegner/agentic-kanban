@@ -30,16 +30,22 @@ export function stopBackupScheduler(): void {
 export function startBackupScheduler(intervalMin = 30): NodeJS.Timeout | null {
   stopBackupScheduler();
 
-  const run = () =>
-    createBackup("periodic").catch((e) =>
+  const run = (options?: { skipIfNewerThanMs?: number }) =>
+    createBackup("periodic", options).catch((e) =>
       console.warn(
         "[backup] periodic backup failed:",
         e instanceof Error ? e.message : e,
       ),
     );
 
-  // One shortly after boot.
-  activeBackupTimeout = setTimeout(() => void run(), 60_000);
+  // One shortly after boot — but skipped if a backup from the previous boot is
+  // still fresher than the configured interval (#322). The point of this one is
+  // "capture the just-recovered state", which a backup taken minutes ago already
+  // does; under `tsx watch` the process boots on every source edit, and taking a
+  // full-size `VACUUM INTO` of the live DB each time turned a restart storm into
+  // a backup storm that starved the API's write path.
+  const bootSkipMs = intervalMin > 0 ? intervalMin * 60_000 : 30 * 60_000;
+  activeBackupTimeout = setTimeout(() => void run({ skipIfNewerThanMs: bootSkipMs }), 60_000);
   activeBackupTimeout.unref?.();
 
   if (intervalMin <= 0) {
