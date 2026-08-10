@@ -64,6 +64,14 @@ export const REPO_LOCK_LIVE_HOLDER_MAX_MS = 2 * 60 * 60 * 1000;
 /** How often a held lock's heartbeat is refreshed while work is in flight. */
 export const REPO_LOCK_HEARTBEAT_INTERVAL_MS = 15 * 1000;
 
+/**
+ * Default bound for {@link withRepoLock}/{@link waitForRepoLock} when a caller names none
+ * (#230 — the old default was "wait forever"). Generous on purpose: it must exceed a
+ * legitimately slow holder (a merge running a full verify gate, 30-45 min), so it only
+ * fires for a holder that is genuinely wedged rather than merely slow.
+ */
+export const REPO_LOCK_DEFAULT_WAIT_MS = 90 * 60 * 1000;
+
 export interface RepoLockContents {
   pid: number;
   hostname: string;
@@ -188,14 +196,57 @@ export function inspectRepoLock(repoPath: string, nowMs = Date.now()): RepoLockS
  * (contents match) — prevents a TOCTOU race where the holder heartbeats or a
  * new holder acquires between inspection and recovery.
  */
-function recoverIfUnchanged(lockPath: string, expected: RepoLockContents): boolean {
+function recoverIfUnchanged(
+  lockPath: string,
+  expected: RepoLockContents,
+): { outcome: "recovered" } | { outcome: "changed" } | { outcome: "error"; code: string; message: string } {
   const current = readLockContents(lockPath);
-  if (!current || JSON.stringify(current) !== JSON.stringify(expected)) return false;
+  if (!current || JSON.stringify(current) !== JSON.stringify(expected)) return { outcome: "changed" };
   try {
     rmSync(lockPath, { force: true });
-    return true;
-  } catch {
-    return false;
+    return { outcome: "recovered" };
+  } catch (err) {
+    // NOT contention: we own the right to remove this stale file and the filesystem
+    // said no (EPERM/EACCES/EBUSY). Reported as UNAVAILABLE so a caller fails with a
+    // real reason instead of polling forever behind an unremovable file (#230).
+    return { outcome: "error", code: errnoCode(err) ?? "UNKNOWN", message: errMessage(err) };
+  }
+}
+
+function errnoCode(err: unknown): string | undefined {
+  return err && typeof err === "object" && "code" in err
+    ? (err as NodeJS.ErrnoException).code
+    : undefined;
+}
+
+function errMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Why one `tryAcquireRepoLock` attempt did not produce a handle (#230).
+ *
+ * The two reasons are operationally OPPOSITE and used to collapse into a single
+ * `null`, with a bare `catch { return null }` around the lockfile write mislabelling
+ * a permission/IO failure as lock contention:
+ *  - `contended` — somebody else legitimately holds the lock (or won the race to it).
+ *    Waiting is correct; it will be released.
+ *  - `unavailable` — this path cannot be locked AT ALL: no `.git` directory, a
+ *    read-only/permission-denied location, an unremovable stale lockfile. Waiting can
+ *    never succeed, so a caller that polls hangs forever with no error and no log line
+ *    (the measured #230 symptom: a merge that HUNG instead of failing). Callers must
+ *    fail fast on this.
+ */
+export type RepoLockAttempt =
+  | { outcome: "acquired"; handle: RepoLockHandle }
+  | { outcome: "contended"; reason: string; heldBy?: RepoLockContents }
+  | { outcome: "unavailable"; reason: string; code: string };
+
+/** Thrown by the bounded waiters when the repo path cannot be locked at all (#230). */
+export class RepoLockUnavailableError extends Error {
+  constructor(readonly repoPath: string, readonly holder: string, readonly code: string, reason: string) {
+    super(`[repo-lock] cannot lock ${repoPath} (holder=${holder}): ${reason}`);
+    this.name = "RepoLockUnavailableError";
   }
 }
 
@@ -216,10 +267,26 @@ function recoverIfUnchanged(lockPath: string, expected: RepoLockContents): boole
  * staleness window behind a holder that no longer exists).
  */
 export function tryAcquireRepoLock(repoPath: string, holder: string, nowMs = Date.now()): RepoLockHandle | null {
+  const attempt = attemptRepoLock(repoPath, holder, nowMs);
+  return attempt.outcome === "acquired" ? attempt.handle : null;
+}
+
+/**
+ * The same single acquisition attempt as {@link tryAcquireRepoLock}, but reporting WHY
+ * it failed — see {@link RepoLockAttempt}. This is the form every waiting caller should
+ * use: `contended` means keep waiting, `unavailable` means fail now (#230).
+ */
+export function attemptRepoLock(repoPath: string, holder: string, nowMs = Date.now()): RepoLockAttempt {
   const lockPath = lockPathFor(repoPath);
   const existing = inspectRepoLock(repoPath, nowMs);
   if (existing) {
-    if (!existing.isStale && !existing.ownerProcessDead) return null;
+    if (!existing.isStale && !existing.ownerProcessDead) {
+      return {
+        outcome: "contended",
+        reason: `held by ${existing.contents.holder} pid=${existing.contents.pid} host=${existing.contents.hostname} (heartbeat age ${Math.round(existing.ageMs / 1000)}s)`,
+        heldBy: existing.contents,
+      };
+    }
     // A stale heartbeat is only PRESUMPTIVE evidence that the holder is gone. When the holder is
     // same-host and its pid is provably alive, that presumption is simply wrong: the process is
     // mid-`git` and merely failed to refresh the file in time (blocked event loop, system
@@ -232,7 +299,11 @@ export function tryAcquireRepoLock(repoPath: string, holder: string, nowMs = Dat
         `[repo-lock] refusing to reclaim stale-heartbeat lock at ${lockPath}: holder pid=${existing.contents.pid} is ALIVE on this host ` +
           `(heartbeat age=${Math.round(existing.ageMs / 1000)}s, holder=${existing.contents.holder}) — waiting rather than stealing a live lock`,
       );
-      return null;
+      return {
+        outcome: "contended",
+        reason: `stale-heartbeat lock refused: holder pid=${existing.contents.pid} is ALIVE on this host (heartbeat age ${Math.round(existing.ageMs / 1000)}s)`,
+        heldBy: existing.contents,
+      };
     }
     if (existing.ownerProcessDead && !existing.isStale) {
       console.warn(
@@ -246,9 +317,17 @@ export function tryAcquireRepoLock(repoPath: string, holder: string, nowMs = Dat
           `heartbeat age=${Math.round(existing.ageMs / 1000)}s (holder=${existing.contents.holder})`,
       );
     }
-    if (!recoverIfUnchanged(lockPath, existing.contents)) {
+    const recovery = recoverIfUnchanged(lockPath, existing.contents);
+    if (recovery.outcome === "changed") {
       // Someone else recovered/reacquired first — refuse rather than clobber them.
-      return null;
+      return { outcome: "contended", reason: "another acquirer recovered or reacquired the stale lock first" };
+    }
+    if (recovery.outcome === "error") {
+      return {
+        outcome: "unavailable",
+        code: recovery.code,
+        reason: `the stale lockfile ${lockPath} could not be removed (${recovery.code}: ${recovery.message}) — waiting cannot fix this`,
+      };
     }
   }
 
@@ -262,14 +341,31 @@ export function tryAcquireRepoLock(repoPath: string, holder: string, nowMs = Dat
 
   if (!existsSync(join(repoPath, ".git"))) {
     console.warn(`[repo-lock] refusing to acquire: ${join(repoPath, ".git")} does not exist (repoPath misconfigured?)`);
-    return null;
+    return {
+      outcome: "unavailable",
+      code: "ENOENT",
+      reason: `${join(repoPath, ".git")} does not exist (repoPath misconfigured?) — no amount of waiting will make this path lockable`,
+    };
   }
 
   try {
     writeFileSync(lockPath, JSON.stringify(contents), { flag: "wx" });
-  } catch {
-    // Lost the race to another acquirer between our staleness check and the write.
-    return null;
+  } catch (err) {
+    // EEXIST is the ONE contention case here: we lost the race to another acquirer
+    // between our staleness check and the `wx` write. Every other errno — EACCES,
+    // EPERM, EROFS, ENOENT, EISDIR — means the path cannot be locked at all, and the
+    // old bare `catch { return null }` reported those as contention, which is what
+    // made a merge poll forever instead of failing (#230).
+    const code = errnoCode(err);
+    if (code === "EEXIST") {
+      return { outcome: "contended", reason: "lost the race to another acquirer (EEXIST)" };
+    }
+    console.warn(`[repo-lock] cannot write ${lockPath} (${code ?? "UNKNOWN"}): ${errMessage(err)}`);
+    return {
+      outcome: "unavailable",
+      code: code ?? "UNKNOWN",
+      reason: `the lockfile ${lockPath} could not be written (${code ?? "UNKNOWN"}: ${errMessage(err)}) — waiting cannot fix this`,
+    };
   }
 
   const handle: RepoLockHandle = {
@@ -295,7 +391,68 @@ export function tryAcquireRepoLock(repoPath: string, holder: string, nowMs = Dat
       }
     },
   };
-  return handle;
+  return { outcome: "acquired", handle };
+}
+
+/**
+ * Everything the bounded waiter needs from the outside world, so the BOUND ITSELF is
+ * testable (#230). With the timeout and the clock as module-private constants and a real
+ * `setTimeout`, no test could fail if the bound were removed — the only way to observe it
+ * was to wait out 90 real minutes. `now`/`sleep`/`attempt` are injected here so a test can
+ * drive a virtual clock past the deadline in microseconds.
+ */
+export interface RepoLockWaitOptions {
+  /** Hard upper bound on waiting. Required — an unbounded wait is the #230 defect. */
+  timeoutMs: number;
+  pollMs?: number;
+  /** Clock source. Injected so a test can advance time without waiting. */
+  now?: () => number;
+  /** Sleep between polls. Injected so a test's virtual clock can advance instead. */
+  sleep?: (ms: number) => Promise<void>;
+  /** Acquisition attempt. Injected so a test can script contended/unavailable outcomes. */
+  attempt?: (repoPath: string, holder: string) => RepoLockAttempt;
+  /** Called on each unsuccessful CONTENDED attempt (periodic logging lives in callers). */
+  onContended?: (attempt: Extract<RepoLockAttempt, { outcome: "contended" }>, waitedMs: number) => void;
+}
+
+/**
+ * Wait for the on-disk repo lock, bounded, and FAIL FAST when the path cannot be locked
+ * at all (#230). The single implementation behind every waiting caller — `withRepoLock`
+ * here, `acquireOnDiskRepoLock` in `workspace-internals.ts`, and the merge-queue's two
+ * sites — so the classification and the bound cannot drift between them.
+ *
+ * Throws {@link RepoLockUnavailableError} immediately on an `unavailable` attempt (a
+ * missing `.git`, a permission/IO error, an unremovable stale lockfile): those can never
+ * resolve by waiting, and treating them as contention is exactly what turned a broken
+ * repoPath into a merge that hung with no error and no log line.
+ */
+export async function waitForRepoLock(
+  repoPath: string,
+  holder: string,
+  opts: RepoLockWaitOptions,
+): Promise<RepoLockHandle> {
+  const pollMs = opts.pollMs ?? 1000;
+  const now = opts.now ?? Date.now;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const attemptFn = opts.attempt ?? attemptRepoLock;
+
+  const startedAt = now();
+  const deadline = startedAt + opts.timeoutMs;
+  for (;;) {
+    const attempt = attemptFn(repoPath, holder);
+    if (attempt.outcome === "acquired") return attempt.handle;
+    if (attempt.outcome === "unavailable") {
+      throw new RepoLockUnavailableError(repoPath, holder, attempt.code, attempt.reason);
+    }
+    opts.onContended?.(attempt, now() - startedAt);
+    if (now() >= deadline) {
+      throw new Error(
+        `[repo-lock] timed out after ${Math.round(opts.timeoutMs / 1000)}s waiting for the lock on ${repoPath} ` +
+          `(holder=${holder}) — ${attempt.reason}`,
+      );
+    }
+    await sleep(pollMs);
+  }
 }
 
 /**
@@ -305,6 +462,10 @@ export function tryAcquireRepoLock(repoPath: string, holder: string, nowMs = Dat
  * hold) — this is the primitive every main-checkout writer (merge, queue
  * rebase, scanner) should call so the same lockfile serializes ALL of them,
  * regardless of process.
+ *
+ * `timeoutMs` defaults to {@link REPO_LOCK_DEFAULT_WAIT_MS} rather than to "forever":
+ * an unbounded wait is the #230 defect. An `unavailable` repo path (no `.git`,
+ * permission denied) throws {@link RepoLockUnavailableError} immediately.
  */
 export async function withRepoLock<T>(
   repoPath: string,
@@ -312,20 +473,12 @@ export async function withRepoLock<T>(
   work: () => Promise<T>,
   opts: { pollMs?: number; timeoutMs?: number } = {},
 ): Promise<T> {
-  const pollMs = opts.pollMs ?? 1000;
-  const deadline = opts.timeoutMs != null ? Date.now() + opts.timeoutMs : null;
+  const handle = await waitForRepoLock(repoPath, holder, {
+    timeoutMs: opts.timeoutMs ?? REPO_LOCK_DEFAULT_WAIT_MS,
+    pollMs: opts.pollMs ?? 1000,
+  });
 
-  let handle: RepoLockHandle | null = null;
-  for (;;) {
-    handle = tryAcquireRepoLock(repoPath, holder);
-    if (handle) break;
-    if (deadline != null && Date.now() >= deadline) {
-      throw new Error(`[repo-lock] timed out waiting for lock on ${repoPath} (holder=${holder})`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, pollMs));
-  }
-
-  const heartbeatTimer = setInterval(() => handle?.heartbeat(), REPO_LOCK_HEARTBEAT_INTERVAL_MS);
+  const heartbeatTimer = setInterval(() => handle.heartbeat(), REPO_LOCK_HEARTBEAT_INTERVAL_MS);
   try {
     return await work();
   } finally {

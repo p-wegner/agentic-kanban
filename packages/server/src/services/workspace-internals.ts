@@ -2,7 +2,13 @@ import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { workspaces } from "@agentic-kanban/shared/schema";
 import type { WorkspaceSetupRun, WorkspaceSymlinkRun } from "@agentic-kanban/shared";
-import { inspectRepoLock, tryAcquireRepoLock, type RepoLockHandle } from "@agentic-kanban/shared/lib/repo-lock";
+import {
+  inspectRepoLock,
+  waitForRepoLock,
+  RepoLockUnavailableError,
+  type RepoLockHandle,
+  type RepoLockWaitOptions,
+} from "@agentic-kanban/shared/lib/repo-lock";
 import type { Database } from "../db/index.js";
 import { listWorkspaceRepos, type RepoRow } from "../repositories/repo.repository.js";
 import type { ProviderName } from "./agent-provider.js";
@@ -676,8 +682,15 @@ export function tryRecoverStaleMergeLock(repoPath: string, lock: ActiveMergeLock
  * which on a full-suite-plus-build project is 30-45 minutes. This must exceed that, or the
  * bound would convert "correctly waiting behind a real merge" into a spurious failure — so
  * it only fires for a holder that is genuinely wedged rather than merely slow.
+ *
+ * EXPORTED, and overridable per call via {@link acquireOnDiskRepoLock}'s options, because a
+ * module-private const with a module-private clock made the bound unfalsifiable: no test
+ * could fail if it were deleted (#230 fix-direction item 2).
  */
-const ON_DISK_REPO_LOCK_TIMEOUT_MS = 90 * 60 * 1000;
+export const ON_DISK_REPO_LOCK_TIMEOUT_MS = 90 * 60 * 1000;
+
+/** How often a waiter logs that it is still waiting, so a stuck merge is diagnosable. */
+export const ON_DISK_REPO_LOCK_LOG_INTERVAL_MS = 60 * 1000;
 
 /**
  * Poll for the on-disk repo lock (#993) — the cross-process source of truth
@@ -695,23 +708,64 @@ const ON_DISK_REPO_LOCK_TIMEOUT_MS = 90 * 60 * 1000;
  * is merely SLOW is still waited out — the timeout is well past the staleness window, so the
  * normal recovery paths (stale heartbeat, dead-pid reclaim in `tryAcquireRepoLock`) get their
  * chance first and this only fires when something is genuinely stuck.
+ *
+ * CONTENDED vs UNAVAILABLE (#230): waiting is only correct for the first. A repoPath whose
+ * `.git` is missing, unwritable, or holds an unremovable lockfile can NEVER be acquired, and
+ * the old code polled it exactly like a busy lock — so a misconfigured repoPath produced a
+ * merge that hung for the full timeout instead of failing immediately with the real reason.
+ * `waitForRepoLock` now rethrows `RepoLockUnavailableError` on the spot; callers surface it
+ * as a merge failure.
+ *
+ * `opts` exists so the BOUND is testable: with the timeout and the clock module-private,
+ * deleting the deadline check broke no test.
  */
-async function acquireOnDiskRepoLock(repoPath: string, workspaceId: string): Promise<RepoLockHandle> {
-  const deadline = Date.now() + ON_DISK_REPO_LOCK_TIMEOUT_MS;
-  for (;;) {
-    const handle = tryAcquireRepoLock(repoPath, `workspace:${workspaceId}`);
-    if (handle) return handle;
-    if (Date.now() >= deadline) {
+export async function acquireOnDiskRepoLock(
+  repoPath: string,
+  workspaceId: string,
+  opts: Partial<RepoLockWaitOptions> = {},
+): Promise<RepoLockHandle> {
+  const timeoutMs = opts.timeoutMs ?? ON_DISK_REPO_LOCK_TIMEOUT_MS;
+  let lastLoggedMs = 0;
+  try {
+    return await waitForRepoLock(repoPath, `workspace:${workspaceId}`, {
+      ...opts,
+      timeoutMs,
+      pollMs: opts.pollMs ?? 500,
+      // Log periodically while waiting so a stuck merge is diagnosable from the server
+      // log instead of being invisible (#230 fix-direction item 2).
+      onContended: (attempt, waitedMs) => {
+        opts.onContended?.(attempt, waitedMs);
+        if (waitedMs - lastLoggedMs < ON_DISK_REPO_LOCK_LOG_INTERVAL_MS) return;
+        lastLoggedMs = waitedMs;
+        console.warn(
+          `[merge-lock] still waiting for the on-disk repo lock on ${repoPath} (workspace:${workspaceId}) ` +
+            `after ${Math.round(waitedMs / 1000)}s of ${Math.round(timeoutMs / 1000)}s — ${attempt.reason}`,
+        );
+      },
+    });
+  } catch (err) {
+    if (err instanceof RepoLockUnavailableError) {
+      // Fail with the REAL reason rather than a timeout that suggests contention. A
+      // WorkspaceError carries `mergeReason` through to the merge attempt record, so the
+      // board shows "repo_lock_unavailable" instead of a merge that never answered.
+      throw new WorkspaceError(
+        `[merge-lock] cannot lock ${repoPath} for workspace:${workspaceId} — ${err.message}. ` +
+          `This is not lock contention (code ${err.code}); waiting would never have succeeded.`,
+        "CONFLICT",
+        { mergeReason: "repo_lock_unavailable", lockErrorCode: err.code, repoPath },
+      );
+    }
+    if (err instanceof Error && err.message.startsWith("[repo-lock] timed out")) {
       const held = inspectRepoLock(repoPath);
       throw new Error(
-        `[merge-lock] timed out after ${Math.round(ON_DISK_REPO_LOCK_TIMEOUT_MS / 1000)}s waiting for the on-disk repo lock on ${repoPath} ` +
+        `[merge-lock] timed out after ${Math.round(timeoutMs / 1000)}s waiting for the on-disk repo lock on ${repoPath} ` +
           `(workspace:${workspaceId})` +
           (held
             ? ` — held by ${held.contents.holder} pid=${held.contents.pid} host=${held.contents.hostname}, heartbeat age ${Math.round(held.ageMs / 1000)}s`
             : " — no lockfile present, so acquisition is failing for another reason (check the [repo-lock] warnings)"),
       );
     }
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    throw err;
   }
 }
 
