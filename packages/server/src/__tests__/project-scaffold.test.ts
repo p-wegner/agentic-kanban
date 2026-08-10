@@ -323,6 +323,29 @@ describe("project-scaffold", () => {
       }
     });
 
+    it("wires the worktree guard on BOTH the write matcher and the shell matcher (#369)", async () => {
+      const dir = await tmp();
+      try {
+        await gitInit(dir);
+        ensureHookScaffold(dir);
+
+        const settings = JSON.parse(await readFile(join(dir, ".claude", "settings.json"), "utf8"));
+        const guardMatchers = ((settings.hooks?.PreToolUse ?? []) as {
+          matcher?: string;
+          hooks?: { command: string }[];
+        }[])
+          .filter((e) => (e.hooks ?? []).some((h) => h.command.includes("prevent-cross-worktree-writes.js")))
+          .map((e) => e.matcher ?? "");
+
+        // The write matcher alone is what made #369 possible: the stray commit was produced by
+        // `cd <main checkout>; git commit -F msg`, a SHELL call the write matcher never sees.
+        expect(guardMatchers.some((m) => m.includes("Write") && m.includes("Edit"))).toBe(true);
+        expect(guardMatchers.some((m) => /Bash|PowerShell/.test(m))).toBe(true);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
     it("skips the worktree guard when includeWorktreeGuard is forced to false", async () => {
       const dir = await tmp();
       try {

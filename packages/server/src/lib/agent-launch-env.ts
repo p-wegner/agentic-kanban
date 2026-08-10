@@ -57,6 +57,11 @@ export interface AgentSpawnEnvParams {
    * Absolute path of the worktree the agent runs in. Used to derive a per-worktree
    * `GRADLE_USER_HOME` (#194) so JVM builders in different worktrees never share a
    * daemon registry — set unconditionally; it is inert for non-Gradle projects.
+   *
+   * Also exported to the child as `KANBAN_WORKTREE_DIR` (#369): the cross-worktree
+   * guard reads it as the AUTHORIZED root instead of deriving one from its own cwd.
+   * Board-supplied, so an agent that has cd-ed into the main checkout can no longer
+   * self-authorize that checkout.
    */
   worktreePath: string;
   /** Per-launch overrides; applied LAST so they win. */
@@ -89,6 +94,9 @@ export function buildAgentSpawnEnv(params: AgentSpawnEnvParams): Record<string, 
     PORT: ports.worktreeServerPort,
     VITE_PORT: ports.worktreeClientPort,
     GRADLE_USER_HOME: gradleUserHomeForWorktree(worktreePath),
+    // The authorized-worktree declaration the cross-worktree guard trusts (#369). Must come
+    // from the board, never from the agent's own cwd.
+    KANBAN_WORKTREE_DIR: worktreePath,
     ...extraEnv,
   };
 }
