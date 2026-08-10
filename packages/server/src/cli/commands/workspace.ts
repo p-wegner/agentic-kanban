@@ -8,6 +8,7 @@ import { insertWorkspaceRecordRow } from "../../repositories/workspace-crud.repo
 import { getIssueTitleAndDescription } from "../../repositories/workspace-session.repository.js";
 import { getProjectIssueIds } from "../../repositories/review-effectiveness.repository.js";
 import { randomUUID } from "node:crypto";
+import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { runMigrations, getActiveProjectId } from "../shared.js";
 import { buildWorkspaceApiUrl, buildApiUrl } from "./workspace-api-url.js";
 import { registerWorkspaceInteractionCommands } from "./workspace-interaction.js";
@@ -120,7 +121,7 @@ Examples:
   wsCmd
     .command("create <issue-id>")
     .description("Create a git worktree workspace for an issue.\n\nCreates a new git worktree from the project's default branch (or a specified base branch) and links it to the issue. The worktree provides an isolated working directory where agents can make changes.\n\nNote: This only creates the worktree. To launch an agent, use the web UI or MCP tools.")
-    .option("-b, --branch <branch>", "Branch name (default: workspace/<issue-id-short>)")
+    .option("-b, --branch <branch>", "Branch name (default: feature/ak-<issue-number>-<slug>, from suggestBranchName)")
     .option("--base <baseBranch>", "Base branch to create from (default: project default branch)")
     .addHelpText("after", `
 Examples:
@@ -147,7 +148,12 @@ Tip: Use 'issue list' to find the issue ID.
         }
         const { createWorktree } = await import("../../services/git.service.js");
 
-        const branchName = options.branch ?? `workspace/${issueId.slice(0, 8)}`;
+        // #220 ask 2: `suggestBranchName` is the ONE branch-name producer for the whole
+        // board. This site used to mint `workspace/<id8>` — not a different slug of the
+        // same convention but a different CONVENTION, so a CLI-created workspace was
+        // invisible to every reconciler that recognizes `feature/ak-<n>-…`
+        // (hand-merged-branch-reconciler) and to the monitor's duplicate-start guard.
+        const branchName = options.branch ?? suggestBranchName(issueRows[0]);
         const baseBranch = options.base ?? project.defaultBranch;
         if (!baseBranch) {
           console.error("No base branch configured. Set the project's default branch in settings or pass --base <branch>.");
