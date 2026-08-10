@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { db, rawClient, rawWriteClient } from "../db/index.js";
 import { workspaces, issues, projects, preferences, sessions, pluginViewProcesses } from "@agentic-kanban/shared/schema";
 import { and, eq, isNotNull, ne } from "drizzle-orm";
@@ -14,6 +15,7 @@ import { reconcileAncestorBranchWorkspaces } from "./ancestor-branch-reconciler.
 import { reconcileHandMergedBranches } from "./hand-merged-branch-reconciler.js";
 import { scanDoneUnmergedWorkspaces } from "./done-unmerged-invariant-scanner.js";
 import { reapTerminalWorkspaces } from "./terminal-workspace-reaper.js";
+import { reconcileOrphanedWorktrees } from "./orphaned-worktree-reconciler.js";
 import { finalizeMergeCleanup, reconcileMergedIssue } from "../services/merge-cleanup.service.js";
 import { assertForeignKeysEnabled, alignForeignKeyActionsOnStartup } from "./fk-alignment.js";
 import { checkForeignKeyViolations, logForeignKeyViolations } from "../db/fk-violations.js";
@@ -520,6 +522,47 @@ export async function pruneStaleWorktrees(): Promise<void> {
   }
 }
 
+/**
+ * Remove git worktrees that no workspace claims any more (#361).
+ *
+ * Complements `pruneStaleWorktrees`: that one starts from workspace rows and so cannot see a
+ * worktree whose row has `workingDir = null` (which every completed merge produces). This starts
+ * from `git worktree list`, so the nulled column makes the orphan visible rather than invisible.
+ * Anything holding unlanded commits or uncommitted edits is reported and KEPT.
+ */
+export async function pruneOrphanedWorktrees(): Promise<void> {
+  let projectRows: { id: string; repoPath: string; defaultBranch: string | null; name: string }[];
+  try {
+    projectRows = await db.select({ id: projects.id, repoPath: projects.repoPath, defaultBranch: projects.defaultBranch, name: projects.name }).from(projects);
+  } catch (err) {
+    console.warn("[startup] pruneOrphanedWorktrees: could not read projects:", err instanceof Error ? err.message : String(err));
+    return;
+  }
+
+  for (const project of projectRows) {
+    if (!project.repoPath || !existsSync(project.repoPath)) continue;
+    try {
+      // Every workspace row of the project, so a live workspace still holding a branch is
+      // recognised as a claim even when its workingDir was cleared.
+      const claims = await db.select({ workingDir: workspaces.workingDir, branch: workspaces.branch, status: workspaces.status })
+        .from(workspaces)
+        .innerJoin(issues, eq(workspaces.issueId, issues.id))
+        .where(eq(issues.projectId, project.id));
+      const report = await reconcileOrphanedWorktrees({
+        repoPath: project.repoPath,
+        baseBranch: project.defaultBranch || "master",
+        claims,
+        git: gitService,
+      });
+      if (report.removed.length > 0 || report.keptWithUnshippedWork.length > 0) {
+        console.log(`[startup] orphaned worktrees for project '${project.name}': removed ${report.removed.length}, kept (unshipped work) ${report.keptWithUnshippedWork.length}`);
+      }
+    } catch (err) {
+      console.warn(`[startup] pruneOrphanedWorktrees failed for project '${project.name}' (non-fatal):`, err instanceof Error ? err.message : String(err));
+    }
+  }
+}
+
 /** Abort any in-progress merges in all registered project repos (self-healing after hot-reload kills a merge mid-operation). */
 export async function abortStaleMerges(): Promise<void> {
   try {
@@ -701,6 +744,11 @@ export async function runStartupAuditTasks(): Promise<void> {
     console.warn("[startup] reapTerminalWorkspaces failed (non-fatal):", err instanceof Error ? err.message : String(err));
   }
   await pruneStaleWorktrees();
+  // #361: pruneStaleWorktrees above is DB-driven and can only see a closed workspace that still
+  // has a workingDir — which a completed merge nulls. This runs the same sweep from GIT truth so a
+  // worktree left behind by a merge (measured: kassenbuch `.worktrees/ak-6` and `ak-12`) is
+  // recovered instead of blocking every later auto-merge on the project.
+  await pruneOrphanedWorktrees();
   await checkMainCheckoutHeads();
 }
 
