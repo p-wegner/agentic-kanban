@@ -3,7 +3,34 @@ import { isPluginEnabledPreferenceKey } from "@agentic-kanban/shared/lib/dynamic
 import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
 import type { Database } from "../db/index.js";
 import { listPluginEnabledPreferences, listPluginRows } from "../repositories/plugins.repository.js";
+import { latestPluginLoopEvent } from "../repositories/plugin-loop-events.repository.js";
 import { getPluginService } from "./plugin.service.js";
+
+/**
+ * How often this pass may retry a loop whose previous advance produced NOTHING (#372).
+ * Falls back to the deterministic monitor's own default interval (`auto_monitor_interval`, 4 min)
+ * when the caller passes none.
+ */
+export const DEFAULT_MIN_BLOCKED_ADVANCE_INTERVAL_MS = 4 * 60 * 1000;
+
+/**
+ * Was the loop's most recent advance a NO-OP — no tickets created and not converged?
+ *
+ * That is the "blocked, not done" state (an unresolved gate, or an upstream that is not finished),
+ * and re-planning it changes nothing until something OUTSIDE this pass changes: a human resolves the
+ * gate (`resolveGate` advances immediately) or a loop ticket merges (`advanceLoopAfterMergedIssue`
+ * advances immediately). So a no-op advance may be retried on the monitor's own cadence and no
+ * faster — see the rate limit in `advanceDuePluginLoops`.
+ */
+function lastAdvanceWasNoOp(payloadJson: string | null): boolean {
+  if (!payloadJson) return false;
+  try {
+    const payload = JSON.parse(payloadJson) as { created?: unknown[]; converged?: boolean };
+    return Array.isArray(payload.created) && payload.created.length === 0 && payload.converged !== true;
+  } catch {
+    return false; // unreadable payload — never let it suppress a real advance
+  }
+}
 
 /**
  * Monitor pass that keeps board-owned plugin loops converging.
@@ -32,9 +59,18 @@ import { getPluginService } from "./plugin.service.js";
  */
 export async function advanceDuePluginLoops(
   database: Database,
-  options: { allowProject: (projectId: string) => boolean; log?: (message: string) => void },
+  options: {
+    allowProject: (projectId: string) => boolean;
+    log?: (message: string) => void;
+    /** Minimum spacing between two NO-OP advances of the SAME loop (#372). */
+    minBlockedAdvanceIntervalMs?: number;
+    /** Injectable clock for tests. */
+    now?: number;
+  },
 ): Promise<number> {
   const log = options.log ?? ((message: string) => console.log(`[monitor] ${message}`));
+  const nowMs = options.now ?? Date.now();
+  const minBlockedIntervalMs = options.minBlockedAdvanceIntervalMs ?? DEFAULT_MIN_BLOCKED_ADVANCE_INTERVAL_MS;
   const service = getPluginService(database);
 
   // plugin_enabled_<slug>_<projectId> — the projectId is the fixed-length uuid tail.
@@ -82,6 +118,25 @@ export async function advanceDuePluginLoops(
         // Not started by a human yet, or the current round is still running.
         if (loop.closedTickets === 0 && loop.openTickets === 0) continue;
         if (loop.openTickets > 0) continue;
+        // Interval gating (#372). This pass runs once per monitor CYCLE, and cycles are
+        // event-triggered (a board mutation fires one after a 1.5s debounce) — not once per
+        // `auto_monitor_interval`. So on a busy board a loop that is blocked on a human gate was
+        // re-planned at the cycle cadence: MEASURED median 91s between advances for the same loop
+        // with the interval set to 240s (500 no-op advances per loop in ~20h, one planner
+        // subprocess each). The productive paths are unaffected — `resolveGate` and
+        // `advanceLoopAfterMergedIssue` advance the loop directly the moment its state really
+        // changes; only the no-op RETRY is spaced out to the configured monitor interval.
+        if (minBlockedIntervalMs > 0) {
+          const lastAdvance = await latestPluginLoopEvent(
+            { pluginSlug: row.pluginId, loopName: loop.name, projectId },
+            "advance",
+            database,
+          ).catch(() => null);
+          if (lastAdvance && lastAdvanceWasNoOp(lastAdvance.payloadJson)) {
+            const age = nowMs - new Date(lastAdvance.createdAt).getTime();
+            if (Number.isFinite(age) && age >= 0 && age < minBlockedIntervalMs) continue;
+          }
+        }
         try {
           const result = await service.advanceLoop(row.id, loop.name, projectId);
           if (result.created.length > 0) {

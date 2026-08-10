@@ -491,7 +491,16 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       // and had to wait for the NEXT cycle — a floor of one full cycle (~4 min by default,
       // and far worse under load: a measured pm-pipeline step waited 27 min to start).
       setPhase("plugin-loops");
-      await advanceDuePluginLoops(db, { allowProject: shouldAutoStartProject });
+      // The no-op-advance rate limit (#372) is the CONFIGURED monitor interval, not the cycle
+      // cadence — cycles are also event-triggered, so without this a gate-blocked loop was
+      // re-planned every ~90s under a 240s interval.
+      await advanceDuePluginLoops(db, {
+        allowProject: shouldAutoStartProject,
+        minBlockedAdvanceIntervalMs: (() => {
+          const minutes = parseInt(prefMap.get("auto_monitor_interval") || "4", 10);
+          return Number.isFinite(minutes) && minutes > 0 ? minutes * 60 * 1000 : undefined;
+        })(),
+      });
       setPhase("auto-start");
       const autoStartSkips = await runAutoStart(prefMap, { serverPort, boardEvents, allowProject: shouldAutoStartProject, isAutoDrivenProject: (projectId) => resolveStartPolicy(prefMap, projectId).mode !== "manual", logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
       // #349: the diagnostic scan used to be a phase HERE and was awaited. It is now on its own
