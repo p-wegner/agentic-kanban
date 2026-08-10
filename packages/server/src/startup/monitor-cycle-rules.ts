@@ -1,10 +1,22 @@
 import { parseSessionStatsBlob } from "@agentic-kanban/shared";
+import { isClaudeUsageLimitStats } from "../services/claude-rate-limit.js";
+import { isCodexUsageLimitStats } from "../services/codex-rate-limit.js";
 import type { WorkspaceCandidate } from "./monitor-cycle.js";
 
 export const MAX_SESSIONS = 10;
 export const DEFAULT_STUCK_BUILDER_TIMEOUT_MS = 9 * 60 * 1000;
 export const NON_TRIVIAL_WORKTREE_DIFF_CHARS = 80;
 const REPEATED_FAILED_COMMAND_MIN_COUNT = 3;
+/**
+ * How long a quota block is honoured when the provider gave us no usable reset time
+ * (`retryAfter` absent or unparseable). Without this the "no reset time" case is a
+ * PERMANENT block, which is the whole of #387 — so the choice is between re-probing
+ * too early and never re-probing at all. Re-probing too early costs one launch that
+ * immediately re-blocks with a FRESH `retryAfter` (or a fresh `startedAt`, restarting
+ * this window from now), so the error is self-correcting and bounded to one probe per
+ * window per workspace. Never re-probing costs the workspace forever.
+ */
+export const QUOTA_BLOCK_PROBE_FALLBACK_MS = 6 * 60 * 60 * 1000;
 
 export type LatestSession = {
   id: string;
@@ -42,6 +54,54 @@ export function hasRepeatedFailedCommand(stats: string | null): boolean {
 
 export function isBuilderSession(sess: LatestSession): boolean {
   return !sess.triggerType || sess.triggerType === "agent" || sess.triggerType === "chat" || sess.triggerType === "plan-implement";
+}
+
+/** A `blocked` workspace parked there by a provider usage limit, and whether its wait is over. */
+export type QuotaBlock = {
+  /** The provider's own reset time, when it gave a parseable one. */
+  retryAfter: string | null;
+  /** The moment this block stops being honoured — `retryAfter`, else `startedAt + fallback`. */
+  releaseAt: string;
+  /** True once `releaseAt` has passed, i.e. the workspace may return to automation. */
+  expired: boolean;
+};
+
+/**
+ * Classify a `blocked` workspace's latest session as a quota block, and decide whether the
+ * wait has elapsed.
+ *
+ * Reads the reset time out of the SAME session-stats blob the monitor cycle already loads
+ * for every candidate, so no new column and no new write path are needed — and, unlike a
+ * newly-persisted deadline, this recognises the workspaces that are ALREADY wedged.
+ *
+ * Returns `null` when the session is not a usage-limit death, so a workspace blocked for
+ * any other reason keeps needing a human (which is what `blocked` is for).
+ */
+export function classifyQuotaBlock(
+  sess: { startedAt?: string | null; stats: string | null } | null | undefined,
+  nowMs: number,
+): QuotaBlock | null {
+  const stats = sess?.stats ?? null;
+  if (!isClaudeUsageLimitStats(stats) && !isCodexUsageLimitStats(stats)) return null;
+  const parsed = parseSessionStats(stats);
+  const rawRetryAfter = typeof parsed.retryAfter === "string" ? parsed.retryAfter : null;
+  const retryAfterMs = rawRetryAfter ? Date.parse(rawRetryAfter) : Number.NaN;
+  if (Number.isFinite(retryAfterMs)) {
+    return {
+      retryAfter: rawRetryAfter,
+      releaseAt: new Date(retryAfterMs).toISOString(),
+      expired: nowMs >= retryAfterMs,
+    };
+  }
+  // No usable reset time — fall back to a bounded probe window measured from the death.
+  const startedMs = sess?.startedAt ? Date.parse(sess.startedAt) : Number.NaN;
+  const anchorMs = Number.isFinite(startedMs) ? startedMs : nowMs;
+  const releaseMs = anchorMs + QUOTA_BLOCK_PROBE_FALLBACK_MS;
+  return {
+    retryAfter: rawRetryAfter,
+    releaseAt: new Date(releaseMs).toISOString(),
+    expired: nowMs >= releaseMs,
+  };
 }
 
 export function isZeroDiffInReviewAwaiting(ws: WorkspaceCandidate): boolean {

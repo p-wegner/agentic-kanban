@@ -4,7 +4,7 @@ import { db } from "../db/index.js";
 import { isClaudeUsageLimitStats } from "./claude-rate-limit.js";
 import { isCodexUsageLimitStats } from "./codex-rate-limit.js";
 import { resolveStartPolicy } from "./start-policy.service.js";
-import { parseSessionStats } from "../startup/monitor-cycle-rules.js";
+import { classifyQuotaBlock, parseSessionStats } from "../startup/monitor-cycle-rules.js";
 import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
 import {
   getAllPreferences,
@@ -23,6 +23,7 @@ const FIX_AND_MERGE_ZOMBIE_SESSION_COUNT = 2;
 export type AutodriveStallCause =
   | "hung_zero_token_builder"
   | "provider_usage_limit"
+  | "provider_usage_limit_expired"
   | "fix_and_merge_zombie"
   | "in_review_auto_merge_stalled"
   | "no_progress"
@@ -123,14 +124,27 @@ function sessionTokenTotal(stats: string | null): number | null {
     + numberValue(parsed.contextTokens);
 }
 
-function classifyCause(rows: ActiveWorkspaceWithSessions[], prefMap: Map<string, string>): AutodriveStallCause {
+function classifyCause(rows: ActiveWorkspaceWithSessions[], prefMap: Map<string, string>, nowMs: number): AutodriveStallCause {
   // Both providers, not just Codex. A Claude quota death used to fall through to
   // "no_progress" — the least actionable bucket — so a stall that self-heals at a known
   // reset time read identically to a genuinely wedged workspace. Measured: a step agent
   // died on a Claude session limit and its stall warning said "no recent progress" for
   // 55 minutes while the real cause (and its reset time) sat in the session stats.
-  if (rows.some((row) => isCodexUsageLimitStats(row.latestSession?.stats)
-    || isClaudeUsageLimitStats(row.latestSession?.stats))) return "provider_usage_limit";
+  //
+  // But the reset time has to be COMPARED TO THE CLOCK (#387). The stats row is immutable,
+  // so a blocked workspace re-supplies the same usage-limit blob on every scan forever, and
+  // the label kept claiming "waiting on quota" for days after the quota had demonstrably
+  // reset — a self-healing condition that was not healing, which is the least actionable
+  // report of all because it tells the reader to wait.
+  const quotaRows = rows.filter((row) => isCodexUsageLimitStats(row.latestSession?.stats)
+    || isClaudeUsageLimitStats(row.latestSession?.stats));
+  if (quotaRows.length > 0) {
+    const stillWaiting = quotaRows.some((row) => {
+      const block = classifyQuotaBlock(row.latestSession, nowMs);
+      return block !== null && !block.expired;
+    });
+    return stillWaiting ? "provider_usage_limit" : "provider_usage_limit_expired";
+  }
 
   if (rows.some((row) => {
     const sess = row.latestSession;
@@ -157,7 +171,8 @@ function classifyCause(rows: ActiveWorkspaceWithSessions[], prefMap: Map<string,
 function causeLabel(cause: AutodriveStallCause): string {
   switch (cause) {
     case "hung_zero_token_builder": return "latest builder appears hung with no token output";
-    case "provider_usage_limit": return "latest session hit a provider usage limit";
+    case "provider_usage_limit": return "latest session hit a provider usage limit and is still inside its reset window";
+    case "provider_usage_limit_expired": return "latest session hit a provider usage limit whose reset time has already passed — wedged, not waiting";
     case "fix_and_merge_zombie": return "fix-and-merge appears to be looping";
     case "in_review_auto_merge_stalled": return "In-Review work is eligible for auto-merge but has not landed";
     case "no_progress": return "no recent status, workspace, session, or merge progress";
@@ -301,7 +316,7 @@ export async function scanAutodriveStallWarnings(
     const [first] = projectRows;
     const issueNumbers = [...new Set(projectRows.map((row) => row.issueNumber).filter((n): n is number => n !== null))].sort((a, b) => a - b);
     const workspaceIds = [...new Set(projectRows.map((row) => row.workspaceId))];
-    const cause = classifyCause(projectRows, prefs);
+    const cause = classifyCause(projectRows, prefs, nowMs);
     const stalledForMin = Math.floor(stalledMs / 60_000);
     const issuePreview = issueNumbers.length > 0 ? ` issue(s) #${issueNumbers.slice(0, 5).join(", #")}` : " active issue(s)";
     warnings.push({
