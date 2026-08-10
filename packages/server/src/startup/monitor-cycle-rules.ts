@@ -104,6 +104,26 @@ export function classifyQuotaBlock(
   };
 }
 
+/**
+ * Order a project's candidates so the ones whose decision costs NOTHING go first.
+ *
+ * The per-project time budget cuts the walk off wherever it happens to be, and a
+ * `blocked` candidate's decision is a stats parse plus at most one DB write — no git, no
+ * subprocess. Leaving it at the back means the quota-release transition (#387) is starved
+ * by the expensive idle/merge candidates AHEAD of it and may never be reached at all:
+ * measured on `eventhub`, the walk deferred 6-21 remaining candidates EVERY cycle (one
+ * candidate even burned the 5-minute per-candidate timeout on a hung git call), so two
+ * releasable workspaces sat blocked across several cycles purely because of their position.
+ *
+ * Stable within each group, so the previous relative order is otherwise unchanged.
+ */
+export function orderCandidatesForWalk<T extends { wsStatus: string }>(candidates: T[]): T[] {
+  const cheap: T[] = [];
+  const rest: T[] = [];
+  for (const candidate of candidates) (candidate.wsStatus === "blocked" ? cheap : rest).push(candidate);
+  return cheap.length === 0 ? candidates : [...cheap, ...rest];
+}
+
 export function isZeroDiffInReviewAwaiting(ws: WorkspaceCandidate): boolean {
   return ws.issueStatusName === "In Review"
     && !ws.isDirect
