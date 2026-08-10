@@ -128,3 +128,91 @@ describe("advanceDuePluginLoops — pause", () => {
     void projectId;
   });
 });
+
+/**
+ * #372 — a loop whose last advance produced nothing ("blocked, not done": an unresolved gate or an
+ * unfinished upstream) must not be re-planned faster than the configured monitor interval. This
+ * pass runs once per monitor CYCLE, and cycles are also event-triggered, so without an explicit
+ * gate a blocked loop was advanced at the cycle cadence — MEASURED median 91s under a 240s
+ * interval, i.e. one wasted planner subprocess every ~90s per blocked loop.
+ */
+describe("advanceDuePluginLoops — blocked-loop interval gating (#372)", () => {
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {
+        /* Windows file locks — best-effort cleanup */
+      }
+    }
+  });
+
+  async function seedNoOpAdvance(db: TestDb, projectId: string, ageMs: number) {
+    await db.insert(schema.pluginLoopEvents).values({
+      id: randomUUID(),
+      pluginSlug: "loop-plugin",
+      loopName: "sweep",
+      projectId,
+      type: "advance",
+      // The shape a blocked advance really persists: nothing planned, nothing created,
+      // NOT converged, waiting on a gate.
+      payloadJson: JSON.stringify({ planned: 0, created: [], converged: false, gate: { id: "step-3:v1" } }),
+      createdAt: new Date(Date.now() - ageMs).toISOString(),
+    });
+  }
+
+  it("skips a blocked loop whose last no-op advance is younger than the interval", async () => {
+    const { db } = createTestDb();
+    const { projectId } = await setupLoopWithOneClosedRound(db);
+    await seedNoOpAdvance(db, projectId, 90_000); // the measured real cadence
+
+    const logs: string[] = [];
+    const advanced = await advanceDuePluginLoops(db as unknown as Database, {
+      allowProject: () => true,
+      log: (message) => logs.push(message),
+      minBlockedAdvanceIntervalMs: 240_000,
+    });
+
+    expect(advanced).toBe(0);
+    // The plan command is `exit 1`, so reaching the planner is always visible as a log line.
+    expect(logs).toEqual([]);
+  });
+
+  it("advances a blocked loop again once the interval has elapsed", async () => {
+    const { db } = createTestDb();
+    const { projectId } = await setupLoopWithOneClosedRound(db);
+    await seedNoOpAdvance(db, projectId, 300_000);
+
+    const logs: string[] = [];
+    await advanceDuePluginLoops(db as unknown as Database, {
+      allowProject: () => true,
+      log: (message) => logs.push(message),
+      minBlockedAdvanceIntervalMs: 240_000,
+    });
+
+    expect(logs.some((m) => m.includes("loop-plugin:sweep advance failed"))).toBe(true);
+  });
+
+  it("does not gate a loop whose last advance actually created tickets", async () => {
+    const { db } = createTestDb();
+    const { projectId } = await setupLoopWithOneClosedRound(db);
+    await db.insert(schema.pluginLoopEvents).values({
+      id: randomUUID(),
+      pluginSlug: "loop-plugin",
+      loopName: "sweep",
+      projectId,
+      type: "advance",
+      payloadJson: JSON.stringify({ planned: 1, created: [{ unitId: "unit-1" }], converged: false }),
+      createdAt: new Date(Date.now() - 5_000).toISOString(),
+    });
+
+    const logs: string[] = [];
+    await advanceDuePluginLoops(db as unknown as Database, {
+      allowProject: () => true,
+      log: (message) => logs.push(message),
+      minBlockedAdvanceIntervalMs: 240_000,
+    });
+
+    expect(logs.some((m) => m.includes("loop-plugin:sweep advance failed"))).toBe(true);
+  });
+});

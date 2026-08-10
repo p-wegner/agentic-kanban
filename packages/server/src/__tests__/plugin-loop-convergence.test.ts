@@ -12,7 +12,7 @@ import {
 } from "@agentic-kanban/shared/lib/plugin-manifest";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { seedProject, seedIssue } from "./helpers/workflow-test-helpers.js";
-import { advanceDuePluginLoops } from "../services/plugin-loop-monitor.js";
+import { advanceDuePluginLoops, DEFAULT_MIN_BLOCKED_ADVANCE_INTERVAL_MS } from "../services/plugin-loop-monitor.js";
 import { getPluginService } from "../services/plugin.service.js";
 import type { Database } from "../db/index.js";
 import type { CreateIssueInput, CreateIssueResult } from "../services/issue.service.js";
@@ -144,9 +144,15 @@ describe("plugin loop convergence is persisted", () => {
     const pluginDir = makePluginDir(false);
     const { projectId } = await setupClosedRound(db, pluginDir);
 
-    const run = () => advanceDuePluginLoops(db as unknown as Database, { allowProject: () => true, log: () => {} });
+    const run = (now?: number) => advanceDuePluginLoops(db as unknown as Database, { allowProject: () => true, log: () => {}, now });
     await run();
+    // #372: still POLLED (unlike a converged loop, which is skipped forever) — but not faster than
+    // the monitor interval. A back-to-back cycle, which is what an event-triggered board mutation
+    // produces, must not spawn a second planner.
     await run();
+    expect(planRuns(pluginDir)).toBe(1);
+    // …and once the interval has elapsed it is polled again.
+    await run(Date.now() + DEFAULT_MIN_BLOCKED_ADVANCE_INTERVAL_MS + 1_000);
     expect(planRuns(pluginDir)).toBe(2);
 
     const pref = await db
