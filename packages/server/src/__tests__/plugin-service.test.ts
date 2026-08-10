@@ -420,6 +420,53 @@ describe("plugin.service", () => {
     await expect(service.runScript(plugin.id, "nope", projectId)).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
+  // #318 — the enable flow must be able to make the output-location choice, because
+  // enabling SCAFFOLDS. Setting the location afterwards moved the preference but left
+  // the already-written scaffold in the leading repo, which is why the operator docs
+  // had to say "decide first".
+  it("enableForProject with location 'sidecar' scaffolds into the SIDECAR, not the leading repo", async () => {
+    const pluginDir = makePluginDir();
+    const repo = makeProjectRepo();
+    const plugin = await service.installPlugin({ source: pluginDir });
+    const projectId = await insertProject(db, repo);
+
+    const report = await service.enableForProject(plugin.id, projectId, "sidecar");
+
+    expect(report.scaffoldWritten).toBe(true);
+    const { location, repoPath: sidecar } = await service.getOutputLocation(plugin.id, projectId);
+    expect(location).toBe("sidecar");
+    expect(sidecar).not.toBe(repo);
+    // The decisive assertion: the scaffold is in the sidecar and NOT in the leading repo.
+    expect(existsSync(join(sidecar!, "docs", "analysis", "_project-profile.md"))).toBe(true);
+    expect(existsSync(join(repo, "docs", "analysis", "_project-profile.md"))).toBe(false);
+  });
+
+  it("enableForProject without a location is unchanged — leading repo, as before", async () => {
+    // The non-breaking half, and the one that matters: omitting the param must behave
+    // exactly as it did before #318.
+    const pluginDir = makePluginDir();
+    const repo = makeProjectRepo();
+    const plugin = await service.installPlugin({ source: pluginDir });
+    const projectId = await insertProject(db, repo);
+
+    const report = await service.enableForProject(plugin.id, projectId);
+
+    expect(report.scaffoldWritten).toBe(true);
+    expect(existsSync(join(repo, "docs", "analysis", "_project-profile.md"))).toBe(true);
+    expect((await service.getOutputLocation(plugin.id, projectId)).location).toBe("leading");
+  });
+
+  it("enableForProject rejects a bogus location instead of silently defaulting", async () => {
+    const pluginDir = makePluginDir();
+    const repo = makeProjectRepo();
+    const plugin = await service.installPlugin({ source: pluginDir });
+    const projectId = await insertProject(db, repo);
+
+    await expect(service.enableForProject(plugin.id, projectId, "elsewhere")).rejects.toThrow(/location must be one of/);
+    // And it must not have half-enabled: the pref write happens after validation.
+    expect(await getPref(db, pluginEnabledPreferenceKey("test-safety-net", projectId))).toBeFalsy();
+  });
+
   it("enableForProject flags an unfilled scaffold's TODO placeholders in warnings", async () => {
     const pluginDir = makePluginDirWithTodoScaffold();
     const plugin = await service.installPlugin({ source: pluginDir });

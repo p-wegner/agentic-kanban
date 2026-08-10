@@ -115,9 +115,15 @@ export function createPluginsRoute(
     return projectId;
   }
 
+  // #318: `location` is OPTIONAL and applied before scaffolding. Enabling scaffolds
+  // into the resolved output repo, so choosing the location afterwards left the
+  // scaffold in the wrong repo. Omitting it preserves the previous behaviour exactly.
   router.post("/:id/enable", async (c) => {
-    const projectId = await requireProjectId(c);
-    return c.json(await service.enableForProject(c.req.param("id"), projectId));
+    const body = await parseOptionalJsonBody<{ projectId?: string; location?: string }>(c);
+    const projectId = typeof body.projectId === "string" ? body.projectId.trim() : "";
+    if (!projectId) throw new PluginError("projectId is required", "BAD_REQUEST");
+    const location = typeof body.location === "string" ? body.location : undefined;
+    return c.json(await service.enableForProject(c.req.param("id"), projectId, location));
   });
 
   router.post("/:id/disable", async (c) => {

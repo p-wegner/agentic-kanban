@@ -46,6 +46,10 @@ export function PluginMarketplacePanel({ projectId }: PluginMarketplacePanelProp
   const [validating, setValidating] = useState(false);
   const [validateResult, setValidateResult] = useState<ValidateResult | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // #318 — output-location choice made BEFORE enabling, keyed by installedId. Empty /
+  // absent means "leave the default", so the enable request stays byte-identical to
+  // what it was for anyone who does not touch this control.
+  const [pendingLocation, setPendingLocation] = useState<Record<string, string>>({});
   const installInputRef = useRef<HTMLInputElement>(null);
   const setSelection = usePluginViewStore((s) => s.setSelection);
   const installFocusNonce = usePluginViewStore((s) => s.installFocusNonce);
@@ -112,9 +116,13 @@ export function PluginMarketplacePanel({ projectId }: PluginMarketplacePanelProp
         await apiPost(`/api/plugins/${entry.installedId}/disable`, { projectId });
         showToast(`Disabled "${entry.name}" for this project`, "success");
       } else {
+        // #318: send the output-location choice WITH the enable. Enabling scaffolds
+        // into the resolved output repo, so setting the location afterwards left the
+        // scaffold in the leading repo. Omitted when the user left it at the default.
+        const location = pendingLocation[entry.installedId];
         const report = await apiPost<{ warnings?: string[] }>(
           `/api/plugins/${entry.installedId}/enable`,
-          { projectId },
+          location ? { projectId, location } : { projectId },
         );
         const warnings = report.warnings ?? [];
         showToast(
@@ -254,6 +262,23 @@ export function PluginMarketplacePanel({ projectId }: PluginMarketplacePanelProp
               >
                 {busy ? "Working…" : entry.enabled ? "Disable" : "Enable for project"}
               </button>
+              {/* #318: the choice has to be made HERE, not after — enabling scaffolds. */}
+              {!entry.enabled && entry.installedId && (
+                <select
+                  value={pendingLocation[entry.installedId] ?? "leading"}
+                  onChange={(e) =>
+                    setPendingLocation((prev) => ({ ...prev, [entry.installedId!]: e.target.value }))
+                  }
+                  disabled={busy}
+                  title="Where this plugin writes its output. Choose before enabling — enabling writes the scaffold."
+                  aria-label="Plugin output location"
+                  data-testid={`plugin-enable-output-location-${entry.installedId}`}
+                  className="text-xs px-1.5 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 disabled:opacity-50"
+                >
+                  <option value="leading">output: leading repo</option>
+                  <option value="sidecar">output: sidecar repo</option>
+                </select>
+              )}
               {entry.enabled && entry.slug && (
                 <button
                   onClick={() => setSelection({ kind: "plugin", slug: entry.slug! })}
