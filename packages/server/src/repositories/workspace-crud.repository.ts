@@ -45,7 +45,10 @@ export async function getIssueForWorkspaceCreate(
   database: Database = db,
 ) {
   return database
-    .select({ projectId: issues.projectId, issueNumber: issues.issueNumber, title: issues.title, description: issues.description, priority: issues.priority })
+    // `externalKey` rides along because a plugin-loop unit ticket is only RECOGNISABLE by it
+    // (`plugin-loop:<slug>:<loop>:<unit>`, #201 debt) and the skill such a ticket must launch with
+    // comes from the loop's manifest entry, not from the project default (#321).
+    .select({ projectId: issues.projectId, issueNumber: issues.issueNumber, title: issues.title, description: issues.description, priority: issues.priority, externalKey: issues.externalKey })
     .from(issues)
     .where(eq(issues.id, issueId))
     .limit(1);

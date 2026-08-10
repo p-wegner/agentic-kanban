@@ -196,6 +196,28 @@ function mapLatestSetup(row: WorkspaceDetailsRow): WorkspaceSetupRun | null {
   };
 }
 
+/**
+ * The workspace's skill NAME for display (#321).
+ *
+ * `row.skillName` comes from joining `workspaces.skillId` against `agent_skills`, which can only
+ * ever name a DB skill. A DISK skill — every plugin skill, including the one a plugin-loop unit
+ * ticket launches with — has no `agent_skills` row by design, so the join yields null and the card's
+ * skill chip vanished for exactly the workspaces whose skill is most worth naming. The session's
+ * `trigger_type` records it as `skill:<name>` (written by `createWorkspace` from the resolved skill),
+ * so that is the fallback. The DB skill still wins when both exist.
+ */
+export function resolveWorkspaceSkillName(
+  rowSkillName: string | null | undefined,
+  sessionTriggerType: string | null | undefined,
+): string | null {
+  if (rowSkillName) return rowSkillName;
+  if (sessionTriggerType && sessionTriggerType.startsWith("skill:")) {
+    const name = sessionTriggerType.slice("skill:".length).trim();
+    if (name) return name;
+  }
+  return null;
+}
+
 /** Assemble the WorkspaceDetails DTO from a joined row and its latest session (or null). */
 export function mapWorkspaceDetailsRow(row: WorkspaceDetailsRow, sess: WorkspaceDetailsSession | null): WorkspaceDetails {
   const { contextTokens, lastTool } = parseSessionContextAndTool(sess?.stats ?? null);
@@ -218,7 +240,7 @@ export function mapWorkspaceDetailsRow(row: WorkspaceDetailsRow, sess: Workspace
     model: row.model,
     pendingPlanPath: row.pendingPlanPath,
     skillId: row.skillId,
-    skillName: row.skillName ?? null,
+    skillName: resolveWorkspaceSkillName(row.skillName, sess?.triggerType),
     contextPrimer: row.contextPrimer ?? null,
     closedAt: row.closedAt,
     mergedAt: row.mergedAt,

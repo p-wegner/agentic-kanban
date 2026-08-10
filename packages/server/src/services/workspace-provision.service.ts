@@ -17,7 +17,7 @@ import { buildAgentPrompt } from "./workspace-create/policy.js";
 import type { Database } from "../db/index.js";
 import * as crudRepo from "../repositories/workspace-crud.repository.js";
 import { listPluginRows } from "../repositories/plugins.repository.js";
-import { parsePluginManifest, pluginEnabledPreferenceKey } from "@agentic-kanban/shared/lib/plugin-manifest";
+import { parsePluginManifest, pluginEnabledPreferenceKey, parsePluginLoopUnitKey } from "@agentic-kanban/shared/lib/plugin-manifest";
 import type { ProviderName } from "./agent-provider.js";
 import { runSetupScript } from "./setup-script.js";
 import type { SetupScriptContainer } from "@agentic-kanban/shared/lib/setup-script";
@@ -270,6 +270,43 @@ export function createWorkspaceProvisionService(deps: {
     }
   }
 
+  /**
+   * The skill a plugin-loop unit ticket must launch with (#321).
+   *
+   * A loop ticket is created by `advanceLoop` with no skill selection, and every start path
+   * (`startPlannedLoopTickets`, the monitor's auto-start pass, a manual launch) calls
+   * `createWorkspace` without one — so `resolveAgentPromptAndSkill` fell through to the project
+   * DEFAULT skill. Measured on workspace fc679902 (issue #12, `plugin-loop:pm-pipeline:pipeline:
+   * step-9:v2`): `skillId` = board-navigator and the session's `trigger_type` =
+   * `skill:board-navigator`, while the loop declares `skill: "pm-step-runner"`. The wrong skill was
+   * PERSISTED, not merely mislabeled — the ticket prose named the right skill and the launch
+   * announced a different one.
+   *
+   * Returns the loop's `skill` from the plugin manifest, or null when this is not a loop ticket /
+   * the plugin is no longer enabled here. The enabled check matters: only an ENABLED plugin's
+   * skills are materialized into the worktree (`materializeEnabledPluginSkills`), so naming a
+   * disabled plugin's skill would resolve to a file that isn't there.
+   */
+  async function resolvePluginLoopSkillName(
+    externalKey: string | null | undefined,
+    projectId: string,
+  ): Promise<string | null> {
+    const unit = parsePluginLoopUnitKey(externalKey);
+    if (!unit) return null;
+    try {
+      const row = (await listPluginRows(database)).find((r) => r.pluginId === unit.pluginSlug);
+      if (!row) return null;
+      if (await getPreference(pluginEnabledPreferenceKey(row.pluginId, projectId), database) !== "true") return null;
+      const loop = (parsePluginManifest(row.manifestJson).loops ?? []).find((l) => l.name === unit.loopName);
+      return loop?.skill ?? null;
+    } catch (err) {
+      // Best-effort, exactly like the materialization above: a broken manifest must not fail a
+      // launch. The old project-default fallback still applies.
+      console.warn(`[workspaces] plugin-loop skill resolution failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    }
+  }
+
   async function buildAgentConfig(
     input: Pick<CreateWorkspaceInput, "profile" | "claudeProfile" | "model">,
     projectId?: string,
@@ -424,7 +461,7 @@ exit 1
    * the workspace row).
    */
   async function resolveAgentPromptAndSkill(params: {
-    issue: { projectId: string; issueNumber: number | null; title: string; description: string | null; priority: string | null };
+    issue: { projectId: string; issueNumber: number | null; title: string; description: string | null; priority: string | null; externalKey?: string | null };
     input: CreateWorkspaceInput;
     includeVisualProof: boolean;
     workspaceId: string;
@@ -447,6 +484,12 @@ exit 1
         effectiveSkillId = workflowStart.node.skillId ?? null;
         effectiveDiskSkill = workflowStart.node.skillName ?? null;
       }
+    }
+
+    // A plugin-loop unit ticket carries its LOOP's skill (#321) — ahead of the project default,
+    // behind an explicit choice and a workflow node, both of which are deliberate selections.
+    if (!effectiveSkillId && !effectiveDiskSkill) {
+      effectiveDiskSkill = await resolvePluginLoopSkillName(issue.externalKey, issue.projectId);
     }
 
     // Fall back to the project-level default skill so Insights "By Skill" can
