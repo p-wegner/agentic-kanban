@@ -224,6 +224,39 @@ async function applyMigrationInTransaction(
  * @param options.folder Override the migrations folder (tests inject a synthetic
  *   journal + .sql files; production callers omit it).
  */
+/**
+ * Journal tags that `applyMigrations` would actually run right now (#322).
+ *
+ * The pre-migration backup exists as insurance against a schema change, but it
+ * was taken on EVERY boot, before anyone asked whether there was a schema change
+ * to insure. On a ~103 MB DB that is a full-size `VACUUM INTO` per process
+ * start, and under `tsx watch` the process starts on every source edit. Callers
+ * use this to pay for the snapshot only when a migration is genuinely pending.
+ *
+ * Fails SAFE: any error reading the journal or the tracking table returns
+ * `null`, which callers must treat as "unknown — take the backup".
+ */
+export async function pendingMigrationTags(
+  client: Client,
+  options?: { folder?: string },
+): Promise<string[] | null> {
+  try {
+    const folder = options?.folder ?? getMigrationsFolder();
+    const journalPath = resolve(folder, "meta/_journal.json");
+    if (!existsSync(journalPath)) return null;
+    const journalRaw = readFileSync(journalPath, "utf8");
+    if (journalRaw.includes("<<<<<<<")) return null;
+    const entries = (JSON.parse(journalRaw) as { entries: JournalEntry[] }).entries;
+    const result = await client.execute("SELECT hash FROM __drizzle_migrations");
+    const applied = new Set(result.rows.map((r) => String((r as { hash?: string }).hash)));
+    return entries.filter((e) => !applied.has(e.tag)).map((e) => e.tag);
+  } catch {
+    // Includes "no such table: __drizzle_migrations" on a fresh DB — unknown,
+    // so the caller takes the backup.
+    return null;
+  }
+}
+
 export async function applyMigrations(client: Client, options?: { folder?: string }): Promise<void> {
   const folder = options?.folder ?? getMigrationsFolder();
   const journalPath = resolve(folder, "meta/_journal.json");

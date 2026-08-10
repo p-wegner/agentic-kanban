@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import {
   applyMigrations,
+  pendingMigrationTags,
   LEGACY_IDEMPOTENCY_CUTOFF_IDX,
 } from "../db/manual-migrate.js";
 
@@ -287,5 +288,42 @@ describe("applyMigrations — FK-toggling migrations on a populated DB (arch-rev
     // Prior FK-enforcement state restored despite the mid-migration abort (the ON
     // statement never ran) — a broken migration must not leave FK silently OFF.
     expect(await foreignKeysOn(client)).toBe(true);
+  });
+
+  // #322 — the pre-migration backup ran on every boot before anyone asked whether
+  // there was a schema change to insure. This is what lets the caller ask.
+  describe("pendingMigrationTags (#322)", () => {
+    it("returns null on a DB with no tracking table (unknown — caller must back up)", async () => {
+      const folder = makeMigrationsFolder([{ idx: 0, tag: "0000_a", sql: "CREATE TABLE a (id TEXT);" }]);
+      expect(await pendingMigrationTags(client, { folder })).toBeNull();
+    });
+
+    it("lists every unapplied tag, in journal order", async () => {
+      const folder = makeMigrationsFolder([
+        { idx: 0, tag: "0000_a", sql: "CREATE TABLE a (id TEXT);" },
+        { idx: 1, tag: "0001_b", sql: "CREATE TABLE b (id TEXT);" },
+      ]);
+      // Create the tracking table (and apply only the first migration).
+      await applyMigrations(client, { folder: makeMigrationsFolder([{ idx: 0, tag: "0000_a", sql: "CREATE TABLE a (id TEXT);" }]) });
+      expect(await pendingMigrationTags(client, { folder })).toEqual(["0001_b"]);
+    });
+
+    it("returns an EMPTY array once everything is applied — the boot backup is then skippable", async () => {
+      const folder = makeMigrationsFolder([
+        { idx: 0, tag: "0000_a", sql: "CREATE TABLE a (id TEXT);" },
+        { idx: 1, tag: "0001_b", sql: "CREATE TABLE b (id TEXT);" },
+      ]);
+      await applyMigrations(client, { folder });
+      expect(await pendingMigrationTags(client, { folder })).toEqual([]);
+    });
+
+    it("returns null (not []) when the journal is missing or conflicted — fail safe", async () => {
+      const folder = makeMigrationsFolder([{ idx: 0, tag: "0000_a", sql: "CREATE TABLE a (id TEXT);" }]);
+      await applyMigrations(client, { folder });
+      expect(await pendingMigrationTags(client, { folder: join(tmpdir(), `does-not-exist-${randomUUID()}`) })).toBeNull();
+
+      writeFileSync(join(folder, "meta", "_journal.json"), "<<<<<<< HEAD\n{}\n");
+      expect(await pendingMigrationTags(client, { folder })).toBeNull();
+    });
   });
 });
