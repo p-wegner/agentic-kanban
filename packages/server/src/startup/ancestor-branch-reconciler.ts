@@ -17,6 +17,7 @@ import {
 } from "../services/workspace-internals.js";
 import { executeSiblingMerges, cleanupSiblingWorktrees, stampReconciledLeadingMerge } from "../services/workspace-repos.service.js";
 import { createBackup } from "../db/backup.js";
+import { reconcileSilentlyMergedWorkspaces } from "./silently-merged-reconciler.js";
 
 /** Issue status names that are already terminal; skip these workspaces. */
 const TERMINAL_STATUS_NAMES = ["Done", "AI Reviewed", "Closed", "Cancelled"];
@@ -386,9 +387,10 @@ export async function runStrandedSiblingCompensatorTick(database?: Database): Pr
  *
  * Shared onto this reconciler's cadence for the same reason #151 moved the stranded-sibling
  * compensator here: a bookkeeping step no operator was told to perform must self-heal within
- * one tick, not at the next boot. Dynamically imported because `startup-tasks` pulls in the
- * whole startup graph, which this module otherwise does not need at load time (and which
- * would introduce a cycle).
+ * one tick, not at the next boot. It lives in its own module rather than in `startup-tasks`
+ * because importing it from there would close a dependency cycle (`startup-tasks` already
+ * imports {@link reconcileAncestorBranchWorkspaces}) that `pnpm lint:arch` rejects — and a
+ * dynamic `import()` does not evade that check, dependency-cruiser counts it too.
  *
  * `reconcileSilentlyMergedWorkspaces` is idempotent by construction — it selects only
  * `mergedAt IS NOT NULL AND status != 'closed'`, and `reconcileMergedIssue` no-ops once the
@@ -396,7 +398,6 @@ export async function runStrandedSiblingCompensatorTick(database?: Database): Pr
  */
 export async function runSilentlyMergedCompensatorTick(database?: Database): Promise<void> {
   try {
-    const { reconcileSilentlyMergedWorkspaces } = await import("./startup-tasks.js");
     await reconcileSilentlyMergedWorkspaces(database);
   } catch (err) {
     console.warn("[ancestor-reconciler] periodic silently-merged compensator tick error:", err instanceof Error ? err.message : err);
