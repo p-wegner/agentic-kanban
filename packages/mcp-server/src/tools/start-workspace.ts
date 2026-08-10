@@ -9,6 +9,7 @@ import { runSetupScript } from "../setup-script.js";
 import { writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { resolveProviderProfileFromPrefs } from "@agentic-kanban/shared/lib/strategy-policy";
 import { requireEntity } from "../db-utils.js";
+import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 
 export function registerStartWorkspace(server: McpServer) {
   server.tool(
@@ -57,7 +58,12 @@ export function registerStartWorkspace(server: McpServer) {
         return { content: [{ type: "text" as const, text: "No default branch configured for this project. Set a default branch in project settings or pass baseBranch." }] };
       }
 
-      const branchName = isDirect ? await gitService.getCurrentBranch(resolvedRepoPath) : (branch || `workspace/${issueId.slice(0, 8)}`);
+      // #220 ask 2: `suggestBranchName` is the ONE branch-name producer for the whole
+      // board. This site used to mint `workspace/<id8>` — not a different slug of the
+      // same convention but a different CONVENTION, so an MCP-created workspace was
+      // invisible to every reconciler that recognizes `feature/ak-<n>-…` and to the
+      // monitor's duplicate-start guard.
+      const branchName = isDirect ? await gitService.getCurrentBranch(resolvedRepoPath) : (branch || suggestBranchName(issue));
       const id = randomUUID();
       const now = new Date().toISOString();
 

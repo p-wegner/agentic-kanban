@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { isTerminalStatusIdView, isTerminalStatusName } from "@agentic-kanban/shared";
+import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import type { Database } from "../db/index.js";
 import * as gitService from "./git.service.js";
 import { resolveAgentSettings } from "./agent-settings.service.js";
@@ -81,12 +82,13 @@ export async function autoStartFollowups(
     if (await hasSkipAutoStartTag(dep.issueId, SKIP_AUTO_START_TAG, database)) continue;
 
     try {
-      const sanitized = followupIssue[0].title
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-+|-+$/g, "")
-        .slice(0, 50);
-      const branch = `feature/ak-${followupIssue[0].issueNumber ?? "f"}-${sanitized}`;
+      // #220 ask 2: this was a THIRD private branch-name derivation. It sliced the slug
+      // at 50 chars instead of 40 and skipped the `-+ -> -` collapse, so for the
+      // ticket's own fixture title it produced
+      // `feature/ak-176-176-follow-up-simplify-updatebase-s-leading-seeded` where
+      // `suggestBranchName` produces `...-updatebase-s-lead` — a different branch for the
+      // same issue, which is exactly what defeats a guard keyed on the derived name.
+      const branch = suggestBranchName(followupIssue[0]);
       const wsId = randomUUID();
       const now = new Date().toISOString();
 
