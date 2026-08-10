@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch, apiPost } from "../lib/api.js";
+import { subscribeSettingsInvalidated } from "../lib/settingsStore.js";
 import { showToast } from "./Toast.js";
 import { usePluginViewStore } from "../stores/pluginViewStore.js";
 import {
@@ -160,6 +161,13 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
       }
     }
   }, [projectId]);
+
+  // #320 — Start Mode is a PREFERENCE, written from the Monitor popover, but the chip that
+  // reports it ("Start mode is Manual — the monitor will not drive this loop") is rendered from
+  // `surface.startPolicy`, which the server resolves per plugin-surface fetch. That fetch happens
+  // once per project, so switching Start Mode left the chip asserting the old mode until a reload.
+  // Refetching on a settings invalidation makes the chip converge without one.
+  useEffect(() => subscribeSettingsInvalidated(() => { void refetch(); }), [refetch]);
 
   // A plugin pick belongs to the project it was made in — tell the store which
   // project is showing so a stale slug can't leak across a project switch.

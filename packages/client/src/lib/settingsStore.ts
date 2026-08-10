@@ -82,6 +82,27 @@ export function setProjectPref(projectId: string, key: string, value: string): P
   return setSettings({ [`${key}_${projectId}`]: value });
 }
 
+type InvalidationListener = () => void;
+const invalidationListeners = new Set<InvalidationListener>();
+
+/**
+ * Notified after every settings invalidation (#320).
+ *
+ * Dropping the cache only helps consumers that READ settings through this module. A surface that
+ * derives from preferences SERVER-side — the plugin surface's `startPolicy`, resolved by
+ * `resolveStartPolicy` in `GET /api/projects/:id/plugin-surface` — has its own fetch, and nothing
+ * told it a preference had changed. That is why the Loop pane kept rendering "Start mode is
+ * Manual" after the Monitor popover wrote a new `start_mode_<projectId>`: the chip was correct
+ * for the surface it had, and the surface was fetched once per project. Subscribers refetch.
+ *
+ * Fires for every write path (`setSettings`, and the `settings` client-invalidation surface,
+ * which calls `invalidateSettings`), so a new call site cannot forget it.
+ */
+export function subscribeSettingsInvalidated(listener: InvalidationListener): () => void {
+  invalidationListeners.add(listener);
+  return () => invalidationListeners.delete(listener);
+}
+
 /**
  * Drop the cached settings so the next getSettings() hits the network.
  * MUST be called after every successful PUT /api/preferences/settings so
@@ -92,4 +113,8 @@ export function invalidateSettings(): void {
   cached = null;
   cachedAt = 0;
   inFlight = null;
+  // A listener that throws must not swallow the invalidation for the others.
+  for (const listener of [...invalidationListeners]) {
+    try { listener(); } catch { /* a subscriber's refetch failure is its own problem */ }
+  }
 }
