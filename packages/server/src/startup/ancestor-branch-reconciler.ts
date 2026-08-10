@@ -364,8 +364,49 @@ export async function runStrandedSiblingCompensatorTick(database?: Database): Pr
 }
 
 /**
+ * Run the silently-merged compensator (`reconcileSilentlyMergedWorkspaces`) once.
+ *
+ * #380: this is Path A of the interrupted-merge pair — `mergedAt` was stamped by
+ * `stampMergedAtEarly` but the `finalizeMergeCleanup` that follows it never ran, so the
+ * workspace stays un-closed and the ISSUE stays in whatever status it was in (typically
+ * In Review). Path B (`reconcileAncestorBranchWorkspaces`, above) has run on a periodic
+ * cadence since it was written; Path A was wired ONLY into startup
+ * (`startup-tasks.ts`), so a merge interrupted between those two writes could only be
+ * recovered by a server RESTART.
+ *
+ * MEASURED consequence that motivated this (linklocker project, issue #12, 2026-08-10):
+ * the merge landed at 01:31:15 with `mergedAt` stamped, the issue stayed In Review, and
+ * nothing converged it until the next boot closed the workspace at 01:34:45 — 3.5 minutes
+ * in which the pm-pipeline planner counted the ticket as open (`openTickets: 1`), refused
+ * to plan the next round, and the client suppressed the live `step-9:v2` approval-gate
+ * card. The only visible symptom was a stale "Round in progress — 1 ticket(s) still open".
+ * Nothing tells the operator a restart is the cure, and
+ * `openWorkspaceBlockMessage` (`terminal-move-guard.ts`) actively promises the opposite:
+ * "merging auto-transitions the issue to Done".
+ *
+ * Shared onto this reconciler's cadence for the same reason #151 moved the stranded-sibling
+ * compensator here: a bookkeeping step no operator was told to perform must self-heal within
+ * one tick, not at the next boot. Dynamically imported because `startup-tasks` pulls in the
+ * whole startup graph, which this module otherwise does not need at load time (and which
+ * would introduce a cycle).
+ *
+ * `reconcileSilentlyMergedWorkspaces` is idempotent by construction — it selects only
+ * `mergedAt IS NOT NULL AND status != 'closed'`, and `reconcileMergedIssue` no-ops once the
+ * issue already sits on the target status — so running it every tick forever is safe.
+ */
+export async function runSilentlyMergedCompensatorTick(database?: Database): Promise<void> {
+  try {
+    const { reconcileSilentlyMergedWorkspaces } = await import("./startup-tasks.js");
+    await reconcileSilentlyMergedWorkspaces(database);
+  } catch (err) {
+    console.warn("[ancestor-reconciler] periodic silently-merged compensator tick error:", err instanceof Error ? err.message : err);
+  }
+}
+
+/**
  * Schedule the ancestor-branch reconciler to run shortly after boot and then periodically.
- * The stranded-sibling compensator (see {@link runStrandedSiblingCompensatorTick}) runs on
+ * The stranded-sibling compensator (see {@link runStrandedSiblingCompensatorTick}) and the
+ * silently-merged compensator (see {@link runSilentlyMergedCompensatorTick}, #380) run on
  * the SAME tick/cadence (#151) rather than only at startup.
  *
  * Both handles are unref'd so they don't prevent the process from exiting cleanly.
@@ -386,6 +427,13 @@ export function startAncestorBranchReconciler(
       console.warn("[ancestor-reconciler] periodic tick error:", err instanceof Error ? err.message : err),
     );
     void runStrandedSiblingCompensatorTick(deps.database);
+    // #380: Path A of the interrupted-merge pair. Deliberately NOT gated on
+    // `reconciler_ancestor_branch_enabled` inside this closure — the enabled check lives in
+    // `reconcileAncestorBranchWorkspaces` (Path B, git-touching and therefore expensive).
+    // Path A is a pure DB sweep over `mergedAt IS NOT NULL AND status != 'closed'`, which is
+    // cheap and must not be disable-able by a pref about git budget, exactly as the
+    // stranded-sibling compensator above is not.
+    void runSilentlyMergedCompensatorTick(deps.database);
   });
   const timer = setTimeout(tick, 35_000);
   const interval = setInterval(tick, intervalMs);
