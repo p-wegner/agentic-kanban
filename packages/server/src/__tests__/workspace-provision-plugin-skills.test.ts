@@ -42,6 +42,12 @@ function makePluginDir(): string {
     name: "Test Safety Net",
     version: "0.1.0",
     skills: [{ dir: "skills/requirement-extraction" }],
+    // #321 — the loop names the skill its unit tickets must launch with.
+    loops: [{
+      name: "extraction",
+      skill: "requirement-extraction",
+      plan: { command: "node tools/loop-plan.mjs --json", cwd: "plugin" },
+    }],
   };
   writeFileSync(join(dir, "kanban-plugin.json"), JSON.stringify(manifest, null, 2));
   const skillDir = join(dir, "skills", "requirement-extraction");
@@ -121,5 +127,150 @@ describe("workspace-provision.service materializeEnabledPluginSkills", () => {
     await provision.materializeEnabledPluginSkills(worktreePath, repo, projectId);
 
     expect(existsSync(join(worktreePath, ".claude", "skills", "requirement-extraction"))).toBe(false);
+  });
+});
+
+/**
+ * Regression for #321: a plugin-loop unit ticket was launched with the PROJECT DEFAULT skill.
+ *
+ * Measured on the live board — workspace fc679902 for issue #12
+ * (`plugin-loop:pm-pipeline:pipeline:step-9:v2`) held `skillId` = board-navigator and its session's
+ * `trigger_type` was `skill:board-navigator`, while the loop declares `skill: "pm-step-runner"`. No
+ * start path passes a skill for a loop ticket (`startPlannedLoopTickets` calls `createWorkspace`
+ * with only `issueId`; so does the monitor's auto-start), so the fix resolves it from the ticket's
+ * own `externalKey` — which covers every start path at once.
+ */
+describe("workspace-provision.service loop-ticket skill resolution (#321)", () => {
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {
+        /* Windows file locks — temp cleanup is best-effort */
+      }
+    }
+  });
+
+  async function setup() {
+    const { db } = createTestDb();
+    const pluginDir = makePluginDir();
+    const repo = makeProjectRepo();
+    const pluginService = createPluginService({ database: db as unknown as Database });
+    const plugin = await pluginService.installPlugin({ source: pluginDir });
+    const projectId = await insertProject(db, repo);
+    const provision = createWorkspaceProvisionService({
+      database: db as unknown as Database,
+      gitService: {} as GitService,
+    });
+    return { db, repo, plugin, projectId, pluginService, provision };
+  }
+
+  const defaultSkillId = randomUUID();
+
+  async function seedDefaultSkill(db: TestDb): Promise<void> {
+    const now = new Date().toISOString();
+    await db.insert(schema.agentSkills).values({
+      id: defaultSkillId,
+      name: "board-navigator",
+      description: "the project default",
+      prompt: "# board-navigator\nUse the board.",
+      isBuiltin: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  function loopIssue(projectId: string, externalKey: string | null) {
+    return {
+      projectId,
+      issueNumber: 12,
+      title: "Extraction round 1",
+      description: "one unit of the loop",
+      priority: "medium" as string | null,
+      externalKey,
+    };
+  }
+
+  it("launches a loop unit ticket with the LOOP's skill, not the project default", async () => {
+    const { db, repo, plugin, projectId, pluginService, provision } = await setup();
+    await pluginService.enableForProject(plugin.id, projectId);
+    await seedDefaultSkill(db);
+    const worktreePath = makeTempDir("provision-test-worktree-");
+
+    const out = await provision.resolveAgentPromptAndSkill({
+      issue: loopIssue(projectId, "plugin-loop:test-safety-net:extraction:auth-service-r1"),
+      input: { issueId: randomUUID() },
+      includeVisualProof: false,
+      workspaceId: randomUUID(),
+      worktreePath,
+      project: { repoPath: repo, defaultSkillId },
+      skillId: null,
+    });
+
+    expect(out.skillName).toBe("requirement-extraction");
+    // The DB-skill slot stays empty on purpose: a plugin skill is a DISK skill with no
+    // `agent_skills` row, and pointing `skillId` at board-navigator is the bug being fixed.
+    expect(out.effectiveSkillId).toBeNull();
+  });
+
+  it("still falls back to the project default for a NON-loop ticket", async () => {
+    const { db, repo, plugin, projectId, pluginService, provision } = await setup();
+    await pluginService.enableForProject(plugin.id, projectId);
+    await seedDefaultSkill(db);
+    const worktreePath = makeTempDir("provision-test-worktree-");
+
+    const out = await provision.resolveAgentPromptAndSkill({
+      issue: loopIssue(projectId, null),
+      input: { issueId: randomUUID() },
+      includeVisualProof: false,
+      workspaceId: randomUUID(),
+      worktreePath,
+      project: { repoPath: repo, defaultSkillId },
+      skillId: null,
+    });
+
+    expect(out.effectiveSkillId).toBe(defaultSkillId);
+    expect(out.skillName).toBe("board-navigator");
+  });
+
+  it("does not override an explicitly chosen skill", async () => {
+    const { db, repo, plugin, projectId, pluginService, provision } = await setup();
+    await pluginService.enableForProject(plugin.id, projectId);
+    await seedDefaultSkill(db);
+    const worktreePath = makeTempDir("provision-test-worktree-");
+
+    const out = await provision.resolveAgentPromptAndSkill({
+      issue: loopIssue(projectId, "plugin-loop:test-safety-net:extraction:auth-service-r1"),
+      input: { issueId: randomUUID() },
+      includeVisualProof: false,
+      workspaceId: randomUUID(),
+      worktreePath,
+      project: { repoPath: repo, defaultSkillId },
+      skillId: defaultSkillId,
+    });
+
+    expect(out.effectiveSkillId).toBe(defaultSkillId);
+    expect(out.skillName).toBe("board-navigator");
+  });
+
+  it("leaves the project default in place when the loop's plugin is not enabled here", async () => {
+    // Not enabled → its skills are never materialized into the worktree, so naming the loop's
+    // skill would point the agent at a file that isn't there.
+    const { db, repo, projectId, provision } = await setup();
+    await seedDefaultSkill(db);
+    const worktreePath = makeTempDir("provision-test-worktree-");
+
+    const out = await provision.resolveAgentPromptAndSkill({
+      issue: loopIssue(projectId, "plugin-loop:test-safety-net:extraction:auth-service-r1"),
+      input: { issueId: randomUUID() },
+      includeVisualProof: false,
+      workspaceId: randomUUID(),
+      worktreePath,
+      project: { repoPath: repo, defaultSkillId },
+      skillId: null,
+    });
+
+    expect(out.effectiveSkillId).toBe(defaultSkillId);
+    expect(out.skillName).toBe("board-navigator");
   });
 });

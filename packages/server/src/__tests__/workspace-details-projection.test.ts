@@ -104,6 +104,26 @@ describe("mapWorkspaceDetailsRow", () => {
     expect(out.lastTool).toBe("Bash");
   });
 
+  // #321 — a plugin-loop workspace's skill is a DISK skill with no agent_skills row, so the
+  // skillId join is null and the card's skill chip used to disappear. The session's trigger type
+  // is the only record of it.
+  it("names a disk skill from the session trigger when the skillId join is empty", () => {
+    const sess: WorkspaceDetailsSession = {
+      status: "stopped", startedAt: "S", endedAt: "E", triggerType: "skill:pm-step-runner", stats: null,
+    };
+    expect(mapWorkspaceDetailsRow(baseRow(), sess).skillName).toBe("pm-step-runner");
+  });
+
+  it("prefers the joined DB skill over the session trigger, and ignores non-skill triggers", () => {
+    const sess: WorkspaceDetailsSession = {
+      status: "stopped", startedAt: "S", endedAt: "E", triggerType: "skill:pm-step-runner", stats: null,
+    };
+    expect(mapWorkspaceDetailsRow(baseRow({ skillName: "code-review" }), sess).skillName).toBe("code-review");
+    expect(mapWorkspaceDetailsRow(baseRow(), { ...sess, triggerType: "review" }).skillName).toBeNull();
+    expect(mapWorkspaceDetailsRow(baseRow(), { ...sess, triggerType: "skill:" }).skillName).toBeNull();
+    expect(mapWorkspaceDetailsRow(baseRow(), null).skillName).toBeNull();
+  });
+
   it("maps a latest symlink run", () => {
     const out = mapWorkspaceDetailsRow(baseRow({ latestSymlinkState: "linked", latestSymlinkDirs: '["node_modules"]' }), null);
     expect(out.latestSymlink?.state).toBe("linked");
