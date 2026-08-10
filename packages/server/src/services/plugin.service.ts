@@ -516,7 +516,10 @@ export function createPluginService(deps: {
     return { location, repoPath, sidecarRepoName: pluginSidecarRepoName(plugin.pluginId) };
   }
 
-  async function enableForProject(pluginRowId: string, projectId: string): Promise<EnableReport> {
+  /** #318: optional `location` FIRST — enabling scaffolds, so choosing it afterwards left the
+   *  scaffold in the leading repo. Delegates for validation + eager sidecar creation. */
+  async function enableForProject(pluginRowId: string, projectId: string, location?: string): Promise<EnableReport> {
+    if (location !== undefined) await setOutputLocation(pluginRowId, projectId, location);
     const plugin = await requirePlugin(pluginRowId);
     const project = await requireProject(projectId);
     const prefKey = pluginEnabledPreferenceKey(plugin.pluginId, projectId);
