@@ -1,12 +1,53 @@
-import { inspectRepoLock, tryAcquireRepoLock } from "@agentic-kanban/shared/lib/repo-lock";
+import { RepoLockUnavailableError, waitForRepoLock } from "@agentic-kanban/shared/lib/repo-lock";
+import type { RepoLockHandle, RepoLockWaitOptions } from "@agentic-kanban/shared/lib/repo-lock";
 import type { Database } from "../db/index.js";
 
 /**
  * How long a queue member waits for the repo lock before failing loudly (#230).
  * Must exceed a legitimate holder's verify gate — see the matching constant in
- * `workspace-internals.ts`.
+ * `workspace-internals.ts`. Exported so a test can drive the bound (a module-private
+ * const with a module-private clock made it unfalsifiable).
  */
-const MERGE_QUEUE_REPO_LOCK_TIMEOUT_MS = 90 * 60 * 1000;
+export const MERGE_QUEUE_REPO_LOCK_TIMEOUT_MS = 90 * 60 * 1000;
+
+/**
+ * Acquire the repo lock for a queue step: bounded, periodically logged, and failing FAST
+ * when the path cannot be locked at all rather than polling a permanently-unlockable
+ * repoPath as if it were merely busy (#230). Both queue sites go through this one helper
+ * so the classification cannot drift between them.
+ */
+export async function acquireQueueRepoLock(
+  repoPath: string,
+  holder: string,
+  opts: Partial<RepoLockWaitOptions> = {},
+): Promise<RepoLockHandle> {
+  const timeoutMs = opts.timeoutMs ?? MERGE_QUEUE_REPO_LOCK_TIMEOUT_MS;
+  let lastLoggedMs = 0;
+  try {
+    return await waitForRepoLock(repoPath, holder, {
+      ...opts,
+      timeoutMs,
+      pollMs: opts.pollMs ?? 500,
+      onContended: (attempt, waitedMs) => {
+        opts.onContended?.(attempt, waitedMs);
+        if (waitedMs - lastLoggedMs < 60_000) return;
+        lastLoggedMs = waitedMs;
+        console.warn(
+          `[merge-queue] still waiting for the repo lock on ${repoPath} (${holder}) after ` +
+            `${Math.round(waitedMs / 1000)}s of ${Math.round(timeoutMs / 1000)}s — ${attempt.reason}`,
+        );
+      },
+    });
+  } catch (err) {
+    if (err instanceof RepoLockUnavailableError) {
+      throw new Error(
+        `[merge-queue] cannot lock ${repoPath} (${holder}) — ${err.message}. ` +
+          `This is not lock contention (code ${err.code}); waiting would never have succeeded.`,
+      );
+    }
+    throw err;
+  }
+}
 import * as gitService from "./git.service.js";
 import {
   getMergeQueueWorkspaceRows,
@@ -531,14 +572,8 @@ export function createMergeQueueService(deps: {
       return;
     }
 
-    const deadline = Date.now() + MERGE_QUEUE_REPO_LOCK_TIMEOUT_MS;
-    let repoLock = tryAcquireRepoLock(repoPath, `merge-train:${label}`);
-    while (!repoLock) {
-      if (Date.now() >= deadline) throw new Error(`[merge-train] timed out waiting for the repo lock on ${repoPath}`);
-      await new Promise((r) => setTimeout(r, 500));
-      repoLock = tryAcquireRepoLock(repoPath, `merge-train:${label}`);
-    }
-    const heartbeat = setInterval(() => repoLock!.heartbeat(), 15_000);
+    const repoLock = await acquireQueueRepoLock(repoPath, `merge-train:${label}`);
+    const heartbeat = setInterval(() => repoLock.heartbeat(), 15_000);
 
     let result: Awaited<ReturnType<typeof runMergeTrain>> | null = null;
     try {
@@ -655,22 +690,11 @@ export function createMergeQueueService(deps: {
         // Bounded (#230): an unbounded wait here wedged the whole queue behind one stuck
         // holder with no error and no way to tell "waiting" from "dead". The budget must
         // exceed a legitimate holder's verify gate (30-45 min on a full-suite project), so
-        // this only fires when something is genuinely stuck.
-        const repoLockDeadline = Date.now() + MERGE_QUEUE_REPO_LOCK_TIMEOUT_MS;
-        let repoLock = tryAcquireRepoLock(ws.repoPath, `merge-queue:${ws.id}`);
-        while (!repoLock) {
-          if (Date.now() >= repoLockDeadline) {
-            const held = inspectRepoLock(ws.repoPath);
-            throw new Error(
-              `[merge-queue] timed out after ${Math.round(MERGE_QUEUE_REPO_LOCK_TIMEOUT_MS / 60000)}min waiting for the repo lock on ${ws.repoPath} ` +
-                `(merge-queue:${ws.id})` +
-                (held ? ` — held by ${held.contents.holder} pid=${held.contents.pid}, heartbeat age ${Math.round(held.ageMs / 1000)}s` : " — no lockfile present"),
-            );
-          }
-          await new Promise((resolve) => setTimeout(resolve, 500));
-          repoLock = tryAcquireRepoLock(ws.repoPath, `merge-queue:${ws.id}`);
-        }
-        const repoLockHeartbeat = setInterval(() => repoLock!.heartbeat(), 15_000);
+        // this only fires when something is genuinely stuck. A repoPath that cannot be
+        // locked AT ALL (no `.git`, permission denied) fails immediately instead — that
+        // case is not contention and waiting it out could never have succeeded.
+        const repoLock = await acquireQueueRepoLock(ws.repoPath, `merge-queue:${ws.id}`);
+        const repoLockHeartbeat = setInterval(() => repoLock.heartbeat(), 15_000);
 
         // #242: the locked region below CONTAINS `yield`s. This is an async generator, so an
         // abandoned consumer (the SSE route `break`s when the stream closes, or `writeSSE`

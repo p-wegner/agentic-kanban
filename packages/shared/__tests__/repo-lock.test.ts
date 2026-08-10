@@ -4,8 +4,11 @@ import { tmpdir, hostname } from "node:os";
 import { join } from "node:path";
 import {
   tryAcquireRepoLock,
+  attemptRepoLock,
   inspectRepoLock,
+  waitForRepoLock,
   withRepoLock,
+  RepoLockUnavailableError,
   REPO_LOCK_STALE_MS,
   REPO_LOCK_LIVE_HOLDER_MAX_MS,
 } from "../src/lib/repo-lock.js";
@@ -339,4 +342,139 @@ describe("repo-lock (#993 on-disk cross-process merge lock)", () => {
       withRepoLock(repo, "waiter", async () => "should not run", { pollMs: 10, timeoutMs: 50 }),
     ).rejects.toThrow(/timed out/);
   });
+});
+
+/**
+ * #230 — CONTENDED vs UNAVAILABLE, and a bound that can actually fail a test.
+ *
+ * Both halves used to be untestable:
+ *  - `tryAcquireRepoLock` collapsed "someone holds it" and "this path cannot be locked"
+ *    into one `null`, and a bare `catch { return null }` around the lockfile write
+ *    reported EPERM/EACCES as contention. A caller polling on that hangs forever.
+ *  - the wait bound lived in a module-private const read against `Date.now()`, so no test
+ *    could fail if the deadline check were deleted — observing it needed 90 real minutes.
+ *    `waitForRepoLock` therefore takes an injected clock and sleeper.
+ */
+describe("repo-lock CONTENDED vs UNAVAILABLE (#230)", () => {
+  const dirs: string[] = [];
+
+  function makeRepo(): string {
+    const dir = mkdtempSync(join(tmpdir(), "repo-lock-230-"));
+    mkdirSync(join(dir, ".git"), { recursive: true });
+    dirs.push(dir);
+    return dir;
+  }
+
+  afterEach(() => {
+    while (dirs.length > 0) rmSync(dirs.pop()!, { recursive: true, force: true });
+  });
+
+  it("classifies a live holder as CONTENDED (waiting is correct)", () => {
+    const repo = makeRepo();
+    expect(attemptRepoLock(repo, "holder-a").outcome).toBe("acquired");
+
+    const second = attemptRepoLock(repo, "holder-b");
+    expect(second.outcome).toBe("contended");
+    if (second.outcome === "contended") expect(second.heldBy?.holder).toBe("holder-a");
+  });
+
+  it("classifies a repoPath with no .git as UNAVAILABLE, not as contention", () => {
+    // The measured #230 trigger: a synthetic repoPath (`/repo-<uuid>`), as several merge
+    // tests use. Pre-fix this returned the same `null` as a busy lock, and the caller
+    // polled it until vitest's 60s timeout with zero diagnostic output.
+    const missing = join(tmpdir(), `repo-lock-230-missing-${Date.now()}`);
+    const attempt = attemptRepoLock(missing, "holder");
+    expect(attempt.outcome).toBe("unavailable");
+    if (attempt.outcome === "unavailable") {
+      expect(attempt.code).toBe("ENOENT");
+      expect(attempt.reason).toMatch(/does not exist/);
+    }
+  });
+
+  it("classifies an unwritable lock path (IO error, not EEXIST) as UNAVAILABLE", () => {
+    // A REAL instance of the class the old bare `catch { return null }` mislabelled as
+    // contention: `.git` is a FILE, not a directory — exactly what a git WORKTREE has, so
+    // this is what happens when a worktree path reaches a repoPath parameter. `existsSync`
+    // sees `.git`, but the lockfile under it can never be created (ENOTDIR/ENOENT). Pre-fix
+    // the caller polled that forever; the errno is not EEXIST, so it must read UNAVAILABLE.
+    const dir = mkdtempSync(join(tmpdir(), "repo-lock-230-gitfile-"));
+    dirs.push(dir);
+    writeFileSync(join(dir, ".git"), "gitdir: /elsewhere/.git/worktrees/x\n");
+
+    const attempt = attemptRepoLock(dir, "holder");
+    expect(attempt.outcome).toBe("unavailable");
+    if (attempt.outcome === "unavailable") expect(attempt.code).not.toBe("EEXIST");
+  });
+
+  it("still classifies a LOST RACE (EEXIST on the write) as contention", () => {
+    // An unparseable lockfile makes `inspectRepoLock` return null, so the attempt falls
+    // through to the `wx` write and hits the real EEXIST — the genuine lost-race errno,
+    // which must stay CONTENDED (waiting is correct; the winner will release).
+    const repo = makeRepo();
+    writeFileSync(join(repo, ".git", "agentic-kanban-merge.lock"), "not json");
+
+    expect(attemptRepoLock(repo, "holder").outcome).toBe("contended");
+  });
+
+  it("waitForRepoLock FAILS FAST on an unavailable path instead of polling it", async () => {
+    const missing = join(tmpdir(), `repo-lock-230-nowait-${Date.now()}`);
+    let sleeps = 0;
+    await expect(
+      waitForRepoLock(missing, "holder", {
+        timeoutMs: 60 * 60 * 1000,
+        sleep: async () => { sleeps++; },
+      }),
+    ).rejects.toBeInstanceOf(RepoLockUnavailableError);
+    // The point of the fix: not one poll was spent on a path that can never be locked.
+    expect(sleeps).toBe(0);
+  });
+
+  /**
+   * THE BOUND ITSELF — the assertion that fails if the deadline check in `waitForRepoLock`
+   * is removed or raised. A virtual clock does the waiting, so the whole 10-simulated-second
+   * budget costs microseconds; the `attempt` tripwire converts an unbounded loop into a
+   * distinct, FAST failure instead of a hang, so the red is legible rather than a timeout.
+   * MEASURED red-then-green: see the commit message.
+   */
+  it("waitForRepoLock stops waiting at the bound on a permanently CONTENDED lock", async () => {
+    let virtualNow = 0;
+    let attempts = 0;
+    const budgetMs = 10_000;
+    const pollMs = 500;
+    const maxAttempts = budgetMs / pollMs + 1; // one attempt per poll + the one at the deadline
+    await expect(
+      waitForRepoLock("/irrelevant", "waiter", {
+        timeoutMs: budgetMs,
+        pollMs,
+        now: () => virtualNow,
+        sleep: async (ms) => { virtualNow += ms; },
+        attempt: () => {
+          attempts++;
+          if (attempts > maxAttempts) {
+            // Tripwire: only reachable when nothing stops the loop at the deadline.
+            throw new Error(`waitForRepoLock is UNBOUNDED: ${attempts} attempts, virtual clock at ${virtualNow}ms`);
+          }
+          return { outcome: "contended", reason: "held by someone-else pid=1" };
+        },
+      }),
+    ).rejects.toThrow(/timed out after 10s/);
+    expect(attempts).toBe(maxAttempts);
+    expect(virtualNow).toBe(budgetMs);
+  }, 5_000);
+
+  it("waitForRepoLock reports progress while waiting, so a stuck wait is diagnosable", async () => {
+    let virtualNow = 0;
+    const waits: number[] = [];
+    await expect(
+      waitForRepoLock("/irrelevant", "waiter", {
+        timeoutMs: 2_000,
+        pollMs: 500,
+        now: () => virtualNow,
+        sleep: async (ms) => { virtualNow += ms; },
+        attempt: () => ({ outcome: "contended", reason: "held by someone-else pid=1" }),
+        onContended: (_a, waitedMs) => waits.push(waitedMs),
+      }),
+    ).rejects.toThrow(/timed out/);
+    expect(waits).toEqual([0, 500, 1000, 1500, 2000]);
+  }, 5_000);
 });
