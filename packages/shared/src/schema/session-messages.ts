@@ -18,6 +18,10 @@ export const sessionMessages = sqliteTable("session_messages", {
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 }, (table) => ({
   sessionIdCreatedAtIdx: index("idx_session_messages_session_id_created_at").on(table.sessionId, table.createdAt),
+  // The hot readers ORDER BY id DESC (workspace-summary, board-status-enrichment,
+  // failure-pattern repositories); without this the created_at index can't serve
+  // them and each query temp-sorts the session's whole matched set (0113).
+  sessionIdIdIdx: index("idx_session_messages_session_id_id").on(table.sessionId, table.id),
 }));
 
 export const sessionMessagesRelations = relations(sessionMessages, ({ one }) => ({
