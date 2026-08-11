@@ -111,6 +111,104 @@ describe("validate-command-safety — destructive verbs still block (no regressi
   }
 });
 
+describe("validate-command-safety — sub-12KB stub removal is allowed (#406)", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "kanban-guard-stub-"));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const posix = (p: string) => p.replace(/\\/g, "/");
+
+  it("allows rm of an on-disk 0-byte kanban.db stub, with a loud note", async () => {
+    const db = join(dir, "kanban.db");
+    await writeFile(db, "");
+
+    const result = runGuard(`rm ${posix(db)}`);
+
+    expect(result.blocked).toBe(false);
+    expect(result.stderr).toContain("stray kanban.db STUB");
+    expect(result.stderr).toContain("12288");
+    expect(result.stderr).toContain("db-path.ts");
+  });
+
+  it("allows removing a small stub together with its -wal/-shm sidecars", async () => {
+    const db = join(dir, "kanban.db");
+    await writeFile(db, "tiny");
+    await writeFile(db + "-wal", "w");
+
+    const result = runGuard(`rm "${db}" "${db}-wal"`);
+
+    expect(result.blocked).toBe(false);
+    expect(result.stderr).toContain("stray kanban.db STUB");
+  });
+
+  it("allows quarantining a stub via mv (rename away)", async () => {
+    const db = join(dir, "kanban.db");
+    await writeFile(db, "");
+
+    expect(runGuard(`mv ${posix(db)} ${posix(db)}.stub-2026-08-11`).blocked).toBe(false);
+  });
+
+  it("still blocks rm of a kanban.db AT the 12KB floor (a real database)", async () => {
+    const db = join(dir, "kanban.db");
+    await writeFile(db, Buffer.alloc(12_288));
+
+    expect(runGuard(`rm ${posix(db)}`).blocked).toBe(true);
+  });
+
+  it("still blocks rm of a kanban.db above the floor", async () => {
+    const db = join(dir, "kanban.db");
+    await writeFile(db, Buffer.alloc(64_000));
+
+    expect(runGuard(`rm ${posix(db)}`).blocked).toBe(true);
+  });
+
+  it("still blocks when the target file is MISSING (path could resolve to the real db)", () => {
+    expect(runGuard(`rm ${posix(join(dir, "kanban.db"))}`).blocked).toBe(true);
+  });
+
+  it("still blocks a redirect/truncation INTO a stub (no size exemption for writes)", async () => {
+    const db = join(dir, "kanban.db");
+    await writeFile(db, "");
+
+    expect(runGuard(`echo corrupt > ${posix(db)}`).blocked).toBe(true);
+  });
+
+  it("still blocks glob deletion even when only a stub exists", async () => {
+    await writeFile(join(dir, "kanban.db"), "");
+
+    expect(runGuard(`rm ${posix(dir)}/*.db`).blocked).toBe(true);
+  });
+
+  it("still blocks a stub removal that changes directory first (stat cannot be trusted)", async () => {
+    const db = join(dir, "kanban.db");
+    await writeFile(db, "");
+
+    expect(runGuard(`cd ${posix(dir)} && rm ${posix(db)}`).blocked).toBe(true);
+  });
+
+  it("still blocks removing only a -wal sidecar when the main db is real-sized", async () => {
+    const db = join(dir, "kanban.db");
+    await writeFile(db, Buffer.alloc(20_000));
+    await writeFile(db + "-wal", "w");
+
+    expect(runGuard(`rm ${posix(db)}-wal`).blocked).toBe(true);
+  });
+
+  it("still blocks when two DIFFERENT db paths are named and only one is a stub", async () => {
+    const stub = join(dir, "kanban.db");
+    await writeFile(stub, "");
+    const other = join(dir, "elsewhere", "kanban.db");
+
+    expect(runGuard(`rm ${posix(stub)} ${posix(other)}`).blocked).toBe(true);
+  });
+});
+
 describe("validate-command-safety — backup covers the db actually in use (#137)", () => {
   let dataDir: string;
 
@@ -124,7 +222,9 @@ describe("validate-command-safety — backup covers the db actually in use (#137
 
   it("backs up the AGENTIC_KANBAN_DIR database before blocking", async () => {
     const db = join(dataDir, "kanban.db");
-    await writeFile(db, "real-database-content");
+    // Real-sized (>= the #406 stub floor of 12288 bytes) so the guard treats it
+    // as the vital database, not a removable stub.
+    await writeFile(db, Buffer.alloc(16_384, 1));
     await writeFile(db + "-wal", "wal");
 
     const result = runGuard(`rm ${db.replace(/\\/g, "/")}`, { AGENTIC_KANBAN_DIR: dataDir });
@@ -140,7 +240,8 @@ describe("validate-command-safety — backup covers the db actually in use (#137
     // Simulate the home fallback by pointing HOME/USERPROFILE at a temp dir.
     const home = join(dataDir, "home");
     await mkdir(join(home, ".agentic-kanban"), { recursive: true });
-    await writeFile(join(home, ".agentic-kanban", "kanban.db"), "fallback-db-content");
+    // Real-sized (>= the #406 stub floor) so removal still blocks and backs up.
+    await writeFile(join(home, ".agentic-kanban", "kanban.db"), Buffer.alloc(16_384, 1));
 
     const result = runGuard("rm ~/.agentic-kanban/kanban.db", {
       HOME: home,
