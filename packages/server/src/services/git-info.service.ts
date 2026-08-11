@@ -1,11 +1,10 @@
 import { existsSync } from "node:fs";
 import { resolve, basename } from "node:path";
 import type { ProjectStatsResponse } from "@agentic-kanban/shared";
-import { gitExecOrThrow, gitExecSync } from "@agentic-kanban/shared/lib/git-exec";
+import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 // The source-tree walk and path classification live in their own module (#340) — this
 // one owns git history, repo detection and the metrics cache.
 import {
-  collectCurrentCodeMetrics,
   collectCurrentCodeMetricsAsync,
   emptyCodeMetrics,
   isSourceFile,
@@ -248,37 +247,7 @@ function parseHotspotsLog(logOut: string): ProjectGitStats["hotspots"] {
   return [...hotspots.values()].sort((a, b) => b.changes - a.changes).slice(0, MAX_HOTSPOTS);
 }
 
-function collectHistoryMetrics(repoPath: string, branch: string): Pick<ProjectGitStats, "history" | "hotspots"> {
-  const weeks = buildEmptyWeeks();
-  let logOut = "";
-
-  try {
-    logOut = gitExecSync(historyLogArgs(weeks[0].week, branch), {
-      cwd: repoPath,
-      timeout: HISTORY_LOG_TIMEOUT_MS,
-      maxBuffer: 4 * 1024 * 1024,
-    });
-  } catch {
-    // Git history is best-effort. Current LOC still makes the metrics view useful.
-  }
-
-  const result = parseHistoryLog(weeks, logOut);
-  if (result.hotspots.length === 0) {
-    try {
-      const fullOut = gitExecSync(hotspotLogArgs(branch), {
-        cwd: repoPath,
-        timeout: HISTORY_LOG_TIMEOUT_MS,
-        maxBuffer: 4 * 1024 * 1024,
-      });
-      result.hotspots = parseHotspotsLog(fullOut);
-    } catch {
-      // Fallback is best-effort; an empty hotspot list is acceptable.
-    }
-  }
-  return result;
-}
-
-/** Async twin of collectHistoryMetrics — same git invocation and parsing, without blocking. */
+/** Collect windowed history + hotspots without blocking — same git invocation and parsing as the retired sync twin (#401). */
 async function collectHistoryMetricsAsync(repoPath: string, branch: string): Promise<Pick<ProjectGitStats, "history" | "hotspots">> {
   const weeks = buildEmptyWeeks();
   let logOut = "";
@@ -301,26 +270,8 @@ async function collectHistoryMetricsAsync(repoPath: string, branch: string): Pro
   return result;
 }
 
-function collectProjectCodeAndHistory(repoPath: string, branch: string): CachedMetrics {
-  let head: string | null;
-  try {
-    head = gitExecSync(["rev-parse", branch], { cwd: repoPath, timeout: HEAD_RESOLVE_TIMEOUT_MS }).trim();
-  } catch {
-    head = null;
-  }
-  const cacheKey = metricsCacheKey(repoPath, branch);
-  const cached = metricsCache.get(cacheKey);
-  if (isMetricsEntryUsable(cached, head, METRICS_CACHE_TTL_MS, Date.now())) return cached!.metrics;
-
-  const codeMetrics = collectCurrentCodeMetrics(repoPath);
-  const { history, hotspots } = collectHistoryMetrics(repoPath, branch);
-  const metrics = { codeMetrics, history, hotspots };
-  metricsCache.set(cacheKey, { timestamp: Date.now(), head, metrics });
-  return metrics;
-}
-
 /**
- * Async twin of collectProjectCodeAndHistory. Shares the same 60s cache; concurrent
+ * Compute (or serve cached) code metrics + history for a repo. Shares the 60s cache; concurrent
  * cold computes for the same key share one in-flight promise instead of each spawning
  * the full source walk + git history scan.
  *
@@ -372,54 +323,12 @@ function parseRecentCommits(logOut: string): { hash: string; message: string; da
   });
 }
 
-export function getProjectGitStats(repoPath: string, defaultBranch: string | null): ProjectGitStats {
-  let commitCount = 0;
-  let recentCommits: { hash: string; message: string; date: string }[] = [];
-
-  // If defaultBranch is not stored in the DB, try to detect it synchronously
-  let branch = defaultBranch;
-  if (!branch) {
-    for (const candidate of ["main", "master"]) {
-      try {
-        gitExecSync(["show-ref", "--verify", "--quiet", `refs/heads/${candidate}`], { cwd: repoPath, timeout: 2000 });
-        branch = candidate;
-        break;
-      } catch { /* branch doesn't exist */ }
-    }
-  }
-
-  if (!branch) return {
-    commitCount,
-    recentCommits,
-    detectedBranch: null,
-    codeMetrics: emptyCodeMetrics(),
-    history: emptyHistory(),
-    hotspots: [],
-  };
-
-  try {
-    const countOut = gitExecSync(["rev-list", "--count", branch], { cwd: repoPath, timeout: 5000 }).trim();
-    commitCount = parseInt(countOut, 10) || 0;
-    // Use ASCII unit separator (\x1f) to avoid conflicts with commit message content
-    const logOut = gitExecSync(["log", branch, `--format=%H${GIT_SEP}%s${GIT_SEP}%cr`, "-10"], { cwd: repoPath, timeout: 5000 }).trim();
-    recentCommits = parseRecentCommits(logOut);
-  } catch { /* git unavailable or no commits */ }
-
-  const metrics = existsSync(repoPath)
-    ? collectProjectCodeAndHistory(repoPath, branch)
-    : { codeMetrics: emptyCodeMetrics(), history: emptyHistory(), hotspots: [] };
-  return { commitCount, recentCommits, detectedBranch: branch, ...metrics };
-}
-
 /**
- * Async twin of getProjectGitStats — identical response shape, but all git/filesystem
- * work runs off the event loop (promisified execFile + fs.promises), so a cold metrics
- * compute no longer blocks every concurrent request for multiple seconds.
- *
- * NOTE: getProjectGitStats (sync) is kept only for its existing caller in
- * project.service.ts getStats(); flip that call site to
- * `await getProjectGitStatsAsync(...)` to activate the non-blocking path, then the
- * sync variant can be removed.
+ * Project git stats — all git/filesystem work runs off the event loop (promisified
+ * execFile + fs.promises), so a cold metrics compute never blocks concurrent requests.
+ * The sync twin (`getProjectGitStats` + its `collectHistoryMetrics` /
+ * `collectProjectCodeAndHistory` helpers, `gitExecSync`-based) was removed in #401 —
+ * it had no production caller left and blocked the loop for up to 15s.
  */
 export async function getProjectGitStatsAsync(repoPath: string, defaultBranch: string | null): Promise<ProjectGitStats> {
   let commitCount = 0;

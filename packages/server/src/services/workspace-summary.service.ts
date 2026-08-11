@@ -6,7 +6,7 @@ import { isAnalyticsNoise } from "./session-filter.js";
 import { computeWorkspaceCodeMetrics, parseStoredWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import type { WorkspaceCodeMetrics, WorkspaceSummary } from "@agentic-kanban/shared";
 import { ACTIVE_WORKSPACE_STATUSES, workspaceStatusPriority } from "@agentic-kanban/shared";
-import { readSessionStdoutFileTail } from "../lib/session-output-reader.js";
+import { readSessionStdoutFileTailAsync } from "../lib/session-output-reader.js";
 import { extractAssistantMessage, extractToolName, safeParseStringArray } from "../lib/session-message-extraction.js";
 import { selectLatestSessionsByWorkspace, parseContextTokensFromStats } from "../lib/workspace-summary-session.js";
 import { selectCachedDiffStats, isPlanOnlySession, isDiffCacheStale } from "../lib/workspace-diff-cache.js";
@@ -513,6 +513,10 @@ async function attachSessionData(
 // Phase 8 I/O: for each candidate session, derive its last tool name and last
 // assistant message — preferring the live .out stdout file and falling back to the
 // persisted session_messages rows for historical sessions with no file.
+
+/** Bounded fan-out for the per-session .out tail reads (#401). */
+const TAIL_READ_CONCURRENCY = 5;
+
 async function collectLastToolAndMessages(
   latestSessionIds: string[],
   database: Database,
@@ -536,18 +540,31 @@ async function collectLastToolAndMessages(
   // FIRST match in the window they are given, so with a whole-file read
   // `lastTool` was really the session's FIRST tool. Over a tail window it now
   // reflects recent activity, which is what the field name promises.
+  //
+  // ASYNC + bounded fan-out (#401): the tail reads used to be synchronous
+  // (openSync/readSync, 256 KB each) in a sequential for-loop — one event-loop
+  // block per non-closed workspace per board rebuild. They now run through
+  // fs.promises with a small worker pool so at most TAIL_READ_CONCURRENCY file
+  // handles are open at once and the loop stays free between reads.
   const needsDb: string[] = [];
-  for (const sid of latestSessionIds) {
-    const fileContent = readSessionStdoutFileTail(sid);
-    if (fileContent === null) {
-      needsDb.push(sid);
-      continue;
+  let nextIdx = 0;
+  const tailWorker = async (): Promise<void> => {
+    while (nextIdx < latestSessionIds.length) {
+      const sid = latestSessionIds[nextIdx++];
+      const fileContent = await readSessionStdoutFileTailAsync(sid);
+      if (fileContent === null) {
+        needsDb.push(sid);
+        continue;
+      }
+      const toolName = extractToolName(fileContent);
+      if (toolName) lastToolBySession.set(sid, toolName);
+      const assistantMessage = extractAssistantMessage(fileContent);
+      if (assistantMessage) lastAssistantMsgBySession.set(sid, assistantMessage);
     }
-    const toolName = extractToolName(fileContent);
-    if (toolName) lastToolBySession.set(sid, toolName);
-    const assistantMessage = extractAssistantMessage(fileContent);
-    if (assistantMessage) lastAssistantMsgBySession.set(sid, assistantMessage);
-  }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(TAIL_READ_CONCURRENCY, latestSessionIds.length) }, tailWorker),
+  );
 
   if (needsDb.length > 0) {
     const msgRows = await getSessionMessagesForSessions(needsDb, database);

@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import {
   collectCurrentCodeMetricsAsyncForTest,
-  getProjectGitStats,
   getProjectGitStatsAsync,
   hotspotLogArgs,
   HOTSPOT_FALLBACK_COMMIT_LIMIT_FOR_TEST,
@@ -81,22 +80,6 @@ describe("getProjectGitStatsAsync", () => {
     expect(hotspotPaths).toContain("src/__tests__/app.test.ts");
   });
 
-  it("matches the sync implementation field-for-field", async () => {
-    const asyncStats = await getProjectGitStatsAsync(repoDir, branchName);
-    const syncStats = getProjectGitStats(repoDir, branchName);
-
-    expect(asyncStats.commitCount).toBe(syncStats.commitCount);
-    expect(asyncStats.detectedBranch).toBe(syncStats.detectedBranch);
-    expect(asyncStats.recentCommits.map((c) => c.hash)).toEqual(syncStats.recentCommits.map((c) => c.hash));
-    expect(asyncStats.recentCommits.map((c) => c.message)).toEqual(syncStats.recentCommits.map((c) => c.message));
-    // generatedAt is a timestamp; compare the numeric metrics only
-    const { generatedAt: _a, ...asyncMetrics } = asyncStats.codeMetrics;
-    const { generatedAt: _s, ...syncMetrics } = syncStats.codeMetrics;
-    expect(asyncMetrics).toEqual(syncMetrics);
-    expect(asyncStats.history).toEqual(syncStats.history);
-    expect(asyncStats.hotspots).toEqual(syncStats.hotspots);
-  });
-
   it("auto-detects branch when defaultBranch is null", async () => {
     const stats = await getProjectGitStatsAsync(repoDir, null);
     expect(stats.commitCount).toBe(2);
@@ -170,10 +153,6 @@ describe("getProjectGitStatsAsync", () => {
       expect(stats.history.weeks.reduce((sum, w) => sum + w.commits, 0)).toBe(0);
       // ...but hotspots are still populated via the full-history fallback.
       expect(stats.hotspots.map((h) => h.path)).toContain("src/legacy.ts");
-
-      // Sync path matches.
-      const syncStats = getProjectGitStats(oldDir, branch);
-      expect(syncStats.hotspots.map((h) => h.path)).toContain("src/legacy.ts");
     } finally {
       await rm(oldDir, { recursive: true, force: true });
     }
@@ -189,22 +168,32 @@ describe("getProjectGitStatsAsync", () => {
     expect(HOTSPOT_FALLBACK_COMMIT_LIMIT_FOR_TEST).toBeGreaterThan(0);
   });
 
-  it("serves warm requests from the shared HEAD-keyed cache (sync and async share it)", async () => {
-    const syncStats = getProjectGitStats(repoDir, branchName);
-    const asyncStats = await getProjectGitStatsAsync(repoDir, branchName);
-    // Same cache entry => identical object references for the cached metrics portion
-    expect(asyncStats.codeMetrics).toBe(syncStats.codeMetrics);
-    expect(asyncStats.history).toBe(syncStats.history);
-    expect(asyncStats.hotspots).toBe(syncStats.hotspots);
+  it("serves warm requests from the shared HEAD-keyed cache", async () => {
+    // Fresh repo: the shared repoDir's cache entry can be older than the 60s TTL by
+    // the time this test runs (each earlier test can take tens of seconds on a loaded
+    // machine), and an EXPIRED entry is served stale-while-revalidate — a background
+    // refresh would legitimately replace the objects and break the identity checks.
+    // A cold compute here guarantees a fresh entry that the follow-up calls must hit.
+    const { repoDir: warmDir, branch } = await initRepoWithSources("kanban-stats-async-warm-");
+    try {
+      const firstStats = await getProjectGitStatsAsync(warmDir, branch);
+      const asyncStats = await getProjectGitStatsAsync(warmDir, branch);
+      // Same cache entry => identical object references for the cached metrics portion
+      expect(asyncStats.codeMetrics).toBe(firstStats.codeMetrics);
+      expect(asyncStats.history).toBe(firstStats.history);
+      expect(asyncStats.hotspots).toBe(firstStats.hotspots);
 
-    // Regression: a THIRD call (async again) must still be served from cache — its
-    // generatedAt must not move. An equal-but-freshly-recomputed object would pass an
-    // `.toEqual()` check but must fail this: `generatedAt` would advance to "now".
-    const generatedAtBefore = asyncStats.codeMetrics.generatedAt;
-    const rewarmedStats = await getProjectGitStatsAsync(repoDir, branchName);
-    expect(rewarmedStats.codeMetrics.generatedAt).toBe(generatedAtBefore);
-    expect(rewarmedStats.codeMetrics).toBe(asyncStats.codeMetrics);
-  });
+      // Regression: a THIRD call (async again) must still be served from cache — its
+      // generatedAt must not move. An equal-but-freshly-recomputed object would pass an
+      // `.toEqual()` check but must fail this: `generatedAt` would advance to "now".
+      const generatedAtBefore = asyncStats.codeMetrics.generatedAt;
+      const rewarmedStats = await getProjectGitStatsAsync(warmDir, branch);
+      expect(rewarmedStats.codeMetrics.generatedAt).toBe(generatedAtBefore);
+      expect(rewarmedStats.codeMetrics).toBe(asyncStats.codeMetrics);
+    } finally {
+      await rm(warmDir, { recursive: true, force: true });
+    }
+  }, 180_000); // repo init + cold compute exceed the default 60s under heavy machine load
 
   // #340: the 60s cache and the in-flight dedupe used to key on `git rev-parse <branch>`
   // and give up (cacheKey = null) when it failed — i.e. they switched themselves OFF

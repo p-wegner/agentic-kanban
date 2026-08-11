@@ -14,7 +14,7 @@ import {
   markDismissed,
   setCachedRecommendations,
 } from "../services/agent-questions.service.js";
-import { readSessionStdoutFileTail } from "../lib/session-output-reader.js";
+import { readSessionStdoutFileTail, readSessionStdoutFileTailAsync } from "../lib/session-output-reader.js";
 import { sessionOutputPath } from "../lib/session-paths.js";
 import { createTestDb } from "./helpers/test-db.js";
 import { setRuntimeState } from "../repositories/runtime-state.repository.js";
@@ -151,6 +151,39 @@ describe("readSessionStdoutFileTail", () => {
     writeFileSync(sessionOutputPath(id), content, "utf-8");
     const tail = readSessionStdoutFileTail(id, 30);
     expect(tail).toBe(`${"y".repeat(20)}\nFINAL\n`);
+  });
+});
+
+describe("readSessionStdoutFileTailAsync (#401)", () => {
+  const cleanupIds: string[] = [];
+  afterEach(() => {
+    for (const id of cleanupIds.splice(0)) {
+      rmSync(sessionOutputPath(id), { force: true });
+    }
+  });
+
+  it("returns null for a missing file", async () => {
+    expect(await readSessionStdoutFileTailAsync(`atail-missing-${Date.now()}`)).toBe(null);
+  });
+
+  it("returns null for an empty file", async () => {
+    const id = `atail-empty-${Date.now()}`;
+    cleanupIds.push(id);
+    writeFileSync(sessionOutputPath(id), "", "utf-8");
+    expect(await readSessionStdoutFileTailAsync(id)).toBe(null);
+  });
+
+  it("matches the sync tail reader byte-for-byte on whole-file and truncated reads", async () => {
+    const id = `atail-parity-${Date.now()}`;
+    cleanupIds.push(id);
+    const content = `${"x".repeat(100)}\n${"y".repeat(20)}\nFINAL\n`;
+    writeFileSync(sessionOutputPath(id), content, "utf-8");
+    // Whole file fits.
+    expect(await readSessionStdoutFileTailAsync(id, 1024)).toBe(readSessionStdoutFileTail(id, 1024));
+    expect(await readSessionStdoutFileTailAsync(id, 1024)).toBe(content);
+    // Truncated: the partial first line of the window is dropped.
+    expect(await readSessionStdoutFileTailAsync(id, 30)).toBe(readSessionStdoutFileTail(id, 30));
+    expect(await readSessionStdoutFileTailAsync(id, 30)).toBe(`${"y".repeat(20)}\nFINAL\n`);
   });
 });
 
