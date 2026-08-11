@@ -74,15 +74,31 @@ export async function getRecentSessionsForWorkspace(
     .limit(10);
 }
 
+/**
+ * Bound for the DB stdout fallback (#401). The caller (agent-questions/listing →
+ * extractQuestionsFromSession) looks for `result` events carrying AskUserQuestion
+ * permission denials — by construction one of the LAST rows a session writes (the
+ * .out-file fast path reads only a 256 KB tail for the same reason). The unbounded
+ * select pulled a session's whole message history (data payload included) through
+ * the loop on every fallback. 50 newest rows comfortably covers the terminal result
+ * event plus trailing noise.
+ */
+const STDOUT_FALLBACK_ROW_LIMIT = 50;
+
 /** DB-backed stdout rows for a session (fallback when the .out file is absent). */
 export async function getSessionStdoutMessages(
   sessionId: string,
   database: Database = db,
 ): Promise<Array<{ type: string; data: string | null }>> {
-  return database
+  const rows = await database
     .select({ type: sessionMessages.type, data: sessionMessages.data })
     .from(sessionMessages)
-    .where(eq(sessionMessages.sessionId, sessionId));
+    .where(eq(sessionMessages.sessionId, sessionId))
+    .orderBy(desc(sessionMessages.id))
+    .limit(STDOUT_FALLBACK_ROW_LIMIT);
+  // Restore ascending (insertion) order — the unbounded query returned rowid order,
+  // and question extraction pushes matches in iteration order.
+  return rows.reverse();
 }
 
 /**

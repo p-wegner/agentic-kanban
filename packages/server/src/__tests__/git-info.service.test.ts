@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFile, execFileSync } from "node:child_process";
-import { detectRepoInfo, getProjectGitStats } from "../services/git-info.service.js";
+import { detectRepoInfo, getProjectGitStatsAsync } from "../services/git-info.service.js";
 
 function exec(cmd: string, args: string[], cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -88,7 +88,7 @@ describe("detectRepoInfo", () => {
   });
 });
 
-describe("getProjectGitStats", () => {
+describe("getProjectGitStatsAsync", () => {
   let repoDir: string;
 
   beforeAll(async () => {
@@ -102,42 +102,42 @@ describe("getProjectGitStats", () => {
     await rm(repoDir, { recursive: true, force: true });
   });
 
-  it("returns commit count when defaultBranch is provided", () => {
+  it("returns commit count when defaultBranch is provided", async () => {
     const branchName = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: repoDir })
       .toString()
       .trim();
-    const stats = getProjectGitStats(repoDir, branchName);
+    const stats = await getProjectGitStatsAsync(repoDir, branchName);
     expect(stats.commitCount).toBe(2);
     expect(stats.detectedBranch).toBe(branchName);
     expect(stats.recentCommits).toHaveLength(2);
     expect(stats.recentCommits[0].message).toBe("second commit");
   });
 
-  it("auto-detects branch and returns commit count when defaultBranch is null (bug fix)", () => {
+  it("auto-detects branch and returns commit count when defaultBranch is null (bug fix)", async () => {
     // This was the bug: passing null would return { commitCount: 0 } immediately
-    const stats = getProjectGitStats(repoDir, null);
+    const stats = await getProjectGitStatsAsync(repoDir, null);
     expect(stats.commitCount).toBe(2);
     expect(stats.detectedBranch).toMatch(/^(main|master)$/);
   });
 
-  it("returns zero commits for an invalid/non-existent repo path", () => {
-    const stats = getProjectGitStats("C:\\nonexistent\\path", "main");
+  it("returns zero commits for an invalid/non-existent repo path", async () => {
+    const stats = await getProjectGitStatsAsync("C:\\nonexistent\\path", "main");
     expect(stats.commitCount).toBe(0);
     expect(stats.recentCommits).toHaveLength(0);
   });
 
-  it("returns null detectedBranch when branch cannot be detected", () => {
+  it("returns null detectedBranch when branch cannot be detected", async () => {
     // A repo on a custom branch (not main/master) with null defaultBranch
-    const stats = getProjectGitStats(repoDir, null);
+    const stats = await getProjectGitStatsAsync(repoDir, null);
     // Should still detect something (main or master) for this test repo
     expect(stats.detectedBranch).not.toBeNull();
   });
 
-  it("parses recent commits with correct fields", () => {
+  it("parses recent commits with correct fields", async () => {
     const branchName = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: repoDir })
       .toString()
       .trim();
-    const stats = getProjectGitStats(repoDir, branchName);
+    const stats = await getProjectGitStatsAsync(repoDir, branchName);
     for (const commit of stats.recentCommits) {
       expect(commit.hash).toHaveLength(7);
       expect(typeof commit.message).toBe("string");

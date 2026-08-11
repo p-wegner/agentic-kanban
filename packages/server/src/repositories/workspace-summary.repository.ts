@@ -147,10 +147,35 @@ export async function getSessionsForWorkspaces(workspaceIds: string[], database:
     .orderBy(sessions.startedAt);
 }
 
+/**
+ * How many of the newest rows per session the DB fallback fetches (#401). The caller
+ * (workspace-summary.service collectLastToolAndMessages) walks rows newest-first and
+ * keeps only the FIRST tool name + FIRST assistant message it finds per session, so
+ * pulling a session's ENTIRE message history (data payload included — megabytes for a
+ * long session) was pure waste. Tool/assistant events occur every few rows in practice;
+ * 50 newest rows is generous (same bound monitor-helpers' DB fallback uses). The only
+ * semantic difference from the unbounded query: a session whose newest 50 rows contain
+ * no extractable event now yields null instead of an ancient match — acceptable for a
+ * field named `lastTool` / `lastAssistantMessage`.
+ */
+const PER_SESSION_MESSAGE_LIMIT = 50;
+
 export async function getSessionMessagesForSessions(sessionIds: string[], database: Database = db) {
-  return database
-    .select({ sessionId: sessionMessages.sessionId, data: sessionMessages.data })
-    .from(sessionMessages)
-    .where(inArray(sessionMessages.sessionId, sessionIds))
-    .orderBy(desc(sessionMessages.id));
+  // One bounded query per session instead of one unbounded query for all sessions:
+  // each per-session query is served by the (session_id, id) index from migration 0113
+  // (index-ordered DESC scan, stops after LIMIT rows — no temp B-tree sort, no full
+  // payload materialization). Rows stay newest-first within each session, which is the
+  // ordering the caller's first-match-wins extraction depends on; interleaving across
+  // sessions never mattered (extraction state is keyed by sessionId).
+  const perSession = await Promise.all(
+    sessionIds.map((sid) =>
+      database
+        .select({ sessionId: sessionMessages.sessionId, data: sessionMessages.data })
+        .from(sessionMessages)
+        .where(eq(sessionMessages.sessionId, sid))
+        .orderBy(desc(sessionMessages.id))
+        .limit(PER_SESSION_MESSAGE_LIMIT),
+    ),
+  );
+  return perSession.flat();
 }

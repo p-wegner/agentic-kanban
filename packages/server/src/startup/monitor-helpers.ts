@@ -2,7 +2,7 @@ import { sessionMessages } from "@agentic-kanban/shared/schema";
 import { desc, eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { MonitorActionName } from "../services/monitor-nudge.js";
-import { readSessionStdoutFileTail } from "../lib/session-output-reader.js";
+import { readSessionStdoutFileTailAsync } from "../lib/session-output-reader.js";
 
 /**
  * How much of a session transcript's tail the monitor reads for its nudge excerpts.
@@ -54,8 +54,10 @@ export function logMonitorAction(
 export async function getRecentAgentExcerpts(sessionId: string, count = 3): Promise<string[]> {
   const excerpts: string[] = [];
 
-  // Try .out file first (reversed for newest-first traversal)
-  const fileContent = readSessionStdoutFileTail(sessionId, MONITOR_EXCERPT_TAIL_BYTES);
+  // Try .out file first (reversed for newest-first traversal). Async (#401): the
+  // 512 KB tail read runs through fs.promises so a monitor cycle over many
+  // long-running workspaces never blocks the event loop on file I/O.
+  const fileContent = await readSessionStdoutFileTailAsync(sessionId, MONITOR_EXCERPT_TAIL_BYTES);
   if (fileContent !== null) {
     const lines = fileContent.split("\n").reverse();
     for (const line of lines) {
