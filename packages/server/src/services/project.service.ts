@@ -803,7 +803,16 @@ export function createProjectService(deps: { database: Database; workspaceSummar
         const projectIssues = await getCrossProjectIssues(project.id, database);
 
         const issueIds = projectIssues.map((i) => i.id);
-        const workspaceSummaryMap = await buildWorkspaceSummaryMap(issueIds, project.defaultBranch, database);
+        const archivedIssueIds = new Set(
+          projectIssues
+            .filter((i) => i.statusName && ARCHIVE_STATUS_NAMES.has(i.statusName.toLowerCase()))
+            .map((i) => i.id),
+        );
+        // Same cached SWR path as getBoard/getGraph (#345). This path used to call
+        // buildWorkspaceSummaryMap directly (and without archivedIssueIds), so ONE
+        // /api/projects/all/workspaces request paid an uncached N-projects × M-workspaces
+        // git+FS fan-out that starved the event loop for every other request.
+        const workspaceSummaryMap = await resolveSummaryMap(project.id, issueIds, project.defaultBranch, archivedIssueIds);
 
         const issuesWithWorkspaces = projectIssues
           .map((issue) => {
@@ -841,12 +850,13 @@ export function createProjectService(deps: { database: Database; workspaceSummar
   }
 
   async function listProjects(opts: { includeArchived?: boolean } = {}) {
-    const projectRows = await getAllProjects(database, opts);
-
     // Enrich each project with a count of workspaces whose agent is currently
     // active (running, reviewing, or resolving conflicts), so the project
     // selector can surface where agents are working without a second request.
-    const activeCounts = await getActiveWorkspaceCounts(database);
+    const [projectRows, activeCounts] = await Promise.all([
+      getAllProjects(database, opts),
+      getActiveWorkspaceCounts(database),
+    ]);
 
     const countByProject = new Map<string, number>();
     for (const row of activeCounts) {

@@ -83,15 +83,20 @@ export async function deduplicateProjects(): Promise<void> {
   const allProjects = await getAllProjects();
   if (allProjects.length <= 1) return;
 
-  // Map gitRoot → projects that resolve to it
+  // Map gitRoot → projects that resolve to it. Roots are resolved in parallel —
+  // the serial version cost one awaited git spawn (~120ms on Windows) per
+  // registered project on every startup.
   const byGitRoot = new Map<string, typeof allProjects>();
-  for (const project of allProjects) {
-    const gitRoot = await tryGetGitRoot(project.repoPath);
-    if (!gitRoot) continue; // can't resolve — skip
+  const gitRoots = await Promise.all(
+    allProjects.map((project) => tryGetGitRoot(project.repoPath)),
+  );
+  allProjects.forEach((project, i) => {
+    const gitRoot = gitRoots[i];
+    if (!gitRoot) return; // can't resolve — skip
     const group = byGitRoot.get(gitRoot) ?? [];
     group.push(project);
     byGitRoot.set(gitRoot, group);
-  }
+  });
 
   for (const [gitRoot, group] of byGitRoot) {
     if (group.length <= 1) continue;

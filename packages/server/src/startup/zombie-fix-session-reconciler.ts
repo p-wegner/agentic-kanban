@@ -1,6 +1,6 @@
 import { count } from "drizzle-orm/sql";
 import { issues, preferences, sessionMessages, sessions, workspaces } from "@agentic-kanban/shared/schema";
-import { and, eq, lt } from "drizzle-orm";
+import { and, eq, inArray, lt } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
@@ -92,6 +92,18 @@ export async function reconcileZombieFixSessions(deps: ZombieFixSessionReconcile
     (s) => s.triggerType === "fix-and-merge" || s.triggerType === "review",
   );
 
+  // One grouped count for all candidates instead of a COUNT(*) per candidate
+  // inside the loop (this reconciler ticks every 60s).
+  const msgCountBySession = new Map<string, number>();
+  if (fixOrReview.length > 0) {
+    const countRows = await database
+      .select({ sessionId: sessionMessages.sessionId, cnt: count() })
+      .from(sessionMessages)
+      .where(inArray(sessionMessages.sessionId, fixOrReview.map((s) => s.sessionId)))
+      .groupBy(sessionMessages.sessionId);
+    for (const row of countRows) msgCountBySession.set(row.sessionId, row.cnt);
+  }
+
   let recovered = 0;
 
   for (const s of fixOrReview) {
@@ -120,12 +132,8 @@ export async function reconcileZombieFixSessions(deps: ZombieFixSessionReconcile
       continue;
     }
 
-    // Check message count for this session.
-    const msgCountRows = await database
-      .select({ cnt: count() })
-      .from(sessionMessages)
-      .where(eq(sessionMessages.sessionId, s.sessionId));
-    const msgCount = msgCountRows[0]?.cnt ?? 0;
+    // Check message count for this session (prefetched above).
+    const msgCount = msgCountBySession.get(s.sessionId) ?? 0;
 
     if (msgCount > 0) continue; // Has output — not a zombie.
 

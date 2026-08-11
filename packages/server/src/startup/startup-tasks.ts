@@ -612,7 +612,12 @@ export async function abortStaleMerges(): Promise<void> {
  */
 export async function abortStaleRebases(): Promise<void> {
   try {
-    const wsRows = await db.select({ workingDir: workspaces.workingDir }).from(workspaces);
+    // Closed workspaces' worktrees are gone (or about to be reaped) — probing them
+    // is a wasted fs/git check per historical row on every startup.
+    const wsRows = await db
+      .select({ workingDir: workspaces.workingDir })
+      .from(workspaces)
+      .where(ne(workspaces.status, "closed"));
     const seen = new Set<string>();
     for (const { workingDir } of wsRows) {
       if (!workingDir || seen.has(workingDir)) continue;
