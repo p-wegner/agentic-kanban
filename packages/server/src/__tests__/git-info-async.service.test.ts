@@ -8,7 +8,9 @@ import {
   getProjectGitStatsAsync,
   hotspotLogArgs,
   HOTSPOT_FALLBACK_COMMIT_LIMIT_FOR_TEST,
+  STALE_METRICS_BOUNDS_FOR_TEST,
   WALK_QUEUE_FLUSH_AT_FOR_TEST,
+  __seedMetricsCacheForTests,
 } from "../services/git-info.service.js";
 
 function exec(cmd: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv): Promise<string> {
@@ -226,6 +228,75 @@ describe("getProjectGitStatsAsync", () => {
         ]);
         expect(b.codeMetrics).toBe(a.codeMetrics);
         expect(c.codeMetrics).toBe(a.codeMetrics);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  // #398 follow-up (G16): stale-while-revalidate used to have NO bound — the success
+  // path was the only cache write, so when refresh failed forever the last-known-good
+  // blob was served forever, with no error ever surfacing. The bound: after
+  // MAX_CONSECUTIVE_REFRESH_FAILURES failed refreshes, or once the entry exceeds
+  // MAX_STALE_SERVE_MS, the caller waits on the refresh instead of taking the stale blob.
+  describe("bounded stale-while-revalidate (G16)", () => {
+    /** Wait for a pending background refresh to land (fresh objects served), so `rm` can't race the walk on Windows. */
+    async function drainBackgroundRefresh(dir: string, branch: string, staleBlob: { generatedAt: string }) {
+      for (let i = 0; i < 100; i++) {
+        const s = await getProjectGitStatsAsync(dir, branch);
+        if (s.codeMetrics.generatedAt !== staleBlob.generatedAt) return;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
+
+    /** Cold-compute once to get a real metrics blob, then re-seed it as an EXPIRED entry. */
+    async function seedStaleEntry(dir: string, branch: string, ageMs: number, failures: number) {
+      const cold = await getProjectGitStatsAsync(dir, branch);
+      const metrics = { codeMetrics: cold.codeMetrics, history: cold.history, hotspots: cold.hotspots };
+      // Bogus head + old timestamp => entry is expired/not-usable, forcing the
+      // stale-vs-wait decision on the next call.
+      __seedMetricsCacheForTests(dir, branch, { timestamp: Date.now() - ageMs, head: "0000000000000000000000000000000000000000", metrics }, failures);
+      return metrics;
+    }
+
+    it("within bounds, an expired entry is still served stale while the refresh runs", async () => {
+      const { repoDir: dir, branch } = await initRepoWithSources("kanban-stats-async-stale-ok-");
+      try {
+        const seeded = await seedStaleEntry(dir, branch, 120_000, 0); // 2min old, no failures
+        const stats = await getProjectGitStatsAsync(dir, branch);
+        // Identity: the seeded stale blob was served, not a fresh compute.
+        expect(stats.codeMetrics).toBe(seeded.codeMetrics);
+        await drainBackgroundRefresh(dir, branch, seeded.codeMetrics);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("after too many consecutive refresh failures, the caller waits for a real refresh instead of the stale blob", async () => {
+      const { repoDir: dir, branch } = await initRepoWithSources("kanban-stats-async-stale-fail-");
+      try {
+        const seeded = await seedStaleEntry(dir, branch, 120_000, STALE_METRICS_BOUNDS_FOR_TEST.MAX_CONSECUTIVE_REFRESH_FAILURES);
+        const stats = await getProjectGitStatsAsync(dir, branch);
+        // NOT the stale blob: a fresh compute was awaited (and here it succeeds,
+        // which also resets the failure counter — a failing one would have thrown).
+        expect(stats.codeMetrics).not.toBe(seeded.codeMetrics);
+        expect(stats.codeMetrics.sourceFilesScanned).toBe(2);
+        // Counter reset by the successful refresh: the next expired entry serves stale again.
+        const reseeded = await seedStaleEntry(dir, branch, 120_000, 0);
+        expect((await getProjectGitStatsAsync(dir, branch)).codeMetrics).toBe(reseeded.codeMetrics);
+        await drainBackgroundRefresh(dir, branch, reseeded.codeMetrics);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    }, 120_000);
+
+    it("an entry older than the age cap is never served stale, even with zero failures", async () => {
+      const { repoDir: dir, branch } = await initRepoWithSources("kanban-stats-async-stale-old-");
+      try {
+        const seeded = await seedStaleEntry(dir, branch, STALE_METRICS_BOUNDS_FOR_TEST.MAX_STALE_SERVE_MS + 1_000, 0);
+        const stats = await getProjectGitStatsAsync(dir, branch);
+        expect(stats.codeMetrics).not.toBe(seeded.codeMetrics);
+        expect(stats.codeMetrics.sourceFilesScanned).toBe(2);
       } finally {
         await rm(dir, { recursive: true, force: true });
       }

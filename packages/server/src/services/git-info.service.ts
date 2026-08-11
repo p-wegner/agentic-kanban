@@ -121,6 +121,38 @@ const metricsCache = new Map<string, { timestamp: number; head: string | null; m
 // repo+head is in flight await the shared promise instead of each spawning the walk.
 const inflightMetrics = new Map<string, Promise<CachedMetrics>>();
 
+// #398 follow-up (G16) — bound on stale-while-revalidate. The cache used to serve the
+// last-known-good blob FOREVER when every background refresh failed (the success path
+// was the only cache write), so a permanently broken repo showed frozen stats with no
+// error. After this many consecutive refresh failures, or once the cached entry is
+// older than the age cap, the caller WAITS on the refresh instead — surfacing its
+// error rather than infinitely-stale data.
+const MAX_CONSECUTIVE_REFRESH_FAILURES = 3;
+const MAX_STALE_SERVE_MS = 15 * 60_000;
+const refreshFailuresByKey = new Map<string, number>();
+
+/** May this expired entry still be served stale while a refresh runs in the background? */
+function canServeStale(cacheKey: string, cachedTimestamp: number, now: number): boolean {
+  if ((refreshFailuresByKey.get(cacheKey) ?? 0) >= MAX_CONSECUTIVE_REFRESH_FAILURES) return false;
+  return now - cachedTimestamp <= MAX_STALE_SERVE_MS;
+}
+
+/** Exported for tests — the stale-serve bound (G16). */
+export const STALE_METRICS_BOUNDS_FOR_TEST = { MAX_CONSECUTIVE_REFRESH_FAILURES, MAX_STALE_SERVE_MS };
+/** TEST-ONLY — seed the metrics cache + failure bookkeeping for one repo+branch key. */
+export function __seedMetricsCacheForTests(
+  repoPath: string,
+  branch: string,
+  entry: { timestamp: number; head: string | null; metrics: CachedMetrics } | null,
+  consecutiveFailures = 0,
+): void {
+  const key = metricsCacheKey(repoPath, branch);
+  if (entry) metricsCache.set(key, entry);
+  else metricsCache.delete(key);
+  if (consecutiveFailures > 0) refreshFailuresByKey.set(key, consecutiveFailures);
+  else refreshFailuresByKey.delete(key);
+}
+
 function emptyHistory(): ProjectStatsResponse["history"] {
   return { weeks: buildEmptyWeeks(), contributorCount: 0, topContributors: [] };
 }
@@ -293,26 +325,36 @@ async function collectProjectCodeAndHistoryAsync(repoPath: string, branch: strin
   if (isMetricsEntryUsable(cached, head, METRICS_CACHE_TTL_MS, Date.now())) return cached!.metrics;
 
   const inflight = inflightMetrics.get(cacheKey);
-  if (inflight) return cached ? cached.metrics : inflight;
+  if (inflight) return cached && canServeStale(cacheKey, cached.timestamp, Date.now()) ? cached.metrics : inflight;
 
   const compute = (async () => {
-    const codeMetrics = await collectCurrentCodeMetricsAsync(repoPath);
-    const { history, hotspots } = await collectHistoryMetricsAsync(repoPath, branch);
-    const metrics = { codeMetrics, history, hotspots };
-    metricsCache.set(cacheKey, { timestamp: Date.now(), head, metrics });
-    return metrics;
+    try {
+      const codeMetrics = await collectCurrentCodeMetricsAsync(repoPath);
+      const { history, hotspots } = await collectHistoryMetricsAsync(repoPath, branch);
+      const metrics = { codeMetrics, history, hotspots };
+      metricsCache.set(cacheKey, { timestamp: Date.now(), head, metrics });
+      refreshFailuresByKey.delete(cacheKey);
+      return metrics;
+    } catch (err) {
+      // G16: count the failure so a permanently failing refresh cannot keep the
+      // stale-while-revalidate path serving a frozen blob forever.
+      refreshFailuresByKey.set(cacheKey, (refreshFailuresByKey.get(cacheKey) ?? 0) + 1);
+      throw err;
+    }
   })();
   // Clear the in-flight slot regardless of outcome; the cache write above is the success path.
   const tracked = compute.finally(() => {
     inflightMetrics.delete(cacheKey);
   });
   inflightMetrics.set(cacheKey, tracked);
-  if (cached) {
+  if (cached && canServeStale(cacheKey, cached.timestamp, Date.now())) {
     // Serve last-known-good now; the refresh above lands in the cache for the next caller.
     // Its rejection must not surface as an unhandled rejection on this detached path.
     void tracked.catch(() => {});
     return cached.metrics;
   }
+  // No cache, or the entry is beyond the stale-serve bound (too old / too many failed
+  // refreshes) — wait for the refresh so an error SURFACES instead of stale data.
   return tracked;
 }
 
