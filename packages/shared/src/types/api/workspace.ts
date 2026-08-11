@@ -228,6 +228,36 @@ export interface WorkspaceHandoffResponse {
   repos: WorkspaceHandoffRepoEntry[];
 }
 
+/**
+ * One workspace's cross-repo facts in GET /api/projects/:id/workspace-repo-status (#415).
+ * Facets not requested via `?include=` are null; a facet that failed to compute for one
+ * workspace is also null (per-workspace best-effort, like the per-workspace endpoints).
+ */
+export interface WorkspaceRepoStatusEntry {
+  workspaceId: string;
+  issueId: string;
+  branch: string | null;
+  status: string;
+  mergedAt: string | null;
+  mergeStatus: RepoMergeStatusResponse | null;
+  conflicts: { hasConflicts: boolean; conflictingFiles: string[] } | null;
+  handoff: WorkspaceHandoffResponse | null;
+  diffStats: import("./diff.js").DiffStatsResponse | null;
+}
+
+/**
+ * Response of GET /api/projects/:id/workspace-repo-status?include=merge,conflicts,handoff,diffstats
+ * (#415): ONE request covering every non-closed, non-direct workspace of the project —
+ * replacing the N × {repo-merge-status, conflicts, handoff, diff} client fan-out.
+ */
+export interface WorkspaceRepoStatusBatchResponse {
+  projectId: string;
+  /** Deliberately NO timestamp field: the body must be content-stable so the ETag
+   * answers 304 across recomputes whenever the underlying facts are unchanged. */
+  include: string[];
+  workspaces: WorkspaceRepoStatusEntry[];
+}
+
 export interface ShowdownContestant {
   skillId?: string;
   skillName?: string;

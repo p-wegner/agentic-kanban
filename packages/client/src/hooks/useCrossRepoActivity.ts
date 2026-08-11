@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { RepoMergeStatusResponse, WorkspaceHandoffResponse } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
-import { fetchWorkspacesList } from "../lib/workspacesListQuery.js";
+import { fetchWorkspaceRepoStatus } from "../lib/workspaceRepoStatusQuery.js";
 import { BOARD_WS_EVENT, type BoardWsEventDetail } from "../lib/useBoardEvents.js";
 import {
   reduceRepoMergeStatusDelta,
@@ -74,68 +74,57 @@ export function useCrossRepoActivity(
     inFlightRef.current = true;
     setLoading(true);
     try {
-      // Shared workspaces query (#403): dedupes with the flight recorder / matrix /
-      // heatmap panels so one WS burst costs one list request across all of them.
-      const workspaces = await fetchWorkspacesList(queryClient, projectId);
-      const active = workspaces.filter((w) => !w.isDirect);
+      // #415 — ONE batched request (shared react-query, deduped with the matrix /
+      // heatmap panels) carries merge status + conflicts + handoff for every
+      // non-closed, non-direct workspace; the old code fanned out three requests
+      // per workspace per burst.
+      const batch = await fetchWorkspaceRepoStatus(queryClient, projectId);
+      const active = batch.workspaces;
       const timestamp = new Date().toISOString();
       const newEntries: CrossRepoActivityEntry[] = [];
       let sawMultiRepo = false;
 
-      await Promise.all(
-        active.map(async (w) => {
-          const mergeStatus = await apiFetch<RepoMergeStatusResponse>(
-            `/api/workspaces/${w.id}/repo-merge-status`,
-          ).catch(() => null);
-          // Single-repo (<=1) and direct/older-server workspaces contribute nothing.
-          if (!mergeStatus || mergeStatus.repos.length <= 1) return;
-          sawMultiRepo = true;
+      for (const w of active) {
+        const mergeStatus = w.mergeStatus;
+        // Single-repo (<=1) workspaces contribute nothing.
+        if (!mergeStatus || mergeStatus.repos.length <= 1) continue;
+        sawMultiRepo = true;
 
-          // Only pay for the per-repo conflict merge-trees when there is unlanded work.
-          const hasUnlanded = mergeStatus.repos.some((r) => r.hasWork && !r.merged);
-          const conflictFiles = hasUnlanded
-            ? await apiFetch<{ hasConflicts: boolean; conflictingFiles: string[] }>(
-                `/api/workspaces/${w.id}/conflicts`,
-              ).then((c) => c.conflictingFiles ?? []).catch(() => null)
-            : [];
+        // The batch only pays for the conflict merge-trees when there is unlanded
+        // work; a workspace with everything landed reports the empty shape.
+        const conflictFiles = w.conflicts ? (w.conflicts.conflictingFiles ?? []) : null;
+        const handoff = w.handoff;
 
-          // HANDOFF.md poll+delta (#89): the endpoint reports mtime per repo (leading +
-          // siblings). A failed fetch (older server, transient) contributes nothing.
-          const handoff = await apiFetch<WorkspaceHandoffResponse>(
-            `/api/workspaces/${w.id}/handoff`,
-          ).catch(() => null);
-
-          const prev = snapshotsRef.current.get(w.id) ?? { mergeStatus: null, conflictFiles: null, handoff: null, issueId: w.issueId };
-          const issue = resolveIssueRef.current?.(w.issueId);
-          const ctx = {
-            workspaceId: w.id,
-            issueId: w.issueId,
-            issueNumber: issue?.issueNumber ?? null,
-            timestamp,
-            baseBranch: mergeStatus.baseBranch,
-          };
-          newEntries.push(...reduceRepoMergeStatusDelta(prev.mergeStatus, mergeStatus, ctx));
-          if (conflictFiles !== null) {
-            newEntries.push(...reduceConflictsDelta(prev.conflictFiles, conflictFiles, ctx));
+        const prev = snapshotsRef.current.get(w.workspaceId) ?? { mergeStatus: null, conflictFiles: null, handoff: null, issueId: w.issueId };
+        const issue = resolveIssueRef.current?.(w.issueId);
+        const ctx = {
+          workspaceId: w.workspaceId,
+          issueId: w.issueId,
+          issueNumber: issue?.issueNumber ?? null,
+          timestamp,
+          baseBranch: mergeStatus.baseBranch,
+        };
+        newEntries.push(...reduceRepoMergeStatusDelta(prev.mergeStatus, mergeStatus, ctx));
+        if (conflictFiles !== null) {
+          newEntries.push(...reduceConflictsDelta(prev.conflictFiles, conflictFiles, ctx));
+        }
+        if (handoff) {
+          // `prev.handoff === null` (workspace never handoff-observed) → pass `undefined`
+          // so the first snapshot is a baseline, not a replay of an existing HANDOFF.md.
+          const prevByRepo = new Map((prev.handoff?.repos ?? []).map((r) => [r.name, r.updatedAt] as const));
+          for (const repoEntry of handoff.repos) {
+            const label = repoEntry.name ?? LEADING_REPO_LABEL;
+            const prevMtime = prev.handoff === null ? undefined : (prevByRepo.get(repoEntry.name) ?? null);
+            newEntries.push(...reduceHandoffDelta(prevMtime, repoEntry, label, ctx));
           }
-          if (handoff) {
-            // `prev.handoff === null` (workspace never handoff-observed) → pass `undefined`
-            // so the first snapshot is a baseline, not a replay of an existing HANDOFF.md.
-            const prevByRepo = new Map((prev.handoff?.repos ?? []).map((r) => [r.name, r.updatedAt] as const));
-            for (const repoEntry of handoff.repos) {
-              const label = repoEntry.name ?? LEADING_REPO_LABEL;
-              const prevMtime = prev.handoff === null ? undefined : (prevByRepo.get(repoEntry.name) ?? null);
-              newEntries.push(...reduceHandoffDelta(prevMtime, repoEntry, label, ctx));
-            }
-          }
-          snapshotsRef.current.set(w.id, {
-            mergeStatus,
-            conflictFiles: conflictFiles ?? prev.conflictFiles,
-            handoff: handoff ?? prev.handoff,
-            issueId: w.issueId,
-          });
-        }),
-      );
+        }
+        snapshotsRef.current.set(w.workspaceId, {
+          mergeStatus,
+          conflictFiles: conflictFiles ?? prev.conflictFiles,
+          handoff: handoff ?? prev.handoff,
+          issueId: w.issueId,
+        });
+      }
 
       // A workspace that just MERGED leaves the non-closed set entirely, so its repos
       // never flip to "merged" while it is in `active` — the headline "repo merged"
@@ -144,7 +133,7 @@ export function useCrossRepoActivity(
       // repo-merge-status fetch (the endpoint resolves closed workspaces too) so the
       // ahead/stranded → merged transition is emitted, then is dropped from tracking —
       // bounding this to at most one extra fetch per merge.
-      const activeIds = new Set(active.map((w) => w.id));
+      const activeIds = new Set(active.map((w) => w.workspaceId));
       const vanished = [...snapshotsRef.current.entries()].filter(
         ([wsId, snap]) =>
           !activeIds.has(wsId) && (snap.mergeStatus?.repos.some((r) => r.hasWork && !r.merged) ?? false),

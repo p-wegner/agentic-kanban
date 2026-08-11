@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { DiffResponse, StatusWithIssues } from "@agentic-kanban/shared";
+import type { DiffStatsResponse, StatusWithIssues } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
-import { fetchWorkspacesList } from "../lib/workspacesListQuery.js";
+import { fetchWorkspaceRepoStatus } from "../lib/workspaceRepoStatusQuery.js";
 import { fetchProjectRepos } from "../lib/projectReposQuery.js";
 import { BOARD_WS_EVENT, type BoardWsEventDetail } from "../lib/useBoardEvents.js";
 import {
@@ -24,10 +24,11 @@ import {
  * and hot columns (change concentrating in a repo) are highlighted, and a cell is
  * marked "contended" when two active workspaces touch overlapping files in the same repo.
  *
- * No new server endpoint: it reuses the same GET data the per-workspace diff panel
- * does — each workspace's `GET /diff` per-repo `stats` for intensity, plus the
- * project's `file-contention` overlaps — and re-aggregates on relevant board events so
- * it stays live without a second WebSocket. The intensity mapping is the pure
+ * Data source (#415): the batched `workspace-repo-status` query's per-repo shortstat
+ * numbers (`diffStats`) for intensity — shared with the matrix/activity panels, so one
+ * board-event burst costs one request instead of a full `GET /diff` body per workspace —
+ * plus the project's `file-contention` overlaps; re-aggregated on relevant board events
+ * so it stays live without a second WebSocket. The intensity mapping is the pure
  * `crossRepoImpact.ts` module (unit-tested independently).
  */
 
@@ -102,28 +103,17 @@ function overlapsFromContention(result: FileContentionResult | null): WorkspaceO
   return overlaps;
 }
 
-/** Map a workspace's DiffResponse into the per-repo summaries the pure builder consumes. */
-function repoDiffsFromDiff(diff: DiffResponse | null, leadingRepoPath: string | null): WorkspaceRepoDiff[] {
-  if (!diff) return [];
-  if (diff.repos && diff.repos.length > 0) {
-    return diff.repos.map((r) => ({
-      path: r.path,
-      name: r.name,
-      filesChanged: r.stats.filesChanged,
-      insertions: r.stats.insertions,
-      deletions: r.stats.deletions,
-    }));
-  }
-  // Single-repo workspace: the top-level stats belong to the leading repo.
-  if (!leadingRepoPath) return [];
-  return [
-    {
-      path: leadingRepoPath,
-      filesChanged: diff.stats.filesChanged,
-      insertions: diff.stats.insertions,
-      deletions: diff.stats.deletions,
-    },
-  ];
+/** Map a workspace's batched per-repo stats (#415) into the pure builder's input.
+ *  The batch always lists every repo (leading first), single-repo included. */
+function repoDiffsFromStats(diffStats: DiffStatsResponse | null): WorkspaceRepoDiff[] {
+  if (!diffStats) return [];
+  return diffStats.repos.map((r) => ({
+    path: r.path,
+    name: r.name,
+    filesChanged: r.stats.filesChanged,
+    insertions: r.stats.insertions,
+    deletions: r.stats.deletions,
+  }));
 }
 
 /** Load every active workspace's per-repo diff footprint + contention for a project, live. */
@@ -149,36 +139,29 @@ function useCrossRepoImpactData(
     setError(null);
     void (async () => {
       try {
-        // Repos + workspaces come from the shared react-query caches (#403) —
-        // deduped with the matrix / activity panels reacting to the same events.
-        const [additionalRepos, allWorkspaces, contention] = await Promise.all([
+        // #415 — the per-repo stats ride the ONE batched workspace-repo-status query
+        // (shared react-query, deduped with the matrix / activity panels); the old code
+        // fetched every workspace's FULL diff body to read three integers per repo.
+        const [additionalRepos, batch, contention] = await Promise.all([
           fetchProjectRepos(queryClient, projectId),
-          fetchWorkspacesList(queryClient, projectId),
+          fetchWorkspaceRepoStatus(queryClient, projectId),
           apiFetch<FileContentionResult>(`/api/projects/${projectId}/file-contention`).catch(() => null),
         ]);
-        // A diff is not applicable to direct workspaces.
-        const active = allWorkspaces.filter((w) => !w.isDirect);
-
-        const diffs = await Promise.all(
-          active.map((w) =>
-            apiFetch<DiffResponse>(`/api/workspaces/${w.id}/diff`).catch(() => null),
-          ),
-        );
 
         // A newer refresh started while we were awaiting — drop this stale result.
         if (seq !== requestSeqRef.current) return;
 
         const issueById = new Map(columnsRef.current.flatMap((c) => c.issues).map((i) => [i.id, i]));
-        const workspaces: ImpactWorkspaceInput[] = active.map((w, i) => {
+        const workspaces: ImpactWorkspaceInput[] = batch.workspaces.map((w) => {
           const issue = issueById.get(w.issueId);
           return {
-            id: w.id,
+            id: w.workspaceId,
             issueId: w.issueId,
             issueNumber: issue?.issueNumber ?? null,
             issueTitle: issue?.title ?? null,
             branch: w.branch,
             status: w.status,
-            repoDiffs: repoDiffsFromDiff(diffs[i], leadingRepoPath),
+            repoDiffs: repoDiffsFromStats(w.diffStats),
           };
         });
 

@@ -16,5 +16,6 @@ export const boardQueryKeys = {
   sprintCapacity: (projectId: string) => ["projects", projectId, "sprint-capacity"] as const,
   tags: ["tags"] as const,
   workspaceIssue: (projectId: string, issueId?: string) => ["projects", projectId, "workspaces", issueId ?? "all"] as const,
+  workspaceRepoStatus: (projectId: string, include: string) => ["projects", projectId, "workspace-repo-status", include] as const,
   workspacesList: (projectId: string, status: string) => ["projects", projectId, "workspaces-list", status] as const,
 };

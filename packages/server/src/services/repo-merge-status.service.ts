@@ -56,7 +56,7 @@ export async function getRepoMergeStatus(
  *   merge, #74/#75): for a sibling-only merge the leading's captured tip equals base → 0 historic →
  *   leading correctly reads no-work.
  */
-async function computeRepoMergeEntry(ref: WorkspaceRepoRef, gitService: GitService): Promise<RepoMergeStatusEntry> {
+export async function computeRepoMergeEntry(ref: WorkspaceRepoRef, gitService: GitService): Promise<RepoMergeStatusEntry> {
   const base = { name: ref.kind === "leading" ? null : ref.name, path: ref.path, isLeading: ref.kind === "leading" };
   if (ref.mergedHeadSha) {
     return { ...base, hasWork: true, ahead: 0, merged: true, stranded: false };
