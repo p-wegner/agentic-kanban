@@ -8,9 +8,13 @@ import {
   getStaleWorkspaceIds,
 } from "../repositories/session-message-pruner.repository.js";
 
+// The interval is a BACKSTOP: the per-session cap is enforced at insert time by
+// the broadcast flush path (see session-manager/broadcast.ts, #404), so the
+// periodic sweep only needs to catch sessions written outside that path and run
+// the terminal-workspace retention purge.
 const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000; // every 6 hours
 const MERGED_WORKSPACE_RETENTION_DAYS = 3;
-const MAX_MESSAGES_PER_ACTIVE_SESSION = 2_000;
+export const MAX_MESSAGES_PER_ACTIVE_SESSION = 2_000;
 
 let activePruneTimeout: ReturnType<typeof setTimeout> | null = null;
 let activePruneInterval: ReturnType<typeof setInterval> | null = null;
@@ -60,14 +64,27 @@ export async function capSessionMessages(database: Database): Promise<number> {
 
   let totalDeleted = 0;
   for (const row of overflowSessions) {
-    // Find the oldest row that should be deleted: order descending (newest first),
-    // skip the MAX rows we want to keep, then take 1 — this is the newest row to delete.
-    // Delete everything with id <= that row's id to remove exactly the excess oldest rows.
-    const thresholdId = await getSessionMessageThresholdId(row.sessionId, MAX_MESSAGES_PER_ACTIVE_SESSION, database);
-    if (thresholdId === null) continue;
-    totalDeleted += await deleteSessionMessagesUpToId(row.sessionId, thresholdId, database);
+    totalDeleted += await capSessionMessagesForSession(row.sessionId, database);
   }
   return totalDeleted;
+}
+
+/**
+ * Trim ONE session down to the newest MAX_MESSAGES_PER_ACTIVE_SESSION rows.
+ * Cheap: one indexed OFFSET lookup + one ranged delete, both riding the
+ * (session_id, id) index from migration 0113. Called from the broadcast flush
+ * path as the insert-time ring-buffer cap (#404) and from the periodic
+ * capSessionMessages sweep above.
+ *
+ * Returns the number of rows deleted (0 when the session is within the cap).
+ */
+export async function capSessionMessagesForSession(sessionId: string, database: Database): Promise<number> {
+  // Find the oldest row that should be deleted: order descending (newest first),
+  // skip the MAX rows we want to keep, then take 1 — this is the newest row to delete.
+  // Delete everything with id <= that row's id to remove exactly the excess oldest rows.
+  const thresholdId = await getSessionMessageThresholdId(sessionId, MAX_MESSAGES_PER_ACTIVE_SESSION, database);
+  if (thresholdId === null) return 0;
+  return deleteSessionMessagesUpToId(sessionId, thresholdId, database);
 }
 
 /**
