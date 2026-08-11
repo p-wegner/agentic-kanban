@@ -14,6 +14,7 @@ import { getProjectIdsForWorkspaces } from "../repositories/workspace-summary.re
 import { listProjectRepos, insertProjectRepo, updateProjectRepo, deleteProjectRepo, type RepoRow } from "../repositories/repo.repository.js";
 import { getProjectById, updateProjectServicesConfig } from "../repositories/project.repository.js";
 import { detectRepoInfo } from "../services/git-info.service.js";
+import { parseIncludeParam, serveWorkspaceRepoStatusBatch } from "../services/workspace-repo-status-batch.service.js";
 import { cloneRepo } from "../services/repo-clone.service.js";
 import type { ProjectRepoResponse, ServiceStackConfig } from "@agentic-kanban/shared";
 import { DEFAULT_SERVICE_STACK_CONFIG } from "@agentic-kanban/shared";
@@ -514,6 +515,17 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
 
     projectService.openInExplorer(body.path);
     return c.json({ success: true });
+  });
+
+  // GET /api/projects/:id/workspace-repo-status?include=merge,conflicts,handoff,diffstats
+  // (#415) — one batched request over all non-closed, non-direct workspaces, replacing
+  // the per-workspace {repo-merge-status, conflicts, handoff, diff} client fan-out.
+  // Body is memoized ~10s server-side; unchanged content answers 304 via the ETag.
+  router.get("/:id/workspace-repo-status", async (c) => {
+    const projectId = c.req.param("id");
+    const include = parseIncludeParam(c.req.query("include"));
+    const body = await serveWorkspaceRepoStatusBatch(projectId, include, { database });
+    return conditionalJsonResponse(body, c.req.header("if-none-match"));
   });
 
   // GET /api/projects/all/workspaces — cross-project workspace summary (all projects)

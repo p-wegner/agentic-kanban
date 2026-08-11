@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { ProjectRepoResponse, StatusWithIssues } from "@agentic-kanban/shared";
-import { apiFetch } from "../lib/api.js";
-import { fetchWorkspacesList } from "../lib/workspacesListQuery.js";
+import { fetchWorkspaceRepoStatus } from "../lib/workspaceRepoStatusQuery.js";
 import { fetchProjectRepos } from "../lib/projectReposQuery.js";
 import {
   buildMultiRepoMatrix,
   type MatrixWorkspaceInput,
   type MultiRepoMatrix,
-  type RepoMergeStatusResponse,
 } from "../lib/multiRepoMatrix.js";
 import { diffMultiRepoMatrix, type MatrixSnapshot } from "../lib/diffMultiRepoMatrix.js";
 import { BOARD_WS_EVENT, type BoardWsEventDetail } from "../lib/useBoardEvents.js";
@@ -62,8 +60,9 @@ export interface UseLiveMultiRepoMatrixResult {
 }
 
 /**
- * Live data source for the Multi-Repo Monitor (#84). Fans out the per-workspace
- * `repo-merge-status` + `conflicts` checks (as #82 did), but re-runs them — debounced —
+ * Live data source for the Multi-Repo Monitor (#84). Reads the batched
+ * `workspace-repo-status` endpoint (#415 — one request per burst, replacing the old
+ * per-workspace `repo-merge-status` + `conflicts` fan-out), re-runs it — debounced —
  * whenever a relevant board event fires, tracks which cells changed since the last
  * snapshot (for flashing), and exposes a pause toggle. Matrix *semantics* are unchanged;
  * this only owns the refresh lifecycle.
@@ -101,46 +100,31 @@ export function useLiveMultiRepoMatrix(
     setError(null);
     void (async () => {
       try {
-        // Both lists come from the shared react-query caches (#403) — deduped
-        // with the other monitor panels reacting to the same board events.
-        const [additionalRepos, allWorkspaces] = await Promise.all([
+        // #415 — ONE batched request (shared react-query, deduped with the activity
+        // feed and impact heatmap reacting to the same board events) replaces the
+        // per-workspace repo-merge-status + conflicts fan-out. The batch already
+        // excludes direct and closed workspaces server-side.
+        const [additionalRepos, batch] = await Promise.all([
           fetchProjectRepos(queryClient, activeProjectId),
-          fetchWorkspacesList(queryClient, activeProjectId),
+          fetchWorkspaceRepoStatus(queryClient, activeProjectId),
         ]);
-        // repo-merge-status is not applicable to direct workspaces (400).
-        const active = allWorkspaces.filter((w) => !w.isDirect);
-
-        const statuses = await Promise.all(
-          active.map((w) =>
-            apiFetch<RepoMergeStatusResponse>(`/api/workspaces/${w.id}/repo-merge-status`).catch(() => null),
-          ),
-        );
-        // The conflict check runs real git merge-trees per repo — only pay for it on
-        // workspaces that actually have unlanded work.
-        const conflicts = await Promise.all(
-          active.map((w, i) => {
-            const st = statuses[i];
-            if (!st?.repos.some((r) => r.hasWork && !r.merged)) return Promise.resolve(null);
-            return apiFetch<{ hasConflicts: boolean }>(`/api/workspaces/${w.id}/conflicts`).catch(() => null);
-          }),
-        );
 
         // A newer refresh started while we were awaiting — drop this stale result.
         if (seq !== requestSeqRef.current) return;
 
         const issueById = new Map(columnsRef.current.flatMap((c) => c.issues).map((i) => [i.id, i]));
-        const workspaces: MatrixWorkspaceInput[] = active.map((w, i) => {
+        const workspaces: MatrixWorkspaceInput[] = batch.workspaces.map((w) => {
           const issue = issueById.get(w.issueId);
           return {
-            id: w.id,
+            id: w.workspaceId,
             issueId: w.issueId,
             issueNumber: issue?.issueNumber ?? null,
             issueTitle: issue?.title ?? null,
             branch: w.branch,
             status: w.status,
             mergedAt: w.mergedAt,
-            repoStatus: statuses[i],
-            hasConflicts: conflicts[i]?.hasConflicts ?? false,
+            repoStatus: w.mergeStatus,
+            hasConflicts: w.conflicts?.hasConflicts ?? false,
           };
         });
 
