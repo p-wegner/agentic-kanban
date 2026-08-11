@@ -30,6 +30,7 @@ import { buildConflictContext } from "./phase-context.service.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import { refreshWorkspaceBuildArtifacts } from "./workspace-build-refresh.service.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
+import { markWorkspaceSummaryDirty } from "../repositories/workspace-summary-projection.repository.js";
 import {
   WorkspaceError,
   resolveRelaunchAgentSelection,
@@ -523,6 +524,12 @@ export function createWorkspaceMergeService(deps: {
     }
 
     console.log(`[workspace-service] update-base: workspaceId=${id} mode=${mode} repos=${allRepos.length} success=${result.success} conflicts=${result.conflictingFiles?.length ?? 0}`);
+
+    // #399 (decision 014): the rebase/merge rewrote this worktree's history, so the
+    // persisted summary projection (head sha, commits-ahead count) is now wrong — mark
+    // dirty so the next board read / heal tick refreshes it. Marked even on a failed
+    // update: a partial sibling rebase may still have moved HEAD.
+    await markWorkspaceSummaryDirty(id, database).catch(() => {});
 
     const projectId = await resolveProjectId(id, database);
 

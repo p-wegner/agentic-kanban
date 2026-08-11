@@ -203,7 +203,12 @@ export async function setWorkspaceStatus(
       : undefined;
     const result = await database
       .update(workspaces)
-      .set({ status, updatedAt: now, ...(opts.set ?? {}) })
+      // summaryDirty (#399, decision 014): every status transition is a board event that
+      // can change the workspace-summary git facts (session start/exit, review, merge
+      // close, ...). Stamping the dirty flag atomically here — the single status-write
+      // authority — is what keeps the persisted summary projection incremental without
+      // hooks in every caller. `opts.set` may deliberately override it.
+      .set({ status, updatedAt: now, summaryDirty: true, ...(opts.set ?? {}) })
       .where(and(eq(workspaces.id, workspaceId), casGuard, terminalGuard));
     const affected = result.rowsAffected ?? (result as { changes?: number }).changes ?? 0;
     if (affected === 0) {
