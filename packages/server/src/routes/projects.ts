@@ -6,10 +6,9 @@ import { wrapAiOperation } from "../middleware/ai-operation.js";
 import { getProjectActivity } from "../services/project-activity.service.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
-import { createHash } from "node:crypto";
 import { isAbsolute } from "node:path";
 import { createWorkspaceSummaryCache } from "../services/workspace-summary-cache.service.js";
-import { createBoardEtagCache } from "../services/board-etag-cache.service.js";
+import { computeBodyEtag, conditionalJsonResponse, createBoardEtagCache } from "../services/board-etag-cache.service.js";
 import { listProjectRepos, insertProjectRepo, updateProjectRepo, deleteProjectRepo, type RepoRow } from "../repositories/repo.repository.js";
 import { getProjectById, updateProjectServicesConfig } from "../repositories/project.repository.js";
 import { detectRepoInfo } from "../services/git-info.service.js";
@@ -192,7 +191,9 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
       ...p,
       servicesConfig: parseServicesConfig((p as { servicesConfig?: unknown }).servicesConfig),
     }));
-    return c.json(withServices);
+    // Conditional GET: content-hash ETag over the serialized list, 304 with no
+    // body when the client's If-None-Match still matches (frequent polls).
+    return conditionalJsonResponse(JSON.stringify(withServices), c.req.header("if-none-match"));
   });
 
   // POST /api/projects
@@ -525,7 +526,7 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
     const generation = workspaceSummaryCache.getGeneration(projectId);
     const result = await projectService.getBoard(projectId, undefined, { includeArchived });
     const body = JSON.stringify(result);
-    const etag = `"${createHash("sha1").update(body).digest("hex").slice(0, 16)}"`;
+    const etag = computeBodyEtag(body);
     boardEtagCache.store(memoKey, etag, generation);
     if (ifNoneMatch === etag) {
       return new Response(null, { status: 304, headers: { ETag: etag } });

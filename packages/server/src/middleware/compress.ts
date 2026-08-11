@@ -1,5 +1,8 @@
-import { gzipSync } from "node:zlib";
+import { gzip, gzipSync } from "node:zlib";
+import { promisify } from "node:util";
 import type { MiddlewareHandler } from "hono";
+
+const gzipAsync = promisify(gzip);
 
 /**
  * Conditional gzip for buffered JSON GET responses.
@@ -11,8 +14,10 @@ import type { MiddlewareHandler } from "hono";
  * resulting response has no content-length and bypasses node-server's fast
  * buffered-body path. Every `application/json` response in this server is a
  * fully buffered string/buffer (SSE routes use `text/event-stream`, WebSocket
- * upgrades live under `/ws/*` outside the `/api/*` mount), so a synchronous
- * `gzipSync` on the buffered body is simpler and safe: 172KB gzips in ~1-3ms.
+ * upgrades live under `/ws/*` outside the `/api/*` mount), so gzipping the
+ * buffered body is simple and safe. Small bodies use `gzipSync` (sub-ms, no
+ * threadpool round-trip); bodies >= ASYNC_COMPRESS_MIN_BYTES use the async
+ * `zlib.gzip` so a multi-hundred-KB board payload never blocks the event loop.
  *
  * Applies ONLY when ALL of:
  *  - method is GET (HEAD/POST/PUT/... pass through untouched),
@@ -30,6 +35,26 @@ import type { MiddlewareHandler } from "hono";
 
 /** Responses smaller than this are not worth compressing. */
 export const COMPRESS_MIN_BYTES = 4096;
+
+/**
+ * Bodies at or above this size are compressed with the ASYNC `zlib.gzip`
+ * (libuv threadpool) instead of `gzipSync`. Small bodies stay on the sync path:
+ * a few KB gzips in well under a millisecond, cheaper than a threadpool
+ * round-trip, while a multi-hundred-KB board payload would block the event
+ * loop for several ms per response on the sync path.
+ */
+export const ASYNC_COMPRESS_MIN_BYTES = 64 * 1024;
+
+/**
+ * Threshold dispatch, exported for direct unit testing: sync below
+ * ASYNC_COMPRESS_MIN_BYTES, async (threadpool) at or above it. The middleware
+ * awaits the result before swapping `c.res`, which is safe under the Hono
+ * contract because the swap happens after `next()` inside the same middleware
+ * invocation — Hono only reads `c.res` once the middleware's promise resolves.
+ */
+export function gzipBody(raw: Buffer): Buffer | Promise<Buffer> {
+  return raw.byteLength >= ASYNC_COMPRESS_MIN_BYTES ? gzipAsync(raw) : gzipSync(raw);
+}
 
 /** True when the Accept-Encoding header allows gzip with a non-zero q-value. */
 function acceptsGzip(header: string | undefined): boolean {
@@ -83,7 +108,7 @@ export const jsonGzip: MiddlewareHandler = async (c, next) => {
     return;
   }
 
-  const compressed = gzipSync(raw);
+  const compressed = await gzipBody(raw);
   const headers = new Headers(res.headers);
   headers.set("content-encoding", "gzip");
   // Content-Length must match the compressed body, not the original.
