@@ -1,10 +1,14 @@
 import { sessionMessages, sessions, workspaces, issues, projects, projectStatuses } from "@agentic-kanban/shared/schema";
-import { eq, and, sql, desc, inArray } from "drizzle-orm";
+import { eq, ne, and, sql, desc, inArray } from "drizzle-orm";
 import { db } from "../../db/index.js";
 import type { Database } from "../../db/index.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import { readSessionStdoutFile } from "../../lib/session-output-reader.js";
-import { readStdoutFromFile } from "./stdout-file.js";
+import {
+  readSessionStdoutFileAsync,
+  readSessionStdoutFileTailAsync,
+  statSessionStdoutFile,
+} from "@agentic-kanban/shared/lib/session-files";
 
 /**
  * Load each session's output as message rows, preferring the on-disk .out file
@@ -68,12 +72,80 @@ export async function getSessionMessageRows(
   return dbRows;
 }
 
+/**
+ * Async twin of readStdoutFromFile (./stdout-file.ts): reconstruct stdout
+ * message rows from the per-session .out file without ever blocking the event
+ * loop on a multi-MB readFileSync. When `tailBytes` is given, only the last
+ * `tailBytes` of the file are read (complete JSONL lines only — the tail
+ * reader drops a truncated first line), which is what the polled transcript
+ * panel actually renders.
+ */
+export async function readStdoutFromFileAsync(
+  sessionId: string,
+  tailBytes?: number,
+): Promise<AgentOutputMessage[]> {
+  const content =
+    tailBytes !== undefined && tailBytes > 0
+      ? await readSessionStdoutFileTailAsync(sessionId, tailBytes)
+      : await readSessionStdoutFileAsync(sessionId);
+  if (!content) return [];
+  return [{ type: "stdout", sessionId, data: content }];
+}
+
+/**
+ * Cheap change-detection metadata for a session's output: .out file size+mtime
+ * plus the max session_messages id (one indexed MAX() lookup). Reads NO file
+ * content and NO message rows — the /output route derives its ETag from this
+ * BEFORE any transcript read, so a matching If-None-Match costs two tiny
+ * queries and one fstat. Returns null when the session does not exist.
+ */
+export interface SessionOutputMeta {
+  /** -1 when the .out file is absent. */
+  fileSize: number;
+  /** -1 when the .out file is absent. */
+  fileMtimeMs: number;
+  /** 0 when the session has no persisted messages. */
+  maxMessageId: number;
+}
+
+export async function getSessionOutputMeta(
+  sessionId: string,
+  database: Database = db,
+): Promise<SessionOutputMeta | null> {
+  const sessionRows = await database
+    .select({ id: sessions.id })
+    .from(sessions)
+    .where(eq(sessions.id, sessionId))
+    .limit(1);
+  if (sessionRows.length === 0) return null;
+
+  const fileStat = await statSessionStdoutFile(sessionId);
+  const maxRows = await database
+    .select({ maxId: sql<number | null>`max(${sessionMessages.id})` })
+    .from(sessionMessages)
+    .where(eq(sessionMessages.sessionId, sessionId));
+
+  return {
+    fileSize: fileStat?.size ?? -1,
+    fileMtimeMs: fileStat?.mtimeMs ?? -1,
+    maxMessageId: maxRows[0]?.maxId ?? 0,
+  };
+}
+
+/**
+ * Upper bound on the DB-fallback read for historical sessions without a .out
+ * file. Active sessions are ring-buffer-capped at 2000 rows (#404), so this
+ * only trims pathological pre-cap sessions instead of streaming them whole.
+ */
+const DB_FALLBACK_MAX_ROWS = 5000;
+
 export async function getSessionOutput(
   sessionId: string,
   database: Database = db,
+  options?: { tailBytes?: number },
 ): Promise<{ messages: AgentOutputMessage[] } | null> {
   const sessionRows = await database
-    .select()
+    .select({ id: sessions.id })
     .from(sessions)
     .where(eq(sessions.id, sessionId))
     .limit(1);
@@ -82,31 +154,42 @@ export async function getSessionOutput(
   // Stdout is served from the per-session .out file. Non-stdout messages
   // (exit, stderr) remain in the DB. For historical sessions whose .out
   // file is gone, fall back to DB rows.
-  const stdoutMessages = readStdoutFromFile(sessionId);
+  const stdoutMessages = await readStdoutFromFileAsync(sessionId, options?.tailBytes);
 
   let nonStdoutRows: AgentOutputMessage[] = [];
   if (stdoutMessages.length > 0) {
-    // File present: only fetch non-stdout rows from DB
+    // File present: only fetch non-stdout rows from DB (filtered in SQL, slim columns)
     const rows = await database
-      .select()
+      .select({
+        type: sessionMessages.type,
+        sessionId: sessionMessages.sessionId,
+        data: sessionMessages.data,
+        exitCode: sessionMessages.exitCode,
+      })
       .from(sessionMessages)
-      .where(eq(sessionMessages.sessionId, sessionId))
+      .where(and(eq(sessionMessages.sessionId, sessionId), ne(sessionMessages.type, "stdout")))
       .orderBy(sessionMessages.id);
-    nonStdoutRows = rows
-      .filter((r) => r.type !== "stdout")
-      .map((row) => ({
-        type: row.type as AgentOutputMessage["type"],
-        sessionId: row.sessionId,
-        data: row.data ?? undefined,
-        exitCode: row.exitCode != null ? Number(row.exitCode) : undefined,
-      }));
+    nonStdoutRows = rows.map((row) => ({
+      type: row.type as AgentOutputMessage["type"],
+      sessionId: row.sessionId,
+      data: row.data ?? undefined,
+      exitCode: row.exitCode != null ? Number(row.exitCode) : undefined,
+    }));
   } else {
-    // No file (old session or cleaned up): read all rows from DB
+    // No file (old session or cleaned up): read rows from DB — newest
+    // DB_FALLBACK_MAX_ROWS only, returned in ascending order.
     const rows = await database
-      .select()
+      .select({
+        type: sessionMessages.type,
+        sessionId: sessionMessages.sessionId,
+        data: sessionMessages.data,
+        exitCode: sessionMessages.exitCode,
+      })
       .from(sessionMessages)
       .where(eq(sessionMessages.sessionId, sessionId))
-      .orderBy(sessionMessages.id);
+      .orderBy(desc(sessionMessages.id))
+      .limit(DB_FALLBACK_MAX_ROWS);
+    rows.reverse();
     nonStdoutRows = rows.map((row) => ({
       type: row.type as AgentOutputMessage["type"],
       sessionId: row.sessionId,

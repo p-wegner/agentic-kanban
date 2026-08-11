@@ -21,6 +21,12 @@ const COLLAPSE_THRESHOLD = 400;
 const SCROLL_STICK_PX = 80;
 /** Fallback poll while a session is still running (WS activity is the primary trigger). */
 const LIVE_POLL_MS = 4000;
+/**
+ * Only the transcript tail is fetched (`?tail=`): the panel renders recent
+ * lines, and the server can then serve a bounded read instead of a multi-MB
+ * full-file read on every poll.
+ */
+const TRANSCRIPT_TAIL_BYTES = 256 * 1024;
 
 interface ResolvedTarget {
   sessionId: string;
@@ -153,6 +159,8 @@ export function SessionTranscriptPanel() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
   const fetchingRef = useRef(false);
+  /** ETag of the last /output response — echoed as If-None-Match so an unchanged transcript polls as a body-less 304. */
+  const outputEtagRef = useRef<string | null>(null);
 
   // Open on the window CustomEvent from any launch site.
   useEffect(() => {
@@ -163,6 +171,7 @@ export function SessionTranscriptPanel() {
       setError(null);
       setLoading(true);
       stickToBottomRef.current = true;
+      outputEtagRef.current = null;
       resolveTarget(target)
         .then((r) => {
           if (!r) {
@@ -185,11 +194,21 @@ export function SessionTranscriptPanel() {
     if (!resolved || fetchingRef.current) return;
     fetchingRef.current = true;
     try {
-      const [messages, nextSummary] = await Promise.all([
-        apiFetch<AgentOutputMessage[]>(`/api/sessions/${resolved.sessionId}/output`),
+      // Conditional tail fetch: send the previous ETag so an unchanged
+      // transcript costs a 304 with no body (same pattern as useAgentLiveTicker).
+      const headers: Record<string, string> = {};
+      if (outputEtagRef.current) headers["If-None-Match"] = outputEtagRef.current;
+      const [outputRes, nextSummary] = await Promise.all([
+        fetch(`/api/sessions/${resolved.sessionId}/output?tail=${TRANSCRIPT_TAIL_BYTES}`, { headers }),
         apiFetch<SessionSummaryResponse>(`/api/sessions/${resolved.sessionId}/summary`).catch(() => null),
       ]);
-      setEvents(parseSessionTranscript(messages, resolved.outputFormat));
+      if (outputRes.status !== 304) {
+        if (!outputRes.ok) throw new Error(`HTTP ${outputRes.status}`);
+        const newEtag = outputRes.headers.get("ETag");
+        if (newEtag) outputEtagRef.current = newEtag;
+        const messages = (await outputRes.json()) as AgentOutputMessage[];
+        setEvents(parseSessionTranscript(messages, resolved.outputFormat));
+      }
       if (nextSummary) setSummary(nextSummary);
       setError(null);
     } catch {
@@ -248,6 +267,7 @@ export function SessionTranscriptPanel() {
     setEvents([]);
     setSummary(null);
     setError(null);
+    outputEtagRef.current = null;
   }, []);
 
   useEffect(() => {

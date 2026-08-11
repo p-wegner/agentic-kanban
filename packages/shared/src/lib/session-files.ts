@@ -1,7 +1,7 @@
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readFileSync, existsSync, openSync, readSync, closeSync, fstatSync } from "node:fs";
-import { open } from "node:fs/promises";
+import { open, readFile, stat } from "node:fs/promises";
 
 // Single source of truth for the on-disk capture files of a detached agent session
 // and the readers over them. Detached agents (claude on Windows — see
@@ -47,6 +47,38 @@ export function readSessionStdoutFile(sessionId: string): string | null {
   try {
     const content = readFileSync(outPath, "utf-8");
     return content || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Async twin of {@link readSessionStdoutFile}. Server hot paths (the polled
+ * /output route) must use this so multi-MB transcript reads never block the
+ * event loop (readFileSync on a 5MB+ .out file measured 100ms+ of loop lag).
+ */
+export async function readSessionStdoutFileAsync(sessionId: string): Promise<string | null> {
+  const outPath = sessionOutputPath(sessionId);
+  try {
+    const content = await readFile(outPath, "utf-8");
+    return content || null;
+  } catch {
+    return null; // absent (or unreadable) — caller falls back to DB rows
+  }
+}
+
+/**
+ * Cheap metadata probe of the per-session .out file: size + mtime, no content
+ * read. Powers the /output route's pre-read ETag (a matching If-None-Match can
+ * 304 without touching the file body). Returns null when the file is absent.
+ */
+export async function statSessionStdoutFile(
+  sessionId: string,
+): Promise<{ size: number; mtimeMs: number } | null> {
+  const outPath = sessionOutputPath(sessionId);
+  try {
+    const s = await stat(outPath);
+    return { size: s.size, mtimeMs: s.mtimeMs };
   } catch {
     return null;
   }
