@@ -9,6 +9,7 @@ import type { WorkspaceCandidate } from "./monitor-cycle.js";
 import type { MonitorWorkspaceActions } from "./monitor-workspace-actions.js";
 import type { MergeGateToken } from "../services/pre-merge-gate.service.js";
 import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.repository.js";
+import { clearMergeBackoff, recordMergeFailure, type MergeBackoffDeps } from "../services/merge-backoff.service.js";
 
 export type LogMonitorActionFn = (action: MonitorActionName, workspaceId: string, issueId: string, extra?: Pick<MonitorAction, "endpoint" | "httpStatus" | "responseSummary" | "verificationResult">) => void;
 
@@ -27,6 +28,12 @@ export async function getProjectStatusIdByName(projectId: string, name: string):
  * fallback fires under exactly the same conditions. The caller keeps ownership of
  * `stats.merged++` (a failed merge that fell back still consumes a merge slot, by
  * design) and of broadcasting the board change.
+ *
+ * #417 backoff bookkeeping: a success clears any recorded merge backoff; a failure
+ * records it (identical repeats double the retry window; the >=2-repeat warning
+ * surfaces via a `merge_retry_blocked` drive obstacle). The SKIP decision itself is
+ * made by the caller BEFORE consuming a merge slot — see `shouldSkipMergeForBackoff`
+ * in monitor-cycle.ts — so a blocked workspace cannot starve other merges.
  */
 export async function mergeWorkspaceWithFixFallback(
   ws: WorkspaceCandidate,
@@ -34,9 +41,11 @@ export async function mergeWorkspaceWithFixFallback(
   logAction: LogMonitorActionFn,
   logs: { conflictMsg: string; successMsg: string },
   gate: MergeGateToken,
+  backoff?: MergeBackoffDeps,
 ): Promise<void> {
   try {
     await workspaceActions.merge(ws.wsId, gate);
+    await clearMergeBackoff((backoff?.database ?? db), ws.wsId);
     console.log(logs.successMsg);
     logAction("merge", ws.wsId, ws.issueId, {
       endpoint: `POST /api/workspaces/${ws.wsId}/merge`,
@@ -44,6 +53,13 @@ export async function mergeWorkspaceWithFixFallback(
     });
   } catch (err) {
     const mergeError = err instanceof Error ? err.message : "merge failed";
+    // Record the failure BEFORE launching the fix session, so an identical repeat backs
+    // off the NEXT cycle even if the fix session itself dies. Never throws (telemetry).
+    await recordMergeFailure(
+      { wsId: ws.wsId, projectId: ws.projectId, workingDir: ws.workingDir, issueNumber: ws.issueNumber },
+      mergeError,
+      backoff,
+    );
     let fixOk = true;
     try {
       await workspaceActions.fixAndMerge(ws.wsId, mergeError);

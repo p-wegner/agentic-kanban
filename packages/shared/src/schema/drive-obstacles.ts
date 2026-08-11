@@ -29,6 +29,8 @@ export const DRIVE_OBSTACLE_KINDS = [
   "over_launch",
   /** A review preflight rebase conflicts and cannot be retried into success (#283). */
   "review_preflight_conflict",
+  /** Monitor merge / fix-and-merge keeps failing with an IDENTICAL signature — retries are backed off (#417). */
+  "merge_retry_blocked",
 ] as const;
 export type DriveObstacleKind = (typeof DRIVE_OBSTACLE_KINDS)[number];
 
