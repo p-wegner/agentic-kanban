@@ -19,7 +19,7 @@ import {
   type PluginPlaceholderVars,
 } from "@agentic-kanban/shared/lib/plugin-manifest";
 import type { Database } from "../db/index.js";
-import { listPluginLoopIssues, listPluginLoopUnmergedWorkspaces } from "../repositories/plugins.repository.js";
+import { listPluginLoopIssues, listPluginLoopSessionStats, listPluginLoopUnmergedWorkspaces } from "../repositories/plugins.repository.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 import {
   insertPluginLoopEvent,
@@ -241,6 +241,12 @@ export interface LoopStatus {
    * recommendation is for an older gate, or the feature is off.
    */
   gateRecommendation: { actionId: string; reason: string } | null;
+  /**
+   * Session-cost rollup for this loop's unit tickets (#294), in USD. `null` when the
+   * caller opted out of the (expensive) rollup via `loopStatuses(..., { includeCosts:
+   * false })` — the cross-project inbox does, since it never renders cost.
+   */
+  totalCostUsd: number | null;
 }
 
 export interface PluginLoopDeps {
@@ -314,41 +320,51 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
     return pluginLoopUnitKey(pluginSlug, loopName, "");
   }
 
-  /** Per-loop ticket counts for the UI, without running the (possibly slow) planner. */
+  /**
+   * Per-loop ticket counts for the UI, without running the (possibly slow) planner.
+   *
+   * `includeCosts` (default true) controls the session-cost rollup (#294): an
+   * unbounded sessions→workspaces→issues join plus a JSON.parse per stats blob.
+   * The cross-project inbox poll only needs gate/openTickets and passes `false`
+   * to skip it entirely (2026-08-11 perf audit); cost-skipped statuses carry
+   * `totalCostUsd: null`.
+   */
   async function loopStatuses(
     manifest: PluginManifest,
     pluginSlug: string,
     projectId: string,
+    options: { includeCosts?: boolean } = {},
   ): Promise<LoopStatus[]> {
-    const out: LoopStatus[] = [];
-    for (const loop of manifest.loops ?? []) {
-      const rows = await listPluginLoopIssues(projectId, keyPrefix(pluginSlug, loop.name), database);
-      const pausedValue = await getPreference(pluginLoopPausedPreferenceKey(pluginSlug, loop.name, projectId), database);
-      const convergedValue = await getPreference(pluginLoopConvergedPreferenceKey(pluginSlug, loop.name, projectId), database);
-      // The latest advance's persisted plan extras (gate/progress/checks/note) ARE the loop's
-      // current display state — surfacing them here is what lets the panel render an approval
-      // card or a stepper without re-running the (possibly slow) planner.
-      const lastAdvance = await latestPluginLoopEvent(
-        { pluginSlug, loopName: loop.name, projectId }, "advance", database,
-      );
+    const includeCosts = options.includeCosts !== false;
+    return Promise.all((manifest.loops ?? []).map(async (loop) => {
+      // The per-loop query bundle used to be 5-7 SERIAL awaits; nothing below
+      // depends on another query's result, so they run as one round-trip wave.
+      const [rows, pausedValue, convergedValue, lastAdvance, unmerged, totalCostUsd] = await Promise.all([
+        listPluginLoopIssues(projectId, keyPrefix(pluginSlug, loop.name), database),
+        getPreference(pluginLoopPausedPreferenceKey(pluginSlug, loop.name, projectId), database),
+        getPreference(pluginLoopConvergedPreferenceKey(pluginSlug, loop.name, projectId), database),
+        // The latest advance's persisted plan extras (gate/progress/checks/note) ARE the loop's
+        // current display state — surfacing them here is what lets the panel render an approval
+        // card or a stepper without re-running the (possibly slow) planner.
+        latestPluginLoopEvent({ pluginSlug, loopName: loop.name, projectId }, "advance", database),
+        listPluginLoopUnmergedWorkspaces(projectId, keyPrefix(pluginSlug, loop.name), database),
+        includeCosts ? sumLoopSessionCosts(pluginSlug, loop.name, projectId) : Promise.resolve(null),
+      ]);
       const payload = parseAdvancePayload(lastAdvance);
-      const unmerged = await listPluginLoopUnmergedWorkspaces(projectId, keyPrefix(pluginSlug, loop.name), database);
       const gate = payload?.gate ?? null;
       let gateRecommendation: LoopStatus["gateRecommendation"] = null;
       let gateSince: string | null = null;
       if (gate) {
         // `gate-reached` is written once per NEW gate id, so its timestamp is the gate's
         // true birth — unlike the advance row, which is restamped every monitor cycle.
-        const reachedRow = await latestPluginLoopEvent(
-          { pluginSlug, loopName: loop.name, projectId }, "gate-reached", database,
-        );
+        const [reachedRow, recoRow] = await Promise.all([
+          latestPluginLoopEvent({ pluginSlug, loopName: loop.name, projectId }, "gate-reached", database),
+          latestPluginLoopEvent({ pluginSlug, loopName: loop.name, projectId }, "gate-recommendation", database),
+        ]);
         try {
           const reached = reachedRow?.payloadJson ? JSON.parse(reachedRow.payloadJson) as { gateId?: string } : null;
           if (reached?.gateId === gate.id) gateSince = reachedRow?.createdAt ?? null;
         } catch { /* malformed event — fall back to no age */ }
-        const recoRow = await latestPluginLoopEvent(
-          { pluginSlug, loopName: loop.name, projectId }, "gate-recommendation", database,
-        );
         try {
           const reco = recoRow?.payloadJson ? JSON.parse(recoRow.payloadJson) as { gateId?: string; actionId?: string; reason?: string } : null;
           if (reco?.gateId === gate.id && typeof reco.actionId === "string") {
@@ -356,7 +372,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
           }
         } catch { /* malformed event — no chip */ }
       }
-      out.push({
+      return {
         name: loop.name,
         label: loop.label ?? loop.name,
         description: loop.description ?? null,
@@ -379,9 +395,27 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
         // affordances, so the surface has to be told which one it is looking at.
         awaitingMerge: selectLoopStall(unmerged, gate, payload?.progress ?? null),
         gateRecommendation,
-      });
-    }
-    return out;
+        totalCostUsd,
+      };
+    }));
+  }
+
+  /**
+   * Cost rollup (#294): sessions → workspaces → unit tickets, folded here so the
+   * plugin panel can show "$X so far" without a second request. Cost is decoration —
+   * a failure never blanks the status, it just reports $0.
+   */
+  async function sumLoopSessionCosts(pluginSlug: string, loopName: string, projectId: string): Promise<number> {
+    let totalCostUsd = 0;
+    try {
+      const statRows = await listPluginLoopSessionStats(projectId, keyPrefix(pluginSlug, loopName), database);
+      for (const statRow of statRows) {
+        try {
+          totalCostUsd += Number((JSON.parse(statRow.stats ?? "{}") as { totalCostUsd?: unknown }).totalCostUsd ?? 0) || 0;
+        } catch { /* skip unparseable stats */ }
+      }
+    } catch { /* cost is decoration — never blank the panel for it */ }
+    return totalCostUsd;
   }
 
   /** Pause/resume a loop's monitor-driven auto-advance (`advanceDuePluginLoops`). */

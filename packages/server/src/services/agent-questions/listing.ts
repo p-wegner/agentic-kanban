@@ -3,7 +3,7 @@
  * staleness computed per card and a compute-on-read response cache.
  */
 import type { Database } from "../../db/index.js";
-import { readSessionStdoutFileTail } from "../../lib/session-output-reader.js";
+import { readSessionStdoutFileTailAsync } from "../../lib/session-output-reader.js";
 import {
   getPendingQuestionWorkspaces,
   getRecentSessionsForWorkspace,
@@ -76,9 +76,11 @@ export async function listPendingQuestionsForProject(
       // sessions. The file is JSONL — split it into lines so each stream event
       // is parsed individually (the whole file as one string can never
       // JSON.parse, which silently hid questions from file-backed sessions).
-      // Only the tail is read: the result event is one of the last lines.
+      // Only the tail is read: the result event is one of the last lines. Async
+      // reader (#401): the sync twin's docstring forbids server hot paths, and this
+      // listing runs on every inbox/bell/questions poll (G3, 2026-08-11 audit).
       let msgs: Array<{ type: string; data: string | null }>;
-      const fileContent = readSessionStdoutFileTail(sess.id);
+      const fileContent = await readSessionStdoutFileTailAsync(sess.id);
       if (fileContent !== null) {
         msgs = fileContent.split("\n").map((line) => ({ type: "stdout", data: line }));
       } else {
