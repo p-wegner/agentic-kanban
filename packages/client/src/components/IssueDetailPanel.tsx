@@ -118,6 +118,12 @@ export function IssueDetailPanel({
     milestones,
     activeShowdownId, setActiveShowdownId,
     descriptionFetching,
+    cycleTime,
+    timeEntries,
+    touchedFiles,
+    relatedIssues,
+    mergedCommits,
+    extrasLoading,
   } = useIssueDetailData(issue, onIssueUpdate);
   const {
     mode: panelMode,
@@ -564,10 +570,10 @@ export function IssueDetailPanel({
           />
 
           {/* Cycle time badge — only shown in view mode */}
-          {!editing && <IssueCycleTimeBadge issueId={issue.id} />}
+          {!editing && <IssueCycleTimeBadge data={cycleTime} loading={extrasLoading} />}
 
           {/* Work log section — only shown in view mode */}
-          {!editing && <IssueWorkLogSection issueId={issue.id} />}
+          {!editing && <IssueWorkLogSection issueId={issue.id} initial={timeEntries} loading={extrasLoading} />}
 
           {/* Workspaces section — placed directly below status/metadata for contextual proximity */}
           {!editing && (
@@ -613,6 +619,10 @@ export function IssueDetailPanel({
             onDeleteComment={handleDeleteComment}
             onAddNote={handleAddNote}
             onNewNoteBodyChange={setNewNoteBody}
+            touchedFiles={touchedFiles}
+            relatedIssues={relatedIssues}
+            mergedCommits={mergedCommits}
+            extrasLoading={extrasLoading}
           />
         </div>
 

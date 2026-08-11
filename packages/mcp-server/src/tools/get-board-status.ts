@@ -106,15 +106,42 @@ export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodD
 
         const issueIds = projectIssues.map(i => i.id);
 
-        // 4. Get workspaces for these issues
+        // 4. Get workspaces for these issues — slim projection (#418 G17):
+        // `workspaces` is the widest table (conflict_cache_files, code_metrics_json,
+        // prompt/plan columns) and this tool runs for every agent + the monitor;
+        // select only what the assembly below consumes.
         const wsRows = issueIds.length > 0
-          ? await db.select().from(schema.workspaces).where(inArray(schema.workspaces.issueId, issueIds))
+          ? await db
+              .select({
+                id: schema.workspaces.id,
+                issueId: schema.workspaces.issueId,
+                branch: schema.workspaces.branch,
+                status: schema.workspaces.status,
+                workingDir: schema.workspaces.workingDir,
+                baseBranch: schema.workspaces.baseBranch,
+                isDirect: schema.workspaces.isDirect,
+                readyForMerge: schema.workspaces.readyForMerge,
+                updatedAt: schema.workspaces.updatedAt,
+              })
+              .from(schema.workspaces)
+              .where(inArray(schema.workspaces.issueId, issueIds))
           : [];
 
-        // 5. Get sessions for these workspaces
+        // 5. Get sessions for these workspaces — slim for the same reason (the
+        // stats blob is parsed, the rest of the row was dead weight).
         const wsIds = wsRows.map(w => w.id);
         const sessionRows = wsIds.length > 0
-          ? await db.select().from(schema.sessions).where(inArray(schema.sessions.workspaceId, wsIds))
+          ? await db
+              .select({
+                id: schema.sessions.id,
+                workspaceId: schema.sessions.workspaceId,
+                status: schema.sessions.status,
+                startedAt: schema.sessions.startedAt,
+                endedAt: schema.sessions.endedAt,
+                stats: schema.sessions.stats,
+              })
+              .from(schema.sessions)
+              .where(inArray(schema.sessions.workspaceId, wsIds))
           : [];
 
         // Group sessions by workspaceId (most recent first)

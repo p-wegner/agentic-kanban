@@ -9,17 +9,34 @@ import {
   getRecentSessionsForWorkspace,
   getSessionStdoutMessages,
   getSyntheticQuestionComments,
+  type PendingQuestionWorkspaceRow,
 } from "../../repositories/agent-questions.repository.js";
+import { getIssueDescription } from "../../repositories/issue.repository.js";
 import { AGENT_QUESTIONS_CACHE_TTL_MS, pendingQuestionsCache } from "./cache.js";
 import { extractQuestionsFromSession, parseSyntheticQuestionPayload } from "./parsing.js";
 import { computeStaleness } from "./staleness.js";
-import { isAnswered, getCachedRecommendations } from "./markers.js";
+import { getAnsweredToolUseIds, getCachedRecommendationsMany } from "./markers.js";
 import { scheduleBackgroundRecommendation } from "./auto-answer.js";
 import type { AutoAnswerSendTurn, PendingQuestionSet } from "./types.js";
+
+/** One question-bearing session found for a workspace (phase 1 of the listing). */
+interface WorkspaceCandidate {
+  ws: PendingQuestionWorkspaceRow;
+  sessionId: string;
+  sessionStartedAt: string | null;
+  sessionEndedAt: string | null;
+  latestSessionStartedAt: string | null;
+  extracted: ReturnType<typeof extractQuestionsFromSession>;
+}
 
 /**
  * List pending (unanswered) AskUserQuestion sets across all workspaces of a project.
  * Compute-on-read: scans the most recent completed session per workspace.
+ *
+ * Structure (#418): phase 1 collects the candidate question sets (transcript
+ * scans), then the answered-markers and cached recommendations for ALL candidates
+ * are read in single batched queries — the per-question runtime_state lookups were
+ * an N+1 on every inbox/bell poll.
  *
  * @param sendTurn  Optional: when provided, newly-computed butler recommendations will
  *                  trigger an auto-answer if the `butler_auto_answer` preference is on.
@@ -47,9 +64,10 @@ export async function listPendingQuestionsForProject(
   // provably wasted work (609 of 648 workspaces on the measured project).
   const wsRows = await getPendingQuestionWorkspaces(projectId, db);
 
-  const results: PendingQuestionSet[] = [];
   const now = nowOverride ?? new Date().toISOString();
 
+  // ── Phase 1: find each workspace's newest question-bearing session ──────────
+  const candidates: WorkspaceCandidate[] = [];
   for (const ws of wsRows) {
     // Recent sessions (any status), newest first. We scan a few because a question
     // asked in an older session is "superseded" once a newer session has run.
@@ -90,11 +108,61 @@ export async function listPendingQuestionsForProject(
       const extracted = extractQuestionsFromSession(msgs);
       if (extracted.length === 0) continue;
 
-      for (const { toolUseId, questions } of extracted) {
-      if (await isAnswered(toolUseId, db)) continue;
+      candidates.push({
+        ws,
+        sessionId: sess.id,
+        sessionStartedAt: sess.startedAt,
+        sessionEndedAt: sess.endedAt,
+        latestSessionStartedAt: latestSession.startedAt,
+        extracted,
+      });
+      // The newest question-bearing session wins; older ones are superseded copies.
+      break;
+    }
+  }
+
+  // Synthetic (MCP clarify_or_propose) questions live in issue comments. Only
+  // kind "agent-question" rows can carry the `mcp_clarify_or_propose` payload
+  // (see mcp-server tools/clarify-or-propose.ts), so filter by kind — and the
+  // repository bounds the scan (created_at floor + LIMIT, #418) so it does not
+  // grow with the project's full comment history.
+  const syntheticRows = await getSyntheticQuestionComments(projectId, db, { now });
+  const parsedSynthetic = syntheticRows
+    .filter((row) => row.workspaceId !== null)
+    .map((row) => ({ row, parsed: parseSyntheticQuestionPayload(row.payload) }))
+    .filter((s): s is typeof s & { parsed: NonNullable<typeof s.parsed> } => s.parsed !== null);
+
+  // ── Phase 2: batched marker/recommendation reads (one IN query each) ────────
+  const allToolUseIds = [
+    ...candidates.flatMap((cand) => cand.extracted.map((e) => e.toolUseId)),
+    ...parsedSynthetic.map((s) => s.parsed.toolUseId),
+  ];
+  const answeredIds = await getAnsweredToolUseIds(allToolUseIds, db);
+  const cachedRecs = await getCachedRecommendationsMany(
+    candidates.flatMap((cand) => cand.extracted.map((e) => e.toolUseId)),
+    db,
+  );
+
+  // Lazily-fetched issue descriptions, only for the rare uncached-recommendation
+  // branch (#418: the workspace scan no longer drags every open issue's
+  // description through the poll). Memoized per issue within this compute.
+  const descriptionByIssue = new Map<string, string | null>();
+  async function issueDescriptionFor(issueId: string): Promise<string | null> {
+    if (descriptionByIssue.has(issueId)) return descriptionByIssue.get(issueId) ?? null;
+    const issue = await getIssueDescription(issueId, db).catch(() => null);
+    const description = issue?.description ?? null;
+    descriptionByIssue.set(issueId, description);
+    return description;
+  }
+
+  const results: PendingQuestionSet[] = [];
+  for (const cand of candidates) {
+    const { ws } = cand;
+    for (const { toolUseId, questions } of cand.extracted) {
+      if (answeredIds.has(toolUseId)) continue;
       // Attach cached recommendation (if any) to each question; kick off a background
       // recommend call when not yet cached (and not already in flight).
-      const cached = await getCachedRecommendations(toolUseId, db);
+      const cached = cachedRecs.get(toolUseId) ?? null;
       const questionsWithRec = questions.map((q, i) => ({
         ...q,
         recommendation: cached ? (cached[i] ?? null) : undefined,
@@ -105,7 +173,7 @@ export async function listPendingQuestionsForProject(
           issueId: ws.issueId,
           issueNumber: ws.issueNumber,
           issueTitle: ws.issueTitle,
-          issueDescription: ws.issueDescription,
+          issueDescription: await issueDescriptionFor(ws.issueId),
           questions,
         }, db, sendTurn ? { workspaceId: ws.workspaceId, sendTurn } : undefined);
       }
@@ -116,9 +184,9 @@ export async function listPendingQuestionsForProject(
         issueStatusName: ws.issueStatusName,
         issueCurrentNodeId: ws.issueCurrentNodeId,
         issueCurrentNodeType: ws.issueCurrentNodeType,
-        questionSessionStartedAt: sess.startedAt,
-        latestSessionStartedAt: latestSession.startedAt,
-        askedAt: sess.endedAt,
+        questionSessionStartedAt: cand.sessionStartedAt,
+        latestSessionStartedAt: cand.latestSessionStartedAt,
+        askedAt: cand.sessionEndedAt,
         now,
       });
       // Drop questions that are definitively stale — workspace closed, issue archived,
@@ -128,36 +196,24 @@ export async function listPendingQuestionsForProject(
       results.push({
         toolUseId,
         workspaceId: ws.workspaceId,
-        sessionId: sess.id,
+        sessionId: cand.sessionId,
         issueId: ws.issueId,
         issueNumber: ws.issueNumber,
         issueTitle: ws.issueTitle,
         questions: questionsWithRec,
-        askedAt: sess.endedAt,
+        askedAt: cand.sessionEndedAt,
         staleness,
       });
-      }
-      // The newest question-bearing session wins; older ones are superseded copies.
-      break;
     }
   }
 
-  // Synthetic (MCP clarify_or_propose) questions live in issue comments. Only
-  // kind "agent-question" rows can carry the `mcp_clarify_or_propose` payload
-  // (see mcp-server tools/clarify-or-propose.ts), so filter by kind instead of
-  // scanning every comment of the project — the unbounded scan grew with the
-  // full comment history.
-  const syntheticRows = await getSyntheticQuestionComments(projectId, db);
-
   const seenToolUseIds = new Set(results.map((r) => r.toolUseId));
-  for (const row of syntheticRows) {
-    if (row.workspaceId === null) continue;
-    const parsed = parseSyntheticQuestionPayload(row.payload);
-    if (!parsed || seenToolUseIds.has(parsed.toolUseId)) continue;
-    if (await isAnswered(parsed.toolUseId, db)) continue;
+  for (const { row, parsed } of parsedSynthetic) {
+    if (seenToolUseIds.has(parsed.toolUseId)) continue;
+    if (answeredIds.has(parsed.toolUseId)) continue;
     results.push({
       toolUseId: parsed.toolUseId,
-      workspaceId: row.workspaceId,
+      workspaceId: row.workspaceId as string,
       sessionId: `issue-comment:${row.id}`,
       issueId: row.issueId,
       issueNumber: row.issueNumber,

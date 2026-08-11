@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
+import { apiPost, apiDelete } from "../lib/api.js";
 import { formatRelativeTime, formatAbsoluteTime } from "../lib/formatRelativeTime.js";
 import { showToast } from "./Toast.js";
 
-interface TimeEntry {
+export interface TimeEntry {
   id: string;
   issueId: string;
   minutes: number;
@@ -20,30 +20,33 @@ export function formatMinutes(totalMinutes: number): string {
   return `${m}m`;
 }
 
-interface IssueWorkLogSectionProps {
-  issueId: string;
+export interface TimeEntriesData {
+  entries: TimeEntry[];
+  totalMinutes: number;
 }
 
-export function IssueWorkLogSection({ issueId }: IssueWorkLogSectionProps) {
-  const [entries, setEntries] = useState<TimeEntry[]>([]);
-  const [totalMinutes, setTotalMinutes] = useState(0);
-  const [loading, setLoading] = useState(true);
+interface IssueWorkLogSectionProps {
+  issueId: string;
+  /** Work-log data from the detail-bundle (#418) — seeds local state; the add/delete
+   *  mutations below keep updating it optimistically. */
+  initial: TimeEntriesData | null;
+  loading: boolean;
+}
+
+export function IssueWorkLogSection({ issueId, initial, loading }: IssueWorkLogSectionProps) {
+  const [entries, setEntries] = useState<TimeEntry[]>(initial?.entries ?? []);
+  const [totalMinutes, setTotalMinutes] = useState(initial?.totalMinutes ?? 0);
   const [minutesInput, setMinutesInput] = useState("");
   const [noteInput, setNoteInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
 
+  // Re-seed when the bundle (re)loads or the panel switches issue.
   useEffect(() => {
-    setLoading(true);
-    apiFetch<{ entries: TimeEntry[]; totalMinutes: number }>(`/api/issues/${issueId}/time-entries`)
-      .then((data) => {
-        setEntries(data.entries);
-        setTotalMinutes(data.totalMinutes);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [issueId]);
+    setEntries(initial?.entries ?? []);
+    setTotalMinutes(initial?.totalMinutes ?? 0);
+  }, [issueId, initial]);
 
   async function handleAdd() {
     const minutes = parseInt(minutesInput, 10);

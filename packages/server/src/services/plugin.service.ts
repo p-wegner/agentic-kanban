@@ -13,6 +13,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-preference-write";
 import { listWorkflowTemplates, type WorkflowDb } from "@agentic-kanban/shared/lib/workflow-engine";
@@ -365,7 +366,40 @@ export function createPluginService(deps: {
     };
   }
 
-  async function listPlugins(projectId?: string) {
+  // Short-TTL memo for the plugin listing (#418): GET /api/plugins re-did per-request
+  // work per installed plugin — a manifest parse, an output-location pref read, and a
+  // manifest-file disk read for the drift check (measured at 5.1s once, likely a cold
+  // AV-scanned disk read). The listing only changes through the mutators below, which
+  // all clear the memo; the TTL bounds staleness from out-of-band pref edits. Keyed by
+  // projectId because the enabled/outputLocation decoration is project-scoped. The
+  // in-flight promise is memoized so concurrent requests share one compute; a rejection
+  // evicts itself so errors are never cached.
+  const LIST_PLUGINS_TTL_MS = 15_000;
+  const listPluginsMemo = new Map<string, { at: number; result: ReturnType<typeof computePluginList> }>();
+
+  function listPlugins(projectId?: string) {
+    const key = projectId ?? "";
+    const memo = listPluginsMemo.get(key);
+    if (memo && Date.now() - memo.at < LIST_PLUGINS_TTL_MS) return memo.result;
+    const result = computePluginList(projectId);
+    listPluginsMemo.set(key, { at: Date.now(), result });
+    result.catch(() => listPluginsMemo.delete(key));
+    return result;
+  }
+
+  /** Wrap a listing-affecting mutator so it clears the listPlugins memo (even on throw —
+   *  a partial mutation must not leave a stale listing cached). */
+  function invalidatesPluginList<A extends unknown[], R>(fn: (...args: A) => Promise<R>): (...args: A) => Promise<R> {
+    return async (...args: A) => {
+      try {
+        return await fn(...args);
+      } finally {
+        listPluginsMemo.clear();
+      }
+    };
+  }
+
+  async function computePluginList(projectId?: string) {
     const rows = await listPluginRows(database);
     const enabledMap = projectId ? await enabledSlugsByProject() : null;
     const enabledSlugs = enabledMap?.get(projectId!) ?? new Set<string>();
@@ -384,7 +418,9 @@ export function createPluginService(deps: {
       // nothing — so say so instead of letting the author chase a phantom bug.
       let manifestDrift = false;
       try {
-        const onDisk = readFileSync(join(row.localPath, PLUGIN_MANIFEST_FILENAME), "utf8");
+        // Async read: this runs per installed plugin per (memo-miss) request, and a
+        // sync read of a cold file would stall the whole event loop for its duration.
+        const onDisk = await readFile(join(row.localPath, PLUGIN_MANIFEST_FILENAME), "utf8");
         manifestDrift = onDisk.trim() !== row.manifestJson.trim();
       } catch { /* checkout gone or unreadable — surfaced elsewhere */ }
       return {
@@ -892,8 +928,9 @@ export function createPluginService(deps: {
   }
 
   return {
-    installPlugin,
-    updatePlugin,
+    // Listing-affecting mutators clear the listPlugins memo (#418).
+    installPlugin: invalidatesPluginList(installPlugin),
+    updatePlugin: invalidatesPluginList(updatePlugin),
     listPlugins,
     listMarketplace,
     listLoops,
@@ -911,9 +948,9 @@ export function createPluginService(deps: {
     draftLoopGateFeedback,
     summarizeLoopGate,
     validatePluginSource,
-    removePlugin,
-    enableForProject,
-    disableForProject,
+    removePlugin: invalidatesPluginList(removePlugin),
+    enableForProject: invalidatesPluginList(enableForProject),
+    disableForProject: invalidatesPluginList(disableForProject),
     getButlerFragments,
     listViews,
     listProjectViews,
@@ -923,7 +960,7 @@ export function createPluginService(deps: {
     runScript,
     runSkill,
     getOutputLocation,
-    setOutputLocation,
+    setOutputLocation: invalidatesPluginList(setOutputLocation),
   };
 }
 

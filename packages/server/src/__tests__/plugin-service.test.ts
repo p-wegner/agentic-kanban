@@ -908,4 +908,31 @@ describe("plugin.service", () => {
 
     await service.stopView(plugin.id, "coverage", projectId);
   });
+
+  // #418: GET /api/plugins re-did per-plugin fs/manifest work on every request
+  // (one 5.1s sample). The listing is memoized for a short TTL and invalidated
+  // by every listing-affecting mutator.
+  it("listPlugins is memoized within the TTL and invalidated by enable/disable (#418)", async () => {
+    const pluginDir = makePluginDir();
+    const repo = makeProjectRepo();
+    const plugin = await service.installPlugin({ source: pluginDir });
+    const projectId = await insertProject(db, repo);
+
+    const first = await service.listPlugins(projectId);
+    // Same promise-backed result within the TTL: identical array instance.
+    const second = await service.listPlugins(projectId);
+    expect(second).toBe(first);
+    expect(first[0]).toMatchObject({ enabled: false });
+
+    // A mutator (enable) invalidates the memo — the next listing recomputes.
+    await service.enableForProject(plugin.id, projectId);
+    const afterEnable = await service.listPlugins(projectId);
+    expect(afterEnable).not.toBe(first);
+    expect(afterEnable[0]).toMatchObject({ enabled: true });
+
+    await service.disableForProject(plugin.id, projectId);
+    const afterDisable = await service.listPlugins(projectId);
+    expect(afterDisable).not.toBe(afterEnable);
+    expect(afterDisable[0]).toMatchObject({ enabled: false });
+  });
 });

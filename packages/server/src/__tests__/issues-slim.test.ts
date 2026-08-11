@@ -101,3 +101,54 @@ describe("GET /api/issues ?slim=1", () => {
     expect(withDesc.description).toBe("A long description that should be omitted in slim mode");
   });
 });
+
+describe("GET /api/issues conditional GET (#418)", () => {
+  let app: Hono;
+  let db: TestDb;
+  let projectId: string;
+  let statusId: string;
+
+  beforeEach(async () => {
+    ({ db } = createTestDb());
+    app = new Hono();
+    app.route("/api/issues", createIssuesRoute(db));
+    projectId = await seedProject(db);
+    statusId = await seedStatus(db, projectId, "Backlog", 0);
+    await seedIssue(db, projectId, statusId, 1, "big description payload");
+  });
+
+  it("serves an ETag and answers 304 with no body when If-None-Match matches", async () => {
+    const first = await app.request(`/api/issues?projectId=${projectId}`);
+    expect(first.status).toBe(200);
+    const etag = first.headers.get("etag");
+    expect(etag).toBeTruthy();
+
+    const second = await app.request(`/api/issues?projectId=${projectId}`, {
+      headers: { "if-none-match": etag! },
+    });
+    expect(second.status).toBe(304);
+    expect(second.headers.get("etag")).toBe(etag);
+    expect(await second.text()).toBe("");
+  });
+
+  it("returns 200 with a new ETag once the list changes", async () => {
+    const first = await app.request(`/api/issues?projectId=${projectId}`);
+    const etag = first.headers.get("etag")!;
+
+    await seedIssue(db, projectId, statusId, 2, "another issue");
+
+    const second = await app.request(`/api/issues?projectId=${projectId}`, {
+      headers: { "if-none-match": etag },
+    });
+    expect(second.status).toBe(200);
+    expect(second.headers.get("etag")).not.toBe(etag);
+    const list = await second.json() as unknown[];
+    expect(list.length).toBe(2);
+  });
+
+  it("slim=1 and full responses carry distinct ETags", async () => {
+    const full = await app.request(`/api/issues?projectId=${projectId}`);
+    const slim = await app.request(`/api/issues?projectId=${projectId}&slim=1`);
+    expect(full.headers.get("etag")).not.toBe(slim.headers.get("etag"));
+  });
+});

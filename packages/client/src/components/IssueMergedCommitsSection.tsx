@@ -1,29 +1,15 @@
-import { useEffect, useState } from "react";
 import type { MergedCommit, MergedCommitsResponse } from "@agentic-kanban/shared";
-import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 
 interface IssueMergedCommitsSectionProps {
-  issueId: string;
+  /** Merged-commits data from the detail-bundle (#418) — no self-fetch anymore. */
+  data: MergedCommitsResponse | null;
+  loading: boolean;
   /** Open the workspace panel (where the diff is viewable) for a merged commit. */
   onOpenDiff: (commit: MergedCommit) => void;
 }
 
-export function IssueMergedCommitsSection({ issueId, onOpenDiff }: IssueMergedCommitsSectionProps) {
-  // Self-contained best-effort fetch — moved out of the panel's loadData
-  // mega-effect. Owns its own loading + data state.
-  const [data, setData] = useState<MergedCommitsResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setData(null);
-    setLoading(true);
-    apiFetch<MergedCommitsResponse>(`/api/issues/${issueId}/merged-commits`)
-      .then((mc) => setData(mc))
-      .catch(() => setData(null))
-      .finally(() => setLoading(false));
-  }, [issueId]);
-
+export function IssueMergedCommitsSection({ data, loading, onOpenDiff }: IssueMergedCommitsSectionProps) {
   // Hide entirely until we know there's something to show or are still loading —
   // an un-merged issue shouldn't add a noisy empty panel to every detail view.
   if (!loading && (!data || !data.merged)) return null;

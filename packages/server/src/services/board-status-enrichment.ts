@@ -1,5 +1,4 @@
 import type { db } from "../db/index.js";
-import type { workspaces } from "@agentic-kanban/shared/schema";
 import { detectConflicts } from "./git.service.js";
 import { listWorkspaceRepos } from "../repositories/repo.repository.js";
 import { getWorkspaceDiffStats } from "./workspace-diff-stats.js";
@@ -9,7 +8,19 @@ import { readSessionStdoutFile } from "../lib/session-output-reader.js";
 import { getRecentSessionMessages } from "../repositories/board-status-enrichment.repository.js";
 import { parseAgentMessageFromJsonLine, parseLastAgentMessage } from "./session-message-parser.js";
 
-type WorkspaceRow = typeof workspaces.$inferSelect;
+/**
+ * The workspace fields the enrichment actually consumes — structural on purpose
+ * (#418 G17): the caller now fetches a slim projection instead of full rows, and
+ * pinning this to `$inferSelect` would force SELECT * back into the hot path.
+ */
+interface WorkspaceRow {
+  id: string;
+  branch: string;
+  status: string;
+  workingDir: string | null;
+  baseBranch: string | null;
+  isDirect: boolean;
+}
 
 export interface ConflictCacheEntry {
   result: { hasConflicts: boolean; conflictingFiles: string[] };
