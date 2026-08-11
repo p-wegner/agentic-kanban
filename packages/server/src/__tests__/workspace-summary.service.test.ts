@@ -271,6 +271,66 @@ describe("workspace-summary.service", () => {
     expect(summaryMap.get(issueId)?.main?.contextTokens).toBe(42_000);
   });
 
+  it("G9: latest-session selection is unchanged for a multi-session workspace with the stats-less list query", async () => {
+    // The session list query no longer ships every row's stats blob; stats are
+    // fetched separately for just the winner. This pins that the winner (and its
+    // stats-derived contextTokens) is IDENTICAL to the old single-query semantics.
+    const { db } = createTestDb();
+    const now = Date.now();
+    const iso = (msAgo: number) => new Date(now - msAgo).toISOString();
+    const projectId = randomUUID();
+    const statusId = randomUUID();
+    const issueId = randomUUID();
+    const workspaceId = randomUUID();
+
+    await db.insert(projects).values({
+      id: projectId, name: "Multi Session", repoPath: "/tmp/multi-session", repoName: "multi-session",
+      defaultBranch: "main", createdAt: iso(0), updatedAt: iso(0),
+    });
+    await db.insert(projectStatuses).values({
+      id: statusId, projectId, name: "In Progress", sortOrder: 0, isDefault: true, createdAt: iso(0),
+    });
+    await db.insert(issues).values({
+      id: issueId, issueNumber: 9, title: "Many sessions", statusId, projectId, createdAt: iso(0), updatedAt: iso(0),
+    });
+    await db.insert(workspaces).values({
+      id: workspaceId, issueId, branch: "feature/many", status: "idle", createdAt: iso(0), updatedAt: iso(0),
+    });
+
+    const latestSessionId = randomUUID();
+    await db.insert(sessions).values([
+      {
+        id: randomUUID(), workspaceId, executor: "claude", status: "completed",
+        startedAt: iso(3 * 3600_000), endedAt: iso(3 * 3600_000 - 60_000),
+        stats: JSON.stringify({ contextTokens: 11_000 }),
+      },
+      {
+        id: latestSessionId, workspaceId, executor: "claude", status: "completed",
+        startedAt: iso(1 * 3600_000), endedAt: iso(1 * 3600_000 - 60_000),
+        stats: JSON.stringify({ contextTokens: 77_000 }),
+      },
+      {
+        // Noise session (analytics trigger) NEWER than the real latest — must not win.
+        id: randomUUID(), workspaceId, executor: "claude", status: "completed",
+        startedAt: iso(10 * 60_000), endedAt: iso(9 * 60_000),
+        triggerType: "skill:board-monitor",
+        stats: JSON.stringify({ contextTokens: 1 }),
+      },
+      {
+        id: randomUUID(), workspaceId, executor: "claude", status: "completed",
+        startedAt: iso(2 * 3600_000), endedAt: iso(2 * 3600_000 - 60_000),
+        stats: JSON.stringify({ contextTokens: 22_000 }),
+      },
+    ]);
+
+    const summaryMap = await buildWorkspaceSummaryMap([issueId], "main", db);
+    const main = summaryMap.get(issueId)?.main;
+    expect(main?.lastSessionAt).toBe(iso(1 * 3600_000 - 60_000));
+    expect(main?.sessionStatus).toBe("completed");
+    expect(main?.contextTokens).toBe(77_000);
+    void latestSessionId;
+  });
+
   it("issues a bounded number of DB queries independent of issue count", async () => {
     // Verifies the N+1 fix: DB round-trips must not grow linearly with issueCount.
     // We seed N issues each with a workspace, count the execute() calls for N=2 vs

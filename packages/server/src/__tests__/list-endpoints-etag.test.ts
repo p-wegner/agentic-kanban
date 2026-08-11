@@ -148,3 +148,38 @@ describe("GET /api/workspaces conditional GET (#400)", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("GET /api/projects/:id/graph conditional GET (G15)", () => {
+  it("serves an ETag, answers a repeated unchanged GET with a bodyless 304, and ships no issue descriptions", async () => {
+    const app = projectsApp();
+    const path = `/api/projects/${projectId}/graph`;
+
+    const first = await get(app, path);
+    expect(first.status).toBe(200);
+    expect(first.etag).toBeTruthy();
+    const payload = JSON.parse(first.body) as { nodes: Record<string, unknown>[] };
+    expect(payload.nodes).toHaveLength(1);
+    // G15a payload diet: the graph select must not ship description bodies.
+    for (const node of payload.nodes) {
+      expect(node).not.toHaveProperty("description");
+    }
+
+    const second = await get(app, path, first.etag!);
+    expect(second.status).toBe(304);
+    expect(second.etag).toBe(first.etag);
+    expect(second.body).toBe("");
+  });
+
+  it("a data change (issue retitled) changes the ETag and returns a full 200", async () => {
+    const app = projectsApp();
+    const path = `/api/projects/${projectId}/graph`;
+    const first = await get(app, path);
+
+    await db.update(issues).set({ title: "Renamed" }).where(eq(issues.projectId, projectId));
+
+    const after = await get(app, path, first.etag!);
+    expect(after.status).toBe(200);
+    expect(after.etag).not.toBe(first.etag);
+    expect((JSON.parse(after.body) as { nodes: { title: string }[] }).nodes[0].title).toBe("Renamed");
+  });
+});

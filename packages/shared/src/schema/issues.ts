@@ -50,6 +50,9 @@ export const issues = sqliteTable("issues", {
   // Plugin-loop unit lookups: three prefix-LIKE queries on external_key per loop per
   // poll, always project-scoped (migration 0115, 2026-08-11 perf audit).
   projectIdExternalKeyIdx: index("idx_issues_project_external_key").on(table.projectId, table.externalKey),
+  // Board/graph list shape "WHERE project_id = ? ORDER BY sort_order" — served
+  // index-ordered, no temp B-tree sort (migration 0116, 2026-08-11 perf audit G14e).
+  projectIdSortOrderIdx: index("idx_issues_project_sort_order").on(table.projectId, table.sortOrder),
 }));
 
 export const issuesRelations = relations(issues, ({ one, many }) => ({

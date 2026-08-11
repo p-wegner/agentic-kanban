@@ -14,7 +14,8 @@ import { gitExecSync } from "@agentic-kanban/shared/lib/git-exec";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from "./git.service.js";
 import { buildWorkspaceSummaryMap, buildBlockedMap, buildTagMap, buildGraphEdges } from "./board-aggregation.service.js";
 import { getProjectById, getProjectByRepoPath, getAllProjects, insertProject, deleteProjectCascade, setProjectArchived, getProjectStats, getProjectStatuses, createProjectStatus, deleteProjectStatus, updateProjectStatusSortOrder } from "../repositories/project.repository.js";
-import { getProjectsBasePath, updateProjectFields, clearActiveProjectPreference, getProjectWorkspacesWithIssue, getWorkspaceWorkingDirById, getProjectStatusIdsAndNames, getBoardIssueRows, getProjectStatusesOrdered, getBoardIssues, getPreferenceValue, getGraphIssues, getCrossProjectIssues, getActiveWorkspaceCounts, getBoardSummaryRows } from "../repositories/project-service.repository.js";
+import { getProjectsBasePath, updateProjectFields, clearActiveProjectPreference, getProjectWorkspacesWithIssue, getWorkspaceWorkingDirById, getProjectStatusIdsAndNames, getBoardIssueRows, getProjectStatusesOrdered, getBoardIssues, getGraphIssues, getCrossProjectIssues, getActiveWorkspaceCounts, getBoardSummaryRows } from "../repositories/project-service.repository.js";
+import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { generateSetupScript as generateSetupScriptAI, generateTeardownScript as generateTeardownScriptAI, generateVerifyScript as generateVerifyScriptAI } from "./project-setup.service.js";
 import { cloneRepo } from "./repo-clone.service.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
@@ -115,7 +116,9 @@ const ARCHIVE_STATUS_NAMES = new Set(["done", "cancelled"]);
 
 // Debounce for invalidation-triggered warm-ahead board rebuilds: one session exit
 // emits several broadcast reasons back-to-back; collapse the burst into one rebuild.
-const BOARD_WARMUP_DEBOUNCE_MS = 75;
+// G14f: raised from 75ms — a monitor cycle's event burst spans several hundred ms,
+// and 75ms let one burst trigger multiple full rebuilds.
+const BOARD_WARMUP_DEBOUNCE_MS = 300;
 
 export function createProjectService(deps: { database: Database; workspaceSummaryCache?: WorkspaceSummaryCache }) {
   const { database, workspaceSummaryCache } = deps;
@@ -724,16 +727,18 @@ export function createProjectService(deps: { database: Database; workspaceSummar
 
     const summaryMapPromise = resolveSummaryMap(projectId, issueIds, defaultBranch, archivedIssueIds);
 
-    const [workspaceSummaryMap, blockedMap, issueTagMap, staleDaysRow, inProgressStaleDaysRow] = await Promise.all([
+    // G14a: the two staleness prefs ride the #402 short-TTL cached full scan
+    // instead of two point-read round trips per board build.
+    const [workspaceSummaryMap, blockedMap, issueTagMap, prefRows] = await Promise.all([
       summaryMapPromise,
       buildBlockedMap(issueIds, database),
       buildTagMap(issueIds, database),
-      getPreferenceValue("backlog_stale_days", database),
-      getPreferenceValue("inprogress_stale_days", database),
+      getAllPreferencesCached(database),
     ]);
 
-    const staleDays = parseInt(staleDaysRow[0]?.value ?? "14", 10) || 14;
-    const inProgressStaleDays = parseInt(inProgressStaleDaysRow[0]?.value ?? "3", 10) || 3;
+    const prefValue = (key: string) => prefRows.find((r) => r.key === key)?.value;
+    const staleDays = parseInt(prefValue("backlog_stale_days") ?? "14", 10) || 14;
+    const inProgressStaleDays = parseInt(prefValue("inprogress_stale_days") ?? "3", 10) || 3;
     const now = new Date(nowOverride ?? new Date().toISOString()).getTime();
 
     return buildBoardColumns({

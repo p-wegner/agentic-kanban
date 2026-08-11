@@ -1,18 +1,31 @@
 // Conditional-GET fast path for GET /api/projects/:id/board: a memo of the last
 // served response's ETag per (projectId + query shape). A request whose
 // If-None-Match equals the memoized ETag can be answered 304 WITHOUT rebuilding
-// the board, as long as the workspace-summary cache generation is unchanged and
-// the memo is younger than BOARD_ETAG_MEMO_MAX_AGE_MS. The invariant making the
-// bounded staleness safe: every board-affecting mutation flows through
-// boardEvents.broadcast(), whose invalidation listener bumps the cache
-// generation — so with an unchanged generation the board body can only drift via
-// time-derived fields (columnAgeDays / staleDays / isStale), which have DAY
-// granularity. 60s of fast-path staleness is therefore invisible; the TTL is just
-// a safety net. Extracted from routes/projects.ts so the route stays declarative
-// and the cache invariants are unit-testable in isolation.
+// the board, as long as the workspace-summary cache generation is unchanged.
+//
+// The invariant making that safe: every board-affecting mutation bumps the cache
+// generation — foreground mutations through boardEvents.broadcast()'s
+// invalidation listener, and (G13) background write-throughs that mutate
+// board-visible workspace fields (diff stats, conflict cache, code metrics, the
+// #399 git projection) through the summary-write-through notifier, which batches
+// a sweep's changes into one invalidation. So with an unchanged generation the
+// board body can only drift via time-derived fields (columnAgeDays / staleDays /
+// isStale), which have DAY granularity.
+//
+// G12: a memo hit at a matching generation REFRESHES the memo's freshness stamp
+// instead of expiring after 60s — recomputing an unchanged board just to answer
+// 304 was the single most expensive no-op on the read path. The residual drift of
+// the time-derived day-granularity fields is bounded by a HARD cap on the memo's
+// age since its last full compute (15 min — invisible at day granularity), after
+// which the route recomputes regardless of generation.
+//
+// Extracted from routes/projects.ts so the route stays declarative and the cache
+// invariants are unit-testable in isolation.
 import { createHash } from "node:crypto";
 
-const BOARD_ETAG_MEMO_MAX_AGE_MS = 60_000;
+/** Hard cap: max age since the memo's last FULL compute before a matching
+ * conditional GET recomputes anyway (bounds day-granularity time-field drift). */
+const BOARD_ETAG_MEMO_HARD_MAX_AGE_MS = 15 * 60_000;
 const BOARD_ETAG_MEMO_MAX_ENTRIES = 500;
 
 /**
@@ -47,7 +60,11 @@ export function conditionalJsonResponse(body: string, ifNoneMatch: string | unde
 interface BoardEtagMemo {
   etag: string;
   generation: number;
+  /** Sliding freshness stamp — refreshed on every generation-matched hit (G12). */
   computedAt: number;
+  /** When the FULL board compute that produced this ETag ran — never refreshed;
+   * the hard cap is measured against this. */
+  fullComputedAt: number;
 }
 
 export interface BoardEtagCache {
@@ -79,8 +96,11 @@ export function createBoardEtagCache(options: { enabled: boolean }): BoardEtagCa
         memo !== undefined &&
         ifNoneMatch === memo.etag &&
         currentGeneration === memo.generation &&
-        Date.now() - memo.computedAt < BOARD_ETAG_MEMO_MAX_AGE_MS
+        Date.now() - memo.fullComputedAt < BOARD_ETAG_MEMO_HARD_MAX_AGE_MS
       ) {
+        // G12: generation still matches, so the board is provably unchanged —
+        // refresh the memo instead of expiring it and recomputing for a 304.
+        memo.computedAt = Date.now();
         return new Response(null, { status: 304, headers: { ETag: memo.etag } });
       }
       return null;
@@ -92,7 +112,8 @@ export function createBoardEtagCache(options: { enabled: boolean }): BoardEtagCa
         const firstKey = memos.keys().next().value;
         if (firstKey !== undefined) memos.delete(firstKey);
       }
-      memos.set(memoKey, { etag, generation, computedAt: Date.now() });
+      const now = Date.now();
+      memos.set(memoKey, { etag, generation, computedAt: now, fullComputedAt: now });
     },
   };
 }

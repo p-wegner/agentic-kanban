@@ -6,6 +6,7 @@ import {
   updateWorkspaceSummaryGitProjection,
 } from "../repositories/workspace-summary-projection.repository.js";
 import { updateWorkspaceDiffStatCache } from "../repositories/workspace-summary.repository.js";
+import { notifySummaryWriteThrough } from "./summary-write-through-notifier.js";
 import type { Database } from "../db/index.js";
 
 /**
@@ -55,6 +56,11 @@ export interface GitProjectionTarget {
    * refresh, preserving the "HEAD advanced → refresh diff" trigger that used to ride on
    * the inline phase-4 prefetch. */
   diffStatCacheHeadSha: string | null;
+  /** Previously projected values (G13) — a refresh only invalidates the board ETag
+   * generation when the facts it writes actually MOVED, so steady-state TTL refreshes
+   * that rewrite identical facts never thrash the conditional-GET memo. */
+  summaryHeadSha: string | null;
+  summaryCommitCount: number | null;
 }
 
 // Per-workspace in-flight guard: several board builds inside one TTL window (or a heal
@@ -82,6 +88,10 @@ export async function refreshWorkspaceGitProjection(
         summaryCommitCount: null,
         summaryGitRefreshedAt: now(),
       }, database);
+      // G13: a vanished worktree that previously projected facts is a visible change.
+      if (ws.summaryHeadSha !== null || ws.summaryCommitCount !== null) {
+        notifySummaryWriteThrough(ws.id);
+      }
       return;
     }
     const base = ws.isDirect ? null : (ws.baseBranch || defaultBranch);
@@ -95,6 +105,11 @@ export async function refreshWorkspaceGitProjection(
       summaryCommitCount: commitCount,
       summaryGitRefreshedAt: now(),
     }, database);
+    // G13: write-through landed — bump the board ETag generation only when the
+    // projected facts moved (change gate; see summary-write-through-notifier.ts).
+    if ((latest?.sha ?? null) !== ws.summaryHeadSha || commitCount !== ws.summaryCommitCount) {
+      notifySummaryWriteThrough(ws.id);
+    }
     // HEAD advanced past the diff-stat cache → chain a diff-stat refresh (write-through,
     // same columns the applyDiffStats SWR path maintains).
     if (latest?.sha && latest.sha !== ws.diffStatCacheHeadSha) {
