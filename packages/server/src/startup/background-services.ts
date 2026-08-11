@@ -2,6 +2,8 @@ import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 import { setupScheduledTasks, stopScheduledTasks } from "./scheduled-tasks.js";
+import { createWorkspaceService } from "../services/workspace.service.js";
+import { createScheduledRunService } from "../services/scheduled-run.service.js";
 import { startAutoMergeOrchestrator, stopAutoMergeOrchestrator } from "./auto-merge-orchestrator.js";
 import { startStrandedReviewReconciler, stopStrandedReviewReconciler } from "./stranded-review-reconciler.js";
 import { startStrandedPlanReconciler, stopStrandedPlanReconciler } from "./plan-mode-reconciler.js";
@@ -57,8 +59,12 @@ export interface BackgroundService {
 export const BACKGROUND_SERVICES: BackgroundService[] = [
   {
     name: "scheduled-tasks",
-    start({ serverPort }) {
-      setupScheduledTasks(serverPort);
+    start({ db, boardEvents, getSessionManager }) {
+      // Direct service call instead of the old self-HTTP fetch (#402): the scheduler
+      // invokes the same service function the POST /api/scheduled-runs/:id/run route uses.
+      const workspaceService = createWorkspaceService({ database: db, getSessionManager, boardEvents });
+      const scheduledRunService = createScheduledRunService({ database: db, createWorkspace: workspaceService.createWorkspace });
+      setupScheduledTasks({ runScheduledRun: (id, triggeredBy) => scheduledRunService.run(id, triggeredBy) });
       return stopScheduledTasks;
     },
   },

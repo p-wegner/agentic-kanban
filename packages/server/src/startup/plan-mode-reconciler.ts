@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { issues, preferences, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { and, desc, eq } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
@@ -59,24 +60,17 @@ export async function reconcileStrandedPlanModeWorkspaces(deps: StrandedPlanReco
   const database = deps.database ?? db;
   const { getSessionManager, boardEvents } = deps;
 
+  // ONE short-TTL cached prefs scan per tick (#402) serves both the live enabled
+  // check and the prefMap below. A read failure keeps the previous fail-open behaviour.
+  const prefRows = await getAllPreferencesCached(database).catch(() => null);
+  const prefMap = new Map((prefRows ?? []).map((r) => [r.key, r.value]));
   const isEnabled = deps.enabled !== undefined
     ? deps.enabled
-    : await (async () => {
-        try {
-          const row = await database.select({ value: preferences.value }).from(preferences)
-            .where(eq(preferences.key, PREF_RECONCILER_STRANDED_PLAN_ENABLED)).limit(1);
-          return row.length === 0 || row[0].value !== "false";
-        } catch {
-          return true;
-        }
-      })();
+    : prefRows === null || prefMap.get(PREF_RECONCILER_STRANDED_PLAN_ENABLED) !== "false";
   if (!isEnabled) {
     console.log("[reconcile] stranded-plan reconciler disabled via preference — skipping tick");
     return 0;
   }
-
-  const prefRows = await database.select({ key: preferences.key, value: preferences.value }).from(preferences);
-  const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
 
   const candidates = await database
     .select({
