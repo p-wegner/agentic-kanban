@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import * as schema from "@agentic-kanban/shared/schema";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -463,6 +463,22 @@ describe("Board API", () => {
     expect(active.workspaceSummary.main.lastAssistantMessage).toBe("Live agent message.");
   });
 
+  // The summary service skips diff-stat work (incl. the planOnlyWarning flag) for a
+  // workingDir that does not exist on disk (#277), so the zero-diff fixture needs a
+  // real temp directory rather than a made-up /repo/... path — same pattern as
+  // makeTempWorktree in workspace-summary.service.test.ts.
+  const tempWorktrees: string[] = [];
+  function makeTempWorktree(label: string): string {
+    const dir = mkdtempSync(join(tmpdir(), `api-board-${label}-`));
+    tempWorktrees.push(dir);
+    return dir;
+  }
+  afterAll(() => {
+    for (const dir of tempWorktrees) {
+      try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+    }
+  });
+
   it("GET /api/projects/:id/board flags zero-diff In Review workspace with planOnlyWarning (AK-607)", async () => {
     const p = await createProjectDirectly(database, { name: "AK-607 Zero-Diff In Review Project" });
     const inReviewStatusId = await createStatusDirectly(database, p, "In Review", 1);
@@ -479,7 +495,7 @@ describe("Board API", () => {
     await database.insert(schema.workspaces).values({
       id: zeroDiffWsId, issueId: zeroDiffIssueId,
       branch: "feature/ak-607-zero-diff",
-      workingDir: "/repo/.worktrees/ak-607-zero-diff",
+      workingDir: makeTempWorktree("ak-607-zero-diff"),
       baseBranch: "master",
       status: "idle",
       isDirect: false,
