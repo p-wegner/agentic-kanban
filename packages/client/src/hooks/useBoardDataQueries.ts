@@ -20,8 +20,12 @@ export function useProjectsQuery() {
   });
 }
 
-export function useArchivedProjectsQuery() {
+export function useArchivedProjectsQuery(options?: { enabled?: boolean }) {
   return useQuery({
+    // Archived projects are only shown in the project-management menu; fetching
+    // them eagerly doubled cold-start load on the slowest endpoint. Callers pass
+    // enabled: false until the menu actually needs the list.
+    enabled: options?.enabled ?? true,
     queryKey: boardQueryKeys.archivedProjects,
     queryFn: async () => {
       const all = await apiFetch<Project[]>("/api/projects?includeArchived=true");

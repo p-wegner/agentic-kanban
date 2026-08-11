@@ -203,18 +203,43 @@ export function BoardPage() {
     addNotificationPluginGateEvent,
     setColumns,
   });
-  useEffect(() => subscribeClientInvalidations((event) => {
-    if (event.surface !== "workspace" && event.surface !== "board" && event.surface !== "issue-detail") return;
-    if (!activeProjectId || event.projectId !== activeProjectId) return;
+  useEffect(() => {
     // Workspace/board live events change which agents are running, which drives the
     // project selector's "active agents" badge (activeWorkspaceCount). That count rides
     // on the projects query, which is otherwise only refreshed on explicit project-mgmt
-    // actions — so without this it stays stale (showing agents after they've stopped).
-    if (event.surface === "workspace" || event.surface === "board") {
-      void queryClient.invalidateQueries({ queryKey: boardQueryKeys.projects });
-    }
-    scheduleRefetch();
-  }), [activeProjectId, scheduleRefetch, queryClient]);
+    // actions — so without a refresh here it stays stale (showing agents after they've
+    // stopped). But /api/projects is one of the slowest endpoints, and an undebounced
+    // invalidation per mutation event cancels and restarts the in-flight fetch on every
+    // merge-cascade event, so it can never settle. Leading + trailing 30s throttle, and
+    // never cancel an in-flight refetch — the badge only needs eventual freshness.
+    let throttleTimer: number | null = null;
+    let trailingPending = false;
+    const invalidateProjects = () =>
+      queryClient.invalidateQueries({ queryKey: boardQueryKeys.projects }, { cancelRefetch: false });
+    const unsubscribe = subscribeClientInvalidations((event) => {
+      if (event.surface !== "workspace" && event.surface !== "board" && event.surface !== "issue-detail") return;
+      if (!activeProjectId || event.projectId !== activeProjectId) return;
+      if (event.surface === "workspace" || event.surface === "board") {
+        if (throttleTimer == null) {
+          void invalidateProjects();
+          throttleTimer = window.setTimeout(() => {
+            throttleTimer = null;
+            if (trailingPending) {
+              trailingPending = false;
+              void invalidateProjects();
+            }
+          }, 30_000);
+        } else {
+          trailingPending = true;
+        }
+      }
+      scheduleRefetch();
+    });
+    return () => {
+      unsubscribe();
+      if (throttleTimer != null) window.clearTimeout(throttleTimer);
+    };
+  }, [activeProjectId, scheduleRefetch, queryClient]);
   const tickerEntries = useAgentLiveTicker(columns, sessionActivity, panels.showLiveActivityTicker);
 
   // Keep selectedIssue in sync with board data (F6 stale data fix). The pure
