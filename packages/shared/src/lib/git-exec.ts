@@ -13,6 +13,21 @@ import { recordOperation } from "./operation-metrics.js";
  * boundary of the app (clean-architecture: the git CLI is an external system; this
  * module is its port).
  *
+ * Since #398 this adapter is also the PROCESS-WIDE SCHEDULER for git spawns: git
+ * concurrency used to be budgeted in four independent places (runBgGit cap 5, the
+ * monitor cycle's concurrency 4, scheduleWorktreeDiffStatsRefresh, plus unbounded
+ * inline `Promise.all`s) against one disk and one event loop, which is what starved
+ * `/api/health` to 6-24s. The budget now lives HERE, beneath all of them:
+ *  - a FIFO semaphore of `GIT_SPAWN_SLOTS` over every buffered async spawn, with an
+ *    `interactive` priority lane that jumps the normal queue (see `GitExecPriority`);
+ *  - a short-TTL dedupe memo over READ-ONLY commands (see `DEDUPE_SAFE_SUBCOMMANDS`)
+ *    so identical concurrent spawns share one child and identical back-to-back
+ *    spawns within `GIT_DEDUPE_MEMO_TTL_MS` share one result.
+ * `gitExecSync` is deliberately NOT scheduled (a sync call cannot queue; it is being
+ * removed by a separate ticket), and `gitStream` is exempt (protocol plumbing bounded
+ * by the HTTP request lifecycle). Callers' private budgets above this module become
+ * harmless fan-out limits, not the real concurrency control.
+ *
  * Node-only: this imports `node:child_process`, so it must never be value-exported
  * from the `@agentic-kanban/shared/lib` barrel (that would white-screen the client
  * bundle, see #791). Import it via its deep path: `@agentic-kanban/shared/lib/git-exec`.
@@ -48,6 +63,16 @@ function nonInteractiveEnv(env: NodeJS.ProcessEnv | undefined): NodeJS.ProcessEn
   return { ...(env ?? process.env), GIT_TERMINAL_PROMPT: "0" };
 }
 
+/**
+ * Scheduling lane for a buffered async git spawn (#398).
+ *
+ * `interactive` — request-path work a user is actively waiting on (an HTTP handler
+ * building a response). Jumps ahead of everything queued in the normal lane, but
+ * never preempts a child that is already running.
+ * `normal` (default) — background sweeps, cache refreshes, monitor work.
+ */
+export type GitExecPriority = "interactive" | "normal";
+
 export interface GitExecOptions {
   /** Working directory. Omit only for repo-path-as-argument commands like `clone`. */
   cwd?: string;
@@ -59,6 +84,8 @@ export interface GitExecOptions {
   env?: NodeJS.ProcessEnv;
   /** Written to the process's stdin and closed (e.g. `hash-object --stdin`). Async variants only. */
   input?: string;
+  /** Queue lane when all spawn slots are busy. Defaults to `normal`. See `GitExecPriority`. */
+  priority?: GitExecPriority;
   /**
    * INSTRUMENTATION ONLY — override the metric label for this call and exclude it from
    * duplicate-spawn accounting. Changes nothing about how git is spawned or what it is asked to do.
@@ -69,7 +96,8 @@ export interface GitExecOptions {
    * per-cycle memo could have removed — corrupting the `duplicateSpawns` number that refuted #359's
    * recommended fix. The DURATION still flows through the same `recordOperation` call as every real
    * git operation, which is the whole point of a control: a control timed by a different mechanism
-   * than the thing it controls for proves nothing.
+   * than the thing it controls for proves nothing. For the same reason a probe is never deduped by
+   * the #398 memo: it must spawn a real child every time or it measures nothing.
    */
   probeLabel?: string;
 }
@@ -91,9 +119,10 @@ export interface GitExecResult {
    * same numbers the registry got instead of re-timing the call its own way.
    *
    * Optional so the many hand-built `GitExecResult` fixtures in tests stay valid; `gitExec` always
-   * populates it. `totalMs` is call-to-callback, `childMs` is the child's own lifetime from its
-   * `exit` event (null when the process never spawned, e.g. ENOENT) — see the split's caveat in
-   * `gitExec`.
+   * populates it. `totalMs` is call-to-callback (INCLUDING time waiting in the #398 spawn queue, so
+   * `totalMs - childMs` keeps meaning "wait", now an explicit queue rather than event-loop
+   * congestion), `childMs` is the child's own lifetime from its `exit` event (null when the process
+   * never spawned, e.g. ENOENT) — see the split's caveat in the spawn implementation.
    */
   timing?: { totalMs: number; childMs: number | null };
 }
@@ -106,6 +135,160 @@ export interface GitExecResult {
  */
 export const GIT_CONTROL_OPERATION_LABEL = "git:control";
 
+// ---------------------------------------------------------------------------
+// #398 — process-wide spawn semaphore with a priority lane.
+// ---------------------------------------------------------------------------
+
+/**
+ * Maximum buffered async git children in flight at once, process-wide. Chosen from the
+ * ticket's 6-8 band: 8 keeps throughput on the ~120ms-per-spawn Windows floor while still
+ * capping the fan-out that used to fire 28-40+ concurrent spawns which then serialized on
+ * the repo index lock (measured 112.7s for one such burst — see project.service.ts:476).
+ */
+export const GIT_SPAWN_SLOTS = 8;
+
+let activeSpawns = 0;
+const interactiveQueue: Array<() => void> = [];
+const normalQueue: Array<() => void> = [];
+
+/** Release one slot: hand it to the next queued spawn (interactive lane first), FIFO within each lane. */
+function releaseSlot(): void {
+  const next = interactiveQueue.shift() ?? normalQueue.shift();
+  if (next) {
+    next(); // slot transfers directly; activeSpawns unchanged
+  } else {
+    activeSpawns--;
+  }
+}
+
+/**
+ * Run `spawnBuffered` under the process-wide semaphore. When a slot is free the spawn
+ * happens synchronously in this tick (so tests and callers observing the spawn right
+ * after the call still work); otherwise the spawn is queued FIFO in its priority lane.
+ */
+function scheduleSpawn(args: string[], opts: GitExecOptions): Promise<GitExecResult> {
+  const startedMs = Date.now();
+  if (activeSpawns < GIT_SPAWN_SLOTS) {
+    activeSpawns++;
+    return spawnBuffered(args, opts, startedMs).finally(releaseSlot);
+  }
+  return new Promise<GitExecResult>((resolve) => {
+    const run = () => {
+      spawnBuffered(args, opts, startedMs).finally(releaseSlot).then(resolve);
+    };
+    (opts.priority === "interactive" ? interactiveQueue : normalQueue).push(run);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// #398 — short-TTL dedupe memo over read-only spawns.
+// ---------------------------------------------------------------------------
+
+/**
+ * Git subcommands that CANNOT mutate repository state (refs, index intent, working tree)
+ * and are therefore safe to dedupe: identical concurrent calls may share one child, and
+ * identical back-to-back calls within `GIT_DEDUPE_MEMO_TTL_MS` may share one result.
+ *
+ * Decided CONSERVATIVELY — a subcommand is listed only when every argv form of it is
+ * mutation-free from the caller's perspective:
+ *  - `rev-parse`, `rev-list`, `log`, `shortlog`, `show`, `diff`, `ls-files`, `ls-tree`,
+ *    `cat-file`, `merge-base`, `for-each-ref`, `describe` — pure reads.
+ *  - `status` — semantically a read; it may opportunistically refresh the index stat
+ *    cache, but that refresh is idempotent and racing two identical `status` calls was
+ *    never better than one.
+ *  - `merge-tree` — writes OBJECTS to the odb (even with `--write-tree`), never refs or
+ *    the working tree; object writes are content-addressed and idempotent, so sharing
+ *    one call is safe (this is the read-only conflict probe `detectConflicts` uses).
+ *
+ * NEVER list here: `commit`, `merge`, `rebase`, `checkout`, `switch`, `reset`, `add`,
+ * `worktree`, `branch` (mutates without `--list`), `tag`, `fetch`/`push`/`pull`/`clone`
+ * (remote or ref mutation; also non-idempotent network work), `stash`, `config`,
+ * `update-ref`, `gc`. A mutating command sharing a child would silently drop one
+ * caller's mutation; a memoized one would report success without doing the work.
+ *
+ * Note on #359's counter-argument (see `spawnDedupeKey`): what was rejected there was a
+ * CYCLE-LIFETIME cache, which could have served stale SHAs across a merge-gate run
+ * (#243). This memo is different on both counts: the TTL is ~1.5s, and any NON-listed
+ * command scheduled through this adapter invalidates the memo for its cwd (before and
+ * after it runs), so a rev-parse re-read after an adapter-driven mutation never serves
+ * the pre-mutation value. Mutations by OTHER processes (agents in worktrees) are bounded
+ * only by the TTL — which is why it stays short.
+ */
+const DEDUPE_SAFE_SUBCOMMANDS = new Set([
+  "rev-parse",
+  "rev-list",
+  "log",
+  "shortlog",
+  "show",
+  "diff",
+  "status",
+  "ls-files",
+  "ls-tree",
+  "cat-file",
+  "merge-base",
+  "merge-tree",
+  "for-each-ref",
+  "describe",
+]);
+
+/** How long an identical read-only result may be re-served without a fresh spawn. */
+export const GIT_DEDUPE_MEMO_TTL_MS = 1500;
+
+/** Identical read-only spawns currently in flight, keyed by full call identity. */
+const inFlightByKey = new Map<string, Promise<GitExecResult>>();
+/** Recently completed read-only results, served until `expiresAt`. */
+const resultMemo = new Map<string, { result: GitExecResult; expiresAt: number }>();
+const RESULT_MEMO_SWEEP_SIZE = 512;
+
+/**
+ * Full call identity for dedupe — stricter than the metrics-only `spawnDedupeKey`:
+ * two calls may only share a child/result when cwd, argv, timeout AND maxBuffer all
+ * match (a narrower buffer or timeout is an observable behavioural difference).
+ */
+function dedupeKeyFor(args: string[], opts: GitExecOptions): string | null {
+  // env can change what git reads (GIT_INDEX_FILE, GIT_DIR); input feeds stdin and is
+  // not part of the key; a probe must really spawn (see `probeLabel`). All three
+  // disqualify the call from dedupe rather than complicating the key.
+  if (opts.env !== undefined || opts.input !== undefined || opts.probeLabel !== undefined) return null;
+  const sub = effectiveSubcommand(args);
+  if (sub === null || !DEDUPE_SAFE_SUBCOMMANDS.has(sub)) return null;
+  return JSON.stringify([opts.cwd ?? "", args, opts.timeout ?? DEFAULT_GIT_TIMEOUT_MS, opts.maxBuffer ?? DEFAULT_MAX_BUFFER]);
+}
+
+/** Drop memoized results for a cwd (all, when cwd is unknown) — called around any command that might mutate. */
+function invalidateMemoForCwd(cwd: string | undefined): void {
+  if (resultMemo.size === 0) return;
+  if (cwd === undefined) {
+    resultMemo.clear();
+    return;
+  }
+  const prefix = `[${JSON.stringify(cwd)},`;
+  for (const key of resultMemo.keys()) {
+    if (key.startsWith(prefix)) resultMemo.delete(key);
+  }
+}
+
+/** Lazy bound on the memo: sweep expired entries when the map grows past the sweep size. */
+function sweepResultMemo(now: number): void {
+  if (resultMemo.size <= RESULT_MEMO_SWEEP_SIZE) return;
+  for (const [key, entry] of resultMemo) {
+    if (entry.expiresAt <= now) resultMemo.delete(key);
+  }
+}
+
+/**
+ * TEST-ONLY — reset the scheduler's module state (slots, queues, dedupe maps) so
+ * concurrency tests are independent. Never call from production code: dropping the
+ * queues loses scheduled work.
+ */
+export function __resetGitExecSchedulerForTests(): void {
+  activeSpawns = 0;
+  interactiveQueue.length = 0;
+  normalQueue.length = 0;
+  inFlightByKey.clear();
+  resultMemo.clear();
+}
+
 function exitCodeOf(err: ExecFileException | null, hadError: boolean): number | null {
   if (!err) return hadError ? null : 0;
   return typeof err.code === "number" ? err.code : null;
@@ -115,10 +298,49 @@ function exitCodeOf(err: ExecFileException | null, hadError: boolean): number | 
  * Run git and resolve with {stdout, stderr, code, error} — NEVER rejects on a
  * non-zero exit. Use this when the exit code itself is meaningful (e.g.
  * `diff --quiet`, allowed-exit-code probes) or when failures should be swallowed.
+ *
+ * Every call goes through the process-wide spawn semaphore, and read-only calls
+ * (see `DEDUPE_SAFE_SUBCOMMANDS`) additionally go through the dedupe memo (#398).
  */
 export function gitExec(args: string[], opts: GitExecOptions = {}): Promise<GitExecResult> {
+  const key = dedupeKeyFor(args, opts);
+  if (key === null) {
+    // Potentially mutating (or dedupe-disqualified): conservatively drop memoized
+    // reads for this cwd both before it runs (don't serve a stale read scheduled
+    // after the mutation was requested) and after it completes (the state change
+    // lands at completion).
+    invalidateMemoForCwd(opts.cwd);
+    return scheduleSpawn(args, opts).finally(() => invalidateMemoForCwd(opts.cwd));
+  }
+  const now = Date.now();
+  const memo = resultMemo.get(key);
+  if (memo) {
+    if (memo.expiresAt > now) return Promise.resolve(memo.result);
+    resultMemo.delete(key);
+  }
+  const existing = inFlightByKey.get(key);
+  if (existing) return existing;
+  const tracked = scheduleSpawn(args, opts)
+    .then((result) => {
+      // Memoize only results whose process actually ran (code !== null): a spawn
+      // failure / kill is environmental and retryable — caching it would convert a
+      // transient failure into 1.5s of guaranteed failures. Non-zero exits ARE
+      // memoized: for an identical read-only argv they are as deterministic as
+      // success (`diff --quiet`'s exit 1 is its answer).
+      if (result.code !== null) {
+        resultMemo.set(key, { result, expiresAt: Date.now() + GIT_DEDUPE_MEMO_TTL_MS });
+        sweepResultMemo(Date.now());
+      }
+      return result;
+    })
+    .finally(() => inFlightByKey.delete(key));
+  inFlightByKey.set(key, tracked);
+  return tracked;
+}
+
+/** The raw buffered spawn — exactly one `execFile("git", …)` site, wrapped by the scheduler above. */
+function spawnBuffered(args: string[], opts: GitExecOptions, startedMs: number): Promise<GitExecResult> {
   const { cwd, timeout = DEFAULT_GIT_TIMEOUT_MS, maxBuffer = DEFAULT_MAX_BUFFER, env, input, probeLabel } = opts;
-  const startedMs = Date.now();
   // #359 — the child's OWN lifetime, captured on its `exit` event, separately from the
   // call-to-callback figure below.
   //
@@ -133,7 +355,9 @@ export function gitExec(args: string[], opts: GitExecOptions = {}): Promise<GitE
   // from that number and are invalidated by this split.
   //
   // `exit` still arrives through the event loop, so this is a tighter bound rather than a perfect
-  // one; read it beside the event-loop delay the monitor reports for the same window.
+  // one; read it beside the event-loop delay the monitor reports for the same window. Since #398,
+  // `startedMs` is taken when the call ENTERS the scheduler, so `totalMs - childMs` also counts
+  // explicit spawn-queue wait — deliberately, that difference still means "time not spent in git".
   let childExitMs: number | undefined;
   return new Promise((resolve) => {
     const child = execFile("git", args, { cwd, timeout, maxBuffer, windowsHide: true, env: nonInteractiveEnv(env) }, (err, stdout, stderr) => {
@@ -193,10 +417,17 @@ export interface GitExecSyncOptions extends GitExecOptions {
  * Synchronous git. Returns stdout as a string (empty when stdout is not piped via
  * `stdio`). Throws the standard `execFileSync` error on a non-zero exit — preserve
  * the try/catch-as-boolean idiom (`diff --quiet`) by catching it.
+ *
+ * NOT scheduled through the #398 semaphore: a synchronous spawn cannot queue without
+ * blocking the event loop even harder, and gitExecSync is being retired by a separate
+ * ticket. It DOES conservatively invalidate the dedupe memo for its cwd, since it may
+ * mutate state a memoized read would then misreport.
  */
 export function gitExecSync(args: string[], opts: GitExecSyncOptions): string {
   const { cwd, timeout = DEFAULT_GIT_TIMEOUT_MS, maxBuffer = DEFAULT_MAX_BUFFER, env, stdio } = opts;
   const startedMs = Date.now();
+  const sub = effectiveSubcommand(args);
+  if (sub === null || !DEDUPE_SAFE_SUBCOMMANDS.has(sub)) invalidateMemoForCwd(cwd);
   try {
     const out = execFileSync("git", args, { cwd, timeout, maxBuffer, windowsHide: true, encoding: "utf8", stdio, env: nonInteractiveEnv(env) });
     return (out ?? "").toString();
@@ -216,19 +447,35 @@ export function gitExecSync(args: string[], opts: GitExecSyncOptions): string {
 /**
  * Identity of one git invocation — the working directory plus the full argv.
  *
- * Only an open measurement window reads this, to count how many spawns inside that window repeated
- * a spawn it had already seen: the exact ceiling on what a window-scoped memo could remove. It
- * exists because #359's recommended fix (memoize per-cycle `rev-parse`) rested on an unmeasured
- * claim about that ceiling, and measuring it required patching this file. The answer, over five
- * consecutive live monitor cycles on 57 active workspaces: 5-9 of 33-58 `rev-parse` spawns per
- * cycle were exact repeats (12-16%), and 5-19 of 65-120 git spawns per cycle overall (7-25%,
- * median 12%) — against a cycle total that varied 46-85s between neighbouring cycles. So the memo
- * was NOT implemented: it could not have produced a measurable win, and it would have put a
- * cycle-lifetime cache next to the merge-gate SHAs that `#243` compares before and after a gate
- * run to prove nothing moved. Anyone tempted to retry it should re-read this counter first.
+ * Feeds the duplicate-spawn accounting in `operation-metrics`: an open measurement window counts
+ * how many spawns inside it repeated a spawn it had already seen. That measurement (5-9 of 33-58
+ * `rev-parse` spawns per cycle were exact repeats, 7-25% of all git spawns, median 12% — five
+ * consecutive live cycles on 57 active workspaces) originally REFUTED #359's cycle-lifetime memo
+ * proposal: a cache living as long as a monitor cycle could not produce a measurable win and would
+ * have sat next to the merge-gate SHAs that #243 compares before and after a gate run. #398 then
+ * implemented a different thing the same measurement JUSTIFIES: a ~1.5s memo at the adapter
+ * (`DEDUPE_SAFE_SUBCOMMANDS` above) that collapses exactly those measured repeats while being
+ * invalidated by any adapter-driven mutation — the #243 hazard the cycle-lifetime design had.
+ * Note the dedupe layer uses its own stricter key (`dedupeKeyFor`, which also includes timeout and
+ * maxBuffer); this one stays coarse because it only labels metrics.
  */
 function spawnDedupeKey(args: string[], cwd: string | undefined): string {
   return `${cwd ?? ""} ${args.join(" ")}`;
+}
+
+/**
+ * The subcommand a git argv will execute, skipping global flags and their values
+ * (`-c k=v`, `--git-dir X`, …). `null` for flag-only invocations like `--version`.
+ * Shared by the metric label and the #398 read-only classification.
+ */
+function effectiveSubcommand(args: string[]): string | null {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "-c" || arg === "--git-dir" || arg === "-C" || arg === "--work-tree") { i++; continue; }
+    if (arg.startsWith("-")) continue;
+    return arg;
+  }
+  return null;
 }
 
 /**
@@ -240,13 +487,8 @@ function spawnDedupeKey(args: string[], cwd: string | undefined): string {
  * config-prefixed calls land on the same label as their bare equivalents.
  */
 function gitOperationLabel(args: string[]): string {
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === "-c" || arg === "--git-dir" || arg === "-C" || arg === "--work-tree") { i++; continue; }
-    if (arg.startsWith("-")) continue;
-    return `git:${arg}`;
-  }
-  return "git:unknown";
+  const sub = effectiveSubcommand(args);
+  return sub === null ? "git:unknown" : `git:${sub}`;
 }
 
 /**
@@ -256,6 +498,7 @@ function gitOperationLabel(args: string[]): string {
  * body into stdin and stream stdout back out — the buffered variants above
  * cannot carry multi-hundred-MB packfiles. Still the ONE sanctioned spawn site:
  * callers get a process handle, not the right to spawn git themselves.
+ * Exempt from the #398 semaphore: its lifetime is bounded by the HTTP request.
  */
 export function gitStream(args: string[], opts: Pick<GitExecOptions, "cwd" | "env"> = {}): ChildProcess {
   return spawn("git", args, {
