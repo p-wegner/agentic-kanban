@@ -1,8 +1,8 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type { StatusWithIssues, MilestoneResponse, ProjectRepoResponse } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { boardQueryKeys } from "../lib/boardQueryKeys.js";
-import { fetchBoardColumns } from "../lib/boardColumnsQuery.js";
+import { boardColumnsQueryOptions } from "../lib/boardColumnsQuery.js";
 import { projectReposQueryOptions } from "../lib/projectReposQuery.js";
 import type { Project, Tag } from "../routes/BoardPage.js";
 
@@ -65,12 +65,31 @@ export function useActiveProjectPreferenceQuery() {
   });
 }
 
-export function useBoardQuery(projectId: string | null) {
-  return useQuery({
+/** The full react-query config the mounted board query runs with. Exported so a
+ *  regression test can assert the hook goes through the ONE ETag-aware transport
+ *  (`boardColumnsQueryOptions`) instead of a bare `apiFetch` — a bare queryFn on
+ *  the same key overwrites the transport (last-applied queryFn wins), silently
+ *  disabling the If-None-Match/304 path for every mount/reconnect (G11). */
+export function boardQueryConfig(projectId: string | null, queryClient: QueryClient) {
+  return {
     enabled: !!projectId,
-    queryKey: projectId ? boardQueryKeys.board(projectId) : ["projects", "none", "board"],
-    queryFn: () => apiFetch<StatusWithIssues[]>(`/api/projects/${projectId}/board`),
-  });
+    // Project switch: keep the previous key's data as placeholder so the query
+    // never flashes `pending` while a cached board exists. The controller masks
+    // cross-project placeholder rows via `isPlaceholderData`, so this only
+    // affects status flags, never shows project A's issues under project B.
+    placeholderData: keepPreviousData,
+    ...(projectId
+      ? boardColumnsQueryOptions(projectId, queryClient)
+      : {
+          queryKey: ["projects", "none", "board"] as const,
+          queryFn: async () => [] as StatusWithIssues[],
+        }),
+  };
+}
+
+export function useBoardQuery(projectId: string | null) {
+  const queryClient = useQueryClient();
+  return useQuery(boardQueryConfig(projectId, queryClient));
 }
 
 export function useSprintCapacityQuery(projectId: string | null) {

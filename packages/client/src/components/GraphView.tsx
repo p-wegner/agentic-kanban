@@ -126,6 +126,18 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery, focus
   const [addEdgeSourceId, setAddEdgeSourceId] = useState<string | null>(null);
 
   const allIssues = columns.flatMap((c) => c.issues);
+  // Latest columns snapshot for the fetch-failure fallback, without making the
+  // load effect depend on the `columns` array identity (new per board refresh).
+  const allIssuesRef = useRef(allIssues);
+  allIssuesRef.current = allIssues;
+  // Graph-relevant digest of the board: issue membership, column, and title.
+  // WS bursts refresh the board every few seconds with a NEW `columns` identity
+  // even when nothing graph-visible changed; depending on this digest instead of
+  // the array keeps the 1MB+ /graph payload from being refetched per burst.
+  const columnsGraphDigest = useMemo(
+    () => columns.map((c) => `${c.id}:${c.issues.map((i) => `${i.id}~${i.title}`).join(",")}`).join("|"),
+    [columns],
+  );
   const statusNames = orderedStatusNames([
     ...columns.map((c) => c.name),
     ...(graphData?.nodes.map((n) => n.statusName) ?? []),
@@ -152,14 +164,17 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery, focus
         );
         setGraphData(result);
       } catch {
-        setGraphData({ nodes: allIssues, edges: [] });
+        setGraphData({ nodes: allIssuesRef.current, edges: [] });
       } finally {
         setLoading(false);
       }
     }
     void load();
+  // Refetch on open, on project change, and when graph-relevant board data
+  // changes — NOT on every board refresh (the digest is stable across WS bursts
+  // that only touch non-graph fields).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, columns]);
+  }, [projectId, columnsGraphDigest]);
 
   // IDs of nodes that participate in at least one edge (have ≥1 dependency).
   const nodesWithDepsIds = useMemo(() => {
