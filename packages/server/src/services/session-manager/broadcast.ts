@@ -4,6 +4,8 @@ import {
   insertSessionMessages,
   updateProviderSessionId,
 } from "../../repositories/broadcast.repository.js";
+import { writeDb } from "../../db/index.js";
+import { capSessionMessagesForSession } from "../session-message-pruner.service.js";
 import * as agentService from "../agent.service.js";
 import { getProvider, narrowProviderName } from "../agent-provider.js";
 import type { ParsedStreamEvent } from "../agent-provider.js";
@@ -79,6 +81,17 @@ async function mergeExistingStats(sessionId: string, statsToSave: Record<string,
 const DB_FLUSH_INTERVAL_MS = 250;
 const DB_FLUSH_BATCH_SIZE = 50;
 
+// Insert-time ring-buffer cap (#404): the periodic pruner sweep only runs every
+// few hours, so without this a chatty session could sit at tens of thousands of
+// session_messages rows in between. Every Nth flush for a session we trim it
+// back to the newest MAX_MESSAGES_PER_ACTIVE_SESSION rows (cheap: one indexed
+// OFFSET lookup + one ranged delete on the (session_id, id) index, see
+// capSessionMessagesForSession). Worst-case slack between trims is
+// CAP_EVERY_N_FLUSHES * DB_FLUSH_BATCH_SIZE = 400 rows past the cap.
+const CAP_EVERY_N_FLUSHES = 8;
+// Per-session flush counter; entries are removed on the session's exit message.
+const sessionFlushCounts = new Map<string, number>();
+
 function flushDbBuffer(state: SessionState, sessionId: string) {
   const timer = state.dbWriteTimers.get(sessionId);
   if (timer !== undefined) {
@@ -95,13 +108,27 @@ function flushDbBuffer(state: SessionState, sessionId: string) {
   const provider = state.sessionProviders.has(sessionId)
     ? narrowProviderName(state.sessionProviders.get(sessionId))
     : null;
-  insertSessionMessages(sessionId, rows, provider).catch((err: unknown) => {
+  const insertResult = insertSessionMessages(sessionId, rows, provider);
+  insertResult.catch((err: unknown) => {
     // FK constraint failure means the session was already deleted (race with workspace cleanup) — ignore
     const msg = err instanceof Error ? err.message : String(err);
     if (!msg.includes("SQLITE_CONSTRAINT_FOREIGNKEY") && !msg.includes("FOREIGN KEY")) {
       console.error("Failed to persist session messages (batch):", err);
     }
   });
+
+  const flushCount = (sessionFlushCounts.get(sessionId) ?? 0) + 1;
+  sessionFlushCounts.set(sessionId, flushCount);
+  if (flushCount % CAP_EVERY_N_FLUSHES === 0) {
+    // Chain after the insert so the trim sees the rows it just wrote.
+    // Promise.resolve() assimilates the real query promise (and tolerates test
+    // doubles); insert failures are already logged by the catch above.
+    Promise.resolve(insertResult)
+      .then(() => capSessionMessagesForSession(sessionId, writeDb))
+      .catch((err: unknown) => {
+        console.error("Failed to cap session messages (insert-time):", err);
+      });
+  }
 }
 
 /**
@@ -376,6 +403,7 @@ export function createBroadcaster(
 
       // Flush any buffered DB writes immediately so no messages are lost on exit
       flushDbBuffer(state, sessionId);
+      sessionFlushCounts.delete(sessionId);
 
       // Fallback for sessions that never emitted a result/stats event (e.g.
       // codex/copilot). Safe: only sets `friction` when absent, so it can't
