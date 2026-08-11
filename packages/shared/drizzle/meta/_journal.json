@@ -799,6 +799,13 @@
       "when": 1786780800000,
       "tag": "0113_perf_hot_path_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 114,
+      "version": "6",
+      "when": 1786867200000,
+      "tag": "0114_workspace_summary_projection",
+      "breakpoints": true
     }
   ]
 }
