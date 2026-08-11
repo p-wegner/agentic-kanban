@@ -28,13 +28,13 @@ const NON_CLOSED_WORKSPACE_STATUSES = [
 
 /**
  * WS `board_changed` reasons that can move cross-repo state (a merge landing, a
- * session/workflow step, a drive obstacle) and so warrant re-snapshotting. Plus the
- * WS lifecycle reasons ("reconnect"/"poll") that already fire a board refresh.
+ * session/workflow step, a drive obstacle) and so warrant re-snapshotting.
+ * "reconnect"/"poll" are deliberately excluded (perf review 2026-08-11): a flapping
+ * server produces a reconnect storm, and each re-snapshot is a slow /api/workspaces
+ * fan-out — amplifying exactly the load that made the server flap.
  */
 function shouldRefetch(reason: string): boolean {
   return (
-    reason === "reconnect" ||
-    reason === "poll" ||
     reason.startsWith("workspace_merged") ||
     reason.startsWith("session") ||
     reason.startsWith("workflow") ||
@@ -192,16 +192,36 @@ export function useCrossRepoActivity(
   }, [projectId]);
 
   // Initial baseline snapshot (emits nothing) + live re-snapshot on relevant WS reasons.
+  // Trailing 250ms debounce per burst; and because `refresh` early-returns while a
+  // snapshot is in flight (inFlightRef), an event arriving mid-flight used to be
+  // silently DROPPED — the debounce timer re-checks after the flight so a burst
+  // always ends with one trailing re-snapshot.
   useEffect(() => {
     if (!projectId) return;
     void refresh();
+    let debounceTimer: number | null = null;
+    const scheduleRefresh = () => {
+      if (debounceTimer != null) window.clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(() => {
+        debounceTimer = null;
+        if (inFlightRef.current) {
+          // Still snapshotting — re-arm so the event's changes are picked up after.
+          scheduleRefresh();
+          return;
+        }
+        void refresh();
+      }, 250);
+    };
     const onWsEvent = (ev: Event) => {
       const detail = (ev as CustomEvent<BoardWsEventDetail>).detail;
       if (!detail || detail.projectId !== projectId) return;
-      if (shouldRefetch(detail.reason)) void refresh();
+      if (shouldRefetch(detail.reason)) scheduleRefresh();
     };
     window.addEventListener(BOARD_WS_EVENT, onWsEvent);
-    return () => window.removeEventListener(BOARD_WS_EVENT, onWsEvent);
+    return () => {
+      window.removeEventListener(BOARD_WS_EVENT, onWsEvent);
+      if (debounceTimer != null) window.clearTimeout(debounceTimer);
+    };
   }, [projectId, refresh]);
 
   // Reset accumulated state when the project changes.

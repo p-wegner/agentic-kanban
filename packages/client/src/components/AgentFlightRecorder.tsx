@@ -58,11 +58,15 @@ const NON_CLOSED_WORKSPACE_STATUSES = [
   "active", "idle", "blocked", "reviewing", "fixing", "ready_for_merge", "awaiting-plan-approval", "error",
 ].join(",");
 
-/** WS reasons after which runtime state (status/questions/stall) may have moved. */
+/**
+ * WS reasons after which runtime state (status/questions/stall) may have moved.
+ * "reconnect"/"poll" are deliberately excluded: a flapping server produces a
+ * reconnect storm, and translating each into a slow /api/workspaces refetch
+ * amplified exactly the load that made the server flap (perf review 2026-08-11) —
+ * the 250ms-debounced refresh on real mutation reasons covers the gap.
+ */
 function shouldRefetch(reason: string): boolean {
   return (
-    reason === "reconnect" ||
-    reason === "poll" ||
     reason.startsWith("session") ||
     reason.startsWith("workflow") ||
     reason.startsWith("workspace") ||
@@ -166,16 +170,26 @@ function useFlightRecorderEvents(projectId: string | null, resolveIssue?: Resolv
     setQuestionEvents([]);
     setStatusEvents([]);
     void refresh();
+    // Trailing debounce: a merge cascade emits bursts of qualifying events, and an
+    // undebounced handler turned each into its own slow /api/workspaces request
+    // (overlapping responses also raced on prevStatusRef). One fetch per burst.
+    let debounceTimer: number | null = null;
     const onWs = (ev: Event) => {
       const detail = (ev as CustomEvent<BoardWsEventDetail>).detail;
       if (!detail || detail.projectId !== projectId) return;
-      if (shouldRefetch(detail.reason)) void refresh();
+      if (!shouldRefetch(detail.reason)) return;
+      if (debounceTimer != null) window.clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(() => {
+        debounceTimer = null;
+        void refresh();
+      }, 250);
     };
     window.addEventListener(BOARD_WS_EVENT, onWs);
     const tick = setInterval(() => setTick((n) => n + 1), 15_000);
     return () => {
       window.removeEventListener(BOARD_WS_EVENT, onWs);
       clearInterval(tick);
+      if (debounceTimer != null) window.clearTimeout(debounceTimer);
     };
   }, [projectId, refresh]);
 

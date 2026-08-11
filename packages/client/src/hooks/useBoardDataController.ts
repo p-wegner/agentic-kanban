@@ -39,7 +39,10 @@ export function useBoardDataController({ setError }: UseBoardDataControllerParam
   );
 
   const projectsQuery = useProjectsQuery();
-  const archivedProjectsQuery = useArchivedProjectsQuery();
+  // Deferred until the primary projects list has settled: the archived list is only
+  // shown in the project menu, and fetching it in parallel at mount doubled the
+  // cold-start load on the slowest endpoint (/api/projects).
+  const archivedProjectsQuery = useArchivedProjectsQuery({ enabled: projectsQuery.isSuccess });
   const activeProjectPreferenceQuery = useActiveProjectPreferenceQuery();
   const boardQuery = useBoardQuery(activeProjectId);
   const sprintCapacityQuery = useSprintCapacityQuery(activeProjectId);
