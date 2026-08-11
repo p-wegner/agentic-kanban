@@ -10,8 +10,39 @@
 // granularity. 60s of fast-path staleness is therefore invisible; the TTL is just
 // a safety net. Extracted from routes/projects.ts so the route stays declarative
 // and the cache invariants are unit-testable in isolation.
+import { createHash } from "node:crypto";
+
 const BOARD_ETAG_MEMO_MAX_AGE_MS = 60_000;
 const BOARD_ETAG_MEMO_MAX_ENTRIES = 500;
+
+/**
+ * Cheap content-hash ETag over a serialized body: sha1, first 16 hex chars,
+ * quoted (an opaque strong validator — the same algorithm the board route has
+ * always used, so tokens stay format-compatible across endpoints).
+ */
+export function computeBodyEtag(body: string): string {
+  return `"${createHash("sha1").update(body).digest("hex").slice(0, 16)}"`;
+}
+
+/**
+ * Conditional-GET wrapper for list endpoints (GET /api/projects,
+ * GET /api/workspaces): hash the serialized payload, answer 304 with no body
+ * when If-None-Match carries the same token, otherwise a 200 JSON response
+ * with the ETag attached. This still pays the serialize on every request (the
+ * data set has no generation counter to memo against, unlike the board route)
+ * but skips the response body — and, downstream, the jsonGzip middleware
+ * passes 304s through untouched, so the gzip cost disappears too.
+ */
+export function conditionalJsonResponse(body: string, ifNoneMatch: string | undefined): Response {
+  const etag = computeBodyEtag(body);
+  if (ifNoneMatch === etag) {
+    return new Response(null, { status: 304, headers: { ETag: etag } });
+  }
+  return new Response(body, {
+    status: 200,
+    headers: { "Content-Type": "application/json", ETag: etag },
+  });
+}
 
 interface BoardEtagMemo {
   etag: string;

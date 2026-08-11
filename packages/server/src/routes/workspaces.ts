@@ -18,6 +18,7 @@ import {
 } from "../lib/workspace-stats.js";
 import { clampDays, cutoffDayFor, subDays, buildDateAxis } from "../lib/analytics-window.js";
 import { startCreateJob, completeCreateJob, failCreateJob, getCreateJob } from "../services/create-job.service.js";
+import { conditionalJsonResponse } from "../services/board-etag-cache.service.js";
 import { claimIssueForAutoStart } from "../services/auto-start-claim.js";
 
 export function createWorkspacesRoute(
@@ -185,7 +186,9 @@ export function createWorkspacesRoute(
       { issueId: issueId ?? undefined, projectId: projectId ?? undefined, statusFilter, limit, offset },
       database,
     );
-    return c.json(rows);
+    // Conditional GET: content-hash ETag over the serialized list, 304 with no
+    // body when the client's If-None-Match still matches (frequent polls).
+    return conditionalJsonResponse(JSON.stringify(rows), c.req.header("if-none-match"));
   });
 
   // GET /api/workspaces/create-jobs/:jobId — the tracked state of an async workspace
