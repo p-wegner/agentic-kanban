@@ -44,6 +44,7 @@ import { getPreference } from "../repositories/preferences.repository.js";
 import { insertProjectRepo, listProjectRepos } from "../repositories/repo.repository.js";
 import { createSiblingRepoDir } from "./project-repos.service.js";
 import { detectRepoInfo } from "./git-info.service.js";
+import { createPluginOutputLocationOps } from "./plugin-output-location.service.js";
 import {
   deletePluginRow,
   getPluginRowById,
@@ -172,6 +173,19 @@ export function createPluginService(deps: {
   const { database, createIssue, createWorkspace, boardEvents } = deps;
   const boardUrl = deps.boardUrl ?? resolvePublicBoardUrl();
   const loops = createPluginLoopEngine({ database, createIssue, createWorkspace, boardUrl, boardEvents });
+  // Output-location concern extracted to its own module (god-module ceiling);
+  // same function names, unchanged behavior — see plugin-output-location.service.ts.
+  // Placed before the views runtime below, which captures resolveOutputRepoPath at init.
+  // (requirePlugin/requireProject are hoisted function declarations, so referencing
+  // them here is safe.)
+  const {
+    readOutputLocationPref,
+    findSidecarRepo,
+    resolveOutputRepoPath,
+    peekOutputRepoPath,
+    getOutputLocation,
+    setOutputLocation,
+  } = createPluginOutputLocationOps({ database, requirePlugin, requireProject });
   /**
    * The view child-server lifecycle lives in `plugin-views.service.ts` — it owns the module-level
    * process map, so this is the only place it gets bound to a service closure. Do NOT reach for the
@@ -445,75 +459,6 @@ export function createPluginService(deps: {
     }
   }
 
-  async function readOutputLocationPref(pluginSlug: string, projectId: string): Promise<PluginOutputLocation> {
-    const raw = await getPreference(pluginOutputLocationPreferenceKey(pluginSlug, projectId), database);
-    return isPluginOutputLocation(raw) ? raw : DEFAULT_PLUGIN_OUTPUT_LOCATION;
-  }
-
-  /** Find (never creates) the sidecar repo row for a plugin, by its naming convention. */
-  async function findSidecarRepo(pluginSlug: string, projectId: string) {
-    const sidecarName = pluginSidecarRepoName(pluginSlug);
-    const siblings = await listProjectRepos(projectId, database);
-    return siblings.find((r) => (r.name ?? "") === sidecarName) ?? null;
-  }
-
-  /**
-   * Where this plugin's scaffold/script/loop output goes for a project — the
-   * project's leading repo (default), or a dedicated sidecar repo, CREATED on
-   * first use if `"sidecar"` is selected and no such repo exists yet.
-   */
-  async function resolveOutputRepoPath(
-    plugin: PluginRow & { manifest: PluginManifest },
-    project: { id: string; repoPath: string },
-  ): Promise<string> {
-    const location = await readOutputLocationPref(plugin.pluginId, project.id);
-    if (location === "leading") return project.repoPath;
-
-    const existing = await findSidecarRepo(plugin.pluginId, project.id);
-    if (existing) return existing.path;
-
-    const sidecarName = pluginSidecarRepoName(plugin.pluginId);
-    const path = await createSiblingRepoDir(database, project.id, { name: sidecarName, generateReadme: true });
-    const repoInfo = await detectRepoInfo(path);
-    await insertProjectRepo(
-      { projectId: project.id, path: repoInfo.repoPath, name: sidecarName, defaultBranch: repoInfo.defaultBranch },
-      database,
-    );
-    return repoInfo.repoPath;
-  }
-
-  /**
-   * The output repo path as it stands, CREATING NOTHING — for read-only consumers (the butler
-   * prompt) where materializing a sidecar repo as a side effect would be wrong. A chosen-but-
-   * not-yet-created sidecar falls back to the leading repo, which is the best available answer.
-   */
-  async function peekOutputRepoPath(pluginSlug: string, project: { id: string; repoPath: string }): Promise<string> {
-    const location = await readOutputLocationPref(pluginSlug, project.id);
-    if (location === "leading") return project.repoPath;
-    return (await findSidecarRepo(pluginSlug, project.id))?.path ?? project.repoPath;
-  }
-
-  /** Current output-location choice + its resolved repo path (`null` = sidecar chosen but not created yet). */
-  async function getOutputLocation(pluginRowId: string, projectId: string) {
-    const plugin = await requirePlugin(pluginRowId);
-    const project = await requireProject(projectId);
-    const location = await readOutputLocationPref(plugin.pluginId, projectId);
-    const repoPath = location === "leading" ? project.repoPath : (await findSidecarRepo(plugin.pluginId, projectId))?.path ?? null;
-    return { location, repoPath, sidecarRepoName: pluginSidecarRepoName(plugin.pluginId) };
-  }
-
-  /** Set the output-location choice and eagerly materialize a sidecar repo if picked. */
-  async function setOutputLocation(pluginRowId: string, projectId: string, location: string) {
-    if (!isPluginOutputLocation(location)) {
-      throw new PluginError(`location must be one of: ${PLUGIN_OUTPUT_LOCATIONS.join(", ")}`, "BAD_REQUEST");
-    }
-    const plugin = await requirePlugin(pluginRowId);
-    const project = await requireProject(projectId);
-    const prefKey = pluginOutputLocationPreferenceKey(plugin.pluginId, projectId);
-    await setPreferenceChecked(database, [{ key: prefKey, value: location }]);
-    const repoPath = await resolveOutputRepoPath(plugin, project);
-    return { location, repoPath, sidecarRepoName: pluginSidecarRepoName(plugin.pluginId) };
-  }
 
   /** #318: optional `location` FIRST — enabling scaffolds, so choosing it afterwards left the
    *  scaffold in the leading repo. Delegates for validation + eager sidecar creation. */
