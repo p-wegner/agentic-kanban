@@ -160,12 +160,15 @@ export async function getGraphIssues(
   projectId: string,
   database: Database = db,
 ) {
+  // G15a: `description` is deliberately NOT selected — the graph client renders
+  // titles only (the detail panel fetches the full issue itself, same as the
+  // board), and shipping every issue's description body measured 1.15MB of the
+  // /graph payload.
   return database
     .select({
       id: issues.id,
       issueNumber: issues.issueNumber,
       title: issues.title,
-      description: issues.description,
       priority: issues.priority,
       issueType: issues.issueType,
       sortOrder: issues.sortOrder,

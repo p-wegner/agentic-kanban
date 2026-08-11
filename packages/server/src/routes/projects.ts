@@ -9,6 +9,8 @@ import type { SessionManager } from "../services/session.manager.js";
 import { isAbsolute } from "node:path";
 import { createWorkspaceSummaryCache } from "../services/workspace-summary-cache.service.js";
 import { computeBodyEtag, conditionalJsonResponse, createBoardEtagCache } from "../services/board-etag-cache.service.js";
+import { setSummaryWriteThroughListener } from "../services/summary-write-through-notifier.js";
+import { getProjectIdsForWorkspaces } from "../repositories/workspace-summary.repository.js";
 import { listProjectRepos, insertProjectRepo, updateProjectRepo, deleteProjectRepo, type RepoRow } from "../repositories/repo.repository.js";
 import { getProjectById, updateProjectServicesConfig } from "../repositories/project.repository.js";
 import { detectRepoInfo } from "../services/git-info.service.js";
@@ -173,12 +175,32 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
   // could serve a wrong 304. Disabled (never permissive) when boardEvents is absent.
   const boardEtagCache = createBoardEtagCache({ enabled: Boolean(options?.boardEvents) });
   if (options?.boardEvents) {
-    options.boardEvents.addInvalidationListener((projectId) => {
+    const boardEvents = options.boardEvents;
+    boardEvents.addInvalidationListener((projectId) => {
       workspaceSummaryCache.invalidate(projectId);
       // Warm-ahead: start the board rebuild now (debounced to collapse event bursts)
       // so the client's WS-triggered refetch ~100-300ms later hits a warm or in-flight
       // cache instead of paying the full cold rebuild (measured 121-205ms per refetch).
-      projectService.scheduleBoardWarmup(projectId);
+      // G14f: only when someone is actually WATCHING — with zero WS subscribers there
+      // is no follow-up refetch to warm ahead of, and monitor bursts were paying full
+      // rebuilds for nobody.
+      if (boardEvents.hasSubscribers(projectId)) {
+        projectService.scheduleBoardWarmup(projectId);
+      }
+    });
+    // G13: background write-throughs (diff stats, conflict cache, code metrics, the
+    // #399 git projection) mutate board-visible fields without a boardEvents
+    // broadcast. The notifier batches a sweep's changed workspaces; here we resolve
+    // them to projects and bump each project's cache generation so the board ETag
+    // fast path stops 304-ing a stale body.
+    setSummaryWriteThroughListener(async (workspaceIds) => {
+      const projectIds = await getProjectIdsForWorkspaces(workspaceIds, database);
+      for (const projectId of projectIds) {
+        workspaceSummaryCache.invalidate(projectId);
+        if (boardEvents.hasSubscribers(projectId)) {
+          projectService.scheduleBoardWarmup(projectId);
+        }
+      }
     });
   }
 
@@ -541,7 +563,10 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
   router.get("/:id/graph", async (c) => {
     const projectId = c.req.param("id");
     const result = await projectService.getGraph(projectId);
-    return c.json(result);
+    // G15b: same conditional-GET treatment as the list endpoints (#400) — the
+    // payload is large (measured >1MB pre-diet) and the graph view refetches on
+    // board digests, so an unchanged graph answers 304 with no body (and no gzip).
+    return conditionalJsonResponse(JSON.stringify(result), c.req.header("if-none-match"));
   });
 
   // GET /api/projects/:id/activity — project-wide activity feed (latest N events across all issues)

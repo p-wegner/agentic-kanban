@@ -21,8 +21,10 @@ import {
   getOutgoingWorkflowEdges,
   getWorkflowNodeNamesByIds,
   getSessionsForWorkspaces,
+  getSessionStatsByIds,
   getSessionMessagesForSessions,
 } from "../repositories/workspace-summary.repository.js";
+import { notifySummaryWriteThrough } from "./summary-write-through-notifier.js";
 
 // Bounded fan-out for background git-backed refresh tasks. The REAL git concurrency
 // control is the process-wide semaphore inside the git-exec adapter (#398) — this
@@ -88,6 +90,18 @@ export async function buildWorkspaceSummaryMap(
 ): Promise<Map<string, WorkspaceSummary>> {
   if (issueIds.length === 0) return new Map<string, WorkspaceSummary>();
 
+  // G14b: existsSync used to run TWICE per main workspace per rebuild (phase 4 +
+  // phase 5). One rebuild pass shares a single stat per distinct workingDir.
+  const dirExistsCache = new Map<string, boolean>();
+  const dirExists = (path: string): boolean => {
+    let known = dirExistsCache.get(path);
+    if (known === undefined) {
+      known = existsSync(path);
+      dirExistsCache.set(path, known);
+    }
+    return known;
+  };
+
   // Phase 1: aggregate workspace counts per issue+status
   const workspaceSummaryMap = await aggregateWorkspaceCounts(issueIds, database);
 
@@ -102,7 +116,7 @@ export async function buildWorkspaceSummaryMap(
 
   // Phase 4: read commit counts / latest commits from the persisted git projection
   // (#399, decision 014) — zero git spawns on this path; stale rows get a bg refresh.
-  const { commitCountByIssue, latestCommitByIssue } = readGitProjection(mainWorkspaceMap, defaultBranch, database, archivedIssueIds);
+  const { commitCountByIssue, latestCommitByIssue } = readGitProjection(mainWorkspaceMap, defaultBranch, database, dirExists, archivedIssueIds);
 
   // Phase 5: attach main workspace summary and schedule stale-while-revalidate cache refreshes
   for (const [issueId, summary] of workspaceSummaryMap) {
@@ -137,7 +151,7 @@ export async function buildWorkspaceSummaryMap(
     // The existsSync is the same point as in prefetchGitData: a set-but-vanished
     // workingDir would otherwise schedule diff-stat + conflict-detection git spawns
     // that can only fail, on every board build (#277).
-    if (!isArchivedIssue && mainWs.workingDir && mainWs.status !== "closed" && existsSync(mainWs.workingDir)) {
+    if (!isArchivedIssue && mainWs.workingDir && mainWs.status !== "closed" && dirExists(mainWs.workingDir)) {
       const diffRef = mainWs.isDirect ? "HEAD" : (mainWs.baseBranch || defaultBranch);
       if (!diffRef) continue;
       const mainRef = summary.main;
@@ -195,8 +209,15 @@ async function populateShowdownSummaries(
   database: Database,
 ): Promise<void> {
   const showdownIdsByIssue = new Map<string, string>();
+  // G14d: group rows by showdown once (O(W)) instead of re-filtering all detail
+  // rows per issue inside the loop below (O(W²) on showdown-heavy boards).
+  const rowsByShowdown = new Map<string, WorkspaceDetailRow[]>();
   for (const row of wsDetailRows) {
-    if (row.showdownId) showdownIdsByIssue.set(row.issueId, row.showdownId);
+    if (!row.showdownId) continue;
+    showdownIdsByIssue.set(row.issueId, row.showdownId);
+    const group = rowsByShowdown.get(row.showdownId);
+    if (group) group.push(row);
+    else rowsByShowdown.set(row.showdownId, [row]);
   }
   if (showdownIdsByIssue.size === 0) return;
 
@@ -208,7 +229,7 @@ async function populateShowdownSummaries(
     const summary = workspaceSummaryMap.get(issueId);
     if (!summary) continue;
     const sdStatus = showdownStatusMap.get(showdownId) ?? "active";
-    const sdWorkspaces = wsDetailRows.filter(w => w.showdownId === showdownId);
+    const sdWorkspaces = rowsByShowdown.get(showdownId) ?? [];
     const doneCount = sdWorkspaces.filter(w => w.status === "idle" || w.status === "closed").length;
     summary.showdown = { id: showdownId, status: sdStatus, total: sdWorkspaces.length, doneCount };
   }
@@ -255,6 +276,7 @@ function readGitProjection(
   mainWorkspaceMap: Map<string, WorkspaceDetailRow>,
   defaultBranch: string | null,
   database: Database,
+  dirExists: (path: string) => boolean,
   archivedIssueIds?: Set<string>,
 ): {
   commitCountByIssue: Map<string, number | null>;
@@ -269,7 +291,7 @@ function readGitProjection(
     // row, and each such workspace would otherwise schedule 2 doomed git spawns on
     // every board build (#277). A stat gets the same answer for free.
     if (archivedIssueIds?.has(issueId)) continue;
-    if (!ws.workingDir || ws.status === "closed" || !existsSync(ws.workingDir)) continue;
+    if (!ws.workingDir || ws.status === "closed" || !dirExists(ws.workingDir)) continue;
 
     latestCommitByIssue.set(
       issueId,
@@ -307,16 +329,25 @@ function applyDiffStats(
     const wsId = mainWs.id;
     const workingDir = mainWs.workingDir!;
     const headShaAtRefresh = currentHeadSha;
+    // G13: only a write that CHANGED the board-visible numbers invalidates the
+    // board ETag generation — a steady-state refresh rewriting identical stats
+    // must not thrash the memo.
     runBgGit(() =>
       getDiffShortstat(workingDir, diffRef)
         .then(stats => {
+          const changed =
+            stats.filesChanged !== mainWs.diffStatCacheFilesChanged ||
+            stats.insertions !== mainWs.diffStatCacheInsertions ||
+            stats.deletions !== mainWs.diffStatCacheDeletions;
           updateWorkspaceDiffStatCache(wsId, {
             diffStatCacheCheckedAt: new Date().toISOString(),
             diffStatCacheHeadSha: headShaAtRefresh,
             diffStatCacheFilesChanged: stats.filesChanged,
             diffStatCacheInsertions: stats.insertions,
             diffStatCacheDeletions: stats.deletions,
-          }, database).catch(() => {});
+          }, database)
+            .then(() => { if (changed) notifySummaryWriteThrough(wsId); })
+            .catch(() => {});
         })
         .catch(() => {})
     );
@@ -334,13 +365,33 @@ function scheduleCodeMetricsRefresh(
     : Infinity;
   if (codeMetricsCacheAge < CODE_METRICS_CACHE_TTL_MS) return;
   const wsId = mainWs.id;
+  const previousMetricsJson = mainWs.codeMetricsJson;
   runBgGit(() =>
     computeWorkspaceCodeMetrics(wsId, database)
       .then((metrics: WorkspaceCodeMetrics | null) => {
         if (metrics && summary.main?.id === wsId) summary.main.codeMetrics = metrics;
+        // G13: computeWorkspaceCodeMetrics wrote the row through — invalidate the
+        // board ETag generation only when the metric VALUES moved (computedAt
+        // always changes, so compare the payload fields, not the whole blob).
+        if (metrics && codeMetricsValuesChanged(previousMetricsJson, metrics)) {
+          notifySummaryWriteThrough(wsId);
+        }
       })
       .catch(() => {})
   );
+}
+
+/** Whether freshly computed code metrics differ from the previously stored blob,
+ * ignoring the always-moving `computedAt` stamp (G13 change gate). */
+function codeMetricsValuesChanged(previousJson: string | null, metrics: WorkspaceCodeMetrics): boolean {
+  if (!previousJson) return true;
+  try {
+    const prev = JSON.parse(previousJson) as WorkspaceCodeMetrics;
+    return JSON.stringify({ coverage: prev.coverage ?? null, lint: prev.lint ?? null, complexity: prev.complexity ?? null })
+      !== JSON.stringify({ coverage: metrics.coverage ?? null, lint: metrics.lint ?? null, complexity: metrics.complexity ?? null });
+  } catch {
+    return true;
+  }
 }
 
 // Phase 5c: conflict detection for non-direct idle/fixing workspaces — stale-while-revalidate.
@@ -379,11 +430,18 @@ function applyConflicts(
       runBgGit(() =>
         detectConflicts(workingDir, baseBranch)
           .then(result => {
+            // G13 change gate — see applyDiffStats.
+            const files = JSON.stringify(result.conflictingFiles);
+            const changed =
+              result.hasConflicts !== mainWs.conflictCacheHasConflicts ||
+              files !== mainWs.conflictCacheFiles;
             updateWorkspaceConflictCache(wsId, {
               conflictCacheCheckedAt: new Date().toISOString(),
               conflictCacheHasConflicts: result.hasConflicts,
-              conflictCacheFiles: JSON.stringify(result.conflictingFiles),
-            }, database).catch(() => {});
+              conflictCacheFiles: files,
+            }, database)
+              .then(() => { if (changed) notifySummaryWriteThrough(wsId); })
+              .catch(() => {});
           })
           .catch(() => {})
       );
@@ -460,6 +518,12 @@ async function attachSessionData(
   const sessionRows = await getSessionsForWorkspaces(mainWsIds, database);
   const latestByWs = selectLatestSessionsByWorkspace(sessionRows, isAnalyticsNoise);
 
+  // G9: the session list query no longer ships every historical session's stats
+  // blob — fetch stats for just the ~1-per-workspace winner rows in one small
+  // IN query (contextTokens is attached for every main, closed included).
+  const statsRows = await getSessionStatsByIds([...latestByWs.values()].map((s) => s.id), database);
+  const statsBySession = new Map(statsRows.map((r) => [r.id, r.stats]));
+
   // lastTool / lastAssistantMessage are only consumed for non-closed, non-archived
   // workspaces (AgentGrid hides closed; MonitorPopover only shows active/reviewing/
   // fixing; board cards never render lastAssistantMessage; archived issues render via
@@ -487,7 +551,8 @@ async function attachSessionData(
     summary.main.lastSessionAt = sess.status === "running" ? sess.startedAt : sess.endedAt;
     summary.main.sessionStatus = sess.status;
     summary.main.lastSessionTriggerType = sess.triggerType;
-    if (sess.stats) summary.main.contextTokens = parseContextTokensFromStats(sess.stats);
+    const stats = statsBySession.get(sess.id) ?? null;
+    if (stats) summary.main.contextTokens = parseContextTokensFromStats(stats);
     summary.main.lastTool = lastToolBySession.get(sess.id) ?? null;
     summary.main.lastAssistantMessage = lastAssistantMsgBySession.get(sess.id) ?? null;
   }

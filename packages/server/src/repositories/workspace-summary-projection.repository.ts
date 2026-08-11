@@ -55,6 +55,9 @@ export interface SummaryHealCandidate {
   baseBranch: string | null;
   diffStatCacheHeadSha: string | null;
   summaryDirty: boolean;
+  /** Previously projected facts (G13) — the refresh's change gate compares against these. */
+  summaryHeadSha: string | null;
+  summaryCommitCount: number | null;
   /** The owning project's default branch — the base fallback when `baseBranch` is null. */
   defaultBranch: string | null;
 }
@@ -78,6 +81,8 @@ export async function selectSummaryHealCandidates(
       baseBranch: sql<string | null>`coalesce(${leadingRepo.baseBranch}, ${workspaces.baseBranch})`,
       diffStatCacheHeadSha: workspaces.diffStatCacheHeadSha,
       summaryDirty: workspaces.summaryDirty,
+      summaryHeadSha: workspaces.summaryHeadSha,
+      summaryCommitCount: workspaces.summaryCommitCount,
       defaultBranch: projects.defaultBranch,
     })
     .from(workspaces)

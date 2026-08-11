@@ -3,13 +3,15 @@
 // session selection and stats parsing are pure transforms, while the file/DB
 // message scan stays in the service where the I/O lives.
 
-/** The minimal session shape the summary cares about, projected from a session row. */
+/** The minimal session shape the summary cares about, projected from a session row.
+ * `stats` is deliberately absent (G9): the repository query no longer ships every
+ * historical session's stats blob — the service fetches stats for just the winner
+ * rows afterwards (getSessionStatsByIds). */
 export interface LatestSession {
   id: string;
   status: string;
   startedAt: string;
   endedAt: string | null;
-  stats: string | null;
   triggerType: string | null;
 }
 
@@ -40,7 +42,6 @@ export function selectLatestSessionsByWorkspace(
       status: s.status,
       startedAt: s.startedAt,
       endedAt: s.endedAt,
-      stats: s.stats,
       triggerType: s.triggerType ?? null,
     };
     if (isNoise(s)) {

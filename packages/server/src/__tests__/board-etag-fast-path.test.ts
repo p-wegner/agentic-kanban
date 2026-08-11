@@ -20,9 +20,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Hono } from "hono";
 import { randomUUID, createHash } from "node:crypto";
+import { eq } from "drizzle-orm";
 import * as schema from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { createBoardEvents } from "../services/board-events.js";
+import { notifySummaryWriteThrough, flushSummaryWriteThroughs, setSummaryWriteThroughListener } from "../services/summary-write-through-notifier.js";
 
 const state = vi.hoisted(() => ({ getBoardCalls: 0 }));
 
@@ -91,6 +93,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   vi.useRealTimers();
+  setSummaryWriteThroughListener(null);
 });
 
 function createApp(withBoardEvents = true) {
@@ -174,7 +177,7 @@ describe("board conditional-GET fast path", () => {
     expect(state.getBoardCalls).toBe(callsAfterArchivedMemoSet);
   });
 
-  it("a memo older than 60s recomputes instead of fast-pathing", async () => {
+  it("G12: a generation-matched memo keeps fast-pathing past 60s without recomputing", async () => {
     const { app } = createApp();
     vi.useFakeTimers({ now: Date.now(), toFake: ["Date"] });
 
@@ -184,10 +187,40 @@ describe("board conditional-GET fast path", () => {
 
     vi.setSystemTime(Date.now() + 61_000);
 
+    // The generation is unchanged, so the board is provably unchanged — the memo
+    // is refreshed and the 304 is served WITHOUT a full recompute (this used to
+    // pay the full board build just to answer 304).
     const second = await getBoard(app, { etag: first.etag! });
-    // Day-granularity fields have not crossed a boundary, so the body still
-    // hashes to the same ETag — but the request paid the full compute path.
     expect(second.status).toBe(304);
+    expect(state.getBoardCalls).toBe(1);
+
+    // ...and keeps doing so across further 60s+ gaps within the hard cap.
+    vi.setSystemTime(Date.now() + 61_000);
+    const third = await getBoard(app, { etag: first.etag! });
+    expect(third.status).toBe(304);
+    expect(state.getBoardCalls).toBe(1);
+  });
+
+  it("G12: the 15-min hard cap since the last FULL compute forces a recompute", async () => {
+    const { app } = createApp();
+    vi.useFakeTimers({ now: Date.now(), toFake: ["Date"] });
+
+    const first = await getBoard(app);
+    expect(first.status).toBe(200);
+    expect(state.getBoardCalls).toBe(1);
+
+    // Sliding hits never move the hard-cap clock: hit at +10min, then cross 15min
+    // total age since the full compute.
+    vi.setSystemTime(Date.now() + 10 * 60_000);
+    const hit = await getBoard(app, { etag: first.etag! });
+    expect(hit.status).toBe(304);
+    expect(state.getBoardCalls).toBe(1);
+
+    vi.setSystemTime(Date.now() + 6 * 60_000); // 16min since full compute
+    const recomputed = await getBoard(app, { etag: first.etag! });
+    // Day-granularity fields have not crossed a boundary, so the body still hashes
+    // to the same ETag — but the request paid the full compute path.
+    expect(recomputed.status).toBe(304);
     expect(state.getBoardCalls).toBe(2);
   });
 
@@ -198,6 +231,45 @@ describe("board conditional-GET fast path", () => {
     expect(first.status).toBe(200);
     const expectedEtag = `"${createHash("sha1").update(first.body).digest("hex").slice(0, 16)}"`;
     expect(first.etag).toBe(expectedEtag);
+  });
+
+  it("G13: a background write-through invalidates the memo and the next fetch sees new data", async () => {
+    const { app } = createApp();
+
+    // Seed a workspace so the write-through can be resolved to this project.
+    const now = new Date().toISOString();
+    const issueRow = await db.select({ id: schema.issues.id }).from(schema.issues);
+    const workspaceId = randomUUID();
+    await db.insert(schema.workspaces).values({
+      id: workspaceId,
+      issueId: issueRow[0].id,
+      branch: "feature/wt",
+      status: "idle",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const first = await getBoard(app);
+    expect(first.status).toBe(200);
+    expect(state.getBoardCalls).toBe(1);
+    await getBoard(app, { etag: first.etag! }); // memoized fast path
+    expect(state.getBoardCalls).toBe(1);
+
+    // A background write-through mutates a board-visible field (as the diff/
+    // conflict/projection refreshers do) and notifies. No boardEvents broadcast.
+    await db
+      .update(schema.workspaces)
+      .set({ status: "active" })
+      .where(eq(schema.workspaces.id, workspaceId));
+    notifySummaryWriteThrough(workspaceId);
+    await flushSummaryWriteThroughs();
+
+    // The generation moved, so the stale memo no longer fast-paths: the full
+    // path recomputes and serves the NEW body under a NEW ETag.
+    const second = await getBoard(app, { etag: first.etag! });
+    expect(second.status).toBe(200);
+    expect(second.etag).not.toBe(first.etag);
+    expect(state.getBoardCalls).toBe(2);
   });
 
   it("disables the fast path when boardEvents is not wired", async () => {

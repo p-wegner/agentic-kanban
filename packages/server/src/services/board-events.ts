@@ -177,6 +177,17 @@ function createBoardEvents() {
     }
   }
 
+  /** Whether any LIVE WebSocket is subscribed to this project's board (G14f) —
+   * lets warm-ahead work skip projects nobody is currently watching. */
+  function hasSubscribers(projectId: string): boolean {
+    const subs = subscribers.get(projectId);
+    if (!subs) return false;
+    for (const sub of subs.values()) {
+      if (sub.ws.readyState === 1) return true;
+    }
+    return false;
+  }
+
   /** Remove dead WebSocket entries (readyState !== OPEN). */
   function cleanupStaleConnections() {
     for (const [projectId, subs] of subscribers) {
@@ -303,6 +314,7 @@ function createBoardEvents() {
   return {
     subscribe,
     unsubscribe,
+    hasSubscribers,
     broadcast,
     broadcastProjectsChanged,
     broadcastActivity,

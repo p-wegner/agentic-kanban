@@ -1,4 +1,4 @@
-import { workspaces, sessions, sessionMessages, showdowns, workflowEdges, workflowNodes, repos } from "@agentic-kanban/shared/schema";
+import { workspaces, sessions, sessionMessages, showdowns, workflowEdges, workflowNodes, repos, issues } from "@agentic-kanban/shared/schema";
 import { and, eq, inArray, sql, desc } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { db } from "../db/index.js";
@@ -137,6 +137,14 @@ export async function getWorkflowNodeNamesByIds(nodeIds: string[], database: Dat
     .where(inArray(workflowNodes.id, nodeIds));
 }
 
+/**
+ * G9 (2026-08-11 read-path audit): this select deliberately EXCLUDES `stats`.
+ * It fetches every session row of every main workspace (unbounded by design —
+ * the caller's latest-per-workspace selection needs the full ordered set for
+ * its noise-fallback semantics), but the caller keeps ~1 row per workspace, so
+ * shipping every historical session's `stats` JSON blob was pure waste. Stats
+ * are fetched separately for just the winner rows via {@link getSessionStatsByIds}.
+ */
 export async function getSessionsForWorkspaces(workspaceIds: string[], database: Database = db) {
   return database
     .select({
@@ -145,12 +153,34 @@ export async function getSessionsForWorkspaces(workspaceIds: string[], database:
       status: sessions.status,
       startedAt: sessions.startedAt,
       endedAt: sessions.endedAt,
-      stats: sessions.stats,
       triggerType: sessions.triggerType,
     })
     .from(sessions)
     .where(inArray(sessions.workspaceId, workspaceIds))
     .orderBy(sessions.startedAt);
+}
+
+/** The `stats` blobs for the latest-per-workspace winner sessions only (G9). */
+export async function getSessionStatsByIds(sessionIds: string[], database: Database = db) {
+  if (sessionIds.length === 0) return [];
+  return database
+    .select({ id: sessions.id, stats: sessions.stats })
+    .from(sessions)
+    .where(inArray(sessions.id, sessionIds));
+}
+
+/**
+ * Distinct owning project ids for a set of workspaces (G13) — resolves which
+ * board ETag generations a batch of background write-throughs invalidates.
+ */
+export async function getProjectIdsForWorkspaces(workspaceIds: string[], database: Database = db): Promise<string[]> {
+  if (workspaceIds.length === 0) return [];
+  const rows = await database
+    .selectDistinct({ projectId: issues.projectId })
+    .from(workspaces)
+    .innerJoin(issues, eq(issues.id, workspaces.issueId))
+    .where(inArray(workspaces.id, workspaceIds));
+  return rows.map((r) => r.projectId).filter((p): p is string => !!p);
 }
 
 /**
@@ -166,6 +196,11 @@ export async function getSessionsForWorkspaces(workspaceIds: string[], database:
  */
 const PER_SESSION_MESSAGE_LIMIT = 50;
 
+/** Bounded fan-out for the per-session fallback queries (G14c) — mirrors the
+ * tail-read sibling's TAIL_READ_CONCURRENCY so a temp sweep that strands ~W
+ * workspaces on the DB fallback doesn't fire W parallel queries in one tick. */
+const PER_SESSION_QUERY_CONCURRENCY = 5;
+
 export async function getSessionMessagesForSessions(sessionIds: string[], database: Database = db) {
   // One bounded query per session instead of one unbounded query for all sessions:
   // each per-session query is served by the (session_id, id) index from migration 0113
@@ -173,15 +208,24 @@ export async function getSessionMessagesForSessions(sessionIds: string[], databa
   // payload materialization). Rows stay newest-first within each session, which is the
   // ordering the caller's first-match-wins extraction depends on; interleaving across
   // sessions never mattered (extraction state is keyed by sessionId).
-  const perSession = await Promise.all(
-    sessionIds.map((sid) =>
-      database
+  //
+  // G14c: the per-session queries run through a small worker pool instead of an
+  // uncapped Promise.all — same bound as the .out tail-read sibling.
+  const results: Array<{ sessionId: string; data: string | null }[]> = new Array(sessionIds.length);
+  let nextIdx = 0;
+  const worker = async (): Promise<void> => {
+    while (nextIdx < sessionIds.length) {
+      const idx = nextIdx++;
+      results[idx] = await database
         .select({ sessionId: sessionMessages.sessionId, data: sessionMessages.data })
         .from(sessionMessages)
-        .where(eq(sessionMessages.sessionId, sid))
+        .where(eq(sessionMessages.sessionId, sessionIds[idx]))
         .orderBy(desc(sessionMessages.id))
-        .limit(PER_SESSION_MESSAGE_LIMIT),
-    ),
+        .limit(PER_SESSION_MESSAGE_LIMIT);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(PER_SESSION_QUERY_CONCURRENCY, sessionIds.length) }, worker),
   );
-  return perSession.flat();
+  return results.flat();
 }

@@ -201,12 +201,10 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery, focus
     const depFiltered = hasAnyEdges
       ? statusFiltered.filter((n) => nodesWithDepsIds.has(n.id))
       : statusFiltered;
+    // Title-only search: /graph no longer ships issue descriptions (G15a payload
+    // diet — they measured 1.15MB and the nodes render titles only).
     const filtered = searchQuery
-      ? depFiltered.filter(
-          (n) =>
-            n.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            n.description?.toLowerCase().includes(searchQuery.toLowerCase())
-        )
+      ? depFiltered.filter((n) => n.title.toLowerCase().includes(searchQuery.toLowerCase()))
       : depFiltered;
     const filteredIds = new Set(filtered.map((n) => n.id));
     const filteredEdges = graphData.edges.filter(
