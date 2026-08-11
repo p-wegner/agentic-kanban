@@ -93,6 +93,14 @@ function InboxSection({ items, onNavigate }: { items: InboxItem[] | null; onNavi
                   {item.projectName}{item.detail ? ` · ${item.detail}` : ""}
                 </p>
               </div>
+              {/* How long this has been blocked on a human — the gate card shows it, but the
+                  bell is where a decision is DISCOVERED, and a day-old wait reads very
+                  differently from a minute-old one (2026-08-11 UX round). */}
+              {item.createdAt && (
+                <span className="shrink-0 text-[10px] text-amber-600 dark:text-amber-400 whitespace-nowrap" title={`Waiting since ${new Date(item.createdAt).toLocaleString("en-US")}`}>
+                  {formatRelativeTime(item.createdAt).replace(" ago", "")}
+                </span>
+              )}
             </button>
           </li>
         ))}

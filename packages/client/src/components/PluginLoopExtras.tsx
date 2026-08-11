@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { DiffComment, CreateDiffCommentRequest } from "@agentic-kanban/shared";
 import { apiFetch, apiPost, apiPut } from "../lib/api.js";
@@ -730,8 +730,19 @@ export function ArtifactViewer({ pluginId, loopName, projectId, path, onClose, o
   }, [pluginId, loopName, projectId, path]);
 
   const isMarkdown = /\.(md|markdown)$/i.test(path);
+
+  // The viewer renders inline BELOW the gate card / loop stats, so opening it from
+  // a chip near the top of a long pane put it entirely below the fold — the click
+  // appeared to do nothing (measured in the 2026-08-11 UX round). Scroll it into
+  // view whenever it opens or switches artifact.
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    containerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [path]);
+
   return (
     <div
+      ref={containerRef}
       className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 flex flex-col max-h-[60vh]"
       data-testid="plugin-artifact-viewer"
     >
