@@ -129,6 +129,32 @@ export const workspaces = sqliteTable("workspaces", {
   reviewPreflightSignature: text("review_preflight_signature"),
   /** Set when the attempt budget was exhausted for the current signature. */
   reviewPreflightBlockedAt: text("review_preflight_blocked_at"),
+  /**
+   * Backoff state for monitor-driven merge / fix-and-merge retries (#417). A merge that
+   * fails on a STATIC, human-only blocker — a dirty main checkout, missing verify-script
+   * infrastructure — is deterministic: retrying every monitor cycle can never succeed, it
+   * just burns a main-checkout git check plus (via the fix-and-merge session) a full
+   * verify run per retry, silently and forever. When the failure signature is IDENTICAL
+   * to the previous attempt the retry interval doubles per repeat (capped at ~2h;
+   * non-retryable-without-change classes go straight to the cap), and the block clears
+   * itself the moment relevant state changes: a new commit on the branch
+   * (`mergeBackoffBranchSha` moved), the main checkout became clean, or the verify script
+   * content changed (`mergeBackoffVerifyHash` moved). Persisted so a server restart does
+   * not reset the backoff. See merge-backoff.service.ts.
+   */
+  mergeBackoffFailures: integer("merge_backoff_failures").notNull().default(0),
+  /** `<failureClass>|<messageDigest>` — identity of the failing attempt. */
+  mergeBackoffSignature: text("merge_backoff_signature"),
+  /** The last merge failure message, so the block is explainable without the log. */
+  mergeBackoffError: text("merge_backoff_error"),
+  /** Branch tip observed at the last failure — a moved tip voids the block. */
+  mergeBackoffBranchSha: text("merge_backoff_branch_sha"),
+  /** Hash of the project's verify_script at the last failure — changed content voids the block. */
+  mergeBackoffVerifyHash: text("merge_backoff_verify_hash"),
+  /** No merge retry for this workspace before this instant (ISO). */
+  mergeBackoffNextRetryAt: text("merge_backoff_next_retry_at"),
+  /** When the CURRENT failure signature was first observed — the "blocked since" for warnings. */
+  mergeBackoffSince: text("merge_backoff_since"),
   /** Context primer assembled by the context-packer at workspace creation. Injected into CLAUDE.local.md. */
   contextPrimer: text("context_primer"),
   /** Set when worktree removal fails post-merge (e.g. EBUSY). Cleared on successful retry cleanup. */

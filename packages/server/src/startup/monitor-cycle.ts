@@ -33,6 +33,7 @@ import {
 } from "./monitor-cycle-actions.js";
 import type { MonitorWorkspaceActions } from "./monitor-workspace-actions.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
+import { shouldSkipMergeForBackoff, type MergeBackoffDeps } from "../services/merge-backoff.service.js";
 
 export { DEFAULT_STUCK_BUILDER_TIMEOUT_MS } from "./monitor-cycle-rules.js";
 
@@ -171,6 +172,8 @@ export interface ProcessWorkspaceDeps {
   candidateTimeoutMs?: number;
   /** Clock seam for deterministic time-budget tests. */
   now?: () => number;
+  /** Seams for the #417 merge-retry backoff (test database/clock/probes). */
+  mergeBackoff?: MergeBackoffDeps;
 }
 
 export interface ProcessWorkspaceCandidatesResult {
@@ -303,6 +306,36 @@ async function hasMovedBaseNoCommits(ws: WorkspaceCandidate, deps: ProcessWorksp
   return behind > 0;
 }
 
+/** Build the #417 backoff deps from the cycle deps: injected seams win; the monitor's
+ *  clock seam and board broadcaster are threaded through so tests stay deterministic
+ *  and the drive-obstacle warning reaches live clients. */
+function mergeBackoffDeps(deps: ProcessWorkspaceDeps): MergeBackoffDeps {
+  return {
+    now: deps.now ? () => new Date(deps.now!()) : undefined,
+    broadcast: (projectId, reason) => deps.boardEvents.broadcast(projectId, reason),
+    ...deps.mergeBackoff,
+  };
+}
+
+/**
+ * #417 circuit breaker: when this workspace's previous merge/fix-and-merge attempt failed
+ * and the IDENTICAL failure is still inside its (exponentially growing) backoff window,
+ * skip the attempt entirely — BEFORE the per-cycle merge slot is consumed and before any
+ * expensive gate/verify work. A relevant state change (new commit, main checkout clean,
+ * verify script changed) clears the block inside `shouldSkipMergeForBackoff` itself.
+ */
+async function mergeBlockedByBackoff(ws: WorkspaceCandidate, deps: ProcessWorkspaceDeps): Promise<boolean> {
+  const decision = await shouldSkipMergeForBackoff(
+    { wsId: ws.wsId, projectId: ws.projectId, workingDir: ws.workingDir, issueNumber: ws.issueNumber },
+    mergeBackoffDeps(deps),
+  ).catch(() => ({ skip: false as const, reason: undefined }));
+  if (decision.skip) {
+    console.log(`[monitor] Skipping merge for workspace ${ws.wsId} (issue #${ws.issueNumber ?? "?"}) — ${decision.reason}`);
+    return true;
+  }
+  return false;
+}
+
 async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession | undefined, sessionCount: number, ctx: CycleContext): Promise<void> {
   const { deps, stats, logAction, canStartRelaunch, canStartMerge } = ctx;
   if (isCodexUsageLimitStats(sess?.stats)) {
@@ -328,6 +361,7 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
       console.log(`[monitor] Skipping auto-merge for idle+readyForMerge workspace ${ws.wsId}  auto_merge_disabled for project ${ws.projectId}`);
       return;
     }
+    if (await mergeBlockedByBackoff(ws, deps)) return;
     if (!canStartMerge(ws)) return;
     // readyForMerge is only set by the review-exit handler AFTER its verify/smoke gate passed,
     // so hand the merge that PROOF (arch-review §1.2) rather than a bare "trust me" — built from
@@ -336,7 +370,7 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
     await mergeWorkspaceWithFixFallback(ws, deps.workspaceActions, logAction, {
       conflictMsg: `[monitor] Merge conflict for idle+readyForMerge workspace ${ws.wsId}  triggered fix-and-merge`,
       successMsg: `[monitor] Triggered merge for idle+readyForMerge workspace ${ws.wsId}`,
-    }, gateTokenFromWorkspaceEvidence(ws, "review-exit gate (readyForMerge, idle)"));
+    }, gateTokenFromWorkspaceEvidence(ws, "review-exit gate (readyForMerge, idle)"), mergeBackoffDeps(deps));
     deps.boardEvents.broadcast(ws.projectId, "board_changed");
   } else if (await hasStaleBaseWithCommits(ws, deps)) {
     // #191: finished-but-stuck — real committed work, blocked only by a stale base. Recover it
@@ -359,12 +393,13 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
       deps.boardEvents.broadcast(ws.projectId, "board_changed");
       return;
     }
+    if (await mergeBlockedByBackoff(ws, deps)) return;
     if (!canStartMerge(ws)) return;
     console.log(`[monitor] Idle workspace ${ws.wsId} for issue #${ws.issueNumber ?? "?"} has committed work on a stale base  attempting merge (falls back to fix-and-merge)`);
     await mergeWorkspaceWithFixFallback(ws, deps.workspaceActions, logAction, {
       conflictMsg: `[monitor] Stale-base workspace ${ws.wsId} could not merge cleanly  triggered fix-and-merge`,
       successMsg: `[monitor] Auto-recovered stale-base workspace ${ws.wsId} via merge`,
-    }, RUN_GATE);
+    }, RUN_GATE, mergeBackoffDeps(deps));
     deps.boardEvents.broadcast(ws.projectId, "board_changed");
   } else if (sessionCount >= MAX_SESSIONS) {
     const needsReviewStatusId = await getProjectStatusIdByName(ws.projectId, "Needs Review");
@@ -382,6 +417,9 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
     deps.boardEvents.broadcast(ws.projectId, "board_changed");
   } else if (ws.issueStatusName === "In Review") {
     if (deps.autoMergeEnabled && deps.autoMergeInReview && !deps.autoMergeDisabledProjectIds?.has(ws.projectId)) {
+      // #417: the backoff check runs BEFORE the pre-merge gate below — the gate is the
+      // expensive verify/smoke run this circuit breaker exists to stop repeating.
+      if (await mergeBlockedByBackoff(ws, deps)) return;
       // #821: the auto_merge_in_review path merges idle In-Review workspaces that are NOT
       // readyForMerge. The verify_script + smoke quality gate lived ONLY in the review-exit handler,
       // so this path bypassed it entirely — unverified/un-rendered code merged on hands-off projects.
@@ -412,7 +450,7 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
       await mergeWorkspaceWithFixFallback(ws, deps.workspaceActions, logAction, {
         conflictMsg: `[monitor] Merge conflict for idle In-Review workspace ${ws.wsId} (auto_merge_in_review)  triggered fix-and-merge`,
         successMsg: `[monitor] Auto-merged idle In-Review workspace ${ws.wsId} (auto_merge_in_review, not marked ready)`,
-      }, gateToken);
+      }, gateToken, mergeBackoffDeps(deps));
       deps.boardEvents.broadcast(ws.projectId, "board_changed");
     } else {
       console.log(`[monitor] Skipping relaunch for idle workspace ${ws.wsId}  issue #${ws.issueNumber} is in review (committed work awaiting merge; enable auto_merge_in_review to land it)`);
