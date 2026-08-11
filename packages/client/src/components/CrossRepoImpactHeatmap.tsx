@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { DiffResponse, ProjectRepoResponse, StatusWithIssues } from "@agentic-kanban/shared";
+import { useQueryClient } from "@tanstack/react-query";
+import type { DiffResponse, StatusWithIssues } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
+import { fetchWorkspacesList } from "../lib/workspacesListQuery.js";
+import { fetchProjectRepos } from "../lib/projectReposQuery.js";
 import { BOARD_WS_EVENT, type BoardWsEventDetail } from "../lib/useBoardEvents.js";
 import {
   buildCrossRepoImpact,
@@ -28,18 +31,6 @@ import {
  * `crossRepoImpact.ts` module (unit-tested independently).
  */
 
-/** Non-terminal workspace statuses — the ones whose in-flight change we want to see. */
-const NON_CLOSED_WORKSPACE_STATUSES = [
-  "active",
-  "idle",
-  "blocked",
-  "reviewing",
-  "fixing",
-  "ready_for_merge",
-  "awaiting-plan-approval",
-  "error",
-].join(",");
-
 /** Board-event reasons that can change a workspace's diff footprint. */
 const RELEVANT_REASONS = new Set<string>([
   "board_changed",
@@ -56,15 +47,6 @@ const RELEVANT_REASONS = new Set<string>([
 ]);
 
 const REFRESH_DEBOUNCE_MS = 1500;
-
-/** Slim projection of GET /api/workspaces?projectId= (see listWorkspacesSlim). */
-interface SlimWorkspace {
-  id: string;
-  issueId: string;
-  branch: string | null;
-  status: string;
-  isDirect: boolean;
-}
 
 /** Shape of GET /api/projects/:id/file-contention (see FileContentionPanel). */
 interface FileContentionResult {
@@ -150,6 +132,7 @@ function useCrossRepoImpactData(
   leadingRepoPath: string | null,
   columns: StatusWithIssues[],
 ): { data: CrossRepoImpact | null; loading: boolean; error: string | null; refresh: () => void } {
+  const queryClient = useQueryClient();
   const [data, setData] = useState<CrossRepoImpact | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -166,11 +149,11 @@ function useCrossRepoImpactData(
     setError(null);
     void (async () => {
       try {
+        // Repos + workspaces come from the shared react-query caches (#403) —
+        // deduped with the matrix / activity panels reacting to the same events.
         const [additionalRepos, allWorkspaces, contention] = await Promise.all([
-          apiFetch<ProjectRepoResponse[]>(`/api/projects/${projectId}/repos`),
-          apiFetch<SlimWorkspace[]>(
-            `/api/workspaces?projectId=${projectId}&status=${NON_CLOSED_WORKSPACE_STATUSES}`,
-          ),
+          fetchProjectRepos(queryClient, projectId),
+          fetchWorkspacesList(queryClient, projectId),
           apiFetch<FileContentionResult>(`/api/projects/${projectId}/file-contention`).catch(() => null),
         ]);
         // A diff is not applicable to direct workspaces.
@@ -212,7 +195,7 @@ function useCrossRepoImpactData(
         setLoading(false);
       }
     })();
-  }, [projectId, leadingRepoPath]);
+  }, [projectId, leadingRepoPath, queryClient]);
 
   // Initial load (and reload when the project/leading repo changes).
   useEffect(() => {

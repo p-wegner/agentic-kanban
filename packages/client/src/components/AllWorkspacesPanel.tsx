@@ -8,6 +8,7 @@ import { CollapsibleSection } from "./CollapsibleSection.js";
 import { openSessionTranscript } from "../lib/sessionTranscriptEvents.js";
 import { AgentStallIndicator, useAgentStallThreshold } from "./AgentStallBadge.js";
 import { useStaleWorkspaceManager } from "../hooks/useStaleWorkspaceManager.js";
+import { useProjectsQuery } from "../hooks/useBoardDataQueries.js";
 import {
   type CrossProjectGroup,
   type WsStatusFilter,
@@ -24,11 +25,6 @@ import {
   formatContextTokens,
   searchPlaceholder,
 } from "../lib/allWorkspacesStatus.js";
-
-interface Project {
-  id: string;
-  name: string;
-}
 
 interface AllWorkspacesPanelProps {
   columns: StatusWithIssues[];
@@ -68,7 +64,10 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
   const [searchQuery, setSearchQuery] = useState("");
   const [closingIdle, setClosingIdle] = useState(false);
   const [projectFilter, setProjectFilter] = useState<string>(activeProjectId ?? "all");
-  const [allProjects, setAllProjects] = useState<Project[]>([]);
+  // Project list for the dropdown — served from the shared projects cache (#403),
+  // so opening this panel does not re-fetch the slow /api/projects endpoint.
+  const { data: allProjectsData } = useProjectsQuery();
+  const allProjects = allProjectsData ?? [];
   const [crossProjectData, setCrossProjectData] = useState<CrossProjectGroup[] | null>(null);
   const [crossProjectLoading, setCrossProjectLoading] = useState(false);
 
@@ -81,13 +80,6 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
     removeStale: handleRemoveStale,
     removeAllStale: handleRemoveAllStale,
   } = useStaleWorkspaceManager({ enabled: statusFilter === "stale", projectFilter });
-
-  // Fetch list of projects for the dropdown
-  useEffect(() => {
-    apiFetch<Project[]>("/api/projects")
-      .then((data) => setAllProjects(data))
-      .catch(() => {});
-  }, []);
 
   // Fetch cross-project data when "All projects" is selected
   useEffect(() => {

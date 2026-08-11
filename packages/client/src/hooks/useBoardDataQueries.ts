@@ -1,8 +1,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { StatusWithIssues, MilestoneResponse } from "@agentic-kanban/shared";
+import type { StatusWithIssues, MilestoneResponse, ProjectRepoResponse } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { boardQueryKeys } from "../lib/boardQueryKeys.js";
 import { fetchBoardColumns } from "../lib/boardColumnsQuery.js";
+import { projectReposQueryOptions } from "../lib/projectReposQuery.js";
 import type { Project, Tag } from "../routes/BoardPage.js";
 
 // Re-exported so existing importers that pull the key factory from this module
@@ -17,6 +18,23 @@ export function useProjectsQuery() {
   return useQuery({
     queryKey: boardQueryKeys.projects,
     queryFn: () => apiFetch<Project[]>("/api/projects"),
+    // /api/projects is one of the slowest endpoints and the list changes only on
+    // explicit project management (which invalidates via the "projects" surface),
+    // so mounting consumers (CreateIssuePanel, AllWorkspacesPanel, …) should not
+    // refetch it for a minute (#403).
+    staleTime: 60_000,
+  });
+}
+
+export function useProjectReposQuery(projectId: string | null | undefined) {
+  return useQuery({
+    enabled: !!projectId,
+    ...(projectId
+      ? projectReposQueryOptions(projectId)
+      : {
+          queryKey: ["projects", "none", "repos"] as const,
+          queryFn: async () => [] as ProjectRepoResponse[],
+        }),
   });
 }
 

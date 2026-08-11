@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { apiFetch } from "../lib/api.js";
+import { useQueryClient } from "@tanstack/react-query";
+import { fetchWorkspacesList, type SlimWorkspaceListItem } from "../lib/workspacesListQuery.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { BOARD_WS_EVENT, type BoardWsEventDetail } from "../lib/useBoardEvents.js";
 import { getAgentQuestions } from "../lib/agentQuestionsStore.js";
@@ -44,20 +45,6 @@ const KIND_LABEL: Record<FlightRecorderEvent["kind"], string> = {
   conflict: "conflict",
 };
 
-/** Slim projection of GET /api/workspaces?projectId= (see listWorkspacesSlim). */
-interface SlimWorkspace {
-  id: string;
-  issueId: string;
-  status: string;
-  isDirect: boolean;
-  latestSessionId?: string | null;
-}
-
-/** Non-terminal statuses worth watching — same allowlist the cross-repo feed uses. */
-const NON_CLOSED_WORKSPACE_STATUSES = [
-  "active", "idle", "blocked", "reviewing", "fixing", "ready_for_merge", "awaiting-plan-approval", "error",
-].join(",");
-
 /**
  * WS reasons after which runtime state (status/questions/stall) may have moved.
  * "reconnect"/"poll" are deliberately excluded: a flapping server produces a
@@ -89,11 +76,12 @@ interface ResolveIssue {
  * server event infrastructure: this is a unified VIEW over what the board already emits.
  */
 function useFlightRecorderEvents(projectId: string | null, resolveIssue?: ResolveIssue) {
+  const queryClient = useQueryClient();
   const { entries: crossRepoEntries } = useCrossRepoActivity(projectId, resolveIssue);
   const thresholdSec = useAgentStallThreshold();
   const activityByIssue = useAgentActivityStore((s) => s.byIssue);
 
-  const [workspaces, setWorkspaces] = useState<SlimWorkspace[]>([]);
+  const [workspaces, setWorkspaces] = useState<SlimWorkspaceListItem[]>([]);
   const [questionEvents, setQuestionEvents] = useState<FlightRecorderEvent[]>([]);
   const [statusEvents, setStatusEvents] = useState<FlightRecorderEvent[]>([]);
   // Re-render on a slow tick so a growing idle gap crosses the stall threshold live.
@@ -134,7 +122,9 @@ function useFlightRecorderEvents(projectId: string | null, resolveIssue?: Resolv
       .catch(() => { /* endpoint down — leave prior questions in place */ });
 
     // Active workspaces → status-transition events (diffed against the prior snapshot).
-    apiFetch<SlimWorkspace[]>(`/api/workspaces?projectId=${projectId}&status=${NON_CLOSED_WORKSPACE_STATUSES}`)
+    // Shared workspaces query (#403): useCrossRepoActivity (mounted above) snapshots
+    // the same list, so opening the runtime feed issues ONE request, not two.
+    fetchWorkspacesList(queryClient, projectId)
       .then((ws) => {
         const now = new Date().toISOString();
         const active = ws.filter((w) => !w.isDirect);
@@ -162,7 +152,7 @@ function useFlightRecorderEvents(projectId: string | null, resolveIssue?: Resolv
         if (fresh.length > 0) setStatusEvents((prev) => mergeFlightRecorderEvents([fresh, prev], 100));
       })
       .catch(() => { /* server down — keep prior snapshot */ });
-  }, [projectId]);
+  }, [projectId, queryClient]);
 
   useEffect(() => {
     if (!projectId) return;
