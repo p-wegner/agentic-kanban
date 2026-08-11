@@ -23,14 +23,49 @@ import {
   getSessionMessagesForSessions,
 } from "../repositories/workspace-summary.repository.js";
 
-// Limit concurrent background git operations to avoid hammering the filesystem
+// Bounded fan-out for background git-backed refresh tasks. The REAL git concurrency
+// control is the process-wide semaphore inside the git-exec adapter (#398) — this
+// limit only caps how many refresh TASKS are in flight at once so a huge board does
+// not build thousands of pending promises.
+//
+// #398: this used to be drop-over-cap (`if (running >= cap) return;`) — the 6th+
+// workspace's refresh was SILENTLY discarded, so the summary cache never warmed past
+// the 5th workspace and every later board rebuild re-paid those git calls inline.
+// Over-cap work now QUEUES and always runs; dropping only happens past a queue bound
+// that steady-state never reaches, and is logged when it does.
 let _bgGitRunning = 0;
 const BG_GIT_CONCURRENCY = 5;
+const BG_GIT_MAX_QUEUE = 1000;
+const _bgGitQueue: Array<() => Promise<void>> = [];
 
-function runBgGit(fn: () => Promise<void>): void {
-  if (_bgGitRunning >= BG_GIT_CONCURRENCY) return;
+/** Exported for tests only — callers inside this module schedule via the helpers below. */
+export function runBgGit(fn: () => Promise<void>): void {
+  if (_bgGitRunning >= BG_GIT_CONCURRENCY) {
+    if (_bgGitQueue.length >= BG_GIT_MAX_QUEUE) {
+      // The exception, not the norm: only a pathological backlog is dropped, loudly.
+      console.warn(`[workspace-summary] bg git queue full (${BG_GIT_MAX_QUEUE}); dropping a refresh task`);
+      return;
+    }
+    _bgGitQueue.push(fn);
+    return;
+  }
   _bgGitRunning++;
-  void fn().finally(() => { _bgGitRunning--; });
+  void runBgGitTask(fn);
+}
+
+async function runBgGitTask(fn: () => Promise<void>): Promise<void> {
+  try {
+    await fn();
+  } catch {
+    // Refresh tasks are best-effort; failures must never wedge the lane.
+  } finally {
+    const next = _bgGitQueue.shift();
+    if (next) {
+      void runBgGitTask(next);
+    } else {
+      _bgGitRunning--;
+    }
+  }
 }
 
 const CONFLICT_CACHE_TTL_MS = 5 * 60 * 1000;
