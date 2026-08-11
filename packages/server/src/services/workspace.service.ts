@@ -54,6 +54,7 @@ export function createWorkspaceService(deps: {
     getWorkspaceDevServerPlan: crud.getWorkspaceDevServerPlan,
     // diff
     getWorkspaceDiff: diff.getWorkspaceDiff,
+    getWorkspaceDiffStats: diff.getWorkspaceDiffStats,
     getConflicts: diff.getConflicts,
     getLatestCommit: diff.getLatestCommit,
     getHandoff: diff.getHandoff,

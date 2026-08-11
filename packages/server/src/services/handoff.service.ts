@@ -236,12 +236,13 @@ export interface HandoffMeta {
 /**
  * Read-only HANDOFF.md metadata for one worktree: whether it exists, its mtime, and a
  * truncated excerpt of the content — the poll+delta feed source (#89). Best-effort:
- * any fs error (missing worktree, unreadable file) resolves to the absent shape.
+ * any fs error (missing worktree/file, unreadable file) resolves to the absent shape.
+ * Fully async (#415): the per-repo `existsSync` blocked the event loop N×M times per
+ * cross-repo panel burst; a missing file now surfaces as the async stat's ENOENT instead.
  */
 export async function readHandoffMeta(workingDir: string, maxChars = MAX_EXCERPT_CHARS): Promise<HandoffMeta> {
   const handoffPath = join(workingDir, HANDOFF_FILENAME);
   try {
-    if (!existsSync(handoffPath)) return { exists: false, updatedAt: null, excerpt: null };
     const [info, content] = await Promise.all([stat(handoffPath), readFile(handoffPath, "utf8")]);
     const excerpt = content.length > maxChars ? content.slice(0, maxChars) + "..." : content;
     return { exists: true, updatedAt: info.mtime.toISOString(), excerpt };

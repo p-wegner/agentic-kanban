@@ -83,14 +83,25 @@ async function leadingRef(workspaceId: string, database: Database): Promise<Work
   const workspace = await getWorkspaceById(workspaceId, database);
   if (!workspace) return null;
   const { repoPath, defaultBranch } = await resolveProjectRepo(workspaceId, database);
-  // AWAITED, not fire-and-forget: `database` is frequently a TRANSACTION client, and an
-  // un-awaited statement still pending on a tx handle deadlocks its commit.
-  try {
-    await repairLeadingRepoRow(workspaceId, workspace, repoPath, defaultBranch, database);
-  } catch (err) {
-    console.warn(`[workspace-all-repos] leading-row read-repair failed for ${workspaceId} (non-fatal):`, err instanceof Error ? err.message : String(err));
+  // #415 — the row is fetched ONCE and the read-repair (INSERT path) only runs when it is
+  // missing. Every GET used to pay a second identical SELECT inside repairLeadingRepoRow
+  // even though the row exists for every post-0110 workspace; on the batched cross-repo
+  // panels that duplicate multiplied by N workspaces per burst.
+  let row = await getLeadingRepoRow(workspaceId, database).catch(() => null);
+  if (!row) {
+    // AWAITED, not fire-and-forget: `database` is frequently a TRANSACTION client, and an
+    // un-awaited statement still pending on a tx handle deadlocks its commit.
+    try {
+      await repairLeadingRepoRow(workspaceId, workspace, repoPath, defaultBranch, database);
+      row = await getLeadingRepoRow(workspaceId, database).catch(() => null);
+    } catch (err) {
+      console.warn(`[workspace-all-repos] leading-row read-repair failed for ${workspaceId} (non-fatal):`, err instanceof Error ? err.message : String(err));
+    }
+  } else {
+    // #226 — the row is the SOURCE, so divergence is REPORTED, not overwritten. Zero extra
+    // queries: the comparison runs on the row/workspace already in hand.
+    warnOnLeadingRowDivergence(workspaceId, workspace, defaultBranch, row);
   }
-  const row = await getLeadingRepoRow(workspaceId, database).catch(() => null);
   return {
     kind: "leading",
     id: workspaceId,
@@ -113,10 +124,9 @@ async function leadingRef(workspaceId: string, database: Database): Promise<Work
 }
 
 /**
- * Converge the physical leading row to the synthesized truth (#222 stage 2). Fire-and-forget
- * from `leadingRef` — a workspace created in the stage-1→2 window (no row) gets one, and a
- * row a dual-write missed is brought back in line, so the rows are trustworthy by the time
- * stage 4 flips the source of truth.
+ * Backfill the physical leading row from the workspace mirror columns (#222 stage 2).
+ * Only called when `leadingRef` found NO row (#415) — a workspace created in the
+ * stage-1→2 window, or pre-migration-0110 — so the common post-0110 read never pays it.
  */
 async function repairLeadingRepoRow(
   workspaceId: string,
@@ -125,40 +135,39 @@ async function repairLeadingRepoRow(
   defaultBranch: string | null,
   database: Database,
 ): Promise<void> {
-  const truth = {
-    workingDir: workspace.workingDir ?? null,
+  await insertLeadingWorkspaceRepo({
+    workspaceId,
+    path: repoPath,
+    defaultBranch,
+    worktreePath: workspace.workingDir ?? null,
     branch: workspace.branch ?? null,
     baseBranch: workspace.baseBranch || defaultBranch,
     baseCommitSha: workspace.baseCommitSha ?? null,
-    mergedHeadSha: workspace.mergedHeadSha ?? null,
-  };
-  const row = await getLeadingRepoRow(workspaceId, database);
-  if (!row) {
-    await insertLeadingWorkspaceRepo({
-      workspaceId,
-      path: repoPath,
-      defaultBranch,
-      worktreePath: truth.workingDir,
-      branch: truth.branch,
-      baseBranch: truth.baseBranch,
-      baseCommitSha: truth.baseCommitSha,
-    }, database);
-    if (truth.mergedHeadSha) {
-      await mirrorWorkspaceColumnsToLeadingRepo(workspaceId, { mergedHeadSha: truth.mergedHeadSha }, database);
-    }
-    return;
+  }, database);
+  if (workspace.mergedHeadSha) {
+    await mirrorWorkspaceColumnsToLeadingRepo(workspaceId, { mergedHeadSha: workspace.mergedHeadSha }, database);
   }
-  // #226 — the row is now the SOURCE, so divergence is REPORTED, not overwritten. Converging
-  // row -> columns (the stage-2 behaviour) would make the row unable to disagree, which is
-  // exactly what made the source flip a no-op by construction. A warning here means a write
-  // path updated a column without mirroring; with the `setWorkspaceStatus` hatch closed at the
-  // type level that should be unreachable, so it is worth seeing rather than silently undoing.
+}
+
+/**
+ * #226 — the row is now the SOURCE, so divergence is REPORTED, not overwritten. Converging
+ * row -> columns (the stage-2 behaviour) would make the row unable to disagree, which is
+ * exactly what made the source flip a no-op by construction. A warning here means a write
+ * path updated a column without mirroring; with the `setWorkspaceStatus` hatch closed at the
+ * type level that should be unreachable, so it is worth seeing rather than silently undoing.
+ */
+function warnOnLeadingRowDivergence(
+  workspaceId: string,
+  workspace: { workingDir: string | null; branch: string | null; baseBranch: string | null; baseCommitSha: string | null; mergedHeadSha: string | null },
+  defaultBranch: string | null,
+  row: RepoRow,
+): void {
   const diverged =
-    row.worktreePath !== truth.workingDir ||
-    row.branch !== truth.branch ||
-    row.baseBranch !== truth.baseBranch ||
-    row.baseCommitSha !== truth.baseCommitSha ||
-    row.mergedHeadSha !== truth.mergedHeadSha;
+    row.worktreePath !== (workspace.workingDir ?? null) ||
+    row.branch !== (workspace.branch ?? null) ||
+    row.baseBranch !== (workspace.baseBranch || defaultBranch) ||
+    row.baseCommitSha !== (workspace.baseCommitSha ?? null) ||
+    row.mergedHeadSha !== (workspace.mergedHeadSha ?? null);
   if (diverged) {
     console.warn(
       `[workspace-all-repos] leading row for ${workspaceId} diverged from the workspace mirror columns — ` +

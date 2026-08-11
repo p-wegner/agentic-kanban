@@ -23,6 +23,25 @@ export interface DiffResponse {
   }>;
 }
 
+/** Per-repo shortstat numbers — one repo of GET /api/workspaces/:id/diff?stats=1 (#415). */
+export interface DiffStatsRepoEntry {
+  /** Sibling repo name; null for the leading repo. */
+  name: string | null;
+  path: string;
+  stats: { filesChanged: number; insertions: number; deletions: number };
+}
+
+/**
+ * Response of GET /api/workspaces/:id/diff?stats=1 (#415): only the shortstat numbers,
+ * never diff bodies — one git spawn per repo instead of three, and a payload orders of
+ * magnitude smaller. `stats` aggregates across all repos; `repos` always lists every
+ * repo (leading first), including single-repo workspaces (one entry).
+ */
+export interface DiffStatsResponse {
+  stats: { filesChanged: number; insertions: number; deletions: number };
+  repos: DiffStatsRepoEntry[];
+}
+
 export interface DiffComment {
   id: string;
   workspaceId: string;
