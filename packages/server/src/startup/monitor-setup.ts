@@ -14,6 +14,7 @@ import { processWorkspaceCandidates } from "./monitor-cycle.js";
 import { createMonitorWorkspaceActions } from "./monitor-workspace-actions.js";
 import { buildMonitorNudgePrompt } from "./review-helpers.js";
 import { snapshotAndCleanStaleDevProcesses, type BoardMonitorResourceSnapshot } from "../services/stale-dev-processes.js";
+import { healWorkspaceSummaryProjection } from "../services/workspace-summary-projection.service.js";
 import { resolveStartPolicy } from "../services/start-policy.service.js";
 import { advanceDuePluginLoops } from "../services/plugin-loop-monitor.js";
 import { scanDirtyMainCheckouts, type DirtyMainCheckoutWarning } from "../services/dirty-main-checkout.js";
@@ -629,9 +630,15 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
   const syncMonitorInterval = setInterval(() => void syncMonitorState(), 30_000);
   syncMonitorInterval.unref?.();
   syncMonitorState().catch(() => {});
-  const resourceSweepInterval = setInterval(() => void runStandaloneResourceSweep(), 5 * 60_000);
+  // #399 (decision 014): the summary-projection heal pass PIGGYBACKS this existing
+  // 5-minute timer (bounded batch of the dirtiest workspaces) — do not give it its own.
+  const resourceSweepInterval = setInterval(() => {
+    void runStandaloneResourceSweep();
+    void healWorkspaceSummaryProjection(db);
+  }, 5 * 60_000);
   resourceSweepInterval.unref?.();
   runStandaloneResourceSweep().catch(() => {});
+  void healWorkspaceSummaryProjection(db);
   return {
     setupMonitorRoutes: (app: Hono) => setupMonitorRoutes(app, monitorState, runMonitorCycle, syncMonitorState, runStandaloneResourceSweep),
     monitorState,
