@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import type { Database } from "../db/index.js";
-import { detectConflicts, getCommitCountAhead, getDiffShortstat, getLatestCommit } from "./git.service.js";
+import { detectConflicts, getDiffShortstat } from "./git.service.js";
+import { isGitProjectionFresh, refreshWorkspaceGitProjection } from "./workspace-summary-projection.service.js";
 import type { ProviderName } from "./agent-provider.js";
 import { isAnalyticsNoise } from "./session-filter.js";
 import { computeWorkspaceCodeMetrics, parseStoredWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
@@ -71,30 +72,6 @@ async function runBgGitTask(fn: () => Promise<void>): Promise<void> {
 const CONFLICT_CACHE_TTL_MS = 5 * 60 * 1000;
 const DIFF_STAT_CACHE_TTL_MS = 30 * 1000;
 const CODE_METRICS_CACHE_TTL_MS = 5 * 60 * 1000;
-const GIT_OPS_CACHE_TTL_MS = 30 * 1000;
-
-// Short-lived per-branch cache for git commit ops. Keyed by workingDir or
-// workingDir:baseBranch. Stale-while-revalidate: a fresh entry is served as-is;
-// an expired entry is served immediately (last-known value) while a background
-// refresh updates it — so steady-state board rebuilds never block on these git
-// subprocesses (same SWR philosophy as diffStats/conflicts; values may be one
-// refresh cycle behind). Only a true first sighting (no entry at all) pays the
-// git call inline, so a fresh boot still shows commit info on the first build.
-const gitOpsCache = new Map<string, { value: unknown; expiresAt: number }>();
-function cachedGitOp<T>(key: string, fn: () => Promise<T>): Promise<T> {
-  const entry = gitOpsCache.get(key);
-  const refresh = () => fn().then(v => {
-    gitOpsCache.set(key, { value: v, expiresAt: Date.now() + GIT_OPS_CACHE_TTL_MS });
-    return v;
-  });
-  if (entry) {
-    if (entry.expiresAt <= Date.now()) {
-      runBgGit(() => refresh().then(() => {}).catch(() => {}));
-    }
-    return Promise.resolve(entry.value as T);
-  }
-  return refresh();
-}
 
 export type { WorkspaceSummary } from "@agentic-kanban/shared";
 
@@ -123,8 +100,9 @@ export async function buildWorkspaceSummaryMap(
   // Phase 3: pick main workspace per issue
   const mainWorkspaceMap = selectMainWorkspaces(wsDetailRows, archivedIssueIds);
 
-  // Phase 4: pre-fetch commit counts and latest commits in parallel
-  const { commitCountByIssue, latestCommitByIssue } = await prefetchGitData(mainWorkspaceMap, defaultBranch, archivedIssueIds);
+  // Phase 4: read commit counts / latest commits from the persisted git projection
+  // (#399, decision 014) — zero git spawns on this path; stale rows get a bg refresh.
+  const { commitCountByIssue, latestCommitByIssue } = readGitProjection(mainWorkspaceMap, defaultBranch, database, archivedIssueIds);
 
   // Phase 5: attach main workspace summary and schedule stale-while-revalidate cache refreshes
   for (const [issueId, summary] of workspaceSummaryMap) {
@@ -265,41 +243,46 @@ function selectMainWorkspaces(
   return mainWorkspaceMap;
 }
 
-// Phase 4: pre-fetch commit counts and latest commit for all non-direct, non-closed main
-// workspaces in parallel to avoid an N+1 pattern (one sequential git call per issue).
-async function prefetchGitData(
+// Phase 4 (#399, decision 014): serve commit counts and latest commits from the PERSISTED
+// git projection on the workspace row — a pure map over rows already fetched, so the hot
+// path spawns no git and awaits nothing. This replaced the in-memory gitOpsCache SWR map
+// (which died on every tsx-watch restart, re-paying 2 spawns × N workspaces per boot, and
+// paid first sightings INLINE). A row whose projection is stale or dirty is still served
+// as-is (last-known values, SWR) while a deduped background refresh writes new facts
+// through to the row — see workspace-summary-projection.service.ts, which also chains the
+// HEAD-advance → diff-stat refresh the inline prefetch used to provide.
+function readGitProjection(
   mainWorkspaceMap: Map<string, WorkspaceDetailRow>,
   defaultBranch: string | null,
+  database: Database,
   archivedIssueIds?: Set<string>,
-): Promise<{
+): {
   commitCountByIssue: Map<string, number | null>;
   latestCommitByIssue: Map<string, { sha: string; message: string } | null>;
-}> {
+} {
   const commitCountByIssue = new Map<string, number | null>();
   const latestCommitByIssue = new Map<string, { sha: string; message: string } | null>();
-  await Promise.all(
-    [...mainWorkspaceMap.entries()]
-      // `workingDir` being SET is not the same as it EXISTING. A worktree that was
-      // removed (or lived in a since-deleted fixture repo) still has its path on the
-      // row, and each such workspace then costs 2 doomed git spawns on every cold
-      // board build — the dominant cost in a 16.7s /board response (#277). A stat
-      // gets the same answer for free.
-      .filter(([issueId, ws]) =>
-        !archivedIssueIds?.has(issueId)
-        && ws.workingDir
-        && ws.status !== "closed"
-        && existsSync(ws.workingDir))
-      .map(async ([issueId, ws]) => {
-        const [latestCommit] = await Promise.all([
-          cachedGitOp(`latestCommit:${ws.workingDir}`, () => getLatestCommit(ws.workingDir!)),
-          (!ws.isDirect && !!(ws.baseBranch || defaultBranch))
-            ? cachedGitOp(`commitCount:${ws.workingDir}:${ws.baseBranch || defaultBranch}`, () => getCommitCountAhead(ws.workingDir!, (ws.baseBranch || defaultBranch) as string))
-                .then(count => { commitCountByIssue.set(issueId, count); })
-            : Promise.resolve(),
-        ]);
-        latestCommitByIssue.set(issueId, latestCommit);
-      })
-  );
+  const nowMs = Date.now();
+  for (const [issueId, ws] of mainWorkspaceMap) {
+    // `workingDir` being SET is not the same as it EXISTING. A worktree that was
+    // removed (or lived in a since-deleted fixture repo) still has its path on the
+    // row, and each such workspace would otherwise schedule 2 doomed git spawns on
+    // every board build (#277). A stat gets the same answer for free.
+    if (archivedIssueIds?.has(issueId)) continue;
+    if (!ws.workingDir || ws.status === "closed" || !existsSync(ws.workingDir)) continue;
+
+    latestCommitByIssue.set(
+      issueId,
+      ws.summaryHeadSha ? { sha: ws.summaryHeadSha, message: ws.summaryHeadMessage ?? "" } : null,
+    );
+    if (!ws.isDirect && !!(ws.baseBranch || defaultBranch) && ws.summaryCommitCount !== null) {
+      commitCountByIssue.set(issueId, ws.summaryCommitCount);
+    }
+
+    if (!isGitProjectionFresh(ws, nowMs)) {
+      runBgGit(() => refreshWorkspaceGitProjection(ws, defaultBranch, database));
+    }
+  }
   return { commitCountByIssue, latestCommitByIssue };
 }
 

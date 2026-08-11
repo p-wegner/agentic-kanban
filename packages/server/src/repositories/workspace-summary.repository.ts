@@ -47,6 +47,12 @@ export async function fetchWorkspaceDetailRows(issueIds: string[], database: Dat
       workingDir: sql<string | null>`coalesce(${leadingRepo.worktreePath}, ${workspaces.workingDir})`,
       baseBranch: sql<string | null>`coalesce(${leadingRepo.baseBranch}, ${workspaces.baseBranch})`,
       isDirect: workspaces.isDirect,
+      // #399 (decision 014) — the persisted git projection, served on the hot path.
+      summaryHeadSha: workspaces.summaryHeadSha,
+      summaryHeadMessage: workspaces.summaryHeadMessage,
+      summaryCommitCount: workspaces.summaryCommitCount,
+      summaryGitRefreshedAt: workspaces.summaryGitRefreshedAt,
+      summaryDirty: workspaces.summaryDirty,
       conflictCacheCheckedAt: workspaces.conflictCacheCheckedAt,
       conflictCacheHasConflicts: workspaces.conflictCacheHasConflicts,
       conflictCacheFiles: workspaces.conflictCacheFiles,
