@@ -149,13 +149,38 @@ export function createWorkspaceActionsRoute(
     return c.json(await workspaceService.getLatestCommit(id));
   });
 
-  // GET /api/workspaces/:id/diff
+  // GET /api/workspaces/:id/diff — full diff, or with `?stats=1` only the per-repo
+  // shortstat numbers (#415: one spawn per repo instead of three, tiny payload).
+  //
+  // #415 ETag-before-compute — STATS VARIANT ONLY: a short-lived memo of the last
+  // validator served per workspace. When If-None-Match matches a memo still within its
+  // window, the 304 is answered WITHOUT recomputing — the old pattern always paid the
+  // git fan-out and hashed the body just to say 304. The full-diff variant deliberately
+  // keeps compute-then-compare: its consumers (review, diff panel) must never see a
+  // stale 304 after a commit, and no cheap per-workspace change signal reaches here.
+  // The stats consumers are polling dashboards that tolerate the same ~10s staleness
+  // as the batch endpoint's memo.
+  const DIFF_STATS_ETAG_MEMO_TTL_MS = 10_000;
+  const diffStatsEtagMemo = new Map<string, { etag: string; at: number }>();
   router.get("/:id/diff", async (c) => {
     const id = c.req.param("id");
-    const result = await workspaceService.getWorkspaceDiff(id);
+    const statsOnly = ["1", "true", "yes"].includes((c.req.query("stats") || "").toLowerCase());
+    const ifNoneMatch = c.req.header("if-none-match");
+    if (statsOnly && ifNoneMatch) {
+      const memo = diffStatsEtagMemo.get(id);
+      if (memo && memo.etag === ifNoneMatch && Date.now() - memo.at < DIFF_STATS_ETAG_MEMO_TTL_MS) {
+        return new Response(null, { status: 304, headers: { ETag: memo.etag } });
+      }
+    }
+    const result = statsOnly
+      ? await workspaceService.getWorkspaceDiffStats(id)
+      : await workspaceService.getWorkspaceDiff(id);
     const body = JSON.stringify(result);
     const etag = `"${createHash("sha1").update(body).digest("hex").slice(0, 16)}"`;
-    const ifNoneMatch = c.req.header("if-none-match");
+    if (statsOnly) {
+      if (diffStatsEtagMemo.size > 2000) diffStatsEtagMemo.clear(); // crude cap; entries are tiny
+      diffStatsEtagMemo.set(id, { etag, at: Date.now() });
+    }
     if (ifNoneMatch === etag) {
       return new Response(null, { status: 304, headers: { ETag: etag } });
     }

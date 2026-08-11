@@ -1,5 +1,5 @@
 import type { Database } from "../db/index.js";
-import type { WorkspaceHandoffResponse, WorkspaceHandoffRepoEntry } from "@agentic-kanban/shared";
+import type { DiffStatsResponse, DiffStatsRepoEntry, WorkspaceHandoffResponse, WorkspaceHandoffRepoEntry } from "@agentic-kanban/shared";
 import * as realGitService from "./git.service.js";
 import { getWorkspaceById, resolveProjectRepo } from "../repositories/workspace.repository.js";
 import { getDiffComments } from "../repositories/session.repository.js";
@@ -7,6 +7,10 @@ import { parseDiffStats } from "./board-aggregation.service.js";
 import { WorkspaceError, requireBaseBranch, type GitService } from "./workspace-internals.js";
 import { listWorkspaceRepos } from "../repositories/repo.repository.js";
 import { readHandoffMeta, type HandoffMeta } from "./handoff.service.js";
+
+/** Freshness window for serving `?stats=1` from the persisted diff_stat_cache columns —
+ * the same 30s SWR cadence that maintains them (workspace-diff-stats / the #399 chain). */
+const DIFF_STAT_CACHE_TTL_MS = 30_000;
 
 export function createWorkspaceDiffService(deps: {
   database: Database;
@@ -97,6 +101,62 @@ export function createWorkspaceDiffService(deps: {
     return repoSections ? { diff, stats, comments, conflicts, repos: repoSections } : { diff, stats, comments, conflicts };
   }
 
+  /**
+   * #415 — the `?stats=1` diff variant: per-repo shortstat numbers only, no diff bodies.
+   * One `git diff --shortstat` per repo (M spawns) instead of the full diff + conflict
+   * probe + untracked-content inlining (3M spawns) the heatmap used to pay to read three
+   * integers. The leading repo is served from the persisted `diff_stat_cache_*` columns
+   * when their stamp is fresh (the same 30s SWR cadence the summary projection chains),
+   * dropping to M-1 spawns on a warm row.
+   */
+  async function getWorkspaceDiffStats(id: string): Promise<DiffStatsResponse> {
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
+    if (!workspace.workingDir && !workspace.branch) {
+      throw new WorkspaceError("Workspace not set up", "BAD_REQUEST");
+    }
+    const { repoPath, defaultBranch } = await resolveProjectRepo(id, database);
+    const baseBranch = workspace.isDirect ? "HEAD" : requireBaseBranch(workspace.baseBranch || defaultBranch);
+
+    const zero = { filesChanged: 0, insertions: 0, deletions: 0 };
+    const cacheFresh =
+      workspace.diffStatCacheCheckedAt !== null &&
+      Date.now() - new Date(workspace.diffStatCacheCheckedAt).getTime() < DIFF_STAT_CACHE_TTL_MS;
+    let leadingStats: { filesChanged: number; insertions: number; deletions: number };
+    if (cacheFresh) {
+      leadingStats = {
+        filesChanged: workspace.diffStatCacheFilesChanged ?? 0,
+        insertions: workspace.diffStatCacheInsertions ?? 0,
+        deletions: workspace.diffStatCacheDeletions ?? 0,
+      };
+    } else if (workspace.workingDir) {
+      leadingStats = await gitService.getDiffShortstat(workspace.workingDir, baseBranch).catch(() => zero);
+    } else {
+      leadingStats = zero;
+    }
+
+    const repoEntries: DiffStatsRepoEntry[] = [{ name: null, path: repoPath, stats: leadingStats }];
+    if (!workspace.isDirect) {
+      for (const repo of await listWorkspaceRepos(id, database)) {
+        let stats = zero;
+        if (repo.worktreePath) {
+          stats = await gitService.getDiffShortstat(repo.worktreePath, repo.baseBranch ?? baseBranch).catch(() => zero);
+        }
+        repoEntries.push({ name: repo.name, path: repo.path, stats });
+      }
+    }
+
+    const total = repoEntries.reduce(
+      (acc, r) => ({
+        filesChanged: acc.filesChanged + r.stats.filesChanged,
+        insertions: acc.insertions + r.stats.insertions,
+        deletions: acc.deletions + r.stats.deletions,
+      }),
+      { ...zero },
+    );
+    return { stats: total, repos: repoEntries };
+  }
+
   async function getConflicts(id: string) {
     const workspace = await getWorkspaceById(id, database);
     if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
@@ -162,5 +222,5 @@ export function createWorkspaceDiffService(deps: {
     return { exists: leading.exists, updatedAt: leading.updatedAt, excerpt: leading.excerpt, repos };
   }
 
-  return { getWorkspaceDiff, getConflicts, getLatestCommit, getHandoff };
+  return { getWorkspaceDiff, getWorkspaceDiffStats, getConflicts, getLatestCommit, getHandoff };
 }
