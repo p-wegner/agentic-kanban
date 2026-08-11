@@ -1,7 +1,8 @@
 import { isTerminalStatusView } from "@agentic-kanban/shared";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
-import { issues, preferences, projectStatuses, workspaces, workflowNodes, sessions, sessionMessages } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, workspaces, workflowNodes, sessions, sessionMessages } from "@agentic-kanban/shared/schema";
 import { and, count, eq, inArray, ne, or } from "drizzle-orm";
+import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import { createMergeQueueService } from "../services/merge-queue.service.js";
@@ -16,6 +17,15 @@ import { reconcileDriveCompletion } from "./drive-completion-reconciler.js";
 import { reconcileProjectCompletion } from "./project-completion-reconciler.js";
 
 const DEFAULT_INTERVAL_MS = 30_000;
+/**
+ * How often the three drift-healing reconcile passes run when there are NO merge
+ * candidates (#402). They used to run every 30s tick unconditionally — three
+ * reconciliation sweeps on an idle board. With candidates present they still run
+ * every tick (they may unblock/complete the very work about to merge); with zero
+ * candidates they fall back to every Nth tick (10 × 30s ≈ 5 min), which keeps
+ * their drift-healer role with a bounded worst-case latency.
+ */
+const RECONCILE_FALLBACK_EVERY_TICKS = 10;
 const MERGEABLE_STATUS_NAMES = ["In Review", "AI Reviewed"] as const;
 /** Cap on how many times the orchestrator launches a batch reconciler for the SAME stranded set before leaving it for a human. */
 const MAX_RECONCILER_ATTEMPTS = 2;
@@ -42,8 +52,13 @@ export function createAutoMergeOrchestrator(deps: {
   database: Database;
   boardEvents?: BoardEvents;
   getSessionManager?: () => SessionManager;
+  /** Test override for the zero-candidate reconcile fallback cadence (default 10 ticks). */
+  reconcileFallbackEveryTicks?: number;
 }) {
   const { database, boardEvents, getSessionManager } = deps;
+  const reconcileFallbackEveryTicks = deps.reconcileFallbackEveryTicks ?? RECONCILE_FALLBACK_EVERY_TICKS;
+  /** Counts effective runOnce passes; drives the zero-candidate reconcile fallback. */
+  let reconcileTick = 0;
   const state: AutoMergeOrchestratorState = {
     running: false,
     timer: null,
@@ -63,16 +78,15 @@ export function createAutoMergeOrchestrator(deps: {
   const mergeService = createWorkspaceMergeService({ database, boardEvents, getSessionManager });
 
   async function isEnabled() {
-    const prefRows = await database
-      .select({ key: preferences.key, value: preferences.value })
-      .from(preferences)
-      .where(inArray(preferences.key, ["auto_merge", "auto_monitor", "merge_strategy"]));
+    // Short-TTL cached full scan (#402) — shared with findCompletedWorkspaceIds in
+    // the same tick, so one underlying query serves both.
+    const prefRows = await getAllPreferencesCached(database);
     const prefMap = new Map(prefRows.map((row) => [row.key, row.value]));
     return isAutoMergeEnabled(prefMap) && resolveMergeStrategy(prefMap) === "merge_queue";
   }
 
   async function findCompletedWorkspaceIds(): Promise<string[]> {
-    const prefRows = await database.select().from(preferences);
+    const prefRows = await getAllPreferencesCached(database);
     const prefMap = new Map(prefRows.map((row) => [row.key, row.value]));
     const autoMergeInReview = getBool(prefMap, "auto_merge_in_review");
 
@@ -246,32 +260,48 @@ export function createAutoMergeOrchestrator(deps: {
     state.lastSkipped = 0;
 
     try {
-      const reconciled = await reconcileCompletionStates(database);
-      if (reconciled > 0) {
-        console.log(`[auto-merge] reconcileCompletionStates: unblocked ${reconciled} stuck workspace(s)`);
+      // Gate the three drift-healing reconcile passes (#402): with zero merge
+      // candidates they run only on the slow fallback cadence (every
+      // `reconcileFallbackEveryTicks`th tick, first tick included so startup still
+      // heals immediately) or when forced. With candidates present they always run
+      // first — reconcileCompletionStates may unblock the very work about to merge —
+      // so candidates are re-queried after the passes.
+      reconcileTick++;
+      const fallbackDue = force || reconcileFallbackEveryTicks <= 1 || reconcileTick % reconcileFallbackEveryTicks === 1;
+      let workspaceIds = await findCompletedWorkspaceIds();
+
+      if (workspaceIds.length > 0 || fallbackDue) {
+        const reconciled = await reconcileCompletionStates(database);
+        if (reconciled > 0) {
+          console.log(`[auto-merge] reconcileCompletionStates: unblocked ${reconciled} stuck workspace(s)`);
+        }
+
+        // Enforce the drive completion contract (#801): keep each active drive's meta in
+        // In Progress until all its children are Done, then drive the meta itself to Done.
+        const driveChanges = await reconcileDriveCompletion(database, { boardEvents }).catch((err) => {
+          console.warn("[auto-merge] reconcileDriveCompletion failed (non-fatal):", err instanceof Error ? err.message : String(err));
+          return 0;
+        });
+        if (driveChanges > 0) {
+          console.log(`[auto-merge] reconcileDriveCompletion: applied ${driveChanges} drive completion-contract change(s)`);
+        }
+
+        // Inform the user when a project's backlog is fully implemented (#848). Edge-triggered:
+        // broadcasts `project_completed` once per completion, not every cycle.
+        const completionChanges = await reconcileProjectCompletion(database, { boardEvents }).catch((err) => {
+          console.warn("[auto-merge] reconcileProjectCompletion failed (non-fatal):", err instanceof Error ? err.message : String(err));
+          return 0;
+        });
+        if (completionChanges > 0) {
+          console.log(`[auto-merge] reconcileProjectCompletion: ${completionChanges} project completion state change(s)`);
+        }
+
+        // The passes may have unblocked/reclassified workspaces — re-query so this
+        // tick still merges what they just healed (previous behaviour, where the
+        // passes always ran before the candidate query).
+        workspaceIds = await findCompletedWorkspaceIds();
       }
 
-      // Enforce the drive completion contract (#801): keep each active drive's meta in
-      // In Progress until all its children are Done, then drive the meta itself to Done.
-      const driveChanges = await reconcileDriveCompletion(database, { boardEvents }).catch((err) => {
-        console.warn("[auto-merge] reconcileDriveCompletion failed (non-fatal):", err instanceof Error ? err.message : String(err));
-        return 0;
-      });
-      if (driveChanges > 0) {
-        console.log(`[auto-merge] reconcileDriveCompletion: applied ${driveChanges} drive completion-contract change(s)`);
-      }
-
-      // Inform the user when a project's backlog is fully implemented (#848). Edge-triggered:
-      // broadcasts `project_completed` once per completion, not every cycle.
-      const completionChanges = await reconcileProjectCompletion(database, { boardEvents }).catch((err) => {
-        console.warn("[auto-merge] reconcileProjectCompletion failed (non-fatal):", err instanceof Error ? err.message : String(err));
-        return 0;
-      });
-      if (completionChanges > 0) {
-        console.log(`[auto-merge] reconcileProjectCompletion: ${completionChanges} project completion state change(s)`);
-      }
-
-      const workspaceIds = await findCompletedWorkspaceIds();
       if (workspaceIds.length === 0) return state;
 
       const plan = await queueService.computePlan(workspaceIds);

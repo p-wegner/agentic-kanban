@@ -15,6 +15,7 @@ import { getPreference } from "../repositories/preferences.repository.js";
 
 vi.mock("../repositories/preferences.repository.js", () => ({
   getPreference: vi.fn(),
+  getAllPreferencesCached: vi.fn(async () => []),
 }));
 
 vi.mock("../db/index.js", () => ({
@@ -72,8 +73,9 @@ describe("startup timers are restart-safe for HMR-style reloads", () => {
   });
 
   it("recreates scheduled-tasks timers instead of accumulating handles", () => {
-    const first = setupScheduledTasks(4123);
-    const second = setupScheduledTasks(4123);
+    const runScheduledRun = vi.fn(async () => ({}));
+    const first = setupScheduledTasks({ runScheduledRun });
+    const second = setupScheduledTasks({ runScheduledRun });
 
     expect(clearTimeoutSpy).toHaveBeenCalledOnce();
     expect(clearIntervalSpy).toHaveBeenCalledOnce();
