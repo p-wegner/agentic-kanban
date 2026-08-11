@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { RepoMergeStatusResponse, WorkspaceHandoffResponse } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
+import { fetchWorkspacesList } from "../lib/workspacesListQuery.js";
 import { BOARD_WS_EVENT, type BoardWsEventDetail } from "../lib/useBoardEvents.js";
 import {
   reduceRepoMergeStatusDelta,
@@ -10,21 +12,6 @@ import {
   type CrossRepoActivityEntry,
 } from "../lib/crossRepoActivity.js";
 import { LEADING_REPO_LABEL } from "../lib/groupConflictsByRepo.js";
-
-/** Slim projection of GET /api/workspaces?projectId= (see listWorkspacesSlim). */
-interface SlimWorkspace {
-  id: string;
-  issueId: string;
-  branch: string | null;
-  status: string;
-  mergedAt: string | null;
-  isDirect: boolean;
-}
-
-/** Non-terminal statuses worth watching — same allowlist the #82 monitor uses. */
-const NON_CLOSED_WORKSPACE_STATUSES = [
-  "active", "idle", "blocked", "reviewing", "fixing", "ready_for_merge", "awaiting-plan-approval", "error",
-].join(",");
 
 /**
  * WS `board_changed` reasons that can move cross-repo state (a merge landing, a
@@ -73,6 +60,7 @@ export function useCrossRepoActivity(
   projectId: string | null,
   resolveIssue?: (issueId: string) => { issueNumber: number | null } | undefined,
 ): UseCrossRepoActivityResult {
+  const queryClient = useQueryClient();
   const [entries, setEntries] = useState<CrossRepoActivityEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [multiRepo, setMultiRepo] = useState(false);
@@ -86,9 +74,9 @@ export function useCrossRepoActivity(
     inFlightRef.current = true;
     setLoading(true);
     try {
-      const workspaces = await apiFetch<SlimWorkspace[]>(
-        `/api/workspaces?projectId=${projectId}&status=${NON_CLOSED_WORKSPACE_STATUSES}`,
-      );
+      // Shared workspaces query (#403): dedupes with the flight recorder / matrix /
+      // heatmap panels so one WS burst costs one list request across all of them.
+      const workspaces = await fetchWorkspacesList(queryClient, projectId);
       const active = workspaces.filter((w) => !w.isDirect);
       const timestamp = new Date().toISOString();
       const newEntries: CrossRepoActivityEntry[] = [];
@@ -189,7 +177,7 @@ export function useCrossRepoActivity(
       inFlightRef.current = false;
       setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, queryClient]);
 
   // Initial baseline snapshot (emits nothing) + live re-snapshot on relevant WS reasons.
   // Trailing 250ms debounce per burst; and because `refresh` early-returns while a

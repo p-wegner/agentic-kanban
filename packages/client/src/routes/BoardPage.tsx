@@ -12,6 +12,7 @@ import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
 import { SkeletonBoard } from "../components/SkeletonBoard.js";
 import { showToast } from "../components/Toast.js";
 import { apiFetch } from "../lib/api.js";
+import { fetchProjectRepos } from "../lib/projectReposQuery.js";
 import { matchesBoardFilters } from "../lib/boardFiltering.js";
 import { reconcileSelectedIssue } from "../lib/selectedIssueSync.js";
 import { createQuickUpdateHandlers } from "../lib/issueQuickUpdates.js";
@@ -474,11 +475,11 @@ export function BoardPage() {
     let cancelled = false;
     setHasAdditionalRepos(false);
     if (!activeProjectId) return;
-    apiFetch<unknown[]>(`/api/projects/${activeProjectId}/repos`)
+    fetchProjectRepos(queryClient, activeProjectId)
       .then((rows) => { if (!cancelled) setHasAdditionalRepos(rows.length > 0); })
       .catch(() => { /* single-repo behavior on failure */ });
     return () => { cancelled = true; };
-  }, [activeProjectId]);
+  }, [activeProjectId, queryClient]);
 
   // Keyboard shortcuts (cursor/search/focus state is read from the board
   // stores inside the hook — no setter wiring from this container).

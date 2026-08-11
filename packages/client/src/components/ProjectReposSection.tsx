@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { ProjectRepoResponse } from "@agentic-kanban/shared";
-import { apiDelete, apiFetch, apiPatch, apiPost } from "../lib/api.js";
+import { apiDelete, apiPatch, apiPost } from "../lib/api.js";
+import { fetchProjectRepos, invalidateProjectRepos } from "../lib/projectReposQuery.js";
 import { showToast } from "./Toast.js";
 import { CollapsibleSection } from "./SettingsPanel.shared.js";
 import { buildRepoPatch, repoFormFromResponse, type RepoEditFormState } from "./repoEditPayload.js";
@@ -18,14 +20,18 @@ export function ProjectReposSection({ projectId }: { projectId: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
-  const load = useCallback(async () => {
+  // Served from the shared repos cache (#403); `fresh: true` (after a mutation)
+  // invalidates first so every cached consumer sees the change too.
+  const load = useCallback(async (opts?: { fresh?: boolean }) => {
     try {
-      setRepos(await apiFetch<ProjectRepoResponse[]>(`/api/projects/${projectId}/repos`));
+      if (opts?.fresh) await invalidateProjectRepos(queryClient, projectId);
+      setRepos(await fetchProjectRepos(queryClient, projectId));
     } catch {
       // section stays empty; non-fatal
     }
-  }, [projectId]);
+  }, [projectId, queryClient]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -45,7 +51,7 @@ export function ProjectReposSection({ projectId }: { projectId: string }) {
         : { path: value };
       await apiPost(`/api/projects/${projectId}/repos`, body);
       setInput("");
-      await load();
+      await load({ fresh: true });
       showToast("Repo added to project", "success");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -71,7 +77,7 @@ export function ProjectReposSection({ projectId }: { projectId: string }) {
     setEditingId(null);
     try {
       await apiPatch(`/api/projects/${projectId}/repos/${repo.id}`, patch);
-      await load();
+      await load({ fresh: true });
       showToast("Repo config saved", "success");
     } catch (err) {
       setRepos(prev);
@@ -82,7 +88,7 @@ export function ProjectReposSection({ projectId }: { projectId: string }) {
   async function handleRemove(repoId: string) {
     try {
       await apiDelete(`/api/projects/${projectId}/repos/${repoId}`);
-      await load();
+      await load({ fresh: true });
       showToast("Repo removed from project", "success");
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to remove repo", "error");

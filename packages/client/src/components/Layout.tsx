@@ -1,10 +1,12 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { fetchProjectRepos, invalidateProjectRepos } from "../lib/projectReposQuery.js";
 import { ProjectTabs } from "./ProjectTabs.js";
 import { ProjectSelector } from "./ProjectSelector.js";
 import { NotificationBell } from "./NotificationBell.js";
 import type { NotificationEvent } from "../hooks/useActivityNotifications.js";
 import { useBoardFilterStore } from "../stores/boardFilterStore.js";
-import { apiDelete, apiFetch, apiPost } from "../lib/api.js";
+import { apiDelete, apiPost } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
 import type { ProjectRepoResponse } from "@agentic-kanban/shared";
 
@@ -109,6 +111,7 @@ export function Layout({
   // Additional (sibling) repos of the active project — powers the ++ button badge
   // and the manage-repositories modal (list + remove). The leading repo is not a
   // row here; it lives on the project's repoPath/repoName and is shown separately.
+  const queryClient = useQueryClient();
   const [projectRepos, setProjectRepos] = useState<ProjectRepoResponse[]>([]);
   const [removingRepoId, setRemovingRepoId] = useState<string | null>(null);
   const [promotingRepoId, setPromotingRepoId] = useState<string | null>(null);
@@ -157,17 +160,20 @@ export function Layout({
     }
   }
 
-  const loadProjectRepos = useCallback(async (projectId: string | null | undefined) => {
+  // Served from the shared repos cache (#403); `fresh: true` (after a mutation)
+  // invalidates first so every cached consumer sees the change too.
+  const loadProjectRepos = useCallback(async (projectId: string | null | undefined, opts?: { fresh?: boolean }) => {
     if (!projectId) {
       setProjectRepos([]);
       return;
     }
     try {
-      setProjectRepos(await apiFetch<ProjectRepoResponse[]>(`/api/projects/${projectId}/repos`));
+      if (opts?.fresh) await invalidateProjectRepos(queryClient, projectId);
+      setProjectRepos(await fetchProjectRepos(queryClient, projectId));
     } catch {
       // non-fatal: badge/list just stays empty
     }
-  }, []);
+  }, [queryClient]);
 
   // Keep the sibling-repo count (button badge) in sync with the active project.
   useEffect(() => {
@@ -193,7 +199,7 @@ export function Layout({
       if (r.error) throw new Error(r.error);
       // Stay open so multiple repos can be added and the new one appears in the list.
       setAddRepoInput("");
-      await loadProjectRepos(activeProjectId);
+      await loadProjectRepos(activeProjectId, { fresh: true });
       showToast(`Added repo "${r.name ?? value}" to the project`, "success");
     } catch (err) {
       setAddRepoError(err instanceof Error ? err.message : String(err));
@@ -210,7 +216,7 @@ export function Layout({
     setRemovingRepoId(repo.id);
     try {
       await apiDelete(`/api/projects/${activeProjectId}/repos/${repo.id}`);
-      await loadProjectRepos(activeProjectId);
+      await loadProjectRepos(activeProjectId, { fresh: true });
       showToast(`Removed "${repo.name ?? repo.path}" from the project`, "success");
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to remove repo", "error");
@@ -229,7 +235,7 @@ export function Layout({
       await apiPost(`/api/projects/${activeProjectId}/repos/${repo.id}/promote`, {});
       // The project row's repoName changes; the WS "project_updated" broadcast reloads the
       // project list (leading display), and this refreshes the sibling list here.
-      await loadProjectRepos(activeProjectId);
+      await loadProjectRepos(activeProjectId, { fresh: true });
       showToast(`"${repo.name ?? repo.path}" is now the leading repo`, "success");
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to change the leading repo", "error");

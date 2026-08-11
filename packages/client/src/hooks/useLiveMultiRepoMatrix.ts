@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { ProjectRepoResponse, StatusWithIssues } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
+import { fetchWorkspacesList } from "../lib/workspacesListQuery.js";
+import { fetchProjectRepos } from "../lib/projectReposQuery.js";
 import {
   buildMultiRepoMatrix,
   type MatrixWorkspaceInput,
@@ -9,34 +12,6 @@ import {
 } from "../lib/multiRepoMatrix.js";
 import { diffMultiRepoMatrix, type MatrixSnapshot } from "../lib/diffMultiRepoMatrix.js";
 import { BOARD_WS_EVENT, type BoardWsEventDetail } from "../lib/useBoardEvents.js";
-
-/** Slim projection of GET /api/workspaces?projectId= (see listWorkspacesSlim). */
-interface SlimWorkspace {
-  id: string;
-  issueId: string;
-  branch: string | null;
-  status: string;
-  mergedAt: string | null;
-  isDirect: boolean;
-}
-
-/**
- * Every non-terminal workspace status (terminal = closed/merged). The matrix shows
- * "active (non-closed) workspaces" per the spec — an allowlist of only the running
- * states would silently drop `ready_for_merge`/`blocked`/`error` workspaces, and a
- * ready-for-merge workspace with stranded siblings is exactly the case (#69) this
- * monitor exists to surface. Kept in sync with WorkspaceStatus (workspace-status.ts).
- */
-const NON_CLOSED_WORKSPACE_STATUSES = [
-  "active",
-  "idle",
-  "blocked",
-  "reviewing",
-  "fixing",
-  "ready_for_merge",
-  "awaiting-plan-approval",
-  "error",
-].join(",");
 
 /**
  * Board-event reasons that can change a repo × workspace cell. A merge landing, a
@@ -98,6 +73,7 @@ export function useLiveMultiRepoMatrix(
   leadingRepoPath: string | null,
   columns: StatusWithIssues[],
 ): UseLiveMultiRepoMatrixResult {
+  const queryClient = useQueryClient();
   const [data, setData] = useState<MonitorData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -125,11 +101,11 @@ export function useLiveMultiRepoMatrix(
     setError(null);
     void (async () => {
       try {
+        // Both lists come from the shared react-query caches (#403) — deduped
+        // with the other monitor panels reacting to the same board events.
         const [additionalRepos, allWorkspaces] = await Promise.all([
-          apiFetch<ProjectRepoResponse[]>(`/api/projects/${activeProjectId}/repos`),
-          apiFetch<SlimWorkspace[]>(
-            `/api/workspaces?projectId=${activeProjectId}&status=${NON_CLOSED_WORKSPACE_STATUSES}`,
-          ),
+          fetchProjectRepos(queryClient, activeProjectId),
+          fetchWorkspacesList(queryClient, activeProjectId),
         ]);
         // repo-merge-status is not applicable to direct workspaces (400).
         const active = allWorkspaces.filter((w) => !w.isDirect);
@@ -193,7 +169,7 @@ export function useLiveMultiRepoMatrix(
         setLoading(false);
       }
     })();
-  }, [activeProjectId, leadingRepoPath]);
+  }, [activeProjectId, leadingRepoPath, queryClient]);
 
   // Initial load (and reload when the project/leading repo changes).
   useEffect(() => {

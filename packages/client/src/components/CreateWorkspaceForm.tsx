@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { apiFetch, apiPost } from "../lib/api.js";
+import { fetchProjectRepos } from "../lib/projectReposQuery.js";
 import { getSettings, setSettings } from "../lib/settingsStore.js";
 import { suggestBranchName, sanitizeBranchName } from "@agentic-kanban/shared/lib/branch";
 import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
@@ -74,6 +76,7 @@ function profileOptionLabel(provider: AgentProvider, name: string): string {
 }
 
 export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCreated, onCancel, onSubmitting, onSettled }: CreateWorkspaceFormProps) {
+  const queryClient = useQueryClient();
   const suggestion = suggestBranchName(issue);
 
   const [branchName, setBranchName] = useState(suggestion);
@@ -128,7 +131,8 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
         .catch(() => setBranches(null));
       // Additional repos (multi-repo project). All checked by default so the
       // default behavior fans out to every repo exactly like before (#91).
-      apiFetch<ProjectRepoResponse[]>(`/api/projects/${project.id}/repos`)
+      // Served from the shared repos cache (#403) — warm opens skip the network.
+      fetchProjectRepos(queryClient, project.id)
         .then((rows) => {
           setProjectRepos(rows);
           setSelectedRepoIds(new Set(rows.map((r) => r.id)));
