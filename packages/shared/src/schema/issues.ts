@@ -47,6 +47,9 @@ export const issues = sqliteTable("issues", {
   statusIdStatusChangedAtIdx: index("idx_issues_status_id_status_changed_at").on(table.statusId, table.statusChangedAt),
   projectIdStatusIdStatusChangedAtIdx: index("idx_issues_project_id_status_id_status_changed_at").on(table.projectId, table.statusId, table.statusChangedAt),
   projectIdIssueNumberIdx: uniqueIndex("idx_issues_project_id_issue_number").on(table.projectId, table.issueNumber),
+  // Plugin-loop unit lookups: three prefix-LIKE queries on external_key per loop per
+  // poll, always project-scoped (migration 0115, 2026-08-11 perf audit).
+  projectIdExternalKeyIdx: index("idx_issues_project_external_key").on(table.projectId, table.externalKey),
 }));
 
 export const issuesRelations = relations(issues, ({ one, many }) => ({

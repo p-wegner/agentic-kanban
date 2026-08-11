@@ -1,4 +1,5 @@
 import { projects } from "@agentic-kanban/shared/schema";
+import { isNull } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { listPendingApprovals } from "./approvals.js";
@@ -36,86 +37,99 @@ export interface InboxItem {
   createdAt: string | null;
 }
 
+/** The slice of a loop status the inbox actually reads off the bulk plugin surface. */
+type InboxLoopStatus = Awaited<ReturnType<ReturnType<typeof getPluginService>["listLoopSurfacesForProjects"]>> extends Map<string, Array<infer L>> ? L : never;
+
 /**
- * Plugin-gate + agent-question items for ONE project. Split out of listInbox so the
- * per-project work can be fanned out (#348) instead of awaited in series.
- *
- * The two try/catch blocks are per-source on purpose: one project's broken plugin
- * surface must not empty the whole inbox.
+ * Plugin-gate items for ONE project, from the pre-fetched bulk loop surface.
+ * Gates use the same visibility rule as the gate card — a gate with round tickets
+ * still open is not actionable yet.
  */
-async function collectProjectInboxItems(
+function collectGateItems(
+  project: { id: string; name: string },
+  loops: InboxLoopStatus[],
+): InboxItem[] {
+  const items: InboxItem[] = [];
+  for (const loop of loops) {
+    if (!loop.gate || loop.openTickets > 0) continue;
+    items.push({
+      kind: "plugin-gate",
+      projectId: project.id,
+      projectName: project.name,
+      title: loop.gate.question,
+      detail: `${loop.pluginName} — ${loop.label}`
+        + (loop.gateRecommendation ? ` · Butler recommends: ${loop.gateRecommendation.actionId}` : ""),
+      link: { view: "plugin-views", pluginId: loop.pluginId, pluginSlug: loop.pluginSlug, loopName: loop.name },
+      // The gate's own birth, NOT `lastAdvanceAt` — the monitor re-plans a gated loop
+      // every cycle, so `lastAdvanceAt` keeps moving while the human has not acted and
+      // an hour-old decision showed up here as if it had just arrived.
+      createdAt: loop.gateSince ?? loop.lastAdvanceAt,
+    });
+  }
+  return items;
+}
+
+/**
+ * Agent-question items for ONE project (cached per project by the listing service).
+ * try/catch is per-project on purpose: one project's broken listing must not empty
+ * the whole inbox.
+ */
+async function collectQuestionItems(
   project: { id: string; name: string },
   database: Database,
-  pluginService: ReturnType<typeof getPluginService>,
 ): Promise<InboxItem[]> {
   const items: InboxItem[] = [];
-
-  // Plugin gates: same visibility rule as the gate card — a gate with round tickets
-  // still open is not actionable yet.
-  const gates = (async () => {
-    try {
-      const surface = await pluginService.listProjectSurface(project.id);
-      for (const loop of surface.loops) {
-        if (!loop.gate || loop.openTickets > 0) continue;
-        items.push({
-          kind: "plugin-gate",
-          projectId: project.id,
-          projectName: project.name,
-          title: loop.gate.question,
-          detail: `${loop.pluginName} — ${loop.label}`
-            + (loop.gateRecommendation ? ` · Butler recommends: ${loop.gateRecommendation.actionId}` : ""),
-          link: { view: "plugin-views", pluginId: loop.pluginId, pluginSlug: loop.pluginSlug, loopName: loop.name },
-          // The gate's own birth, NOT `lastAdvanceAt` — the monitor re-plans a gated loop
-          // every cycle, so `lastAdvanceAt` keeps moving while the human has not acted and
-          // an hour-old decision showed up here as if it had just arrived.
-          createdAt: loop.gateSince ?? loop.lastAdvanceAt,
-        });
-      }
-    } catch (err) {
-      console.warn(`[inbox] plugin surface failed for project ${project.id}:`, err instanceof Error ? err.message : String(err));
+  try {
+    for (const set of await listPendingQuestionsForProject(project.id, database)) {
+      if (set.staleness) continue; // likely no longer actionable — not "waiting on you"
+      items.push({
+        kind: "agent-question",
+        projectId: project.id,
+        projectName: project.name,
+        title: set.questions[0]?.question ?? "Agent question",
+        detail: set.issueNumber != null ? `#${set.issueNumber}: ${set.issueTitle}` : set.issueTitle ?? null,
+        link: { view: "butler", workspaceId: set.workspaceId, issueNumber: set.issueNumber ?? null },
+        createdAt: set.askedAt ?? null,
+      });
     }
-  })();
-
-  // Agent questions (cached per project by the listing service).
-  const questions = (async () => {
-    try {
-      for (const set of await listPendingQuestionsForProject(project.id, database)) {
-        if (set.staleness) continue; // likely no longer actionable — not "waiting on you"
-        items.push({
-          kind: "agent-question",
-          projectId: project.id,
-          projectName: project.name,
-          title: set.questions[0]?.question ?? "Agent question",
-          detail: set.issueNumber != null ? `#${set.issueNumber}: ${set.issueTitle}` : set.issueTitle ?? null,
-          link: { view: "butler", workspaceId: set.workspaceId, issueNumber: set.issueNumber ?? null },
-          createdAt: set.askedAt ?? null,
-        });
-      }
-    } catch (err) {
-      console.warn(`[inbox] agent questions failed for project ${project.id}:`, err instanceof Error ? err.message : String(err));
-    }
-  })();
-
-  await Promise.all([gates, questions]);
+  } catch (err) {
+    console.warn(`[inbox] agent questions failed for project ${project.id}:`, err instanceof Error ? err.message : String(err));
+  }
   return items;
 }
 
 export async function listInbox(database: Database = db): Promise<{ items: InboxItem[] }> {
+  // Archived projects are excluded (2026-08-11 perf audit) — also a correctness fix:
+  // an archived project's gates surfaced here with deep links into a project the UI
+  // can no longer navigate to, and its whole plugin/question scan was wasted work.
   const projectRows = await database
     .select({ id: projects.id, name: projects.name })
-    .from(projects);
+    .from(projects)
+    .where(isNull(projects.archivedAt));
   const pluginService = getPluginService(database);
 
   // #348: this used to be `for (const project of projectRows) { await ...; await ...; }`
   // — strictly serial, so the cost was O(projects x plugins x loops x ~8 awaits) with
   // every round-trip's latency stacking, on an endpoint the UI POLLS. There is no
-  // ordering dependency between projects (or between the two sources within a project):
-  // everything is sorted by createdAt at the end. This DB has 20 projects, so the fan-out
-  // is bounded by the project count and the work is DB-read-bound, not CPU-bound.
-  const perProject = await Promise.all(
-    projectRows.map((project) => collectProjectInboxItems(project, database, pluginService)),
-  );
-  const items: InboxItem[] = perProject.flat();
+  // ordering dependency between the two sources or between projects: everything is
+  // sorted by createdAt at the end. The plugin-gate source is now ONE bulk read
+  // (2026-08-11 perf audit — plugin rows / manifest parses / enabled-pref scans are
+  // hoisted out of the per-project loop and the cost rollup is skipped); the
+  // agent-question source still fans out per project. The two run concurrently.
+  const surfacesPromise = pluginService
+    .listLoopSurfacesForProjects(projectRows.map((p) => p.id))
+    .catch((err: unknown) => {
+      console.warn(`[inbox] plugin loop surfaces failed:`, err instanceof Error ? err.message : String(err));
+      return new Map<string, InboxLoopStatus[]>();
+    });
+  const [loopSurfaces, questionItems] = await Promise.all([
+    surfacesPromise,
+    Promise.all(projectRows.map((project) => collectQuestionItems(project, database))),
+  ]);
+  const items: InboxItem[] = questionItems.flat();
+  for (const project of projectRows) {
+    items.push(...collectGateItems(project, loopSurfaces.get(project.id) ?? []));
+  }
 
   // Tool approvals are in-memory and already carry their projectId.
   const nameById = new Map(projectRows.map((p) => [p.id, p.name]));

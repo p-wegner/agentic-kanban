@@ -5,20 +5,27 @@
  * the cost was O(projects x plugins x loops x ~8 awaits) on an endpoint the UI polls.
  * This DB has 20 projects. Slow-log entries: 203/213/238/1088ms.
  *
- * These tests pin the parallel fan-out AND that it did not change what the inbox shows:
- * the same items, the same newest-first order, and one project's broken plugin surface
- * still not emptying everyone else's inbox.
+ * 2026-08-11 perf audit: the plugin-gate source is now ONE bulk read
+ * (`listLoopSurfacesForProjects`) instead of a per-project `listProjectSurface` — the
+ * plugin rows, manifest parses and enabled-pref scans are hoisted out of the loop.
+ * Archived projects are excluded entirely (their gates deep-linked into projects the
+ * UI can no longer navigate to).
+ *
+ * These tests pin the bulk + concurrent shape AND that it did not change what the
+ * inbox shows: the same items, the same newest-first order, and one broken plugin
+ * surface still not emptying everyone else's inbox.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
 import * as schema from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 
-const listProjectSurface = vi.fn();
+const listLoopSurfacesForProjects = vi.fn();
 const listPendingQuestionsForProject = vi.fn();
 
 vi.mock("../services/plugin.service.js", () => ({
-  getPluginService: () => ({ listProjectSurface: (...a: unknown[]) => listProjectSurface(...a) }),
+  getPluginService: () => ({ listLoopSurfacesForProjects: (...a: unknown[]) => listLoopSurfacesForProjects(...a) }),
 }));
 vi.mock("../services/agent-questions/listing.js", () => ({
   listPendingQuestionsForProject: (...a: unknown[]) => listPendingQuestionsForProject(...a),
@@ -31,27 +38,30 @@ let db: TestDb;
 const PROJECT_COUNT = 6;
 let projectIds: string[];
 
-/** A plugin surface with one actionable gate, born at `gateSince`. */
-function surfaceWithGate(name: string, gateSince: string) {
+/** One loop status with an actionable gate, born at `gateSince`. */
+function loopWithGate(name: string, gateSince: string) {
   return {
-    loops: [{
-      gate: { question: `Approve ${name}?` },
-      openTickets: 0,
-      pluginName: "demo-plugin",
-      pluginId: "plugin-1",
-      pluginSlug: "demo",
-      label: name,
-      name,
-      gateSince,
-      lastAdvanceAt: gateSince,
-      gateRecommendation: null,
-    }],
+    gate: { question: `Approve ${name}?` },
+    openTickets: 0,
+    pluginName: "demo-plugin",
+    pluginId: "plugin-1",
+    pluginSlug: "demo",
+    label: name,
+    name,
+    gateSince,
+    lastAdvanceAt: gateSince,
+    gateRecommendation: null,
   };
+}
+
+/** Bulk-surface result: every requested project gets `loopsFor(projectId)`. */
+function surfacesFrom(loopsFor: (projectId: string) => unknown[]) {
+  return async (ids: string[]) => new Map(ids.map((id) => [id, loopsFor(id)]));
 }
 
 beforeEach(async () => {
   db = createTestDb().db;
-  listProjectSurface.mockReset();
+  listLoopSurfacesForProjects.mockReset().mockImplementation(surfacesFrom(() => []));
   listPendingQuestionsForProject.mockReset().mockResolvedValue([]);
 
   const now = new Date().toISOString();
@@ -71,38 +81,25 @@ beforeEach(async () => {
   }
 });
 
-describe("listInbox fan-out (#348)", () => {
-  it("queries every project's surface concurrently instead of one after another", async () => {
-    let inFlight = 0;
-    let peak = 0;
-    const gate = new Promise<void>((resolve) => setTimeout(resolve, 20));
-
-    listProjectSurface.mockImplementation(async () => {
-      inFlight++;
-      peak = Math.max(peak, inFlight);
-      // Hold every call open until they have all had a chance to start. Serially, the
-      // first call would have to RESOLVE before the second began, so peak would be 1.
-      await gate;
-      inFlight--;
-      return { loops: [] };
-    });
-
+describe("listInbox fan-out (#348 / 2026-08-11 bulk surface)", () => {
+  it("reads every project's plugin surface in ONE bulk call, not per project", async () => {
     await listInbox(db);
 
-    expect(listProjectSurface).toHaveBeenCalledTimes(PROJECT_COUNT);
-    expect(peak).toBe(PROJECT_COUNT);
+    expect(listLoopSurfacesForProjects).toHaveBeenCalledTimes(1);
+    const requested = listLoopSurfacesForProjects.mock.calls[0][0] as string[];
+    expect([...requested].sort()).toEqual([...projectIds].sort());
   });
 
-  it("runs a project's plugin surface and agent questions concurrently, not in sequence", async () => {
+  it("runs the bulk plugin surface and agent questions concurrently, not in sequence", async () => {
     let surfaceStarted = false;
     let questionsStartedBeforeSurfaceFinished = false;
     let releaseSurface: () => void = () => {};
     const surfaceHeld = new Promise<void>((resolve) => { releaseSurface = resolve; });
 
-    listProjectSurface.mockImplementation(async () => {
+    listLoopSurfacesForProjects.mockImplementation(async (ids: string[]) => {
       surfaceStarted = true;
       await surfaceHeld;
-      return { loops: [] };
+      return new Map(ids.map((id) => [id, []]));
     });
     listPendingQuestionsForProject.mockImplementation(async () => {
       if (surfaceStarted) questionsStartedBeforeSurfaceFinished = true;
@@ -118,10 +115,10 @@ describe("listInbox fan-out (#348)", () => {
   it("returns every project's gate, newest-first", async () => {
     // Ascending gate ages by project index, so the expected output order is the reverse.
     const base = Date.parse("2026-08-01T00:00:00.000Z");
-    listProjectSurface.mockImplementation(async (projectId: string) => {
+    listLoopSurfacesForProjects.mockImplementation(surfacesFrom((projectId) => {
       const index = projectIds.indexOf(projectId);
-      return surfaceWithGate(`loop-${index}`, new Date(base + index * 60_000).toISOString());
-    });
+      return [loopWithGate(`loop-${index}`, new Date(base + index * 60_000).toISOString())];
+    }));
 
     const { items } = await listInbox(db);
 
@@ -138,24 +135,32 @@ describe("listInbox fan-out (#348)", () => {
     }
   });
 
-  it("keeps the other projects' items when one project's plugin surface throws", async () => {
-    const failingId = projectIds[2];
-    listProjectSurface.mockImplementation(async (projectId: string) => {
-      if (projectId === failingId) throw new Error("plugin exploded");
+  it("excludes ARCHIVED projects — no gates, no question scan, no dead deep-links", async () => {
+    const archivedId = projectIds[1];
+    await db.update(schema.projects)
+      .set({ archivedAt: new Date().toISOString() })
+      .where(eq(schema.projects.id, archivedId));
+    listLoopSurfacesForProjects.mockImplementation(surfacesFrom((projectId) => {
       const index = projectIds.indexOf(projectId);
-      return surfaceWithGate(`loop-${index}`, new Date(Date.parse("2026-08-01T00:00:00.000Z") + index * 60_000).toISOString());
-    });
+      return [loopWithGate(`loop-${index}`, "2026-08-01T00:00:00.000Z")];
+    }));
 
     const { items } = await listInbox(db);
 
+    // The archived project's gates never surface...
     expect(items).toHaveLength(PROJECT_COUNT - 1);
-    expect(items.some((i) => i.projectId === failingId)).toBe(false);
+    expect(items.some((i) => i.projectId === archivedId)).toBe(false);
+    // ...and its plugin/question work is not even requested.
+    const requested = listLoopSurfacesForProjects.mock.calls[0][0] as string[];
+    expect(requested).not.toContain(archivedId);
+    const questionedIds = listPendingQuestionsForProject.mock.calls.map((call) => call[0]);
+    expect(questionedIds).not.toContain(archivedId);
   });
 
-  it("still collects a project's agent questions when its plugin surface throws", async () => {
-    // Per-SOURCE error isolation: the two sources are now concurrent, so a rejection in
+  it("still collects agent questions when the whole bulk plugin surface throws", async () => {
+    // Per-SOURCE error isolation: the two sources are concurrent, so a rejection in
     // one must not take the other's already-collected items with it.
-    listProjectSurface.mockRejectedValue(new Error("plugin exploded"));
+    listLoopSurfacesForProjects.mockRejectedValue(new Error("plugin exploded"));
     listPendingQuestionsForProject.mockImplementation(async (projectId: string) => {
       if (projectId !== projectIds[0]) return [];
       return [{
@@ -176,8 +181,24 @@ describe("listInbox fan-out (#348)", () => {
     expect(items[0].detail).toBe("#7: Pick an approach");
   });
 
+  it("keeps the other projects' gates when one project's surface entry is missing", async () => {
+    // The bulk method swallows per-plugin errors internally, which shows up here as a
+    // project simply absent from (or empty in) the returned map.
+    const failingId = projectIds[2];
+    listLoopSurfacesForProjects.mockImplementation(async (ids: string[]) => new Map(
+      ids.filter((id) => id !== failingId).map((id) => {
+        const index = projectIds.indexOf(id);
+        return [id, [loopWithGate(`loop-${index}`, new Date(Date.parse("2026-08-01T00:00:00.000Z") + index * 60_000).toISOString())]];
+      }),
+    ));
+
+    const { items } = await listInbox(db);
+
+    expect(items).toHaveLength(PROJECT_COUNT - 1);
+    expect(items.some((i) => i.projectId === failingId)).toBe(false);
+  });
+
   it("drops stale agent questions, as before", async () => {
-    listProjectSurface.mockResolvedValue({ loops: [] });
     listPendingQuestionsForProject.mockImplementation(async (projectId: string) => {
       if (projectId !== projectIds[0]) return [];
       return [
@@ -192,12 +213,12 @@ describe("listInbox fan-out (#348)", () => {
   });
 
   it("skips a gate whose round still has open tickets, as before", async () => {
-    listProjectSurface.mockImplementation(async (projectId: string) => {
-      if (projectId !== projectIds[0]) return { loops: [] };
-      const surface = surfaceWithGate("loop-0", "2026-08-01T00:00:00.000Z");
-      surface.loops[0].openTickets = 3;
-      return surface;
-    });
+    listLoopSurfacesForProjects.mockImplementation(surfacesFrom((projectId) => {
+      if (projectId !== projectIds[0]) return [];
+      const loop = loopWithGate("loop-0", "2026-08-01T00:00:00.000Z");
+      loop.openTickets = 3;
+      return [loop];
+    }));
 
     const { items } = await listInbox(db);
 

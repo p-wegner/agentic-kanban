@@ -30,14 +30,14 @@ export function scheduleBackgroundRecommendation(projectId: string, input: Recom
   void (async () => {
     try {
       const recs = await recommendQuestionsForSet(projectId, input, db);
-      await setCachedRecommendations(input.toolUseId, recs, db);
+      await setCachedRecommendations(input.toolUseId, recs, db, projectId);
       if (autoAnswerDeps) {
-        await tryAutoAnswer(input.toolUseId, autoAnswerDeps.workspaceId, input.questions, recs, autoAnswerDeps.sendTurn, db);
+        await tryAutoAnswer(input.toolUseId, autoAnswerDeps.workspaceId, input.questions, recs, autoAnswerDeps.sendTurn, db, projectId);
       }
     } catch (err) {
       console.error(`[agent-questions] background recommend failed: toolUseId=${input.toolUseId} ${err instanceof Error ? err.message : String(err)}`);
       // Cache nulls so we don't re-poll on every list call.
-      await setCachedRecommendations(input.toolUseId, input.questions.map(() => null), db);
+      await setCachedRecommendations(input.toolUseId, input.questions.map(() => null), db, projectId);
     } finally {
       inFlightRecommendations.delete(input.toolUseId);
     }
@@ -61,6 +61,8 @@ export async function tryAutoAnswer(
   recs: Array<AgentQuestionRecommendation | null>,
   sendTurn: AutoAnswerSendTurn,
   db: Database,
+  /** Scopes the listing-cache invalidation; omitted it clears all projects' caches. */
+  projectId?: string,
 ): Promise<void> {
   const autoAnswerEnabled = await getPreference("butler_auto_answer", db);
   if (autoAnswerEnabled !== "true") return;
@@ -94,7 +96,7 @@ export async function tryAutoAnswer(
 
   try {
     await sendTurn(workspaceId, content);
-    await markAnswered(toolUseId, db);
+    await markAnswered(toolUseId, db, projectId);
     await writeAgentQuestionComment(
       { toolUseId, workspaceId, questions, answers, body: content, author: "butler" },
       db,

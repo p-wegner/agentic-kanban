@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { NotificationEvent, NotificationEventType } from "../hooks/useActivityNotifications.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { apiFetch } from "../lib/api.js";
@@ -196,17 +196,27 @@ export function NotificationBell({
   // count exists while the dropdown is closed; refreshed on open and on a slow
   // poll so a resolved gate clears the badge without a reload.
   const [inboxItems, setInboxItems] = useState<InboxItem[] | null>(null);
+  const cancelledRef = useRef(false);
+  const loadInbox = useCallback(() => {
+    apiFetch<{ items: InboxItem[] }>("/api/inbox")
+      .then((res) => { if (!cancelledRef.current) setInboxItems(res.items); })
+      .catch(() => { if (!cancelledRef.current) setInboxItems((prev) => prev ?? []); });
+  }, []);
+  // The slow poll runs for the component's whole lifetime. It used to depend on
+  // `[isOpen]`, which RESTARTED the interval and fired an extra /api/inbox fetch on
+  // every open AND every close (2026-08-11 perf audit) — the on-open refresh is its
+  // own effect below.
   useEffect(() => {
-    let cancelled = false;
-    const load = () => {
-      apiFetch<{ items: InboxItem[] }>("/api/inbox")
-        .then((res) => { if (!cancelled) setInboxItems(res.items); })
-        .catch(() => { if (!cancelled) setInboxItems((prev) => prev ?? []); });
-    };
-    load();
-    const timer = setInterval(load, 60_000);
-    return () => { cancelled = true; clearInterval(timer); };
-  }, [isOpen]);
+    cancelledRef.current = false;
+    loadInbox();
+    const timer = setInterval(loadInbox, 60_000);
+    return () => { cancelledRef.current = true; clearInterval(timer); };
+  }, [loadInbox]);
+  // Refresh once when the dropdown OPENS (a resolved gate should vanish without
+  // waiting for the slow poll); closing fetches nothing.
+  useEffect(() => {
+    if (isOpen) loadInbox();
+  }, [isOpen, loadInbox]);
   const inboxCount = inboxItems?.length ?? 0;
   const badgeCount = unreadCount + inboxCount;
 

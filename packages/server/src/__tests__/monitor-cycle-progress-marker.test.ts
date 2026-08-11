@@ -93,7 +93,13 @@ function buildMonitor() {
   setup.setupMonitorRoutes(fakeApp);
 
   const triggerCycle = () => handlers["/api/internal/monitor-run"]({ json: (v: unknown) => v });
-  const status = () => handlers["/api/internal/monitor-status"]({ json: (v: unknown) => v }) as Promise<Record<string, unknown>>;
+  // The monitor-status handler now reads `c.req` (verbose query, If-None-Match) and
+  // returns a raw `Response` (conditional GET) — the fake context mirrors that.
+  const statusCtx = { json: (v: unknown) => v, req: { query: () => undefined, header: () => undefined } };
+  const status = async () => {
+    const res = await handlers["/api/internal/monitor-status"](statusCtx as never);
+    return (res instanceof Response ? await res.json() : res) as Record<string, unknown>;
+  };
   return { setup, triggerCycle, status };
 }
 

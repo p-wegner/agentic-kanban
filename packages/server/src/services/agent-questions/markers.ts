@@ -31,9 +31,11 @@ export async function isAnswered(toolUseId: string, db: Database): Promise<boole
   return (await getRuntimeState(answeredStateKey(toolUseId), db)) !== null;
 }
 
-export async function markAnswered(toolUseId: string, db: Database): Promise<void> {
+/** `projectId` scopes the listing-cache invalidation to the affected project; omitted
+ *  (legacy callers) it clears all projects' caches. */
+export async function markAnswered(toolUseId: string, db: Database, projectId?: string): Promise<void> {
   await setRuntimeState(answeredStateKey(toolUseId), "1", db, { ttlMs: AGENT_QUESTION_MARKER_TTL_MS });
-  invalidateAgentQuestionsCache();
+  invalidateAgentQuestionsCache(projectId);
 }
 
 /**
@@ -78,12 +80,13 @@ export async function writeAgentQuestionComment(
  *  relaunched or notified — the row is kept (not deleted) for audit. Stores
  *  `{ dismissed: true, dismissedAt }` under the same answered pref key so the question
  *  disappears from the pending list. `dismissedAt` is passed in (callers stamp the time)
- *  so the service stays free of `Date.now()`/`new Date()`. */
-export async function markDismissed(toolUseId: string, dismissedAt: string, db: Database): Promise<void> {
+ *  so the service stays free of `Date.now()`/`new Date()`. `projectId` scopes the
+ *  listing-cache invalidation; omitted it clears all projects' caches. */
+export async function markDismissed(toolUseId: string, dismissedAt: string, db: Database, projectId?: string): Promise<void> {
   await setRuntimeState(answeredStateKey(toolUseId), JSON.stringify({ dismissed: true, dismissedAt }), db, {
     ttlMs: AGENT_QUESTION_MARKER_TTL_MS,
   });
-  invalidateAgentQuestionsCache();
+  invalidateAgentQuestionsCache(projectId);
 }
 
 /** Cached recommendation array, one entry per sub-question. A null entry = couldn't recommend
@@ -103,15 +106,18 @@ export async function getCachedRecommendations(
   }
 }
 
+/** `projectId` scopes the listing-cache invalidation to the affected project; omitted
+ *  (legacy callers) it clears all projects' caches. */
 export async function setCachedRecommendations(
   toolUseId: string,
   recommendations: Array<AgentQuestionRecommendation | null>,
   db: Database,
+  projectId?: string,
 ): Promise<void> {
   await setRuntimeState(recommendationStateKey(toolUseId), JSON.stringify({ recommendations }), db, {
     ttlMs: AGENT_QUESTION_MARKER_TTL_MS,
   });
   // A landed recommendation changes the `recommendation` field attached to the
   // cached listing — drop the response cache so the next poll picks it up.
-  invalidateAgentQuestionsCache();
+  invalidateAgentQuestionsCache(projectId);
 }

@@ -179,7 +179,9 @@ describe("sync-free hot paths (#401 static guard)", () => {
   }
 
   it("workspace-summary tail loop and monitor excerpts use the async tail reader only", () => {
-    for (const rel of ["services/workspace-summary.service.ts", "startup/monitor-helpers.ts"]) {
+    // agent-questions/listing.ts was the one call site #401 missed (fixed in the
+    // 2026-08-11 perf round, G3) — listed here so it can't regress to the sync reader.
+    for (const rel of ["services/workspace-summary.service.ts", "startup/monitor-helpers.ts", "services/agent-questions/listing.ts"]) {
       const src = read(rel);
       // The sync tail reader must not appear (readSessionStdoutFileTailAsync is fine).
       expect(src).not.toMatch(/readSessionStdoutFileTail(?!Async)/);

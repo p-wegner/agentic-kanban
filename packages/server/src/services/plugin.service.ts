@@ -86,8 +86,7 @@ import {
 import { PluginError } from "./plugin-errors.js";
 import { fanOutScaffold, scaffoldPlaceholderStatus, requireScaffoldReady } from "./plugin-scaffold.js";
 import { createPluginLoopExtras, validatePluginSource } from "./plugin-loop-extras.service.js";
-import { listPluginLoopSessionStats } from "../repositories/plugins.repository.js";
-import { getAllPreferences } from "../repositories/preferences.repository.js";
+import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { resolveStartPolicy } from "./start-policy.service.js";
 import type { BoardEvents } from "./board-events.js";
 import {
@@ -857,21 +856,10 @@ export function createPluginService(deps: {
           ...(await getViewStatus(row.id, view.id, projectId)),
         });
       }
+      // Cost rollup (#294) now lives inside `loopStatuses` (default `includeCosts: true`),
+      // so the panel's "$X so far" arrives on the status itself.
       for (const status of await loops.loopStatuses(manifest, row.pluginId, projectId)) {
-        // Cost rollup (#294): sessions → workspaces → unit tickets, folded here so the
-        // panel can show "$X so far" without a second request.
-        let totalCostUsd = 0;
-        try {
-          const statRows = await listPluginLoopSessionStats(
-            projectId, `plugin-loop:${row.pluginId}:${status.name}:`, database,
-          );
-          for (const statRow of statRows) {
-            try {
-              totalCostUsd += Number((JSON.parse(statRow.stats ?? "{}") as { totalCostUsd?: unknown }).totalCostUsd ?? 0) || 0;
-            } catch { /* skip unparseable stats */ }
-          }
-        } catch { /* cost is decoration — never blank the panel for it */ }
-        projectLoops.push({ ...owner, ...status, totalCostUsd });
+        projectLoops.push({ ...owner, ...status });
       }
       for (const script of manifest.scripts ?? []) {
         scripts.push({
@@ -891,7 +879,8 @@ export function createPluginService(deps: {
     }
     // Start policy (#293): under `manual` the monitor never runs the planner, which is
     // indistinguishable from convergence unless the panel says so explicitly.
-    const prefs = await getAllPreferences(database);
+    // #402's short-TTL cache — this surface is polled, so the raw full-table scan added up.
+    const prefs = await getAllPreferencesCached(database);
     const policy = resolveStartPolicy(new Map(prefs.map((p) => [p.key, p.value])), projectId);
     return {
       views,
@@ -921,6 +910,42 @@ export function createPluginService(deps: {
     return out;
   }
 
+  /**
+   * The enabled plugins' LOOP statuses for MANY projects in one sweep — built for the
+   * cross-project inbox poll (2026-08-11 perf audit). `listProjectSurface` re-read the
+   * plugin rows, re-parsed every manifest and re-scanned the enabled-prefs table PER
+   * PROJECT per poll; here those per-poll invariants are hoisted and shared, views/
+   * scripts/skills are skipped (the inbox reads only gates), and the cost rollup is
+   * skipped via `includeCosts: false`. Per-plugin errors are swallowed so one broken
+   * plugin never empties another project's inbox.
+   */
+  async function listLoopSurfacesForProjects(projectIds: string[]) {
+    const out = new Map<string, Array<LoopStatus & { pluginId: string; pluginSlug: string; pluginName: string }>>();
+    if (projectIds.length === 0) return out;
+    const enabledMap = await enabledSlugsByProject();
+    // Parse each installed plugin's manifest ONCE, not once per project.
+    const parsedRows: Array<{ row: PluginRow; manifest: PluginManifest }> = [];
+    for (const row of await listPluginRows(database)) {
+      try {
+        parsedRows.push({ row, manifest: parsePluginManifest(row.manifestJson) });
+      } catch { /* a broken cached manifest must not blank every project's inbox */ }
+    }
+    await Promise.all(projectIds.map(async (projectId) => {
+      const enabled = enabledMap.get(projectId) ?? new Set<string>();
+      const projectLoops: Array<LoopStatus & { pluginId: string; pluginSlug: string; pluginName: string }> = [];
+      for (const { row, manifest } of parsedRows) {
+        if (!enabled.has(row.pluginId)) continue;
+        try {
+          for (const status of await loops.loopStatuses(manifest, row.pluginId, projectId, { includeCosts: false })) {
+            projectLoops.push({ pluginId: row.id, pluginSlug: row.pluginId, pluginName: row.name, ...status });
+          }
+        } catch { /* one plugin's broken loop state must not drop the project's other items */ }
+      }
+      out.set(projectId, projectLoops);
+    }));
+    return out;
+  }
+
   return {
     installPlugin,
     updatePlugin,
@@ -929,6 +954,7 @@ export function createPluginService(deps: {
     listLoops,
     listProjectLoops,
     listProjectSurface,
+    listLoopSurfacesForProjects,
     advanceLoop,
     setLoopPaused,
     resolveLoopGate,

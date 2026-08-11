@@ -265,6 +265,28 @@ describe("response cache + invalidation", () => {
     expect(pending.map((p) => p.toolUseId)).not.toContain("tu-inv-b");
   });
 
+  it("project-scoped invalidation leaves the OTHER project's cache warm (2026-08-11 audit)", async () => {
+    const { db } = createTestDb();
+    const PROJECT_B = "proj-perf-b";
+    await seed(db, { key: "scope-a", toolUseId: "tu-scope-a" });
+    await db.insert(projects).values({ id: PROJECT_B, name: "pb", repoPath: "/tmp/pb" });
+
+    // Warm both projects' caches.
+    const aWarm = await listPendingQuestionsForProject(PROJECT_ID, db);
+    expect(aWarm.map((p) => p.toolUseId)).toContain("tu-scope-a");
+    const bWarm = await listPendingQuestionsForProject(PROJECT_B, db);
+
+    // Scoped invalidation (markAnswered now carries the projectId): A recomputes...
+    await markAnswered("tu-scope-a", db, PROJECT_ID);
+    const aAfter = await listPendingQuestionsForProject(PROJECT_ID, db);
+    expect(aAfter).not.toBe(aWarm);
+    expect(aAfter.map((p) => p.toolUseId)).not.toContain("tu-scope-a");
+
+    // ...while B still serves its cached array instance (cache never dropped).
+    const bAfter = await listPendingQuestionsForProject(PROJECT_B, db);
+    expect(bAfter).toBe(bWarm);
+  });
+
   it("does not serve a cache entry computed against a different Database instance", async () => {
     const { db: db1 } = createTestDb();
     await seed(db1, { key: "iso-1", toolUseId: "tu-iso-1" });

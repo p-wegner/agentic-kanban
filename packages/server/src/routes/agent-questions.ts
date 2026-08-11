@@ -49,6 +49,7 @@ export function createAgentQuestionsRoute(
   // POST /api/projects/:id/agent-questions/:toolUseId/answer
   // Body: { questions: AgentQuestion[], answers: [{ selectedLabels: string[], freeText?: string }, ...], workspaceId: string }
   router.post("/:id/agent-questions/:toolUseId/answer", async (c) => {
+    const projectId = c.req.param("id");
     const toolUseId = c.req.param("toolUseId");
     const body = await parseJsonBody<{
       questions: AgentQuestion[];
@@ -62,7 +63,7 @@ export function createAgentQuestionsRoute(
     try {
       const result = await workspaceService.sendTurn(body.workspaceId, content);
       // Mark answered AFTER the turn is accepted, so a failure leaves it visible for retry.
-      await markAnswered(toolUseId, database);
+      await markAnswered(toolUseId, database, projectId);
       // Persist the Q&A as durable ticket history (best-effort).
       await writeAgentQuestionComment(
         { toolUseId, workspaceId: body.workspaceId, questions: body.questions, answers: body.answers, body: content, author: "user" },
@@ -82,9 +83,10 @@ export function createAgentQuestionsRoute(
   // answered pref key (keeps the row for audit) so it drops out of the pending list.
   // The corresponding workspace is intentionally NOT relaunched or notified.
   router.delete("/:id/agent-questions/:toolUseId", async (c) => {
+    const projectId = c.req.param("id");
     const toolUseId = c.req.param("toolUseId");
     const dismissedAt = new Date().toISOString();
-    await markDismissed(toolUseId, dismissedAt, database);
+    await markDismissed(toolUseId, dismissedAt, database, projectId);
     return c.json({ ok: true, dismissed: true, dismissedAt });
   });
 
@@ -115,7 +117,7 @@ export function createAgentQuestionsRoute(
         },
         database,
       );
-      await setCachedRecommendations(toolUseId, recommendations, database);
+      await setCachedRecommendations(toolUseId, recommendations, database, projectId);
       return c.json({ ok: true, recommendations });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
