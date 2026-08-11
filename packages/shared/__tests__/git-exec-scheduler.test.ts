@@ -21,6 +21,7 @@ vi.mock("node:child_process", () => ({
 import { execFile } from "node:child_process";
 import {
   gitExec,
+  runWithGitPriority,
   GIT_SPAWN_SLOTS,
   GIT_DEDUPE_MEMO_TTL_MS,
   __resetGitExecSchedulerForTests,
@@ -164,6 +165,65 @@ describe("process-wide spawn semaphore", () => {
     completeNext();
     await flush();
     expect(pending[pending.length - 1].args).toEqual(["fetch", "bg-0"]);
+  });
+
+  // #398 follow-up (G8) — the interactive lane was dead code because no production call
+  // site passed `priority: "interactive"`. HTTP request paths now get it AMBIENTLY: a
+  // Hono middleware wraps each /api request in `runWithGitPriority("interactive", next)`
+  // and gitExec reads the AsyncLocalStorage context when no explicit priority is passed.
+  describe("ambient priority context (HTTP middleware seam)", () => {
+    it("a call inside runWithGitPriority('interactive') jumps the normal backlog WITHOUT an explicit option", async () => {
+      for (let i = 0; i < GIT_SPAWN_SLOTS; i++) void gitExec(["fetch", `busy-${i}`], { cwd: "/repo" });
+      for (let i = 0; i < 4; i++) void gitExec(["fetch", `bg-${i}`], { cwd: "/repo" });
+      // The middleware seam: no per-call option anywhere below this scope.
+      runWithGitPriority("interactive", () => {
+        void gitExec(["fetch", "http-request"], { cwd: "/repo" });
+      });
+      expect(spawned).toBe(GIT_SPAWN_SLOTS);
+
+      completeNext();
+      await flush();
+      // The freed slot went to the request-path call, jumping the 4 queued normal calls.
+      expect(pending[pending.length - 1].args).toEqual(["fetch", "http-request"]);
+
+      // A background call OUTSIDE the scope stayed in the normal lane and drains FIFO.
+      completeNext();
+      await flush();
+      expect(pending[pending.length - 1].args).toEqual(["fetch", "bg-0"]);
+    });
+
+    it("the ambient priority survives awaits (AsyncLocalStorage, not a sync flag)", async () => {
+      for (let i = 0; i < GIT_SPAWN_SLOTS; i++) void gitExec(["fetch", `busy-${i}`], { cwd: "/repo" });
+      for (let i = 0; i < 3; i++) void gitExec(["fetch", `bg-${i}`], { cwd: "/repo" });
+      await runWithGitPriority("interactive", async () => {
+        // A handler always awaits (DB reads, other git calls) before spawning more git.
+        await Promise.resolve();
+        await new Promise((r) => setTimeout(r, 0));
+        void gitExec(["fetch", "after-awaits"], { cwd: "/repo" });
+      });
+
+      completeNext();
+      await flush();
+      expect(pending[pending.length - 1].args).toEqual(["fetch", "after-awaits"]);
+    });
+
+    it("an explicit per-call priority wins over the ambient context", async () => {
+      for (let i = 0; i < GIT_SPAWN_SLOTS; i++) void gitExec(["fetch", `busy-${i}`], { cwd: "/repo" });
+      void gitExec(["fetch", "bg-0"], { cwd: "/repo" });
+      runWithGitPriority("interactive", () => {
+        // Explicitly demoted despite the interactive scope (e.g. a fire-and-forget
+        // background sweep a handler deliberately marks as non-urgent).
+        void gitExec(["fetch", "demoted"], { cwd: "/repo", priority: "normal" });
+      });
+
+      completeNext();
+      await flush();
+      // FIFO in the normal lane: bg-0 was queued first, "demoted" did not jump it.
+      expect(pending[pending.length - 1].args).toEqual(["fetch", "bg-0"]);
+      completeNext();
+      await flush();
+      expect(pending[pending.length - 1].args).toEqual(["fetch", "demoted"]);
+    });
   });
 
   it("deduped concurrent calls consume only one slot", async () => {

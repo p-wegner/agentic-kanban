@@ -5,6 +5,7 @@ import { createNodeWebSocket } from "@hono/node-ws";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { corsOrigin } from "./lib/cors-origin.js";
+import { runWithGitPriority } from "@agentic-kanban/shared/lib/git-exec";
 import { db } from "./db/index.js";
 import * as agentService from "./services/agent.service.js";
 import { createBoardEvents } from "./services/board-events.js";
@@ -73,6 +74,7 @@ export async function startServer(port?: number, hostname?: string) {
   // lib/cors-origin.ts.
   app.use("/api/*", cors({ origin: corsOrigin }));
   app.use("/api/*", slowRequestLogger);
+  app.use("/api/*", (_c, next) => runWithGitPriority("interactive", next)); // #398 G8 — request-path git jumps the spawn queue's normal lane
   // Gzip for large buffered JSON GET responses (board ~172KB, issues ~1MB,
   // monitor-status ~60KB) — ~85% wire reduction for remote (Tailscale) access.
   // SSE (text/event-stream) is excluded by content-type inside the middleware;

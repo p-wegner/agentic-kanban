@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { execFile, execFileSync, spawn, type ChildProcess, type ExecFileException, type StdioOptions } from "node:child_process";
 import { existsSync } from "node:fs";
 import { recordOperation } from "./operation-metrics.js";
@@ -72,6 +73,36 @@ function nonInteractiveEnv(env: NodeJS.ProcessEnv | undefined): NodeJS.ProcessEn
  * `normal` (default) — background sweeps, cache refreshes, monitor work.
  */
 export type GitExecPriority = "interactive" | "normal";
+
+/**
+ * Ambient priority context (#398 follow-up, G8). The `interactive` lane above was dead
+ * code: no production call site passed `priority: "interactive"`, so HTTP request paths
+ * queued behind minutes of monitor-cycle git (measured: /diff 180s, /stats 145s,
+ * repo-merge-status 115s on an idle workspace). Threading an options parameter through
+ * every git-service function between a route handler and this adapter would have touched
+ * ~20 files, so the priority rides an AsyncLocalStorage context instead: a Hono
+ * middleware wraps every /api request in `runWithGitPriority("interactive", next)`, and
+ * `gitExec` reads the ambient value when the caller passes no explicit `priority`.
+ *
+ * Semantics:
+ *  - An explicit `opts.priority` always wins over the ambient context.
+ *  - Only code running inside a `runWithGitPriority` scope is affected; background work
+ *    (monitor cycles, reconcilers, crons) never enters one, so the default is unchanged.
+ *  - ALS propagates through awaits AND into fire-and-forget promises started inside the
+ *    scope (e.g. a stale-while-revalidate refresh kicked off by a request). That is
+ *    accepted: such work was user-initiated, and the lane only reorders the queue —
+ *    it never starves the normal lane of running slots.
+ */
+const ambientGitPriority = new AsyncLocalStorage<GitExecPriority>();
+
+/**
+ * Run `fn` with `priority` as the ambient lane for every `gitExec` call in its async
+ * continuation (unless a call passes an explicit `opts.priority`). This is the seam the
+ * server's HTTP middleware uses to mark request-path git as `interactive`.
+ */
+export function runWithGitPriority<T>(priority: GitExecPriority, fn: () => T): T {
+  return ambientGitPriority.run(priority, fn);
+}
 
 export interface GitExecOptions {
   /** Working directory. Omit only for repo-path-as-argument commands like `clone`. */
@@ -303,6 +334,12 @@ function exitCodeOf(err: ExecFileException | null, hadError: boolean): number | 
  * (see `DEDUPE_SAFE_SUBCOMMANDS`) additionally go through the dedupe memo (#398).
  */
 export function gitExec(args: string[], opts: GitExecOptions = {}): Promise<GitExecResult> {
+  // Resolve the scheduling lane HERE, synchronously, while still inside the caller's
+  // async context — the queued callback in `scheduleSpawn` runs later, outside it.
+  if (opts.priority === undefined) {
+    const ambient = ambientGitPriority.getStore();
+    if (ambient !== undefined) opts = { ...opts, priority: ambient };
+  }
   const key = dedupeKeyFor(args, opts);
   if (key === null) {
     // Potentially mutating (or dedupe-disqualified): conservatively drop memoized
