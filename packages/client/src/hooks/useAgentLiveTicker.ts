@@ -3,6 +3,8 @@ import type { AgentOutputMessage, StatusWithIssues } from "@agentic-kanban/share
 
 const POLL_INTERVAL_MS = 5000;
 const MAX_TAIL = 60;
+/** The ticker shows only the last 1-2 lines — a small server-side tail read is plenty. */
+const OUTPUT_TAIL_BYTES = 64 * 1024;
 
 export interface TickerEntry {
   issueId: string;
@@ -92,7 +94,7 @@ export function useAgentLiveTicker(
     const headers: Record<string, string> = {};
     const etag = etagsRef.current[sessionId];
     if (etag) headers["If-None-Match"] = etag;
-    const res = await fetch(`/api/sessions/${sessionId}/output`, { headers });
+    const res = await fetch(`/api/sessions/${sessionId}/output?tail=${OUTPUT_TAIL_BYTES}`, { headers });
     if (res.status === 304) return null;
     if (!res.ok) return null;
     const newEtag = res.headers.get("ETag");

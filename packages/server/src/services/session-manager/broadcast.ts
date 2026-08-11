@@ -81,6 +81,72 @@ async function mergeExistingStats(sessionId: string, statsToSave: Record<string,
 const DB_FLUSH_INTERVAL_MS = 250;
 const DB_FLUSH_BATCH_SIZE = 50;
 
+// ---------------------------------------------------------------------------
+// Per-session activity-broadcast throttle (perf G4): every agent tool call
+// used to fire an unthrottled session_activity WS broadcast, and each one
+// triggers client refetch bursts of /output + /summary. Coalesce to at most
+// one emit per THROTTLE window per session — leading edge fires immediately
+// (snappy UI), later calls within the window collapse into ONE trailing emit
+// carrying the newest activity. Keyed per SessionState (WeakMap) so parallel
+// test states never share throttle windows. Exit/terminal events bypass via
+// clearActivityThrottle (the exit path emits its clearing broadcast directly).
+// ---------------------------------------------------------------------------
+export const ACTIVITY_BROADCAST_THROTTLE_MS = 500;
+
+interface ActivityThrottle {
+  timer: ReturnType<typeof setTimeout> | null;
+  lastEmit: number;
+  pending: (() => void) | null;
+}
+
+const activityThrottlesByState = new WeakMap<SessionState, Map<string, ActivityThrottle>>();
+
+function emitActivityThrottled(state: SessionState, sessionId: string, emit: () => void): void {
+  let throttles = activityThrottlesByState.get(state);
+  if (!throttles) {
+    throttles = new Map();
+    activityThrottlesByState.set(state, throttles);
+  }
+  let t = throttles.get(sessionId);
+  if (!t) {
+    t = { timer: null, lastEmit: 0, pending: null };
+    throttles.set(sessionId, t);
+  }
+
+  const now = Date.now();
+  if (t.timer === null && now - t.lastEmit >= ACTIVITY_BROADCAST_THROTTLE_MS) {
+    t.lastEmit = now;
+    emit();
+    return;
+  }
+
+  // Within the window: remember only the NEWEST emit and schedule one trailing fire.
+  t.pending = emit;
+  if (t.timer === null) {
+    const delay = Math.max(0, ACTIVITY_BROADCAST_THROTTLE_MS - (now - t.lastEmit));
+    const throttle = t;
+    t.timer = setTimeout(() => {
+      throttle.timer = null;
+      const pending = throttle.pending;
+      throttle.pending = null;
+      if (pending) {
+        throttle.lastEmit = Date.now();
+        pending();
+      }
+    }, delay);
+    t.timer.unref?.();
+  }
+}
+
+/** Drop any pending trailing emit for a session (exit path — its clearing broadcast bypasses the throttle). */
+function clearActivityThrottle(state: SessionState, sessionId: string): void {
+  const throttles = activityThrottlesByState.get(state);
+  const t = throttles?.get(sessionId);
+  if (!t) return;
+  if (t.timer !== null) clearTimeout(t.timer);
+  throttles!.delete(sessionId);
+}
+
 // Insert-time ring-buffer cap (#404): the periodic pruner sweep only runs every
 // few hours, so without this a chatty session could sit at tens of thousands of
 // session_messages rows in between. Every Nth flush for a session we trim it
@@ -263,7 +329,9 @@ function applyToolActivity(
   state.sessionLastTool.set(sessionId, toolActivity.name);
   const activity = formatToolActivity(toolActivity.name, toolActivity.input);
   if (activity) {
-    options?.onActivity?.(ctx.projectId, ctx.issueId, sessionId, activity);
+    emitActivityThrottled(state, sessionId, () =>
+      options?.onActivity?.(ctx.projectId, ctx.issueId, sessionId, activity),
+    );
   }
 
   // Track Agent tool_use IDs for subagent count decrement
@@ -385,6 +453,10 @@ export function createBroadcaster(
     // On exit, clear activity, todos, and transient per-session stats state
     if (message.type === "exit") {
       const ctx = state.sessionContexts.get(sessionId);
+      // Terminal events bypass the activity throttle: drop any pending trailing
+      // emit (it would resurrect stale activity after the clear) and send the
+      // clearing broadcast immediately.
+      clearActivityThrottle(state, sessionId);
       if (ctx) {
         options?.onActivity?.(ctx.projectId, ctx.issueId, sessionId, "");
         options?.onTodos?.(ctx.projectId, ctx.issueId, []);
