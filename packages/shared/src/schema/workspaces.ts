@@ -69,6 +69,18 @@ export const workspaces = sqliteTable("workspaces", {
    * the feature branch ref is gone.
    */
   mergedHeadSha: text("merged_head_sha"),
+  /**
+   * #399 (decision 014) — the workspace-summary GIT PROJECTION. The two phase-4 git facts
+   * (`git log -1` sha+subject, `git rev-list --count base..HEAD`) persisted per row so board
+   * reads never spawn git on the hot path. `summaryGitRefreshedAt` is the per-row staleness
+   * stamp; `summaryDirty` is set by board events (status transitions via setWorkspaceStatus,
+   * merge stamps, update-base) and cleared by the write-through refresh / heal pass.
+   */
+  summaryHeadSha: text("summary_head_sha"),
+  summaryHeadMessage: text("summary_head_message"),
+  summaryCommitCount: integer("summary_commit_count"),
+  summaryGitRefreshedAt: text("summary_git_refreshed_at"),
+  summaryDirty: integer("summary_dirty", { mode: "boolean" }).notNull().default(true),
   conflictCacheCheckedAt: text("conflict_cache_checked_at"),
   conflictCacheHasConflicts: integer("conflict_cache_has_conflicts", { mode: "boolean" }),
   conflictCacheFiles: text("conflict_cache_files"),
