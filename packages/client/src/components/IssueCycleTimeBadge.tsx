@@ -1,12 +1,9 @@
-import { useEffect, useState } from "react";
-import { apiFetch } from "../lib/api.js";
-
 interface StatusDuration {
   statusName: string;
   durationMs: number;
 }
 
-interface CycleTimeData {
+export interface CycleTimeData {
   totalAgeMs: number;
   createdAt: string;
   closedAt: string | null;
@@ -27,22 +24,12 @@ function formatDurationMs(ms: number): string {
 }
 
 interface IssueCycleTimeBadgeProps {
-  issueId: string;
+  /** Cycle-time data from the detail-bundle (#418) — no self-fetch anymore. */
+  data: CycleTimeData | null;
+  loading: boolean;
 }
 
-export function IssueCycleTimeBadge({ issueId }: IssueCycleTimeBadgeProps) {
-  const [data, setData] = useState<CycleTimeData | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setLoading(true);
-    setData(null);
-    apiFetch<CycleTimeData>(`/api/issues/${issueId}/cycle-time`)
-      .then(setData)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [issueId]);
-
+export function IssueCycleTimeBadge({ data, loading }: IssueCycleTimeBadgeProps) {
   if (loading) {
     return (
       <div className="pt-2 border-t border-gray-100 dark:border-gray-800">

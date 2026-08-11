@@ -1,5 +1,5 @@
 import { sessions, sessionMessages, workspaces, issues, projectStatuses, issueComments, workflowNodes } from "@agentic-kanban/shared/schema";
-import { eq, ne, and, desc } from "drizzle-orm";
+import { eq, ne, and, desc, gte } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
@@ -25,7 +25,6 @@ export interface PendingQuestionWorkspaceRow {
   issueId: string;
   issueNumber: number | null;
   issueTitle: string;
-  issueDescription: string | null;
   issueStatusName: string | null;
   issueCurrentNodeId: string | null;
   issueCurrentNodeType: string | null;
@@ -35,6 +34,10 @@ export interface PendingQuestionWorkspaceRow {
  * Pull all non-closed workspaces+issues for a project (one query). Includes the
  * workspace status/closedAt/readyForMerge and the issue's status-column name so
  * staleness can be computed per card without extra round-trips.
+ *
+ * Deliberately does NOT select `issues.description` (#418 G17): this runs per
+ * poll for every open workspace, and the description was only consumed on the
+ * rare uncached-recommendation branch — the listing fetches it lazily there.
  */
 export async function getPendingQuestionWorkspaces(
   projectId: string,
@@ -49,7 +52,6 @@ export async function getPendingQuestionWorkspaces(
       issueId: issues.id,
       issueNumber: issues.issueNumber,
       issueTitle: issues.title,
-      issueDescription: issues.description,
       issueStatusName: projectStatuses.name,
       issueCurrentNodeId: issues.currentNodeId,
       issueCurrentNodeType: workflowNodes.nodeType,
@@ -102,20 +104,38 @@ export async function getSessionStdoutMessages(
 }
 
 /**
+ * Bounds for the synthetic-question comment scan (#418 G17). Every answered
+ * question ALSO writes an `agent-question` comment (durable history), so this
+ * table grows for the project's lifetime — the unbounded select parsed every
+ * historical payload on each poll. The `createdAt` floor mirrors
+ * `AGENT_QUESTION_MARKER_TTL_MS` (30 days): once a question's answered marker
+ * has been swept, resurfacing it would be wrong anyway, so older comments can
+ * never contribute a pending question. The row cap is a hard safety net on top.
+ */
+export const SYNTHETIC_QUESTION_COMMENT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+export const SYNTHETIC_QUESTION_COMMENT_LIMIT = 200;
+
+/**
  * Synthetic (MCP clarify_or_propose) questions live in `agent-question` issue
  * comments. Only that kind can carry the `mcp_clarify_or_propose` payload, so
- * filter by kind instead of scanning every comment of the project.
+ * filter by kind instead of scanning every comment of the project. Bounded by a
+ * created_at floor + LIMIT (see above); the unused `body` column is not selected
+ * (the listing only parses `payload`).
+ *
+ * `now` is injectable for deterministic tests (defaults to wall clock).
  */
 export async function getSyntheticQuestionComments(
   projectId: string,
   database: Database = db,
+  opts?: { now?: string },
 ) {
+  const nowMs = opts?.now ? new Date(opts.now).getTime() : Date.now();
+  const floor = new Date(nowMs - SYNTHETIC_QUESTION_COMMENT_WINDOW_MS).toISOString();
   return database
     .select({
       id: issueComments.id,
       issueId: issueComments.issueId,
       workspaceId: issueComments.workspaceId,
-      body: issueComments.body,
       payload: issueComments.payload,
       createdAt: issueComments.createdAt,
       issueNumber: issues.issueNumber,
@@ -123,8 +143,13 @@ export async function getSyntheticQuestionComments(
     })
     .from(issueComments)
     .innerJoin(issues, eq(issueComments.issueId, issues.id))
-    .where(and(eq(issues.projectId, projectId), eq(issueComments.kind, "agent-question")))
-    .orderBy(desc(issueComments.createdAt));
+    .where(and(
+      eq(issues.projectId, projectId),
+      eq(issueComments.kind, "agent-question"),
+      gte(issueComments.createdAt, floor),
+    ))
+    .orderBy(desc(issueComments.createdAt))
+    .limit(SYNTHETIC_QUESTION_COMMENT_LIMIT);
 }
 
 /** Fetch a project row by id (for starting a butler session on demand). */

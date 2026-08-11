@@ -1,6 +1,5 @@
 import { db } from "../db/index.js";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
-import { workspaces } from "@agentic-kanban/shared/schema";
 import { isTerminalStatusIdView, ACTIVE_WORKSPACE_STATUSES, workspaceStatusPriority } from "@agentic-kanban/shared";
 import type { BoardStatusResponse, BoardStatusIssue } from "@agentic-kanban/shared";
 import { isAnalyticsNoise } from "./session-filter.js";
@@ -22,6 +21,7 @@ import {
   getWorkspacesForIssues,
   getWorkflowNodeStatuses,
   getSessionsForWorkspaces,
+  type BoardStatusWorkspaceRow,
 } from "../repositories/board-status.repository.js";
 
 export { classifyBoardStatusIssueAttention, classifyBoardStatusIssueMergeState } from "./board-status-classifiers.js";
@@ -30,7 +30,8 @@ export { classifyBoardStatusIssueAttention, classifyBoardStatusIssueMergeState }
 const conflictCache = new Map<string, ConflictCacheEntry>();
 const CONFLICT_CACHE_TTL = 60_000; // 60 seconds
 
-type WorkspaceRow = typeof workspaces.$inferSelect;
+// Slim projection (#418 G17) — only the columns board-status consumes, not SELECT *.
+type WorkspaceRow = BoardStatusWorkspaceRow;
 
 export interface BoardStatusOptions {
   projectId?: string;

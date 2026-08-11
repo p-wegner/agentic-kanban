@@ -34,6 +34,7 @@ import { getIssueActivity } from "../services/issue-activity.service.js";
 import { createIssueMergedCommitsService } from "../services/issue-merged-commits.service.js";
 import { getIssueCycleTime } from "../services/cycle-time.service.js";
 import { createWebhookSender } from "../services/outbound-webhook.service.js";
+import { conditionalJsonResponse } from "../services/board-etag-cache.service.js";
 
 /** Shape of the domain errors thrown by the issue service (see IssueError + the `index`-tagged batch errors). */
 interface IssueRouteError {
@@ -75,7 +76,10 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
       statusName,
       slim ? { excludeDescription: true } : undefined,
     );
-    return c.json(result);
+    // Conditional GET (#418, the #400 pattern): the full project list is the largest
+    // payload in the app (~1MB of descriptions on a big board) and mostly unchanged
+    // between polls — hash the serialized body, answer 304 when If-None-Match matches.
+    return conditionalJsonResponse(JSON.stringify(result), c.req.header("if-none-match"));
   });
 
   // POST /api/issues/enhance — AI-enhance a ticket title and description
@@ -310,37 +314,32 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     }
   });
 
-  // GET /api/issues/:id/touched-files — return cached prediction only (no AI call)
-  router.get("/:id/touched-files", async (c) => {
-    const issueId = c.req.param("id");
+  // Cached touched-files prediction for one issue, or null when the issue doesn't
+  // exist. Shared by the standalone endpoint and the detail-bundle (#418).
+  async function readTouchedFiles(issueId: string): Promise<{ files: unknown[]; cached: boolean } | null> {
     const row = await getIssueTouchedFiles(issueId, database);
-    if (!row) return c.json({ error: "Issue not found" }, 404);
+    if (!row) return null;
     const json = row.touchedFilesJson;
     let files: unknown[] = [];
     if (json) {
       try { files = JSON.parse(json) as unknown[]; } catch { files = []; }
     }
-    return c.json({ files, cached: true });
-  });
+    return { files, cached: true };
+  }
 
-  // POST /api/issues/:id/analyze-touched-files — run (or re-run) AI prediction
-  router.post("/:id/analyze-touched-files", async (c) => {
-    const issueId = c.req.param("id");
-    const body = await parseJsonBody<{ refresh?: boolean }>(c).catch(() => ({ refresh: false }));
-    return c.json(await wrapAiOperation("analyze-touched-files", () => analyzeTouchedFiles(issueId, database, body?.refresh === true)));
-  });
-
-  // GET /api/issues/:id/related-issues — find other issues that share touched files with this one
-  router.get("/:id/related-issues", async (c) => {
-    const issueId = c.req.param("id");
+  // File-overlap scan against the project's other issues, or null when the issue
+  // doesn't exist. Shared by the standalone endpoint and the detail-bundle (#418).
+  async function computeRelatedIssues(
+    issueId: string,
+  ): Promise<{ related: { id: string; issueNumber: number | null; title: string; sharedFileCount: number }[] } | null> {
     const row = await getIssueTouchedFilesWithProject(issueId, database);
-    if (!row) return c.json({ error: "Issue not found" }, 404);
+    if (!row) return null;
     const json = row.touchedFilesJson;
-    if (!json) return c.json({ related: [] });
+    if (!json) return { related: [] };
     let myFiles: { path: string }[] = [];
-    try { myFiles = JSON.parse(json) as { path: string }[]; } catch { return c.json({ related: [] }); }
+    try { myFiles = JSON.parse(json) as { path: string }[]; } catch { return { related: [] }; }
     const myPaths = new Set(myFiles.map((f) => f.path));
-    if (myPaths.size === 0) return c.json({ related: [] });
+    if (myPaths.size === 0) return { related: [] };
 
     const candidates = await getProjectIssuesTouchedFiles(row.projectId, database);
 
@@ -356,7 +355,30 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
       }
     }
     related.sort((a, b) => b.sharedFileCount - a.sharedFileCount);
-    return c.json({ related });
+    return { related };
+  }
+
+  // GET /api/issues/:id/touched-files — return cached prediction only (no AI call)
+  router.get("/:id/touched-files", async (c) => {
+    const issueId = c.req.param("id");
+    const result = await readTouchedFiles(issueId);
+    if (!result) return c.json({ error: "Issue not found" }, 404);
+    return c.json(result);
+  });
+
+  // POST /api/issues/:id/analyze-touched-files — run (or re-run) AI prediction
+  router.post("/:id/analyze-touched-files", async (c) => {
+    const issueId = c.req.param("id");
+    const body = await parseJsonBody<{ refresh?: boolean }>(c).catch(() => ({ refresh: false }));
+    return c.json(await wrapAiOperation("analyze-touched-files", () => analyzeTouchedFiles(issueId, database, body?.refresh === true)));
+  });
+
+  // GET /api/issues/:id/related-issues — find other issues that share touched files with this one
+  router.get("/:id/related-issues", async (c) => {
+    const issueId = c.req.param("id");
+    const result = await computeRelatedIssues(issueId);
+    if (!result) return c.json({ error: "Issue not found" }, 404);
+    return c.json(result);
   });
 
 
@@ -452,21 +474,31 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   // dependencies, artifacts, comments, activity) the panel otherwise fires as
   // ~7 separate requests, which queue behind the browser's 6-connection
   // HTTP/1.1 limit (head-of-line blocking — the same problem /settings-bootstrap
-  // solved for the settings panel). Project-scoped data (all tags, skills,
-  // milestones, available issues) and git-heavy best-effort data (touched-files,
-  // related-issues, merged-commits) stay on their own endpoints. Each sub-result
-  // is independent: a failure degrades that field rather than failing the bundle.
+  // solved for the settings panel). #418 folds in the remaining per-issue fetches
+  // the panel used to fire separately (cycle-time, time-entries, touched-files,
+  // related-issues, merged-commits — ~5 more requests per open). Project-scoped
+  // data (all tags, skills, milestones, available issues) stays on its own
+  // cacheable endpoints, and the individual per-issue endpoints stay alive for
+  // other callers (MCP/CLI/mutation refetches). Each sub-result is independent:
+  // a failure degrades that field rather than failing the bundle.
   router.get("/:id/detail-bundle", async (c) => {
     const id = c.req.param("id");
     const issue = await getIssueDescription(id, database);
     if (!issue) return c.json({ error: "Issue not found" }, 404);
-    const [workspaces, tags, dependencies, artifacts, comments, activity] = await Promise.all([
+    const [workspaces, tags, dependencies, artifacts, comments, activity, cycleTime, timeEntries, touchedFiles, relatedIssues, mergedCommits] = await Promise.all([
       Promise.resolve(issueService.getEnrichedWorkspaces(id)).catch(() => []),
       Promise.resolve(issueService.getTags(id)).catch(() => []),
       Promise.resolve(issueService.getDependencies(id)).catch(() => null),
       Promise.resolve(issueService.getArtifacts(id)).catch(() => []),
       Promise.resolve(issueCommentsService.listComments(id)).catch(() => []),
       Promise.resolve(getIssueActivity(id, database)).catch(() => null),
+      Promise.resolve(getIssueCycleTime(id, database)).catch(() => null),
+      Promise.all([timeEntriesService.listEntries(id), timeEntriesService.totalMinutes(id)])
+        .then(([entries, totalMinutes]) => ({ entries, totalMinutes }))
+        .catch(() => null),
+      readTouchedFiles(id).catch(() => null),
+      computeRelatedIssues(id).catch(() => null),
+      Promise.resolve(mergedCommitsService.getMergedCommits(id)).catch(() => null),
     ]);
     return c.json({
       issue,
@@ -476,6 +508,11 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
       artifacts,
       comments,
       activity: activity ?? { events: [] },
+      cycleTime,
+      timeEntries,
+      touchedFiles,
+      relatedIssues,
+      mergedCommits,
     });
   });
 

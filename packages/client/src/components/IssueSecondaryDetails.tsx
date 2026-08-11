@@ -1,4 +1,4 @@
-import type { IssueWithStatus, DependencyInfo, IssueArtifact, MergedCommit } from "@agentic-kanban/shared";
+import type { IssueWithStatus, DependencyInfo, IssueArtifact, MergedCommit, MergedCommitsResponse } from "@agentic-kanban/shared";
 import { apiPost, apiDelete } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 import { formatRelativeTime, formatAbsoluteTime } from "../lib/formatRelativeTime.js";
@@ -6,7 +6,7 @@ import { invalidateAvailableIssuesCache } from "../hooks/useIssueDetailData.js";
 import { IssueChecklistSection } from "./IssueChecklistSection.js";
 import { DependencyDisplay } from "./DependencyDisplay.js";
 import { IssueTouchedFilesSection, type TouchedFile } from "./IssueTouchedFilesSection.js";
-import { IssueRelatedIssuesSection } from "./IssueRelatedIssuesSection.js";
+import { IssueRelatedIssuesSection, type RelatedIssue } from "./IssueRelatedIssuesSection.js";
 import { IssueFollowUpSection } from "./IssueFollowUpSection.js";
 import { IssueArtifactsSection } from "./IssueArtifactsSection.js";
 import { StatusTransitionTimeline } from "./StatusTransitionTimeline.js";
@@ -47,6 +47,11 @@ interface IssueSecondaryDetailsProps {
   onDeleteComment: (commentId: string) => void;
   onAddNote: () => void;
   onNewNoteBodyChange: (body: string) => void;
+  // #418: bundle-folded section data (the sections no longer self-fetch).
+  touchedFiles: TouchedFile[] | null;
+  relatedIssues: RelatedIssue[] | null;
+  mergedCommits: MergedCommitsResponse | null;
+  extrasLoading: boolean;
 }
 
 /**
@@ -86,6 +91,10 @@ export function IssueSecondaryDetails({
   onDeleteComment,
   onAddNote,
   onNewNoteBodyChange,
+  touchedFiles,
+  relatedIssues,
+  mergedCommits,
+  extrasLoading,
 }: IssueSecondaryDetailsProps) {
   return (
     <>
@@ -161,11 +170,12 @@ export function IssueSecondaryDetails({
       {/* Touched Files section */}
       <IssueTouchedFilesSection
         issueId={issue.id}
+        initialFiles={touchedFiles}
         onAppendToDescription={onAppendTouchedFiles}
       />
 
       {/* Related Issues section */}
-      <IssueRelatedIssuesSection issueId={issue.id} onNavigateToIssue={onNavigateToIssue} />
+      <IssueRelatedIssuesSection related={relatedIssues} loading={extrasLoading} onNavigateToIssue={onNavigateToIssue} />
 
       {/* Follow-up task creation */}
       <IssueFollowUpSection
@@ -209,7 +219,8 @@ export function IssueSecondaryDetails({
       {/* Merged commits that landed on the default branch for this issue */}
       {!editing && (
         <IssueMergedCommitsSection
-          issueId={issue.id}
+          data={mergedCommits}
+          loading={extrasLoading}
           onOpenDiff={(commit: MergedCommit) => onManageWorkspaces(issue, commit.workspaceId)}
         />
       )}

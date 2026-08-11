@@ -449,3 +449,64 @@ describe("board-status", () => {
     });
   });
 });
+
+// #418 G17: the board-status repository moved from SELECT * to slim projections.
+// Snapshot the consumed field set so an accidental widening (or a consumer added
+// without extending the projection) is caught here instead of silently re-fattening
+// the get_board_status hot path.
+describe("board-status slim projections (#418)", () => {
+  it("getWorkspacesForIssues returns exactly the consumed workspace columns", async () => {
+    const { db } = createTestDb();
+    const now = new Date().toISOString();
+    const projectId = randomUUID();
+    const statusId = randomUUID();
+    const issueId = randomUUID();
+    await db.insert(projects).values({ id: projectId, name: "p", repoPath: "/tmp/p", createdAt: now, updatedAt: now });
+    await db.insert(projectStatuses).values({ id: statusId, projectId, name: "Backlog", sortOrder: 0, createdAt: now });
+    await db.insert(issues).values({ id: issueId, issueNumber: 1, title: "t", statusId, projectId, createdAt: now, updatedAt: now });
+    await db.insert(workspaces).values({ id: randomUUID(), issueId, branch: "feature/x", status: "idle", createdAt: now, updatedAt: now });
+
+    const { getWorkspacesForIssues } = await import("../repositories/board-status.repository.js");
+    const rows = await getWorkspacesForIssues([issueId], db);
+    expect(rows).toHaveLength(1);
+    expect(Object.keys(rows[0]).sort()).toEqual([
+      "baseBranch",
+      "branch",
+      "currentNodeId",
+      "id",
+      "isDirect",
+      "issueId",
+      "readyForMerge",
+      "status",
+      "updatedAt",
+      "workingDir",
+    ]);
+  });
+
+  it("getSessionsForWorkspaces returns exactly the consumed session columns", async () => {
+    const { db } = createTestDb();
+    const now = new Date().toISOString();
+    const projectId = randomUUID();
+    const statusId = randomUUID();
+    const issueId = randomUUID();
+    const workspaceId = randomUUID();
+    await db.insert(projects).values({ id: projectId, name: "p", repoPath: "/tmp/p", createdAt: now, updatedAt: now });
+    await db.insert(projectStatuses).values({ id: statusId, projectId, name: "Backlog", sortOrder: 0, createdAt: now });
+    await db.insert(issues).values({ id: issueId, issueNumber: 1, title: "t", statusId, projectId, createdAt: now, updatedAt: now });
+    await db.insert(workspaces).values({ id: workspaceId, issueId, branch: "feature/x", status: "idle", createdAt: now, updatedAt: now });
+    await db.insert(sessions).values({ id: randomUUID(), workspaceId, status: "stopped", startedAt: now });
+
+    const { getSessionsForWorkspaces } = await import("../repositories/board-status.repository.js");
+    const rows = await getSessionsForWorkspaces([workspaceId], db);
+    expect(rows).toHaveLength(1);
+    expect(Object.keys(rows[0]).sort()).toEqual([
+      "endedAt",
+      "id",
+      "startedAt",
+      "stats",
+      "status",
+      "triggerType",
+      "workspaceId",
+    ]);
+  });
+});

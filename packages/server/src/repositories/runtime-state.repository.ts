@@ -1,5 +1,5 @@
 import { runtimeState } from "@agentic-kanban/shared/schema";
-import { and, eq, isNotNull, like, lt } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, like, lt } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
@@ -25,6 +25,24 @@ export async function getRuntimeState(
     .where(eq(runtimeState.key, key))
     .limit(1);
   return rows[0]?.value ?? null;
+}
+
+/**
+ * Batched read of many runtime-state values in ONE query (#418: collapses the
+ * per-question answered/recommendation N+1 in the agent-questions listing).
+ * Returns a key→value map; absent keys are simply missing from the map. Same
+ * TTL caveat as {@link getRuntimeState}: expired rows are not filtered here.
+ */
+export async function getRuntimeStateMany(
+  keys: string[],
+  database: Database = db,
+): Promise<Map<string, string>> {
+  if (keys.length === 0) return new Map();
+  const rows = await database
+    .select({ key: runtimeState.key, value: runtimeState.value })
+    .from(runtimeState)
+    .where(inArray(runtimeState.key, keys));
+  return new Map(rows.map((r) => [r.key, r.value]));
 }
 
 /**

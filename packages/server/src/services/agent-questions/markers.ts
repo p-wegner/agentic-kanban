@@ -6,7 +6,7 @@
  * stop appearing in the pending list.
  */
 import type { Database } from "../../db/index.js";
-import { getRuntimeState, setRuntimeState } from "../../repositories/runtime-state.repository.js";
+import { getRuntimeState, getRuntimeStateMany, setRuntimeState } from "../../repositories/runtime-state.repository.js";
 import { AGENT_QUESTION_MARKER_TTL_MS } from "../../lib/runtime-state-keys.js";
 import { insertIssueComment } from "../../repositories/issue-comments.repository.js";
 import { getWorkspaceIssueId } from "../../repositories/agent-questions.repository.js";
@@ -29,6 +29,35 @@ function recommendationStateKey(toolUseId: string): string {
  *  string "1"; dismissals store a JSON object `{ dismissed: true, dismissedAt }`. */
 export async function isAnswered(toolUseId: string, db: Database): Promise<boolean> {
   return (await getRuntimeState(answeredStateKey(toolUseId), db)) !== null;
+}
+
+/** Batched {@link isAnswered}: the subset of `toolUseIds` that are resolved, in ONE
+ *  query (#418 — the listing checked each candidate individually per poll). */
+export async function getAnsweredToolUseIds(toolUseIds: string[], db: Database): Promise<Set<string>> {
+  const unique = [...new Set(toolUseIds)];
+  const found = await getRuntimeStateMany(unique.map(answeredStateKey), db);
+  return new Set(unique.filter((id) => found.has(answeredStateKey(id))));
+}
+
+/** Batched {@link getCachedRecommendations}: toolUseId → recommendations for every id
+ *  with a cached (parseable) entry, in ONE query. Ids without a usable cache entry are
+ *  absent from the map — same semantics as the single read returning null. */
+export async function getCachedRecommendationsMany(
+  toolUseIds: string[],
+  db: Database,
+): Promise<Map<string, Array<AgentQuestionRecommendation | null>>> {
+  const unique = [...new Set(toolUseIds)];
+  const found = await getRuntimeStateMany(unique.map(recommendationStateKey), db);
+  const out = new Map<string, Array<AgentQuestionRecommendation | null>>();
+  for (const id of unique) {
+    const raw = found.get(recommendationStateKey(id));
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw) as { recommendations?: Array<AgentQuestionRecommendation | null> };
+      if (Array.isArray(parsed.recommendations)) out.set(id, parsed.recommendations);
+    } catch { /* malformed cache entry — treated as not-yet-computed */ }
+  }
+  return out;
 }
 
 /** `projectId` scopes the listing-cache invalidation to the affected project; omitted
