@@ -196,12 +196,15 @@ export function createPluginsRoute(
   });
 
   // A declared loop artifact, read fresh from the output repo (#288).
+  // `withDiff=1` opts into the extra `git diff` spawn (#421) — omit it for the
+  // Rendered/Raw open, which is the overwhelming majority of reads.
   router.get("/:id/loops/:name/artifact", async (c) => {
     const projectId = c.req.query("projectId")?.trim();
     const path = c.req.query("path")?.trim();
+    const withDiff = c.req.query("withDiff") === "1";
     if (!projectId) throw new PluginError("projectId query param is required", "BAD_REQUEST");
     if (!path) throw new PluginError("path query param is required", "BAD_REQUEST");
-    return c.json(await service.getLoopArtifact(c.req.param("id"), projectId, path));
+    return c.json(await service.getLoopArtifact(c.req.param("id"), projectId, path, { withDiff }));
   });
 
   // Edit-then-approve (#305): overwrite one of the current gate's artifacts and commit it.

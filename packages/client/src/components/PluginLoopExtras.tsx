@@ -156,27 +156,43 @@ const STEP_TONE: Record<PluginProgressStep["state"], string> = {
   "pending": "border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 bg-transparent",
 };
 
-export function ProgressStepper({ steps, onOpenArtifact }: {
+export function ProgressStepper({ steps, activePath, onOpenStep }: {
   steps: PluginProgressStep[] | undefined;
-  onOpenArtifact: (path: string) => void;
+  /** Path currently open in the viewer — keeps its chip visibly selected (#423). */
+  activePath?: string | null;
+  /** Reports the whole step, not just a path, so the viewer can show step context
+   *  and offer the step's OTHER artifacts (#422). */
+  onOpenStep: (step: PluginProgressStep, index: number, total: number) => void;
 }) {
   if (!steps || steps.length === 0) return null;
   return (
     <ol className="flex flex-wrap items-center gap-1" data-testid="plugin-loop-stepper">
       {steps.map((step, i) => {
-        const clickable = (step.artifacts?.length ?? 0) > 0;
+        const count = step.artifacts?.length ?? 0;
+        const clickable = count > 0;
+        const isActive = !!activePath && (step.artifacts ?? []).includes(activePath);
         return (
           <li key={step.id} className="flex items-center gap-1">
             {i > 0 && <span className="text-gray-300 dark:text-gray-600 text-xs">—</span>}
             <button
               type="button"
               disabled={!clickable}
-              onClick={() => clickable && onOpenArtifact(step.artifacts![0])}
-              title={`${step.label} — ${step.state}${step.version ? ` (${step.version})` : ""}${clickable ? "\nClick to open the artifact" : ""}`}
-              className={`text-[11px] px-2 py-1 rounded border ${STEP_TONE[step.state]} ${clickable ? "hover:underline cursor-pointer" : "cursor-default"}`}
+              aria-current={isActive ? "true" : undefined}
+              onClick={() => clickable && onOpenStep(step, i + 1, steps.length)}
+              title={`${step.label} — ${step.state}${step.version ? ` (${step.version})` : ""}${
+                clickable
+                  ? `\nClick to open ${count === 1 ? "the artifact" : `its ${count} artifacts`}`
+                  : ""
+              }`}
+              className={`text-[11px] px-2 py-1 rounded border ${STEP_TONE[step.state]} ${clickable ? "hover:underline cursor-pointer" : "cursor-default"} ${isActive ? "ring-2 ring-brand-400 ring-offset-1 dark:ring-offset-gray-900" : ""}`}
             >
               <span aria-hidden="true">{STEP_MARK[step.state]}</span> {step.label}
               {step.version && <span className="opacity-70"> {step.version}</span>}
+              {/* A step with several outputs used to look identical to one with a single
+                  output, while silently opening only the first (#422). */}
+              {count > 1 && (
+                <span className="ml-1 opacity-70" title={`${count} artifacts`}>📄{count}</span>
+              )}
             </button>
           </li>
         );
@@ -643,13 +659,24 @@ type ArtifactResponse = {
   truncated: boolean;
   commits: Array<{ sha: string; date: string }>;
   diff: string | null;
+  /** Whether a v(N-1)→vN diff can be fetched (#421) — the diff itself is deferred. */
+  hasPreviousVersion?: boolean;
 };
 
-export function ArtifactViewer({ pluginId, loopName, projectId, path, onClose, onLineNotesChange }: {
+export function ArtifactViewer({ pluginId, loopName, projectId, path, step, onOpenArtifact, onClose, onLineNotesChange }: {
   pluginId: string;
   loopName: string;
   projectId: string;
   path: string;
+  /**
+   * The step this artifact belongs to, when it was opened from the stepper (#422/#423).
+   * Supplies the human-readable header ("Step 7/9 — Test & QA · v3") and, when the step
+   * declares more than one artifact, the sibling picker. Absent when the viewer is opened
+   * from the gate card or the unit list, which have their own per-file affordances.
+   */
+  step?: { label: string; version?: string; artifacts?: string[]; index?: number; total?: number };
+  /** Switch to a sibling artifact of the same step without closing the viewer. */
+  onOpenArtifact?: (path: string) => void;
   onClose: () => void;
   /**
    * Line-anchored review notes (#304): comments created on the version diff are
@@ -716,18 +743,40 @@ export function ArtifactViewer({ pluginId, loopName, projectId, path, onClose, o
     return { filesChanged: 1, insertions, deletions };
   }, [artifact?.diff]);
 
+  // The diff is fetched lazily (#421): opening an artifact costs one `git log`, and the
+  // second `git` spawn only happens if the reader actually asks for the Diff tab.
+  const [wantDiff, setWantDiff] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
     setArtifact(null);
     setError(null);
     setTab("rendered");
+    setWantDiff(false);
+    return () => { cancelled = true; void cancelled; };
+  }, [pluginId, loopName, projectId, path]);
+
+  useEffect(() => {
+    let cancelled = false;
     apiFetch<ArtifactResponse>(
-      `/api/plugins/${pluginId}/loops/${encodeURIComponent(loopName)}/artifact?projectId=${projectId}&path=${encodeURIComponent(path)}`,
+      `/api/plugins/${pluginId}/loops/${encodeURIComponent(loopName)}/artifact`
+      + `?projectId=${projectId}&path=${encodeURIComponent(path)}${wantDiff ? "&withDiff=1" : ""}`,
     )
       .then((res) => { if (!cancelled) setArtifact(res); })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); });
     return () => { cancelled = true; };
-  }, [pluginId, loopName, projectId, path]);
+  }, [pluginId, loopName, projectId, path, wantDiff]);
+
+  /** Offering the Diff tab must not depend on the diff being loaded — that is the deferral. */
+  const canDiff = artifact?.hasPreviousVersion ?? artifact?.diff != null;
+  const diffPending = tab === "diff" && artifact?.diff == null;
+
+  function openDiff() {
+    setTab("diff");
+    setWantDiff(true);
+  }
+
+  const siblings = step?.artifacts ?? [];
 
   const isMarkdown = /\.(md|markdown)$/i.test(path);
 
@@ -746,37 +795,79 @@ export function ArtifactViewer({ pluginId, loopName, projectId, path, onClose, o
       className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 flex flex-col max-h-[60vh]"
       data-testid="plugin-artifact-viewer"
     >
-      <div className="flex items-center gap-2 border-b border-gray-100 dark:border-gray-800 px-3 py-2">
-        <span className="text-xs font-mono text-gray-600 dark:text-gray-300 truncate flex-1" title={path}>{path}</span>
-        {artifact?.exists && (
-          <div className="flex items-center gap-1 text-[11px]">
-            {(["rendered", "raw"] as const).filter((t) => t !== "rendered" || isMarkdown).map((t) => (
-              <button
-                key={t}
-                onClick={() => setTab(t)}
-                className={`px-2 py-0.5 rounded ${tab === t ? "bg-brand-600 text-white" : "text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"}`}
-              >
-                {t === "rendered" ? "Rendered" : "Raw"}
-              </button>
-            ))}
-            {artifact.diff && (
-              <button
-                onClick={() => setTab("diff")}
-                className={`px-2 py-0.5 rounded ${tab === "diff" ? "bg-brand-600 text-white" : "text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"}`}
-                title="Diff between the artifact's last two committed versions"
-              >
-                Diff v-1→v
-              </button>
+      <div className="border-b border-gray-100 dark:border-gray-800 px-3 py-2 space-y-1">
+        <div className="flex items-center gap-2">
+          {/* Which STEP this file belongs to (#423). The path alone only reads as a step
+              because THIS plugin encodes the number in it; a plugin writing `docs/prd.md`
+              would leave the reader with nothing. */}
+          <div className="min-w-0 flex-1">
+            {step ? (
+              <>
+                <div className="text-xs font-medium text-gray-800 dark:text-gray-100 truncate" data-testid="plugin-artifact-step">
+                  {step.index && step.total ? `Step ${step.index}/${step.total} — ` : ""}{step.label}
+                  {step.version && <span className="ml-1 text-gray-500 dark:text-gray-400 font-normal">{step.version}</span>}
+                </div>
+                <div className="text-[10px] font-mono text-gray-500 dark:text-gray-400 truncate" title={path}>{path}</div>
+              </>
+            ) : (
+              <span className="text-xs font-mono text-gray-600 dark:text-gray-300 truncate block" title={path}>{path}</span>
             )}
           </div>
+          {artifact?.exists && (
+            <div className="flex items-center gap-1 text-[11px] shrink-0">
+              {(["rendered", "raw"] as const).filter((t) => t !== "rendered" || isMarkdown).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setTab(t)}
+                  className={`px-2 py-0.5 rounded ${tab === t ? "bg-brand-600 text-white" : "text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"}`}
+                >
+                  {t === "rendered" ? "Rendered" : "Raw"}
+                </button>
+              ))}
+              {canDiff && (
+                <button
+                  onClick={openDiff}
+                  className={`px-2 py-0.5 rounded ${tab === "diff" ? "bg-brand-600 text-white" : "text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"}`}
+                  title="Diff between the artifact's last two committed versions"
+                >
+                  Diff v-1→v
+                </button>
+              )}
+            </div>
+          )}
+          <button
+            onClick={onClose}
+            className="text-xs px-2 py-0.5 rounded text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 shrink-0"
+            aria-label="Close artifact"
+          >
+            ✕
+          </button>
+        </div>
+        {/* Sibling artifacts of the same step (#422). Without this the step chip opens
+            artifacts[0] and the rest of the step's output has no route in the UI at all. */}
+        {siblings.length > 1 && onOpenArtifact && (
+          <div className="flex flex-wrap items-center gap-1" data-testid="plugin-artifact-siblings">
+            {siblings.map((sib) => {
+              const active = sib === path;
+              return (
+                <button
+                  key={sib}
+                  type="button"
+                  onClick={() => !active && onOpenArtifact(sib)}
+                  title={sib}
+                  aria-current={active ? "true" : undefined}
+                  className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+                    active
+                      ? "border-brand-500 bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300"
+                      : "border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+                  }`}
+                >
+                  {sib.split("/").pop()}
+                </button>
+              );
+            })}
+          </div>
         )}
-        <button
-          onClick={onClose}
-          className="text-xs px-2 py-0.5 rounded text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
-          aria-label="Close artifact"
-        >
-          ✕
-        </button>
       </div>
       <div className="flex-1 min-h-0 overflow-auto p-3">
         {error && <div className="text-xs text-red-600 dark:text-red-400">{error}</div>}
@@ -786,7 +877,10 @@ export function ArtifactViewer({ pluginId, loopName, projectId, path, onClose, o
             Not produced yet — the file will appear once its step has run.
           </div>
         )}
-        {artifact?.exists && artifact.content !== null && (
+        {artifact?.exists && diffPending && (
+          <div className="text-xs text-gray-500 dark:text-gray-400">Loading diff…</div>
+        )}
+        {artifact?.exists && artifact.content !== null && !diffPending && (
           tab === "diff" && artifact.diff ? (
             // Full diff surface (#304): syntax highlight + INLINE COMMENTS. Comments stay
             // local; the gate card attaches them to revision feedback as "file:line: note".
