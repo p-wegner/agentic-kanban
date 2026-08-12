@@ -562,7 +562,7 @@ export function GateCard({ pluginId, loopName, projectId, gate, gateSince, check
             <button
               onClick={() => void act(recommendationView.action)}
               disabled={resolving}
-              className="shrink-0 text-[11px] px-2 py-0.5 rounded border border-amber-400 dark:border-amber-600 hover:bg-amber-100 dark:hover:bg-amber-900/40 text-amber-900 dark:text-amber-200"
+              className="shrink-0 text-[11px] px-3 py-2.5 sm:px-2 sm:py-0.5 min-h-11 sm:min-h-0 rounded border border-amber-400 dark:border-amber-600 hover:bg-amber-100 dark:hover:bg-amber-900/40 text-amber-900 dark:text-amber-200"
             >
               Accept
             </button>
@@ -596,15 +596,18 @@ export function GateCard({ pluginId, loopName, projectId, gate, gateSince, check
               <button
                 type="button"
                 onClick={() => onOpenArtifact(path)}
-                className="text-[11px] font-mono px-2 py-0.5 text-amber-900 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/40"
+                className="text-[11px] font-mono px-3 py-2.5 sm:px-2 sm:py-0.5 min-h-11 sm:min-h-0 text-amber-900 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/40"
                 title="Open the artifact under review"
               >
                 📄 {path.split("/").pop()}
               </button>
+              {/* The pencil was a ~20x22px sliver glued to the open button inside one pill —
+                  on a phone you open the EDITOR when you meant to read. Widened to a 44px
+                  target below sm; unchanged on desktop where the dense pill is fine (#433). */}
               <button
                 type="button"
                 onClick={() => void openEditor(path)}
-                className="text-[11px] px-1.5 py-0.5 border-l border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/40"
+                className="text-[11px] px-3 py-2.5 sm:px-1.5 sm:py-0.5 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 border-l border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/40"
                 title="Edit the artifact before approving (#305)"
                 data-testid={`plugin-gate-edit-${path.split("/").pop()}`}
               >
@@ -660,7 +663,10 @@ export function GateCard({ pluginId, loopName, projectId, gate, gateSince, check
             rows={4}
             autoFocus
             placeholder={gateInputPlaceholder(selected)}
-            className="w-full text-sm px-2 py-1.5 rounded border border-amber-300 dark:border-amber-700 bg-white dark:bg-gray-900"
+            // text-base (16px) below sm is not cosmetic: iOS Safari ZOOMS the page on focus
+            // for any input under 16px, and it does not zoom back out — leaving the gate
+            // panned off-screen mid-answer. sm+ keeps the denser text-sm (#433).
+            className="w-full text-base sm:text-sm px-2 py-2 sm:py-1.5 min-h-28 rounded border border-amber-300 dark:border-amber-700 bg-white dark:bg-gray-900"
             data-testid="plugin-gate-input"
           />
           {/* #378 B — the Confirm button below is disabled until there is something to submit;
@@ -681,7 +687,11 @@ export function GateCard({ pluginId, loopName, projectId, gate, gateSince, check
           </button>
         </div>
       )}
-      <div className="flex items-center gap-2">
+      {/* Wraps, and the buttons are full-width 44px targets below sm (#433): this row is
+          THE thing you tap to answer a gate from a phone. It was a non-wrapping
+          `flex items-center` of ~32px buttons whose longest label ("Confirm: Needs
+          revision") cannot share a line with the others at any phone width. */}
+      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2">
         {gate.actions.map((action) => (
           <button
             key={action.id}
@@ -689,7 +699,7 @@ export function GateCard({ pluginId, loopName, projectId, gate, gateSince, check
             // #378 B — once the textarea is armed this button IS the confirm; a required-input
             // action with an empty box must not look clickable and then do nothing.
             disabled={resolving || (selected?.id === action.id && !canSubmitGateAction(action, input, lineNotes))}
-            className={`text-sm px-3 py-1.5 rounded disabled:opacity-50 disabled:cursor-not-allowed ${
+            className={`text-sm px-4 py-2.5 sm:px-3 sm:py-1.5 min-h-11 sm:min-h-0 rounded disabled:opacity-50 disabled:cursor-not-allowed ${
               action.input === "text"
                 ? "border border-amber-400 dark:border-amber-600 text-amber-900 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/40"
                 : "bg-brand-600 text-white hover:bg-brand-700"
@@ -702,7 +712,7 @@ export function GateCard({ pluginId, loopName, projectId, gate, gateSince, check
         <button
           onClick={() => void summarize()}
           disabled={summarizing}
-          className="text-sm px-3 py-1.5 rounded border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/40 disabled:opacity-50"
+          className="text-sm px-4 py-2.5 sm:px-3 sm:py-1.5 min-h-11 sm:min-h-0 rounded border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/40 disabled:opacity-50"
           data-testid="plugin-gate-summarize"
           title="Butler reads the artifacts and posts a decision-ready digest here (#330)"
         >
