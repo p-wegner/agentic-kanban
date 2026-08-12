@@ -319,6 +319,46 @@ function formatGateAge(since: string): string {
   return `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
 
+function normalizeForCompare(text: string): string {
+  return text.replace(/[\s`"'“”]+/g, " ").trim().toLowerCase();
+}
+
+/**
+ * A gate question often carries BOTH the decision and a truncated copy of the failure that
+ * caused it — e.g. `Approve step 7/9 — Test & QA (v3)? ⚠ 1 record row(s) claim verification
+ * for a criterion the Findings declare unverifiable: STORY-3-1 Sz.1 is recorded manual while
+ * Finding F1 says "cannot be verif".` The full, untruncated version of that same sentence is
+ * ALREADY rendered right below as the failing check's detail, so the card said it twice — and
+ * the second copy was the readable one. The duplication pushed the butler's verdict and the
+ * action buttons below the fold, which is the actual cost: the reader scrolls past a repeated
+ * paragraph to reach the decision.
+ *
+ * So split the question at its first `?` and drop the trailing detail *only when a check
+ * already says it*. Plugin-agnostic by construction: it never parses the plugin's format, it
+ * just refuses to print the same sentence twice. A question with no trailing detail, or whose
+ * detail appears in no check, is rendered exactly as before.
+ */
+export function splitGateQuestion(
+  question: string,
+  checks?: Array<{ detail?: string | null }> | null,
+): { heading: string; duplicatedDetail: string | null } {
+  const boundary = question.indexOf("?");
+  if (boundary === -1 || boundary === question.length - 1) {
+    return { heading: question, duplicatedDetail: null };
+  }
+  const heading = question.slice(0, boundary + 1);
+  const tail = question.slice(boundary + 1).replace(/^[\s⚠!*-]+/, "").trim();
+  if (!tail) return { heading, duplicatedDetail: null };
+
+  // The tail is a TRUNCATION of the check detail, so compare a prefix rather than the whole
+  // string. Long enough not to collide by accident, short enough to survive the truncation.
+  const probe = normalizeForCompare(tail).slice(0, 40);
+  if (probe.length < 20) return { heading: question, duplicatedDetail: null };
+  const echoed = (checks ?? []).some((check) =>
+    check.detail ? normalizeForCompare(check.detail).includes(probe) : false);
+  return echoed ? { heading, duplicatedDetail: tail } : { heading: question, duplicatedDetail: null };
+}
+
 export function GateCard({ pluginId, loopName, projectId, gate, gateSince, checks, recommendation, lineNotes, onResolved, onOpenArtifact }: {
   pluginId: string;
   loopName: string;
@@ -459,30 +499,21 @@ export function GateCard({ pluginId, loopName, projectId, gate, gateSince, check
     fail: "text-red-800 dark:text-red-300",
   } as const;
 
+  const questionView = splitGateQuestion(gate.question, checks);
+
   return (
     <div
       className="rounded border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 p-4 space-y-3 max-w-2xl"
       data-testid="plugin-gate-card"
     >
-      <div className="text-sm font-medium text-amber-900 dark:text-amber-200">
-        ✋ {gate.question}
+      <div className="text-sm font-medium text-amber-900 dark:text-amber-200" data-testid="plugin-gate-question">
+        ✋ {questionView.heading}
       </div>
       {/* How long this decision has been blocking the pipeline. Sourced from the gate's own
           `gate-reached` event, so a re-planned loop cannot make an old gate look fresh. */}
       {gateSince && (
         <div className="text-xs text-amber-800 dark:text-amber-300" data-testid="plugin-gate-age">
           Waiting {formatGateAge(gateSince)} · since {new Date(gateSince).toLocaleString("en-US")}
-        </div>
-      )}
-      {/* Verification digest (#303) — verdict + detail readable on the card itself. */}
-      {(checks?.length ?? 0) > 0 && (
-        <div className="space-y-1" data-testid="plugin-gate-checks-digest">
-          {checks!.map((check) => (
-            <div key={check.name} className={`text-xs ${checkTone[check.verdict]}`}>
-              <span className="font-medium">{check.verdict === "pass" ? "✓" : check.verdict === "warn" ? "⚠" : "✕"} {check.name}:</span>{" "}
-              {check.detail ?? check.verdict.toUpperCase()}
-            </div>
-          ))}
         </div>
       )}
       {/* Butler recommendation chip (#309) — a pre-read, never a decision.
@@ -515,6 +546,17 @@ export function GateCard({ pluginId, loopName, projectId, gate, gateSince, check
               Accept
             </button>
           )}
+        </div>
+      )}
+      {/* Verification digest (#303) — verdict + detail readable on the card itself. */}
+      {(checks?.length ?? 0) > 0 && (
+        <div className="space-y-1" data-testid="plugin-gate-checks-digest">
+          {checks!.map((check) => (
+            <div key={check.name} className={`text-xs ${checkTone[check.verdict]}`}>
+              <span className="font-medium">{check.verdict === "pass" ? "✓" : check.verdict === "warn" ? "⚠" : "✕"} {check.name}:</span>{" "}
+              {check.detail ?? check.verdict.toUpperCase()}
+            </div>
+          ))}
         </div>
       )}
       {/* Summarize-for-me (#330) — butler digest rendered in place. */}

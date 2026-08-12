@@ -194,13 +194,22 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null 
         <LoopStateChips loop={loop} startPolicy={startPolicy} />
       </div>
 
-      <p className="text-xs text-gray-500 dark:text-gray-400 max-w-2xl">
-        A board-owned loop. Each advance asks the plugin what work is still outstanding and turns every unit
-        into a ticket carrying the <span className="font-mono">{loop.skill}</span> skill. The board&apos;s monitor
-        starts those tickets within this project&apos;s WIP limit — so they use the same provider selection and
-        profile rotation as any other ticket. Once a round&apos;s tickets are all closed the next round is planned
-        automatically, until the plugin reports nothing left to do — or until the loop is paused.
-      </p>
+      {/* Collapsed by default: this is unchanging documentation of how loops work in general,
+          identical on every loop and every visit, and it cost ~90px at the top of the pane —
+          which pushed the gate's ACTION BUTTONS below the fold on a 720px viewport. The thing
+          the reader came for (the gate, its verdict, its buttons) outranks the explainer. */}
+      <details className="max-w-2xl">
+        <summary className="text-xs text-gray-500 dark:text-gray-400 cursor-pointer hover:text-gray-700 dark:hover:text-gray-300">
+          How this loop works
+        </summary>
+        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+          A board-owned loop. Each advance asks the plugin what work is still outstanding and turns every unit
+          into a ticket carrying the <span className="font-mono">{loop.skill}</span> skill. The board&apos;s monitor
+          starts those tickets within this project&apos;s WIP limit — so they use the same provider selection and
+          profile rotation as any other ticket. Once a round&apos;s tickets are all closed the next round is planned
+          automatically, until the plugin reports nothing left to do — or until the loop is paused.
+        </p>
+      </details>
 
       {/* Declarative pipeline progress (#289) + verification badges (#290). */}
       <ProgressStepper
