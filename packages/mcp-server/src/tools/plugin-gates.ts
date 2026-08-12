@@ -59,7 +59,7 @@ async function surfaceLoops(projectId: string): Promise<SurfaceLoop[]> {
 export function registerListPluginGates(server: McpServer) {
   server.tool(
     "list_plugin_gates",
-    "List plugin-loop approval gates currently waiting on a HUMAN decision for a project (question, verification checks, artifacts, the butler's recommendation if any). Also reports loops whose finished ticket is still waiting for its merge to land.",
+    "List plugin-loop approval gates waiting on a HUMAN decision for ONE project (question, verification checks, artifacts, the butler's recommendation if any). Also reports loops whose finished ticket is still waiting for its merge to land. For a question spanning MULTIPLE projects use list_inbox instead — calling this once per project and stitching the results mis-attributes items to the wrong project.",
     { projectId: z.string().describe("The project ID") },
     async ({ projectId }) => {
       try {
@@ -105,6 +105,31 @@ export function registerGetPluginGate(server: McpServer) {
       } catch (err) {
         return text(`Failed: ${err instanceof Error ? err.message : String(err)}`);
       }
+    },
+  );
+}
+
+/**
+ * The CROSS-project inbox (#441). Every other tool here is single-project, so a
+ * question like "what needs my attention across the whole board?" forced a manual
+ * fan-out over every project plus hand-stitching of the results — and hand-stitching
+ * is where it went wrong: a real butler answer named the right issue numbers and
+ * titles under the WRONG project names (eventhub #28 reported as bugtrack #28,
+ * pantry #33 as habithub #33).
+ *
+ * `GET /api/inbox` already does this correctly server-side, with each item carrying
+ * its own projectId/projectName, so the fix is exposure, not computation.
+ */
+export function registerListInbox(server: McpServer) {
+  server.tool(
+    "list_inbox",
+    "Everything blocked on a HUMAN across ALL projects at once: plugin-loop gates, finished-but-unlanded loop merges, unanswered agent questions and pending tool approvals — each carrying its own project. USE THIS for any cross-project \"what needs my attention / what is waiting on me\" question instead of calling the per-project tools once per project; fanning out by hand mis-attributes items to the wrong project.",
+    {},
+    async () => {
+      const res = await api("/inbox");
+      if (!res.ok) return text(`Inbox failed (${res.status}): ${JSON.stringify(res.data)}`);
+      const items = (res.data as { items?: unknown[] }).items ?? [];
+      return text(items.length ? items : "Nothing is waiting on you on any project.");
     },
   );
 }

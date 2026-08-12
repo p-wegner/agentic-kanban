@@ -20,7 +20,14 @@ import { getPluginService } from "./plugin.service.js";
  */
 
 export interface InboxItem {
-  kind: "plugin-gate" | "agent-question" | "tool-approval";
+  /**
+   * `plugin-merge` (#440) is a loop whose builder finished but whose merge never
+   * landed. It waits on a human exactly as a gate does — nothing advances the loop
+   * until someone lands or discards it — but it was omitted here for months while
+   * `list_plugin_gates` reported it, so the two surfaces disagreed on what
+   * "waiting on you" means.
+   */
+  kind: "plugin-gate" | "plugin-merge" | "agent-question" | "tool-approval";
   projectId: string;
   projectName: string;
   title: string;
@@ -51,6 +58,26 @@ function collectGateItems(
 ): InboxItem[] {
   const items: InboxItem[] = [];
   for (const loop of loops) {
+    // A finished-but-unlanded ticket (#440). Reported independently of the gate check
+    // below: the two are different waits and a loop can be in either.
+    const awaiting = loop.awaitingMerge;
+    if (awaiting) {
+      items.push({
+        kind: "plugin-merge",
+        projectId: project.id,
+        projectName: project.name,
+        title: awaiting.issueNumber ? `#${awaiting.issueNumber} ${awaiting.issueTitle}` : awaiting.issueTitle,
+        // `mergeSafe: false` (#363) must never read as "land this" — the measured
+        // instance had zero commits on its branch, so merging would close the unit
+        // without its artifacts.
+        detail: `${loop.pluginName} — ${loop.label} · `
+          + (awaiting.mergeSafe === false
+            ? `DO NOT merge: ${awaiting.detail ?? awaiting.reason ?? "branch has nothing to land"}`
+            : `finished, waiting to land${awaiting.reason ? ` (${awaiting.reason})` : ""}`),
+        link: { view: "board", workspaceId: awaiting.workspaceId, issueNumber: awaiting.issueNumber },
+        createdAt: loop.lastAdvanceAt ?? null,
+      });
+    }
     if (!loop.gate || loop.openTickets > 0) continue;
     items.push({
       kind: "plugin-gate",
