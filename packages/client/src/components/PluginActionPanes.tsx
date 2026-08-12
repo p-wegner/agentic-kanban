@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { showToast } from "./Toast.js";
+import { setProjectPref } from "../lib/settingsStore.js";
 import {
   ArtifactViewer,
   AwaitingMergeCard,
@@ -149,6 +150,27 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
   const [timelineKey, setTimelineKey] = useState(0);
   // Line-anchored review notes collected on the artifact diff (#304).
   const [lineNotes, setLineNotes] = useState<string[]>([]);
+  const [switchingMode, setSwitchingMode] = useState(false);
+
+  /**
+   * One-click fix for the manual-Start-Mode warning (#428): the loop planned tickets that
+   * nothing will start. Writes the same `start_mode` project preference the Monitor view's
+   * control writes. It deliberately does NOT touch the Conductor: this only ever moves
+   * manual → monitor, and a project in manual has no conductor loop running to stop.
+   */
+  async function switchToMonitorMode() {
+    if (switchingMode) return;
+    setSwitchingMode(true);
+    try {
+      await setProjectPref(projectId, "start_mode", "monitor");
+      showToast("Start Mode set to monitor — the board will start this loop's tickets", "success");
+      onChanged();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to change Start Mode", "error");
+    } finally {
+      setSwitchingMode(false);
+    }
+  }
 
   async function advance() {
     if (advancing) return;
@@ -198,7 +220,12 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
     <div className="p-6 space-y-4 overflow-y-auto" data-testid="plugin-loop-pane">
       <div className="flex items-start justify-between gap-3">
         <PaneHeading title={loop.label} subtitle={loop.description} />
-        <LoopStateChips loop={loop} startPolicy={startPolicy} />
+        <LoopStateChips
+          loop={loop}
+          startPolicy={startPolicy}
+          onSwitchToMonitor={() => void switchToMonitorMode()}
+          switchingMode={switchingMode}
+        />
       </div>
 
       {/* Setup gate (#427): the server 409s every advance while the scaffold has unresolved
