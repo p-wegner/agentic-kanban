@@ -42,6 +42,8 @@ export type PluginLoop = PluginOwner & {
   description: string | null;
   skill: string;
   openTickets: number;
+  /** The open tickets themselves (#429), so the pane can name them rather than only count them. */
+  openTicketRefs?: Array<{ issueId: string; issueNumber: number | null; statusName: string }>;
   closedTickets: number;
   paused: boolean;
   converged: boolean;
@@ -347,8 +349,25 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
       </div>
 
       {roundRunning && (
-        <p className="text-xs text-amber-700 dark:text-amber-400">
-          Round in progress — {loop.openTickets} ticket(s) still open. The next round is planned automatically once they close.
+        <p className="text-xs text-amber-700 dark:text-amber-400" data-testid="plugin-loop-round-running">
+          Round in progress — {loop.openTickets} ticket(s) still open
+          {/* NAME the open tickets and their live status (#429). "1 ticket(s) still open" left the
+              reader to go to the board and work out which one and whether it had actually started —
+              the difference between "running" and "planned but nothing is provisioning it" is
+              exactly what stalls here look like. The refs cost no extra query. */}
+          {(loop.openTicketRefs?.length ?? 0) > 0 && (
+            <>
+              {": "}
+              {loop.openTicketRefs!.map((ref, i) => (
+                <span key={ref.issueId}>
+                  {i > 0 && ", "}
+                  <span className="font-mono">#{ref.issueNumber ?? "?"}</span>
+                  <span className="opacity-75"> ({ref.statusName})</span>
+                </span>
+              ))}
+            </>
+          )}
+          . The next round is planned automatically once they close.
         </p>
       )}
       {loop.paused && (
