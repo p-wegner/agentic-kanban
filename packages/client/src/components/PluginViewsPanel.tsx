@@ -33,11 +33,17 @@ type PluginSurface = {
   loops: PluginLoop[];
   scripts: PluginScript[];
   skills: PluginSkill[];
+  /**
+   * Enabled plugins whose on-disk manifest is ahead of the one the board runs (#442).
+   * The marketplace has warned about this since #295, but an operator drives loops from
+   * HERE and never opens Settings — so a stale manifest ran silently.
+   */
+  drifted?: Array<{ pluginId: string; pluginSlug: string; pluginName: string }>;
   /** Project start policy (#293) — `manual` means the monitor never drives loops. */
   startPolicy?: { mode: string; autoStartUnblocked: boolean } | null;
 };
 
-const EMPTY_SURFACE: PluginSurface = { views: [], loops: [], scripts: [], skills: [], startPolicy: null };
+const EMPTY_SURFACE: PluginSurface = { views: [], loops: [], scripts: [], skills: [], drifted: [], startPolicy: null };
 
 type Selection =
   | { kind: "view"; key: string }
@@ -245,6 +251,7 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
       loops: surface.loops.filter((l) => l.pluginSlug === pluginSlug),
       scripts: surface.scripts.filter((s) => s.pluginSlug === pluginSlug),
       skills: surface.skills.filter((s) => s.pluginSlug === pluginSlug),
+      drifted: (surface.drifted ?? []).filter((d) => d.pluginSlug === pluginSlug),
       startPolicy: surface.startPolicy ?? null,
     };
   }, [surface, pluginSlug]);
@@ -504,6 +511,18 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
             </svg>
           </button>
         </div>
+        {/* #442: what the board RUNS is the cached manifest; edits on disk do nothing until
+            the author presses Update in Settings. Saying so here — where loops are actually
+            started — is the difference between a two-second fix and chasing a phantom bug. */}
+        {(filtered.drifted ?? []).length > 0 && (
+          <div
+            className="mt-2 mx-1 text-[11px] px-2 py-1.5 rounded bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
+            data-testid="plugin-surface-drift"
+          >
+            ⚠ This plugin&apos;s manifest changed on disk. The board still runs the old version —
+            press <span className="font-semibold">Update</span> in Settings → Plugins to apply it.
+          </div>
+        )}
         {shownPlugin && scaffold?.exists && (
           <div className="space-y-0.5">
             <div className="px-2 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">

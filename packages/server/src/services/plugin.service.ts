@@ -407,6 +407,29 @@ export function createPluginService(deps: {
     };
   }
 
+  /**
+   * Is the manifest the board RUNS (the cached row) behind the one on DISK? Shared by the
+   * marketplace listing and the board's plugin panel (#442) — the panel is where an operator
+   * actually drives loops, and it used to show nothing, so a drifted plugin ran its stale
+   * manifest with the only warning parked in a Settings tab the operator never opens.
+   *
+   * mtime + cached-manifestJson keyed (#425): skips the read when neither side has moved, and
+   * can never report stale drift because a row rewrite (POST /:id/update) invalidates the entry.
+   */
+  async function readManifestDrift(row: { localPath: string; manifestJson: string }): Promise<boolean> {
+    try {
+      const manifestPath = join(row.localPath, PLUGIN_MANIFEST_FILENAME);
+      const mtimeMs = (await stat(manifestPath)).mtimeMs;
+      const cached = manifestDriftCache.get(manifestPath);
+      if (cached && cached.mtimeMs === mtimeMs && cached.manifestJson === row.manifestJson) return cached.drift;
+      const drift = (await readFile(manifestPath, "utf8")).trim() !== row.manifestJson.trim();
+      manifestDriftCache.set(manifestPath, { mtimeMs, manifestJson: row.manifestJson, drift });
+      return drift;
+    } catch {
+      return false; // checkout gone or unreadable — surfaced elsewhere
+    }
+  }
+
   async function computePluginList(projectId?: string) {
     const rows = await listPluginRows(database);
     const enabledMap = projectId ? await enabledSlugsByProject() : null;
@@ -424,28 +447,9 @@ export function createPluginService(deps: {
       // Drift (#295): the cached manifest is what the board RUNS; the file on disk is what the
       // author EDITED. They only reconcile on POST /:id/update, and until then edits silently do
       // nothing — so say so instead of letting the author chase a phantom bug.
-      let manifestDrift = false;
-      try {
-        // Async read: this runs per installed plugin per (memo-miss) request, and a
-        // sync read of a cold file would stall the whole event loop for its duration.
-        //
-        // #425: skip the read entirely when the file has not been touched since the last
-        // time we compared it. `stat` is materially cheaper than reading + comparing the
-        // whole manifest, and this runs on the hot path — `GET /api/plugins?projectId=`
-        // is fired by every plugin-view open and measured 34-37ms against 11-16ms for its
-        // sibling endpoints. mtime moving without content changing just costs us one read,
-        // which is exactly the old behaviour, so the cache can never report stale drift.
-        const manifestPath = join(row.localPath, PLUGIN_MANIFEST_FILENAME);
-        const mtimeMs = (await stat(manifestPath)).mtimeMs;
-        const cached = manifestDriftCache.get(manifestPath);
-        if (cached && cached.mtimeMs === mtimeMs && cached.manifestJson === row.manifestJson) {
-          manifestDrift = cached.drift;
-        } else {
-          const onDisk = await readFile(manifestPath, "utf8");
-          manifestDrift = onDisk.trim() !== row.manifestJson.trim();
-          manifestDriftCache.set(manifestPath, { mtimeMs, manifestJson: row.manifestJson, drift: manifestDrift });
-        }
-      } catch { /* checkout gone or unreadable — surfaced elsewhere */ }
+      // Async read (see readManifestDrift): a sync read of a cold file would stall the
+      // whole event loop, and this runs per installed plugin per memo-miss request.
+      const manifestDrift = await readManifestDrift(row);
       return {
         ...row,
         manifest,
@@ -841,6 +845,8 @@ export function createPluginService(deps: {
     const projectLoops = [];
     const scripts = [];
     const skills = [];
+    /** Enabled plugins whose on-disk manifest is ahead of the one the board runs (#442). */
+    const drifted: Array<{ pluginId: string; pluginSlug: string; pluginName: string }> = [];
     for (const row of await listPluginRows(database)) {
       if (!enabled.has(row.pluginId)) continue;
       let manifest: PluginManifest;
@@ -850,6 +856,7 @@ export function createPluginService(deps: {
         continue; // a broken cached manifest must not blank the whole panel
       }
       const owner = { pluginId: row.id, pluginSlug: row.pluginId, pluginName: row.name };
+      if (await readManifestDrift(row)) drifted.push(owner);
       for (const view of manifest.views ?? []) {
         views.push({
           ...owner,
@@ -891,6 +898,7 @@ export function createPluginService(deps: {
       loops: projectLoops,
       scripts,
       skills,
+      drifted,
       startPolicy: { mode: policy.mode, autoStartUnblocked: policy.autoStartUnblocked },
     };
   }
