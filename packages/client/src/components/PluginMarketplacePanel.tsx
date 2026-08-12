@@ -187,7 +187,7 @@ export function PluginMarketplacePanel({ projectId }: PluginMarketplacePanelProp
   }
 
   if (loading) {
-    return <div className="flex-1 p-6 text-sm text-gray-500 dark:text-gray-400">Loading marketplace…</div>;
+    return <div className="flex-1 p-3 sm:p-6 text-sm text-gray-500 dark:text-gray-400">Loading marketplace…</div>;
   }
 
   const installed = entries.filter((e) => e.installed);
@@ -254,7 +254,7 @@ export function PluginMarketplacePanel({ projectId }: PluginMarketplacePanelProp
               <button
                 onClick={() => void handleToggleEnabled(entry)}
                 disabled={busy}
-                className={`text-xs px-2 py-1 rounded disabled:opacity-50 ${
+                className={`text-xs px-3 py-2.5 sm:px-2 sm:py-1 min-h-11 sm:min-h-0 rounded disabled:opacity-50 ${
                   entry.enabled
                     ? "border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
                     : "bg-emerald-600 text-white hover:bg-emerald-700"
@@ -282,7 +282,7 @@ export function PluginMarketplacePanel({ projectId }: PluginMarketplacePanelProp
               {entry.enabled && entry.slug && (
                 <button
                   onClick={() => setSelection({ kind: "plugin", slug: entry.slug! })}
-                  className="text-xs px-2 py-1 rounded bg-violet-600 text-white hover:bg-violet-700"
+                  className="text-xs px-3 py-2.5 sm:px-2 sm:py-1 min-h-11 sm:min-h-0 rounded bg-violet-600 text-white hover:bg-violet-700"
                 >
                   Open
                 </button>
@@ -339,20 +339,21 @@ export function PluginMarketplacePanel({ projectId }: PluginMarketplacePanelProp
           <label htmlFor="plugin-install-source" className="block text-xs font-medium text-gray-700 dark:text-gray-200">
             Install a plugin
           </label>
-          <div className="mt-1.5 flex gap-2">
+          {/* stacks below sm: a URL field plus Validate plus Install cannot share a phone line (#434) */}
+          <div className="mt-1.5 flex flex-col sm:flex-row gap-2">
             <input
               id="plugin-install-source"
               ref={installInputRef}
               value={source}
               onChange={(e) => setSource(e.target.value)}
               placeholder="Git URL (https://… / git@…) or local directory path"
-              className="flex-1 text-xs rounded px-2 py-1.5 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 outline-none focus:border-violet-500"
+              className="flex-1 text-base sm:text-xs rounded px-2 py-2 sm:py-1.5 min-h-11 sm:min-h-0 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 outline-none focus:border-violet-500"
             />
             <button
               type="button"
               onClick={() => void handleValidate()}
               disabled={validating || !source.trim()}
-              className="text-xs px-3 py-1.5 rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+              className="text-xs px-4 py-2.5 sm:px-3 sm:py-1.5 min-h-11 sm:min-h-0 rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
               title="Parse the manifest and check referenced files, without installing (local directories only)"
               data-testid="plugin-validate"
             >
@@ -361,7 +362,7 @@ export function PluginMarketplacePanel({ projectId }: PluginMarketplacePanelProp
             <button
               type="submit"
               disabled={installing || !source.trim()}
-              className="text-xs px-3 py-1.5 rounded bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50"
+              className="text-xs px-4 py-2.5 sm:px-3 sm:py-1.5 min-h-11 sm:min-h-0 rounded bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50"
             >
               {installing ? "Installing…" : "Install"}
             </button>

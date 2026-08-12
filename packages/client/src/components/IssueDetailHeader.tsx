@@ -80,7 +80,8 @@ export function IssueDetailHeader({
           </span>
         )}
       </h2>
-      <div className="flex items-center gap-1">
+      {/* wraps below sm: nine 44px targets cannot share one phone row (#434) */}
+      <div className="flex flex-wrap items-center gap-1">
         {editing ? (
           <>
             <button
@@ -104,7 +105,7 @@ export function IssueDetailHeader({
               onClick={onStartEditing}
               title="Edit issue"
               aria-label="Edit issue"
-              className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 p-0.5 rounded transition-colors"
+              className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 p-2.5 sm:p-0.5 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center rounded transition-colors"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -118,7 +119,7 @@ export function IssueDetailHeader({
                 onClick={onChat}
                 title="Chat about this ticket with the butler — what took so long, where agents failed, missing context"
                 aria-label="Chat about this ticket with the butler"
-                className="text-gray-400 dark:text-gray-500 hover:text-brand-600 dark:hover:text-brand-400 p-0.5 rounded transition-colors"
+                className="text-gray-400 dark:text-gray-500 hover:text-brand-600 dark:hover:text-brand-400 p-2.5 sm:p-0.5 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center rounded transition-colors"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
@@ -150,7 +151,7 @@ export function IssueDetailHeader({
               <button
                 onClick={onDecompose}
                 title="Decompose into subtasks"
-                className="text-purple-400 dark:text-purple-500 hover:text-purple-600 dark:hover:text-purple-300 p-0.5 rounded transition-colors"
+                className="text-purple-400 dark:text-purple-500 hover:text-purple-600 dark:hover:text-purple-300 p-2.5 sm:p-0.5 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center rounded transition-colors"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h8m-8 4h8" />
@@ -162,7 +163,7 @@ export function IssueDetailHeader({
               disabled={duplicating}
               title="Duplicate issue"
               aria-label="Duplicate issue"
-              className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 p-0.5 rounded transition-colors disabled:opacity-50"
+              className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 p-2.5 sm:p-0.5 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center rounded transition-colors disabled:opacity-50"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
@@ -185,7 +186,7 @@ export function IssueDetailHeader({
         <button
           onClick={onCyclePanelMode}
           title={panelMode === "sidebar" ? "Expand to modal" : panelMode === "modal" ? "Expand to fullscreen" : "Collapse to sidebar"}
-          className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 p-0.5 rounded"
+          className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 p-2.5 sm:p-0.5 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center rounded"
         >
           {panelMode === "fullscreen" ? (
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

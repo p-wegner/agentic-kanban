@@ -454,7 +454,13 @@ function IssueCardActions({
   // surrounding cards. Compact: collapse it entirely until hover so dense lists
   // don't pay ~26px of reserved blank space per card.
   return (
-    <div className={`flex items-center gap-1.5 transition-opacity ${compact ? "mt-1 hidden group-hover:flex" : "mt-1.5 opacity-0 group-hover:opacity-100"}`}>
+    // Below sm these are ALWAYS visible (#434). They were hover-only — `hidden` in compact
+    // density (not tappable at all) and `opacity-0` in comfortable (invisible but clickable,
+    // which is worse: you tap a blank strip and something happens). This row holds the only
+    // touch route to Resume / Diff / Start Workspace / Dry Run / "Move to <next status>", and
+    // card drag-and-drop is HTML5 DnD, which iOS Safari never fires from touch — so without
+    // this the board offers a phone no status transition whatsoever.
+    <div className={`flex flex-wrap items-center gap-1.5 transition-opacity ${compact ? "mt-1 flex sm:hidden sm:group-hover:flex" : "mt-1.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100"}`}>
       {showResume && (
         <button
           onClick={(e) => { e.stopPropagation(); onWorkspaceClick!(issue, ws?.main?.id); }}

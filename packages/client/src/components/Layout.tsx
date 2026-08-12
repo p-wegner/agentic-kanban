@@ -344,7 +344,7 @@ export function Layout({
                   const active = projects.find((p) => p.id === activeProjectId) ?? projects[0];
                   setConfirmArchive(active);
                 }}
-                className="p-1 text-gray-400 dark:text-gray-500 hover:text-amber-500 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
+                className="p-2.5 sm:p-1 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-amber-500 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
                 title="Archive project"
               >
                 <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -358,7 +358,7 @@ export function Layout({
                   const active = projects.find((p) => p.id === activeProjectId) ?? projects[0];
                   setConfirmUnregister(active);
                 }}
-                className="p-1 text-gray-400 dark:text-gray-500 hover:text-red-500 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
+                className="p-2.5 sm:p-1 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-red-500 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
                 title="Unregister project"
               >
                 <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -368,7 +368,7 @@ export function Layout({
             )}
             <button
               onClick={openRegister}
-              className="p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
+              className="p-2.5 sm:p-1 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
               title="Register project"
             >
               <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -378,7 +378,7 @@ export function Layout({
             {activeProjectId && (
               <button
                 onClick={openAddRepo}
-                className="relative p-1 text-gray-400 dark:text-gray-500 hover:text-brand-600 dark:hover:text-brand-400 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
+                className="relative p-2.5 sm:p-1 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-brand-600 dark:hover:text-brand-400 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
                 title={projectRepos.length > 0
                   ? `Manage repositories (${projectRepos.length + 1} repos in this project)`
                   : "Add a repository to this project (multi-repo)"}
@@ -416,7 +416,7 @@ export function Layout({
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder='Search issues... ("/")'
-                className="pl-8 pr-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md w-28 sm:w-36 md:w-44 lg:w-56 xl:w-64 focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
+                className="pl-8 pr-3 py-2 sm:py-1.5 min-h-11 sm:min-h-0 text-base sm:text-sm border border-gray-300 dark:border-gray-600 rounded-md w-28 sm:w-36 md:w-44 lg:w-56 xl:w-64 focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
               />
               {searchQuery && (
                 <button
@@ -430,7 +430,7 @@ export function Layout({
             <div className="hidden sm:flex items-center gap-1.5">
             <button
               onClick={onAllWorkspacesClick}
-              className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
+              className="p-2.5 sm:p-1.5 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
               title="All Workspaces"
             >
               <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -442,7 +442,7 @@ export function Layout({
             </button>
             <button
               onClick={onLaunchFailuresClick}
-              className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
+              className="p-2.5 sm:p-1.5 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
               title="Launch Failures"
             >
               <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -453,7 +453,7 @@ export function Layout({
             </button>
             <button
               onClick={onWorktreeOverviewClick}
-              className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
+              className="p-2.5 sm:p-1.5 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
               title="Worktrees"
             >
               <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -465,7 +465,7 @@ export function Layout({
             </button>
             <button
               onClick={onProjectHealthClick}
-              className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
+              className="p-2.5 sm:p-1.5 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
               title="Project Health (p)"
             >
               <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -474,7 +474,7 @@ export function Layout({
             </button>
             <button
               onClick={onThemeToggle}
-              className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
+              className="p-2.5 sm:p-1.5 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
               title={isDark ? "Switch to light mode" : "Switch to dark mode"}
             >
               {isDark ? (
@@ -490,7 +490,7 @@ export function Layout({
             </button>
             <button
               onClick={onSettingsClick}
-              className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
+              className="p-2.5 sm:p-1.5 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
               title="Settings"
             >
               <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -520,7 +520,7 @@ export function Layout({
                 onClick={() => setShowUtilMenu((v) => !v)}
                 aria-haspopup="menu"
                 aria-expanded={showUtilMenu}
-                className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
+                className="p-2.5 sm:p-1.5 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
                 title="More"
               >
                 <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">

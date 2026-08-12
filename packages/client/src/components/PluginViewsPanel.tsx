@@ -484,7 +484,7 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
           <button
             type="button"
             onClick={() => toggleRail(false)}
-            className="shrink-0 p-1 -mr-1 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-200 dark:hover:text-gray-100 dark:hover:bg-gray-800"
+            className="shrink-0 p-2.5 sm:p-1 -mr-1 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center rounded text-gray-400 hover:text-gray-700 hover:bg-gray-200 dark:hover:text-gray-100 dark:hover:bg-gray-800"
             title="Hide plugin menu"
             aria-label="Hide plugin menu"
             data-testid="plugin-rail-close"
@@ -552,7 +552,7 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
             <button
               type="button"
               onClick={() => toggleRail(true)}
-              className="flex items-center gap-1.5 text-xs px-2 py-1 rounded text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+              className="flex items-center gap-1.5 text-xs px-2 py-2.5 sm:py-1 min-h-11 sm:min-h-0 rounded text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
               title="Show plugin menu"
               aria-label="Show plugin menu"
               data-testid="plugin-rail-open"

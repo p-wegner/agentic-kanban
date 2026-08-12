@@ -112,7 +112,9 @@ export function PluginScaffoldPane({ pluginId, pluginName, projectId, onFilled }
                 onChange={(e) => setValues((v) => ({ ...v, [field.index]: e.target.value }))}
                 rows={2}
                 disabled={saving}
-                className="w-full text-sm px-2 py-1.5 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 disabled:opacity-50"
+                // text-base below sm: iOS Safari zooms the page for inputs under 16px and does
+                // not zoom back, which on an 11-field form leaves you panned off-screen (#434).
+                className="w-full text-base sm:text-sm px-2 py-2 sm:py-1.5 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 disabled:opacity-50"
                 data-testid={`plugin-scaffold-field-${field.index}`}
               />
             </label>
@@ -120,7 +122,7 @@ export function PluginScaffoldPane({ pluginId, pluginName, projectId, onFilled }
           <button
             onClick={() => void submit()}
             disabled={saving}
-            className="text-sm px-3 py-1.5 rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
+            className="text-sm px-4 py-2.5 sm:px-3 sm:py-1.5 min-h-11 sm:min-h-0 w-full sm:w-auto rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
             data-testid="plugin-scaffold-save"
           >
             {saving ? "Saving…" : "Save profile"}
