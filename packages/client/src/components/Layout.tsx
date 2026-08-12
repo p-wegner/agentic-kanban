@@ -119,6 +119,8 @@ export function Layout({
   // Below sm the utility icons (workspaces/failures/worktrees/theme/settings)
   // collapse into a single ⋯ menu so the header fits on one row.
   const [showUtilMenu, setShowUtilMenu] = useState(false);
+  /** Mobile search is an icon until tapped (#435) — see the header. */
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const utilMenuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!showUtilMenu) return;
@@ -319,8 +321,34 @@ export function Layout({
 
   return (
     <div className="h-screen flex flex-col bg-surface dark:bg-surface-dark">
-      <header className="bg-surface-raised dark:bg-surface-raised-dark border-b border-black/[0.07] dark:border-white/10 px-2.5 py-1.5 sm:px-3 shrink-0">
-        <div className="flex min-w-0 items-center justify-between gap-2">
+      <header className="bg-surface-raised dark:bg-surface-raised-dark border-b border-black/[0.07] dark:border-white/10 px-2.5 py-0.5 sm:py-1.5 sm:px-3 shrink-0">
+        {mobileSearchOpen && (
+          <div className="sm:hidden flex items-center gap-2">
+            <div className="relative flex-1 min-w-0">
+              <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                <circle cx="11" cy="11" r="8" />
+                <path d="m21 21-4.3-4.3" />
+              </svg>
+              <input
+                type="text"
+                autoFocus
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search issues…"
+                className="w-full pl-8 pr-3 py-2 min-h-11 text-base border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => { setSearchQuery(""); setMobileSearchOpen(false); }}
+              className="shrink-0 p-2.5 min-h-11 min-w-11 inline-flex items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+              aria-label="Close search"
+            >
+              &times;
+            </button>
+          </div>
+        )}
+        <div className={`${mobileSearchOpen ? "hidden sm:flex" : "flex"} min-w-0 items-center justify-between gap-2`}>
           <div className="flex flex-1 items-center gap-1.5 min-w-0">
             <h1 className="wordmark hidden sm:block text-base lg:text-lg font-semibold text-ink dark:text-stone-100 shrink-0">
               Agentic Kanban
@@ -344,7 +372,7 @@ export function Layout({
                   const active = projects.find((p) => p.id === activeProjectId) ?? projects[0];
                   setConfirmArchive(active);
                 }}
-                className="p-2.5 sm:p-1 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-amber-500 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
+                className="hidden sm:inline-flex p-2.5 sm:p-1 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 items-center justify-center text-gray-400 dark:text-gray-500 hover:text-amber-500 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
                 title="Archive project"
               >
                 <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -358,7 +386,7 @@ export function Layout({
                   const active = projects.find((p) => p.id === activeProjectId) ?? projects[0];
                   setConfirmUnregister(active);
                 }}
-                className="p-2.5 sm:p-1 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-red-500 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
+                className="hidden sm:inline-flex p-2.5 sm:p-1 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 items-center justify-center text-gray-400 dark:text-gray-500 hover:text-red-500 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
                 title="Unregister project"
               >
                 <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -368,7 +396,7 @@ export function Layout({
             )}
             <button
               onClick={openRegister}
-              className="p-2.5 sm:p-1 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
+              className="hidden sm:inline-flex p-2.5 sm:p-1 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
               title="Register project"
             >
               <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -378,7 +406,7 @@ export function Layout({
             {activeProjectId && (
               <button
                 onClick={openAddRepo}
-                className="relative p-2.5 sm:p-1 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-brand-600 dark:hover:text-brand-400 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
+                className="relative hidden sm:inline-flex p-2.5 sm:p-1 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 items-center justify-center text-gray-400 dark:text-gray-500 hover:text-brand-600 dark:hover:text-brand-400 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
                 title={projectRepos.length > 0
                   ? `Manage repositories (${projectRepos.length + 1} repos in this project)`
                   : "Add a repository to this project (multi-repo)"}
@@ -399,7 +427,22 @@ export function Layout({
             )}
           </div>
           <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-            <div className="relative">
+            {/* Below sm the field is an ICON until tapped (#435): at w-28 it showed a truncated
+                "Search i…" while eating a quarter of the header. Tapping expands it over the
+                header row, which is the only place a real query field fits on a phone. */}
+            <button
+              type="button"
+              onClick={() => setMobileSearchOpen(true)}
+              className="sm:hidden p-2.5 min-h-11 min-w-11 inline-flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
+              title="Search issues"
+              aria-label="Search issues"
+            >
+              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                <circle cx="11" cy="11" r="8" />
+                <path d="m21 21-4.3-4.3" />
+              </svg>
+            </button>
+            <div className="relative hidden sm:block">
               <svg
                 className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500"
                 viewBox="0 0 24 24"
@@ -534,6 +577,15 @@ export function Layout({
                     { label: "Launch Failures", onClick: onLaunchFailuresClick },
                     { label: "Worktrees", onClick: onWorktreeOverviewClick },
                     { label: "Project Health", onClick: onProjectHealthClick },
+                    // Folded off the mobile header (#435) — but folded AWAY is not the same as
+                    // removed, so they keep a route here. Archive/Unregister are last and still
+                    // go through their existing confirm dialogs.
+                    { label: "Register project", onClick: openRegister },
+                    ...(projects.length > 0 ? [
+                      { label: "Add repository", onClick: openAddRepo },
+                      { label: "Archive project", onClick: () => setConfirmArchive(projects.find((p) => p.id === activeProjectId) ?? projects[0]) },
+                      { label: "Unregister project", onClick: () => setConfirmUnregister(projects.find((p) => p.id === activeProjectId) ?? projects[0]) },
+                    ] : []),
                     { label: isDark ? "Light mode" : "Dark mode", onClick: onThemeToggle },
                     { label: "Settings", onClick: onSettingsClick },
                   ].map((item) => (
