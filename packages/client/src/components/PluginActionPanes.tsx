@@ -3,6 +3,7 @@ import { apiFetch, apiPost } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 import { setProjectPref } from "../lib/settingsStore.js";
 import { requestIssueFocus, requestViewNavigation } from "../lib/navigateView.js";
+import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import {
   ArtifactViewer,
   AwaitingMergeCard,
@@ -496,9 +497,24 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
 }
 
 /** One-shot deterministic subprocess. */
+/**
+ * Last run per script, surviving a pane switch (#414).
+ *
+ * The result used to live in the pane's own state, so selecting another script threw it
+ * away — and with no timestamp anywhere, "did I already run this?" had no answer short of
+ * running it again. Module-scoped rather than persisted: a script's output is about the
+ * repo as it was minutes ago, so carrying it across a page reload would be a lie, while
+ * carrying it across a pane switch is exactly what the reader expects.
+ */
+const lastScriptRuns = new Map<string, { result: ScriptRunResult; ranAt: number }>();
+
 export function PluginScriptPane({ script, projectId }: { script: PluginScript; projectId: string }) {
+  const runKey = `${script.pluginId}:${script.name}:${projectId}`;
   const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<ScriptRunResult | null>(null);
+  const [lastRun, setLastRun] = useState(() => lastScriptRuns.get(runKey) ?? null);
+  // Selecting a different script re-renders this same component with new props.
+  useEffect(() => { setLastRun(lastScriptRuns.get(runKey) ?? null); }, [runKey]);
+  const result = lastRun?.result ?? null;
 
   async function run() {
     if (running) return;
@@ -508,7 +524,9 @@ export function PluginScriptPane({ script, projectId }: { script: PluginScript; 
         `/api/plugins/${script.pluginId}/scripts/${encodeURIComponent(script.name)}/run`,
         { projectId },
       );
-      setResult(res);
+      const entry = { result: res, ranAt: Date.now() };
+      lastScriptRuns.set(runKey, entry);
+      setLastRun(entry);
       if (res.timedOut) showToast(`"${script.label}" timed out`, "error");
       else if (res.code !== 0) showToast(`"${script.label}" exited ${res.code}`, "error");
       else showToast(`"${script.label}" finished`, "success");
@@ -537,9 +555,10 @@ export function PluginScriptPane({ script, projectId }: { script: PluginScript; 
       </div>
       {result && (
         <div className="flex-1 min-h-0 flex flex-col gap-1">
-          <div className="text-xs text-gray-500 dark:text-gray-400">
+          <div className="text-xs text-gray-500 dark:text-gray-400" data-testid="plugin-script-result-meta">
             {result.timedOut ? "Timed out" : `Exit code ${result.code ?? "?"}`}
             {result.code === 0 && !result.timedOut ? " ✓" : ""}
+            {lastRun && ` · ran ${formatRelativeTime(new Date(lastRun.ranAt).toISOString())}`}
           </div>
           <pre className="flex-1 min-h-0 p-3 rounded bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 overflow-auto whitespace-pre-wrap break-all text-[11px] text-gray-700 dark:text-gray-300">
             {[
