@@ -38,7 +38,7 @@ import { useBoardSelectionStore } from "../stores/boardSelectionStore.js";
 import { useBoardFilterStore, boardFilterActions } from "../stores/boardFilterStore.js";
 import { useBoardBulkSelectionStore } from "../stores/boardBulkSelectionStore.js";
 import { usePluginViewStore } from "../stores/pluginViewStore.js";
-import { SELECT_PROJECT_EVENT, type SelectProjectDetail } from "../lib/navigateView.js";
+import { SELECT_PROJECT_EVENT, type SelectProjectDetail, FOCUS_ISSUE_EVENT, type FocusIssueDetail } from "../lib/navigateView.js";
 import type {
   DependencyInfo,
   IssueWithStatus,
@@ -292,6 +292,22 @@ export function BoardPage() {
     window.addEventListener(SELECT_PROJECT_EVENT, onSelectProject);
     return () => window.removeEventListener(SELECT_PROJECT_EVENT, onSelectProject);
   }, []);
+
+  // #413: open the issue a deep link names. `columnsRef` (not `columns`) so the listener is
+  // registered once and still reads the CURRENT board — a link fired right after a project
+  // switch would otherwise resolve against the previous project's columns.
+  useEffect(() => {
+    function onFocusIssue(e: Event) {
+      const detail = (e as CustomEvent<FocusIssueDetail>).detail;
+      if (!detail) return;
+      const issue = columnsRef.current
+        .flatMap((col) => col.issues)
+        .find((i) => (detail.issueId ? i.id === detail.issueId : i.issueNumber === detail.issueNumber));
+      if (issue) setSelectedIssue(issue);
+    }
+    window.addEventListener(FOCUS_ISSUE_EVENT, onFocusIssue);
+    return () => window.removeEventListener(FOCUS_ISSUE_EVENT, onFocusIssue);
+  }, [columnsRef, setSelectedIssue]);
 
 
   const { handleQuickPriorityChange, handleQuickAddTag, handleQuickRemoveTag, handleQuickTogglePinned } =

@@ -553,7 +553,16 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
             () => setSelection({ kind: "loop", key: ownerKey(loop, loop.name) }),
             // A pending gate outranks the ticket count (#301): it is the one state
             // that goes nowhere without the person looking at this rail.
-            loop.gate && loop.openTickets === 0 ? "✋" : loop.openTickets > 0 ? String(loop.openTickets) : undefined,
+            // #413: a count made of nothing but STRANDED tickets reads as live work when it
+            // is the opposite — mark it "⚠" so the rail does not vouch for a phantom round.
+            loop.gate && loop.openTickets === 0
+              ? "✋"
+              : loop.openTickets > 0
+                ? (loop.openTicketRefs?.length === loop.openTickets
+                    && loop.openTicketRefs.every((r) => r.stranded)
+                    ? "⚠"
+                    : String(loop.openTickets))
+                : undefined,
           ))}
         {railGroup("Scripts", filtered.scripts, (script) =>
           railButton(

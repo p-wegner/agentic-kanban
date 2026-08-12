@@ -185,8 +185,21 @@ export interface LoopStatus {
   skill: string;
   /** Open (non-terminal) tickets this loop has created. */
   openTickets: number;
-  /** The open tickets themselves (#429) — same rows the count is derived from. */
-  openTicketRefs: Array<{ issueId: string; issueNumber: number | null; statusName: string }>;
+  /**
+   * The open tickets themselves (#429) — same rows the count is derived from.
+   *
+   * `stranded` (#413) marks the phantom shape: the ticket is open, it HAS had a workspace,
+   * and none of them is live. Nothing will close it, so the loop's "round in progress —
+   * the next round is planned automatically once they close" is a promise it cannot keep.
+   * A merely QUEUED ticket (planned, never provisioned) has no workspace at all and is not
+   * stranded — that distinction is the whole reason `hasAnyWorkspace` is carried.
+   */
+  openTicketRefs: Array<{
+    issueId: string;
+    issueNumber: number | null;
+    statusName: string;
+    stranded: boolean;
+  }>;
   /** Terminal (Done/Cancelled) tickets this loop has created. */
   closedTickets: number;
   /** True when a human has paused this loop's monitor-driven auto-advance. */
@@ -385,7 +398,12 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
         // and find it. Costs nothing: these rows are already loaded for the counts above.
         openTicketRefs: rows
           .filter((r) => !isTerminalStatusName(r.statusName))
-          .map((r) => ({ issueId: r.id, issueNumber: r.issueNumber, statusName: r.statusName })),
+          .map((r) => ({
+            issueId: r.id,
+            issueNumber: r.issueNumber,
+            statusName: r.statusName,
+            stranded: r.hasAnyWorkspace && !r.hasLiveWorkspace,
+          })),
         closedTickets: rows.filter((r) => isTerminalStatusName(r.statusName)).length,
         paused: pausedValue === "true",
         converged: convergedValue === "true",
