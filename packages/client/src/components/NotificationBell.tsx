@@ -1,9 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import type { NotificationEvent, NotificationEventType } from "../hooks/useActivityNotifications.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
-import { apiFetch } from "../lib/api.js";
-import { requestProjectSelection, requestViewNavigation } from "../lib/navigateView.js";
-import { usePluginViewStore } from "../stores/pluginViewStore.js";
+import { INBOX_KIND_MARK, openInboxItem, refreshInbox, useInbox, type InboxItem } from "../hooks/useInbox.js";
 
 function eventLabel(type: NotificationEventType): string {
   switch (type) {
@@ -20,33 +18,6 @@ function eventLabel(type: NotificationEventType): string {
   }
 }
 
-/** GET /api/inbox (#302) — everything blocked on a human, across ALL projects. */
-interface InboxItem {
-  kind: "plugin-gate" | "plugin-merge" | "agent-question" | "tool-approval";
-  projectId: string;
-  projectName: string;
-  title: string;
-  detail: string | null;
-  link: {
-    view: "plugin-views" | "butler" | "board";
-    pluginId?: string;
-    pluginSlug?: string;
-    loopName?: string;
-    workspaceId?: string;
-    issueNumber?: number | null;
-  };
-  createdAt: string | null;
-}
-
-const INBOX_KIND_MARK: Record<InboxItem["kind"], string> = {
-  "plugin-gate": "✋",
-  // #440: a builder finished but its merge never landed — a different wait from a
-  // gate, and one that sat invisible here for over a week on two projects.
-  "plugin-merge": "⏳",
-  "agent-question": "❓",
-  "tool-approval": "🔐",
-};
-
 /**
  * The durable half of the dropdown (#302): pending DECISIONS read fresh from the
  * server whenever the bell opens — unlike the activity feed below it, these are
@@ -56,20 +27,7 @@ const INBOX_KIND_MARK: Record<InboxItem["kind"], string> = {
  */
 function InboxSection({ items, onNavigate }: { items: InboxItem[] | null; onNavigate: () => void }) {
   function open(item: InboxItem) {
-    // #323: an inbox item may belong to ANOTHER project — switch first, then
-    // navigate. The loopFocus request survives the project switch, so the loop
-    // pane picks it up once the target project's plugin surface loads.
-    requestProjectSelection(item.projectId);
-    if (item.link.view === "plugin-views") {
-      if (item.link.pluginSlug && item.link.loopName) {
-        usePluginViewStore.getState().focusLoop(item.link.pluginSlug, item.link.loopName);
-      }
-      requestViewNavigation("plugin-views");
-    } else if (item.link.view === "butler") {
-      requestViewNavigation("butler");
-    } else {
-      requestViewNavigation("kanban");
-    }
+    openInboxItem(item);
     onNavigate();
   }
 
@@ -195,32 +153,14 @@ export function NotificationBell({
 
   // #328: pending decisions (cross-project inbox) are STATE, not events — they
   // must light the badge on a fresh page load, independent of the activity
-  // feed's lastReadAt bookkeeping. Fetched here (not in InboxSection) so the
-  // count exists while the dropdown is closed; refreshed on open and on a slow
-  // poll so a resolved gate clears the badge without a reload.
-  const [inboxItems, setInboxItems] = useState<InboxItem[] | null>(null);
-  const cancelledRef = useRef(false);
-  const loadInbox = useCallback(() => {
-    apiFetch<{ items: InboxItem[] }>("/api/inbox")
-      .then((res) => { if (!cancelledRef.current) setInboxItems(res.items); })
-      .catch(() => { if (!cancelledRef.current) setInboxItems((prev) => prev ?? []); });
-  }, []);
-  // The slow poll runs for the component's whole lifetime. It used to depend on
-  // `[isOpen]`, which RESTARTED the interval and fired an extra /api/inbox fetch on
-  // every open AND every close (2026-08-11 perf audit) — the on-open refresh is its
-  // own effect below.
-  useEffect(() => {
-    cancelledRef.current = false;
-    loadInbox();
-    const timer = setInterval(loadInbox, 60_000);
-    return () => { cancelledRef.current = true; clearInterval(timer); };
-  }, [loadInbox]);
+  // feed's lastReadAt bookkeeping. The list itself lives in the shared `useInbox`
+  // cache (#411) so the header chip and switcher badges read the SAME poll.
+  const { items: inboxItems, count: inboxCount } = useInbox();
   // Refresh once when the dropdown OPENS (a resolved gate should vanish without
   // waiting for the slow poll); closing fetches nothing.
   useEffect(() => {
-    if (isOpen) loadInbox();
-  }, [isOpen, loadInbox]);
-  const inboxCount = inboxItems?.length ?? 0;
+    if (isOpen) void refreshInbox();
+  }, [isOpen]);
   const badgeCount = unreadCount + inboxCount;
 
   useEffect(() => {
@@ -256,13 +196,25 @@ export function NotificationBell({
         onClick={handleBellClick}
         className="relative p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
         title="Notifications"
-        aria-label={`Notifications${badgeCount > 0 ? ` (${badgeCount} unread)` : ""}`}
+        aria-label={
+          `Notifications${badgeCount > 0 ? ` (${badgeCount} unread)` : ""}` +
+          (inboxCount > 0 ? ` — ${inboxCount} waiting on you` : "")
+        }
       >
         <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
         </svg>
         {badgeCount > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-semibold leading-none">
+          /* Amber when something is BLOCKED ON A HUMAN, red for mere activity (#411):
+             a decision-blocked pipeline is a different urgency class from an event feed,
+             and one red "1" for both is why a gate sat unnoticed for 1d 3h. */
+          <span
+            className={`absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full text-white text-[10px] font-semibold leading-none ${
+              inboxCount > 0 ? "bg-amber-500" : "bg-red-500"
+            }`}
+            data-testid="notification-badge"
+            data-waiting={inboxCount > 0 ? "true" : "false"}
+          >
             {badgeCount > 9 ? "9+" : badgeCount}
           </span>
         )}

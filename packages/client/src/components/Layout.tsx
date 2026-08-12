@@ -4,6 +4,8 @@ import { fetchProjectRepos, invalidateProjectRepos } from "../lib/projectReposQu
 import { ProjectTabs } from "./ProjectTabs.js";
 import { ProjectSelector } from "./ProjectSelector.js";
 import { NotificationBell } from "./NotificationBell.js";
+import { WaitingOnYouChip } from "./WaitingOnYouChip.js";
+import { useInboxCountsByProject } from "../hooks/useInbox.js";
 import type { NotificationEvent } from "../hooks/useActivityNotifications.js";
 import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 import { apiDelete, apiPost } from "../lib/api.js";
@@ -90,6 +92,8 @@ export function Layout({
   // store directly instead of receiving searchQuery/onSearchChange props.
   const searchQuery = useBoardFilterStore((s) => s.searchQuery);
   const setSearchQuery = useBoardFilterStore((s) => s.setSearchQuery);
+  // #411: which projects have something blocked on a human (shared /api/inbox poll).
+  const inboxCounts = useInboxCountsByProject();
   const [showRegister, setShowRegister] = useState(false);
   const [confirmUnregister, setConfirmUnregister] = useState<Project | null>(null);
   const [unregistering, setUnregistering] = useState(false);
@@ -373,7 +377,10 @@ export function Layout({
               projects={projects}
               activeProjectId={activeProjectId ?? null}
               onProjectChange={onProjectChange}
+              waitingCounts={inboxCounts}
             />
+            {/* #411: what the ACTIVE project needs from a human, in every view. */}
+            <WaitingOnYouChip activeProjectId={activeProjectId ?? null} />
             {projects.length > 0 && onArchiveProject && (
               <button
                 onClick={() => {
