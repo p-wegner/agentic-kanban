@@ -146,6 +146,12 @@ interface BoardToolbarProps {
   agingHotDays?: number;
   onAgingThresholdsChange?: (warm: number, hot: number) => void;
   swimlaneDimension?: "none" | "priority" | "tag";
+  /**
+   * Rendered inside the Layout header instead of its own band (#436, phone widths). The row
+   * must then stay on ONE line — its normal `flex-wrap` spills to a second line inside the
+   * header, which puts back the vertical band the merge just removed.
+   */
+  inlineHeader?: boolean;
   onSwimlaneChange?: (v: "none" | "priority" | "tag") => void;
 }
 
@@ -192,6 +198,7 @@ export function BoardToolbar({
   agingHotDays = 7,
   onAgingThresholdsChange,
   swimlaneDimension: _swimlaneDimension = "none",
+  inlineHeader = false,
   onSwimlaneChange: _onSwimlaneChange,
 }: BoardToolbarProps) {
   const [showMonitorPopover, setShowMonitorPopover] = useState(false);
@@ -427,7 +434,7 @@ export function BoardToolbar({
         the board-summary chips). Without it the row stays content-sized and the
         responsive view-tab strip below gets almost no room, collapsing every
         tab into "More". */}
-    <div className="flex flex-1 min-w-0 items-start gap-2 flex-wrap">
+    <div className={`flex flex-1 min-w-0 gap-2 ${inlineHeader ? "items-center flex-nowrap justify-end" : "items-start flex-wrap"}`}>
       {/* < sm : toggle to reveal the action cluster (collapsed by default for room) */}
       <button
         onClick={() => setShowActions((v) => !v)}
