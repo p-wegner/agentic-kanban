@@ -170,6 +170,15 @@ export interface ProcessWorkspaceDeps {
   projectConcurrency?: number;
   /** Real wall-clock cap per candidate — see `DEFAULT_MONITOR_CANDIDATE_TIMEOUT_MS`. */
   candidateTimeoutMs?: number;
+  /**
+   * #416: absolute deadline (on the injected `now` clock) after which NO NEW project
+   * sub-pass may start. Projects whose walk never started are reported in
+   * `notStartedProjectIds` so the cross-cycle scheduler's carry-over cursor resumes at
+   * the first of them next cycle. A walk already in flight when the deadline passes is
+   * still bounded only by its own per-project budget — this gate stops NEW groups, it
+   * never truncates a started one (per-project semantics stay identical).
+   */
+  cycleDeadlineMs?: number;
   /** Clock seam for deterministic time-budget tests. */
   now?: () => number;
   /** Seams for the #417 merge-retry backoff (test database/clock/probes). */
@@ -183,6 +192,12 @@ export interface ProcessWorkspaceCandidatesResult {
   /** Projects whose candidate walk exceeded its time budget this cycle — their
    *  remaining candidates were skipped and will be picked up next cycle. */
   deferredProjectIds: string[];
+  /** #416: projects whose candidate walk ran to COMPLETION this cycle (neither deferred
+   *  mid-walk nor stopped before starting) — the scheduler stamps their sub-pass clock. */
+  completedProjectIds: string[];
+  /** #416: projects whose sub-pass never STARTED because the global cycle deadline
+   *  (`cycleDeadlineMs`) had passed — the carry-over cursor resumes at the first of these. */
+  notStartedProjectIds: string[];
 }
 
 /** Shared per-cycle state handed to the per-status handlers. `stats` is the
@@ -722,7 +737,8 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
     });
   }
 
-  async function processProjectGroup(projectId: string, unordered: WorkspaceCandidate[]): Promise<void> {
+  /** Returns true when the project's walk ran to completion (nothing deferred). */
+  async function processProjectGroup(projectId: string, unordered: WorkspaceCandidate[]): Promise<boolean> {
     // Zero-cost decisions first, so the time budget below cannot starve them (#387).
     const wsList = orderCandidatesForWalk(unordered);
     const deadline = now() + projectTimeBudgetMs;
@@ -731,7 +747,7 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
         const remaining = wsList.length - i;
         console.warn(`[monitor] Project ${projectId} exceeded its ${projectTimeBudgetMs}ms per-cycle time budget  deferring ${remaining} remaining candidate(s) to the next cycle`);
         deferredProjectIds.push(projectId);
-        return;
+        return false;
       }
       // PREEMPTIVE, unlike the deadline check above: a candidate that wedges inside an
       // unbounded await (hung git) must not keep the whole cycle — and therefore every
@@ -741,9 +757,10 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
         const remaining = wsList.length - i;
         console.warn(`[monitor] Workspace ${wsList[i].wsId} (project ${projectId}) did not finish within ${candidateTimeoutMs}ms  abandoning the wait and deferring ${remaining} remaining candidate(s) to the next cycle`);
         deferredProjectIds.push(projectId);
-        return;
+        return false;
       }
     }
+    return true;
   }
 
   // Bounded concurrency ACROSS projects: unrelated projects' candidate walks are I/O and
@@ -752,16 +769,32 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
   // deadline above lets us bail out of a single slow project's walk early.
   const groups = [...byProject.entries()];
   const concurrency = Math.max(1, Math.min(deps.projectConcurrency ?? DEFAULT_MONITOR_PROJECT_CONCURRENCY, groups.length || 1));
+  const completedProjectIds: string[] = [];
+  const notStartedProjectIds: string[] = [];
+  const cycleDeadlineMs = deps.cycleDeadlineMs;
+  let budgetTripLogged = false;
   let cursor = 0;
   async function worker(): Promise<void> {
     for (;;) {
       const idx = cursor++;
       if (idx >= groups.length) return;
       const [projectId, wsList] = groups[idx];
-      await processProjectGroup(projectId, wsList);
+      // #416: past the GLOBAL cycle deadline, start no new project sub-pass. Keep
+      // draining the queue (cheaply) so every not-started project is recorded for the
+      // scheduler's carry-over cursor.
+      if (cycleDeadlineMs !== undefined && now() > cycleDeadlineMs) {
+        if (!budgetTripLogged) {
+          budgetTripLogged = true;
+          console.warn(`[monitor] Global cycle budget exceeded — deferring ${groups.length - idx} remaining project sub-pass(es) to the next cycle (carry-over cursor resumes there)`);
+        }
+        notStartedProjectIds.push(projectId);
+        continue;
+      }
+      const completed = await processProjectGroup(projectId, wsList);
+      if (completed) completedProjectIds.push(projectId);
     }
   }
   await Promise.all(Array.from({ length: concurrency }, () => worker()));
 
-  return { ...stats, deferredProjectIds };
+  return { ...stats, deferredProjectIds, completedProjectIds, notStartedProjectIds };
 }

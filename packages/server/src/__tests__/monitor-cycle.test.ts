@@ -21,6 +21,7 @@ vi.mock("../repositories/workspace-status.repository.js", () => ({
 }));
 
 import { db } from "../db/index.js";
+import { createMonitorProjectScheduler } from "../startup/monitor-project-scheduler.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { QUOTA_BLOCK_PROBE_FALLBACK_MS, orderCandidatesForWalk } from "../startup/monitor-cycle-rules.js";
 import {
@@ -246,7 +247,7 @@ index 1111111..2222222 100644
 
     const stats = await processWorkspaceCandidates([candidate], deps);
 
-    expect(stats).toEqual({ relaunched: 0, merged: 0, nudged: 0, deferredProjectIds: [] });
+    expect(stats).toEqual({ relaunched: 0, merged: 0, nudged: 0, deferredProjectIds: [], completedProjectIds: ["proj-1"], notStartedProjectIds: [] });
     expect(deps.sessionManager.stopSession).toHaveBeenCalledWith("sess-1");
     expect(deps.getCommitCountAhead).toHaveBeenCalledWith("/path/to/dir", "main");
     expect(deps.commitLeftoverChanges).toHaveBeenCalledWith("/path/to/dir");
@@ -316,7 +317,7 @@ describe("processWorkspaceCandidates — idle + readyForMerge=false", () => {
     const candidate: WorkspaceCandidate = { ...baseCandidate, readyForMerge: false, issueStatusName: "In Progress" };
     const stats = await processWorkspaceCandidates([candidate], deps);
 
-    expect(stats).toEqual({ relaunched: 1, merged: 0, nudged: 0, deferredProjectIds: [] });
+    expect(stats).toEqual({ relaunched: 1, merged: 0, nudged: 0, deferredProjectIds: [], completedProjectIds: ["proj-1"], notStartedProjectIds: [] });
     expect(vi.mocked(deps.workspaceActions.launch)).toHaveBeenCalledWith("ws-1");
     expect(vi.mocked(deps.workspaceActions.fixAndMerge)).not.toHaveBeenCalled();
     expect(vi.mocked(deps.workspaceActions.merge)).not.toHaveBeenCalled();
@@ -753,6 +754,113 @@ describe("processWorkspaceCandidates — per-project time budget (#208)", () => 
     // check tripped) and the healthy project's candidate did.
     const launchedIds = vi.mocked(deps.workspaceActions.launch).mock.calls.map(([id]) => id);
     expect(launchedIds).not.toContain("slow-2");
+  });
+});
+
+// #416: the per-project budget above bounds ONE project's walk, but with 10 driven projects
+// the AGGREGATE still exceeded the monitor interval (measured: processing-candidates 184s of
+// a 213s cycle at a 4-min interval) — so cycles ran back-to-back and the loop was starved
+// continuously. A GLOBAL cycle deadline stops starting NEW project sub-passes; the projects
+// that never started are reported so the cross-cycle scheduler resumes at them next cycle.
+describe("processWorkspaceCandidates — global cycle budget with carry-over (#416)", () => {
+  function queueSelectsFor(candidateCount: number) {
+    vi.mocked(db.select).mockReset();
+    for (let i = 0; i < candidateCount; i++) {
+      vi.mocked(db.select)
+        .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>)
+        .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>);
+    }
+  }
+
+  const projectIds = ["proj-a", "proj-b", "proj-c"];
+  const candidateFor = (projectId: string): WorkspaceCandidate => ({
+    ...baseCandidate,
+    wsId: `ws-${projectId}`,
+    issueId: `issue-${projectId}`,
+    projectId,
+    readyForMerge: false,
+    issueStatusName: "In Progress",
+  });
+
+  /** Fast, deterministic git stubs — the walk's decisions, not real git, are under test. */
+  function makeBudgetDeps(extra: Partial<ProcessWorkspaceDeps>): ProcessWorkspaceDeps {
+    return {
+      ...makeDeps(),
+      projectConcurrency: 1,
+      getCommitCountAhead: vi.fn(async () => 0),
+      countBehindCommits: vi.fn(async () => 0),
+      ...extra,
+    } satisfies ProcessWorkspaceDeps;
+  }
+
+  /**
+   * Fake clock: calls 1-3 (first group's cycle-deadline check, its per-project deadline
+   * arm, its first candidate check) see t=0; every later call sees the deadline as passed,
+   * so the SECOND and THIRD project groups never start.
+   */
+  function makeExpiringClock() {
+    let calls = 0;
+    return () => {
+      calls++;
+      return calls <= 3 ? 0 : 1_000_000;
+    };
+  }
+
+  it("stops starting NEW project sub-passes past the cycle deadline and reports them as not started", async () => {
+    queueSelectsFor(3);
+    const deps = makeBudgetDeps({ cycleDeadlineMs: 10, now: makeExpiringClock() });
+
+    const result = await processWorkspaceCandidates(projectIds.map(candidateFor), deps);
+
+    expect(result.completedProjectIds).toEqual(["proj-a"]);
+    expect(result.notStartedProjectIds).toEqual(["proj-b", "proj-c"]);
+    const launchedIds = vi.mocked(deps.workspaceActions.launch).mock.calls.map(([id]) => id);
+    expect(launchedIds).toEqual(["ws-proj-a"]);
+  });
+
+  it("without a cycle deadline every project completes (unchanged legacy behavior)", async () => {
+    queueSelectsFor(3);
+    const deps = makeBudgetDeps({});
+
+    const result = await processWorkspaceCandidates(projectIds.map(candidateFor), deps);
+
+    expect(result.completedProjectIds).toEqual(expect.arrayContaining(projectIds));
+    expect(result.notStartedProjectIds).toEqual([]);
+  });
+
+  it("a budget-stopped cycle plus the scheduler's carry-over covers ALL projects across 2 cycles", async () => {
+    const scheduler = createMonitorProjectScheduler({ now: () => 0 });
+    const candidates = projectIds.map(candidateFor);
+    const orderByPlan = (toRun: string[]) => {
+      const idx = new Map(toRun.map((id, i) => [id, i]));
+      return candidates
+        .filter((c) => idx.has(c.projectId))
+        .sort((a, b) => (idx.get(a.projectId) ?? 0) - (idx.get(b.projectId) ?? 0));
+    };
+
+    // Cycle 1: deadline trips after the first sub-pass.
+    queueSelectsFor(3);
+    const deps1 = makeBudgetDeps({ cycleDeadlineMs: 10, now: makeExpiringClock() });
+    const plan1 = scheduler.planCycle(projectIds);
+    const result1 = await processWorkspaceCandidates(orderByPlan(plan1.toRun), deps1);
+    scheduler.recordCycleResult({ planned: plan1.toRun, completed: result1.completedProjectIds });
+    expect(result1.completedProjectIds).toEqual(["proj-a"]);
+
+    // Cycle 2: the plan RESUMES at the cursor (proj-b) instead of restarting at proj-a.
+    const plan2 = scheduler.planCycle(projectIds);
+    expect(plan2.toRun).toEqual(["proj-b", "proj-c"]);
+    expect(plan2.skipped).toEqual(["proj-a"]); // completed, inactive, floor not due — cheap skip
+
+    queueSelectsFor(2);
+    const deps2 = makeBudgetDeps({});
+    const result2 = await processWorkspaceCandidates(orderByPlan(plan2.toRun), deps2);
+    expect(result2.completedProjectIds).toEqual(expect.arrayContaining(["proj-b", "proj-c"]));
+
+    // All projects covered across the two cycles.
+    const covered = new Set([...result1.completedProjectIds, ...result2.completedProjectIds]);
+    expect(covered).toEqual(new Set(projectIds));
+    const launched2 = vi.mocked(deps2.workspaceActions.launch).mock.calls.map(([id]) => id);
+    expect(launched2).toEqual(expect.arrayContaining(["ws-proj-b", "ws-proj-c"]));
   });
 });
 

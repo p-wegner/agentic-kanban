@@ -25,6 +25,9 @@ import { conditionalJsonResponse } from "../services/board-etag-cache.service.js
 import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
 import { createMonitorPhaseRecorder, type MonitorCycleTimings } from "../lib/monitor-phase-timings.js";
 import { createSpawnControlProbe } from "../lib/monitor-spawn-control.js";
+import { createMonitorProjectScheduler } from "./monitor-project-scheduler.js";
+import { shouldStartHealthRefresh } from "./health-refresh-gate.js";
+import { getLoopLagMonitor } from "../lib/loop-lag-registry.js";
 
 /**
  * Per-project hands-off mode. A `board_autodrive_<projectId>` preference set to
@@ -86,7 +89,7 @@ export function monitorShouldRun(prefMap: Map<string, string>): boolean {
 export interface MonitorState {
   timer: ReturnType<typeof setTimeout> | null;
   nextRunAt: string | null;
-  lastRun: { at: string; relaunched: number; merged: number; nudged: number; resources: MonitorResourceSummary | null; warnings: number; deferredProjectIds?: string[] } | null;
+  lastRun: { at: string; relaunched: number; merged: number; nudged: number; resources: MonitorResourceSummary | null; warnings: number; deferredProjectIds?: string[]; skippedProjectIds?: string[]; notStartedProjectIds?: string[] } | null;
   currentIntervalMin: number | null;
   recentActions: MonitorAction[];
   lastResourceSnapshot: BoardMonitorResourceSnapshot | null;
@@ -125,6 +128,15 @@ export type MonitorWarning = DirtyMainCheckoutWarning | AutodriveStallWarning;
  * guard, so a slow scan can never again pace the board or pile up on itself.
  */
 const HEALTH_WARNING_REFRESH_INTERVAL_MS = 10 * 60_000;
+
+/**
+ * #416: fraction of the configured monitor interval a cycle may spend before it stops
+ * starting NEW project sub-passes (the carry-over cursor resumes them next cycle). 2/3
+ * leaves the remaining third of every interval genuinely idle for interactive traffic —
+ * the measured failure mode was cycle duration >= interval at 10 driven projects, which
+ * made `cycleInFlight` permanently true and starved the event loop continuously.
+ */
+const CYCLE_BUDGET_INTERVAL_FRACTION = 2 / 3;
 
 export interface MonitorResourceSummary {
   processCount: number;
@@ -270,6 +282,10 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
   let autoStartSkipWarnings: MonitorWarning[] = [];
   let lastWarningRefreshAt = 0;
   let warningRefreshRunning = false;
+  // #416: cross-cycle project scheduling state — carry-over cursor + per-project activity.
+  // In-memory by design: a restart starts coverage over, which is fine (none of it is
+  // correctness state; the first post-restart cycle treats every project as due).
+  const projectScheduler = createMonitorProjectScheduler();
   function composeWarnings(): MonitorWarning[] {
     monitorState.warnings = [...lastScannedWarnings, ...autoStartSkipWarnings];
     return monitorState.warnings;
@@ -331,8 +347,20 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
    */
   function refreshMonitorWarningsThrottled(prefMap?: Map<string, string>, force = false): void {
     if (stopped) return;
-    if (warningRefreshRunning) return;
-    if (!force && Date.now() - lastWarningRefreshAt < HEALTH_WARNING_REFRESH_INTERVAL_MS) return;
+    // #416: beyond the #349 single-flight + rate limit, only START the scan in a genuinely
+    // idle window — no cycle in flight AND a calm event loop — since nothing reads its output
+    // on any deadline. Deferral is capped (~30 min) inside the gate so it still eventually
+    // runs on a permanently-busy board. `getLoopLagMonitor()` is null in unit tests → calm.
+    const lagStats = getLoopLagMonitor()?.stats() ?? null;
+    if (!shouldStartHealthRefresh({
+      nowMs: Date.now(),
+      lastStartedAtMs: lastWarningRefreshAt,
+      refreshRunning: warningRefreshRunning,
+      intervalMs: HEALTH_WARNING_REFRESH_INTERVAL_MS,
+      cycleInFlight: cycleRunning,
+      loopLagP90Ms: lagStats ? lagStats.p90 : null,
+      force,
+    })) return;
     warningRefreshRunning = true;
     // Stamped BEFORE the scan, not after: stamping on completion would let a scan that takes
     // longer than the interval re-arm the instant it finished, restoring the back-to-back
@@ -376,7 +404,10 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
     // anything at all, and one lone end-of-cycle sample would be a control with nothing to control.
     let cycleDidWork = false;
     const cycleStats = { relaunched: 0, merged: 0, nudged: 0 };
+    const cycleStartMs = Date.now();
     let deferredProjectIds: string[] = [];
+    let skippedProjectIds: string[] = [];
+    let notStartedProjectIds: string[] = [];
     let resourceSummary: MonitorResourceSummary | null = null;
     let warningCount = monitorState.warnings.length;
     try {
@@ -464,13 +495,44 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
           OR (${issues.currentNodeId} IS NULL AND ${issues.statusId} IN (${sql.join(activeStatusIds.map((id) => sql`${id}`), sql`, `)}))
         )`);
       const allowedCandidates = candidates.filter((candidate) => allowProject(candidate.projectId));
+      // #416: plan which projects this cycle walks. The scheduler rotates the order to the
+      // carry-over cursor (a budget-stopped cycle's tail becomes this cycle's head) and
+      // skips projects with no board activity since their last COMPLETED sub-pass (a slow
+      // ~15-min floor still forces a pass, catching external/out-of-band mutations).
+      const candidateProjectOrder: string[] = [];
+      const seenProjects = new Set<string>();
+      for (const candidate of allowedCandidates) {
+        if (!seenProjects.has(candidate.projectId)) {
+          seenProjects.add(candidate.projectId);
+          candidateProjectOrder.push(candidate.projectId);
+        }
+      }
+      const cyclePlan = projectScheduler.planCycle(candidateProjectOrder);
+      skippedProjectIds = cyclePlan.skipped;
+      if (cyclePlan.skipped.length > 0) {
+        console.log(`[monitor] Skipping ${cyclePlan.skipped.length} inactive project(s) this cycle (no board activity since their last sub-pass; slow floor still applies)`);
+      }
+      const planIndex = new Map(cyclePlan.toRun.map((id, i) => [id, i]));
+      // Stable sort: candidates keep their relative order within a project; project groups
+      // are walked in plan order so the cursor project is processed first.
+      const scheduledCandidates = allowedCandidates
+        .filter((candidate) => planIndex.has(candidate.projectId))
+        .sort((a, b) => (planIndex.get(a.projectId) ?? 0) - (planIndex.get(b.projectId) ?? 0));
+      // #416: global cycle wall-clock budget — 2/3 of the interval by default (pref
+      // `monitor_cycle_budget_ms` overrides). Measured against the cycle's own start, so
+      // the resource sweep and candidate loading already count against it.
+      const intervalMinForBudget = parseInt(prefMap.get("auto_monitor_interval") || "4", 10);
+      const budgetPrefMs = Number(prefMap.get("monitor_cycle_budget_ms"));
+      const cycleBudgetMs = Number.isFinite(budgetPrefMs) && budgetPrefMs > 0
+        ? budgetPrefMs
+        : Math.round((Number.isFinite(intervalMinForBudget) && intervalMinForBudget > 0 ? intervalMinForBudget : 4) * 60_000 * CYCLE_BUDGET_INTERVAL_FRACTION);
       const autoMergeDisabledProjectIds = new Set(
         [...prefMap]
           .filter(([key, value]) => /^auto_merge_disabled_[0-9a-f-]+$/.test(key) && value === "true")
           .map(([key]) => key.replace("auto_merge_disabled_", "")),
       );
       setPhase("processing-candidates");
-      const candidateResult = await processWorkspaceCandidates(allowedCandidates, {
+      const candidateResult = await processWorkspaceCandidates(scheduledCandidates, {
         sessionManager,
         boardEvents,
         workspaceActions,
@@ -495,11 +557,17 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
           const ms = Number(prefMap.get("monitor_candidate_timeout_ms"));
           return Number.isFinite(ms) && ms > 0 ? ms : undefined;
         })(),
+        cycleDeadlineMs: cycleStartMs + cycleBudgetMs,
       });
       cycleStats.relaunched = candidateResult.relaunched;
       cycleStats.merged = candidateResult.merged;
       cycleStats.nudged = candidateResult.nudged;
       deferredProjectIds = candidateResult.deferredProjectIds;
+      notStartedProjectIds = candidateResult.notStartedProjectIds;
+      // #416: stamp completed sub-passes (consuming their pre-completion activity, including
+      // the walk's own broadcasts) and set the carry-over cursor to the first planned project
+      // that did NOT complete, so the next cycle resumes there instead of restarting at #1.
+      projectScheduler.recordCycleResult({ planned: cyclePlan.toRun, completed: candidateResult.completedProjectIds });
       // Gated auto-contract (#918): BEFORE fan-out, contract (or suggest contracting) coupled
       // components so coupled tickets never start as separate conflicting workspaces. Off by
       // default — only projects with `auto_contract_coupled_<id>` set act, and only those the
@@ -576,7 +644,15 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       cycleRunning = false;
       monitorState.currentCycle = null;
       monitorState.lastCyclePhaseTimings = phaseRecorder.finish(controlReport);
-      monitorState.lastRun = { at: new Date().toISOString(), ...cycleStats, resources: resourceSummary, warnings: warningCount, ...(deferredProjectIds.length > 0 ? { deferredProjectIds } : {}) };
+      monitorState.lastRun = {
+        at: new Date().toISOString(),
+        ...cycleStats,
+        resources: resourceSummary,
+        warnings: warningCount,
+        ...(deferredProjectIds.length > 0 ? { deferredProjectIds } : {}),
+        ...(skippedProjectIds.length > 0 ? { skippedProjectIds } : {}),
+        ...(notStartedProjectIds.length > 0 ? { notStartedProjectIds } : {}),
+      };
       const prefRows = await db.select().from(preferences).catch(() => []);
       const prefMap = new Map(prefRows.map((r: { key: string; value: string }) => [r.key, r.value]));
       if (monitorShouldRun(prefMap)) {
@@ -655,7 +731,12 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
   // merged ticket triggers the next unblocked one within EVENT_TRIGGER_DEBOUNCE_MS instead of
   // up to a full poll interval later. The cycle itself early-returns when nothing is auto-
   // driven and is idempotent, so events for non-driven projects cost at most one no-op pass.
-  const invalidationListener = () => triggerMonitorSoon();
+  // Every board mutation carries its projectId — that is the #416 activity signal the
+  // scheduler uses to skip projects with nothing new since their last completed sub-pass.
+  const invalidationListener = (projectId: string) => {
+    projectScheduler.recordActivity(projectId);
+    triggerMonitorSoon();
+  };
   boardEvents.addInvalidationListener(invalidationListener);
 
   const syncMonitorInterval = setInterval(() => void syncMonitorState(), 30_000);
