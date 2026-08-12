@@ -809,7 +809,7 @@ export function createPluginService(deps: {
   // scaffold form. Extracted to plugin-loop-extras.service.ts (god-module ceiling);
   // composed with this service's own closures, like the views runtime above.
   const {
-    resolveLoopGate, listLoopEvents, getLoopArtifact, getScaffoldForm,
+    resolveLoopGate, listLoopEvents, getLoopArtifact, getScaffoldForm, saveScaffoldContent,
     fillScaffoldForm, saveLoopArtifact, draftLoopGateFeedback, summarizeLoopGate,
   } = createPluginLoopExtras({
     database,
@@ -966,6 +966,7 @@ export function createPluginService(deps: {
     listLoopEvents,
     getLoopArtifact,
     getScaffoldForm,
+    saveScaffoldContent,
     fillScaffoldForm,
     saveLoopArtifact,
     draftLoopGateFeedback,

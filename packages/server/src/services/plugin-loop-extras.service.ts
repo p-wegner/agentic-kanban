@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import {
+  countScaffoldPlaceholders,
   pluginSkillName,
   type PluginManifest,
 } from "@agentic-kanban/shared/lib/plugin-manifest";
@@ -220,6 +221,46 @@ export function createPluginLoopExtras(ctx: PluginLoopExtrasCtx) {
   }
 
   /**
+   * Overwrite the scaffold file wholesale (#438).
+   *
+   * `fillScaffoldForm` addresses `TODO:` markers by index, so once the profile is
+   * complete it has no markers left and therefore no way to change anything. That
+   * made a mis-filled profile PERMANENT from the board's side — and the profile is
+   * the scope contract every step agent reads first. Live cost: the `mealplan`
+   * pipeline diagnosed its own mislabeled profile at step 1, could not act on it,
+   * and re-explained it in steps 2-5, stamping a caveat block into every artifact.
+   *
+   * Commits for the same reason `fillScaffoldForm` does (#324): step tickets run in
+   * worktrees branched from the base branch, so an uncommitted profile is invisible
+   * to them and they halt on a profile that looks unfilled.
+   */
+  async function saveScaffoldContent(pluginRowId: string, projectId: string, newContent: string) {
+    const plugin = await requirePlugin(pluginRowId);
+    const project = await requireProject(projectId);
+    const scaffold = plugin.manifest.scaffold;
+    if (!scaffold) throw new PluginError("This plugin declares no scaffold", "NOT_FOUND");
+    if (!newContent.trim()) {
+      throw new PluginError("Refusing to write an empty scaffold — the profile is the plugin's scope contract", "BAD_REQUEST");
+    }
+    const repoPath = await resolveOutputRepoPath(plugin, project);
+    const target = resolveInside(repoPath, scaffold.targetPath, `scaffold targetPath "${scaffold.targetPath}"`);
+    if (!existsSync(target)) throw new PluginError(`Scaffold file not found: ${scaffold.targetPath}`, "NOT_FOUND");
+    writeFileSync(target, newContent, "utf8");
+    const committed = await commitPathWithRetry(
+      repoPath,
+      scaffold.targetPath,
+      `plugin: edit ${plugin.pluginId} scaffold ${scaffold.targetPath}`,
+    );
+    return {
+      targetPath: scaffold.targetPath,
+      remaining: countScaffoldPlaceholders(newContent),
+      fields: parseScaffoldFields(newContent),
+      content: newContent,
+      committed,
+    };
+  }
+
+  /**
    * Pathspec-limited add+commit with the #296 index.lock retry — the board's own
    * merge jobs contend on `.git/index.lock`. Returns false when the repo has no
    * git / nothing changed / all attempts failed; callers treat that as non-fatal.
@@ -314,7 +355,7 @@ export function createPluginLoopExtras(ctx: PluginLoopExtrasCtx) {
     return { summary };
   }
 
-  return { resolveLoopGate, listLoopEvents, getLoopArtifact, getScaffoldForm, fillScaffoldForm, saveLoopArtifact, draftLoopGateFeedback, summarizeLoopGate };
+  return { resolveLoopGate, listLoopEvents, getLoopArtifact, getScaffoldForm, fillScaffoldForm, saveScaffoldContent, saveLoopArtifact, draftLoopGateFeedback, summarizeLoopGate };
 }
 
 /**
