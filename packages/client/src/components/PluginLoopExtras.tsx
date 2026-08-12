@@ -862,10 +862,15 @@ export function ArtifactViewer({ pluginId, loopName, projectId, path, step, onOp
     containerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [path]);
 
+  // Below sm the viewer is a FULL-SCREEN sheet, not an inline max-h-[60vh] box (#434).
+  // Inline, it was the third nested scroll container (pane -> viewer -> diff body): a
+  // vertical swipe inside it moved neither the page nor reliably the intended layer, and
+  // ~60vh of a phone (with dynamic browser chrome) is too little to read a PRD in. The
+  // sheet also makes the ✕ meaningful instead of a way to shrink one box inside another.
   return (
     <div
       ref={containerRef}
-      className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 flex flex-col max-h-[60vh]"
+      className="fixed inset-0 z-40 rounded-none max-h-none sm:static sm:z-auto sm:rounded sm:max-h-[60vh] border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 flex flex-col"
       data-testid="plugin-artifact-viewer"
     >
       <div className="border-b border-gray-100 dark:border-gray-800 px-3 py-2 space-y-1">
@@ -892,7 +897,7 @@ export function ArtifactViewer({ pluginId, loopName, projectId, path, step, onOp
                 <button
                   key={t}
                   onClick={() => setTab(t)}
-                  className={`px-2 py-0.5 rounded ${tab === t ? "bg-brand-600 text-white" : "text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"}`}
+                  className={`px-3 py-2 sm:px-2 sm:py-0.5 min-h-11 sm:min-h-0 rounded ${tab === t ? "bg-brand-600 text-white" : "text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"}`}
                 >
                   {t === "rendered" ? "Rendered" : "Raw"}
                 </button>
@@ -900,7 +905,7 @@ export function ArtifactViewer({ pluginId, loopName, projectId, path, step, onOp
               {canDiff && (
                 <button
                   onClick={openDiff}
-                  className={`px-2 py-0.5 rounded ${tab === "diff" ? "bg-brand-600 text-white" : "text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"}`}
+                  className={`px-3 py-2 sm:px-2 sm:py-0.5 min-h-11 sm:min-h-0 rounded ${tab === "diff" ? "bg-brand-600 text-white" : "text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"}`}
                   title="Diff between the artifact's last two committed versions"
                 >
                   Diff v-1→v
@@ -910,7 +915,7 @@ export function ArtifactViewer({ pluginId, loopName, projectId, path, step, onOp
           )}
           <button
             onClick={onClose}
-            className="text-xs px-2 py-0.5 rounded text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 shrink-0"
+            className="text-xs px-3 py-2 sm:px-2 sm:py-0.5 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 rounded text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 shrink-0"
             aria-label="Close artifact"
           >
             ✕
@@ -929,7 +934,7 @@ export function ArtifactViewer({ pluginId, loopName, projectId, path, step, onOp
                   onClick={() => !active && onOpenArtifact(sib)}
                   title={sib}
                   aria-current={active ? "true" : undefined}
-                  className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+                  className={`text-[10px] font-mono px-2.5 py-2 sm:px-1.5 sm:py-0.5 min-h-11 sm:min-h-0 rounded border ${
                     active
                       ? "border-brand-500 bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300"
                       : "border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
@@ -967,7 +972,9 @@ export function ArtifactViewer({ pluginId, loopName, projectId, path, step, onOp
               onResolveComment={handleResolveComment}
             />
           ) : tab === "rendered" && isMarkdown ? (
-            <div className="prose prose-sm dark:prose-invert max-w-none">
+            // A PM Pipeline PRD routinely contains wide tables and fenced code. Typography's
+            // table/pre do not wrap, so without this they push the whole pane sideways (#434).
+            <div className="prose prose-sm dark:prose-invert max-w-none prose-pre:whitespace-pre-wrap prose-pre:break-words prose-table:block prose-table:overflow-x-auto prose-img:max-w-full">
               <ReactMarkdown>{artifact.content}</ReactMarkdown>
             </div>
           ) : (

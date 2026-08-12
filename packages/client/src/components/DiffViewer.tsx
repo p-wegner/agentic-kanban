@@ -163,7 +163,10 @@ function CommentBlock({
         <span className="text-[10px] text-gray-400 dark:text-gray-500">{timestamp}</span>
       </div>
       <div className={`text-xs whitespace-pre-wrap ${resolved ? "text-gray-500 dark:text-gray-400 line-through decoration-gray-400/60" : "text-gray-700 dark:text-gray-300"}`}>{comment.body}</div>
-      <div className="flex items-center gap-2 mt-0.5 opacity-0 group-hover/comment:opacity-100 transition-opacity">
+      {/* opacity-100 below sm: these were `opacity-0 group-hover` only, so on a touch device
+          Resolve / Edit / Delete never appeared — you could not resolve a comment you had just
+          made (#434). Hover-reveal is kept on sm+. */}
+      <div className="flex flex-wrap items-center gap-3 sm:gap-2 mt-0.5 opacity-100 sm:opacity-0 sm:group-hover/comment:opacity-100 transition-opacity">
         {onResolve && (
           <button
             onClick={() => onResolve(comment.id, !resolved)}
@@ -328,14 +331,28 @@ function UnifiedFileView({
       <Fragment key={li}>
         <div
           className={className}
-          onClick={() => {
-            if (isCommentable && onCreateComment) setInputLineIdx(currentLi);
+          // #434: the click used to sit on the ENTIRE line. On a phone there is no hover to
+          // warn you and no other reason to tap a line, so any tap opened a comment box — and
+          // these comments feed the gate's revision feedback, so a stray tap silently attached
+          // a note to your revision. The affordance below owns the click now; on sm+ the whole
+          // line stays clickable, which is the familiar desktop behaviour.
+          onClick={(e) => {
+            if (!isCommentable || !onCreateComment) return;
+            if (!window.matchMedia("(min-width: 640px)").matches) return;
+            if ((e.target as HTMLElement).closest("[data-comment-affordance]")) return;
+            setInputLineIdx(currentLi);
           }}
         >
           {line.type === "add" ? "+" : line.type === "delete" ? "-" : " "}
           {line.type === "hunk" ? line.content : (line.content ? highlightLine(line.content, lang) : " ")}
           {isCommentable && onCreateComment && lineComments.length === 0 && !isInputOpen && (
-            <span className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover/line:opacity-100 transition-opacity cursor-pointer select-none w-5 h-5 flex items-center justify-center rounded-full bg-gray-200 dark:bg-gray-700 hover:bg-brand-200 text-gray-500 dark:text-gray-400 hover:text-brand-600 text-sm leading-none">
+            <span
+              data-comment-affordance
+              role="button"
+              aria-label="Comment on this line"
+              onClick={() => setInputLineIdx(currentLi)}
+              className="absolute right-1 top-1/2 -translate-y-1/2 opacity-100 sm:opacity-0 sm:group-hover/line:opacity-100 transition-opacity cursor-pointer select-none w-8 h-8 sm:w-5 sm:h-5 flex items-center justify-center rounded-full bg-gray-200 dark:bg-gray-700 hover:bg-brand-200 text-gray-500 dark:text-gray-400 hover:text-brand-600 text-sm leading-none"
+            >
               +
             </span>
           )}
@@ -378,7 +395,7 @@ function UnifiedFileView({
   }
 
   return (
-    <div className="overflow-auto max-h-80 bg-gray-50 dark:bg-gray-950 font-mono text-xs">
+    <div className="overflow-auto max-h-[60vh] sm:max-h-80 bg-gray-50 dark:bg-gray-950 font-mono text-xs">
       {elements}
     </div>
   );
@@ -435,7 +452,7 @@ function SplitFileView({
   const seenRegions = new Set<number>();
 
   return (
-    <div className="overflow-auto max-h-80 bg-gray-50 dark:bg-gray-950 font-mono text-xs">
+    <div className="overflow-auto max-h-[60vh] sm:max-h-80 bg-gray-50 dark:bg-gray-950 font-mono text-xs">
       <table className="w-full border-collapse">
         <tbody>
           {pairs.map((pair) => {
@@ -682,7 +699,7 @@ export function DiffViewer({ diff, stats, comments = [], onCreateComment, onEdit
               {allExpanded ? "Collapse all" : "Expand all"}
             </button>
           )}
-          <div className="flex items-center bg-gray-200 dark:bg-gray-700 rounded overflow-hidden">
+          <div className="hidden sm:flex items-center bg-gray-200 dark:bg-gray-700 rounded overflow-hidden">
             <button
               onClick={() => setViewMode("unified")}
               className={`px-2 py-0.5 text-xs ${viewMode === "unified" ? "bg-white dark:bg-gray-900 shadow-sm dark:text-gray-100" : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"}`}
@@ -700,7 +717,7 @@ export function DiffViewer({ diff, stats, comments = [], onCreateComment, onEdit
       </div>
       <div className="flex">
         {sidebarOpen && files.length > 0 && (
-          <div className="w-48 min-w-[140px] shrink-0 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-y-auto max-h-96">
+          <div className="hidden sm:block w-48 min-w-[140px] shrink-0 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-y-auto max-h-96">
             <DiffFileTree files={files} onSelectFile={handleSelectFile} />
           </div>
         )}

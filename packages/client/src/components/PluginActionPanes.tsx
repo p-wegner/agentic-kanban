@@ -326,7 +326,7 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
         <button
           onClick={() => void advance()}
           disabled={advancing || !!setupRequired}
-          className="text-sm px-3 py-1.5 rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
+          className="text-sm px-4 py-2.5 sm:px-3 sm:py-1.5 min-h-11 sm:min-h-0 rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
           data-testid="plugin-loop-advance"
           title={setupRequired
             ? `Fill in the ${setupRequired.pendingFields} outstanding profile field(s) first — the plugin refuses to plan without them`
@@ -339,7 +339,7 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
         <button
           onClick={() => void togglePause()}
           disabled={pausing}
-          className="text-sm px-3 py-1.5 rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+          className="text-sm px-4 py-2.5 sm:px-3 sm:py-1.5 min-h-11 sm:min-h-0 rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
           data-testid="plugin-loop-pause-toggle"
           title={loop.paused
             ? "Resume — the monitor will auto-advance this loop again"
@@ -458,7 +458,7 @@ export function PluginScriptPane({ script, projectId }: { script: PluginScript; 
   }
 
   return (
-    <div className="p-6 space-y-4 min-h-0 flex flex-col" data-testid="plugin-script-pane">
+    <div className="p-3 sm:p-6 space-y-4 min-h-0 flex flex-col" data-testid="plugin-script-pane">
       <PaneHeading title={script.label} subtitle={script.description} />
       <div className="flex items-center gap-2">
         <code className="text-[11px] px-2 py-1 rounded bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-300 truncate flex-1">
@@ -467,7 +467,7 @@ export function PluginScriptPane({ script, projectId }: { script: PluginScript; 
         <button
           onClick={() => void run()}
           disabled={running}
-          className="text-sm px-3 py-1.5 rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 shrink-0"
+          className="text-sm px-4 py-2.5 sm:px-3 sm:py-1.5 min-h-11 sm:min-h-0 rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 shrink-0"
           data-testid="plugin-script-run"
         >
           {running ? "Running…" : "Run"}
@@ -614,7 +614,7 @@ export function PluginSkillPane({ skill, projectId }: { skill: PluginSkill; proj
   }
 
   return (
-    <div className="p-6 space-y-4 overflow-auto" data-testid="plugin-skill-pane">
+    <div className="p-3 sm:p-6 space-y-4 overflow-auto" data-testid="plugin-skill-pane">
       <PaneHeading title={skill.name} subtitle={skill.description} mono />
       <p className="text-xs text-gray-500 dark:text-gray-400 max-w-2xl">
         Skills need judgment, so running one creates a ticket and launches a workspace against it — the same
@@ -629,7 +629,7 @@ export function PluginSkillPane({ skill, projectId }: { skill: PluginSkill; proj
             onChange={(e) => setTitle(e.target.value)}
             disabled={running}
             placeholder={`${skill.pluginName}: run ${skill.name}`}
-            className="w-full text-sm px-2 py-1.5 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 disabled:opacity-50"
+            className="w-full text-base sm:text-sm px-2 py-2 sm:py-1.5 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 disabled:opacity-50"
             data-testid="plugin-skill-title"
           />
         </label>
@@ -643,7 +643,7 @@ export function PluginSkillPane({ skill, projectId }: { skill: PluginSkill; proj
             disabled={running}
             rows={5}
             placeholder="What should this run focus on? e.g. which module, which lens, which constraint — anything the skill's own brief cannot know."
-            className="w-full text-sm px-2 py-1.5 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 font-mono text-[12px] disabled:opacity-50"
+            className="w-full text-base sm:text-sm px-2 py-2 sm:py-1.5 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 font-mono sm:text-[12px] disabled:opacity-50"
             data-testid="plugin-skill-prompt"
           />
           <span className="text-[11px] text-gray-500 dark:text-gray-400">
@@ -656,7 +656,7 @@ export function PluginSkillPane({ skill, projectId }: { skill: PluginSkill; proj
             value={workflowTemplateId}
             onChange={(e) => setWorkflowTemplateId(e.target.value)}
             disabled={running || templates.length === 0}
-            className="w-full text-sm px-2 py-1.5 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 disabled:opacity-50"
+            className="w-full text-base sm:text-sm px-2 py-2 sm:py-1.5 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 disabled:opacity-50"
             data-testid="plugin-skill-workflow"
           >
             <option value="">
@@ -683,7 +683,7 @@ export function PluginSkillPane({ skill, projectId }: { skill: PluginSkill; proj
       <button
         onClick={() => void run()}
         disabled={running}
-        className="text-sm px-3 py-1.5 rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
+        className="text-sm px-4 py-2.5 sm:px-3 sm:py-1.5 min-h-11 sm:min-h-0 w-full sm:w-auto rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
         data-testid="plugin-skill-run"
       >
         {running ? "Launching…" : "Run as a ticket"}

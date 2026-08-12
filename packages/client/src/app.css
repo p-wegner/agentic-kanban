@@ -387,3 +387,28 @@ body {
 }
 .markdown-body strong { font-weight: 600; }
 .markdown-body em { font-style: italic; }
+
+/* ── Mobile: stop iOS Safari from zooming on focus (#434) ─────────────────────
+ *
+ * iOS Safari auto-zooms any focused input/textarea/select whose computed
+ * font-size is under 16px, and does NOT restore the zoom on blur. Every form
+ * control in this app is Tailwind `text-sm` (14px) or `text-xs` (12px), so
+ * every field triggered it.
+ *
+ * That is worse here than in a normal page: the shell is `html, body {
+ * overflow: hidden }` inside `h-screen`, so once zoomed the user cannot pan
+ * back — they are stuck at ~1.6x with the layout half off-screen for the rest
+ * of the session.
+ *
+ * One rule instead of ~300 class edits. It touches form controls only, and
+ * only below the `sm` breakpoint, so desktop density is untouched. Component
+ * classes stay as they are — this deliberately overrides them, because the
+ * alternative is remembering the 16px floor at every future call site.
+ */
+@media (max-width: 639px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}

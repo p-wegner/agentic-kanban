@@ -36,8 +36,11 @@ const INTENT_CLASSES: Record<ActionIntent, string> = {
     "bg-transparent text-gray-600 hover:bg-gray-100 border-gray-300 dark:text-gray-300 dark:hover:bg-gray-800 dark:border-gray-600 focus-visible:ring-gray-400",
 };
 
+// py-2.5 + min-h-11 below sm (#434): this is the SHARED primitive behind the whole workspace
+// toolbar — Review, Merge, Diff, Stop and friends — so sizing it once lifts every one of them
+// to the 44px touch minimum without touching the call sites.
 const BASE =
-  "inline-flex items-center justify-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-md border transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 dark:focus-visible:ring-offset-gray-900";
+  "inline-flex items-center justify-center gap-1.5 text-sm font-medium px-3 py-2.5 sm:py-1.5 min-h-11 sm:min-h-0 rounded-md border transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 dark:focus-visible:ring-offset-gray-900";
 
 interface WorkspaceActionButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement> {

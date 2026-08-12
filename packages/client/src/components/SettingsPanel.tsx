@@ -409,12 +409,14 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-gray-200 dark:border-gray-700 px-5">
+        {/* 11 tabs (~880px of content) in a ~350px box with no wrap and no scroll meant the
+            right-hand ~7 spilled past the modal edge and were unreachable on a phone (#434). */}
+        <div className="flex overflow-x-auto border-b border-gray-200 dark:border-gray-700 px-5">
           {TABS.map((t) => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`px-3 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              className={`shrink-0 whitespace-nowrap px-3 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
                 tab === t.id
                   ? "border-brand-500 text-brand-600"
                   : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
