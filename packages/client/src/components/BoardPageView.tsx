@@ -9,6 +9,7 @@ import { lazy, Suspense } from "react";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { Layout } from "./Layout.js";
+import { useIsNarrow } from "../hooks/useMediaQuery.js";
 import { BacklogView } from "./BacklogView.js";
 import { MilestoneFilterBanner } from "./MilestoneFilterBanner.js";
 import { BoardSecondaryViews } from "./BoardSecondaryViews.js";
@@ -279,9 +280,72 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
   const setWorkspaceInitial = useBoardSelectionStore((s) => s.setWorkspaceInitial);
   const setWorkspaceInitialDiff = useBoardSelectionStore((s) => s.setWorkspaceInitialDiff);
   const setWorkspaceOpenCreate = useBoardSelectionStore((s) => s.setWorkspaceOpenCreate);
+  const isNarrow = useIsNarrow();
+  /**
+   * ONE BoardToolbar instance, rendered either in its own row (wide) or hoisted into the
+   * Layout header (phone) — #436. Rendering it twice behind breakpoint classes would give the
+   * two copies independent popover/toggle state, so whichever one you were not looking at
+   * would silently disagree.
+   */
+  const boardToolbar = (
+        <BoardToolbar
+      activeColumns={activeColumns}
+      backlogCount={backlogColumn?.count ?? 0}
+      onShowQuickTasks={() => panels.setShowQuickTasks(true)}
+      autoMonitor={prefs.autoMonitor}
+      monitorRunning={prefs.monitorRunning}
+      onMonitorRunNow={prefs.handleMonitorRunNow}
+      monitorStatus={prefs.monitorStatus}
+      onToggleAutoMonitor={prefs.toggleAutoMonitor}
+      autoMonitorInterval={prefs.autoMonitorInterval}
+      onIntervalChange={prefs.handleIntervalChange}
+      nudgeAutoStart={prefs.nudgeAutoStart}
+      onNudgeAutoStartChange={prefs.handleNudgeAutoStartChange}
+      nudgeWipLimit={prefs.nudgeWipLimit}
+      onNudgeWipLimitChange={prefs.handleNudgeWipLimitChange}
+      columns={columns}
+      onOpenWorkspace={handleOpenWorkspaceById}
+      viewMode={viewMode}
+      onViewModeChange={handleViewModeChange}
+      butlerBadgeCount={agentQuestionsCount}
+      projectId={activeProjectId}
+      onVoiceIssueCreated={() => refetchBoard()}
+      onShowTimeReport={activeProjectId ? () => panels.setShowTimeReport(true) : undefined}
+      onShowMergeQueue={() => panels.setShowMergeQueue(true)}
+      mergeQueueCount={columns.flatMap(c => c.issues).filter(i => {
+        const ws = i.workspaceSummary?.main;
+        return i.statusName === "In Review" && ws && ws.status !== "closed";
+      }).length}
+      onShowRunQueueForecast={() => panels.setShowRunQueueForecast(true)}
+      runQueueOpenSlots={runQueueForecast.openSlots}
+      onShowLiveActivityTicker={() => panels.setShowLiveActivityTicker((prev) => !prev)}
+      liveActivityCount={tickerEntries.length}
+      onViewAllHealthEvents={() => {
+        // Health events live in the Runtime feed's health tab (#235).
+        viewTabActions.request(RUNTIME_VIEW_ID, "health-events");
+        handleViewModeChange("runtime");
+      }}
+      cardDensity={prefs.cardDensity}
+      onCardDensityChange={prefs.handleCardDensityChange}
+      visibilityColumns={visibilityColumns}
+      hiddenColumns={prefs.hiddenColumns}
+      onHiddenColumnsChange={prefs.handleHiddenColumnsChange}
+      showPriorityLegend={prefs.showPriorityLegend}
+      onShowPriorityLegendChange={prefs.handleShowPriorityLegendChange}
+      showCardAgingHeatmap={prefs.showCardAgingHeatmap}
+      onShowCardAgingHeatmapChange={prefs.handleShowCardAgingHeatmapChange}
+      agingWarmDays={prefs.agingWarmDays}
+      agingHotDays={prefs.agingHotDays}
+      onAgingThresholdsChange={prefs.handleAgingThresholdsChange}
+      swimlaneDimension={swimlaneDimension}
+      onSwimlaneChange={handleSwimlaneChange}
+    />
+  );
+
   return (
     <MentionProvider value={{ issues: allMentionIssues, onMentionClick: handleMentionClick }}>
     <Layout
+      headerExtra={isNarrow ? boardToolbar : undefined}
       projects={projects}
       activeProjectId={activeProjectId}
       onProjectChange={handleProjectChange}
@@ -329,7 +393,7 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
         </div>
       )}
       <div className="flex flex-col gap-2 p-2 sm:p-4 h-full overflow-hidden">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className={`${isNarrow ? "hidden" : "flex"} flex-wrap items-center gap-2`}>
         {viewMode !== "butler" && (
           <BoardStats
             activeColumns={activeColumns}
@@ -344,58 +408,7 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
             sessionActivity={sessionActivity}
           />
         )}
-        <BoardToolbar
-          activeColumns={activeColumns}
-          backlogCount={backlogColumn?.count ?? 0}
-          onShowQuickTasks={() => panels.setShowQuickTasks(true)}
-          autoMonitor={prefs.autoMonitor}
-          monitorRunning={prefs.monitorRunning}
-          onMonitorRunNow={prefs.handleMonitorRunNow}
-          monitorStatus={prefs.monitorStatus}
-          onToggleAutoMonitor={prefs.toggleAutoMonitor}
-          autoMonitorInterval={prefs.autoMonitorInterval}
-          onIntervalChange={prefs.handleIntervalChange}
-          nudgeAutoStart={prefs.nudgeAutoStart}
-          onNudgeAutoStartChange={prefs.handleNudgeAutoStartChange}
-          nudgeWipLimit={prefs.nudgeWipLimit}
-          onNudgeWipLimitChange={prefs.handleNudgeWipLimitChange}
-          columns={columns}
-          onOpenWorkspace={handleOpenWorkspaceById}
-          viewMode={viewMode}
-          onViewModeChange={handleViewModeChange}
-          butlerBadgeCount={agentQuestionsCount}
-          projectId={activeProjectId}
-          onVoiceIssueCreated={() => refetchBoard()}
-          onShowTimeReport={activeProjectId ? () => panels.setShowTimeReport(true) : undefined}
-          onShowMergeQueue={() => panels.setShowMergeQueue(true)}
-          mergeQueueCount={columns.flatMap(c => c.issues).filter(i => {
-            const ws = i.workspaceSummary?.main;
-            return i.statusName === "In Review" && ws && ws.status !== "closed";
-          }).length}
-          onShowRunQueueForecast={() => panels.setShowRunQueueForecast(true)}
-          runQueueOpenSlots={runQueueForecast.openSlots}
-          onShowLiveActivityTicker={() => panels.setShowLiveActivityTicker((prev) => !prev)}
-          liveActivityCount={tickerEntries.length}
-          onViewAllHealthEvents={() => {
-            // Health events live in the Runtime feed's health tab (#235).
-            viewTabActions.request(RUNTIME_VIEW_ID, "health-events");
-            handleViewModeChange("runtime");
-          }}
-          cardDensity={prefs.cardDensity}
-          onCardDensityChange={prefs.handleCardDensityChange}
-          visibilityColumns={visibilityColumns}
-          hiddenColumns={prefs.hiddenColumns}
-          onHiddenColumnsChange={prefs.handleHiddenColumnsChange}
-          showPriorityLegend={prefs.showPriorityLegend}
-          onShowPriorityLegendChange={prefs.handleShowPriorityLegendChange}
-          showCardAgingHeatmap={prefs.showCardAgingHeatmap}
-          onShowCardAgingHeatmapChange={prefs.handleShowCardAgingHeatmapChange}
-          agingWarmDays={prefs.agingWarmDays}
-          agingHotDays={prefs.agingHotDays}
-          onAgingThresholdsChange={prefs.handleAgingThresholdsChange}
-          swimlaneDimension={swimlaneDimension}
-          onSwimlaneChange={handleSwimlaneChange}
-        />
+        {!isNarrow && boardToolbar}
         </div>
         {viewMode === "kanban" && (
           <BoardBulkActionBar

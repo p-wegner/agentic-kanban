@@ -109,7 +109,7 @@ export function ProjectSelector({ projects, activeProjectId, onProjectChange }: 
         onClick={() => setOpen((value) => !value)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        className="flex h-8 max-w-[13rem] items-center gap-2 rounded-md border border-gray-200 bg-white px-2.5 text-left text-sm text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800 sm:max-w-[16rem]"
+        className="flex h-8 max-w-[8rem] items-center gap-2 rounded-md border border-gray-200 bg-white px-2.5 text-left text-sm text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800 sm:max-w-[16rem] sm:!max-w-[16rem]"
         title="Switch project"
       >
         <span
@@ -122,7 +122,7 @@ export function ProjectSelector({ projects, activeProjectId, onProjectChange }: 
         <span className="min-w-0 flex-1">
           <span className="block truncate font-medium leading-4">{activeProject.name}</span>
           {projects.length > 1 && (
-            <span className="block truncate text-[10px] leading-3 text-gray-400 dark:text-gray-500">
+            <span className="hidden sm:block truncate text-[10px] leading-3 text-gray-400 dark:text-gray-500">
               {projects.length} projects
             </span>
           )}
