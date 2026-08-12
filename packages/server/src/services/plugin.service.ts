@@ -139,6 +139,12 @@ export interface PluginUpdateResult {
   version: string | null;
   /** Running view servers of this plugin killed because they executed pre-update code. */
   viewsStopped: number;
+  /**
+   * Skills re-materialized into each project that has this plugin enabled (#443).
+   * An update can ADD or RENAME a skill dir, and only `enableForProject` used to fan
+   * skills out — so a newly declared skill appeared in the panel with no bundle behind it.
+   */
+  skillsRefreshed: Array<{ projectId: string; skills: EnableReport["skills"]; warnings: string[] }>;
 }
 
 export interface PluginSkillRunResult {
@@ -356,6 +362,34 @@ export function createPluginService(deps: {
       },
       database,
     );
+    // #443: the manifest that just landed may declare a skill the enabled projects have no
+    // bundle for. `enableForProject` was the ONLY skill fan-out, so a rename (pm-pipeline's
+    // `pm-pipeline-operate` → `pm-round`) left the panel offering a skill whose directory does
+    // not exist in the project — `copySkillToWorktree` then returns false silently and the
+    // ticket launches with the skill NAME in its prose and nothing to run (#204's failure
+    // mode, through a door update opened). Re-running the fan-out is idempotent: an already
+    // materialized skill reports `skipped-existing`.
+    const skillsRefreshed: PluginUpdateResult["skillsRefreshed"] = [];
+    const enabledByProject = await enabledSlugsByProject();
+    for (const [projectId, slugs] of enabledByProject) {
+      if (!slugs.has(row.pluginId)) continue;
+      try {
+        const project = await requireProject(projectId);
+        const report: EnableReport = {
+          prefKey: pluginEnabledPreferenceKey(row.pluginId, projectId),
+          skills: [], scaffoldWritten: false, scaffoldPlaceholders: 0, warnings: [],
+        };
+        fanOutSkills({ ...updated, manifest }, project.repoPath, report);
+        skillsRefreshed.push({ projectId, skills: report.skills, warnings: report.warnings });
+      } catch (err) {
+        // A project whose repo has gone missing must not fail the update itself.
+        skillsRefreshed.push({
+          projectId, skills: [],
+          warnings: [`skill refresh skipped: ${err instanceof Error ? err.message : String(err)}`],
+        });
+      }
+    }
+
     return {
       row: updated,
       pulled,
@@ -363,6 +397,7 @@ export function createPluginService(deps: {
       previousVersion: row.version ?? null,
       version: updated.version ?? null,
       viewsStopped,
+      skillsRefreshed,
     };
   }
 

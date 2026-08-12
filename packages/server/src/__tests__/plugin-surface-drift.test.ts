@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as schema from "@agentic-kanban/shared/schema";
@@ -138,6 +138,52 @@ describe("plugin surface — manifest drift (#442)", () => {
     // Re-install is the same upsert `POST /plugins/:id/update` performs.
     await service.installPlugin({ source: pluginDir });
     expect((await service.listProjectSurface(projectId)).drifted).toEqual([]);
+  });
+
+  it("materializes a skill the update newly declares, into every enabled project (#443)", async () => {
+    const pluginDir = makePluginDir();
+    const repo = makeProjectRepo();
+    const projectId = await insertProject(db, repo);
+    const plugin = await service.installPlugin({ source: pluginDir });
+    await service.enableForProject(plugin.id, projectId);
+    expect(existsSync(join(repo, ".claude", "skills", "prober"))).toBe(true);
+
+    // The author renames the skill dir — exactly what pm-pipeline did
+    // (`pm-pipeline-operate` → `pm-round`).
+    const renamedDir = join(pluginDir, "skills", "renamed");
+    mkdirSync(renamedDir, { recursive: true });
+    writeFileSync(join(renamedDir, "SKILL.md"), "# renamed\nStill here.");
+    writeFileSync(
+      join(pluginDir, "kanban-plugin.json"),
+      JSON.stringify({ ...MANIFEST, skills: [{ dir: "skills/renamed" }] }, null, 2),
+    );
+
+    const result = await service.updatePlugin(plugin.id);
+
+    // Without the fan-out the panel would offer `renamed` with no bundle behind it, and
+    // copySkillToWorktree would return false silently at launch (#204's failure mode).
+    expect(existsSync(join(repo, ".claude", "skills", "renamed", "SKILL.md"))).toBe(true);
+    const refreshed = result.skillsRefreshed.find((r) => r.projectId === projectId);
+    expect(refreshed?.skills).toEqual([{ name: "renamed", mode: expect.stringMatching(/^(junction|copy)$/) }]);
+  });
+
+  it("skill refresh on update is idempotent and skips projects where the plugin is disabled", async () => {
+    const pluginDir = makePluginDir();
+    const enabledRepo = makeProjectRepo();
+    const enabledProject = await insertProject(db, enabledRepo);
+    const otherRepo = makeProjectRepo();
+    const otherProject = await insertProject(db, otherRepo);
+
+    const plugin = await service.installPlugin({ source: pluginDir });
+    await service.enableForProject(plugin.id, enabledProject);
+
+    const result = await service.updatePlugin(plugin.id);
+    expect(result.skillsRefreshed.map((r) => r.projectId)).toEqual([enabledProject]);
+    // Already materialized by enable — re-running must not duplicate or re-copy it.
+    expect(result.skillsRefreshed[0].skills).toEqual([{ name: "prober", mode: "skipped-existing" }]);
+    // The disabled project is neither reported nor written into.
+    expect(result.skillsRefreshed.some((r) => r.projectId === otherProject)).toBe(false);
+    expect(existsSync(join(otherRepo, ".claude", "skills", "prober"))).toBe(false);
   });
 
   it("does not flag a plugin that is installed but not enabled for this project", async () => {
