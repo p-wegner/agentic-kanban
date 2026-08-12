@@ -121,11 +121,18 @@ function PaneHeading({ title, subtitle, mono }: { title: string; subtitle?: stri
 }
 
 /** Converging analysis loop: advance a round, then let the board's monitor run it. */
-export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null }: {
+export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null, setupRequired = null }: {
   loop: PluginLoop;
   projectId: string;
   onChanged: () => void;
   startPolicy?: StartPolicy;
+  /**
+   * Set when the plugin's scaffold still has unresolved TODO markers (#427). Every advance
+   * 409s in that state, so the pane must say so BEFORE the click rather than only in the
+   * toast afterwards — on a fresh project this pane opened with "Start loop" as the primary
+   * action when refusal was the only possible outcome.
+   */
+  setupRequired?: { pendingFields: number; targetPath: string; onOpenSetup: () => void } | null;
 }) {
   const [advancing, setAdvancing] = useState(false);
   const [pausing, setPausing] = useState(false);
@@ -194,6 +201,29 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null 
         <LoopStateChips loop={loop} startPolicy={startPolicy} />
       </div>
 
+      {/* Setup gate (#427): the server 409s every advance while the scaffold has unresolved
+          markers, so say it here — persistently — instead of only in the toast after the click. */}
+      {setupRequired && (
+        <div
+          className="rounded border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 max-w-2xl flex items-start gap-2"
+          data-testid="plugin-loop-setup-required"
+        >
+          <span aria-hidden="true">🛠️</span>
+          <div className="flex-1 text-xs text-amber-900 dark:text-amber-200">
+            <span className="font-medium">Setup required before this loop can run.</span>{" "}
+            {setupRequired.pendingFields} unanswered field{setupRequired.pendingFields === 1 ? "" : "s"} in{" "}
+            <span className="font-mono">{setupRequired.targetPath}</span> — the plugin&apos;s agents work from
+            that profile, so every advance is refused until it is filled in.
+          </div>
+          <button
+            type="button"
+            onClick={setupRequired.onOpenSetup}
+            className="shrink-0 text-[11px] px-2 py-0.5 rounded border border-amber-400 dark:border-amber-600 hover:bg-amber-100 dark:hover:bg-amber-900/40 text-amber-900 dark:text-amber-200"
+          >
+            Fill it in
+          </button>
+        </div>
+      )}
       {/* Collapsed by default: this is unchanging documentation of how loops work in general,
           identical on every loop and every visit, and it cost ~90px at the top of the pane —
           which pushed the gate's ACTION BUTTONS below the fold on a 720px viewport. The thing
@@ -265,10 +295,14 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null 
         )}
         <button
           onClick={() => void advance()}
-          disabled={advancing}
+          disabled={advancing || !!setupRequired}
           className="text-sm px-3 py-1.5 rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
           data-testid="plugin-loop-advance"
-          title={roundRunning ? "The current round is still running — advancing now plans nothing new" : "Plan the next round"}
+          title={setupRequired
+            ? `Fill in the ${setupRequired.pendingFields} outstanding profile field(s) first — the plugin refuses to plan without them`
+            : roundRunning
+              ? "The current round is still running — advancing now plans nothing new"
+              : "Plan the next round"}
         >
           {advancing ? "Planning…" : loop.closedTickets === 0 && loop.openTickets === 0 ? "Start loop" : "Advance now"}
         </button>

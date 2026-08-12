@@ -203,12 +203,16 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
     [filtered],
   );
   const [scaffold, setScaffold] = useState<ScaffoldForm | null>(null);
+  const [scaffoldLoading, setScaffoldLoading] = useState(true);
   const refetchScaffold = useCallback(async () => {
-    if (!shownPlugin) { setScaffold(null); return; }
+    if (!shownPlugin) { setScaffold(null); setScaffoldLoading(false); return; }
+    setScaffoldLoading(true);
     try {
       setScaffold(await apiFetch<ScaffoldForm>(`/api/plugins/${shownPlugin.pluginId}/scaffold?projectId=${projectId}`));
     } catch {
       setScaffold(null); // 404 = the plugin declares no scaffold
+    } finally {
+      setScaffoldLoading(false);
     }
   }, [shownPlugin, projectId]);
   useEffect(() => { void refetchScaffold(); }, [refetchScaffold]);
@@ -227,11 +231,21 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
   const autoSelectedFor = useRef<string | null>(null);
   useEffect(() => {
     if (loading || !pluginSlug) return;
+    // Wait for the scaffold probe before choosing a landing pane — otherwise a
+    // setup-required plugin lands on its loop for the first render and only then
+    // corrects itself, which is a worse flicker than a short wait.
+    if (scaffold === null && scaffoldLoading) return;
     const key = `${projectId}:${pluginSlug}`;
     if (autoSelectedFor.current === key) return;
     autoSelectedFor.current = key;
     setActiveUrl(null);
-    if (filtered.views.length > 0) {
+    // Setup outranks everything: a plugin whose scaffold still has unresolved TODO
+    // markers cannot run its loops OR its scripts — the server 409s every advance.
+    // Landing on the loop pane offered "Start loop" as the primary action when the
+    // only possible outcome was that refusal (observed on a fresh project, #427).
+    if (scaffoldNeedsSetup) {
+      setSelection({ kind: "scaffold", key: "scaffold" });
+    } else if (filtered.views.length > 0) {
       const first = filtered.views[0];
       setSelection({ kind: "view", key: ownerKey(first, first.id) });
       void startView(first);
@@ -240,7 +254,7 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
     } else {
       setSelection(null);
     }
-  }, [loading, pluginSlug, projectId, filtered, startView]);
+  }, [loading, pluginSlug, projectId, filtered, startView, scaffoldNeedsSetup, scaffold, scaffoldLoading]);
 
   // Deep-link consumption (#300): a gate toast/notification/bell click asked for a
   // specific loop. Runs after the surface has loaded; one-shot per focus request.
@@ -531,6 +545,11 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
             projectId={projectId}
             onChanged={() => void refetch()}
             startPolicy={surface.startPolicy ?? null}
+            setupRequired={scaffoldNeedsSetup ? {
+              pendingFields: scaffold!.fields.length,
+              targetPath: scaffold!.targetPath,
+              onOpenSetup: () => setSelection({ kind: "scaffold", key: "scaffold" }),
+            } : null}
           />
         )}
         {activeScript && <PluginScriptPane script={activeScript} projectId={projectId} />}
