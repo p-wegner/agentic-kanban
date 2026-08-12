@@ -110,18 +110,39 @@ export function createPluginLoopExtras(ctx: PluginLoopExtrasCtx) {
   }
 
   /**
-   * Read one declared loop artifact from the OUTPUT repo (#288): current content
-   * plus the diff between its last two committed versions. Content is read
-   * fresh per request — the artifact is the plugin's file, the board only renders it.
+   * Read one declared loop artifact from the OUTPUT repo (#288): current content,
+   * its last two commits, and — only when asked for — the v(N-1)→vN diff. Content is
+   * read fresh per request — the artifact is the plugin's file, the board only renders it.
+   *
+   * `withDiff` is the #421 fix. The viewer opens on the Rendered tab and shows the diff
+   * only once the user selects the Diff tab, but this function used to compute the diff
+   * on EVERY open. Reading the file is sub-millisecond; each `git` spawn is tens of
+   * milliseconds, and it dominated the endpoint (a flat ~65ms regardless of file size,
+   * versus 11-15ms for its sibling plugin endpoints). The `git log` stays eager because
+   * its result decides whether a Diff tab is offered at all; the `git diff` is deferred
+   * to the request that actually renders it.
    */
-  async function getLoopArtifact(pluginRowId: string, projectId: string, relPath: string) {
+  async function getLoopArtifact(
+    pluginRowId: string,
+    projectId: string,
+    relPath: string,
+    opts: { withDiff?: boolean } = {},
+  ) {
     const plugin = await requirePlugin(pluginRowId);
     const project = await requireProject(projectId);
     const repoPath = await resolveOutputRepoPath(plugin, project);
     // Same containment rule as every manifest path — no absolute paths, no `..` escapes.
     const abs = resolveInside(repoPath, relPath, `artifact path "${relPath}"`);
     if (!existsSync(abs)) {
-      return { path: relPath, exists: false as const, content: null, truncated: false, commits: [], diff: null };
+      return {
+        path: relPath,
+        exists: false as const,
+        content: null,
+        truncated: false,
+        commits: [],
+        diff: null,
+        hasPreviousVersion: false,
+      };
     }
     const raw = readFileSync(abs, "utf8");
     const truncated = raw.length > ARTIFACT_CONTENT_CAP;
@@ -136,7 +157,7 @@ export function createPluginLoopExtras(ctx: PluginLoopExtrasCtx) {
         const [sha, date] = line.split("|");
         return { sha, date };
       });
-      if (commits.length === 2) {
+      if (commits.length === 2 && opts.withDiff) {
         const d = await gitExec(["diff", commits[1].sha, commits[0].sha, "--", relPath], { cwd: repoPath });
         diff = d.stdout.slice(0, ARTIFACT_CONTENT_CAP) || null;
       }
@@ -149,6 +170,10 @@ export function createPluginLoopExtras(ctx: PluginLoopExtrasCtx) {
       truncated,
       commits,
       diff,
+      // Whether a diff EXISTS to be fetched — the client offers the Diff tab on this,
+      // then re-requests with `withDiff=1`. Without it a deferred diff would be
+      // indistinguishable from "this artifact has no previous version".
+      hasPreviousVersion: commits.length === 2,
     };
   }
 

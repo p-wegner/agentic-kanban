@@ -13,7 +13,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-preference-write";
 import { listWorkflowTemplates, type WorkflowDb } from "@agentic-kanban/shared/lib/workflow-engine";
@@ -377,6 +377,14 @@ export function createPluginService(deps: {
   const LIST_PLUGINS_TTL_MS = 15_000;
   const listPluginsMemo = new Map<string, { at: number; result: ReturnType<typeof computePluginList> }>();
 
+  /**
+   * Manifest-drift verdicts keyed by manifest path (#425). Invalidated by the file's own
+   * mtime AND by the cached `manifestJson` it was compared against, so a `POST /:id/update`
+   * (which rewrites the row, not the file) can never leave a stale "drifted" badge behind.
+   * Unbounded only in the number of INSTALLED plugins, which is a handful.
+   */
+  const manifestDriftCache = new Map<string, { mtimeMs: number; manifestJson: string; drift: boolean }>();
+
   function listPlugins(projectId?: string) {
     const key = projectId ?? "";
     const memo = listPluginsMemo.get(key);
@@ -420,8 +428,23 @@ export function createPluginService(deps: {
       try {
         // Async read: this runs per installed plugin per (memo-miss) request, and a
         // sync read of a cold file would stall the whole event loop for its duration.
-        const onDisk = await readFile(join(row.localPath, PLUGIN_MANIFEST_FILENAME), "utf8");
-        manifestDrift = onDisk.trim() !== row.manifestJson.trim();
+        //
+        // #425: skip the read entirely when the file has not been touched since the last
+        // time we compared it. `stat` is materially cheaper than reading + comparing the
+        // whole manifest, and this runs on the hot path — `GET /api/plugins?projectId=`
+        // is fired by every plugin-view open and measured 34-37ms against 11-16ms for its
+        // sibling endpoints. mtime moving without content changing just costs us one read,
+        // which is exactly the old behaviour, so the cache can never report stale drift.
+        const manifestPath = join(row.localPath, PLUGIN_MANIFEST_FILENAME);
+        const mtimeMs = (await stat(manifestPath)).mtimeMs;
+        const cached = manifestDriftCache.get(manifestPath);
+        if (cached && cached.mtimeMs === mtimeMs && cached.manifestJson === row.manifestJson) {
+          manifestDrift = cached.drift;
+        } else {
+          const onDisk = await readFile(manifestPath, "utf8");
+          manifestDrift = onDisk.trim() !== row.manifestJson.trim();
+          manifestDriftCache.set(manifestPath, { mtimeMs, manifestJson: row.manifestJson, drift: manifestDrift });
+        }
       } catch { /* checkout gone or unreadable — surfaced elsewhere */ }
       return {
         ...row,

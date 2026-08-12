@@ -131,6 +131,14 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null 
   const [pausing, setPausing] = useState(false);
   const [result, setResult] = useState<LoopAdvanceResult | null>(null);
   const [openArtifact, setOpenArtifact] = useState<string | null>(null);
+  /**
+   * The step the open artifact came from (#422/#423) — supplies the viewer's header and
+   * its sibling picker. Null when the artifact was opened from the gate card or the unit
+   * list, which are per-file and carry no step.
+   */
+  const [openArtifactStep, setOpenArtifactStep] = useState<
+    { label: string; version?: string; artifacts?: string[]; index: number; total: number } | null
+  >(null);
   const [timelineKey, setTimelineKey] = useState(0);
   // Line-anchored review notes collected on the artifact diff (#304).
   const [lineNotes, setLineNotes] = useState<string[]>([]);
@@ -195,7 +203,14 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null 
       </p>
 
       {/* Declarative pipeline progress (#289) + verification badges (#290). */}
-      <ProgressStepper steps={loop.progress?.steps} onOpenArtifact={setOpenArtifact} />
+      <ProgressStepper
+        steps={loop.progress?.steps}
+        activePath={openArtifact}
+        onOpenStep={(step, index, total) => {
+          setOpenArtifact(step.artifacts![0]);
+          setOpenArtifactStep({ label: step.label, version: step.version, artifacts: step.artifacts, index, total });
+        }}
+      />
       <ChecksBadges checks={loop.checks} />
 
       {/* A finished step whose merge hasn't landed (#299) — the loop's silent-stall state. */}
@@ -214,7 +229,7 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null 
           checks={loop.checks}
           recommendation={loop.gateRecommendation ?? null}
           lineNotes={lineNotes}
-          onOpenArtifact={setOpenArtifact}
+          onOpenArtifact={(p) => { setOpenArtifact(p); setOpenArtifactStep(null); }}
           onResolved={() => { setTimelineKey((k) => k + 1); setLineNotes([]); onChanged(); }}
         />
       )}
@@ -294,7 +309,7 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null 
                         <button
                           key={path}
                           type="button"
-                          onClick={() => setOpenArtifact(path)}
+                          onClick={() => { setOpenArtifact(path); setOpenArtifactStep(null); }}
                           className="text-[11px] font-mono text-brand-600 dark:text-brand-400 hover:underline ml-1"
                         >
                           📄 {path.split("/").pop()}
@@ -316,7 +331,9 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null 
           loopName={loop.name}
           projectId={projectId}
           path={openArtifact}
-          onClose={() => setOpenArtifact(null)}
+          step={openArtifactStep ?? undefined}
+          onOpenArtifact={setOpenArtifact}
+          onClose={() => { setOpenArtifact(null); setOpenArtifactStep(null); }}
           onLineNotesChange={setLineNotes}
         />
       )}
