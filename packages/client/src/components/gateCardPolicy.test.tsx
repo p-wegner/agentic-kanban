@@ -71,7 +71,10 @@ describe("#378 A — a stored recommendation is revalidated against the offered 
         onOpenArtifact={() => {}}
       />,
     );
-    expect(html).toContain(">Accept<");
+    expect(html).toContain('data-testid="plugin-gate-recommendation-accept"');
+    // #414 — the control NAMES the action it will take. "Accept" alone did not say what it
+    // accepted, next to a gate where the recommended action waives unexecuted QA criteria.
+    expect(html).toContain(">Do it: Needs revision<");
     expect(html).toContain('data-recommendation-state="actionable"');
   });
 });

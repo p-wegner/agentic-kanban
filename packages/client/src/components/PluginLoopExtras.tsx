@@ -562,9 +562,15 @@ export function GateCard({ pluginId, loopName, projectId, gate, gateSince, check
             <button
               onClick={() => void act(recommendationView.action)}
               disabled={resolving}
-              className="shrink-0 text-[11px] px-3 py-2.5 sm:px-2 sm:py-0.5 min-h-11 sm:min-h-0 rounded border border-amber-400 dark:border-amber-600 hover:bg-amber-100 dark:hover:bg-amber-900/40 text-amber-900 dark:text-amber-200"
+              className="shrink-0 max-w-[12rem] truncate text-[11px] px-3 py-2.5 sm:px-2 sm:py-0.5 min-h-11 sm:min-h-0 rounded border border-amber-400 dark:border-amber-600 hover:bg-amber-100 dark:hover:bg-amber-900/40 text-amber-900 dark:text-amber-200"
+              /* #414 — "Accept" alone did not say what it accepts. It is not "adopt this as
+                 prefilled feedback": it RESOLVES the gate with that action, which on this very
+                 gate means waiving 8 unexecuted acceptance criteria. Name the action it will
+                 take, since that is the consequential half. */
+              title={`Resolve this gate now by choosing "${recommendationView.action.label}". This is the butler's pre-read, not a verification.`}
+              data-testid="plugin-gate-recommendation-accept"
             >
-              Accept
+              Do it: {recommendationView.action.label}
             </button>
           )}
         </div>
