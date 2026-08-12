@@ -38,6 +38,27 @@ export function ActiveAgentsBadge({ count, compact = false }: ActiveAgentsBadgeP
   );
 }
 
+/**
+ * #411 — the switcher rendered gate-parked, converged and idle projects identically, so
+ * an operator scanning 19 projects could not see which ones were waiting on them. This
+ * dot is that scan: amber, per row, from the same `/api/inbox` sweep the bell uses.
+ */
+export function WaitingBadge({ count, compact = false }: { count: number; compact?: boolean }) {
+  if (count <= 0) return null;
+  const title = `${count} decision${count === 1 ? "" : "s"} waiting on you`;
+  return (
+    <span
+      className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium leading-none text-amber-700 dark:bg-amber-950/50 dark:text-amber-300"
+      title={title}
+      data-testid="project-waiting-badge"
+    >
+      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
+      {compact ? count : `✋ ${count}`}
+      <span className="sr-only">{title}</span>
+    </span>
+  );
+}
+
 export function getProjectInitials(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean);
   if (words.length === 0) return "?";
@@ -64,15 +85,23 @@ interface ProjectSelectorProps {
   projects: ProjectSelectorProject[];
   activeProjectId: string | null;
   onProjectChange?: (id: string) => void;
+  /** projectId → number of inbox items blocked on a human (#411). */
+  waitingCounts?: Map<string, number>;
 }
 
-export function ProjectSelector({ projects, activeProjectId, onProjectChange }: ProjectSelectorProps) {
+export function ProjectSelector({ projects, activeProjectId, onProjectChange, waitingCounts }: ProjectSelectorProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const activeProject = projects.find((project) => project.id === activeProjectId) ?? projects[0] ?? null;
   const filteredProjects = useMemo(() => filterProjects(projects, query), [projects, query]);
+  const otherProjectsWaiting = useMemo(() => {
+    if (!waitingCounts) return 0;
+    let total = 0;
+    for (const [id, count] of waitingCounts) if (id !== activeProject?.id) total += count;
+    return total;
+  }, [waitingCounts, activeProject?.id]);
 
   useEffect(() => {
     if (!open) return;
@@ -103,13 +132,16 @@ export function ProjectSelector({ projects, activeProjectId, onProjectChange }: 
   if (!activeProject) return null;
 
   return (
-    <div className="relative min-w-0" ref={rootRef}>
+    <div className="relative min-w-0 max-w-[8rem] sm:max-w-[16rem]" ref={rootRef}>
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        className="flex h-8 max-w-[8rem] items-center gap-2 rounded-md border border-gray-200 bg-white px-2.5 text-left text-sm text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800 sm:max-w-[16rem] sm:!max-w-[16rem]"
+        /* `w-full` (the width caps now live on the wrapper) keeps the trigger inside its
+           min-w-0, shrinkable parent. Sized to its CONTENT it overflowed to the right whenever
+           the header ran out of room — measured overlapping the #411 waiting chip by 14px. */
+        className="flex h-8 w-full items-center gap-2 rounded-md border border-gray-200 bg-white px-2.5 text-left text-sm text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
         title="Switch project"
       >
         <span
@@ -128,6 +160,10 @@ export function ProjectSelector({ projects, activeProjectId, onProjectChange }: 
           )}
         </span>
         <ActiveAgentsBadge count={activeProject.activeWorkspaceCount ?? 0} compact />
+        {/* The ACTIVE project's own wait is already spelled out by the header chip beside
+            this button, so the trigger counts the OTHER projects — that is the number an
+            operator cannot otherwise get without opening the list. */}
+        <WaitingBadge count={otherProjectsWaiting} compact />
         <svg className="h-4 w-4 shrink-0 text-gray-400 dark:text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
         </svg>
@@ -197,6 +233,7 @@ export function ProjectSelector({ projects, activeProjectId, onProjectChange }: 
                         </span>
                       </span>
                       <ActiveAgentsBadge count={project.activeWorkspaceCount ?? 0} />
+                      <WaitingBadge count={waitingCounts?.get(project.id) ?? 0} />
                       {active && (
                         <svg className="h-4 w-4 shrink-0 text-brand-600 dark:text-brand-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                           <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
