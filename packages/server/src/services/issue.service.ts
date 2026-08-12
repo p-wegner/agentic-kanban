@@ -53,6 +53,7 @@ import {
     getIssueDescription,
     getIssueProjectId,
     getIssuesByProject,
+    countIssuesByProject,
     getIssueSummary as getIssueSummaryRepo,
     getIssueTags,
     getIssueWorkspaces,
@@ -855,9 +856,14 @@ export function createIssueService(deps: {
     projectId: string,
     issueNumber?: number,
     statusName?: string,
-    opts?: { excludeDescription?: boolean },
+    opts?: { excludeDescription?: boolean; limit?: number; offset?: number },
   ) {
     return getIssuesByProject(projectId, issueNumber, database, statusName, opts);
+  }
+
+  /** Total matching the same filters, ignoring limit/offset — the paginator's denominator (#424). */
+  async function countIssues(projectId: string, statusName?: string) {
+    return countIssuesByProject(projectId, database, statusName);
   }
 
   async function getIssueSummary(idParam: string) {
@@ -969,6 +975,7 @@ export function createIssueService(deps: {
     archiveDoneIssues,
     getEnrichedWorkspaces,
     listIssues,
+    countIssues,
     getIssueSummary,
     getTags,
     assignTag,
