@@ -22,7 +22,7 @@ function eventLabel(type: NotificationEventType): string {
 
 /** GET /api/inbox (#302) — everything blocked on a human, across ALL projects. */
 interface InboxItem {
-  kind: "plugin-gate" | "agent-question" | "tool-approval";
+  kind: "plugin-gate" | "plugin-merge" | "agent-question" | "tool-approval";
   projectId: string;
   projectName: string;
   title: string;
@@ -40,6 +40,9 @@ interface InboxItem {
 
 const INBOX_KIND_MARK: Record<InboxItem["kind"], string> = {
   "plugin-gate": "✋",
+  // #440: a builder finished but its merge never landed — a different wait from a
+  // gate, and one that sat invisible here for over a week on two projects.
+  "plugin-merge": "⏳",
   "agent-question": "❓",
   "tool-approval": "🔐",
 };

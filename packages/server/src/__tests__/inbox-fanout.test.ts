@@ -224,4 +224,80 @@ describe("listInbox fan-out (#348 / 2026-08-11 bulk surface)", () => {
 
     expect(items).toHaveLength(0);
   });
-});
+
+  /**
+   * #440 — a builder-finished loop whose merge never landed. It waits on a human
+   * exactly as a gate does, but `collectGateItems` only emitted gate items, so two
+   * real instances (eventhub #28, pantry #33) sat unreported for over a week while
+   * `list_plugin_gates` showed them.
+   */
+  describe("awaiting-merge items (#440)", () => {
+    function loopAwaitingMerge(over: Record<string, unknown> = {}) {
+      return {
+        gate: null,
+        openTickets: 0,
+        pluginName: "Refactor Safety Net",
+        pluginId: "plugin-1",
+        pluginSlug: "rsn",
+        label: "Requirement extraction",
+        name: "requirement-extraction",
+        gateSince: null,
+        lastAdvanceAt: "2026-08-02T00:00:00.000Z",
+        gateRecommendation: null,
+        awaitingMerge: {
+          workspaceId: "ws-1",
+          issueNumber: 33,
+          issueTitle: "Requirement extraction: auth-service",
+          reason: "builder-finished",
+          mergeSafe: true,
+          ...over,
+        },
+      };
+    }
+
+    it("reports a finished-but-unlanded loop, attributed to its own project", async () => {
+      listLoopSurfacesForProjects.mockImplementation(surfacesFrom((projectId) =>
+        projectId === projectIds[1] ? [loopAwaitingMerge()] : []));
+
+      const { items } = await listInbox(db);
+
+      expect(items).toHaveLength(1);
+      expect(items[0].kind).toBe("plugin-merge");
+      // The mis-attribution this whole fix exists to prevent.
+      expect(items[0].projectId).toBe(projectIds[1]);
+      expect(items[0].title).toContain("#33");
+      expect(items[0].link.workspaceId).toBe("ws-1");
+    });
+
+    it("marks a mergeSafe:false loop as DO NOT merge, never as ready to land", async () => {
+      listLoopSurfacesForProjects.mockImplementation(surfacesFrom((projectId) =>
+        projectId === projectIds[0]
+          ? [loopAwaitingMerge({ mergeSafe: false, detail: "branch has zero commits" })]
+          : []));
+
+      const { items } = await listInbox(db);
+
+      expect(items[0].detail).toMatch(/DO NOT merge/);
+      expect(items[0].detail).toContain("zero commits");
+      expect(items[0].detail).not.toMatch(/waiting to land/);
+    });
+
+    it("reports BOTH a gate and an awaiting-merge loop — they are different waits", async () => {
+      listLoopSurfacesForProjects.mockImplementation(surfacesFrom((projectId) => {
+        if (projectId === projectIds[0]) return [loopWithGate("loop-0", "2026-08-01T00:00:00.000Z")];
+        if (projectId === projectIds[1]) return [loopAwaitingMerge()];
+        return [];
+      }));
+
+      const { items } = await listInbox(db);
+
+      expect(items.map((i) => i.kind).sort()).toEqual(["plugin-gate", "plugin-merge"]);
+    });
+
+    it("emits nothing extra when no loop is awaiting a merge", async () => {
+      listLoopSurfacesForProjects.mockImplementation(surfacesFrom(() => []));
+      const { items } = await listInbox(db);
+      expect(items).toHaveLength(0);
+    });
+  });
+})
