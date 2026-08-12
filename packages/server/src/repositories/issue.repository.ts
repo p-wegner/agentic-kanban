@@ -1,7 +1,7 @@
 import { issues, workspaces, sessions, projectStatuses, workflowNodes, tags, issueTags, issueDependencies, issueArtifacts, agentSkills } from "@agentic-kanban/shared/schema";
 import { parseSessionSummary } from "@agentic-kanban/shared";
 import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
-import { eq, inArray, desc, and, gte } from "drizzle-orm";
+import { eq, inArray, desc, and, gte, count } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -158,12 +158,22 @@ export async function getIssuesByProject(
   issueNumber?: number,
   database: Database = db,
   statusName?: string,
-  opts?: { excludeDescription?: boolean },
+  opts?: { excludeDescription?: boolean; limit?: number; offset?: number },
 ) {
   const conditions = [eq(issues.projectId, projectId)];
   if (issueNumber !== undefined) conditions.push(eq(issues.issueNumber, issueNumber));
   if (statusName !== undefined) conditions.push(eq(projectStatuses.name, statusName));
   const whereClause = conditions.length === 1 ? conditions[0] : and(...conditions);
+
+  // Pagination (#424). The list is unbounded — it grows with every issue a project ever
+  // had (380 done on the dev board at the time of writing) and every consumer paid the
+  // whole thing. `limit` is opt-in so the default response shape is unchanged; `offset`
+  // without `limit` is meaningless in SQLite and is therefore ignored rather than
+  // silently returning an empty page.
+  const hasLimit = typeof opts?.limit === "number" && Number.isFinite(opts.limit) && opts.limit > 0;
+  const offset = typeof opts?.offset === "number" && Number.isFinite(opts.offset) && opts.offset > 0
+    ? Math.floor(opts.offset)
+    : 0;
 
   const fullSelection = {
     id: issues.id,
@@ -193,20 +203,42 @@ export async function getIssuesByProject(
     // description is ~60% of a full-project payload. The key is absent
     // (undefined), not null, in slim rows.
     const { description: _description, ...slimSelection } = fullSelection;
-    return database
+    const q = database
       .select(slimSelection)
       .from(issues)
       .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
       .where(whereClause)
       .orderBy(issues.sortOrder);
+    return hasLimit ? q.limit(Math.floor(opts!.limit!)).offset(offset) : q;
   }
 
-  return database
+  const q = database
     .select(fullSelection)
     .from(issues)
     .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
     .where(whereClause)
     .orderBy(issues.sortOrder);
+  return hasLimit ? q.limit(Math.floor(opts!.limit!)).offset(offset) : q;
+}
+
+/**
+ * Total issues matching the same filters, ignoring limit/offset — so a paginated
+ * caller can report "showing 50 of 380" without fetching all 380 (#424).
+ */
+export async function countIssuesByProject(
+  projectId: string,
+  database: Database = db,
+  statusName?: string,
+) {
+  const conditions = [eq(issues.projectId, projectId)];
+  if (statusName !== undefined) conditions.push(eq(projectStatuses.name, statusName));
+  const whereClause = conditions.length === 1 ? conditions[0] : and(...conditions);
+  const rows = await database
+    .select({ n: count() })
+    .from(issues)
+    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+    .where(whereClause);
+  return Number(rows[0]?.n ?? 0);
 }
 
 export async function getIssueDescription(

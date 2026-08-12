@@ -152,3 +152,82 @@ describe("GET /api/issues conditional GET (#418)", () => {
     expect(full.headers.get("etag")).not.toBe(slim.headers.get("etag"));
   });
 });
+
+describe("GET /api/issues pagination (#424)", () => {
+  let app: Hono;
+  let db: TestDb;
+  let projectId: string;
+  let statusId: string;
+
+  beforeEach(async () => {
+    ({ db } = createTestDb());
+    app = new Hono();
+    app.route("/api/issues", createIssuesRoute(db));
+    projectId = await seedProject(db);
+    statusId = await seedStatus(db, projectId, "Backlog", 0);
+    for (let n = 1; n <= 12; n++) await seedIssue(db, projectId, statusId, n, `description ${n}`);
+  });
+
+  it("without limit, returns everything and sets NO X-Total-Count (shape unchanged)", async () => {
+    const res = await app.request(`/api/issues?projectId=${projectId}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-total-count")).toBeNull();
+    expect(((await res.json()) as unknown[]).length).toBe(12);
+  });
+
+  it("limit caps the page and reports the unpaginated total", async () => {
+    const res = await app.request(`/api/issues?projectId=${projectId}&limit=5`);
+    expect(res.status).toBe(200);
+    // The header is the whole point of the feature and is easy to lose: a header set on a
+    // hand-constructed Response does NOT survive Hono's raw-Response adoption, which
+    // silently swallowed it during development. Assert it explicitly.
+    expect(res.headers.get("x-total-count")).toBe("12");
+    expect(((await res.json()) as unknown[]).length).toBe(5);
+  });
+
+  it("offset walks disjoint pages that reassemble into the full ordered list", async () => {
+    const seen: number[] = [];
+    for (let offset = 0; offset < 12; offset += 5) {
+      const res = await app.request(`/api/issues?projectId=${projectId}&limit=5&offset=${offset}`);
+      const page = (await res.json()) as Array<{ issueNumber: number }>;
+      seen.push(...page.map((i) => i.issueNumber));
+    }
+    expect(seen).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    expect(new Set(seen).size).toBe(12);
+  });
+
+  it("clamps an oversized limit instead of rejecting it", async () => {
+    const res = await app.request(`/api/issues?projectId=${projectId}&limit=99999`);
+    expect(res.status).toBe(200);
+    // Fewer issues exist than the cap, so this asserts the request is SERVED, not 400'd.
+    expect(((await res.json()) as unknown[]).length).toBe(12);
+  });
+
+  it("ignores a junk or non-positive limit and falls back to the full list", async () => {
+    for (const bad of ["abc", "0", "-5", ""]) {
+      const res = await app.request(`/api/issues?projectId=${projectId}&limit=${bad}`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("x-total-count")).toBeNull();
+      expect(((await res.json()) as unknown[]).length).toBe(12);
+    }
+  });
+
+  it("offset without limit is ignored rather than silently returning a partial list", async () => {
+    const res = await app.request(`/api/issues?projectId=${projectId}&offset=5`);
+    expect(((await res.json()) as unknown[]).length).toBe(12);
+  });
+
+  it("composes with slim and keeps conditional GET working", async () => {
+    const res = await app.request(`/api/issues?projectId=${projectId}&slim=1&limit=4`);
+    const page = (await res.json()) as Record<string, unknown>[];
+    expect(page.length).toBe(4);
+    for (const issue of page) expect("description" in issue).toBe(false);
+    expect(res.headers.get("x-total-count")).toBe("12");
+
+    const etag = res.headers.get("etag")!;
+    const again = await app.request(`/api/issues?projectId=${projectId}&slim=1&limit=4`, {
+      headers: { "if-none-match": etag },
+    });
+    expect(again.status).toBe(304);
+  });
+});
