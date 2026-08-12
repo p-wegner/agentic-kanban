@@ -58,6 +58,10 @@ export interface LoopIssueRow {
   issueNumber: number | null;
   externalKey: string;
   statusName: string;
+  /** This ticket has at least one workspace that is not closed (#413 phantom detection). */
+  hasLiveWorkspace: boolean;
+  /** This ticket has ever had a workspace at all — separates "ran and ended" from "queued". */
+  hasAnyWorkspace: boolean;
 }
 
 /**
@@ -86,12 +90,31 @@ export async function listPluginLoopIssues(
       issueNumber: issues.issueNumber,
       externalKey: issues.externalKey,
       statusName: projectStatuses.name,
+      // #413/#397 — an open loop ticket with no LIVE workspace but a dead one behind it is
+      // the phantom shape: the work ran, the workspace closed, and the ticket stayed open,
+      // so the loop's own pane says "round in progress" about something nothing is driving.
+      // Correlated EXISTS rather than two more round trips; these rows already load per loop.
+      hasLiveWorkspace: sql<boolean>`EXISTS (
+        SELECT 1 FROM ${workspaces} AS live
+        WHERE live.issue_id = ${issues.id} AND live.status != 'closed'
+      )`,
+      hasAnyWorkspace: sql<boolean>`EXISTS (
+        SELECT 1 FROM ${workspaces} AS any_ws WHERE any_ws.issue_id = ${issues.id}
+      )`,
     })
     .from(issues)
     .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
     .where(and(eq(issues.projectId, projectId), sql`${issues.externalKey} LIKE ${pattern} ESCAPE '\\'`));
   return rows.flatMap((row) =>
-    row.externalKey ? [{ ...row, externalKey: row.externalKey }] : [],
+    row.externalKey
+      ? [{
+          ...row,
+          externalKey: row.externalKey,
+          // SQLite returns 0/1 for EXISTS; normalise so consumers can trust the type.
+          hasLiveWorkspace: Boolean(row.hasLiveWorkspace),
+          hasAnyWorkspace: Boolean(row.hasAnyWorkspace),
+        }]
+      : [],
   );
 }
 

@@ -28,3 +28,19 @@ export interface SelectProjectDetail {
 export function requestProjectSelection(projectId: string): void {
   window.dispatchEvent(new CustomEvent<SelectProjectDetail>(SELECT_PROJECT_EVENT, { detail: { projectId } }));
 }
+
+// #413: a place that NAMES an issue must be able to open it. The plugin loop pane said
+// "1 ticket(s) still open" and linked nowhere, so finding out WHICH ticket meant querying
+// the board API — which is how a stranded phantom went unnoticed. BoardPage holds the
+// loaded columns (an issue panel needs the full row, not just a number), so it resolves
+// the number and opens the detail panel.
+export const FOCUS_ISSUE_EVENT = "kanban:focus-issue";
+
+export interface FocusIssueDetail {
+  issueId?: string;
+  issueNumber?: number | null;
+}
+
+export function requestIssueFocus(detail: FocusIssueDetail): void {
+  window.dispatchEvent(new CustomEvent<FocusIssueDetail>(FOCUS_ISSUE_EVENT, { detail }));
+}

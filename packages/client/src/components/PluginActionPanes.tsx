@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 import { setProjectPref } from "../lib/settingsStore.js";
+import { requestIssueFocus, requestViewNavigation } from "../lib/navigateView.js";
 import {
   ArtifactViewer,
   AwaitingMergeCard,
@@ -29,6 +30,36 @@ import {
  * result blob is how a UI stops answering the question the user actually has.
  */
 
+/**
+ * Loop tickets, named AND reachable (#413). Clicking switches to the board and opens the
+ * issue's detail panel — the pane used to print a bare "1 ticket(s) still open" and leave
+ * the reader to query the API for which one, which is precisely how a phantom hid.
+ */
+function OpenTicketLinks({ refs }: { refs: Array<{ issueId: string; issueNumber: number | null; statusName: string }> }) {
+  return (
+    <>
+      {refs.map((ref, i) => (
+        <span key={ref.issueId}>
+          {i > 0 && ", "}
+          <button
+            type="button"
+            onClick={() => {
+              requestViewNavigation("kanban");
+              requestIssueFocus({ issueId: ref.issueId, issueNumber: ref.issueNumber });
+            }}
+            className="font-mono underline underline-offset-2 hover:no-underline"
+            title="Open this ticket on the board"
+            data-testid="plugin-loop-ticket-link"
+          >
+            #{ref.issueNumber ?? "?"}
+          </button>
+          <span className="opacity-75"> ({ref.statusName})</span>
+        </span>
+      ))}
+    </>
+  );
+}
+
 export type PluginOwner = {
   /** Plugin DB row id — the `:id` segment of the plugin routes. */
   pluginId: string;
@@ -43,7 +74,13 @@ export type PluginLoop = PluginOwner & {
   skill: string;
   openTickets: number;
   /** The open tickets themselves (#429), so the pane can name them rather than only count them. */
-  openTicketRefs?: Array<{ issueId: string; issueNumber: number | null; statusName: string }>;
+  openTicketRefs?: Array<{
+    issueId: string;
+    issueNumber: number | null;
+    statusName: string;
+    /** Open, has had a workspace, none live — nothing will ever close it (#413/#397). */
+    stranded?: boolean;
+  }>;
   closedTickets: number;
   paused: boolean;
   converged: boolean;
@@ -218,6 +255,8 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
   }
 
   const roundRunning = loop.openTickets > 0;
+  const strandedRefs = (loop.openTicketRefs ?? []).filter((ref) => ref.stranded);
+  const liveRefs = (loop.openTicketRefs ?? []).filter((ref) => !ref.stranded);
   return (
     <div className="p-3 sm:p-6 space-y-4 overflow-y-auto" data-testid="plugin-loop-pane">
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-3">
@@ -349,26 +388,43 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
         </button>
       </div>
 
-      {roundRunning && (
+      {/* #413 — the stranded tickets get their OWN line, whether or not they are all of them.
+          MEASURED live: eventhub's extraction loop held 28 open tickets of which 9 were
+          stranded, so a warning that only fired when EVERY open ticket was stranded would
+          have stayed silent on the shape that actually occurs. Nothing will close these, so
+          "the next round is planned automatically once they close" is a promise the loop
+          cannot keep — on roomsync it sat beside 9 ✓ step chips and a `converged: true` API. */}
+      {strandedRefs.length > 0 && (
+        <p
+          className="text-xs rounded border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-red-800 dark:text-red-300 max-w-2xl"
+          data-testid="plugin-loop-stranded"
+        >
+          <span className="font-medium">
+            {strandedRefs.length === 1 ? "A ticket is" : `${strandedRefs.length} tickets are`} stranded open with no
+            live workspace
+          </span>{" "}
+          — <OpenTicketLinks refs={strandedRefs} />. Nothing is driving{" "}
+          {strandedRefs.length === 1 ? "it" : "them"}, so {strandedRefs.length === 1 ? "it" : "they"} will not close on{" "}
+          {strandedRefs.length === 1 ? "its" : "their"} own and the loop keeps waiting. Close or re-start{" "}
+          {strandedRefs.length === 1 ? "it" : "them"} on the board (see #397), or press Advance to replan.
+        </p>
+      )}
+      {roundRunning && liveRefs.length > 0 && (
         <p className="text-xs text-amber-700 dark:text-amber-400" data-testid="plugin-loop-round-running">
-          Round in progress — {loop.openTickets} ticket(s) still open
-          {/* NAME the open tickets and their live status (#429). "1 ticket(s) still open" left the
-              reader to go to the board and work out which one and whether it had actually started —
-              the difference between "running" and "planned but nothing is provisioning it" is
-              exactly what stalls here look like. The refs cost no extra query. */}
-          {(loop.openTicketRefs?.length ?? 0) > 0 && (
-            <>
-              {": "}
-              {loop.openTicketRefs!.map((ref, i) => (
-                <span key={ref.issueId}>
-                  {i > 0 && ", "}
-                  <span className="font-mono">#{ref.issueNumber ?? "?"}</span>
-                  <span className="opacity-75"> ({ref.statusName})</span>
-                </span>
-              ))}
-            </>
-          )}
+          Round in progress — {liveRefs.length} ticket(s) still open
+          {/* NAME the open tickets, their live status, and LINK to them (#429/#413). "1 ticket(s)
+              still open" left the reader to go to the board and work out which one and whether it
+              had actually started — the difference between "running" and "planned but nothing is
+              provisioning it" is exactly what stalls here look like. The refs cost no extra query. */}
+          {": "}<OpenTicketLinks refs={liveRefs} />
           . The next round is planned automatically once they close.
+        </p>
+      )}
+      {/* No refs at all (an older surface payload) — keep the bare count rather than nothing. */}
+      {roundRunning && (loop.openTicketRefs?.length ?? 0) === 0 && (
+        <p className="text-xs text-amber-700 dark:text-amber-400" data-testid="plugin-loop-round-running">
+          Round in progress — {loop.openTickets} ticket(s) still open. The next round is planned automatically once
+          they close.
         </p>
       )}
       {loop.paused && (
