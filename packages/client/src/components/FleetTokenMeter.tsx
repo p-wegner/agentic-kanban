@@ -64,7 +64,10 @@ export function FleetTokenMeter({ liveStats, columns, sessionActivity }: FleetTo
         data-testid="fleet-token-meter"
         data-idle="true"
         title="No active agents — fleet token meter idle"
-        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700"
+        // Hidden below sm (#435): "fleet idle" is pure status with nothing to tap, and on a
+        // phone it was padding out the toolbar row above the content. The ACTIVE state stays
+        // visible at every width — that one is telling you agents are burning tokens.
+        className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700"
       >
         <span className="w-1.5 h-1.5 rounded-full bg-gray-400 shrink-0" />
         <span className="text-xs font-medium text-gray-500 dark:text-gray-400">fleet idle</span>
