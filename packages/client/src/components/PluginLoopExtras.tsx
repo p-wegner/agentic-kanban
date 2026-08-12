@@ -58,13 +58,21 @@ export type LoopStall = {
 // ── State chips (#293) ────────────────────────────────────────────────
 
 /** Why the loop planned nothing — four look-alike states, told apart explicitly. */
-export function LoopStateChips({ loop, startPolicy }: {
+export function LoopStateChips({ loop, startPolicy, onSwitchToMonitor, switchingMode = false }: {
   loop: {
     paused: boolean; converged: boolean; openTickets: number;
     gate: PluginGate | null; note: string | null; closedTickets: number;
     awaitingMerge?: LoopStall | null;
   };
   startPolicy: StartPolicy;
+  /**
+   * One-click fix for the manual-Start-Mode chip (#428). The chip is the PERSISTENT statement
+   * of the problem — the advance result carries the same warning but only on the advance that
+   * actually creates tickets, so it is gone the moment you navigate away while the loop stays
+   * stuck. The remedy belongs next to the durable signal, not the transient one.
+   */
+  onSwitchToMonitor?: () => void;
+  switchingMode?: boolean;
 }) {
   const chips: Array<{ text: string; tone: "gray" | "amber" | "green" | "blue" | "red" }> = [];
   if (loop.paused) chips.push({ text: "Paused", tone: "amber" });
@@ -98,6 +106,7 @@ export function LoopStateChips({ loop, startPolicy }: {
     blue: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
     red: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
   } as const;
+  const manualChip = startPolicy?.mode === "manual" && !loop.converged;
   return (
     <div className="flex flex-wrap items-center gap-1.5" data-testid="plugin-loop-state-chips">
       {chips.map((chip) => (
@@ -105,6 +114,18 @@ export function LoopStateChips({ loop, startPolicy }: {
           {chip.text}
         </span>
       ))}
+      {manualChip && onSwitchToMonitor && (
+        <button
+          type="button"
+          onClick={onSwitchToMonitor}
+          disabled={switchingMode}
+          data-testid="plugin-loop-switch-start-mode"
+          title="Set this project's Start Mode to monitor so the board starts this loop's tickets"
+          className="text-[11px] px-2 py-0.5 rounded border border-red-300 dark:border-red-700 text-red-800 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/40 disabled:opacity-50"
+        >
+          {switchingMode ? "Switching…" : "Switch to monitor"}
+        </button>
+      )}
     </div>
   );
 }
