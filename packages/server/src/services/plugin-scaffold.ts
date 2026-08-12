@@ -93,6 +93,37 @@ export interface ScaffoldField {
 }
 
 /**
+ * End offset of a `TODO:` hint that may WRAP onto following lines (#439).
+ *
+ * Templates write these hints as prose, so they wrap naturally:
+ *
+ *   - **Input documents:** TODO: repo-relative path to any source material (market reports,
+ *     requirements, interface docs) the agents must ground on, or "none"
+ *
+ * Replacing only to the first newline left the second line behind in the filled
+ * profile, where every step agent then read template hint text — complete with an
+ * unbalanced `)` — as if it were the human's answer.
+ *
+ * A continuation is a line that is INDENTED, non-blank, and does not begin a new
+ * list item, heading or `TODO:`. Those exclusions are the safety rail: swallowing
+ * the next bullet would silently delete a whole field, which is far worse than the
+ * orphan line this fixes.
+ */
+function hintEnd(masked: string, from: number): number {
+  let end = masked.indexOf("\n", from);
+  if (end === -1) return masked.length;
+  for (;;) {
+    const nextEnd = masked.indexOf("\n", end + 1);
+    const line = masked.slice(end + 1, nextEnd === -1 ? masked.length : nextEnd);
+    if (!/^[ \t]+\S/.test(line)) return end;
+    const body = line.trim();
+    if (/^[-*+]\s/.test(body) || body.startsWith("#") || body.includes("TODO:")) return end;
+    end = nextEnd === -1 ? masked.length : nextEnd;
+    if (nextEnd === -1) return end;
+  }
+}
+
+/**
  * Strip inline-code spans the same way `countScaffoldPlaceholders` does, so the
  * form's field count and the gate's placeholder count can never disagree about
  * which markers are real.
@@ -111,14 +142,16 @@ export function parseScaffoldFields(content: string): ScaffoldField[] {
   let index = 0;
   while ((match = re.exec(masked)) !== null) {
     const lineStart = masked.lastIndexOf("\n", match.index) + 1;
-    const lineEndRaw = masked.indexOf("\n", match.index);
-    const lineEnd = lineEndRaw === -1 ? masked.length : lineEndRaw;
+    // Wrapped hints count as one field (#439) — otherwise the form showed a label
+    // truncated mid-sentence at the line break.
+    const lineEnd = hintEnd(masked, match.index);
     // Read label/line from the ORIGINAL content at the same offsets — the mask
     // only hides code spans from the scan, it must not leak into the UI.
+    const collapse = (s: string) => s.trim().replace(/\s*\r?\n\s*/g, " ");
     fields.push({
       index,
-      label: content.slice(match.index + "TODO:".length, lineEnd).trim(),
-      line: content.slice(lineStart, lineEnd).trim(),
+      label: collapse(content.slice(match.index + "TODO:".length, lineEnd)),
+      line: collapse(content.slice(lineStart, lineEnd)),
     });
     index++;
   }
@@ -146,9 +179,9 @@ export function applyScaffoldValues(
   while ((match = re.exec(masked)) !== null) {
     const value = byIndex.get(index);
     if (value !== undefined) {
-      const lineEndRaw = masked.indexOf("\n", match.index);
-      const lineEnd = lineEndRaw === -1 ? masked.length : lineEndRaw;
-      edits.push({ start: match.index, end: lineEnd, text: value });
+      // Consume the hint's wrapped continuation lines too (#439) — leaving them
+      // behind put template prose into the profile as if it were the answer.
+      edits.push({ start: match.index, end: hintEnd(masked, match.index), text: value });
     }
     index++;
   }

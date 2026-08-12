@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { apiFetch, apiPost } from "../lib/api.js";
+import { apiFetch, apiPost, apiPut } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 
 /**
@@ -29,6 +29,10 @@ export function PluginScaffoldPane({ pluginId, pluginName, projectId, onFilled }
   const [values, setValues] = useState<Record<number, string>>({});
   const [saving, setSaving] = useState(false);
   const [showFile, setShowFile] = useState(false);
+  // #438: a COMPLETE profile has no TODO markers, so the index-addressed form above
+  // can no longer reach any of it. `draft` is the whole-file editor that makes a
+  // wrong answer correctable — null while not editing.
+  const [draft, setDraft] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -36,6 +40,7 @@ export function PluginScaffoldPane({ pluginId, pluginName, projectId, onFilled }
       setForm(res);
       setError(null);
       setValues({});
+      setDraft(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -73,6 +78,36 @@ export function PluginScaffoldPane({ pluginId, pluginName, projectId, onFilled }
     }
   }
 
+  /**
+   * Save the whole file (#438). The plugin owns the format, so this deliberately
+   * writes back exactly what the human typed rather than reformatting it — the same
+   * contract the per-field form honours.
+   */
+  async function saveDraft() {
+    if (draft === null || saving) return;
+    setSaving(true);
+    try {
+      const res = await apiPut<{ remaining: number; committed: boolean }>(
+        `/api/plugins/${pluginId}/scaffold`,
+        { projectId, content: draft },
+      );
+      showToast(
+        res.remaining > 0
+          ? `Saved — ${res.remaining} TODO marker(s) now open, which re-blocks scripts and loops`
+          : res.committed
+            ? "Profile saved and committed — step agents will see it"
+            : "Profile saved (not committed — no git repo)",
+        res.remaining > 0 ? "error" : "success",
+      );
+      await load();
+      onFilled();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Saving the profile failed", "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="p-6 space-y-4 overflow-y-auto" data-testid="plugin-scaffold-pane">
       <div className="space-y-1">
@@ -91,10 +126,21 @@ export function PluginScaffoldPane({ pluginId, pluginName, projectId, onFilled }
           The scaffold file has not been written yet — enable the plugin for this project first.
         </p>
       )}
-      {form?.exists && form.fields.length === 0 && (
-        <p className="text-xs text-green-700 dark:text-green-400" data-testid="plugin-scaffold-complete">
-          ✓ Profile complete — nothing left to fill in.
-        </p>
+      {form?.exists && form.fields.length === 0 && draft === null && (
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="text-xs text-green-700 dark:text-green-400" data-testid="plugin-scaffold-complete">
+            ✓ Profile complete — nothing left to fill in.
+          </p>
+          {/* #438: without this the profile was write-once. Every step agent reads it
+              first, so a wrong answer here quietly skews all of them. */}
+          <button
+            onClick={() => setDraft(form.content ?? "")}
+            className="text-xs px-3 py-2 sm:py-1 min-h-11 sm:min-h-0 rounded border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300"
+            data-testid="plugin-scaffold-edit"
+          >
+            Edit profile
+          </button>
+        </div>
       )}
 
       {form?.exists && form.fields.length > 0 && (
@@ -130,7 +176,46 @@ export function PluginScaffoldPane({ pluginId, pluginName, projectId, onFilled }
         </div>
       )}
 
-      {form?.exists && form.content && (
+      {draft !== null && (
+        <div className="space-y-2 max-w-2xl" data-testid="plugin-scaffold-editor">
+          <p className="text-[11px] text-gray-500 dark:text-gray-400">
+            Editing <span className="font-mono">{form?.targetPath}</span>. Saving commits the file
+            — step agents run in worktrees and only see committed changes. Re-introducing a{" "}
+            <span className="font-mono">TODO:</span> marker will block this plugin&apos;s scripts and loops again.
+          </p>
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            rows={20}
+            disabled={saving}
+            spellCheck={false}
+            // text-base below sm for the same iOS zoom reason as the field form (#434) —
+            // correcting the profile from a phone is the point of this editor.
+            className="w-full font-mono text-base sm:text-xs px-2 py-2 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 disabled:opacity-50"
+            data-testid="plugin-scaffold-textarea"
+          />
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => void saveDraft()}
+              disabled={saving || draft.trim() === ""}
+              className="text-sm px-4 py-2.5 sm:px-3 sm:py-1.5 min-h-11 sm:min-h-0 rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
+              data-testid="plugin-scaffold-draft-save"
+            >
+              {saving ? "Saving…" : "Save profile"}
+            </button>
+            <button
+              onClick={() => setDraft(null)}
+              disabled={saving}
+              className="text-sm px-4 py-2.5 sm:px-3 sm:py-1.5 min-h-11 sm:min-h-0 rounded border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 disabled:opacity-50"
+              data-testid="plugin-scaffold-draft-cancel"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {form?.exists && form.content && draft === null && (
         <div className="max-w-2xl">
           <button
             onClick={() => setShowFile((s) => !s)}

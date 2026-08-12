@@ -261,6 +261,16 @@ export function createPluginsRoute(
     return c.json(await service.fillScaffoldForm(c.req.param("id"), projectId, values));
   });
 
+  // Overwrite the whole scaffold file (#438). `POST` addresses TODO markers by index,
+  // so a COMPLETE profile — which has none — was uneditable from the board entirely.
+  router.put("/:id/scaffold", async (c) => {
+    const body = await parseJsonBody<{ projectId?: string; content?: string }>(c);
+    const projectId = typeof body.projectId === "string" ? body.projectId.trim() : "";
+    if (!projectId) throw new PluginError("projectId is required", "BAD_REQUEST");
+    if (typeof body.content !== "string") throw new PluginError("content must be a string", "BAD_REQUEST");
+    return c.json(await service.saveScaffoldContent(c.req.param("id"), projectId, body.content));
+  });
+
   router.post("/:id/loops/:name/pause", async (c) => {
     const projectId = await requireProjectId(c);
     return c.json(await service.setLoopPaused(c.req.param("id"), c.req.param("name"), projectId, true));
