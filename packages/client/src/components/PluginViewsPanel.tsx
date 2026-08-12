@@ -133,9 +133,19 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
     }
   });
 
+  /**
+   * Persist the choice ONLY at desktop width (#437). Below md the rail is an overlay, so
+   * closing it is dismissing a drawer — not a statement about how you want the pane laid out.
+   * Persisting that leaked across form factors: dismissing the drawer on a phone left the rail
+   * collapsed on the desktop the next time, where "collapsed" means something else entirely.
+   */
   const toggleRail = useCallback((next: boolean) => {
     setRailOpen(next);
-    try { localStorage.setItem(RAIL_OPEN_STORAGE_KEY, String(next)); } catch { /* non-fatal */ }
+    try {
+      if (window.matchMedia("(min-width: 768px)").matches) {
+        localStorage.setItem(RAIL_OPEN_STORAGE_KEY, String(next));
+      }
+    } catch { /* non-fatal */ }
   }, []);
 
   /**
@@ -548,11 +558,16 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
             rail is closed at ANY size — not `md:hidden`, or collapsing on desktop would be
             a one-way door. */}
         {!railOpen && (
-          <div className="flex items-center gap-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-2 py-1.5">
+          // A 57px band to hold one toggle was out of proportion on a phone — with the 75px
+          // header that was 132px of chrome before any content, and it repeated the "Plugins"
+          // the header already shows (#437). The BAND is now the tap target: full-width and
+          // ~32px, which is a comfortable touch area horizontally without costing a whole
+          // row's worth of height. The button inside carries no padding of its own.
+          <div className="flex items-center border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
             <button
               type="button"
               onClick={() => toggleRail(true)}
-              className="flex items-center gap-1.5 text-xs px-2 py-2.5 sm:py-1 min-h-11 sm:min-h-0 rounded text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+              className="flex flex-1 items-center gap-1.5 text-xs px-2 py-2 sm:py-1 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
               title="Show plugin menu"
               aria-label="Show plugin menu"
               data-testid="plugin-rail-open"
