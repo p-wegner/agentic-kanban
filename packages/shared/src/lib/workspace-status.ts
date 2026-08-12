@@ -1,6 +1,6 @@
 import { and, eq, isNull, ne, or } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
-import { workspaces } from "../schema/index.js";
+import { repos, workspaces } from "../schema/index.js";
 import type * as schema from "../schema/index.js";
 import {
   checkWorkspaceTransition,
@@ -222,6 +222,16 @@ export async function setWorkspaceStatus(
       }
       return false;
     }
+    // #415 — the per-repo merge-status projection (repos.summary_*, decision 014
+    // extension): a status transition is the same board event that dirties the
+    // workspace projection above, so the workspace's repos rows are dirtied in the
+    // same authority. Best-effort: a failure here only delays a projection refresh.
+    try {
+      await database
+        .update(repos)
+        .set({ summaryDirty: true })
+        .where(eq(repos.workspaceId, workspaceId));
+    } catch { /* projection staleness heals via TTL + the 5-min pass */ }
     return true;
   } catch (err) {
     // A STRICT-policy transition violation must propagate, not be swallowed into

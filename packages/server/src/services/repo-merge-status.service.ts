@@ -3,6 +3,7 @@ import type { Database } from "../db/index.js";
 import { getWorkspaceById } from "../repositories/workspace.repository.js";
 import { WorkspaceError, requireBaseBranch, type GitService } from "./workspace-internals.js";
 import { getAllWorkspaceRepos, type WorkspaceRepoRef } from "./workspace-all-repos.js";
+import { computeRepoAheadHistoric, isRepoProjectionFresh } from "./workspace-summary-projection.service.js";
 
 // The wire contract lives in @agentic-kanban/shared (types/api/workspace.ts) so the
 // client consumes the same shape (#79); these aliases keep existing importers working.
@@ -34,7 +35,7 @@ export async function getRepoMergeStatus(
 
   const repos: RepoMergeStatusEntry[] = [];
   for (const ref of allRepos) {
-    repos.push(await computeRepoMergeEntry(ref, gitService));
+    repos.push(await computeRepoMergeEntry(ref, gitService, { workspaceStatus: workspace.status, database }));
   }
 
   const allMerged = repos.every((r) => !r.hasWork || r.merged);
@@ -56,28 +57,37 @@ export async function getRepoMergeStatus(
  *   merge, #74/#75): for a sibling-only merge the leading's captured tip equals base → 0 historic →
  *   leading correctly reads no-work.
  */
-export async function computeRepoMergeEntry(ref: WorkspaceRepoRef, gitService: GitService): Promise<RepoMergeStatusEntry> {
+export interface RepoMergeComputeOpts {
+  /** Owning workspace's status — selects the projection TTL (30s active / 5 min idle,
+   * the decision-014 cadence). Unset = idle TTL. */
+  workspaceStatus?: string;
+  /** Enables the write-through of a live result onto the backing repos row. */
+  database?: Database;
+  /** Clock override for freshness tests. */
+  nowMs?: number;
+}
+
+export async function computeRepoMergeEntry(
+  ref: WorkspaceRepoRef,
+  gitService: GitService,
+  opts: RepoMergeComputeOpts = {},
+): Promise<RepoMergeStatusEntry> {
   const base = { name: ref.kind === "leading" ? null : ref.name, path: ref.path, isLeading: ref.kind === "leading" };
   if (ref.mergedHeadSha) {
     return { ...base, hasWork: true, ahead: 0, merged: true, stranded: false };
   }
-  let ahead = 0;
-  if (ref.branch && ref.baseBranch) {
-    try {
-      await gitService.revParse(ref.path, ref.baseBranch);
-      await gitService.revParse(ref.path, ref.branch);
-      ahead = await gitService.countUniqueCommits(ref.path, ref.baseBranch, ref.branch).catch(() => 0);
-    } catch { /* branch/base ref gone (e.g. cleaned up) → no countable work */ }
-  }
-  let historic = 0;
-  if (ahead === 0 && ref.baseCommitSha) {
-    let tip: string | null = null;
-    if (ref.branch && (await gitService.revParse(ref.path, ref.branch).then(() => true).catch(() => false))) {
-      tip = ref.branch;
-    } else if (ref.mergedHeadSha) {
-      tip = ref.mergedHeadSha;
-    }
-    if (tip) historic = await gitService.countUniqueCommits(ref.path, ref.baseCommitSha, tip).catch(() => 0);
+  // #415 — projection-fresh rows answer with ZERO git spawns; the facts were persisted
+  // by a previous live computation or the 5-minute heal pass, and every board event
+  // that can move them marks the row dirty (workspace-summary-projection.service).
+  let ahead: number;
+  let historic: number;
+  if (isRepoProjectionFresh(ref, opts.workspaceStatus, opts.nowMs ?? Date.now())) {
+    ahead = ref.summaryAhead ?? 0;
+    historic = ref.summaryHistoric ?? 0;
+  } else {
+    // Dirty/stale/rowless → live git, with write-through so the NEXT read within TTL
+    // is spawn-free (a rowless pre-0110 leading ref simply stays live until backfilled).
+    ({ ahead, historic } = await computeRepoAheadHistoric(ref, gitService, opts.database));
   }
   const hasWork = ahead > 0 || historic > 0;
   return { ...base, hasWork, ahead, merged: hasWork && ahead === 0, stranded: hasWork && ahead > 0 };

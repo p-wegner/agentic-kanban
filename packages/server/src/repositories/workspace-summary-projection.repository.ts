@@ -36,7 +36,10 @@ export async function updateWorkspaceSummaryGitProjection(
     .where(eq(workspaces.id, workspaceId));
 }
 
-/** Board-event hook: mark one workspace's projection as needing a refresh. */
+/** Board-event hook: mark one workspace's projection as needing a refresh.
+ * #415: also dirties the workspace's per-repo merge-status projection (repos rows) —
+ * every event that can move the workspace git facts (merge, rebase, status change)
+ * can move the per-repo ahead/merged facts too. */
 export async function markWorkspaceSummaryDirty(
   workspaceId: string,
   database: Database = db,
@@ -45,6 +48,104 @@ export async function markWorkspaceSummaryDirty(
     .update(workspaces)
     .set({ summaryDirty: true })
     .where(eq(workspaces.id, workspaceId));
+  await markWorkspaceRepoSummariesDirty(workspaceId, database);
+}
+
+/** #415 — dirty-mark the per-repo merge-status projection of every repos row (leading +
+ * siblings) a workspace spans. Board-event hook, same contract as the workspace flag. */
+export async function markWorkspaceRepoSummariesDirty(
+  workspaceId: string,
+  database: Database = db,
+): Promise<void> {
+  await database
+    .update(repos)
+    .set({ summaryDirty: true })
+    .where(eq(repos.workspaceId, workspaceId));
+}
+
+export interface RepoSummaryProjectionValues {
+  summaryAhead: number | null;
+  summaryHistoric: number | null;
+  summaryGitRefreshedAt: string;
+}
+
+/** #415 — write-through after a live per-repo merge-status computation: store the
+ * ahead/historic facts on the repos row, stamp freshness, clear dirty. */
+export async function updateRepoSummaryProjection(
+  rowId: string,
+  values: RepoSummaryProjectionValues,
+  database: Database = db,
+): Promise<void> {
+  await database
+    .update(repos)
+    .set({ ...values, summaryDirty: false })
+    .where(eq(repos.id, rowId));
+}
+
+export interface RepoSummaryHealCandidate {
+  /** The repos-row id (write target). */
+  rowId: string;
+  workspaceId: string;
+  workspaceStatus: string;
+  isLeading: boolean;
+  path: string;
+  name: string | null;
+  branch: string | null;
+  /** Coalesced with the workspace/project fallbacks for leading rows (#226 precedence). */
+  baseBranch: string | null;
+  baseCommitSha: string | null;
+  mergedHeadSha: string | null;
+  worktreePath: string | null;
+  summaryAhead: number | null;
+  summaryHistoric: number | null;
+  summaryGitRefreshedAt: string | null;
+  summaryDirty: boolean;
+}
+
+/**
+ * #415 — the heal pass's bounded worklist over repos rows: workspace-scoped rows of
+ * non-closed workspaces whose per-repo projection is dirty or older than `staleBefore`,
+ * dirtiest first. Rows with a stamped mergedHeadSha are excluded — their merge-status
+ * entry short-circuits to `merged` without ever reading the projection.
+ */
+export async function selectRepoSummaryHealCandidates(
+  limit: number,
+  staleBefore: string,
+  database: Database = db,
+): Promise<RepoSummaryHealCandidate[]> {
+  return database
+    .select({
+      rowId: repos.id,
+      workspaceId: sql<string>`${workspaces.id}`,
+      workspaceStatus: workspaces.status,
+      isLeading: repos.isLeading,
+      path: repos.path,
+      name: repos.name,
+      branch: sql<string | null>`coalesce(${repos.branch}, ${workspaces.branch})`,
+      baseBranch: sql<string | null>`coalesce(${repos.baseBranch}, ${workspaces.baseBranch}, ${projects.defaultBranch})`,
+      baseCommitSha: sql<string | null>`coalesce(${repos.baseCommitSha}, ${workspaces.baseCommitSha})`,
+      mergedHeadSha: repos.mergedHeadSha,
+      worktreePath: repos.worktreePath,
+      summaryAhead: repos.summaryAhead,
+      summaryHistoric: repos.summaryHistoric,
+      summaryGitRefreshedAt: repos.summaryGitRefreshedAt,
+      summaryDirty: repos.summaryDirty,
+    })
+    .from(repos)
+    .innerJoin(workspaces, eq(workspaces.id, repos.workspaceId))
+    .innerJoin(issues, eq(issues.id, workspaces.issueId))
+    .innerJoin(projects, eq(projects.id, issues.projectId))
+    .where(and(
+      ne(workspaces.status, "closed"),
+      isNull(repos.mergedHeadSha),
+      or(
+        eq(repos.summaryDirty, true),
+        isNull(repos.summaryGitRefreshedAt),
+        lt(repos.summaryGitRefreshedAt, staleBefore),
+      ),
+    ))
+    .orderBy(desc(repos.summaryDirty), asc(repos.summaryGitRefreshedAt))
+    .limit(limit);
 }
 
 export interface SummaryHealCandidate {
