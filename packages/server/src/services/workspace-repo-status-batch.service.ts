@@ -175,6 +175,11 @@ export async function buildWorkspaceRepoStatusBatch(
       baseCommitSha: leadingRow?.baseCommitSha ?? ws.baseCommitSha ?? null,
       mergedHeadSha: leadingRow?.mergedHeadSha ?? ws.mergedHeadSha ?? null,
       defaultBranch: project.defaultBranch,
+      projectionRowId: leadingRow?.id ?? null,
+      summaryAhead: leadingRow?.summaryAhead ?? null,
+      summaryHistoric: leadingRow?.summaryHistoric ?? null,
+      summaryGitRefreshedAt: leadingRow?.summaryGitRefreshedAt ?? null,
+      summaryDirty: leadingRow?.summaryDirty ?? null,
     };
     const refs: WorkspaceRepoRef[] = [leadingRef, ...siblingRows.map(siblingRefFromRow)];
     const baseBranch = leadingRef.baseBranch ?? "";
@@ -194,7 +199,11 @@ export async function buildWorkspaceRepoStatusBatch(
     if (include.includes("merge")) {
       try {
         const repoEntries = [];
-        for (const ref of refs) repoEntries.push(await computeRepoMergeEntry(ref, gitService));
+        for (const ref of refs) {
+          // #415 sibling projection: a fresh row answers spawn-free; a live compute
+          // writes through so the NEXT burst is spawn-free.
+          repoEntries.push(await computeRepoMergeEntry(ref, gitService, { workspaceStatus: ws.status, database }));
+        }
         const mergeStatus: RepoMergeStatus = {
           branch: ws.branch,
           baseBranch,

@@ -193,6 +193,9 @@ export async function mirrorWorkspaceColumnsToLeadingRepo(
   if (patch.baseCommitSha !== undefined) set.baseCommitSha = patch.baseCommitSha;
   if (patch.mergedHeadSha !== undefined) set.mergedHeadSha = patch.mergedHeadSha;
   if (Object.keys(set).length === 0) return;
+  // #415 — any mirrored git-state change can move the row's projected merge-status
+  // facts (ahead/historic), so the projection is dirtied atomically with the mirror.
+  set.summaryDirty = true;
   await database
     .update(repos)
     .set(set)
@@ -204,7 +207,9 @@ export async function setWorkspaceRepoMergedSha(
   mergedHeadSha: string,
   database: RepoDb = db,
 ): Promise<void> {
-  await database.update(repos).set({ mergedHeadSha }).where(eq(repos.id, repoId));
+  // #415 — the merge stamp changes the row's merge-status verdict; dirty the projection
+  // atomically (the stamped sha itself short-circuits reads, but ahead/historic move too).
+  await database.update(repos).set({ mergedHeadSha, summaryDirty: true }).where(eq(repos.id, repoId));
 }
 
 export async function deleteProjectRepo(repoId: string, projectId: string, database: RepoDb = db): Promise<boolean> {

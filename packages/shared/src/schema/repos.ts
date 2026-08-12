@@ -39,6 +39,20 @@ export const repos = sqliteTable("repos", {
    * Every query that means "the SIBLING repos of a workspace" MUST filter this out.
    */
   isLeading: integer("is_leading", { mode: "boolean" }).notNull().default(false),
+  /**
+   * #415 — the per-repo merge-status projection (extends #399 / decision 014 to repos
+   * rows, migration 0118). `summaryAhead` = commits on `branch` not on `baseBranch`;
+   * `summaryHistoric` = commits between `baseCommitSha` and the branch tip when ahead
+   * is 0. Together they derive hasWork/merged/stranded with zero git spawns while
+   * fresh. `summaryDirty` is set by the same board events that dirty the workspace
+   * projection (status transitions, merge stamps, rebase) and cleared by the refresh
+   * write-through; the bounded 5-minute heal pass also refreshes stale rows. Default
+   * dirty=1 so every pre-0118 row heals on first sight.
+   */
+  summaryAhead: integer("summary_ahead"),
+  summaryHistoric: integer("summary_historic"),
+  summaryGitRefreshedAt: text("summary_git_refreshed_at"),
+  summaryDirty: integer("summary_dirty", { mode: "boolean" }).notNull().default(true),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 }, (table) => [
   index("repos_project_id_idx").on(table.projectId),

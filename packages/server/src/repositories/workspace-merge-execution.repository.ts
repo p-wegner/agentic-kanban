@@ -3,6 +3,7 @@ import { workspaces } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { mirrorWorkspaceColumnsToLeadingRepo } from "./repo.repository.js";
+import { markWorkspaceRepoSummariesDirty } from "./workspace-summary-projection.repository.js";
 
 /**
  * Stamp mergedAt/mergedHeadSha/updatedAt on a workspace row.
@@ -17,6 +18,8 @@ export async function stampWorkspaceMergedAt(
 ): Promise<void> {
   await database.update(workspaces).set({ mergedAt: now, mergedHeadSha, updatedAt: now, summaryDirty: true }).where(eq(workspaces.id, id));
   await mirrorWorkspaceColumnsToLeadingRepo(id, { mergedHeadSha }, database);
+  // #415 — a landed merge moves every repo's ahead/merged facts, not just the leading's.
+  await markWorkspaceRepoSummariesDirty(id, database);
 }
 
 /**

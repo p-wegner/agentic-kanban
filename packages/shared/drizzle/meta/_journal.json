@@ -827,6 +827,13 @@
       "when": 1787126400000,
       "tag": "0117_merge_backoff",
       "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "6",
+      "when": 1787212800000,
+      "tag": "0118_repo_summary_projection",
+      "breakpoints": true
     }
   ]
 }

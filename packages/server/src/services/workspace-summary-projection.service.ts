@@ -1,8 +1,11 @@
 import { existsSync } from "node:fs";
 import { ACTIVE_WORKSPACE_STATUSES } from "@agentic-kanban/shared";
+import * as realGitService from "./git.service.js";
 import { getCommitCountAhead, getDiffShortstat, getLatestCommit } from "./git.service.js";
 import {
+  selectRepoSummaryHealCandidates,
   selectSummaryHealCandidates,
+  updateRepoSummaryProjection,
   updateWorkspaceSummaryGitProjection,
 } from "../repositories/workspace-summary-projection.repository.js";
 import { updateWorkspaceDiffStatCache } from "../repositories/workspace-summary.repository.js";
@@ -134,6 +137,88 @@ export async function refreshWorkspaceGitProjection(
   }
 }
 
+// ─── #415: the per-repo merge-status projection (repos.summary_*, migration 0118) ───
+
+/** Minimal git surface the per-repo projection needs — satisfied by the full GitService. */
+export interface RepoProjectionGit {
+  revParse(repoPath: string, ref: string): Promise<string>;
+  countUniqueCommits(repoPath: string, baseSha: string, branchSha: string): Promise<number>;
+}
+
+/** The repo fields the per-repo projection reads/writes (a subset of WorkspaceRepoRef
+ * and of the heal candidates — both satisfy it structurally). */
+export interface RepoProjectionRef {
+  path: string;
+  branch: string | null;
+  baseBranch: string | null;
+  baseCommitSha: string | null;
+  mergedHeadSha: string | null;
+  projectionRowId: string | null;
+  summaryDirty: boolean | null;
+  summaryGitRefreshedAt: string | null;
+}
+
+/**
+ * #415 — whether a repos row's persisted `summary_ahead`/`summary_historic` can answer
+ * its merge-status entry without any git spawn. Mirrors the decision-014 freshness rule:
+ * never fresh when dirty (or rowless / never-refreshed), status-dependent TTL — an
+ * ACTIVE workspace commits at any time; an idle one's git state only moves through
+ * board services, which mark dirty.
+ */
+export function isRepoProjectionFresh(
+  ref: Pick<RepoProjectionRef, "summaryDirty" | "summaryGitRefreshedAt">,
+  workspaceStatus: string | undefined,
+  nowMs: number,
+): boolean {
+  if (ref.summaryDirty !== false || !ref.summaryGitRefreshedAt) return false;
+  const ttl = workspaceStatus && ACTIVE_WORKSPACE_STATUSES.has(workspaceStatus)
+    ? ACTIVE_GIT_PROJECTION_TTL_MS
+    : IDLE_GIT_PROJECTION_TTL_MS;
+  return nowMs - new Date(ref.summaryGitRefreshedAt).getTime() < ttl;
+}
+
+/**
+ * #415 — the LIVE per-repo computation (the projection's single recompute path, shared
+ * by the read fallback in repo-merge-status and the heal pass below):
+ *   ahead    = commits on `branch` not on `baseBranch` (guarded revParse; gone refs → 0)
+ *   historic = when 0-ahead, commits between the original cut point and the live tip
+ *              (else the stamped tip) — the "had work, now landed" signal.
+ * When `database` is passed and the ref has a backing row, the result is written
+ * through (freshness stamped, dirty cleared) so the next read within TTL is spawn-free.
+ */
+export async function computeRepoAheadHistoric(
+  ref: RepoProjectionRef,
+  gitService: RepoProjectionGit,
+  database?: Database,
+): Promise<{ ahead: number; historic: number }> {
+  let ahead = 0;
+  if (ref.branch && ref.baseBranch) {
+    try {
+      await gitService.revParse(ref.path, ref.baseBranch);
+      await gitService.revParse(ref.path, ref.branch);
+      ahead = await gitService.countUniqueCommits(ref.path, ref.baseBranch, ref.branch).catch(() => 0);
+    } catch { /* branch/base ref gone (e.g. cleaned up) → no countable work */ }
+  }
+  let historic = 0;
+  if (ahead === 0 && ref.baseCommitSha) {
+    let tip: string | null = null;
+    if (ref.branch && (await gitService.revParse(ref.path, ref.branch).then(() => true).catch(() => false))) {
+      tip = ref.branch;
+    } else if (ref.mergedHeadSha) {
+      tip = ref.mergedHeadSha;
+    }
+    if (tip) historic = await gitService.countUniqueCommits(ref.path, ref.baseCommitSha, tip).catch(() => 0);
+  }
+  if (database && ref.projectionRowId) {
+    await updateRepoSummaryProjection(ref.projectionRowId, {
+      summaryAhead: ahead,
+      summaryHistoric: historic,
+      summaryGitRefreshedAt: new Date().toISOString(),
+    }, database).catch(() => {});
+  }
+  return { ahead, historic };
+}
+
 /**
  * Reconcile pass (decision 014): refresh a bounded batch of the dirtiest projections —
  * dirty-flagged rows first, then the oldest stamps. Piggybacks the existing 5-minute
@@ -153,7 +238,27 @@ export async function healWorkspaceSummaryProjection(
     for (const c of candidates) {
       await refreshWorkspaceGitProjection(c, c.defaultBranch, database);
     }
-    return candidates.length;
+    // #415 — the same tick also heals a bounded batch of PER-REPO projections
+    // (repos.summary_*), so sibling merge-status facts recover from external git
+    // mutations even when nobody is reading the cross-repo panels. Rows whose repo
+    // root vanished are stamped as no-work (fresh) so they stop being re-picked.
+    const repoCandidates = await selectRepoSummaryHealCandidates(limit, staleBefore, database);
+    for (const c of repoCandidates) {
+      if (!existsSync(c.path)) {
+        await updateRepoSummaryProjection(c.rowId, {
+          summaryAhead: 0,
+          summaryHistoric: 0,
+          summaryGitRefreshedAt: new Date().toISOString(),
+        }, database).catch(() => {});
+        continue;
+      }
+      await computeRepoAheadHistoric(
+        { ...c, projectionRowId: c.rowId },
+        realGitService,
+        database,
+      );
+    }
+    return candidates.length + repoCandidates.length;
   } catch (err) {
     console.warn("[summary-projection] heal pass failed:", err instanceof Error ? err.message : String(err));
     return 0;

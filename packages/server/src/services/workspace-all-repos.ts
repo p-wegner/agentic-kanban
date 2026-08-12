@@ -57,6 +57,19 @@ export interface WorkspaceRepoRef {
   baseCommitSha: string | null;
   mergedHeadSha: string | null;
   defaultBranch: string | null;
+  /**
+   * #415 — the physical repos-row id backing this ref, the write target for the per-repo
+   * merge-status projection (`summary_*` columns, migration 0118). Null only for a
+   * leading ref whose row has not been backfilled yet (pre-0110) — such a ref is never
+   * projection-fresh and never written through.
+   */
+  projectionRowId: string | null;
+  /** #415 projection facts (see schema/repos.ts). Null = never projected. */
+  summaryAhead: number | null;
+  summaryHistoric: number | null;
+  summaryGitRefreshedAt: string | null;
+  /** Null when no backing row exists (never fresh). */
+  summaryDirty: boolean | null;
 }
 
 /**
@@ -120,6 +133,11 @@ async function leadingRef(workspaceId: string, database: Database): Promise<Work
     baseCommitSha: row?.baseCommitSha ?? workspace.baseCommitSha ?? null,
     mergedHeadSha: row?.mergedHeadSha ?? workspace.mergedHeadSha ?? null,
     defaultBranch,
+    projectionRowId: row?.id ?? null,
+    summaryAhead: row?.summaryAhead ?? null,
+    summaryHistoric: row?.summaryHistoric ?? null,
+    summaryGitRefreshedAt: row?.summaryGitRefreshedAt ?? null,
+    summaryDirty: row?.summaryDirty ?? null,
   };
 }
 
@@ -190,6 +208,11 @@ export function siblingRefFromRow(row: RepoRow): WorkspaceRepoRef {
     baseCommitSha: row.baseCommitSha,
     mergedHeadSha: row.mergedHeadSha,
     defaultBranch: row.defaultBranch,
+    projectionRowId: row.id,
+    summaryAhead: row.summaryAhead,
+    summaryHistoric: row.summaryHistoric,
+    summaryGitRefreshedAt: row.summaryGitRefreshedAt,
+    summaryDirty: row.summaryDirty,
   };
 }
 
