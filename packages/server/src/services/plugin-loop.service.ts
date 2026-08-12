@@ -185,6 +185,8 @@ export interface LoopStatus {
   skill: string;
   /** Open (non-terminal) tickets this loop has created. */
   openTickets: number;
+  /** The open tickets themselves (#429) — same rows the count is derived from. */
+  openTicketRefs: Array<{ issueId: string; issueNumber: number | null; statusName: string }>;
   /** Terminal (Done/Cancelled) tickets this loop has created. */
   closedTickets: number;
   /** True when a human has paused this loop's monitor-driven auto-advance. */
@@ -378,6 +380,12 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
         description: loop.description ?? null,
         skill: loop.skill,
         openTickets: rows.filter((r) => !isTerminalStatusName(r.statusName)).length,
+        // The open tickets THEMSELVES, not just their count (#429). The pane said "1 ticket(s)
+        // still open" and offered no way to reach the work — the reader had to go to the board
+        // and find it. Costs nothing: these rows are already loaded for the counts above.
+        openTicketRefs: rows
+          .filter((r) => !isTerminalStatusName(r.statusName))
+          .map((r) => ({ issueId: r.id, issueNumber: r.issueNumber, statusName: r.statusName })),
         closedTickets: rows.filter((r) => isTerminalStatusName(r.statusName)).length,
         paused: pausedValue === "true",
         converged: convergedValue === "true",
