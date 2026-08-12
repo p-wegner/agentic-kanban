@@ -484,7 +484,13 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
         />
       )}
 
-      <LoopTimeline pluginId={loop.pluginId} loopName={loop.name} projectId={projectId} refreshKey={timelineKey} />
+      <LoopTimeline
+        pluginId={loop.pluginId}
+        loopName={loop.name}
+        projectId={projectId}
+        refreshKey={timelineKey}
+        hasGate={!!loop.gate}
+      />
     </div>
   );
 }

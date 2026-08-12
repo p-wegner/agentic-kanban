@@ -1036,19 +1036,39 @@ const EVENT_MARK: Record<string, string> = {
   "converged": "★",
 };
 
-export function LoopTimeline({ pluginId, loopName, projectId, refreshKey }: {
+/**
+ * #412 — the loop's audit timeline was nearly undiscoverable: a COLLAPSED toggle at the
+ * very bottom of the pane, labelled neither "timeline" nor "events" (a DOM text search for
+ * `timeline|events` across the whole Plugins view returned zero hits), showing nothing at
+ * all until clicked. Diagnosing "why is nothing happening" therefore sent operators to curl
+ * the events API. Three changes, all cheap: name it, let the collapsed toggle advertise its
+ * most recent event, and open it by default while a gate is waiting — the moment a human is
+ * deciding is exactly when the recent history matters.
+ */
+export function LoopTimeline({ pluginId, loopName, projectId, refreshKey, hasGate = false }: {
   pluginId: string;
   loopName: string;
   projectId: string;
   /** Bump to refetch (e.g. after an advance or gate decision). */
   refreshKey: number;
+  /** This loop is blocked on a human right now — open the history unasked. */
+  hasGate?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(hasGate);
   const [data, setData] = useState<LoopEventsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Auto-open when a gate APPEARS (the surface usually loads after this mounts). Only on the
+  // transition, so a human who deliberately collapsed it is not fought on the next poll.
+  const sawGateRef = useRef(hasGate);
   useEffect(() => {
-    if (!open) return;
+    if (hasGate && !sawGateRef.current) setOpen(true);
+    sawGateRef.current = hasGate;
+  }, [hasGate]);
+
+  // Fetched whether or not it is open: the collapsed label shows the latest event, which is
+  // the whole point of the change — and it makes expanding instant instead of a loading flash.
+  useEffect(() => {
     let cancelled = false;
     apiFetch<LoopEventsResponse>(
       `/api/plugins/${pluginId}/loops/${encodeURIComponent(loopName)}/events?projectId=${projectId}&limit=50`,
@@ -1056,15 +1076,24 @@ export function LoopTimeline({ pluginId, loopName, projectId, refreshKey }: {
       .then((res) => { if (!cancelled) { setData(res); setError(null); } })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); });
     return () => { cancelled = true; };
-  }, [open, pluginId, loopName, projectId, refreshKey]);
+  }, [pluginId, loopName, projectId, refreshKey]);
 
+  const latest = data?.events[0];
   return (
     <div className="border-t border-gray-100 dark:border-gray-800 pt-3" data-testid="plugin-loop-timeline">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+        className="flex max-w-full items-baseline gap-1.5 text-left text-xs text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
       >
-        {open ? "▾" : "▸"} History & cost
+        <span className="shrink-0">{open ? "▾" : "▸"} Timeline &amp; cost</span>
+        {/* Collapsed, this used to show NOTHING — so the toggle advertised neither what it
+            held nor that anything had happened. The newest event is the one line that makes
+            "is this loop doing something?" answerable without a click. */}
+        {!open && latest && (
+          <span className="truncate text-gray-400 dark:text-gray-500" data-testid="plugin-loop-timeline-latest">
+            · {EVENT_MARK[latest.type] ?? "·"} {eventSummary(latest)} — {formatRelativeTime(latest.createdAt)}
+          </span>
+        )}
       </button>
       {open && (
         <div className="mt-2 space-y-2">
