@@ -219,8 +219,8 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
 
   const roundRunning = loop.openTickets > 0;
   return (
-    <div className="p-6 space-y-4 overflow-y-auto" data-testid="plugin-loop-pane">
-      <div className="flex items-start justify-between gap-3">
+    <div className="p-3 sm:p-6 space-y-4 overflow-y-auto" data-testid="plugin-loop-pane">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-3">
         <PaneHeading title={loop.label} subtitle={loop.description} />
         <LoopStateChips
           loop={loop}
@@ -307,7 +307,8 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
         </p>
       )}
 
-      <div className="flex items-center gap-4 text-sm">
+      {/* wraps below sm: three stat boxes + Advance + Pause cannot share a phone line (#433) */}
+      <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-sm">
         <div className="px-3 py-2 rounded border border-gray-200 dark:border-gray-700">
           <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">{loop.openTickets}</div>
           <div className="text-[11px] text-gray-500 dark:text-gray-400">open tickets</div>

@@ -472,15 +472,6 @@ export function Layout({
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </button>
-            <NotificationBell
-              events={notificationEvents}
-              unreadCount={notificationUnreadCount}
-              isOpen={notificationOpen}
-              onOpen={onNotificationOpen ?? (() => {})}
-              onClose={onNotificationClose ?? (() => {})}
-              onMarkRead={onNotificationMarkRead ?? (() => {})}
-              onEventClick={onNotificationEventClick ?? (() => {})}
-            />
             <button
               onClick={onThemeToggle}
               className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
@@ -508,6 +499,21 @@ export function Layout({
               </svg>
             </button>
             </div>
+            {/* The bell is the ONLY cross-project list of gates waiting on a human
+                (GET /api/inbox), and it used to live inside the `hidden sm:flex` cluster
+                above — so on a phone it was display:none and the ⋯ menu's "Notifications"
+                row toggled a dropdown inside that hidden subtree, i.e. tapping it did
+                nothing visible (#433). It renders at ALL widths now; only the other
+                utility icons fold. */}
+            <NotificationBell
+              events={notificationEvents}
+              unreadCount={notificationUnreadCount}
+              isOpen={notificationOpen}
+              onOpen={onNotificationOpen ?? (() => {})}
+              onClose={onNotificationClose ?? (() => {})}
+              onMarkRead={onNotificationMarkRead ?? (() => {})}
+              onEventClick={onNotificationEventClick ?? (() => {})}
+            />
             {/* < sm : all utility actions fold into one ⋯ menu */}
             <div className="relative sm:hidden" ref={utilMenuRef}>
               <button
@@ -528,7 +534,6 @@ export function Layout({
                     { label: "Launch Failures", onClick: onLaunchFailuresClick },
                     { label: "Worktrees", onClick: onWorktreeOverviewClick },
                     { label: "Project Health", onClick: onProjectHealthClick },
-                    { label: `Notifications${notificationUnreadCount > 0 ? ` (${notificationUnreadCount})` : ""}`, onClick: onNotificationOpen },
                     { label: isDark ? "Light mode" : "Dark mode", onClick: onThemeToggle },
                     { label: "Settings", onClick: onSettingsClick },
                   ].map((item) => (

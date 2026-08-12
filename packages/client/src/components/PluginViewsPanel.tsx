@@ -48,6 +48,9 @@ type Selection =
 
 const ownerKey = (o: PluginOwner, id: string) => `${o.pluginId}:${id}`;
 
+/** Remembered rail visibility (#432) — an explicit choice outranks the width default. */
+const RAIL_OPEN_STORAGE_KEY = "kanban.pluginRail.open";
+
 /**
  * Last-request-wins latch for view starts (#251).
  *
@@ -105,6 +108,46 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
   const loopFocus = usePluginViewStore((s) => s.loopFocus);
   const clearLoopFocus = usePluginViewStore((s) => s.clearLoopFocus);
   const startLatch = useRef(createStartLatch());
+
+  /**
+   * Capability-rail visibility (#432). The rail was a hard `w-56` column with no way to
+   * dismiss it: on a 390px phone it took 238px — 61% of the screen — leaving the detail
+   * pane wrapping at 2-4 words per line, which makes answering a human gate on a phone
+   * impractical. It is now collapsible on every size, and on mobile it is an OVERLAY
+   * rather than a column, so opening it never costs the content any width.
+   *
+   * Initial state is width-derived (open on >=md, closed below) and an explicit user
+   * choice is remembered. `matchMedia` is read lazily inside the initializer so this
+   * still renders under SSR/jsdom where `window` may be absent.
+   */
+  const [railOpen, setRailOpen] = useState(() => {
+    try {
+      const stored = localStorage.getItem(RAIL_OPEN_STORAGE_KEY);
+      if (stored === "true") return true;
+      if (stored === "false") return false;
+    } catch { /* private mode / storage disabled — fall through to the width default */ }
+    try {
+      return window.matchMedia("(min-width: 768px)").matches;
+    } catch {
+      return true;
+    }
+  });
+
+  const toggleRail = useCallback((next: boolean) => {
+    setRailOpen(next);
+    try { localStorage.setItem(RAIL_OPEN_STORAGE_KEY, String(next)); } catch { /* non-fatal */ }
+  }, []);
+
+  /**
+   * Picking something on a phone should reveal it, not leave the drawer covering it.
+   * Desktop keeps the rail pinned — there the rail costs nothing, and closing it on
+   * every click would be hostile.
+   */
+  const closeRailOnMobile = useCallback(() => {
+    try {
+      if (!window.matchMedia("(min-width: 768px)").matches) toggleRail(false);
+    } catch { /* no matchMedia — leave it open */ }
+  }, [toggleRail]);
 
   const refetch = useCallback(async () => {
     try {
@@ -386,8 +429,14 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
     return (
       <button
         key={key}
-        onClick={onClick}
-        className={`w-full text-left text-xs px-2 py-1.5 rounded flex items-center gap-1.5 ${
+        // Every rail entry dismisses the drawer on mobile (no-op on desktop): picking
+        // something must REVEAL it, not leave the overlay sitting on top of it (#432).
+        onClick={() => { onClick(); closeRailOnMobile(); }}
+        // py-2 (not py-1.5) puts the row at ~34px; still under the 44px iOS guideline but
+        // the rail is a dense list where full-size rows would push Skills off-screen. The
+        // gate's own action buttons — the thing you actually tap on a phone — are sized
+        // properly in GateCard.
+        className={`w-full text-left text-xs px-2 py-2 md:py-1.5 rounded flex items-center gap-1.5 ${
           active
             ? "bg-brand-600 text-white"
             : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
@@ -405,15 +454,45 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
   }
 
   return (
-    <div className="flex-1 min-h-0 flex" data-testid="plugin-views-panel">
-      {/* Capability rail (scoped to the selected plugin) */}
-      <div className="w-56 shrink-0 border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 overflow-y-auto px-1.5 pb-3">
-        <div
-          className="px-2 pt-3 text-xs font-semibold text-gray-700 dark:text-gray-200 truncate"
-          title={pluginName}
-          data-testid="plugin-panel-title"
-        >
-          🧩 {pluginName}
+    <div className="flex-1 min-h-0 flex relative" data-testid="plugin-views-panel">
+      {/* Mobile scrim (#432): tapping outside the drawer dismisses it. `md:hidden` because on
+          desktop the rail is a real column and must not be dimmable/dismissable-by-backdrop. */}
+      {railOpen && (
+        <button
+          type="button"
+          className="md:hidden absolute inset-0 z-20 bg-black/40"
+          onClick={() => toggleRail(false)}
+          aria-label="Close plugin menu"
+          data-testid="plugin-rail-scrim"
+        />
+      )}
+      {/* Capability rail (scoped to the selected plugin).
+          Mobile: an absolutely-positioned OVERLAY, so showing it costs the content no width.
+          Desktop (md+): a static column, exactly as before. */}
+      <div
+        className={`${railOpen ? "flex flex-col" : "hidden"} absolute inset-y-0 left-0 z-30 w-64 shadow-xl md:static md:z-auto md:w-56 md:shadow-none shrink-0 border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 overflow-y-auto px-1.5 pb-3`}
+        data-testid="plugin-rail"
+      >
+        <div className="flex items-center gap-1 px-2 pt-3">
+          <div
+            className="text-xs font-semibold text-gray-700 dark:text-gray-200 truncate flex-1"
+            title={pluginName}
+            data-testid="plugin-panel-title"
+          >
+            🧩 {pluginName}
+          </div>
+          <button
+            type="button"
+            onClick={() => toggleRail(false)}
+            className="shrink-0 p-1 -mr-1 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-200 dark:hover:text-gray-100 dark:hover:bg-gray-800"
+            title="Hide plugin menu"
+            aria-label="Hide plugin menu"
+            data-testid="plugin-rail-close"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
+          </button>
         </div>
         {shownPlugin && scaffold?.exists && (
           <div className="space-y-0.5">
@@ -465,6 +544,26 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
 
       {/* Detail pane */}
       <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+        {/* The only way back to the rail once it is hidden, so it is rendered whenever the
+            rail is closed at ANY size — not `md:hidden`, or collapsing on desktop would be
+            a one-way door. */}
+        {!railOpen && (
+          <div className="flex items-center gap-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-2 py-1.5">
+            <button
+              type="button"
+              onClick={() => toggleRail(true)}
+              className="flex items-center gap-1.5 text-xs px-2 py-1 rounded text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+              title="Show plugin menu"
+              aria-label="Show plugin menu"
+              data-testid="plugin-rail-open"
+            >
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                <path d="M3 6h18M3 12h18M3 18h18" />
+              </svg>
+              <span className="truncate">🧩 {pluginName}</span>
+            </button>
+          </div>
+        )}
         {activeView && (
           <>
             <div className="flex items-center justify-between gap-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-3 py-1.5">
