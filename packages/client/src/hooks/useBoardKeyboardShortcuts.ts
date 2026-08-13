@@ -13,6 +13,7 @@ import {
   RUNTIME_VIEW_ID,
 } from "../lib/viewTabs.js";
 import { viewTabActions } from "../stores/viewTabStore.js";
+import { markProgrammaticNavigation } from "../routes/boardRouteSync.js";
 import { computeNavTarget, type NavKey } from "../lib/boardKeyboardNav.js";
 import { showToast } from "../lib/toast.js";
 import type { BoardPanelState } from "./useBoardPanels.js";
@@ -358,6 +359,8 @@ export function useBoardKeyboardShortcuts(
           icon: tab.paletteIcon,
           category: "navigation",
           handler: () => {
+            // View + tab are two URL writes for one palette hit (#446).
+            markProgrammaticNavigation();
             viewTabActions.request(viewId, tab.id);
             actions.handleViewModeChange(view);
           },

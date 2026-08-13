@@ -1,4 +1,5 @@
 import { VIEW_IDS, type ViewMode } from "./viewRegistry.js";
+import { resolveViewTab, viewHasTabs } from "./viewTabs.js";
 
 const VIEW_ROUTE_PATHS: Record<ViewMode, string> = {
   kanban: "/board",
@@ -105,8 +106,10 @@ function normalizePath(pathname: string): string {
  *
  *   /p/<slugOrId>                        -> project, default view (kanban)
  *   /p/<slugOrId>/<viewPath>             -> that view
- *   /p/<slugOrId>/<viewPath>/issue/<n>   -> that view + issue #n's DETAIL panel
- *   /p/<slugOrId>/<viewPath>/issue/<n>/workspace
+ *   /p/<slugOrId>/<viewPath>/<tab>       -> tabbed container view at that tab
+ *   /p/<slugOrId>/<viewPath>[/<tab>]/issue/<n>
+ *                                        -> that view + issue #n's DETAIL panel
+ *   /p/<slugOrId>/<viewPath>[/<tab>]/issue/<n>/workspace
  *                                        -> that view + issue #n's WORKSPACE panel
  *   /p/<slugOrId>/issues/<n>             -> short alias: kanban + issue #n
  *
@@ -142,7 +145,11 @@ export interface ParsedAppRoute {
   projectSlug: string | null;
   /** Resolved view, or null when the path is not an app route at all. */
   view: ViewMode | null;
-  /** Tab to preselect for a legacy absorbed-view route, else null. */
+  /**
+   * Tab to select inside a tabbed container view (#446). Resolved, not raw:
+   * a container view always reports a tab (its default when the path names
+   * none, or names one that does not exist), and a plain view always null.
+   */
   tab: string | null;
   /** Issue number whose panel should open, else null. */
   issueNumber: number | null;
@@ -186,8 +193,39 @@ function resolveViewSegment(segment: string): { view: ViewMode; tab: string | nu
 }
 
 /**
- * Parse any in-app path into its project scope, view, legacy tab and issue
- * deep link. Never throws — malformed input yields null fields.
+ * The part of a path AFTER the view segment: an optional tab segment followed
+ * by an optional issue deep link. Shared by the scoped and flat grammars so the
+ * two cannot drift.
+ *
+ * Returns null when the tail is malformed — a tab segment on a view that has no
+ * tabs, a junk segment where `issue` was expected, a bad issue number, or an
+ * unknown panel segment. `legacyTab` is the tab implied by an absorbed view's
+ * old path (`/burndown`); an explicit tab segment wins over it.
+ */
+function parseViewTail(
+  view: ViewMode,
+  legacyTab: string | null,
+  tail: string[],
+): { view: ViewMode; tab: string | null; issueNumber: number | null; panel: IssuePanel | null } | null {
+  const hasTabSegment = tail.length > 0 && tail[0] !== ISSUE_SEGMENT;
+  // A plain view has no tab dimension, so an extra segment is not a tab — it is
+  // junk, and the path is not a route (same as before #446).
+  if (hasTabSegment && !viewHasTabs(view)) return null;
+  const tab = resolveViewTab(view, hasTabSegment ? tail[0] : legacyTab);
+  const issueTail = hasTabSegment ? tail.slice(1) : tail;
+
+  if (issueTail.length === 0) return { view, tab, issueNumber: null, panel: null };
+  if (issueTail[0] !== ISSUE_SEGMENT || issueTail.length > 3) return null;
+  const issueNumber = parseIssueNumber(issueTail[1]);
+  if (issueNumber === null) return null;
+  const panel = parsePanelSegment(issueTail[2]);
+  if (panel === null) return null;
+  return { view, tab, issueNumber, panel };
+}
+
+/**
+ * Parse any in-app path into its project scope, view, tab and issue deep link.
+ * Never throws — malformed input yields null fields.
  */
 export function parseAppPath(pathname: string): ParsedAppRoute {
   const normalized = normalizePath(pathname ?? "");
@@ -218,34 +256,27 @@ export function parseAppPath(pathname: string): ParsedAppRoute {
   const resolved = resolveViewSegment(rest[0]);
   if (!resolved) return base;
 
-  // /p/<slug>/<viewPath>
-  if (rest.length === 1) {
-    return { ...base, view: resolved.view, tab: resolved.tab };
-  }
-
-  // /p/<slug>/<viewPath>/issue/<n>[/workspace]
-  if (rest[1] !== ISSUE_SEGMENT || rest.length > 4) return base;
-  const issueNumber = parseIssueNumber(rest[2]);
-  if (issueNumber === null) return base;
-  const panel = parsePanelSegment(rest[3]);
-  if (panel === null) return base;
-  return { ...base, view: resolved.view, tab: resolved.tab, issueNumber, panel };
+  // /p/<slug>/<viewPath>[/<tab>][/issue/<n>[/workspace]]
+  const tail = parseViewTail(resolved.view, resolved.tab, rest.slice(1));
+  if (!tail) return base;
+  return { ...base, ...tail };
 }
 
-/** Legacy flat paths: no project scope, but issue deep links still parse. */
+/** Legacy flat paths: no project scope, but tab and issue deep links still parse. */
 function parseFlatPath(normalized: string): ParsedAppRoute {
-  const view = ROUTE_TO_VIEW[normalized];
-  if (view) {
+  const segments = normalized.split("/").filter((s) => s.length > 0);
+
+  // Whole-path aliases ("/", "/merge-queue", …) and the plain view paths.
+  const whole = ROUTE_TO_VIEW[normalized];
+  if (whole && segments.length <= 1) {
     return {
       projectSlug: null,
-      view,
-      tab: LEGACY_TAB_ROUTES[normalized]?.tab ?? null,
+      view: whole,
+      tab: resolveViewTab(whole, LEGACY_TAB_ROUTES[normalized]?.tab ?? null),
       issueNumber: null,
       panel: null,
     };
   }
-
-  const segments = normalized.split("/").filter((s) => s.length > 0);
 
   // /issues/<n>
   if (segments[0] === ISSUE_ALIAS_SEGMENT && segments.length === 2) {
@@ -254,22 +285,12 @@ function parseFlatPath(normalized: string): ParsedAppRoute {
     return { projectSlug: null, view: DEFAULT_VIEW, tab: null, issueNumber, panel: "issue" };
   }
 
-  // /<viewPath>/issue/<n>[/workspace]
-  if ((segments.length === 3 || segments.length === 4) && segments[1] === ISSUE_SEGMENT) {
-    const resolved = resolveViewSegment(segments[0]);
-    const issueNumber = parseIssueNumber(segments[2]);
-    const panel = parsePanelSegment(segments[3]);
-    if (!resolved || issueNumber === null || panel === null) return NO_ROUTE;
-    return {
-      projectSlug: null,
-      view: resolved.view,
-      tab: resolved.tab,
-      issueNumber,
-      panel,
-    };
-  }
-
-  return NO_ROUTE;
+  // /<viewPath>[/<tab>][/issue/<n>[/workspace]]
+  const resolved = segments[0] ? resolveViewSegment(segments[0]) : null;
+  if (!resolved) return NO_ROUTE;
+  const tail = parseViewTail(resolved.view, resolved.tab, segments.slice(1));
+  if (!tail) return NO_ROUTE;
+  return { projectSlug: null, ...tail };
 }
 
 function decodeSegment(segment: string): string {
@@ -287,16 +308,23 @@ function decodeSegment(segment: string): string {
  * Only ever emits the canonical `/issue/<n>` form — `/issues/<n>` is an
  * inbound alias. `panel: "workspace"` adds the trailing `/workspace` segment so
  * the workspace drawer reloads as the workspace drawer.
+ *
+ * `tab` is emitted only when it is given AND the view actually has tabs, so a
+ * plain view never grows a phantom segment; an unknown tab downgrades to the
+ * view's default rather than putting junk in the address bar.
  */
 export function buildAppPath(opts: {
   projectSlug?: string | null;
   view: ViewMode;
+  tab?: string | null;
   issueNumber?: number | null;
   panel?: IssuePanel | null;
 }): string {
   const viewPath = VIEW_ROUTE_PATHS[opts.view] ?? VIEW_ROUTE_PATHS[DEFAULT_VIEW];
+  const tab = opts.tab ? resolveViewTab(opts.view, opts.tab) : null;
+  const tabPath = tab ? `/${tab}` : "";
   const slug = opts.projectSlug ? encodeURIComponent(opts.projectSlug) : null;
-  const base = slug ? `/${PROJECT_ROUTE_PREFIX}/${slug}${viewPath}` : viewPath;
+  const base = slug ? `/${PROJECT_ROUTE_PREFIX}/${slug}${viewPath}${tabPath}` : `${viewPath}${tabPath}`;
   const issueNumber =
     typeof opts.issueNumber === "number" && Number.isSafeInteger(opts.issueNumber) && opts.issueNumber > 0
       ? opts.issueNumber

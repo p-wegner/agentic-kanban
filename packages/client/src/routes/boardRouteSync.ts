@@ -29,6 +29,7 @@
 import { buildAppPath, parseAppPath, type IssuePanel } from "../lib/appRoutes.js";
 import { buildProjectSlugMap, resolveProjectIdFromSlug, type SlugProject } from "../lib/projectSlug.js";
 import type { ViewMode } from "../lib/viewRegistry.js";
+import { getDefaultViewTab, isRoutableViewTab, viewHasTabs } from "../lib/viewTabs.js";
 
 /* ------------------------------------------------------------------ *
  * Inbound: a deep link held until the data it names has loaded
@@ -135,6 +136,12 @@ export interface UrlSyncInput {
   projects: SlugProject[];
   activeProjectId: string | null;
   view: ViewMode;
+  /**
+   * The active tab of a tabbed container view (#446), or null when it is not
+   * known yet — the container owns that state and mounts after the route does.
+   * Ignored for a view that has no tabs.
+   */
+  tab?: string | null;
   issueNumber: number | null;
   /**
    * Which issue-bearing panel is open. Two panels can hold an issue — the
@@ -163,9 +170,30 @@ function normalizePathname(pathname: string): string {
  * loading). Rewriting before then would flatten a scoped inbound URL back to
  * `/board` and lose the link.
  */
+/**
+ * Which tab the URL should name for the current view.
+ *
+ * The container view mounts AFTER the route hook, so `active` is null on the
+ * first pass — falling back to the tab already in the URL is what stops that
+ * first pass from flattening an inbound `/analytics/burndown` to the default.
+ * Only once nothing names a tab does the default apply.
+ */
+export function resolveSyncTab(
+  view: ViewMode,
+  active: string | null | undefined,
+  currentTab: string | null,
+): string | null {
+  if (!viewHasTabs(view)) return null;
+  if (isRoutableViewTab(view, active)) return active as string;
+  if (isRoutableViewTab(view, currentTab)) return currentTab as string;
+  return getDefaultViewTab(view);
+}
+
 export function planUrlSync(input: UrlSyncInput): UrlSyncPlan {
   const { currentPath, projects, activeProjectId, view, issueNumber } = input;
   const panel: IssuePanel | null = issueNumber === null ? null : input.panel ?? "issue";
+  const current = parseAppPath(currentPath);
+  const tab = resolveSyncTab(view, input.tab, current.view === view ? current.tab : null);
   const slug = activeProjectId ? buildProjectSlugMap(projects).get(activeProjectId) ?? null : null;
   // No slug and no loaded projects = the projects query is still in flight.
   // Writing now would flatten a scoped inbound URL and lose the link.
@@ -173,13 +201,13 @@ export function planUrlSync(input: UrlSyncInput): UrlSyncPlan {
   // fall back to the flat path so view routing keeps working.)
   if (!slug && projects.length === 0) return { path: normalizePathname(currentPath), action: "none" };
 
-  const path = buildAppPath({ projectSlug: slug, view, issueNumber, panel });
+  const path = buildAppPath({ projectSlug: slug, view, tab, issueNumber, panel });
   if (normalizePathname(currentPath) === path) return { path, action: "none" };
   if (input.preferReplace) return { path, action: "replace" };
 
-  const current = parseAppPath(currentPath);
   const sameTarget =
     current.view === view &&
+    (current.tab ?? null) === tab &&
     (current.issueNumber ?? null) === (issueNumber ?? null) &&
     (current.panel ?? null) === panel;
   const currentIsActiveProject =
@@ -188,8 +216,9 @@ export function planUrlSync(input: UrlSyncInput): UrlSyncPlan {
     resolveProjectIdFromSlug(current.projectSlug, projects) === activeProjectId;
 
   // In-place upgrades, not navigations: a legacy flat path gaining its project
-  // scope (`/board` -> `/p/<slug>/board`), or a raw-id/alias path being
-  // canonicalised to the slug. Neither deserves a history entry.
+  // scope (`/board` -> `/p/<slug>/board`), an absorbed view's old path gaining
+  // its container + tab (`/burndown` -> `/p/<slug>/analytics/burndown`), or a
+  // raw-id/alias path canonicalised to the slug. None deserves a history entry.
   if (sameTarget && (current.projectSlug === null || currentIsActiveProject)) {
     return { path, action: "replace" };
   }

@@ -165,3 +165,70 @@ export const RUNTIME_TABS: readonly ViewTabDescriptor[] = [
 export type RuntimeTabId = "flight-recorder" | "monitor-cycles" | "health-events";
 
 export const RUNTIME_TAB_IDS = RUNTIME_TABS.map((t) => t.id as RuntimeTabId);
+
+// ---------------------------------------------------------------------------
+// #446 — the tab as a URL dimension.
+//
+// The router needs to answer "does this view have tabs, which ones, and what is
+// its default?" for EVERY view, and the containers need the same three facts.
+// One registry answers both, so a tab added below is routable and palette-
+// reachable without touching appRoutes.ts — a second list there would drift.
+// ---------------------------------------------------------------------------
+
+/**
+ * Path segments the project-scoped URL grammar owns
+ * (`/p/<slug>/<view>/<tab>/issue/<n>/workspace`). A tab id colliding with one
+ * of these could not be told apart from the issue deep link, so such a tab is
+ * simply not routable — it still works in-app, it just never reaches the URL.
+ */
+export const RESERVED_ROUTE_SEGMENTS: readonly string[] = ["issue", "issues", "workspace"];
+
+export interface ViewTabSet {
+  /** The tabs, in bar order. */
+  tabs: readonly ViewTabDescriptor[];
+  /** The tab shown when the URL names none, or names one that does not exist. */
+  defaultTab: string;
+}
+
+/** Every tabbed container view, keyed by its view id (which IS its ViewMode). */
+export const VIEW_TAB_REGISTRY: Readonly<Record<string, ViewTabSet>> = {
+  [ANALYTICS_VIEW_ID]: { tabs: ANALYTICS_TABS, defaultTab: "throughput" },
+  [ACTIVITY_VIEW_ID]: { tabs: ACTIVITY_TABS, defaultTab: "activity" },
+  [RUNTIME_VIEW_ID]: { tabs: RUNTIME_TABS, defaultTab: "flight-recorder" },
+};
+
+/** True when `viewId` is a tabbed container view. Plain views have no tab dimension. */
+export function viewHasTabs(viewId: string): boolean {
+  return viewId in VIEW_TAB_REGISTRY;
+}
+
+/** The tab ids of a container view, in bar order; empty for a plain view. */
+export function getViewTabIds(viewId: string): readonly string[] {
+  return VIEW_TAB_REGISTRY[viewId]?.tabs.map((t) => t.id) ?? [];
+}
+
+/** The tab a container view falls back to; null for a plain view. */
+export function getDefaultViewTab(viewId: string): string | null {
+  return VIEW_TAB_REGISTRY[viewId]?.defaultTab ?? null;
+}
+
+/** True when `tab` exists on `viewId` AND may appear as a URL segment. */
+export function isRoutableViewTab(viewId: string, tab: string | null | undefined): boolean {
+  if (!tab || RESERVED_ROUTE_SEGMENTS.includes(tab)) return false;
+  return getViewTabIds(viewId).includes(tab);
+}
+
+/**
+ * The tab a view should actually show for a candidate id.
+ *
+ * - plain view -> null (never invent a tab)
+ * - known, routable tab -> itself
+ * - unknown / reserved / absent -> the view's default (never a blank screen)
+ * - a default that is itself reserved -> null (unroutable, so unnameable)
+ */
+export function resolveViewTab(viewId: string, candidate: string | null | undefined): string | null {
+  if (!viewHasTabs(viewId)) return null;
+  if (isRoutableViewTab(viewId, candidate)) return candidate as string;
+  const fallback = getDefaultViewTab(viewId);
+  return isRoutableViewTab(viewId, fallback) ? fallback : null;
+}

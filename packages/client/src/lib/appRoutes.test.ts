@@ -6,7 +6,13 @@ import {
   getViewRoutePath,
   parseAppPath,
 } from "./appRoutes";
-import { VIEW_IDS } from "./viewRegistry";
+import { VIEW_IDS, type ViewMode } from "./viewRegistry";
+import {
+  RESERVED_ROUTE_SEGMENTS,
+  VIEW_TAB_REGISTRY,
+  getDefaultViewTab,
+  getViewTabIds,
+} from "./viewTabs";
 
 describe("appRoutes", () => {
   it("maps key view modes to stable frontend paths", () => {
@@ -116,14 +122,20 @@ describe("parseAppPath — legacy flat paths (#446)", () => {
       issueNumber: null,
       panel: null,
     });
-    expect(parseAppPath("/analytics").tab).toBeNull();
+    // A container view with no tab segment resolves to its default (#446) —
+    // never null, so the canonical URL can always name a tab.
+    expect(parseAppPath("/analytics").tab).toBe("throughput");
+    expect(parseAppPath("/board").tab).toBeNull();
   });
 
   it("agrees with the legacy helpers for every view route", () => {
     for (const view of VIEW_IDS) {
       const path = getViewRoutePath(view);
       expect(parseAppPath(path).view).toBe(getAppRouteView(path));
-      expect(parseAppPath(path).tab).toBe(getAppRouteTab(path)?.tab ?? null);
+      const legacyTab = getAppRouteTab(path)?.tab ?? null;
+      // Container views resolve to a tab even when the path names none; plain
+      // views never do.
+      expect(parseAppPath(path).tab).toBe(legacyTab ?? getDefaultViewTab(view));
     }
   });
 
@@ -365,6 +377,117 @@ describe("issue panel segment — /issue/<n>/workspace", () => {
     for (const panel of ["issue", "workspace"] as const) {
       const path = buildAppPath({ projectSlug: "x", view: "graph", issueNumber: 9, panel });
       expect(parseAppPath(path)).toMatchObject({ view: "graph", issueNumber: 9, panel });
+    }
+  });
+});
+
+/**
+ * MEASURED: `/p/taskflow/burndown` rendered the Burndown tab but the URL was
+ * canonicalised to `/p/taskflow/analytics` — the shared link no longer selected
+ * Burndown, and switching tabs never changed the URL at all. Several views
+ * absorbed whole former views as tabs (#234/#235), so most of the app was
+ * unlinkable. The tab is now a real segment (#446).
+ */
+describe("tab segment — /p/<slug>/<view>/<tab>", () => {
+  it("parses an explicit tab, scoped and flat", () => {
+    expect(parseAppPath("/p/taskflow/analytics/burndown")).toEqual({
+      projectSlug: "taskflow",
+      view: "analytics",
+      tab: "burndown",
+      issueNumber: null,
+      panel: null,
+    });
+    expect(parseAppPath("/runtime/health-events")).toEqual({
+      projectSlug: null,
+      view: "runtime",
+      tab: "health-events",
+      issueNumber: null,
+      panel: null,
+    });
+  });
+
+  it("falls back to the view's default tab for an unknown tab segment", () => {
+    expect(parseAppPath("/p/taskflow/analytics/nonsense")).toMatchObject({
+      projectSlug: "taskflow",
+      view: "analytics",
+      tab: "throughput",
+    });
+    expect(parseAppPath("/activity/nonsense").tab).toBe("activity");
+  });
+
+  it("never invents a tab for a plain view", () => {
+    expect(parseAppPath("/p/taskflow/board").tab).toBeNull();
+    // …and an extra segment on a plain view is junk, not a tab.
+    expect(parseAppPath("/p/taskflow/board/nonsense").view).toBeNull();
+    expect(parseAppPath("/table/nonsense").view).toBeNull();
+  });
+
+  it("keeps the issue deep link working alongside a tab", () => {
+    expect(parseAppPath("/p/taskflow/analytics/burndown/issue/12")).toEqual({
+      projectSlug: "taskflow",
+      view: "analytics",
+      tab: "burndown",
+      issueNumber: 12,
+      panel: "issue",
+    });
+    expect(parseAppPath("/p/taskflow/runtime/monitor-cycles/issue/12/workspace")).toMatchObject({
+      view: "runtime",
+      tab: "monitor-cycles",
+      issueNumber: 12,
+      panel: "workspace",
+    });
+    // No tab segment: the issue link still parses, tab is the default.
+    expect(parseAppPath("/p/taskflow/analytics/issue/12")).toMatchObject({
+      view: "analytics",
+      tab: "throughput",
+      issueNumber: 12,
+      panel: "issue",
+    });
+  });
+
+  it("does not let a tab segment be confused with the reserved segments", () => {
+    for (const view of Object.keys(VIEW_TAB_REGISTRY)) {
+      for (const tab of getViewTabIds(view)) {
+        expect(RESERVED_ROUTE_SEGMENTS).not.toContain(tab);
+      }
+    }
+    // A reserved word in the tab position is not a tab — it must still parse as
+    // (or fail as) the issue grammar.
+    expect(parseAppPath("/p/taskflow/analytics/issues/12").view).toBeNull();
+    expect(parseAppPath("/p/taskflow/analytics/workspace").tab).toBe("throughput");
+  });
+
+  it("builds and round-trips the tab-bearing form", () => {
+    expect(buildAppPath({ projectSlug: "taskflow", view: "analytics", tab: "burndown" })).toBe(
+      "/p/taskflow/analytics/burndown",
+    );
+    expect(buildAppPath({ view: "activity", tab: "digest" })).toBe("/activity/digest");
+    // Unknown tab -> the default, never junk in the address bar.
+    expect(buildAppPath({ projectSlug: "x", view: "analytics", tab: "nope" })).toBe(
+      "/p/x/analytics/throughput",
+    );
+    // Plain views never grow a segment, whatever the tab says.
+    expect(buildAppPath({ projectSlug: "x", view: "kanban", tab: "burndown" })).toBe("/p/x/board");
+    // Omitted tab stays omitted (the sync layer supplies the resolved tab).
+    expect(buildAppPath({ projectSlug: "x", view: "analytics" })).toBe("/p/x/analytics");
+
+    for (const view of Object.keys(VIEW_TAB_REGISTRY)) {
+      for (const tab of getViewTabIds(view)) {
+        const path = buildAppPath({ projectSlug: "x", view: view as ViewMode, tab });
+        expect(parseAppPath(path)).toMatchObject({ projectSlug: "x", view, tab });
+        const withIssue = buildAppPath({ projectSlug: "x", view: view as ViewMode, tab, issueNumber: 3, panel: "workspace" });
+        expect(parseAppPath(withIssue)).toMatchObject({ view, tab, issueNumber: 3, panel: "workspace" });
+      }
+    }
+  });
+
+  it("every registered container view has a routable default tab", () => {
+    for (const view of Object.keys(VIEW_TAB_REGISTRY)) {
+      const def = getDefaultViewTab(view);
+      expect(getViewTabIds(view)).toContain(def);
+      expect(RESERVED_ROUTE_SEGMENTS).not.toContain(def);
+      // The registry keys ARE view modes — otherwise no URL could reach them.
+      expect(VIEW_IDS).toContain(view);
     }
   });
 });

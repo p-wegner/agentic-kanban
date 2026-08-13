@@ -7,6 +7,7 @@ import {
   planDeepLinkIssue,
   planDeepLinkProject,
   planUrlSync,
+  resolveSyncTab,
   type PendingDeepLink,
 } from "./boardRouteSync";
 
@@ -240,8 +241,10 @@ describe("planUrlSync", () => {
     const parsed = parseAppPath("/p/agentic-kanban/burndown");
     expect(parsed.view).toBe("analytics");
     expect(parsed.tab).toBe("burndown");
+    // The canonical form carries the tab (#446), so the legacy path upgrades in
+    // place to /p/<slug>/analytics/burndown rather than losing the chart.
     expect(planUrlSync({ ...base, view: "analytics", currentPath: "/p/agentic-kanban/burndown" })).toEqual({
-      path: "/p/agentic-kanban/analytics",
+      path: "/p/agentic-kanban/analytics/burndown",
       action: "replace",
     });
   });
@@ -284,5 +287,98 @@ describe("navigation bursts — one logical navigation, one back-step", () => {
     expect(burst.isCoalescing(0)).toBe(true);
     expect(burst.isCoalescing(500)).toBe(true);
     expect(burst.isCoalescing(1500)).toBe(false);
+  });
+});
+
+/**
+ * The tab dimension (#446). MEASURED: `/p/taskflow/burndown` rendered Burndown
+ * but the URL became `/p/taskflow/analytics`, and switching tabs inside a
+ * container never changed the URL at all.
+ */
+describe("planUrlSync — the tab dimension", () => {
+  const base = { projects: PROJECTS, activeProjectId: AK, view: "analytics" as const, issueNumber: null };
+  const SLUG = "/p/agentic-kanban";
+
+  it("names the active tab in the canonical path", () => {
+    expect(planUrlSync({ ...base, tab: "burndown", currentPath: `${SLUG}/analytics/throughput` })).toEqual({
+      path: `${SLUG}/analytics/burndown`,
+      action: "push",
+    });
+  });
+
+  it("gives a tab switch its own history entry", () => {
+    // Same view, same issue — only the tab moved, and that is a navigation.
+    expect(
+      planUrlSync({ ...base, tab: "provider-mix", currentPath: `${SLUG}/analytics/burndown` }).action,
+    ).toBe("push");
+    // …unless it is one step of a coalesced programmatic navigation.
+    expect(
+      planUrlSync({
+        ...base,
+        tab: "provider-mix",
+        currentPath: `${SLUG}/analytics/burndown`,
+        preferReplace: true,
+      }).action,
+    ).toBe("replace");
+  });
+
+  it("upgrades a legacy flat tab path in place, keeping the tab", () => {
+    expect(planUrlSync({ ...base, tab: null, currentPath: "/burndown" })).toEqual({
+      path: `${SLUG}/analytics/burndown`,
+      action: "replace",
+    });
+    expect(planUrlSync({ ...base, tab: null, currentPath: `${SLUG}/burndown` })).toEqual({
+      path: `${SLUG}/analytics/burndown`,
+      action: "replace",
+    });
+  });
+
+  it("keeps the URL's tab while the container has not mounted yet", () => {
+    // active tab unknown (null): the inbound link, not the default, wins.
+    expect(planUrlSync({ ...base, tab: null, currentPath: `${SLUG}/analytics/provider-cost` }).path).toBe(
+      `${SLUG}/analytics/provider-cost`,
+    );
+    // Nothing names a tab at all -> the default, as a replace (in-place upgrade).
+    expect(planUrlSync({ ...base, tab: null, currentPath: `${SLUG}/analytics` })).toEqual({
+      path: `${SLUG}/analytics/throughput`,
+      action: "replace",
+    });
+  });
+
+  it("ignores a tab that the view does not have", () => {
+    expect(planUrlSync({ ...base, tab: "nonsense", currentPath: `${SLUG}/analytics/burndown` }).path).toBe(
+      `${SLUG}/analytics/burndown`,
+    );
+    // A tab from ANOTHER container view is just as invalid.
+    expect(planUrlSync({ ...base, tab: "health-events", currentPath: `${SLUG}/analytics` }).path).toBe(
+      `${SLUG}/analytics/throughput`,
+    );
+  });
+
+  it("never puts a tab on a view that has none", () => {
+    expect(planUrlSync({ ...base, view: "kanban", tab: "burndown", currentPath: `${SLUG}/board` })).toEqual({
+      path: `${SLUG}/board`,
+      action: "none",
+    });
+  });
+
+  it("keeps the tab beside an open issue panel", () => {
+    expect(
+      planUrlSync({
+        ...base,
+        tab: "burndown",
+        issueNumber: 12,
+        panel: "workspace",
+        currentPath: `${SLUG}/analytics/burndown`,
+      }),
+    ).toEqual({ path: `${SLUG}/analytics/burndown/issue/12/workspace`, action: "push" });
+  });
+
+  it("resolveSyncTab is the single decision the sync makes about tabs", () => {
+    expect(resolveSyncTab("kanban", "burndown", "burndown")).toBeNull();
+    expect(resolveSyncTab("analytics", "burndown", "throughput")).toBe("burndown");
+    expect(resolveSyncTab("analytics", null, "provider-mix")).toBe("provider-mix");
+    expect(resolveSyncTab("analytics", "nope", null)).toBe("throughput");
+    expect(resolveSyncTab("runtime", null, null)).toBe("flight-recorder");
   });
 });
