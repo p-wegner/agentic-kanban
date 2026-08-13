@@ -7,9 +7,14 @@ import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { DiffViewer } from "./DiffViewer.js";
 import {
   canSubmitGateAction,
+  gateActionButtonClasses,
+  gateActionIntent,
+  gateActionTitle,
   gateFeedbackText,
   gateInputPlaceholder,
   gateInputRequirementHint,
+  gateRecommendationConflict,
+  partitionGateChecks,
   viewGateRecommendation,
 } from "./gateCardPolicy.js";
 
@@ -358,26 +363,49 @@ function normalizeForCompare(text: string): string {
  * already says it*. Plugin-agnostic by construction: it never parses the plugin's format, it
  * just refuses to print the same sentence twice. A question with no trailing detail, or whose
  * detail appears in no check, is rendered exactly as before.
+ *
+ * ── The two-tail bug (#449, MEASURED) ──
+ *
+ * The first version probed the WHOLE tail against each check detail. A question may carry more
+ * than one appended `⚠` segment — the live `mealplan` step-7 gate carried two ("8 of 50 …
+ * UNEXECUTED" and a classification sentence). Their concatenation matches no single check, so
+ * the dedupe silently declined and the card printed the finding a second time. It failed toward
+ * "print it twice", which is exactly the state this function exists to prevent, and it did so
+ * invisibly.
+ *
+ * So the tail is split on its `⚠` markers and each segment is judged on its own: echoed
+ * segments are dropped, the rest are returned in `keptDetails` for the card to render as
+ * findings in their own right (rather than as a run-on heading). When NOTHING is echoed the
+ * question is returned verbatim, so a plugin whose question we cannot read is never reflowed.
  */
 export function splitGateQuestion(
   question: string,
   checks?: Array<{ detail?: string | null }> | null,
-): { heading: string; duplicatedDetail: string | null } {
+): { heading: string; duplicatedDetail: string | null; keptDetails: string[] } {
   const boundary = question.indexOf("?");
   if (boundary === -1 || boundary === question.length - 1) {
-    return { heading: question, duplicatedDetail: null };
+    return { heading: question, duplicatedDetail: null, keptDetails: [] };
   }
   const heading = question.slice(0, boundary + 1);
-  const tail = question.slice(boundary + 1).replace(/^[\s⚠!*-]+/, "").trim();
-  if (!tail) return { heading, duplicatedDetail: null };
+  const segments = question
+    .slice(boundary + 1)
+    .split("⚠")
+    .map((segment) => segment.replace(/^[\s!*-]+/, "").trim())
+    .filter(Boolean);
+  if (segments.length === 0) return { heading, duplicatedDetail: null, keptDetails: [] };
 
-  // The tail is a TRUNCATION of the check detail, so compare a prefix rather than the whole
-  // string. Long enough not to collide by accident, short enough to survive the truncation.
-  const probe = normalizeForCompare(tail).slice(0, 40);
-  if (probe.length < 20) return { heading: question, duplicatedDetail: null };
-  const echoed = (checks ?? []).some((check) =>
-    check.detail ? normalizeForCompare(check.detail).includes(probe) : false);
-  return echoed ? { heading, duplicatedDetail: tail } : { heading: question, duplicatedDetail: null };
+  // Each segment is a TRUNCATION of its check's detail, so compare a prefix rather than the
+  // whole string. Long enough not to collide by accident, short enough to survive truncation.
+  const echoed: string[] = [];
+  const kept: string[] = [];
+  for (const segment of segments) {
+    const probe = normalizeForCompare(segment).slice(0, 40);
+    const isEchoed = probe.length >= 20 && (checks ?? []).some((check) =>
+      check.detail ? normalizeForCompare(check.detail).includes(probe) : false);
+    (isEchoed ? echoed : kept).push(segment);
+  }
+  if (echoed.length === 0) return { heading: question, duplicatedDetail: null, keptDetails: [] };
+  return { heading, duplicatedDetail: echoed.join(" "), keptDetails: kept };
 }
 
 export function GateCard({ pluginId, loopName, projectId, gate, gateSince, checks, recommendation, lineNotes, onResolved, onOpenArtifact }: {
@@ -519,50 +547,129 @@ export function GateCard({ pluginId, loopName, projectId, gate, gateSince, check
     warn: "text-amber-800 dark:text-amber-300",
     fail: "text-red-800 dark:text-red-300",
   } as const;
+  const checkIcon = { pass: "✓", warn: "⚠", fail: "✕" } as const;
 
   const questionView = splitGateQuestion(gate.question, checks);
+  // #449 — the card was ~500px of uniform amber prose in one type size, so "what stops me
+  // approving" was the fifth paragraph. Split the checks: only fail/warn can withdraw a plain
+  // approval, and those go first, one row each; passing checks and the gate age are reassurance
+  // and collapse.
+  const { blocking, passing } = partitionGateChecks(checks);
+  const hasBlocking = blocking.length > 0 || questionView.keptDetails.length > 0;
+  // #451 — a butler that recommends approving while a check FAILS is the most decision-relevant
+  // fact on the card; it used to be left for the reader to spot across the two smallest elements.
+  const recommendationConflict = gateRecommendationConflict(
+    recommendationView?.actionable ? recommendationView.action : null,
+    checks,
+  );
+
+  const blockingBlock = hasBlocking ? (
+    <div
+      className="rounded border border-red-300 dark:border-red-800 bg-white/70 dark:bg-gray-900/40 px-3 py-2 space-y-1.5"
+      data-testid="plugin-gate-blocking"
+    >
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-red-800 dark:text-red-300">
+        What stops a plain approval
+      </div>
+      {/* Findings the question carries that NO check repeats (#449). They are real findings, so
+          they belong in this block — not tacked onto the heading as run-on prose. */}
+      {questionView.keptDetails.map((detail) => (
+        <div key={detail} className="flex gap-1.5 text-xs text-amber-900 dark:text-amber-200">
+          <span aria-hidden="true">⚠</span>
+          <span className="flex-1">{detail}</span>
+        </div>
+      ))}
+      {blocking.map((check) => (
+        <div key={check.name} className={`flex gap-1.5 text-xs ${checkTone[check.verdict]}`}>
+          <span aria-hidden="true">{checkIcon[check.verdict]}</span>
+          <span className="flex-1">
+            <span className="font-medium">{check.name}:</span> {check.detail ?? check.verdict.toUpperCase()}
+          </span>
+        </div>
+      ))}
+    </div>
+  ) : null;
+
+  const secondaryBlock = (passing.length > 0 || gateSince) ? (
+    // Open by default when nothing blocks — then the passing checks ARE the story.
+    <details className="text-xs" data-testid="plugin-gate-secondary" open={!hasBlocking}>
+      <summary className="cursor-pointer select-none text-[11px] text-amber-800 dark:text-amber-300">
+        {passing.length > 0 ? `${passing.length} check(s) passing` : "Gate context"}
+        {gateSince ? ` · waiting ${formatGateAge(gateSince)}` : ""}
+      </summary>
+      <div className="mt-1 space-y-1">
+        {/* How long this decision has been blocking the pipeline. Sourced from the gate's own
+            `gate-reached` event, so a re-planned loop cannot make an old gate look fresh. */}
+        {gateSince && (
+          <div className="text-[11px] text-amber-800 dark:text-amber-300" data-testid="plugin-gate-age">
+            Waiting {formatGateAge(gateSince)} · since {new Date(gateSince).toLocaleString("en-US")}
+          </div>
+        )}
+        {passing.map((check) => (
+          <div key={check.name} className={`flex gap-1.5 text-xs ${checkTone[check.verdict]}`}>
+            <span aria-hidden="true">{checkIcon[check.verdict]}</span>
+            <span className="flex-1">
+              <span className="font-medium">{check.name}:</span> {check.detail ?? check.verdict.toUpperCase()}
+            </span>
+          </div>
+        ))}
+      </div>
+    </details>
+  ) : null;
 
   return (
     <div
       className="rounded border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 p-4 space-y-3 max-w-2xl"
       data-testid="plugin-gate-card"
     >
-      <div className="text-sm font-medium text-amber-900 dark:text-amber-200" data-testid="plugin-gate-question">
+      {/* (a) The decision line — the one sentence the reader answers. */}
+      <div className="text-base font-semibold text-amber-900 dark:text-amber-100" data-testid="plugin-gate-question">
         ✋ {questionView.heading}
       </div>
-      {/* How long this decision has been blocking the pipeline. Sourced from the gate's own
-          `gate-reached` event, so a re-planned loop cannot make an old gate look fresh. */}
-      {gateSince && (
-        <div className="text-xs text-amber-800 dark:text-amber-300" data-testid="plugin-gate-age">
-          Waiting {formatGateAge(gateSince)} · since {new Date(gateSince).toLocaleString("en-US")}
-        </div>
-      )}
-      {/* Butler recommendation chip (#309) — a pre-read, never a decision.
+      {/* Butler recommendation (#309) — a pre-read, never a decision. Full-width block directly
+          under the question (#451): it is the element that can save the reviewer the most work,
+          and it used to be an 11px chip in a hairline box with a truncated action label.
           A recommendation whose action is no longer offered stays visible but loses its Accept
           button (#378 A): the chip was handing out a one-click path to an action the gate had
           deliberately withdrawn, and the click was silently inert. */}
       {recommendation && recommendationView && (
         <div
-          className="flex items-start gap-2 text-xs rounded border border-amber-200 dark:border-amber-800 bg-white/60 dark:bg-gray-900/40 px-2 py-1.5"
+          className="rounded border border-amber-300 dark:border-amber-700 bg-white/70 dark:bg-gray-900/40 px-3 py-2 space-y-2"
           data-testid="plugin-gate-recommendation"
           data-recommendation-state={recommendationView.actionable ? "actionable" : recommendationView.skipReason}
         >
-          <span aria-hidden="true">🤵</span>
-          <span className="flex-1 text-amber-900 dark:text-amber-200">
-            Butler recommends <span className="font-medium">{recommendation.actionId}</span>
-            {recommendation.reason ? ` — ${recommendation.reason}` : ""}
-            {!recommendationView.actionable && (
-              <span className="block mt-0.5 text-amber-800 dark:text-amber-300" data-testid="plugin-gate-recommendation-stale">
-                ⚠ That action is no longer offered on this gate — this is a pre-read only. Choose
-                one of the actions below.
-              </span>
-            )}
-          </span>
+          <div className="flex items-start gap-2 text-xs">
+            <span aria-hidden="true">🤵</span>
+            <span className="flex-1 text-amber-900 dark:text-amber-200">
+              Butler recommends <span className="font-medium">{recommendation.actionId}</span>
+              {recommendation.reason ? ` — ${recommendation.reason}` : ""}
+              {!recommendationView.actionable && (
+                <span className="block mt-0.5 text-amber-800 dark:text-amber-300" data-testid="plugin-gate-recommendation-stale">
+                  ⚠ That action is no longer offered on this gate — this is a pre-read only. Choose
+                  one of the actions below.
+                </span>
+              )}
+              {recommendationConflict && (
+                <span
+                  className="block mt-1 font-medium text-red-800 dark:text-red-300"
+                  data-testid="plugin-gate-recommendation-conflict"
+                >
+                  ⚠ The butler disputes a failing check — it recommends approving while{" "}
+                  {recommendationConflict.failing.map((c) => c.name).join(", ")} FAILED. One of the
+                  two is wrong, and deciding which is the call you are being asked to make.
+                </span>
+              )}
+            </span>
+          </div>
           {recommendationView.actionable && (
             <button
               onClick={() => void act(recommendationView.action)}
               disabled={resolving}
-              className="shrink-0 max-w-[12rem] truncate text-[11px] px-3 py-2.5 sm:px-2 sm:py-0.5 min-h-11 sm:min-h-0 rounded border border-amber-400 dark:border-amber-600 hover:bg-amber-100 dark:hover:bg-amber-900/40 text-amber-900 dark:text-amber-200"
+              /* #451 — the label was `max-w-[12rem] truncate`, so a button that resolves the gate
+                 by waiving 8 unexecuted acceptance criteria read "Do it: Approve, waiving unexec…".
+                 #414 deliberately renamed it from "Accept" to name the consequence, and the width
+                 cap then ate the consequence. It wraps now; the label is never cut. */
+              className="w-full sm:w-auto text-left whitespace-normal break-words text-xs px-3 py-2.5 sm:py-1.5 min-h-11 sm:min-h-0 rounded border border-amber-400 dark:border-amber-600 hover:bg-amber-100 dark:hover:bg-amber-900/40 text-amber-900 dark:text-amber-200 disabled:opacity-50"
               /* #414 — "Accept" alone did not say what it accepts. It is not "adopt this as
                  prefilled feedback": it RESOLVES the gate with that action, which on this very
                  gate means waiving 8 unexecuted acceptance criteria. Name the action it will
@@ -575,15 +682,11 @@ export function GateCard({ pluginId, loopName, projectId, gate, gateSince, check
           )}
         </div>
       )}
-      {/* Verification digest (#303) — verdict + detail readable on the card itself. */}
-      {(checks?.length ?? 0) > 0 && (
-        <div className="space-y-1" data-testid="plugin-gate-checks-digest">
-          {checks!.map((check) => (
-            <div key={check.name} className={`text-xs ${checkTone[check.verdict]}`}>
-              <span className="font-medium">{check.verdict === "pass" ? "✓" : check.verdict === "warn" ? "⚠" : "✕"} {check.name}:</span>{" "}
-              {check.detail ?? check.verdict.toUpperCase()}
-            </div>
-          ))}
+      {/* (b) Verification digest (#303/#449) — blocking first, everything else collapsed. */}
+      {(blockingBlock || secondaryBlock) && (
+        <div className="space-y-2" data-testid="plugin-gate-checks-digest">
+          {blockingBlock}
+          {secondaryBlock}
         </div>
       )}
       {/* Summarize-for-me (#330) — butler digest rendered in place. */}
@@ -595,9 +698,12 @@ export function GateCard({ pluginId, loopName, projectId, gate, gateSince, check
           {summary}
         </div>
       )}
-      {(gate.artifacts?.length ?? 0) > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {gate.artifacts!.map((path) => (
+      {/* Utility row (#450): the artifact chips and "Summarize for me" are things you do BEFORE
+          deciding, so they belong together and away from the decision buttons. Summarize used to
+          sit in the decision row at the same weight as the two opposite answers, making a third
+          of that row a non-decision. */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {(gate.artifacts ?? []).map((path) => (
             <span key={path} className="inline-flex items-stretch rounded border border-amber-300 dark:border-amber-700 overflow-hidden">
               <button
                 type="button"
@@ -620,9 +726,17 @@ export function GateCard({ pluginId, loopName, projectId, gate, gateSince, check
                 ✎
               </button>
             </span>
-          ))}
-        </div>
-      )}
+        ))}
+        <button
+          onClick={() => void summarize()}
+          disabled={summarizing}
+          className="text-[11px] px-3 py-2.5 sm:px-2 sm:py-0.5 min-h-11 sm:min-h-0 rounded border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/40 disabled:opacity-50"
+          data-testid="plugin-gate-summarize"
+          title="Butler reads the artifacts and posts a decision-ready digest here (#330)"
+        >
+          {summarizing ? "Summarizing…" : "🤵 Summarize for me"}
+        </button>
+      </div>
       {/* Edit-then-approve editor (#305). */}
       {editing && (
         <div className="space-y-2" data-testid="plugin-gate-editor">
@@ -698,32 +812,27 @@ export function GateCard({ pluginId, loopName, projectId, gate, gateSince, check
           `flex items-center` of ~32px buttons whose longest label ("Confirm: Needs
           revision") cannot share a line with the others at any phone width. */}
       <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2">
-        {gate.actions.map((action) => (
-          <button
-            key={action.id}
-            onClick={() => void act(action)}
-            // #378 B — once the textarea is armed this button IS the confirm; a required-input
-            // action with an empty box must not look clickable and then do nothing.
-            disabled={resolving || (selected?.id === action.id && !canSubmitGateAction(action, input, lineNotes))}
-            className={`text-sm px-4 py-2.5 sm:px-3 sm:py-1.5 min-h-11 sm:min-h-0 rounded disabled:opacity-50 disabled:cursor-not-allowed ${
-              action.input === "text"
-                ? "border border-amber-400 dark:border-amber-600 text-amber-900 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/40"
-                : "bg-brand-600 text-white hover:bg-brand-700"
-            }`}
-            data-testid={`plugin-gate-action-${action.id}`}
-          >
-            {resolving ? "Applying…" : selected?.id === action.id && action.input === "text" ? `Confirm: ${action.label}` : action.label}
-          </button>
-        ))}
-        <button
-          onClick={() => void summarize()}
-          disabled={summarizing}
-          className="text-sm px-4 py-2.5 sm:px-3 sm:py-1.5 min-h-11 sm:min-h-0 rounded border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/40 disabled:opacity-50"
-          data-testid="plugin-gate-summarize"
-          title="Butler reads the artifacts and posts a decision-ready digest here (#330)"
-        >
-          {summarizing ? "Summarizing…" : "🤵 Summarize for me"}
-        </button>
+        {gate.actions.map((action) => {
+          // #450 — styled by SEMANTICS, not by `action.input === "text"`. At a QA gate both the
+          // approve and the revise action require text, so the old rule rendered the two
+          // opposite decisions identically and left the gate with no primary action at all.
+          const intent = gateActionIntent(action);
+          return (
+            <button
+              key={action.id}
+              onClick={() => void act(action)}
+              // #378 B — once the textarea is armed this button IS the confirm; a required-input
+              // action with an empty box must not look clickable and then do nothing.
+              disabled={resolving || (selected?.id === action.id && !canSubmitGateAction(action, input, lineNotes))}
+              className={`text-sm px-4 py-2.5 sm:px-3 sm:py-1.5 min-h-11 sm:min-h-0 rounded disabled:opacity-50 disabled:cursor-not-allowed ${gateActionButtonClasses(intent)}`}
+              title={gateActionTitle(action)}
+              data-action-intent={intent}
+              data-testid={`plugin-gate-action-${action.id}`}
+            >
+              {resolving ? "Applying…" : selected?.id === action.id && action.input === "text" ? `Confirm: ${action.label}` : action.label}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
