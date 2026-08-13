@@ -146,5 +146,60 @@ describe("Agent Skills API", () => {
     const delRes = await app2.request(`/api/agent-skills/${builtin.id}`, { method: "DELETE" });
     expect(delRes.status).toBe(403);
   });
+
+  it("POST /api/agent-skills accepts isInit and PUT can toggle it", async () => {
+    const createRes = await app.request("/api/agent-skills", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "init-skill",
+        description: "An init-only skill",
+        prompt: "onboard the project",
+        isInit: true,
+      }),
+    });
+    expect(createRes.status).toBe(201);
+    const created = await createRes.json() as any;
+    expect(created.isInit).toBe(true);
+
+    const putRes = await app.request(`/api/agent-skills/${created.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isInit: false }),
+    });
+    expect(putRes.status).toBe(200);
+    const updated = await putRes.json() as any;
+    expect(updated.isInit).toBe(false);
+  });
+
+  it("GET /api/agent-skills?init=true filters to init skills only, merging global + project scope", async () => {
+    const { db: database } = createTestApp();
+    const project = await createProjectDirectly(database, { name: "init-filter-project" });
+
+    await app.request("/api/agent-skills", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "global-init", description: "d", prompt: "p", isInit: true }),
+    });
+    await app.request("/api/agent-skills", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "global-non-init", description: "d", prompt: "p", isInit: false }),
+    });
+    await app.request("/api/agent-skills", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "project-init", description: "d", prompt: "p", isInit: true, projectId: project.id }),
+    });
+
+    const res = await app.request(`/api/agent-skills?projectId=${project.id}&init=true`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as any[];
+    const names = body.map((s) => s.name);
+    expect(names).toContain("global-init");
+    expect(names).toContain("project-init");
+    expect(names).not.toContain("global-non-init");
+    expect(body.every((s) => s.isInit === true)).toBe(true);
+  });
 });
 

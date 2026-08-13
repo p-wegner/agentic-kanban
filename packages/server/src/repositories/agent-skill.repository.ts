@@ -9,18 +9,26 @@ export async function listAgentSkills(
   projectId: string | undefined,
   globalOnly: boolean,
   database: Database = db,
+  initOnly = false,
 ) {
+  const initCondition = initOnly ? eq(agentSkills.isInit, true) : undefined;
   if (globalOnly) {
     return database.select().from(agentSkills)
-      .where(isNull(agentSkills.projectId))
+      .where(initCondition ? and(isNull(agentSkills.projectId), initCondition) : isNull(agentSkills.projectId))
       .orderBy(agentSkills.name);
   }
   if (projectId) {
+    // Parenthesized: without it, `and(scopeCondition, initCondition)` would produce
+    // `project_id IS NULL OR project_id = ? AND is_init = 1` — AND binds tighter than
+    // OR, so a global (NULL projectId) row would pass regardless of is_init.
+    const scopeCondition = sql`(${agentSkills.projectId} IS NULL OR ${agentSkills.projectId} = ${projectId})`;
     return database.select().from(agentSkills)
-      .where(sql`${agentSkills.projectId} IS NULL OR ${agentSkills.projectId} = ${projectId}`)
+      .where(initCondition ? and(scopeCondition, initCondition) : scopeCondition)
       .orderBy(agentSkills.name);
   }
-  return database.select().from(agentSkills).orderBy(agentSkills.name);
+  return database.select().from(agentSkills)
+    .where(initCondition)
+    .orderBy(agentSkills.name);
 }
 
 export async function getAgentSkillById(
@@ -50,6 +58,7 @@ export async function createAgentSkill(
     prompt: string;
     model?: string | null;
     projectId?: string | null;
+    isInit?: boolean;
   },
   database: Database = db,
 ) {
@@ -63,6 +72,7 @@ export async function createAgentSkill(
     model: input.model ?? null,
     projectId: input.projectId ?? null,
     isBuiltin: false,
+    isInit: input.isInit ?? false,
     createdAt: now,
     updatedAt: now,
   };
