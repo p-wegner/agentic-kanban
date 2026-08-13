@@ -20,6 +20,7 @@ import { useColumnResize } from "../lib/columnResizeHandler.js";
 import { useActivityNotifications, type NotificationEvent } from "../hooks/useActivityNotifications.js";
 import { buildRunQueueForecast } from "../components/RunQueueForecastPanel.js";
 import { useBoardPageRoute } from "./useBoardPageRoute.js";
+import { markProgrammaticNavigation } from "./boardRouteSync.js";
 import { useBoardPreferences } from "../hooks/useBoardPreferences.js";
 import { useBoardPanels } from "../hooks/useBoardPanels.js";
 import { useBoardNavigation } from "../hooks/useBoardNavigation.js";
@@ -165,13 +166,6 @@ export function BoardPage() {
   const loadProjectsRef = useRef<() => Promise<string | undefined>>(() => Promise.resolve(undefined));
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<ExpandedCreatePanel>(null);
 
-  const {
-    viewMode,
-    graphFocusIssueId,
-    setGraphFocusIssueId,
-    handleViewModeChange,
-  } = useBoardPageRoute();
-
   // Extracted hooks
   const prefs = useBoardPreferences(activeProjectId);
   const panels = useBoardPanels();
@@ -276,6 +270,37 @@ export function BoardPage() {
     loadProjects,
   });
 
+  // Issue deep links (#446) resolve against `columnsRef`, not `columns` — same
+  // reason as the FOCUS_ISSUE handler below: a link applied right after a
+  // project switch must read the CURRENT board.
+  const openIssueNumber = useCallback((issueNumber: number): boolean => {
+    const issue = columnsRef.current
+      .flatMap((col) => col.issues)
+      .find((i) => i.issueNumber === issueNumber);
+    if (!issue) return false;
+    setSelectedIssue(issue);
+    return true;
+  }, [columnsRef, setSelectedIssue]);
+  const closeSelectedIssue = useCallback(() => setSelectedIssue(null), [setSelectedIssue]);
+
+  // The URL owns (project, view, open issue) (#446): inbound deep links win over
+  // the stored view preference, every state change is reflected in the address
+  // bar, and back/forward restores all three.
+  const {
+    viewMode,
+    graphFocusIssueId,
+    setGraphFocusIssueId,
+    handleViewModeChange,
+  } = useBoardPageRoute({
+    projects,
+    activeProjectId,
+    selectedIssueNumber: selectedIssue?.issueNumber ?? null,
+    columns,
+    onSelectProject: handleProjectChange,
+    onOpenIssueNumber: openIssueNumber,
+    onCloseIssue: closeSelectedIssue,
+  });
+
   // #323: cross-project deep links (inbox gate entries, sticky gate toasts,
   // desktop notifications) dispatch SELECT_PROJECT_EVENT from lib-layer code;
   // BoardPage owns handleProjectChange, so it performs the actual switch here.
@@ -287,6 +312,9 @@ export function BoardPage() {
     function onSelectProject(e: Event) {
       const detail = (e as CustomEvent<SelectProjectDetail>).detail;
       if (!detail?.projectId || detail.projectId === activeProjectIdSelectRef.current) return;
+      // First step of a project -> view -> issue chain (#446): coalesce the
+      // resulting URL writes so the user gets ONE back-step, not three.
+      markProgrammaticNavigation();
       void projectChangeRef.current(detail.projectId);
     }
     window.addEventListener(SELECT_PROJECT_EVENT, onSelectProject);
@@ -303,7 +331,11 @@ export function BoardPage() {
       const issue = columnsRef.current
         .flatMap((col) => col.issues)
         .find((i) => (detail.issueId ? i.id === detail.issueId : i.issueNumber === detail.issueNumber));
-      if (issue) setSelectedIssue(issue);
+      if (issue) {
+        // Usually the last step of a project -> view -> issue chain (#446).
+        markProgrammaticNavigation();
+        setSelectedIssue(issue);
+      }
     }
     window.addEventListener(FOCUS_ISSUE_EVENT, onFocusIssue);
     return () => window.removeEventListener(FOCUS_ISSUE_EVENT, onFocusIssue);
