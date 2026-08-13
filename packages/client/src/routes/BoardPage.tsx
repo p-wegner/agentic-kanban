@@ -20,7 +20,15 @@ import { useColumnResize } from "../lib/columnResizeHandler.js";
 import { useActivityNotifications, type NotificationEvent } from "../hooks/useActivityNotifications.js";
 import { buildRunQueueForecast } from "../components/RunQueueForecastPanel.js";
 import { useBoardPageRoute } from "./useBoardPageRoute.js";
-import { markProgrammaticNavigation } from "./boardRouteSync.js";
+import { markProgrammaticNavigation, navigationBurst } from "./boardRouteSync.js";
+import type { IssuePanel } from "../lib/appRoutes.js";
+
+/**
+ * How long a FOCUS_ISSUE request whose issue is not on the board YET is held
+ * while the project it belongs to loads. Bounded so a link naming an issue that
+ * never arrives cannot open a panel long after the click.
+ */
+const FOCUS_ISSUE_HOLD_MS = 15_000;
 import { useBoardPreferences } from "../hooks/useBoardPreferences.js";
 import { useBoardPanels } from "../hooks/useBoardPanels.js";
 import { useBoardNavigation } from "../hooks/useBoardNavigation.js";
@@ -118,6 +126,10 @@ export function BoardPage() {
   const selectedIssue = useBoardSelectionStore((s) => s.selectedIssue);
   const setSelectedIssue = useBoardSelectionStore((s) => s.setSelectedIssue);
   const setWorkspaceIssue = useBoardSelectionStore((s) => s.setWorkspaceIssue);
+  // The SECOND issue-bearing panel (#446 follow-up). It was invisible to the
+  // URL: opening a diff/workspace drawer left the address bar on /board, so the
+  // state was unshareable and unreloadable.
+  const workspaceIssue = useBoardSelectionStore((s) => s.workspaceIssue);
   const {
     activeAgentsTarget,
     activeProjectId,
@@ -273,15 +285,27 @@ export function BoardPage() {
   // Issue deep links (#446) resolve against `columnsRef`, not `columns` — same
   // reason as the FOCUS_ISSUE handler below: a link applied right after a
   // project switch must read the CURRENT board.
-  const openIssueNumber = useCallback((issueNumber: number): boolean => {
+  // The panel handlers are created below (they need handleViewModeChange, which
+  // the route hook returns), so the route hook reaches them through a ref.
+  const openWorkspacePanelRef = useRef<(issue: IssueWithStatus, workspaceId?: string) => void>(() => {});
+  const openIssueNumber = useCallback((issueNumber: number, panel: IssuePanel = "issue"): boolean => {
     const issue = columnsRef.current
       .flatMap((col) => col.issues)
       .find((i) => i.issueNumber === issueNumber);
     if (!issue) return false;
-    setSelectedIssue(issue);
+    if (panel === "workspace") {
+      openWorkspacePanelRef.current(issue);
+    } else {
+      setWorkspaceIssue(null);
+      setSelectedIssue(issue);
+    }
     return true;
-  }, [columnsRef, setSelectedIssue]);
-  const closeSelectedIssue = useCallback(() => setSelectedIssue(null), [setSelectedIssue]);
+  }, [columnsRef, setSelectedIssue, setWorkspaceIssue]);
+  // Back past an `/issue/<n>` entry closes whichever panel that entry opened.
+  const closeSelectedIssue = useCallback(() => {
+    setSelectedIssue(null);
+    setWorkspaceIssue(null);
+  }, [setSelectedIssue, setWorkspaceIssue]);
 
   // The URL owns (project, view, open issue) (#446): inbound deep links win over
   // the stored view preference, every state change is reflected in the address
@@ -294,7 +318,10 @@ export function BoardPage() {
   } = useBoardPageRoute({
     projects,
     activeProjectId,
-    selectedIssueNumber: selectedIssue?.issueNumber ?? null,
+    // The workspace drawer wins when both are set (the handlers clear the other,
+    // so this is only a tie-break) — it is the panel actually on top.
+    selectedIssueNumber: workspaceIssue?.issueNumber ?? selectedIssue?.issueNumber ?? null,
+    openPanel: workspaceIssue ? "workspace" : selectedIssue ? "issue" : null,
     columns,
     onSelectProject: handleProjectChange,
     onOpenIssueNumber: openIssueNumber,
@@ -324,22 +351,54 @@ export function BoardPage() {
   // #413: open the issue a deep link names. `columnsRef` (not `columns`) so the listener is
   // registered once and still reads the CURRENT board — a link fired right after a project
   // switch would otherwise resolve against the previous project's columns.
+  const applyIssueFocus = useCallback((detail: FocusIssueDetail): boolean => {
+    const issue = columnsRef.current
+      .flatMap((col) => col.issues)
+      .find((i) => (detail.issueId ? i.id === detail.issueId : i.issueNumber === detail.issueNumber));
+    if (!issue) return false;
+    // A link that names a WORKSPACE (an inbox "finished, waiting to land" item)
+    // is about that workspace, so open the drawer, not the detail panel — the
+    // URL then says `/issue/<n>/workspace` and reloads as the drawer.
+    if (detail.panel === "workspace" || detail.workspaceId) {
+      openWorkspacePanelRef.current(issue, detail.workspaceId);
+    } else {
+      setWorkspaceIssue(null);
+      setSelectedIssue(issue);
+    }
+    return true;
+  }, [columnsRef, setSelectedIssue, setWorkspaceIssue]);
+
+  // A cross-project link (inbox item) fires its focus while the project switch
+  // is still in flight, so the issue is not on the CURRENT board yet. Hold it
+  // until that project's columns arrive — bounded, so a link naming an issue
+  // that never shows up cannot pop a panel open minutes later.
+  const pendingFocusRef = useRef<{ detail: FocusIssueDetail; expiresAt: number } | null>(null);
   useEffect(() => {
     function onFocusIssue(e: Event) {
       const detail = (e as CustomEvent<FocusIssueDetail>).detail;
       if (!detail) return;
-      const issue = columnsRef.current
-        .flatMap((col) => col.issues)
-        .find((i) => (detail.issueId ? i.id === detail.issueId : i.issueNumber === detail.issueNumber));
-      if (issue) {
-        // Usually the last step of a project -> view -> issue chain (#446).
-        markProgrammaticNavigation();
-        setSelectedIssue(issue);
-      }
+      // Usually the last step of a project -> view -> issue chain (#446).
+      markProgrammaticNavigation();
+      pendingFocusRef.current = applyIssueFocus(detail)
+        ? null
+        : { detail, expiresAt: Date.now() + FOCUS_ISSUE_HOLD_MS };
     }
     window.addEventListener(FOCUS_ISSUE_EVENT, onFocusIssue);
     return () => window.removeEventListener(FOCUS_ISSUE_EVENT, onFocusIssue);
-  }, [columnsRef, setSelectedIssue]);
+  }, [applyIssueFocus]);
+
+  useEffect(() => {
+    const held = pendingFocusRef.current;
+    if (!held) return;
+    if (Date.now() > held.expiresAt) {
+      pendingFocusRef.current = null;
+      return;
+    }
+    // Still the SAME click: its history entry already exists, so the URL write
+    // this focus triggers must replace rather than add a second back-step.
+    navigationBurst.markSilent(Date.now());
+    if (applyIssueFocus(held.detail)) pendingFocusRef.current = null;
+  }, [columns, applyIssueFocus]);
 
 
   const { handleQuickPriorityChange, handleQuickAddTag, handleQuickRemoveTag, handleQuickTogglePinned } =
@@ -378,6 +437,9 @@ export function BoardPage() {
     setButlerInitialPrompt,
     handleViewModeChange,
   });
+  // Close the loop for the route hook and the FOCUS_ISSUE listener above, both
+  // of which are declared before this hook exists.
+  openWorkspacePanelRef.current = (issue, workspaceId) => handleManageWorkspaces(issue, workspaceId);
 
   const boardStatusOptions = useMemo(
     () => columns.map((col) => ({ id: col.id, name: col.name })),

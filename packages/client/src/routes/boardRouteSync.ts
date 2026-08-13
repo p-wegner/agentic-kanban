@@ -26,7 +26,7 @@
  * the final URL. A "silent" burst (used while restoring from popstate) allows
  * no push at all — the entry already exists.
  */
-import { buildAppPath, parseAppPath } from "../lib/appRoutes.js";
+import { buildAppPath, parseAppPath, type IssuePanel } from "../lib/appRoutes.js";
 import { buildProjectSlugMap, resolveProjectIdFromSlug, type SlugProject } from "../lib/projectSlug.js";
 import type { ViewMode } from "../lib/viewRegistry.js";
 
@@ -37,8 +37,10 @@ import type { ViewMode } from "../lib/viewRegistry.js";
 export interface PendingDeepLink {
   /** `/p/<slugOrId>` segment from the inbound URL; null when unscoped. */
   projectSlug: string | null;
-  /** Issue number whose detail panel the link asks for; null when none. */
+  /** Issue number whose panel the link asks for; null when none. */
   issueNumber: number | null;
+  /** WHICH panel to open on that issue — detail or workspace drawer. */
+  panel: IssuePanel;
   /** The project the slug resolved to, once known (guards the issue step). */
   targetProjectId: string | null;
   /** True once the project part has been applied (or had nothing to apply). */
@@ -52,10 +54,12 @@ export interface PendingDeepLink {
 export function createPendingDeepLink(parsed: {
   projectSlug: string | null;
   issueNumber: number | null;
+  panel?: IssuePanel | null;
 }): PendingDeepLink {
   return {
     projectSlug: parsed.projectSlug,
     issueNumber: parsed.issueNumber,
+    panel: parsed.panel ?? "issue",
     targetProjectId: null,
     projectSettled: parsed.projectSlug === null,
     issueSettled: parsed.issueNumber === null,
@@ -98,7 +102,7 @@ export type DeepLinkIssueStep =
   /** The board for the target project has not loaded yet. */
   | { kind: "wait" }
   | { kind: "none" }
-  | { kind: "open"; issueNumber: number };
+  | { kind: "open"; issueNumber: number; panel: IssuePanel };
 
 export function planDeepLinkIssue(
   pending: PendingDeepLink,
@@ -111,7 +115,7 @@ export function planDeepLinkIssue(
   // the wrong ticket, so wait for the target project's board.
   if (pending.targetProjectId && pending.targetProjectId !== ctx.activeProjectId) return { kind: "wait" };
   if (!ctx.boardLoaded) return { kind: "wait" };
-  return { kind: "open", issueNumber: pending.issueNumber };
+  return { kind: "open", issueNumber: pending.issueNumber, panel: pending.panel };
 }
 
 /* ------------------------------------------------------------------ *
@@ -132,6 +136,12 @@ export interface UrlSyncInput {
   activeProjectId: string | null;
   view: ViewMode;
   issueNumber: number | null;
+  /**
+   * Which issue-bearing panel is open. Two panels can hold an issue — the
+   * detail panel and the workspace drawer — and the URL has to say which, or a
+   * reload reopens the wrong one (the drawer was invisible to the URL entirely).
+   */
+  panel?: IssuePanel | null;
   /**
    * Force `replace` for a write that is not a user navigation: coalescing a
    * multi-step programmatic navigation, restoring from popstate, or correcting
@@ -155,6 +165,7 @@ function normalizePathname(pathname: string): string {
  */
 export function planUrlSync(input: UrlSyncInput): UrlSyncPlan {
   const { currentPath, projects, activeProjectId, view, issueNumber } = input;
+  const panel: IssuePanel | null = issueNumber === null ? null : input.panel ?? "issue";
   const slug = activeProjectId ? buildProjectSlugMap(projects).get(activeProjectId) ?? null : null;
   // No slug and no loaded projects = the projects query is still in flight.
   // Writing now would flatten a scoped inbound URL and lose the link.
@@ -162,12 +173,15 @@ export function planUrlSync(input: UrlSyncInput): UrlSyncPlan {
   // fall back to the flat path so view routing keeps working.)
   if (!slug && projects.length === 0) return { path: normalizePathname(currentPath), action: "none" };
 
-  const path = buildAppPath({ projectSlug: slug, view, issueNumber });
+  const path = buildAppPath({ projectSlug: slug, view, issueNumber, panel });
   if (normalizePathname(currentPath) === path) return { path, action: "none" };
   if (input.preferReplace) return { path, action: "replace" };
 
   const current = parseAppPath(currentPath);
-  const sameTarget = current.view === view && (current.issueNumber ?? null) === (issueNumber ?? null);
+  const sameTarget =
+    current.view === view &&
+    (current.issueNumber ?? null) === (issueNumber ?? null) &&
+    (current.panel ?? null) === panel;
   const currentIsActiveProject =
     current.projectSlug !== null &&
     activeProjectId !== null &&
