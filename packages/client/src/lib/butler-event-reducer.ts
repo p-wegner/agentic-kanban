@@ -7,6 +7,35 @@
 // reducer never touches the DOM, Date.now, or Math.random (both injected via
 // deps) so it can be exercised deterministically.
 
+/** One selectable choice of an AskUserQuestion question. */
+export interface ButlerQuestionOption {
+  label: string;
+  description?: string;
+}
+
+/** One question of an AskUserQuestion call (server: normalizeButlerQuestions). */
+export interface ButlerQuestion {
+  question: string;
+  header: string;
+  multiSelect: boolean;
+  options: ButlerQuestionOption[];
+}
+
+/** The user's answer to one question (one entry for single-select, N for multi). */
+export interface ButlerQuestionAnswer {
+  question: string;
+  header: string;
+  answers: string[];
+}
+
+/** A question card in the chat: pending (answerable) or resolved (read-only). */
+export interface ButlerQuestionPrompt {
+  askId: string;
+  questions: ButlerQuestion[];
+  /** Set once the question is over. `answers` is absent for a denial. */
+  resolved?: { answers?: ButlerQuestionAnswer[]; reason?: string };
+}
+
 /** Event shape emitted by the server butler SSE stream (butler-sdk.service.ts). */
 export type ButlerEvent =
   | { type: "ready" }
@@ -19,6 +48,8 @@ export type ButlerEvent =
   | { type: "result"; text?: string; isError?: boolean }
   | { type: "usage"; contextTokens: number }
   | { type: "meta"; model?: string; contextWindow?: number; mcpConnected?: boolean }
+  | { type: "question"; askId: string; questions: ButlerQuestion[] }
+  | { type: "question-resolved"; askId: string; answers?: ButlerQuestionAnswer[]; reason?: string }
   | { type: "error"; message: string };
 
 export interface ButlerToolCall {
@@ -30,10 +61,11 @@ export interface ButlerToolCall {
 
 export interface ButlerChatMessage {
   id: string;
-  role: "user" | "assistant" | "activity" | "tool";
+  role: "user" | "assistant" | "activity" | "tool" | "question";
   text: string;
   ts: number;
   tool?: ButlerToolCall;
+  question?: ButlerQuestionPrompt;
 }
 
 /** Accumulator for streamed assistant text within a single turn. */
@@ -150,7 +182,40 @@ export function reduceButlerEvent<S extends ButlerChatState>(
     }
     case "text":
       return appendAssistantText(state, buf, event.text, deps);
+    case "question": {
+      // The question card replaces the streamed text run, like a tool call does.
+      const nextBuf: AssistantBuf = { buf: "", msgId: null, textSeen: buf.textSeen };
+      if (state.chatMessages.some((m) => m.question?.askId === event.askId)) return { state, buf: nextBuf };
+      return {
+        state: {
+          ...state,
+          chatMessages: [...state.chatMessages, {
+            id: `ask-${event.askId}`,
+            role: "question",
+            text: event.questions[0]?.question ?? "",
+            ts: deps.now(),
+            question: { askId: event.askId, questions: event.questions },
+          }],
+        },
+        buf: nextBuf,
+      };
+    }
+    case "question-resolved": {
+      const idx = state.chatMessages.findIndex((m) => m.question?.askId === event.askId);
+      if (idx === -1) return { state, buf };
+      const msg = state.chatMessages[idx];
+      if (msg.question?.resolved) return { state, buf };
+      const next = [...state.chatMessages];
+      next[idx] = { ...msg, question: { ...msg.question!, resolved: { answers: event.answers, reason: event.reason } } };
+      return { state: { ...state, chatMessages: next }, buf };
+    }
     case "tool": {
+      // AskUserQuestion is rendered as its own question card (the `question` event),
+      // so a generic tool card for it would be a confusing duplicate. The buffer is
+      // left ALONE on purpose: the SDK dispatches the assistant message carrying this
+      // tool_use only after canUseTool resolved, i.e. mid-way through the reply that
+      // follows the answer — resetting there splits that reply into two bubbles.
+      if (event.name === "AskUserQuestion") return { state, buf };
       const id = event.toolId ? `tool-${event.toolId}` : `tool-${deps.now()}-${deps.rand()}`;
       // Reset the streamed-text accumulator (a tool call ends the current text run)
       // but preserve textSeen — it gates the final "result" text.
