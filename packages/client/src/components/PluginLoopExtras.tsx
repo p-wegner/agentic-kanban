@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import ReactMarkdown from "react-markdown";
+import { MarkdownView } from "./MarkdownView.js";
 import type { DiffComment, CreateDiffCommentRequest } from "@agentic-kanban/shared";
 import { apiFetch, apiPost, apiPut } from "../lib/api.js";
 import { showToast } from "./Toast.js";
@@ -1583,10 +1583,12 @@ export function ArtifactViewer({ pluginId, loopName, projectId, path, step, gate
           ) : tab === "rendered" && isMarkdown ? (
             // A PM Pipeline PRD routinely contains wide tables and fenced code. Typography's
             // table/pre do not wrap, so without this they push the whole pane sideways (#434).
-            <div className="prose prose-sm dark:prose-invert max-w-none prose-pre:whitespace-pre-wrap prose-pre:break-words prose-table:block prose-table:overflow-x-auto prose-img:max-w-full">
+            // Tables get their overflow from MarkdownView's own wrapper, NOT `prose-table:block`
+            // — that trick drops the table out of table layout and un-aligns every column.
+            <div className="prose prose-sm dark:prose-invert max-w-none prose-pre:whitespace-pre-wrap prose-pre:break-words prose-img:max-w-full">
               {segments.map((segment, i) =>
                 segment.kind === "markdown" ? (
-                  <ReactMarkdown key={`md-${i}`} components={markdownComponents}>{segment.text}</ReactMarkdown>
+                  <MarkdownView key={`md-${i}`} components={markdownComponents}>{segment.text}</MarkdownView>
                 ) : (
                   <details
                     key={`bk-${i}`}

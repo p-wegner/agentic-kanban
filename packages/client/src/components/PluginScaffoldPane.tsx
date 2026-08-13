@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import { MarkdownView } from "./MarkdownView.js";
 import { apiFetch, apiPost, apiPut } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 
@@ -218,10 +218,10 @@ export function PluginScaffoldPane({ pluginId, pluginName, projectId, onFilled }
         <div
           // Heading scale capped: the profile's own `# PM Pipeline — Project Profile` at the
           // default prose h1 size dwarfs this pane's header and re-titles the screen.
-          className="prose prose-sm dark:prose-invert max-w-none prose-pre:whitespace-pre-wrap prose-pre:break-words prose-table:block prose-table:overflow-x-auto prose-img:max-w-full prose-h1:text-base prose-h2:text-sm prose-h3:text-sm"
+          className="prose prose-sm dark:prose-invert max-w-none prose-pre:whitespace-pre-wrap prose-pre:break-words prose-img:max-w-full prose-h1:text-base prose-h2:text-sm prose-h3:text-sm"
           data-testid="plugin-scaffold-profile"
         >
-          <ReactMarkdown>{form.content}</ReactMarkdown>
+          <MarkdownView>{form.content}</MarkdownView>
         </div>
       )}
 
