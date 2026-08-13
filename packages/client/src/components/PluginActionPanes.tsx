@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 import { setProjectPref } from "../lib/settingsStore.js";
@@ -21,6 +21,9 @@ import {
   type PluginProgressStep,
   type StartPolicy,
 } from "./PluginLoopExtras.js";
+import { PluginSkillPane } from "./PluginSkillPane.js";
+
+export { PluginSkillPane };
 
 /**
  * The non-iframe halves of the board's Plugins panel: the panes for a plugin's
@@ -29,14 +32,14 @@ import {
  *
  * All three do the same shape of work (POST, show a result, report an error), but
  * they are deliberately NOT one generic pane: what "success" means differs enough
- * to matter to the user — a loop reports rounds and convergence, a script an exit
- * code and output, a skill a ticket number — and flattening them into a shared
+ * to matter to the user â€” a loop reports rounds and convergence, a script an exit
+ * code and output, a skill a ticket number â€” and flattening them into a shared
  * result blob is how a UI stops answering the question the user actually has.
  */
 
 /**
  * Loop tickets, named AND reachable (#413). Clicking switches to the board and opens the
- * issue's detail panel — the pane used to print a bare "1 ticket(s) still open" and leave
+ * issue's detail panel â€” the pane used to print a bare "1 ticket(s) still open" and leave
  * the reader to query the API for which one, which is precisely how a phantom hid.
  */
 function OpenTicketLinks({ refs }: { refs: Array<{ issueId: string; issueNumber: number | null; statusName: string }> }) {
@@ -65,7 +68,7 @@ function OpenTicketLinks({ refs }: { refs: Array<{ issueId: string; issueNumber:
 }
 
 export type PluginOwner = {
-  /** Plugin DB row id — the `:id` segment of the plugin routes. */
+  /** Plugin DB row id â€” the `:id` segment of the plugin routes. */
   pluginId: string;
   pluginSlug: string;
   pluginName: string;
@@ -82,7 +85,7 @@ export type PluginLoop = PluginOwner & {
     issueId: string;
     issueNumber: number | null;
     statusName: string;
-    /** Open, has had a workspace, none live — nothing will ever close it (#413/#397). */
+    /** Open, has had a workspace, none live â€” nothing will ever close it (#413/#397). */
     stranded?: boolean;
   }>;
   closedTickets: number;
@@ -92,7 +95,7 @@ export type PluginLoop = PluginOwner & {
   lastAdvanceAt: string | null;
   gate: PluginGate | null;
   /**
-   * When the current gate was first reached. Use this — never `lastAdvanceAt` — to show how
+   * When the current gate was first reached. Use this â€” never `lastAdvanceAt` â€” to show how
    * long a decision has been waiting: the monitor re-plans a gated loop every cycle, so
    * `lastAdvanceAt` keeps moving while nobody has acted.
    */
@@ -101,7 +104,7 @@ export type PluginLoop = PluginOwner & {
   checks: PluginCheck[] | null;
   totalCostUsd?: number;
   /**
-   * Finished-but-unlanded loop ticket (#299) — the silent-stall state, now named. Since #363 it
+   * Finished-but-unlanded loop ticket (#299) â€” the silent-stall state, now named. Since #363 it
    * also carries a workspace parked `ready_for_merge` whose issue never advanced; check
    * `mergeSafe` before offering to land it.
    */
@@ -124,15 +127,6 @@ export type PluginSkill = PluginOwner & {
   workflow?: string | null;
 };
 
-type WorkflowTemplate = {
-  id: string;
-  name: string;
-  description: string | null;
-  builtinKey: string | null;
-  isDefault: boolean;
-  ticketType: string | null;
-};
-
 type LoopAdvanceResult = {
   loop: string;
   converged: boolean;
@@ -146,20 +140,12 @@ type LoopAdvanceResult = {
 }
 
 type ScriptRunResult = { code: number | null; stdout: string; stderr: string; timedOut: boolean };
-type SkillRunResult = { issueId: string; issueNumber: number | null; workspaceId: string; branch: string };
 
-/** Mirrors the server's PluginSkillRunProgress (plugin.service.ts). */
-type SkillRunProgress =
-  | { stage: "ticket"; issueId: string; issueNumber: number | null; title: string }
-  | { stage: "workspace"; issueId: string; issueNumber: number | null; setupScript: string | null }
-  | ({ stage: "done" } & SkillRunResult)
-  | { stage: "error"; message: string };
-
-function PaneHeading({ title, subtitle, mono, identity }: {
+export function PaneHeading({ title, subtitle, mono, identity }: {
   title: string;
   subtitle?: string | null;
   mono?: boolean;
-  /** The product this pane's work is FOR (#455) — stated above the pane's own name. */
+  /** The product this pane's work is FOR (#455) â€” stated above the pane's own name. */
   identity?: string | null;
 }) {
   return (
@@ -182,7 +168,7 @@ function PaneHeading({ title, subtitle, mono, identity }: {
 /**
  * The identifiers the gate's checks quote, as the artifact viewer's jump chips (#457/#452).
  *
- * Union over the checks that can actually withdraw an approval — a passing check names nothing
+ * Union over the checks that can actually withdraw an approval â€” a passing check names nothing
  * the reviewer has to go and find. Order preserved (blocking findings tend to be listed in the
  * order they matter), deduped, capped: a chip that finds nothing is worse than no chip.
  */
@@ -201,7 +187,7 @@ export function gateFindHints(checks?: PluginCheck[] | null, limit = 6): string[
  * The token an artifact opened FROM the gate should land on (#457/#452).
  *
  * Only `fail` arms it: a `warn` is usually a summary rather than a location, and an artifact
- * opened from the stepper is being read rather than adjudicated — pushing that to the raw tab
+ * opened from the stepper is being read rather than adjudicated â€” pushing that to the raw tab
  * mid-search would be wrong. Undefined when no failing check quotes anything, which leaves the
  * viewer exactly as it was.
  */
@@ -215,7 +201,7 @@ export function gateInitialFind(checks?: PluginCheck[] | null): string | undefin
 }
 
 /**
- * Tailwind for the loop pane's two review layouts (#447) — see the long note at the render.
+ * Tailwind for the loop pane's two review layouts (#447) â€” see the long note at the render.
  *
  * `stacked` is today's single scrolling column and must stay byte-identical to it, because the
  * sub-`sm` full-screen sheet (#434) and the 44px touch targets were measured against it.
@@ -243,7 +229,7 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
   /**
    * Set when the plugin's scaffold still has unresolved TODO markers (#427). Every advance
    * 409s in that state, so the pane must say so BEFORE the click rather than only in the
-   * toast afterwards — on a fresh project this pane opened with "Start loop" as the primary
+   * toast afterwards â€” on a fresh project this pane opened with "Start loop" as the primary
    * action when refusal was the only possible outcome.
    */
   setupRequired?: { pendingFields: number; targetPath: string; onOpenSetup: () => void } | null;
@@ -253,7 +239,7 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
   const [result, setResult] = useState<LoopAdvanceResult | null>(null);
   const [openArtifact, setOpenArtifact] = useState<string | null>(null);
   /**
-   * The step the open artifact came from (#422/#423) — supplies the viewer's header and
+   * The step the open artifact came from (#422/#423) â€” supplies the viewer's header and
    * its sibling picker. Null when the artifact was opened from the gate card or the unit
    * list, which are per-file and carry no step.
    */
@@ -267,7 +253,7 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
   /**
    * Per-unit agent cost for the stepper (#457/#453). The events endpoint computes the cost
    * rollup independently of the event window, so `limit=1` buys the whole `byUnit` join for
-   * the price of one row — the timeline's own fetch (limit=200, ~1 MB on a long-lived loop)
+   * the price of one row â€” the timeline's own fetch (limit=200, ~1 MB on a long-lived loop)
    * is not duplicated here.
    */
   const [costByUnit, setCostByUnit] = useState<LoopUnitCost[] | null>(null);
@@ -287,7 +273,7 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
       + `?projectId=${projectId}&limit=1`,
     )
       .then((res) => { if (!cancelled) setCostByUnit(res.cost?.byUnit ?? null); })
-      .catch(() => { /* cost is decoration — a failure must not blank the pane */ });
+      .catch(() => { /* cost is decoration â€” a failure must not blank the pane */ });
     return () => { cancelled = true; };
   }, [loop.pluginId, loop.name, projectId, timelineKey]);
 
@@ -310,14 +296,14 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
    * One-click fix for the manual-Start-Mode warning (#428): the loop planned tickets that
    * nothing will start. Writes the same `start_mode` project preference the Monitor view's
    * control writes. It deliberately does NOT touch the Conductor: this only ever moves
-   * manual → monitor, and a project in manual has no conductor loop running to stop.
+   * manual â†’ monitor, and a project in manual has no conductor loop running to stop.
    */
   async function switchToMonitorMode() {
     if (switchingMode) return;
     setSwitchingMode(true);
     try {
       await setProjectPref(projectId, "start_mode", "monitor");
-      showToast("Start Mode set to monitor — the board will start this loop's tickets", "success");
+      showToast("Start Mode set to monitor â€” the board will start this loop's tickets", "success");
       onChanged();
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to change Start Mode", "error");
@@ -373,21 +359,21 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
   const strandedRefs = (loop.openTicketRefs ?? []).filter((ref) => ref.stranded);
   const liveRefs = (loop.openTicketRefs ?? []).filter((ref) => !ref.stranded);
   /**
-   * #447 — reading the artifact and deciding on it used to be mutually exclusive.
+   * #447 â€” reading the artifact and deciding on it used to be mutually exclusive.
    *
    * MEASURED on the live `mealplan` step-7 gate at 1440x900: the viewer mounted BELOW the gate
    * card and the stats row, so the document and the Approve/Revise buttons were never on screen
-   * together — you scrolled down to read and back up to act, losing the checks and the butler
+   * together â€” you scrolled down to read and back up to act, losing the checks and the butler
    * verdict on the way. Meanwhile the gate card was `max-w-2xl` in a ~1200px pane (~500px of
    * empty whitespace) and the artifact was squeezed into a `max-h-[60vh]` NESTED scroller.
    *
    * So from `lg` up, an open artifact turns the pane into the review shape the board already
    * uses for diffs: the document on the left taking the full pane height with its own scroll,
-   * the decision column on the right with its own. Two SIBLING scrollers — the pane itself
+   * the decision column on the right with its own. Two SIBLING scrollers â€” the pane itself
    * stops scrolling in that mode, which is what removes the nesting.
    *
    * Below `lg` nothing changes: the pane scrolls as one column, and below `sm` the viewer is
-   * still the full-screen sheet (#434, a measured fix — a 60vh box inside a scrolling pane is
+   * still the full-screen sheet (#434, a measured fix â€” a 60vh box inside a scrolling pane is
    * unusable on a phone). The one visible difference in the stacked layout is that the viewer
    * now sits at the BOTTOM of the pane rather than between the advance result and the timeline;
    * it scrolls itself into view on open (#288), and below `sm` it is a sheet, so its position
@@ -407,13 +393,13 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
       {/* `order-first` on the header and the gate, so in the split layout the column opens on
           WHAT is being decided and the decision itself. MEASURED without it: the 9-row stepper,
           the checks strip and the stats row pushed the Approve/Revise buttons to y=1213 in a
-          900px viewport — co-visible with the artifact in principle, off screen in fact. The
+          900px viewport â€” co-visible with the artifact in principle, off screen in fact. The
           class is inert in the stacked layout, where the column is not a flex container. */}
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-3 lg:order-first">
         <PaneHeading
           title={loop.label}
           subtitle={loop.description}
-          /* #455 — the pane never said WHICH product this pipeline is building, so deciding
+          /* #455 â€” the pane never said WHICH product this pipeline is building, so deciding
              "approve step 7 of a pipeline for what?" after a 13h gap meant opening step 2's
              PRD. Degrades silently to today's header when the profile names neither. */
           identity={identity?.oneLiner ?? null}
@@ -427,17 +413,17 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
       </div>
 
       {/* Setup gate (#427): the server 409s every advance while the scaffold has unresolved
-          markers, so say it here — persistently — instead of only in the toast after the click. */}
+          markers, so say it here â€” persistently â€” instead of only in the toast after the click. */}
       {setupRequired && (
         <div
           className="rounded border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 max-w-2xl flex items-start gap-2"
           data-testid="plugin-loop-setup-required"
         >
-          <span aria-hidden="true">🛠️</span>
+          <span aria-hidden="true">ðŸ› ï¸</span>
           <div className="flex-1 text-xs text-amber-900 dark:text-amber-200">
             <span className="font-medium">Setup required before this loop can run.</span>{" "}
             {setupRequired.pendingFields} unanswered field{setupRequired.pendingFields === 1 ? "" : "s"} in{" "}
-            <span className="font-mono">{setupRequired.targetPath}</span> — the plugin&apos;s agents work from
+            <span className="font-mono">{setupRequired.targetPath}</span> â€” the plugin&apos;s agents work from
             that profile, so every advance is refused until it is filled in.
           </div>
           <button
@@ -450,7 +436,7 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
         </div>
       )}
       {/* Collapsed by default: this is unchanging documentation of how loops work in general,
-          identical on every loop and every visit, and it cost ~90px at the top of the pane —
+          identical on every loop and every visit, and it cost ~90px at the top of the pane â€”
           which pushed the gate's ACTION BUTTONS below the fold on a 720px viewport. The thing
           the reader came for (the gate, its verdict, its buttons) outranks the explainer. */}
       <details className="max-w-2xl">
@@ -460,9 +446,9 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
         <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
           A board-owned loop. Each advance asks the plugin what work is still outstanding and turns every unit
           into a ticket carrying the <span className="font-mono">{loop.skill}</span> skill. The board&apos;s monitor
-          starts those tickets within this project&apos;s WIP limit — so they use the same provider selection and
+          starts those tickets within this project&apos;s WIP limit â€” so they use the same provider selection and
           profile rotation as any other ticket. Once a round&apos;s tickets are all closed the next round is planned
-          automatically, until the plugin reports nothing left to do — or until the loop is paused.
+          automatically, until the plugin reports nothing left to do â€” or until the loop is paused.
         </p>
       </details>
 
@@ -470,14 +456,14 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
       <ProgressStepper
         steps={loop.progress?.steps}
         activePath={openArtifact}
-        /* #457 — per-step cost, joined `step-<n>:v<m>` → step id by `stepCost`. */
+        /* #457 â€” per-step cost, joined `step-<n>:v<m>` â†’ step id by `stepCost`. */
         costByUnit={costByUnit}
         onOpenStep={(step, index, total) => {
           setOpenArtifact(step.artifacts![0]);
           setOpenArtifactStep({ label: step.label, version: step.version, artifacts: step.artifacts, index, total });
           setArtifactFromGate(false);
         }}
-        /* #457 — open the artifact that was actually clicked. Without this an artifact chip
+        /* #457 â€” open the artifact that was actually clicked. Without this an artifact chip
            fell back to `onOpenStep`, which always opens `artifacts[0]`: on a step with three
            outputs, two of the three chips opened the wrong file. */
         onOpenStepArtifact={(step, artifactPath, index, total) => {
@@ -488,7 +474,7 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
       />
       <ChecksBadges checks={loop.checks} />
 
-      {/* A finished step whose merge hasn't landed (#299) — the loop's silent-stall state. */}
+      {/* A finished step whose merge hasn't landed (#299) â€” the loop's silent-stall state. */}
       {loop.awaitingMerge && (
         <AwaitingMergeCard awaitingMerge={loop.awaitingMerge} onMergeStarted={onChanged} />
       )}
@@ -532,10 +518,10 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
             <div className="text-[11px] text-gray-500 dark:text-gray-400">agent cost so far</div>
           </div>
         )}
-        {/* #450 — while a gate is waiting, this button plans NOTHING by design (its own tooltip
+        {/* #450 â€” while a gate is waiting, this button plans NOTHING by design (its own tooltip
             says so), and it was the only `bg-brand-600` control on the whole pane: the eye was
             drawn to the one thing that cannot help while the two real answers sat in the gate
-            card below. It stays reachable — a replan is occasionally what you want — but the
+            card below. It stays reachable â€” a replan is occasionally what you want â€” but the
             gate's decision is now the pane's only primary action. */}
         <button
           onClick={() => void advance()}
@@ -548,14 +534,14 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
           data-testid="plugin-loop-advance"
           data-demoted={loop.gate ? "gate" : undefined}
           title={setupRequired
-            ? `Fill in the ${setupRequired.pendingFields} outstanding profile field(s) first — the plugin refuses to plan without them`
+            ? `Fill in the ${setupRequired.pendingFields} outstanding profile field(s) first â€” the plugin refuses to plan without them`
             : loop.gate
-              ? "A gate is waiting for a decision — advancing plans nothing until it is resolved. Answer the gate above."
+              ? "A gate is waiting for a decision â€” advancing plans nothing until it is resolved. Answer the gate above."
               : roundRunning
-                ? "The current round is still running — advancing now plans nothing new"
+                ? "The current round is still running â€” advancing now plans nothing new"
                 : "Plan the next round"}
         >
-          {advancing ? "Planning…" : loop.closedTickets === 0 && loop.openTickets === 0 ? "Start loop" : "Advance now"}
+          {advancing ? "Planningâ€¦" : loop.closedTickets === 0 && loop.openTickets === 0 ? "Start loop" : "Advance now"}
         </button>
         <button
           onClick={() => void togglePause()}
@@ -563,19 +549,19 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
           className="text-sm px-4 py-2.5 sm:px-3 sm:py-1.5 min-h-11 sm:min-h-0 rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
           data-testid="plugin-loop-pause-toggle"
           title={loop.paused
-            ? "Resume — the monitor will auto-advance this loop again"
-            : "Pause — stops the monitor from auto-advancing this loop; manual Advance still works"}
+            ? "Resume â€” the monitor will auto-advance this loop again"
+            : "Pause â€” stops the monitor from auto-advancing this loop; manual Advance still works"}
         >
-          {pausing ? "Working…" : loop.paused ? "Resume" : "Pause"}
+          {pausing ? "Workingâ€¦" : loop.paused ? "Resume" : "Pause"}
         </button>
       </div>
 
-      {/* #413 — the stranded tickets get their OWN line, whether or not they are all of them.
+      {/* #413 â€” the stranded tickets get their OWN line, whether or not they are all of them.
           MEASURED live: eventhub's extraction loop held 28 open tickets of which 9 were
           stranded, so a warning that only fired when EVERY open ticket was stranded would
           have stayed silent on the shape that actually occurs. Nothing will close these, so
           "the next round is planned automatically once they close" is a promise the loop
-          cannot keep — on roomsync it sat beside 9 ✓ step chips and a `converged: true` API. */}
+          cannot keep â€” on roomsync it sat beside 9 âœ“ step chips and a `converged: true` API. */}
       {strandedRefs.length > 0 && (
         <p
           className="text-xs rounded border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-red-800 dark:text-red-300 max-w-2xl"
@@ -585,7 +571,7 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
             {strandedRefs.length === 1 ? "A ticket is" : `${strandedRefs.length} tickets are`} stranded open with no
             live workspace
           </span>{" "}
-          — <OpenTicketLinks refs={strandedRefs} />. Nothing is driving{" "}
+          â€” <OpenTicketLinks refs={strandedRefs} />. Nothing is driving{" "}
           {strandedRefs.length === 1 ? "it" : "them"}, so {strandedRefs.length === 1 ? "it" : "they"} will not close on{" "}
           {strandedRefs.length === 1 ? "its" : "their"} own and the loop keeps waiting. Close or re-start{" "}
           {strandedRefs.length === 1 ? "it" : "them"} on the board (see #397), or press Advance to replan.
@@ -593,25 +579,25 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
       )}
       {roundRunning && liveRefs.length > 0 && (
         <p className="text-xs text-amber-700 dark:text-amber-400" data-testid="plugin-loop-round-running">
-          Round in progress — {liveRefs.length} ticket(s) still open
+          Round in progress â€” {liveRefs.length} ticket(s) still open
           {/* NAME the open tickets, their live status, and LINK to them (#429/#413). "1 ticket(s)
               still open" left the reader to go to the board and work out which one and whether it
-              had actually started — the difference between "running" and "planned but nothing is
+              had actually started â€” the difference between "running" and "planned but nothing is
               provisioning it" is exactly what stalls here look like. The refs cost no extra query. */}
           {": "}<OpenTicketLinks refs={liveRefs} />
           . The next round is planned automatically once they close.
         </p>
       )}
-      {/* No refs at all (an older surface payload) — keep the bare count rather than nothing. */}
+      {/* No refs at all (an older surface payload) â€” keep the bare count rather than nothing. */}
       {roundRunning && (loop.openTicketRefs?.length ?? 0) === 0 && (
         <p className="text-xs text-amber-700 dark:text-amber-400" data-testid="plugin-loop-round-running">
-          Round in progress — {loop.openTickets} ticket(s) still open. The next round is planned automatically once
+          Round in progress â€” {loop.openTickets} ticket(s) still open. The next round is planned automatically once
           they close.
         </p>
       )}
       {loop.paused && (
         <p className="text-xs text-amber-700 dark:text-amber-400">
-          Paused — the monitor will not auto-advance this loop. Press Resume to let it converge hands-off again.
+          Paused â€” the monitor will not auto-advance this loop. Press Resume to let it converge hands-off again.
         </p>
       )}
 
@@ -619,12 +605,12 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
         <div className="space-y-2 border-t border-gray-100 dark:border-gray-800 pt-3">
           <div className="text-sm text-gray-800 dark:text-gray-200">
             {result.converged && result.created.length === 0
-              ? "Converged — the plugin reports no outstanding work."
+              ? "Converged â€” the plugin reports no outstanding work."
               : `Planned ${result.planned} unit(s): ${result.created.length} new ticket(s), ${result.skippedExisting.length} already ticketed.`}
           </div>
           {result.note && <div className="text-xs text-gray-500 dark:text-gray-400">{result.note}</div>}
           {result.warnings.map((warning) => (
-            <div key={warning} className="text-xs text-amber-700 dark:text-amber-400">⚠ {warning}</div>
+            <div key={warning} className="text-xs text-amber-700 dark:text-amber-400">âš  {warning}</div>
           ))}
           {result.created.length > 0 && (
             <ul className="text-xs text-gray-600 dark:text-gray-300 space-y-0.5">
@@ -640,7 +626,7 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
                           onClick={() => { setOpenArtifact(path); setOpenArtifactStep(null); setArtifactFromGate(false); }}
                           className="text-[11px] font-mono text-brand-600 dark:text-brand-400 hover:underline ml-1"
                         >
-                          📄 {path.split("/").pop()}
+                          ðŸ“„ {path.split("/").pop()}
                         </button>
                       ))}
                     </span>
@@ -661,7 +647,7 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
       />
       </div>
 
-      {/* Inline artifact viewer (#288) — opened from the gate card, stepper, or unit list.
+      {/* Inline artifact viewer (#288) â€” opened from the gate card, stepper, or unit list.
           At `lg` with the pane in split mode this is the LEFT column (#447); stacked below
           that, and a full-screen sheet below `sm` (#434). */}
       {openArtifact && (
@@ -671,12 +657,12 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
           projectId={projectId}
           path={openArtifact}
           step={openArtifactStep ?? undefined}
-          /* #457 — label-driven bookkeeping detection (#454). With the gate's own action
+          /* #457 â€” label-driven bookkeeping detection (#454). With the gate's own action
              labels the viewer folds away a file-backed gate's `[ ] Approved / [ ] Needs
              revision` machinery even when the plugin heads that section its own way; without
              them it falls back to the generic approval vocabulary. */
           gateActionLabels={loop.gate?.actions.map((a) => a.label)}
-          /* #457/#452 — the identifiers the failing checks quote, as one-click jump chips,
+          /* #457/#452 â€” the identifiers the failing checks quote, as one-click jump chips,
              and (from a gate-card open) the first FAILED check's token as the opening search
              so the viewer lands on the row the check names instead of the top of the file. */
           findHints={findHints}
@@ -695,7 +681,7 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
  * Last run per script, surviving a pane switch (#414).
  *
  * The result used to live in the pane's own state, so selecting another script threw it
- * away — and with no timestamp anywhere, "did I already run this?" had no answer short of
+ * away â€” and with no timestamp anywhere, "did I already run this?" had no answer short of
  * running it again. Module-scoped rather than persisted: a script's output is about the
  * repo as it was minutes ago, so carrying it across a page reload would be a lie, while
  * carrying it across a pane switch is exactly what the reader expects.
@@ -744,20 +730,20 @@ export function PluginScriptPane({ script, projectId }: { script: PluginScript; 
           className="text-sm px-4 py-2.5 sm:px-3 sm:py-1.5 min-h-11 sm:min-h-0 rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 shrink-0"
           data-testid="plugin-script-run"
         >
-          {running ? "Running…" : "Run"}
+          {running ? "Runningâ€¦" : "Run"}
         </button>
       </div>
       {result && (
         <div className="flex-1 min-h-0 flex flex-col gap-1">
           <div className="text-xs text-gray-500 dark:text-gray-400" data-testid="plugin-script-result-meta">
             {result.timedOut ? "Timed out" : `Exit code ${result.code ?? "?"}`}
-            {result.code === 0 && !result.timedOut ? " ✓" : ""}
-            {lastRun && ` · ran ${formatRelativeTime(new Date(lastRun.ranAt).toISOString())}`}
+            {result.code === 0 && !result.timedOut ? " âœ“" : ""}
+            {lastRun && ` Â· ran ${formatRelativeTime(new Date(lastRun.ranAt).toISOString())}`}
           </div>
           <pre className="flex-1 min-h-0 p-3 rounded bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 overflow-auto whitespace-pre-wrap break-all text-[11px] text-gray-700 dark:text-gray-300">
             {[
-              result.stdout && `── stdout ──\n${result.stdout}`,
-              result.stderr && `── stderr ──\n${result.stderr}`,
+              result.stdout && `â”€â”€ stdout â”€â”€\n${result.stdout}`,
+              result.stderr && `â”€â”€ stderr â”€â”€\n${result.stderr}`,
             ].filter(Boolean).join("\n\n") || "(no output)"}
           </pre>
         </div>
@@ -766,238 +752,3 @@ export function PluginScriptPane({ script, projectId }: { script: PluginScript; 
   );
 }
 
-/** Seconds since a start timestamp, ticking once a second while a launch is in flight. */
-function useElapsed(since: number | null): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (since === null) return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [since]);
-  return since === null ? 0 : Math.max(0, Math.round((now - since) / 1000));
-}
-
-/**
- * Judgment-requiring work — launched as a ticket + workspace, not a subprocess.
- *
- * Two things this pane has to get right, both learned the hard way:
- *
- * 1. **Most skills need more than their name.** "Run requirement-extraction" is rarely the whole
- *    instruction; the launcher usually knows which module, which lens, which constraint. That text
- *    has nowhere to go unless the launch offers it, so the pane takes a title and a free-text
- *    prompt and the server appends the prompt to the skill's brief.
- *
- * 2. **The launch takes MINUTES and the ticket appears in MILLISECONDS.** Provisioning is worktree
- *    → the project's setup script (`npm install`, often the bulk of it) → agent launch, all inside
- *    one request. The old pane awaited that single request behind a "Launching…" label, so for
- *    minutes there was no ticket number, no stage, no error surface — indistinguishable from a
- *    dead button, while the ticket had in fact been on the board since the first second. It now
- *    streams the server's progress and shows each stage as it lands.
- */
-export function PluginSkillPane({ skill, projectId }: { skill: PluginSkill; projectId: string }) {
-  const [running, setRunning] = useState(false);
-  const [title, setTitle] = useState("");
-  const [prompt, setPrompt] = useState("");
-  const [progress, setProgress] = useState<SkillRunProgress[]>([]);
-  const [startedAt, setStartedAt] = useState<number | null>(null);
-  const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
-  const [workflowTemplateId, setWorkflowTemplateId] = useState("");
-  const [templatesError, setTemplatesError] = useState<string | null>(null);
-  const elapsed = useElapsed(running ? startedAt : null);
-
-  // The workflow decides whether this ticket has to pass a review gate to reach done. A skill
-  // that only writes analysis docs has nothing to review, so being silently routed through the
-  // board's implement → review → done default parks it on a gate that can only rubber-stamp it.
-  useEffect(() => {
-    let cancelled = false;
-    setTemplatesError(null);
-    apiFetch<WorkflowTemplate[]>(`/api/workflows/templates?projectId=${projectId}`)
-      .then((rows) => { if (!cancelled) setTemplates(rows); })
-      // Don't swallow this. The launch still works — it falls back to the board default — but a
-      // selector silently offering one option looks like the board HAS one workflow, which is a
-      // different and wrong message.
-      .catch((err) => {
-        if (!cancelled) setTemplatesError(err instanceof Error ? err.message : String(err));
-      });
-    return () => { cancelled = true; };
-  }, [projectId]);
-
-  // Reset the choice when switching skills so one skill's pick can't leak onto another.
-  useEffect(() => { setWorkflowTemplateId(""); }, [skill.pluginId, skill.name]);
-
-  const declared = skill.workflow
-    ? templates.find((t) => t.builtinKey === skill.workflow || t.name.toLowerCase() === skill.workflow!.toLowerCase())
-    : undefined;
-  const boardDefault = templates.find((t) => t.isDefault && !t.ticketType);
-
-  const ticket = progress.find((p) => p.stage === "ticket");
-  const workspaceStage = progress.find((p) => p.stage === "workspace");
-  const done = progress.find((p) => p.stage === "done");
-  const failed = progress.find((p) => p.stage === "error");
-
-  async function run() {
-    if (running) return;
-    setRunning(true);
-    setProgress([]);
-    setStartedAt(Date.now());
-    try {
-      // SSE over POST must be read with fetch + ReadableStream — EventSource is GET-only
-      // (client/CLAUDE.md). Each `data:` line is one stage of the launch.
-      const resp = await fetch(
-        `/api/plugins/${skill.pluginId}/skills/${encodeURIComponent(skill.name)}/run?stream=1`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            projectId,
-            title: title.trim() || undefined,
-            prompt: prompt.trim() || undefined,
-            workflowTemplateId: workflowTemplateId || undefined,
-          }),
-        },
-      );
-      if (!resp.ok || !resp.body) throw new Error(`Launch failed (${resp.status})`);
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      for (;;) {
-        const { done: streamDone, value } = await reader.read();
-        if (streamDone) break;
-        buffer += decoder.decode(value, { stream: true });
-        const chunks = buffer.split("\n\n");
-        buffer = chunks.pop() ?? "";
-        for (const chunk of chunks) {
-          const line = chunk.split("\n").find((l) => l.startsWith("data:"));
-          if (!line) continue;
-          const event = JSON.parse(line.slice(5).trim()) as SkillRunProgress;
-          setProgress((prev) => [...prev, event]);
-          if (event.stage === "done") {
-            showToast(`Launched #${event.issueNumber ?? "?"} on ${event.branch}`, "success");
-            setPrompt("");
-            setTitle("");
-          }
-          if (event.stage === "error") showToast(event.message, "error");
-        }
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Skill run failed";
-      setProgress((prev) => [...prev, { stage: "error", message }]);
-      showToast(message, "error");
-    } finally {
-      setRunning(false);
-    }
-  }
-
-  return (
-    <div className="p-3 sm:p-6 space-y-4 overflow-auto" data-testid="plugin-skill-pane">
-      <PaneHeading title={skill.name} subtitle={skill.description} mono />
-      <p className="text-xs text-gray-500 dark:text-gray-400 max-w-2xl">
-        Skills need judgment, so running one creates a ticket and launches a workspace against it — the same
-        path as any other board work, with the project&apos;s provider selection, review and merge gates.
-      </p>
-
-      <div className="space-y-3 max-w-2xl">
-        <label className="block space-y-1">
-          <span className="text-xs font-medium text-gray-700 dark:text-gray-300">Ticket title</span>
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            disabled={running}
-            placeholder={`${skill.pluginName}: run ${skill.name}`}
-            className="w-full text-base sm:text-sm px-2 py-2 sm:py-1.5 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 disabled:opacity-50"
-            data-testid="plugin-skill-title"
-          />
-        </label>
-        <label className="block space-y-1">
-          <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
-            Additional context <span className="font-normal text-gray-500 dark:text-gray-400">(optional)</span>
-          </span>
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            disabled={running}
-            rows={5}
-            placeholder="What should this run focus on? e.g. which module, which lens, which constraint — anything the skill's own brief cannot know."
-            className="w-full text-base sm:text-sm px-2 py-2 sm:py-1.5 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 font-mono sm:text-[12px] disabled:opacity-50"
-            data-testid="plugin-skill-prompt"
-          />
-          <span className="text-[11px] text-gray-500 dark:text-gray-400">
-            Appended to the skill&apos;s brief in the ticket the agent reads.
-          </span>
-        </label>
-        <label className="block space-y-1">
-          <span className="text-xs font-medium text-gray-700 dark:text-gray-300">Workflow</span>
-          <select
-            value={workflowTemplateId}
-            onChange={(e) => setWorkflowTemplateId(e.target.value)}
-            disabled={running || templates.length === 0}
-            className="w-full text-base sm:text-sm px-2 py-2 sm:py-1.5 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 disabled:opacity-50"
-            data-testid="plugin-skill-workflow"
-          >
-            <option value="">
-              {declared
-                ? `${declared.name} — declared by this plugin`
-                : boardDefault
-                  ? `${boardDefault.name} — this board's default`
-                  : "Board default"}
-            </option>
-            {templates.map((t) => (
-              <option key={t.id} value={t.id}>{t.name}</option>
-            ))}
-          </select>
-          <span className={`text-[11px] ${templatesError ? "text-amber-700 dark:text-amber-400" : "text-gray-500 dark:text-gray-400"}`}>
-            {templatesError
-              ? `Could not load this project's workflows (${templatesError}) — the launch will use the board default.`
-              : declared?.description
-                ?? boardDefault?.description
-                ?? "Decides which gates this ticket passes on its way to done — including whether it needs a review."}
-          </span>
-        </label>
-      </div>
-
-      <button
-        onClick={() => void run()}
-        disabled={running}
-        className="text-sm px-4 py-2.5 sm:px-3 sm:py-1.5 min-h-11 sm:min-h-0 w-full sm:w-auto rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
-        data-testid="plugin-skill-run"
-      >
-        {running ? "Launching…" : "Run as a ticket"}
-      </button>
-
-      {progress.length > 0 && (
-        <div
-          className="max-w-2xl text-xs rounded border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 p-3 space-y-1.5"
-          data-testid="plugin-skill-progress"
-        >
-          <div className="flex items-center justify-between text-gray-500 dark:text-gray-400">
-            <span>{failed ? "Launch failed" : done ? "Launched" : "Launching…"}</span>
-            {running && <span className="tabular-nums">{elapsed}s</span>}
-          </div>
-          {ticket && ticket.stage === "ticket" && (
-            <div className="text-gray-700 dark:text-gray-300">
-              ✓ Ticket <span className="font-medium">#{ticket.issueNumber ?? "?"}</span> created — it is on the
-              board now, even while the rest of this runs.
-            </div>
-          )}
-          {workspaceStage && workspaceStage.stage === "workspace" && (
-            <div className={done ? "text-gray-700 dark:text-gray-300" : "text-gray-600 dark:text-gray-400"}>
-              {done ? "✓" : "…"} Creating the worktree
-              {workspaceStage.setupScript
-                ? <> and running the project&apos;s setup script (<span className="font-mono">{workspaceStage.setupScript}</span>){done ? "" : " — this is usually the slow part, often a few minutes"}</>
-                : null}
-              , then launching the agent.
-            </div>
-          )}
-          {done && done.stage === "done" && (
-            <div className="text-gray-700 dark:text-gray-300">
-              ✓ Workspace ready on <span className="font-mono">{done.branch}</span> — the agent is running.
-            </div>
-          )}
-          {failed && failed.stage === "error" && (
-            <div className="text-red-600 dark:text-red-400">✕ {failed.message}</div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
