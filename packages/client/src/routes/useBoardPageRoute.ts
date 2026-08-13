@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { VIEW_IDS, type ViewMode } from "../lib/viewRegistry.js";
-import { buildAppPath, getAppRouteTab, parseAppPath } from "../lib/appRoutes.js";
+import { buildAppPath, getAppRouteTab, parseAppPath, type IssuePanel } from "../lib/appRoutes.js";
 import { buildProjectSlugMap, resolveProjectIdFromSlug, type SlugProject } from "../lib/projectSlug.js";
 import { NAVIGATE_VIEW_EVENT, type NavigateViewDetail } from "../lib/navigateView.js";
 import { viewTabActions } from "../stores/viewTabStore.js";
@@ -27,8 +27,14 @@ export interface BoardPageRouteOptions {
   /** Loaded projects; empty while the projects query is in flight. */
   projects: SlugProject[];
   activeProjectId: string | null;
-  /** Issue number of the open detail panel, or null when none is open. */
+  /** Issue number of the open issue-bearing panel, or null when none is open. */
   selectedIssueNumber: number | null;
+  /**
+   * WHICH panel that issue number belongs to. The workspace drawer is a second
+   * issue-bearing panel; without this the URL claimed nothing was open while a
+   * full panel was on screen, and a reload could not restore it.
+   */
+  openPanel: IssuePanel | null;
   /**
    * The board columns. Only their identity/length is read — it is the signal
    * that this project's board has arrived, so a held issue deep link can be
@@ -37,9 +43,12 @@ export interface BoardPageRouteOptions {
   columns: readonly unknown[];
   /** Switch the active project (server-side preference). */
   onSelectProject: (projectId: string) => void | Promise<void>;
-  /** Open issue #n's detail panel; returns false when it is not on the board. */
-  onOpenIssueNumber: (issueNumber: number) => boolean;
-  /** Close the detail panel (popstate back past an `/issue/<n>` entry). */
+  /**
+   * Open issue #n's panel — the detail panel or the workspace drawer, as the
+   * URL names. Returns false when the issue is not on the board.
+   */
+  onOpenIssueNumber: (issueNumber: number, panel: IssuePanel) => boolean;
+  /** Close whichever issue panel is open (popstate back past an `/issue/<n>` entry). */
   onCloseIssue: () => void;
 }
 
@@ -60,6 +69,7 @@ export function useBoardPageRoute(options?: Partial<BoardPageRouteOptions>): Boa
   const projects = options?.projects ?? NO_PROJECTS;
   const activeProjectId = options?.activeProjectId ?? null;
   const selectedIssueNumber = options?.selectedIssueNumber ?? null;
+  const openPanel = options?.openPanel ?? null;
   const columns = options?.columns ?? NO_COLUMNS;
 
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
@@ -180,7 +190,9 @@ export function useBoardPageRoute(options?: Partial<BoardPageRouteOptions>): Boa
       pending.issueSettled = true;
       // Not on this board (deleted, or a bad number): correct the URL in place
       // rather than pushing an entry for a panel that never opened.
-      if (!handlersRef.current.onOpenIssueNumber(issueStep.issueNumber)) pending.unresolved = true;
+      if (!handlersRef.current.onOpenIssueNumber(issueStep.issueNumber, issueStep.panel)) {
+        pending.unresolved = true;
+      }
     }
   }, [projects, activeProjectId, columns]);
 
@@ -195,6 +207,7 @@ export function useBoardPageRoute(options?: Partial<BoardPageRouteOptions>): Boa
       activeProjectId,
       view: viewMode,
       issueNumber: selectedIssueNumber,
+      panel: openPanel,
       preferReplace: pending.unresolved || navigationBurst.isCoalescing(now),
     });
     if (plan.action === "none") return;
@@ -206,7 +219,7 @@ export function useBoardPageRoute(options?: Partial<BoardPageRouteOptions>): Boa
       window.history.pushState(null, "", nextUrl);
       navigationBurst.notePush(now);
     }
-  }, [projects, activeProjectId, viewMode, selectedIssueNumber, columns]);
+  }, [projects, activeProjectId, viewMode, selectedIssueNumber, openPanel, columns]);
 
   // ---- Back/forward across all three dimensions. ----
   useEffect(() => {
@@ -237,7 +250,11 @@ export function useBoardPageRoute(options?: Partial<BoardPageRouteOptions>): Boa
         // The board is being replaced; hand the issue to the pending machinery,
         // which waits for the new project's columns.
         pendingRef.current = {
-          ...createPendingDeepLink({ projectSlug: null, issueNumber: parsed.issueNumber }),
+          ...createPendingDeepLink({
+            projectSlug: null,
+            issueNumber: parsed.issueNumber,
+            panel: parsed.panel,
+          }),
           targetProjectId: switchingTo,
         };
         return;
@@ -245,7 +262,7 @@ export function useBoardPageRoute(options?: Partial<BoardPageRouteOptions>): Boa
       if (parsed.issueNumber === null) {
         handlersRef.current.onCloseIssue();
       } else {
-        handlersRef.current.onOpenIssueNumber(parsed.issueNumber);
+        handlersRef.current.onOpenIssueNumber(parsed.issueNumber, parsed.panel ?? "issue");
       }
     }
     window.addEventListener("popstate", handlePopState);

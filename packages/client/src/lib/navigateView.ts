@@ -39,6 +39,15 @@ export const FOCUS_ISSUE_EVENT = "kanban:focus-issue";
 export interface FocusIssueDetail {
   issueId?: string;
   issueNumber?: number | null;
+  /**
+   * Which panel to open on that issue. Default (absent) = the detail panel.
+   * A caller that names a workspace — e.g. an inbox "finished, waiting to land"
+   * item — wants the workspace drawer, which is a different panel and now a
+   * different URL (`/issue/<n>/workspace`).
+   */
+  panel?: "issue" | "workspace";
+  /** The workspace the drawer should open onto, when one is named. */
+  workspaceId?: string;
 }
 
 export function requestIssueFocus(detail: FocusIssueDetail): void {

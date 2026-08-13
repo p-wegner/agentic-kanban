@@ -81,6 +81,19 @@ describe("inbound deep links — issue half", () => {
     expect(planDeepLinkIssue(pending, { boardLoaded: true, activeProjectId: PANTRY })).toEqual({
       kind: "open",
       issueNumber: 42,
+      panel: "issue",
+    });
+  });
+
+  it("carries the panel the link names, so a reload reopens the SAME panel", () => {
+    const pending = pendingFor("/p/pantry/board/issue/28/workspace");
+    expect(pending.panel).toBe("workspace");
+    pending.projectSettled = true;
+    pending.targetProjectId = PANTRY;
+    expect(planDeepLinkIssue(pending, { boardLoaded: true, activeProjectId: PANTRY })).toEqual({
+      kind: "open",
+      issueNumber: 28,
+      panel: "workspace",
     });
   });
 
@@ -90,6 +103,7 @@ describe("inbound deep links — issue half", () => {
     expect(planDeepLinkIssue(pending, { boardLoaded: true, activeProjectId: AK })).toEqual({
       kind: "open",
       issueNumber: 7,
+      panel: "issue",
     });
   });
 
@@ -160,6 +174,43 @@ describe("planUrlSync", () => {
       path: "/p/agentic-kanban/board",
       action: "push",
     });
+  });
+
+  it("puts the workspace drawer in the URL, and switching panels is a navigation", () => {
+    // MEASURED: opening the drawer left the bar on /p/<slug>/board — a full
+    // panel on screen that the URL denied and a reload could not restore.
+    expect(
+      planUrlSync({ ...base, issueNumber: 28, panel: "workspace", currentPath: "/p/agentic-kanban/board" }),
+    ).toEqual({ path: "/p/agentic-kanban/board/issue/28/workspace", action: "push" });
+    // Detail -> workspace on the SAME issue is a different panel, so a real
+    // history entry (back returns to the detail panel).
+    expect(
+      planUrlSync({
+        ...base,
+        issueNumber: 28,
+        panel: "workspace",
+        currentPath: "/p/agentic-kanban/board/issue/28",
+      }).action,
+    ).toBe("push");
+    // Already correct: no write at all.
+    expect(
+      planUrlSync({
+        ...base,
+        issueNumber: 28,
+        panel: "workspace",
+        currentPath: "/p/agentic-kanban/board/issue/28/workspace",
+      }).action,
+    ).toBe("none");
+    // A scoped upgrade of the workspace URL is still an in-place replace.
+    expect(
+      planUrlSync({ ...base, issueNumber: 28, panel: "workspace", currentPath: "/board/issue/28/workspace" }),
+    ).toEqual({ path: "/p/agentic-kanban/board/issue/28/workspace", action: "replace" });
+  });
+
+  it("omits the panel segment when no issue panel is open", () => {
+    expect(
+      planUrlSync({ ...base, issueNumber: null, panel: "workspace", currentPath: "/p/agentic-kanban/graph" }),
+    ).toEqual({ path: "/p/agentic-kanban/board", action: "push" });
   });
 
   it("replaces instead of pushing when told to coalesce", () => {

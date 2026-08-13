@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api.js";
-import { requestProjectSelection, requestViewNavigation } from "../lib/navigateView.js";
+import { requestIssueFocus, requestProjectSelection, requestViewNavigation } from "../lib/navigateView.js";
+import { planInboxNavigation } from "../lib/inboxNavigation.js";
+import { markProgrammaticNavigation } from "../routes/boardRouteSync.js";
 import { usePluginViewStore } from "../stores/pluginViewStore.js";
 
 /** GET /api/inbox (#302) — everything blocked on a human, across ALL projects. */
@@ -95,18 +97,29 @@ export function useInboxCountsByProject(): Map<string, number> {
  * #323: an item may belong to ANOTHER project — switch first, then navigate. The
  * loopFocus request survives the project switch, so the loop pane picks it up once
  * the target project's plugin surface loads.
+ *
+ * #446 follow-up: the item's link also NAMES the thing that is waiting (an issue,
+ * and often the workspace that finished but never landed). That was dropped, so the
+ * click landed on a bare board. It now opens the named panel via the FOCUS_ISSUE
+ * path, which the route sync turns into a pasteable URL. The whole chain is ONE
+ * history entry — `markProgrammaticNavigation` coalesces the burst.
+ *
+ * The decision is pure and unit-tested in lib/inboxNavigation.ts.
  */
 export function openInboxItem(item: InboxItem): void {
-  requestProjectSelection(item.projectId);
-  if (item.link.view === "plugin-views") {
-    if (item.link.pluginSlug && item.link.loopName) {
-      usePluginViewStore.getState().focusLoop(item.link.pluginSlug, item.link.loopName);
-    }
-    requestViewNavigation("plugin-views");
-  } else if (item.link.view === "butler") {
-    requestViewNavigation("butler");
-  } else {
-    requestViewNavigation("kanban");
+  const nav = planInboxNavigation(item);
+  markProgrammaticNavigation();
+  requestProjectSelection(nav.projectId);
+  if (nav.focusLoop) {
+    usePluginViewStore.getState().focusLoop(nav.focusLoop.pluginSlug, nav.focusLoop.loopName);
+  }
+  requestViewNavigation(nav.view);
+  if (nav.focusIssue) {
+    requestIssueFocus({
+      issueNumber: nav.focusIssue.issueNumber,
+      panel: nav.focusIssue.panel,
+      workspaceId: nav.focusIssue.workspaceId,
+    });
   }
 }
 

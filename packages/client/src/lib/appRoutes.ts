@@ -105,7 +105,9 @@ function normalizePath(pathname: string): string {
  *
  *   /p/<slugOrId>                        -> project, default view (kanban)
  *   /p/<slugOrId>/<viewPath>             -> that view
- *   /p/<slugOrId>/<viewPath>/issue/<n>   -> that view + issue #n's panel
+ *   /p/<slugOrId>/<viewPath>/issue/<n>   -> that view + issue #n's DETAIL panel
+ *   /p/<slugOrId>/<viewPath>/issue/<n>/workspace
+ *                                        -> that view + issue #n's WORKSPACE panel
  *   /p/<slugOrId>/issues/<n>             -> short alias: kanban + issue #n
  *
  * Legacy flat paths ("/board", "/burndown", "/", every alias) keep resolving
@@ -121,6 +123,17 @@ const ISSUE_ALIAS_SEGMENT = "issues";
 /** The canonical issue segment emitted by `buildAppPath`. */
 const ISSUE_SEGMENT = "issue";
 
+/**
+ * Distinguishes the SECOND issue-bearing panel (#446 follow-up). Two different
+ * full-height panels can be open on one issue — the detail panel and the
+ * workspace/diff drawer — and a URL that named only the issue number reopened
+ * the wrong one on reload. The trailing segment names which.
+ */
+const WORKSPACE_PANEL_SEGMENT = "workspace";
+
+/** Which issue-bearing panel a route opens. */
+export type IssuePanel = "issue" | "workspace";
+
 /** The view a project-scoped path with no view segment resolves to. */
 const DEFAULT_VIEW: ViewMode = "kanban";
 
@@ -131,8 +144,10 @@ export interface ParsedAppRoute {
   view: ViewMode | null;
   /** Tab to preselect for a legacy absorbed-view route, else null. */
   tab: string | null;
-  /** Issue number whose detail panel should open, else null. */
+  /** Issue number whose panel should open, else null. */
   issueNumber: number | null;
+  /** WHICH panel that issue opens — detail or workspace. Null when no issue. */
+  panel: IssuePanel | null;
 }
 
 const NO_ROUTE: ParsedAppRoute = {
@@ -140,12 +155,23 @@ const NO_ROUTE: ParsedAppRoute = {
   view: null,
   tab: null,
   issueNumber: null,
+  panel: null,
 };
 
 function parseIssueNumber(raw: string | undefined): number | null {
   if (!raw || !/^\d+$/.test(raw)) return null;
   const value = Number.parseInt(raw, 10);
   return Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
+/**
+ * The panel a trailing segment after `/issue/<n>` names. Absent = the detail
+ * panel; anything unknown is malformed (null) rather than silently the detail
+ * panel, so a typo does not open a different panel than the URL claims.
+ */
+function parsePanelSegment(raw: string | undefined): IssuePanel | null {
+  if (raw === undefined) return "issue";
+  return raw === WORKSPACE_PANEL_SEGMENT ? "workspace" : null;
 }
 
 /**
@@ -175,7 +201,7 @@ export function parseAppPath(pathname: string): ParsedAppRoute {
   if (!projectSlug) return NO_ROUTE;
 
   const rest = segments.slice(2);
-  const base: ParsedAppRoute = { projectSlug, view: null, tab: null, issueNumber: null };
+  const base: ParsedAppRoute = { projectSlug, view: null, tab: null, issueNumber: null, panel: null };
 
   // /p/<slug>
   if (rest.length === 0) {
@@ -186,7 +212,7 @@ export function parseAppPath(pathname: string): ParsedAppRoute {
   if (rest[0] === ISSUE_ALIAS_SEGMENT) {
     const issueNumber = parseIssueNumber(rest[1]);
     if (issueNumber === null || rest.length > 2) return base;
-    return { ...base, view: DEFAULT_VIEW, issueNumber };
+    return { ...base, view: DEFAULT_VIEW, issueNumber, panel: "issue" };
   }
 
   const resolved = resolveViewSegment(rest[0]);
@@ -197,11 +223,13 @@ export function parseAppPath(pathname: string): ParsedAppRoute {
     return { ...base, view: resolved.view, tab: resolved.tab };
   }
 
-  // /p/<slug>/<viewPath>/issue/<n>
-  if (rest[1] !== ISSUE_SEGMENT || rest.length > 3) return base;
+  // /p/<slug>/<viewPath>/issue/<n>[/workspace]
+  if (rest[1] !== ISSUE_SEGMENT || rest.length > 4) return base;
   const issueNumber = parseIssueNumber(rest[2]);
   if (issueNumber === null) return base;
-  return { ...base, view: resolved.view, tab: resolved.tab, issueNumber };
+  const panel = parsePanelSegment(rest[3]);
+  if (panel === null) return base;
+  return { ...base, view: resolved.view, tab: resolved.tab, issueNumber, panel };
 }
 
 /** Legacy flat paths: no project scope, but issue deep links still parse. */
@@ -213,6 +241,7 @@ function parseFlatPath(normalized: string): ParsedAppRoute {
       view,
       tab: LEGACY_TAB_ROUTES[normalized]?.tab ?? null,
       issueNumber: null,
+      panel: null,
     };
   }
 
@@ -222,19 +251,21 @@ function parseFlatPath(normalized: string): ParsedAppRoute {
   if (segments[0] === ISSUE_ALIAS_SEGMENT && segments.length === 2) {
     const issueNumber = parseIssueNumber(segments[1]);
     if (issueNumber === null) return NO_ROUTE;
-    return { projectSlug: null, view: DEFAULT_VIEW, tab: null, issueNumber };
+    return { projectSlug: null, view: DEFAULT_VIEW, tab: null, issueNumber, panel: "issue" };
   }
 
-  // /<viewPath>/issue/<n>
-  if (segments.length === 3 && segments[1] === ISSUE_SEGMENT) {
+  // /<viewPath>/issue/<n>[/workspace]
+  if ((segments.length === 3 || segments.length === 4) && segments[1] === ISSUE_SEGMENT) {
     const resolved = resolveViewSegment(segments[0]);
     const issueNumber = parseIssueNumber(segments[2]);
-    if (!resolved || issueNumber === null) return NO_ROUTE;
+    const panel = parsePanelSegment(segments[3]);
+    if (!resolved || issueNumber === null || panel === null) return NO_ROUTE;
     return {
       projectSlug: null,
       view: resolved.view,
       tab: resolved.tab,
       issueNumber,
+      panel,
     };
   }
 
@@ -254,12 +285,14 @@ function decodeSegment(segment: string): string {
  * path, so nothing regresses before the project list has loaded.
  *
  * Only ever emits the canonical `/issue/<n>` form — `/issues/<n>` is an
- * inbound alias.
+ * inbound alias. `panel: "workspace"` adds the trailing `/workspace` segment so
+ * the workspace drawer reloads as the workspace drawer.
  */
 export function buildAppPath(opts: {
   projectSlug?: string | null;
   view: ViewMode;
   issueNumber?: number | null;
+  panel?: IssuePanel | null;
 }): string {
   const viewPath = VIEW_ROUTE_PATHS[opts.view] ?? VIEW_ROUTE_PATHS[DEFAULT_VIEW];
   const slug = opts.projectSlug ? encodeURIComponent(opts.projectSlug) : null;
@@ -268,5 +301,7 @@ export function buildAppPath(opts: {
     typeof opts.issueNumber === "number" && Number.isSafeInteger(opts.issueNumber) && opts.issueNumber > 0
       ? opts.issueNumber
       : null;
-  return issueNumber === null ? base : `${base}/${ISSUE_SEGMENT}/${issueNumber}`;
+  if (issueNumber === null) return base;
+  const issuePath = `${base}/${ISSUE_SEGMENT}/${issueNumber}`;
+  return opts.panel === "workspace" ? `${issuePath}/${WORKSPACE_PANEL_SEGMENT}` : issuePath;
 }

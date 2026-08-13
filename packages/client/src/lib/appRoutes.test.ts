@@ -86,12 +86,14 @@ describe("parseAppPath — legacy flat paths (#446)", () => {
       view: "kanban",
       tab: null,
       issueNumber: null,
+      panel: null,
     });
     expect(parseAppPath("/board")).toEqual({
       projectSlug: null,
       view: "kanban",
       tab: null,
       issueNumber: null,
+      panel: null,
     });
     expect(parseAppPath("/plugin-views").view).toBe("plugin-views");
     expect(parseAppPath("/merge-queue").view).toBe("agents");
@@ -105,12 +107,14 @@ describe("parseAppPath — legacy flat paths (#446)", () => {
       view: "analytics",
       tab: "burndown",
       issueNumber: null,
+      panel: null,
     });
     expect(parseAppPath("/monitor-history")).toEqual({
       projectSlug: null,
       view: "runtime",
       tab: "monitor-cycles",
       issueNumber: null,
+      panel: null,
     });
     expect(parseAppPath("/analytics").tab).toBeNull();
   });
@@ -129,12 +133,14 @@ describe("parseAppPath — legacy flat paths (#446)", () => {
       view: "kanban",
       tab: null,
       issueNumber: 42,
+      panel: "issue",
     });
     expect(parseAppPath("/table/issue/7")).toEqual({
       projectSlug: null,
       view: "table",
       tab: null,
       issueNumber: 7,
+      panel: "issue",
     });
   });
 
@@ -144,6 +150,7 @@ describe("parseAppPath — legacy flat paths (#446)", () => {
       view: null,
       tab: null,
       issueNumber: null,
+      panel: null,
     });
     expect(parseAppPath("/not-a-view").view).toBeNull();
     expect(parseAppPath("").view).toBe("kanban");
@@ -157,6 +164,7 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       view: "kanban",
       tab: null,
       issueNumber: null,
+      panel: null,
     });
     expect(parseAppPath("/p/mealplan/")).toEqual(parseAppPath("/p/mealplan"));
   });
@@ -167,6 +175,7 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       view: "plugin-views",
       tab: null,
       issueNumber: null,
+      panel: null,
     });
     expect(parseAppPath("/p/agentic-kanban/board").view).toBe("kanban");
     expect(parseAppPath("/p/agentic-kanban/merge-queue").view).toBe("agents");
@@ -184,6 +193,7 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       view: "analytics",
       tab: "burndown",
       issueNumber: null,
+      panel: null,
     });
   });
 
@@ -193,12 +203,14 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       view: "kanban",
       tab: null,
       issueNumber: 446,
+      panel: "issue",
     });
     expect(parseAppPath("/p/mealplan/burndown/issue/9")).toEqual({
       projectSlug: "mealplan",
       view: "analytics",
       tab: "burndown",
       issueNumber: 9,
+      panel: "issue",
     });
   });
 
@@ -208,6 +220,7 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       view: "kanban",
       tab: null,
       issueNumber: 12,
+      panel: "issue",
     });
   });
 
@@ -221,12 +234,14 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       view: null,
       tab: null,
       issueNumber: null,
+      panel: null,
     });
     expect(parseAppPath("/p/")).toEqual({
       projectSlug: null,
       view: null,
       tab: null,
       issueNumber: null,
+      panel: null,
     });
     // Unknown view segment — project is still known, view is not.
     expect(parseAppPath("/p/mealplan/not-a-view")).toEqual({
@@ -234,6 +249,7 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       view: null,
       tab: null,
       issueNumber: null,
+      panel: null,
     });
     // Non-numeric / invalid issue numbers.
     expect(parseAppPath("/p/mealplan/board/issue/abc").view).toBeNull();
@@ -285,18 +301,70 @@ describe("buildAppPath (#446)", () => {
         projectSlug: "x",
         view,
         issueNumber: 7,
+        panel: "issue",
       });
       const noIssue = buildAppPath({ projectSlug: "x", view });
       expect(parseAppPath(noIssue)).toMatchObject({
         projectSlug: "x",
         view,
         issueNumber: null,
+        panel: null,
       });
       // Flat form round-trips too.
       expect(parseAppPath(buildAppPath({ view }))).toMatchObject({
         projectSlug: null,
         view,
       });
+    }
+  });
+});
+
+/**
+ * The workspace/diff drawer is a SECOND issue-bearing panel. MEASURED: opening
+ * it from the "Recently merged" strip left the URL on `/p/eventhub/board` — the
+ * URL claimed nothing was open while a full panel was on screen, and the state
+ * could not be reloaded or pasted. A shape that reopened the DETAIL panel on
+ * reload would be no fix either, so the segment names WHICH panel.
+ */
+describe("issue panel segment — /issue/<n>/workspace", () => {
+  it("parses the workspace panel, scoped and flat", () => {
+    expect(parseAppPath("/p/eventhub/board/issue/28/workspace")).toEqual({
+      projectSlug: "eventhub",
+      view: "kanban",
+      tab: null,
+      issueNumber: 28,
+      panel: "workspace",
+    });
+    expect(parseAppPath("/table/issue/7/workspace")).toEqual({
+      projectSlug: null,
+      view: "table",
+      tab: null,
+      issueNumber: 7,
+      panel: "workspace",
+    });
+  });
+
+  it("treats a bare /issue/<n> as the detail panel", () => {
+    expect(parseAppPath("/p/eventhub/board/issue/28").panel).toBe("issue");
+    expect(parseAppPath("/issues/28").panel).toBe("issue");
+    expect(parseAppPath("/p/eventhub/board").panel).toBeNull();
+  });
+
+  it("rejects an unknown panel segment rather than guessing a panel", () => {
+    expect(parseAppPath("/p/eventhub/board/issue/28/nonsense").view).toBeNull();
+    expect(parseAppPath("/p/eventhub/board/issue/28/workspace/extra").view).toBeNull();
+    expect(parseAppPath("/table/issue/7/nonsense").view).toBeNull();
+  });
+
+  it("builds the workspace form and round-trips it", () => {
+    expect(
+      buildAppPath({ projectSlug: "eventhub", view: "kanban", issueNumber: 28, panel: "workspace" }),
+    ).toBe("/p/eventhub/board/issue/28/workspace");
+    // No issue = no panel segment, whatever the panel says.
+    expect(buildAppPath({ projectSlug: "x", view: "kanban", panel: "workspace" })).toBe("/p/x/board");
+    for (const panel of ["issue", "workspace"] as const) {
+      const path = buildAppPath({ projectSlug: "x", view: "graph", issueNumber: 9, panel });
+      expect(parseAppPath(path)).toMatchObject({ view: "graph", issueNumber: 9, panel });
     }
   });
 });
