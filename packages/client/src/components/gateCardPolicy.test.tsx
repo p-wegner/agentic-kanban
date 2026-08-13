@@ -1,11 +1,15 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { GateCard, type PluginGate, type PluginGateAction } from "./PluginLoopExtras.js";
+import { GateCard, type PluginCheck, type PluginGate, type PluginGateAction } from "./PluginLoopExtras.js";
 import {
   canSubmitGateAction,
+  gateActionButtonClasses,
+  gateActionIntent,
   gateFeedbackText,
   gateInputPlaceholder,
+  gateRecommendationConflict,
   isWaiverAction,
+  partitionGateChecks,
   viewGateRecommendation,
 } from "./gateCardPolicy.js";
 
@@ -113,5 +117,143 @@ describe("#378 C — the text box asks the question the action actually needs", 
   it("keeps the revise wording for a revise action", () => {
     expect(isWaiverAction(reviseAction)).toBe(false);
     expect(gateInputPlaceholder(reviseAction)).toContain("what should change");
+  });
+});
+
+describe("#450 — actions are styled by what they MEAN, not by whether they need text", () => {
+  it("reads the two opposite QA-gate decisions differently", () => {
+    // The MEASURED defect: both declare `input: "text"`, so the old rule gave them the same
+    // amber outline and the gate had no primary action at all.
+    expect(gateActionIntent(waiveAction)).toBe("approve-override");
+    expect(gateActionIntent(reviseAction)).toBe("reject");
+    expect(gateActionButtonClasses(gateActionIntent(waiveAction)))
+      .not.toBe(gateActionButtonClasses(gateActionIntent(reviseAction)));
+  });
+
+  it("makes a plain approve the primary action", () => {
+    expect(gateActionIntent({ id: "approve", label: "Approve" })).toBe("approve");
+    expect(gateActionButtonClasses("approve")).toContain("bg-brand-600");
+  });
+
+  it("marks a waiver-flavoured approve as an override, not as a plain approve", () => {
+    const classes = gateActionButtonClasses("approve-override");
+    expect(classes).not.toContain("bg-brand-600");
+    expect(classes).toContain("ring-2"); // filled like a primary, but visibly an override
+  });
+
+  it("leaves an action it cannot read as a secondary, never promoting it", () => {
+    // Conservative by design: a mis-read must not turn an unknown action into the primary one.
+    expect(gateActionIntent({ id: "escalate", label: "Ask the team" })).toBe("neutral");
+    expect(gateActionButtonClasses("neutral")).toBe(gateActionButtonClasses("reject"));
+  });
+
+  it("reads an ambiguous approve/revise label as the safe half", () => {
+    expect(gateActionIntent({ id: "approve-or-revise", label: "Approve or request revision" })).toBe("reject");
+  });
+
+  it("renders the two decisions with different classes and keeps Summarize out of that row", () => {
+    const html = renderToStaticMarkup(
+      <GateCard
+        pluginId="p1"
+        loopName="pm"
+        projectId="proj"
+        gate={{ ...staleGate, artifacts: ["docs/status.md"] }}
+        onResolved={() => {}}
+        onOpenArtifact={() => {}}
+      />,
+    );
+    expect(html).toContain('data-action-intent="approve-override"');
+    expect(html).toContain('data-action-intent="reject"');
+    // Summarize moved to the utility row beside the artifact chips (#450) — it is not a decision.
+    const summarizeAt = html.indexOf('data-testid="plugin-gate-summarize"');
+    const decisionAt = html.indexOf('data-testid="plugin-gate-action-approve-waive"');
+    expect(summarizeAt).toBeGreaterThan(-1);
+    expect(summarizeAt).toBeLessThan(decisionAt);
+  });
+});
+
+describe("#449 — the card leads with what withdraws a plain approval", () => {
+  const failing: PluginCheck = { name: "QA classification", verdict: "fail", detail: "the document disagrees with itself" };
+  const warning: PluginCheck = { name: "Coverage", verdict: "warn", detail: "8 of 50 unexecuted" };
+  const passing: PluginCheck = { name: "Inline verification", verdict: "pass", detail: "PASS" };
+
+  it("splits checks into blocking and reassurance", () => {
+    const { blocking, passing: ok } = partitionGateChecks([passing, failing, warning]);
+    expect(blocking.map((c) => c.name)).toEqual(["QA classification", "Coverage"]);
+    expect(ok.map((c) => c.name)).toEqual(["Inline verification"]);
+    expect(partitionGateChecks(null)).toEqual({ blocking: [], passing: [] });
+  });
+
+  it("renders the blocking block ABOVE the collapsed rest", () => {
+    const html = renderToStaticMarkup(
+      <GateCard
+        pluginId="p1"
+        loopName="pm"
+        projectId="proj"
+        gate={staleGate}
+        checks={[passing, failing]}
+        gateSince={new Date(Date.now() - 3_600_000).toISOString()}
+        onResolved={() => {}}
+        onOpenArtifact={() => {}}
+      />,
+    );
+    const blockingAt = html.indexOf('data-testid="plugin-gate-blocking"');
+    const secondaryAt = html.indexOf('data-testid="plugin-gate-secondary"');
+    expect(blockingAt).toBeGreaterThan(-1);
+    expect(blockingAt).toBeLessThan(secondaryAt);
+    expect(html).toContain("What stops a plain approval");
+    // The gate age is secondary now, but still present and still on its own testid.
+    expect(html).toContain('data-testid="plugin-gate-age"');
+  });
+});
+
+describe("#451 — the butler pre-read is a full block and its consequence is never truncated", () => {
+  const failing: PluginCheck = { name: "QA classification", verdict: "fail", detail: "the document disagrees with itself" };
+
+  it("detects a recommendation that contradicts a failing check", () => {
+    expect(gateRecommendationConflict(waiveAction, [failing])).toEqual({ failing: [failing] });
+    // A revise recommendation agrees with a failing check — no conflict to report.
+    expect(gateRecommendationConflict(reviseAction, [failing])).toBeNull();
+    // Nothing failing, nothing to say.
+    expect(gateRecommendationConflict(waiveAction, [{ name: "x", verdict: "pass" }])).toBeNull();
+    expect(gateRecommendationConflict(null, [failing])).toBeNull();
+  });
+
+  it("never truncates the accept label and says the butler disputes the check", () => {
+    const html = renderToStaticMarkup(
+      <GateCard
+        pluginId="p1"
+        loopName="pm"
+        projectId="proj"
+        gate={staleGate}
+        checks={[failing]}
+        recommendation={{ actionId: "approve-waive", reason: "Classification flag false positive" }}
+        onResolved={() => {}}
+        onOpenArtifact={() => {}}
+      />,
+    );
+    // The full consequence is in the label — `max-w-[12rem] truncate` cut it mid-word.
+    expect(html).toContain(">Do it: Approve, waiving unexecuted QA (reason required)<");
+    expect(html).not.toContain("max-w-[12rem]");
+    expect(html).not.toContain("truncate");
+    // The disagreement is stated, not left for the reader to spot across two 11px elements.
+    expect(html).toContain('data-testid="plugin-gate-recommendation-conflict"');
+    expect(html).toContain("QA classification");
+  });
+
+  it("says nothing about a conflict when the checks agree with the butler", () => {
+    const html = renderToStaticMarkup(
+      <GateCard
+        pluginId="p1"
+        loopName="pm"
+        projectId="proj"
+        gate={staleGate}
+        checks={[{ name: "Inline verification", verdict: "pass" }]}
+        recommendation={{ actionId: "approve-waive", reason: "looks fine" }}
+        onResolved={() => {}}
+        onOpenArtifact={() => {}}
+      />,
+    );
+    expect(html).not.toContain('data-testid="plugin-gate-recommendation-conflict"');
   });
 });
