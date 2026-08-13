@@ -1,38 +1,11 @@
-import { createHash, randomUUID } from "node:crypto";
-import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
-import {
-  appendFileSync,
-  cpSync,
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readFileSync,
-  rmdirSync,
-  statSync,
-  symlinkSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { readFile, stat } from "node:fs/promises";
-import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
-import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-preference-write";
+import { existsSync, readFileSync } from "node:fs";
 import { listWorkflowTemplates, type WorkflowDb } from "@agentic-kanban/shared/lib/workflow-engine";
 import {
-  DEFAULT_PLUGIN_OUTPUT_LOCATION,
-  PLUGIN_MANIFEST_FILENAME,
-  PLUGIN_OUTPUT_LOCATIONS,
-  countScaffoldPlaceholders,
-  DEFAULT_PLUGIN_AUDIENCE,
-  isPluginOutputLocation,
   parsePluginManifest,
-  pluginEnabledPreferenceKey,
-  pluginOutputLocationPreferenceKey,
-  pluginSidecarRepoName,
   pluginSkillName,
   substitutePluginEnv,
   substitutePluginPlaceholders,
   type PluginManifest,
-  type PluginOutputLocation,
   type PluginPlaceholderVars,
 } from "@agentic-kanban/shared/lib/plugin-manifest";
 import { isPluginEnabledPreferenceKey } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
@@ -42,21 +15,19 @@ import { resolvePublicBoardUrl } from "../runtime-port.js";
 import { runPluginCommand, type PluginCommandResult } from "./plugin-exec.js";
 import { createPluginLoopEngine, type LoopAdvanceResult, type LoopStatus } from "./plugin-loop.service.js";
 import { getProjectById } from "../repositories/project.repository.js";
-import { getPreference } from "../repositories/preferences.repository.js";
-import { insertProjectRepo, listProjectRepos } from "../repositories/repo.repository.js";
-import { createSiblingRepoDir } from "./project-repos.service.js";
-import { detectRepoInfo } from "./git-info.service.js";
 import { createPluginOutputLocationOps } from "./plugin-output-location.service.js";
 import {
-  deletePluginRow,
   getPluginRowById,
   listPluginEnabledPreferences,
   listPluginRows,
-  upsertPluginRow,
   type PluginRow,
 } from "../repositories/plugins.repository.js";
 import type { CreateIssueInput, CreateIssueResult } from "./issue.service.js";
 import type { CreateWorkspaceInput, CreateWorkspaceResult } from "./workspace-internals.js";
+import { createPluginEnablementOps } from "./plugin-enablement.service.js";
+import { createPluginLifecycleOps } from "./plugin-lifecycle.service.js";
+import { createPluginListingOps } from "./plugin-listing.service.js";
+import { createPluginProjectSurfaceOps } from "./plugin-project-surface.service.js";
 
 /**
  * Plugin system core (server side).
@@ -78,19 +49,10 @@ import type { CreateWorkspaceInput, CreateWorkspaceResult } from "./workspace-in
 
 // Re-exported so existing `import { PluginError } from "./plugin.service.js"` keeps working.
 export { PluginError } from "./plugin-errors.js";
-import {
-  looksLikeGitUrl,
-  readManifestFromDir,
-  resolveInside,
-  addToGitInfoExclude,
-  isLinkPath,
-  removeLink,
-} from "./plugin-fs.js";
+import { resolveInside } from "./plugin-fs.js";
 import { PluginError } from "./plugin-errors.js";
 import { fanOutScaffold, scaffoldPlaceholderStatus, requireScaffoldReady } from "./plugin-scaffold.js";
 import { createPluginLoopExtras, validatePluginSource } from "./plugin-loop-extras.service.js";
-import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
-import { resolveStartPolicy } from "./start-policy.service.js";
 import type { BoardEvents } from "./board-events.js";
 import {
   createPluginViewsRuntime,
@@ -100,13 +62,7 @@ import {
   type PluginViewProcess,
 } from "./plugin-views.service.js";
 import { pluginsHomeDir } from "./plugin-fs.js";
-import {
-  marketplaceCatalogPath,
-  buildMarketplaceEntries,
-  normalizeGitUrl,
-  type PluginMarketplaceEntry,
-  type InstalledPluginRow,
-} from "./plugin-marketplace.js";
+import { marketplaceCatalogPath, type PluginMarketplaceEntry } from "./plugin-marketplace.js";
 import {
   upsertPluginViewProcess,
   deletePluginViewProcess,
@@ -121,32 +77,11 @@ export type { PluginMarketplaceEntry, PluginViewProcess };
 
 export type PluginScriptResult = PluginCommandResult;
 
-export interface EnableReport {
-  prefKey: string;
-  skills: Array<{ name: string; mode: "junction" | "copy" | "skipped-existing" | "missing-source" }>;
-  scaffoldWritten: boolean;
-  /** Unfilled `TODO:` markers in the just-written scaffold file (0 when nothing was written). */
-  scaffoldPlaceholders: number;
-  warnings: string[];
-}
-
-export interface PluginUpdateResult {
-  row: PluginRow;
-  /** Whether a `git pull` ran (only board-managed clones, i.e. rows with a sourceUrl). */
-  pulled: boolean;
-  /** Whether the pull actually moved HEAD. */
-  headChanged: boolean;
-  previousVersion: string | null;
-  version: string | null;
-  /** Running view servers of this plugin killed because they executed pre-update code. */
-  viewsStopped: number;
-  /**
-   * Skills re-materialized into each project that has this plugin enabled (#443).
-   * An update can ADD or RENAME a skill dir, and only `enableForProject` used to fan
-   * skills out — so a newly declared skill appeared in the panel with no bundle behind it.
-   */
-  skillsRefreshed: Array<{ projectId: string; skills: EnableReport["skills"]; warnings: string[] }>;
-}
+// `EnableReport`/`PluginUpdateResult` now live in the modules that own the behavior
+// behind them (plugin-enablement.service.ts / plugin-lifecycle.service.ts) — re-exported
+// here so `import { EnableReport } from "./plugin.service.js"` keeps working.
+export type { EnableReport } from "./plugin-enablement.service.js";
+export type { PluginUpdateResult } from "./plugin-lifecycle.service.js";
 
 export interface PluginSkillRunResult {
   issueId: string;
@@ -242,361 +177,24 @@ export function createPluginService(deps: {
     return map;
   }
 
-  /**
-   * Where a git-sourced plugin is cloned. Keyed by a hash of the NORMALIZED url, not by the
-   * repo's basename: `github.com/a/tools` and `gitlab.com/b/tools` both wanted
-   * `<plugins home>/tools`, and since the clone is skipped when the directory exists, the second
-   * install silently registered the FIRST checkout under its own `sourceUrl` — a plugin serving
-   * another repo's code.
-   *
-   * A legacy basename-only directory is still reused when its `origin` is the same remote, so
-   * plugins installed before this change are not re-cloned. Any existing directory whose origin
-   * disagrees is refused rather than adopted.
-   */
-  async function resolveCloneDir(source: string): Promise<string> {
-    const repoName = (basename(source).replace(/\.git$/i, "") || "plugin").toLowerCase()
-      .replace(/[^a-z0-9._-]+/g, "-");
-    const legacy = join(pluginsHomeDir(), repoName);
-    if (existsSync(legacy) && await cloneMatchesRemote(legacy, source)) return legacy;
-    const digest = createHash("sha1").update(normalizeGitUrl(source)).digest("hex").slice(0, 8);
-    const keyed = join(pluginsHomeDir(), `${repoName}-${digest}`);
-    if (existsSync(keyed) && !(await cloneMatchesRemote(keyed, source))) {
-      throw new PluginError(
-        `${keyed} already holds a checkout of a different remote — remove it or install from a local directory`,
-        "CONFLICT",
-      );
-    }
-    return keyed;
-  }
+  // Per-project enable/disable + skill fan-out extracted to its own module
+  // (god-module ceiling) — see plugin-enablement.service.ts.
+  const { fanOutSkills, enableForProject, disableForProject } = createPluginEnablementOps({
+    database, requirePlugin, requireProject, resolveOutputRepoPath, setOutputLocation,
+  });
 
-  /** True when `dir` is a git checkout whose origin is (the normalized form of) `source`. */
-  async function cloneMatchesRemote(dir: string, source: string): Promise<boolean> {
-    const result = await gitExec(["remote", "get-url", "origin"], { cwd: dir });
-    if (result.code !== 0) return false;
-    return normalizeGitUrl(result.stdout) === normalizeGitUrl(source);
-  }
+  // Install/update/remove of a plugin ROW extracted to its own module (god-module
+  // ceiling) — see plugin-lifecycle.service.ts. Depends on `fanOutSkills` above so a
+  // manifest update can re-materialize a newly declared skill (#443).
+  const { installPlugin, updatePlugin, removePlugin } = createPluginLifecycleOps({
+    database, requireProject, enabledSlugsByProject, fanOutSkills,
+  });
 
-  async function installPlugin(input: { source: string }): Promise<PluginRow> {
-    const source = typeof input.source === "string" ? input.source.trim() : "";
-    if (!source) throw new PluginError("source is required", "BAD_REQUEST");
-
-    let localPath: string;
-    let sourceUrl: string | null = null;
-    if (existsSync(source) && statSync(source).isDirectory()) {
-      localPath = resolve(source);
-    } else if (looksLikeGitUrl(source)) {
-      sourceUrl = source;
-      localPath = await resolveCloneDir(source);
-      if (!existsSync(localPath)) {
-        mkdirSync(pluginsHomeDir(), { recursive: true });
-        await gitExecOrThrow(["clone", "--depth", "1", source, localPath], {});
-      }
-    } else {
-      throw new PluginError(
-        `source must be an existing local directory or a git URL (got "${source}")`,
-        "BAD_REQUEST",
-      );
-    }
-
-    const { manifest, raw } = readManifestFromDir(localPath);
-    return upsertPluginRow(
-      {
-        id: randomUUID(),
-        pluginId: manifest.id,
-        name: manifest.name,
-        sourceUrl,
-        localPath,
-        version: manifest.version ?? null,
-        manifestJson: raw,
-      },
-      database,
-    );
-  }
-
-  /**
-   * Refresh an installed plugin in place: `git pull --ff-only` for a board-managed clone
-   * (a row with a `sourceUrl`), then re-read the manifest into the row. A plugin installed
-   * from a local directory is the USER'S checkout — it is never pulled, only re-read, so
-   * "Update" doubles as "pick up my local manifest edits". When the pull actually moved
-   * HEAD, this plugin's running view servers are stopped: they still execute the old code,
-   * and a silently stale dashboard is worse than a one-click restart.
-   */
-  async function updatePlugin(id: string): Promise<PluginUpdateResult> {
-    const row = await getPluginRowById(id, database);
-    if (!row) throw new PluginError("Plugin not found", "NOT_FOUND");
-    if (!existsSync(row.localPath)) {
-      throw new PluginError(`Plugin checkout no longer exists at ${row.localPath}`, "BAD_REQUEST");
-    }
-
-    let pulled = false;
-    let headChanged = false;
-    if (row.sourceUrl) {
-      const before = (await gitExecOrThrow(["rev-parse", "HEAD"], { cwd: row.localPath })).trim();
-      // ff-only: an update must never merge or rebase a plugin checkout; divergence
-      // (e.g. a hand-edited clone) surfaces as an error instead of a surprise merge.
-      await gitExecOrThrow(["pull", "--ff-only"], { cwd: row.localPath });
-      const after = (await gitExecOrThrow(["rev-parse", "HEAD"], { cwd: row.localPath })).trim();
-      pulled = true;
-      headChanged = before !== after;
-    }
-
-    const { manifest, raw } = readManifestFromDir(row.localPath);
-    if (manifest.id !== row.pluginId) {
-      throw new PluginError(
-        `Manifest id changed upstream ("${row.pluginId}" → "${manifest.id}"). Uninstall and reinstall to adopt the new id — per-project enablement is keyed by it.`,
-        "BAD_REQUEST",
-      );
-    }
-
-    const viewsStopped = headChanged ? stopPluginViews(row.id) : 0;
-    if (headChanged) await deletePluginViewProcessesForPlugin(row.id, undefined, database);
-
-    const updated = await upsertPluginRow(
-      {
-        id: row.id,
-        pluginId: row.pluginId,
-        name: manifest.name,
-        sourceUrl: row.sourceUrl,
-        localPath: row.localPath,
-        version: manifest.version ?? null,
-        manifestJson: raw,
-      },
-      database,
-    );
-    // #443: the manifest that just landed may declare a skill the enabled projects have no
-    // bundle for. `enableForProject` was the ONLY skill fan-out, so a rename (pm-pipeline's
-    // `pm-pipeline-operate` → `pm-round`) left the panel offering a skill whose directory does
-    // not exist in the project — `copySkillToWorktree` then returns false silently and the
-    // ticket launches with the skill NAME in its prose and nothing to run (#204's failure
-    // mode, through a door update opened). Re-running the fan-out is idempotent: an already
-    // materialized skill reports `skipped-existing`.
-    const skillsRefreshed: PluginUpdateResult["skillsRefreshed"] = [];
-    const enabledByProject = await enabledSlugsByProject();
-    for (const [projectId, slugs] of enabledByProject) {
-      if (!slugs.has(row.pluginId)) continue;
-      try {
-        const project = await requireProject(projectId);
-        const report: EnableReport = {
-          prefKey: pluginEnabledPreferenceKey(row.pluginId, projectId),
-          skills: [], scaffoldWritten: false, scaffoldPlaceholders: 0, warnings: [],
-        };
-        fanOutSkills({ ...updated, manifest }, project.repoPath, report);
-        skillsRefreshed.push({ projectId, skills: report.skills, warnings: report.warnings });
-      } catch (err) {
-        // A project whose repo has gone missing must not fail the update itself.
-        skillsRefreshed.push({
-          projectId, skills: [],
-          warnings: [`skill refresh skipped: ${err instanceof Error ? err.message : String(err)}`],
-        });
-      }
-    }
-
-    return {
-      row: updated,
-      pulled,
-      headChanged,
-      previousVersion: row.version ?? null,
-      version: updated.version ?? null,
-      viewsStopped,
-      skillsRefreshed,
-    };
-  }
-
-  // Short-TTL memo for the plugin listing (#418): GET /api/plugins re-did per-request
-  // work per installed plugin — a manifest parse, an output-location pref read, and a
-  // manifest-file disk read for the drift check (measured at 5.1s once, likely a cold
-  // AV-scanned disk read). The listing only changes through the mutators below, which
-  // all clear the memo; the TTL bounds staleness from out-of-band pref edits. Keyed by
-  // projectId because the enabled/outputLocation decoration is project-scoped. The
-  // in-flight promise is memoized so concurrent requests share one compute; a rejection
-  // evicts itself so errors are never cached.
-  const LIST_PLUGINS_TTL_MS = 15_000;
-  const listPluginsMemo = new Map<string, { at: number; result: ReturnType<typeof computePluginList> }>();
-
-  /**
-   * Manifest-drift verdicts keyed by manifest path (#425). Invalidated by the file's own
-   * mtime AND by the cached `manifestJson` it was compared against, so a `POST /:id/update`
-   * (which rewrites the row, not the file) can never leave a stale "drifted" badge behind.
-   * Unbounded only in the number of INSTALLED plugins, which is a handful.
-   */
-  const manifestDriftCache = new Map<string, { mtimeMs: number; manifestJson: string; drift: boolean }>();
-
-  function listPlugins(projectId?: string) {
-    const key = projectId ?? "";
-    const memo = listPluginsMemo.get(key);
-    if (memo && Date.now() - memo.at < LIST_PLUGINS_TTL_MS) return memo.result;
-    const result = computePluginList(projectId);
-    listPluginsMemo.set(key, { at: Date.now(), result });
-    result.catch(() => listPluginsMemo.delete(key));
-    return result;
-  }
-
-  /** Wrap a listing-affecting mutator so it clears the listPlugins memo (even on throw —
-   *  a partial mutation must not leave a stale listing cached). */
-  function invalidatesPluginList<A extends unknown[], R>(fn: (...args: A) => Promise<R>): (...args: A) => Promise<R> {
-    return async (...args: A) => {
-      try {
-        return await fn(...args);
-      } finally {
-        listPluginsMemo.clear();
-      }
-    };
-  }
-
-  /**
-   * Is the manifest the board RUNS (the cached row) behind the one on DISK? Shared by the
-   * marketplace listing and the board's plugin panel (#442) — the panel is where an operator
-   * actually drives loops, and it used to show nothing, so a drifted plugin ran its stale
-   * manifest with the only warning parked in a Settings tab the operator never opens.
-   *
-   * mtime + cached-manifestJson keyed (#425): skips the read when neither side has moved, and
-   * can never report stale drift because a row rewrite (POST /:id/update) invalidates the entry.
-   */
-  async function readManifestDrift(row: { localPath: string; manifestJson: string }): Promise<boolean> {
-    try {
-      const manifestPath = join(row.localPath, PLUGIN_MANIFEST_FILENAME);
-      const mtimeMs = (await stat(manifestPath)).mtimeMs;
-      const cached = manifestDriftCache.get(manifestPath);
-      if (cached && cached.mtimeMs === mtimeMs && cached.manifestJson === row.manifestJson) return cached.drift;
-      const drift = (await readFile(manifestPath, "utf8")).trim() !== row.manifestJson.trim();
-      manifestDriftCache.set(manifestPath, { mtimeMs, manifestJson: row.manifestJson, drift });
-      return drift;
-    } catch {
-      return false; // checkout gone or unreadable — surfaced elsewhere
-    }
-  }
-
-  async function computePluginList(projectId?: string) {
-    const rows = await listPluginRows(database);
-    const enabledMap = projectId ? await enabledSlugsByProject() : null;
-    const enabledSlugs = enabledMap?.get(projectId!) ?? new Set<string>();
-    return Promise.all(rows.map(async (row) => {
-      let manifest: PluginManifest | null = null;
-      let manifestError: string | null = null;
-      try {
-        manifest = parsePluginManifest(row.manifestJson);
-      } catch (err) {
-        manifestError = err instanceof Error ? err.message : String(err);
-      }
-      // A peek only — never creates the sidecar repo (that happens on enable/run/setOutputLocation).
-      const outputLocation = projectId ? await readOutputLocationPref(row.pluginId, projectId) : undefined;
-      // Drift (#295): the cached manifest is what the board RUNS; the file on disk is what the
-      // author EDITED. They only reconcile on POST /:id/update, and until then edits silently do
-      // nothing — so say so instead of letting the author chase a phantom bug.
-      // Async read (see readManifestDrift): a sync read of a cold file would stall the
-      // whole event loop, and this runs per installed plugin per memo-miss request.
-      const manifestDrift = await readManifestDrift(row);
-      return {
-        ...row,
-        manifest,
-        manifestError,
-        manifestDrift,
-        ...(projectId ? { enabled: enabledSlugs.has(row.pluginId), outputLocation } : {}),
-      };
-    }));
-  }
-
-  /**
-   * The marketplace = every installed plugin (row + manifest + enabled flag) merged
-   * with the machine's catalog file of installable-but-not-installed plugins. A
-   * catalog entry matching an installed plugin (by normalized git URL or slug) is
-   * absorbed into the installed row rather than listed twice.
-   */
-  async function listMarketplace(projectId?: string): Promise<{ entries: PluginMarketplaceEntry[]; catalogPath: string }> {
-    const rows = (await listPlugins(projectId)) as unknown as InstalledPluginRow[];
-    return { entries: buildMarketplaceEntries(rows), catalogPath: marketplaceCatalogPath() };
-  }
-
-  /** Delete the row + running views. Never deletes cloned files on disk. */
-  async function removePlugin(id: string): Promise<void> {
-    const row = await getPluginRowById(id, database);
-    if (!row) throw new PluginError("Plugin not found", "NOT_FOUND");
-    stopPluginViews(id);
-    await deletePluginViewProcessesForPlugin(id, undefined, database);
-    // Disable everywhere: flip every plugin_enabled_<slug>_* pref to "false" via the
-    // checked write (skill junctions/scaffolds stay — the row is gone, the files inert).
-    const prefs = await listPluginEnabledPreferences(database);
-    const entries = prefs
-      .filter((p) => isPluginEnabledPreferenceKey(p.key) && p.key.startsWith(`plugin_enabled_${row.pluginId}_`))
-      .map((p) => ({ key: p.key, value: "false" }));
-    if (entries.length > 0) await setPreferenceChecked(database, entries);
-    await deletePluginRow(id, database);
-  }
-
-  function fanOutSkills(plugin: PluginRow & { manifest: PluginManifest }, repoPath: string, report: EnableReport) {
-    for (const skill of plugin.manifest.skills ?? []) {
-      const name = pluginSkillName(skill.dir);
-      const source = resolveInside(plugin.localPath, skill.dir, `skill dir "${skill.dir}"`);
-      if (!existsSync(source)) {
-        report.skills.push({ name, mode: "missing-source" });
-        report.warnings.push(`skill dir not found in plugin: ${skill.dir}`);
-        continue;
-      }
-      const skillsRoot = join(repoPath, ".claude", "skills");
-      const target = join(skillsRoot, name);
-      if (existsSync(target) || isLinkPath(target)) {
-        report.skills.push({ name, mode: "skipped-existing" });
-      } else {
-        mkdirSync(skillsRoot, { recursive: true });
-        try {
-          symlinkSync(source, target, "junction");
-          report.skills.push({ name, mode: "junction" });
-        } catch (err) {
-          try {
-            cpSync(source, target, { recursive: true });
-            report.skills.push({ name, mode: "copy" });
-          } catch (copyErr) {
-            report.warnings.push(
-              `failed to link or copy skill "${name}": ${copyErr instanceof Error ? copyErr.message : String(copyErr)} (junction error: ${err instanceof Error ? err.message : String(err)})`,
-            );
-            continue;
-          }
-        }
-      }
-      addToGitInfoExclude(repoPath, `.claude/skills/${name}`);
-      addToGitInfoExclude(repoPath, `.claude/skills/${name}/`);
-    }
-  }
-
-
-  /** #318: optional `location` FIRST — enabling scaffolds, so choosing it afterwards left the
-   *  scaffold in the leading repo. Delegates for validation + eager sidecar creation. */
-  async function enableForProject(pluginRowId: string, projectId: string, location?: string): Promise<EnableReport> {
-    if (location !== undefined) await setOutputLocation(pluginRowId, projectId, location);
-    const plugin = await requirePlugin(pluginRowId);
-    const project = await requireProject(projectId);
-    const prefKey = pluginEnabledPreferenceKey(plugin.pluginId, projectId);
-    await setPreferenceChecked(database, [{ key: prefKey, value: "true" }]);
-
-    const report: EnableReport = { prefKey, skills: [], scaffoldWritten: false, scaffoldPlaceholders: 0, warnings: [] };
-    fanOutSkills(plugin, project.repoPath, report);
-    const outputRepoPath = await resolveOutputRepoPath(plugin, project);
-    fanOutScaffold(plugin, outputRepoPath, project.repoPath, project.name, report);
-    return report;
-  }
-
-  async function disableForProject(pluginRowId: string, projectId: string): Promise<{ prefKey: string; skillsRemoved: string[] }> {
-    const plugin = await requirePlugin(pluginRowId);
-    const project = await requireProject(projectId);
-    const prefKey = pluginEnabledPreferenceKey(plugin.pluginId, projectId);
-    await setPreferenceChecked(database, [{ key: prefKey, value: "false" }]);
-
-    // Stop this plugin's serve processes for the project.
-    stopPluginViews(pluginRowId, projectId);
-    await deletePluginViewProcessesForPlugin(pluginRowId, projectId, database);
-
-    // Remove skill JUNCTIONS only — a path that is a real directory (copy fallback
-    // or a pre-existing project skill) is NEVER deleted.
-    const skillsRemoved: string[] = [];
-    for (const skill of plugin.manifest.skills ?? []) {
-      const name = pluginSkillName(skill.dir);
-      const target = join(project.repoPath, ".claude", "skills", name);
-      if (!isLinkPath(target)) continue;
-      removeLink(target);
-      skillsRemoved.push(name);
-    }
-    return { prefKey, skillsRemoved };
-  }
+  // Read-side listing (short-TTL memo, marketplace merge, manifest-drift verdict)
+  // extracted to its own module (god-module ceiling) — see plugin-listing.service.ts.
+  const { listPlugins, listMarketplace, readManifestDrift, invalidatesPluginList } = createPluginListingOps({
+    database, enabledSlugsByProject, readOutputLocationPref,
+  });
 
   /**
    * What an enabled plugin can be ASKED to do, derived from its manifest so it cannot drift out of
@@ -869,140 +467,11 @@ export function createPluginService(deps: {
     return loops.loopStatuses(plugin.manifest, plugin.pluginId, projectId);
   }
 
-  /**
-   * Everything the ENABLED plugins offer this project, in one read: the board's
-   * Plugins panel renders views, loops, scripts and skills side by side, and
-   * four round-trips for one panel would just be four chances to disagree.
-   */
-  async function listProjectSurface(projectId: string) {
-    await requireProject(projectId);
-    const enabled = (await enabledSlugsByProject()).get(projectId) ?? new Set<string>();
-    const views = [];
-    const projectLoops = [];
-    const scripts = [];
-    const skills = [];
-    /** Enabled plugins whose on-disk manifest is ahead of the one the board runs (#442). */
-    const drifted: Array<{ pluginId: string; pluginSlug: string; pluginName: string }> = [];
-    for (const row of await listPluginRows(database)) {
-      if (!enabled.has(row.pluginId)) continue;
-      let manifest: PluginManifest;
-      try {
-        manifest = parsePluginManifest(row.manifestJson);
-      } catch {
-        continue; // a broken cached manifest must not blank the whole panel
-      }
-      const owner = { pluginId: row.id, pluginSlug: row.pluginId, pluginName: row.name };
-      if (await readManifestDrift(row)) drifted.push(owner);
-      for (const view of manifest.views ?? []) {
-        views.push({
-          ...owner,
-          id: view.id,
-          label: view.label,
-          kind: view.kind,
-          description: view.description ?? null,
-          // #456 — resolved here, so every consumer sees the same default and a manifest
-          // written before the field existed reads as `operator` rather than as unknown.
-          audience: view.audience ?? DEFAULT_PLUGIN_AUDIENCE,
-          ...(await getViewStatus(row.id, view.id, projectId)),
-        });
-      }
-      // Cost rollup (#294) now lives inside `loopStatuses` (default `includeCosts: true`),
-      // so the panel's "$X so far" arrives on the status itself.
-      for (const status of await loops.loopStatuses(manifest, row.pluginId, projectId)) {
-        projectLoops.push({ ...owner, ...status });
-      }
-      for (const script of manifest.scripts ?? []) {
-        scripts.push({
-          ...owner,
-          name: script.name,
-          label: script.label ?? script.name,
-          description: script.description ?? null,
-          command: script.command,
-          audience: script.audience ?? DEFAULT_PLUGIN_AUDIENCE,
-        });
-      }
-      for (const skill of manifest.skills ?? []) {
-        const name = pluginSkillName(skill.dir);
-        // `workflow` travels to the UI so the launcher can SEE which workflow the plugin
-        // chose for this skill, and change it, instead of discovering it after the fact.
-        skills.push({
-          ...owner,
-          name,
-          description: skill.description ?? null,
-          workflow: skill.workflow ?? null,
-          audience: skill.audience ?? DEFAULT_PLUGIN_AUDIENCE,
-        });
-      }
-    }
-    // Start policy (#293): under `manual` the monitor never runs the planner, which is
-    // indistinguishable from convergence unless the panel says so explicitly.
-    // #402's short-TTL cache — this surface is polled, so the raw full-table scan added up.
-    const prefs = await getAllPreferencesCached(database);
-    const policy = resolveStartPolicy(new Map(prefs.map((p) => [p.key, p.value])), projectId);
-    return {
-      views,
-      loops: projectLoops,
-      scripts,
-      skills,
-      drifted,
-      startPolicy: { mode: policy.mode, autoStartUnblocked: policy.autoStartUnblocked },
-    };
-  }
-
-  /** Flat list of the ENABLED plugins' loops for a project (the board Plugins panel). */
-  async function listProjectLoops(projectId: string) {
-    await requireProject(projectId);
-    const enabled = (await enabledSlugsByProject()).get(projectId) ?? new Set<string>();
-    const out = [];
-    for (const row of await listPluginRows(database)) {
-      if (!enabled.has(row.pluginId)) continue;
-      try {
-        const manifest = parsePluginManifest(row.manifestJson);
-        for (const status of await loops.loopStatuses(manifest, row.pluginId, projectId)) {
-          out.push({ pluginId: row.id, pluginSlug: row.pluginId, pluginName: row.name, ...status });
-        }
-      } catch {
-        /* skip plugins with a broken cached manifest */
-      }
-    }
-    return out;
-  }
-
-  /**
-   * The enabled plugins' LOOP statuses for MANY projects in one sweep — built for the
-   * cross-project inbox poll (2026-08-11 perf audit). `listProjectSurface` re-read the
-   * plugin rows, re-parsed every manifest and re-scanned the enabled-prefs table PER
-   * PROJECT per poll; here those per-poll invariants are hoisted and shared, views/
-   * scripts/skills are skipped (the inbox reads only gates), and the cost rollup is
-   * skipped via `includeCosts: false`. Per-plugin errors are swallowed so one broken
-   * plugin never empties another project's inbox.
-   */
-  async function listLoopSurfacesForProjects(projectIds: string[]) {
-    const out = new Map<string, Array<LoopStatus & { pluginId: string; pluginSlug: string; pluginName: string }>>();
-    if (projectIds.length === 0) return out;
-    const enabledMap = await enabledSlugsByProject();
-    // Parse each installed plugin's manifest ONCE, not once per project.
-    const parsedRows: Array<{ row: PluginRow; manifest: PluginManifest }> = [];
-    for (const row of await listPluginRows(database)) {
-      try {
-        parsedRows.push({ row, manifest: parsePluginManifest(row.manifestJson) });
-      } catch { /* a broken cached manifest must not blank every project's inbox */ }
-    }
-    await Promise.all(projectIds.map(async (projectId) => {
-      const enabled = enabledMap.get(projectId) ?? new Set<string>();
-      const projectLoops: Array<LoopStatus & { pluginId: string; pluginSlug: string; pluginName: string }> = [];
-      for (const { row, manifest } of parsedRows) {
-        if (!enabled.has(row.pluginId)) continue;
-        try {
-          for (const status of await loops.loopStatuses(manifest, row.pluginId, projectId, { includeCosts: false })) {
-            projectLoops.push({ pluginId: row.id, pluginSlug: row.pluginId, pluginName: row.name, ...status });
-          }
-        } catch { /* one plugin's broken loop state must not drop the project's other items */ }
-      }
-      out.set(projectId, projectLoops);
-    }));
-    return out;
-  }
+  // "Everything the enabled plugins offer this project (or projects)" reads extracted
+  // to their own module (god-module ceiling) — see plugin-project-surface.service.ts.
+  const { listProjectSurface, listProjectLoops, listLoopSurfacesForProjects } = createPluginProjectSurfaceOps({
+    database, requireProject, enabledSlugsByProject, loops, readManifestDrift, getViewStatus,
+  });
 
   return {
     // Listing-affecting mutators clear the listPlugins memo (#418).
