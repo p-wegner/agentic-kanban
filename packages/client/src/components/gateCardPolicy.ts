@@ -195,3 +195,39 @@ export function gateRecommendationConflict(
   const failing = (checks ?? []).filter((c) => c.verdict === "fail");
   return failing.length > 0 ? { failing } : null;
 }
+
+/**
+ * The identifiers a check's detail quotes, so the artifact viewer can jump to them (#452).
+ *
+ * ── The problem, MEASURED ──
+ *
+ * The live `QA classification (step 7)` check reads: *"STORY-2-1 Sz.3 is recorded `auto` while
+ * Finding F3 says 'not verifiable'"*. Acting on that means finding one row among 50 acceptance
+ * criteria in `test_plan.md`, then finding Finding F3 in `status.md` — by eye, in a viewer that
+ * had no search, no outline and no anchors.
+ *
+ * A check MAY carry explicit `locations` one day (plugin-side, additive). Until it does, the
+ * detail text already contains the exact tokens: backtick-quoted spans, and SCREAMING-CASE
+ * identifiers like `STORY-2-1` or `F3`. Extracting those needs no plugin change and covers the
+ * cases seen so far.
+ *
+ * Deliberately conservative — a hint that finds nothing is a dud chip, so prefer few and exact:
+ * only backticked spans and uppercase/digit identifiers of at least two characters, deduped,
+ * order preserved, capped.
+ */
+const CHECK_TOKEN_RE = /`([^`\n]{1,60})`|\b([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+)\b|\b([A-Z]{1,3}\d{1,3})\b/g;
+
+export function checkLocationTokens(detail?: string | null, limit = 4): string[] {
+  if (!detail) return [];
+  const seen: string[] = [];
+  for (const m of detail.matchAll(CHECK_TOKEN_RE)) {
+    const token = (m[1] ?? m[2] ?? m[3] ?? "").trim();
+    // One-word backticked values like `auto` are real content but too generic to jump to;
+    // keep them only when they carry structure (a separator or a digit).
+    if (token.length < 2) continue;
+    if (m[1] && !/[-_.:/\d]/.test(token)) continue;
+    if (!seen.includes(token)) seen.push(token);
+    if (seen.length >= limit) break;
+  }
+  return seen;
+}
