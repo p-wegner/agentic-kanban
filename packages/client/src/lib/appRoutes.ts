@@ -151,6 +151,14 @@ export interface ParsedAppRoute {
    * none, or names one that does not exist), and a plain view always null.
    */
   tab: string | null;
+  /**
+   * Whether the PATH actually named that tab (a tab segment, or a legacy
+   * absorbed-view path like `/burndown`) rather than it being the registry
+   * default. Because `tab` is resolved, a defaulted tab is indistinguishable
+   * from a chosen one — and a caller weighing the path against another source
+   * (the legacy `?tab=` param) must not let a default outrank an explicit ask.
+   */
+  tabIsExplicit: boolean;
   /** Issue number whose panel should open, else null. */
   issueNumber: number | null;
   /** WHICH panel that issue opens — detail or workspace. Null when no issue. */
@@ -161,6 +169,7 @@ const NO_ROUTE: ParsedAppRoute = {
   projectSlug: null,
   view: null,
   tab: null,
+  tabIsExplicit: false,
   issueNumber: null,
   panel: null,
 };
@@ -206,21 +215,32 @@ function parseViewTail(
   view: ViewMode,
   legacyTab: string | null,
   tail: string[],
-): { view: ViewMode; tab: string | null; issueNumber: number | null; panel: IssuePanel | null } | null {
+): {
+  view: ViewMode;
+  tab: string | null;
+  tabIsExplicit: boolean;
+  issueNumber: number | null;
+  panel: IssuePanel | null;
+} | null {
   const hasTabSegment = tail.length > 0 && tail[0] !== ISSUE_SEGMENT;
   // A plain view has no tab dimension, so an extra segment is not a tab — it is
   // junk, and the path is not a route (same as before #446).
   if (hasTabSegment && !viewHasTabs(view)) return null;
-  const tab = resolveViewTab(view, hasTabSegment ? tail[0] : legacyTab);
+  const named = hasTabSegment ? tail[0] : legacyTab;
+  const tab = resolveViewTab(view, named);
+  // A tab the path NAMED but that does not exist has been downgraded to the
+  // default, so it is not an explicit choice either — it must not outrank a
+  // `?tab=` that names a real one.
+  const tabIsExplicit = tab !== null && tab === named;
   const issueTail = hasTabSegment ? tail.slice(1) : tail;
 
-  if (issueTail.length === 0) return { view, tab, issueNumber: null, panel: null };
+  if (issueTail.length === 0) return { view, tab, tabIsExplicit, issueNumber: null, panel: null };
   if (issueTail[0] !== ISSUE_SEGMENT || issueTail.length > 3) return null;
   const issueNumber = parseIssueNumber(issueTail[1]);
   if (issueNumber === null) return null;
   const panel = parsePanelSegment(issueTail[2]);
   if (panel === null) return null;
-  return { view, tab, issueNumber, panel };
+  return { view, tab, tabIsExplicit, issueNumber, panel };
 }
 
 /**
@@ -239,7 +259,14 @@ export function parseAppPath(pathname: string): ParsedAppRoute {
   if (!projectSlug) return NO_ROUTE;
 
   const rest = segments.slice(2);
-  const base: ParsedAppRoute = { projectSlug, view: null, tab: null, issueNumber: null, panel: null };
+  const base: ParsedAppRoute = {
+    projectSlug,
+    view: null,
+    tab: null,
+    tabIsExplicit: false,
+    issueNumber: null,
+    panel: null,
+  };
 
   // /p/<slug>
   if (rest.length === 0) {
@@ -269,10 +296,13 @@ function parseFlatPath(normalized: string): ParsedAppRoute {
   // Whole-path aliases ("/", "/merge-queue", …) and the plain view paths.
   const whole = ROUTE_TO_VIEW[normalized];
   if (whole && segments.length <= 1) {
+    const legacyTab = LEGACY_TAB_ROUTES[normalized]?.tab ?? null;
+    const tab = resolveViewTab(whole, legacyTab);
     return {
       projectSlug: null,
       view: whole,
-      tab: resolveViewTab(whole, LEGACY_TAB_ROUTES[normalized]?.tab ?? null),
+      tab,
+      tabIsExplicit: tab !== null && tab === legacyTab,
       issueNumber: null,
       panel: null,
     };
@@ -282,7 +312,14 @@ function parseFlatPath(normalized: string): ParsedAppRoute {
   if (segments[0] === ISSUE_ALIAS_SEGMENT && segments.length === 2) {
     const issueNumber = parseIssueNumber(segments[1]);
     if (issueNumber === null) return NO_ROUTE;
-    return { projectSlug: null, view: DEFAULT_VIEW, tab: null, issueNumber, panel: "issue" };
+    return {
+      projectSlug: null,
+      view: DEFAULT_VIEW,
+      tab: null,
+      tabIsExplicit: false,
+      issueNumber,
+      panel: "issue",
+    };
   }
 
   // /<viewPath>[/<tab>][/issue/<n>[/workspace]]
