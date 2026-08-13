@@ -13,7 +13,7 @@ import {
   RUNTIME_VIEW_ID,
 } from "../lib/viewTabs.js";
 import { viewTabActions } from "../stores/viewTabStore.js";
-import { markProgrammaticNavigation } from "../routes/boardRouteSync.js";
+import { markProgrammaticNavigation } from "../lib/navigationBurst.js";
 import { computeNavTarget, type NavKey } from "../lib/boardKeyboardNav.js";
 import { showToast } from "../lib/toast.js";
 import type { BoardPanelState } from "./useBoardPanels.js";

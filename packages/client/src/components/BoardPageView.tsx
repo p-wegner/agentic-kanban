@@ -30,7 +30,7 @@ import { ViewLoadingFallback } from "./ViewLoadingFallback.js";
 import { MentionProvider } from "../lib/MentionContext.js";
 import { RUNTIME_VIEW_ID } from "../lib/viewTabs.js";
 import { viewTabActions } from "../stores/viewTabStore.js";
-import { markProgrammaticNavigation } from "../routes/boardRouteSync.js";
+import { markProgrammaticNavigation } from "../lib/navigationBurst.js";
 import { useBoardSelectionStore } from "../stores/boardSelectionStore.js";
 import { boardBulkSelectionActions } from "../stores/boardBulkSelectionStore.js";
 import type { Dispatch, MouseEvent as ReactMouseEvent, MutableRefObject, SetStateAction } from "react";
