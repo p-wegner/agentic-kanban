@@ -461,6 +461,42 @@ remain, with an actionable error. Two consequences:
   re-write it. The plugin then runs against a sidecar with no profile file and no gate. Switch the
   output location **before** enabling, or disable and re-enable after switching.
 
+## `audience` — say which entries are diagnostics
+
+The board renders every enabled capability into one **rail** down the left of the Plugins view.
+By default it renders them all at the same weight, which is wrong for most plugins: a real one
+ships a selftest, a dry-run planner dump, a status query and the skill its own loop launches —
+so the single entry that is the actual workflow ends up buried among four debugging tools, and
+a couple of them (running a loop's skill by hand, most of all) actively create duplicate work
+when pressed by someone who assumed they were part of the job.
+
+Mark those entries:
+
+```json
+"scripts": [
+  { "name": "status",   "command": "node tools/status.mjs", "cwd": "plugin" },
+  { "name": "selftest", "command": "node tools/selftest.mjs", "cwd": "plugin",
+    "audience": "developer" }
+],
+"skills": [
+  { "dir": ".claude/skills/operate" },
+  { "dir": ".claude/skills/step-runner", "audience": "developer" }
+]
+```
+
+- Valid on `skills[]`, `scripts[]` and `views[]`. Values: `"operator"` (default) and `"developer"`.
+- **Omitting it means `operator`** — a manifest written before this field existed renders exactly
+  as it always did.
+- `developer` entries move into a collapsed **Diagnostics** disclosure at the bottom of the rail.
+  Nothing is hidden or disabled: the disclosure is one click, and it opens itself whenever the
+  selected entry lives inside it.
+- **Loops carry no audience.** A loop is the workflow the panel exists to drive, and loops are now
+  rendered as the first group in the rail.
+
+Rule of thumb: mark it `developer` when a person *running your pipeline* would never press it —
+anything that validates the plugin's own fixtures, dumps internal state, or is launched by a loop
+on its own.
+
 ## Placeholders and env
 
 Available in every `command` and every `env` value, and in the scaffold template:
@@ -725,6 +761,7 @@ no agents. Cover, at minimum:
 - [ ] every `loops[].skill` is one of those skill basenames
 - [ ] `SKILL.md` still reads correctly with a launcher's extra context appended under it
 - [ ] `scripts[].cwd` set explicitly (it defaults to `"repo"`)
+- [ ] every diagnostic entry (selftest, dry run, a loop's own skill) marked `"audience": "developer"`
 - [ ] `views[].serve.portEnv` set; the server binds it, answers `/health` (or `serve.healthPath`),
       and re-reads state per request
 - [ ] every view renders a useful page BEFORE the pipeline has ever run, and offers fullscreen
@@ -753,6 +790,8 @@ half-valid. The rules that are easy to trip:
 - `loops[].skill` must be one of your `skills[]` basenames.
 - `maxUnitsPerAdvance` must be a positive integer.
 - `views[].kind` must be `"iframe"`.
+- `audience` (on `skills[]`, `scripts[]`, `views[]`) must be `"operator"` or `"developer"` when
+  present; absent means `"operator"`.
 - In a plan: every unit needs an `id` and a `title`, and duplicate unit ids **within one plan**
   are an error.
 - **Unknown top-level fields are ignored**, deliberately — a manifest using a newer field stays

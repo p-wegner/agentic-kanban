@@ -73,6 +73,22 @@ export const PLUGIN_LOOP_NAME_PATTERN = /^[A-Za-z0-9._-]+$/;
 /** Where a manifest command runs: the plugin's own checkout or the project repo. */
 export type PluginCwd = "plugin" | "repo";
 
+/**
+ * Who an entry is FOR (#456) — the board's capability rail renders the two differently.
+ *
+ * `operator` (the default, and what every pre-#456 manifest gets) is workflow: the things a
+ * person running this pipeline presses. `developer` is diagnostics — a selftest over the
+ * plugin's own fixtures, a dry-run planner dump, a skill the LOOP launches so pressing it by
+ * hand duplicates loop work. Both are still reachable; the rail just collapses `developer`
+ * entries under a "Diagnostics" disclosure so a seven-entry rail stops presenting five
+ * debugging tools at the same weight as the one entry that is the actual job.
+ */
+export const PLUGIN_AUDIENCES = ["operator", "developer"] as const;
+export type PluginAudience = (typeof PLUGIN_AUDIENCES)[number];
+
+/** The audience an entry gets when its manifest says nothing — backward compatibility. */
+export const DEFAULT_PLUGIN_AUDIENCE: PluginAudience = "operator";
+
 export interface PluginSkillDef {
   /** Directory inside the plugin repo containing a SKILL.md (e.g. ".claude/skills/x"). */
   dir: string;
@@ -89,6 +105,8 @@ export interface PluginSkillDef {
    * only rubber-stamp it. Without this field the board's per-issue-type default silently wins.
    */
   workflow?: string;
+  /** Who this skill is for (#456). Default `operator`; `developer` collapses it under Diagnostics. */
+  audience?: PluginAudience;
 }
 
 export interface PluginViewServeDef {
@@ -114,6 +132,8 @@ export interface PluginViewDef {
   /** Only "iframe" is supported in this slice. */
   kind: "iframe";
   description?: string;
+  /** Who this view is for (#456). Default `operator`; `developer` collapses it under Diagnostics. */
+  audience?: PluginAudience;
   serve: PluginViewServeDef;
 }
 
@@ -126,6 +146,8 @@ export interface PluginScriptDef {
   description?: string;
   /** Where the command runs: the plugin's own checkout or the project repo. Default "repo". */
   cwd?: PluginCwd;
+  /** Who this script is for (#456). Default `operator`; `developer` collapses it under Diagnostics. */
+  audience?: PluginAudience;
   /** Extra env vars; values support the same placeholders as view env. */
   env?: Record<string, string>;
 }
@@ -360,6 +382,20 @@ function optionalCwd(value: unknown, field: string): PluginCwd | undefined {
   return value;
 }
 
+/**
+ * `audience` is optional and absence is meaningful: it means "operator", so a manifest written
+ * before #456 keeps rendering exactly as it did. It is left UNDEFINED here rather than
+ * defaulted, so a consumer can still tell "unset" from "explicitly operator"; every renderer
+ * resolves it through `DEFAULT_PLUGIN_AUDIENCE`.
+ */
+function optionalAudience(value: unknown, field: string): PluginAudience | undefined {
+  if (value == null) return undefined;
+  if (typeof value !== "string" || !(PLUGIN_AUDIENCES as readonly string[]).includes(value)) {
+    fail(`"${field}" must be one of ${PLUGIN_AUDIENCES.join(", ")} (got ${JSON.stringify(value)})`);
+  }
+  return value as PluginAudience;
+}
+
 function requireArray(value: unknown, field: string): unknown[] {
   if (!Array.isArray(value)) fail(`"${field}" must be an array`);
   return value;
@@ -415,6 +451,7 @@ export function parsePluginManifest(input: string | unknown): PluginManifest {
       dir: requireRelativePath(rec.dir, `skills[${i}].dir`),
       description: optionalString(rec.description, `skills[${i}].description`),
       workflow: optionalString(rec.workflow, `skills[${i}].workflow`),
+      audience: optionalAudience(rec.audience, `skills[${i}].audience`),
     };
   });
 
@@ -431,6 +468,7 @@ export function parsePluginManifest(input: string | unknown): PluginManifest {
       label: requireString(rec.label, `views[${i}].label`),
       kind: "iframe" as const,
       description: optionalString(rec.description, `views[${i}].description`),
+      audience: optionalAudience(rec.audience, `views[${i}].audience`),
       serve: {
         command: requireString(serve.command, `views[${i}].serve.command`),
         cwd: optionalCwd(serve.cwd, `views[${i}].serve.cwd`),
@@ -453,6 +491,7 @@ export function parsePluginManifest(input: string | unknown): PluginManifest {
       label: optionalString(rec.label, `scripts[${i}].label`),
       description: optionalString(rec.description, `scripts[${i}].description`),
       cwd: optionalCwd(rec.cwd, `scripts[${i}].cwd`),
+      audience: optionalAudience(rec.audience, `scripts[${i}].audience`),
       env: optionalEnv(rec.env, `scripts[${i}].env`),
     };
   });
