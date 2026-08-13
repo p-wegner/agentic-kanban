@@ -72,6 +72,16 @@ export async function getAllProjects(
   return database.select().from(projects).where(isNull(projects.archivedAt));
 }
 
+/** `{id, name}` for every non-archived project — the cross-project inbox scan (#302) only needs these. */
+export async function getActiveProjectSummaries(
+  database: Database = db,
+): Promise<Array<{ id: string; name: string }>> {
+  return database
+    .select({ id: projects.id, name: projects.name })
+    .from(projects)
+    .where(isNull(projects.archivedAt));
+}
+
 export async function setProjectArchived(
   projectId: string,
   archived: boolean,
