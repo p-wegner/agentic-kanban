@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import type { DiffComment, CreateDiffCommentRequest } from "@agentic-kanban/shared";
 import { apiFetch, apiPost, apiPut } from "../lib/api.js";
@@ -840,6 +840,228 @@ export function GateCard({ pluginId, loopName, projectId, gate, gateSince, check
 
 // ── Artifact viewer (#288) ────────────────────────────────────────────
 
+// ── Markdown navigation primitives (#452) ───────────────────────────
+//
+// A failing check quotes an exact identifier ("STORY-2-1 Sz.3 is recorded `auto` …") and the
+// reviewer then has to find that row by eye in a 50-row table, inside a 60vh nested scroller
+// where the browser's own Ctrl+F is close to useless. These three pure functions are what the
+// viewer needs to answer "where is that": an outline to jump by structure, and a find that
+// reports the matching LINES so the raw view can highlight and scroll to them.
+
+export type MarkdownHeading = { depth: number; text: string; line: number; slug: string };
+
+/**
+ * CRLF-safe line split. Artifacts are read off a Windows checkout, so a plain `split("\n")`
+ * leaves a trailing `\r` on every line — which made every "blank" line a `"\r"` line that
+ * `pre-wrap` renders as 0px, silently eating the file's paragraph structure in the raw view.
+ */
+function splitLines(text: string): string[] {
+  return text.split(/\r?\n/);
+}
+
+export function slugifyHeading(text: string): string {
+  return (
+    text
+      .toLowerCase()
+      .replace(/[`*_~]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "section"
+  );
+}
+
+const FENCE_RE = /^\s{0,3}(```|~~~)/;
+
+/** Headings of a markdown document, with their 0-based line numbers. Fenced code is skipped
+ *  so a `# comment` inside a shell block never becomes a fake outline entry. */
+export function parseMarkdownOutline(content: string): MarkdownHeading[] {
+  const out: MarkdownHeading[] = [];
+  let inFence = false;
+  const lines = splitLines(content);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (FENCE_RE.test(line)) { inFence = !inFence; continue; }
+    if (inFence) continue;
+    const m = /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
+    if (!m) continue;
+    const text = m[2].trim();
+    if (!text) continue;
+    out.push({ depth: m[1].length, text, line: i, slug: slugifyHeading(text) });
+  }
+  return out;
+}
+
+/** 0-based indices of the lines containing `query` (case-insensitive, literal — the tokens
+ *  a check quotes are identifiers like `STORY-2-1`, never regexes). */
+export function findMatchingLines(content: string, query: string): number[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [];
+  const hits: number[] = [];
+  const lines = splitLines(content);
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].toLowerCase().includes(needle)) hits.push(i);
+  }
+  return hits;
+}
+
+/** One line split into matched / unmatched runs, for `<mark>`ing without a regex. */
+export function splitHighlight(text: string, query: string): Array<{ text: string; hit: boolean }> {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [{ text, hit: false }];
+  const parts: Array<{ text: string; hit: boolean }> = [];
+  const hay = text.toLowerCase();
+  let at = 0;
+  for (;;) {
+    const idx = hay.indexOf(needle, at);
+    if (idx === -1) break;
+    if (idx > at) parts.push({ text: text.slice(at, idx), hit: false });
+    parts.push({ text: text.slice(idx, idx + needle.length), hit: true });
+    at = idx + needle.length;
+  }
+  if (at < text.length) parts.push({ text: text.slice(at), hit: false });
+  return parts.length > 0 ? parts : [{ text, hit: false }];
+}
+
+// ── Plugin gate bookkeeping (#454) ──────────────────────────────────
+//
+// A file-backed gate keeps its answer IN the artifact: pm-pipeline's `status.md` opens with
+//
+//   ## Approval
+//   - [ ] Approved
+//   - [ ] Needs revision
+//   ## Feedback
+//   (reviewer writes here)
+//
+// Rendered verbatim, that is a second, non-functional approval form sitting directly above the
+// real buttons — and hand-ticking it is explicitly forbidden (the plugin's own resolve script
+// owns that file). So the viewer collapses it behind a disclosure that says what it is and who
+// answers it.
+//
+// The detection is deliberately structural, never plugin-specific: a heading whose body is
+// NOTHING BUT task-list items, whose labels mirror the gate's own action labels. When no action
+// labels are supplied it falls back to a generic approval vocabulary on the heading. Anything
+// that does not match is rendered unchanged — the failure mode is "show it", never "hide
+// something we did not understand".
+
+export type GateBookkeepingItem = { label: string; checked: boolean };
+export type GateBookkeepingBlock = {
+  /** 0-based inclusive line range covered, including an adjoining placeholder Feedback section. */
+  startLine: number;
+  endLine: number;
+  heading: string;
+  items: GateBookkeepingItem[];
+  /** True once the file itself carries an answer — then it is a record, not a prompt. */
+  answered: boolean;
+  /** Set when a `## Feedback` placeholder section was folded in with the approval section. */
+  feedbackHeading?: string;
+};
+
+const TASK_ITEM_RE = /^\s*[-*+]\s+\[([ xX])\]\s+(.*\S)\s*$/;
+const GENERIC_APPROVAL_HEADING = /^(approval|approvals|sign[- ]?off|decision|review decision|gate)\b/i;
+
+function normalizeLabel(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/** "Approved" mirrors the gate action "Approve"; "Needs revision" mirrors "Needs revision". */
+function labelsMirror(a: string, b: string): boolean {
+  const x = normalizeLabel(a);
+  const y = normalizeLabel(b);
+  if (x.length < 4 || y.length < 4) return false;
+  return x === y || x.startsWith(y) || y.startsWith(x);
+}
+
+export function detectGateBookkeeping(
+  content: string,
+  actionLabels?: string[] | null,
+): GateBookkeepingBlock[] {
+  const lines = splitLines(content);
+  const headings = parseMarkdownOutline(content);
+  if (headings.length === 0) return [];
+  const sectionEnd = (i: number) => (i + 1 < headings.length ? headings[i + 1].line - 1 : lines.length - 1);
+
+  const blocks: GateBookkeepingBlock[] = [];
+  for (let i = 0; i < headings.length; i++) {
+    const heading = headings[i];
+    const end = sectionEnd(i);
+    const body = lines.slice(heading.line + 1, end + 1);
+    const items: GateBookkeepingItem[] = [];
+    let foreign = 0;
+    for (const line of body) {
+      if (!line.trim()) continue;
+      const m = TASK_ITEM_RE.exec(line);
+      if (m) items.push({ label: m[2].trim(), checked: m[1].toLowerCase() === "x" });
+      else foreign++;
+    }
+    if (items.length < 2 || foreign > 0) continue;
+
+    const labels = (actionLabels ?? []).filter(Boolean);
+    const mirrored = labels.length > 0
+      ? items.filter((item) => labels.some((label) => labelsMirror(item.label, label))).length
+      : 0;
+    const qualifies = labels.length > 0
+      ? mirrored * 2 >= items.length
+      : GENERIC_APPROVAL_HEADING.test(heading.text);
+    if (!qualifies) continue;
+
+    const block: GateBookkeepingBlock = {
+      startLine: heading.line,
+      endLine: end,
+      heading: heading.text,
+      items,
+      answered: items.some((item) => item.checked),
+    };
+
+    // The "(reviewer writes here)" prompt belongs to the same machinery — the board collects
+    // that feedback in a textarea — but only fold it in when it really is a placeholder.
+    const next = headings[i + 1];
+    if (next && /^feedback\b/i.test(next.text)) {
+      const nextEnd = sectionEnd(i + 1);
+      const nextBody = lines.slice(next.line + 1, nextEnd + 1).filter((l) => l.trim());
+      const placeholder = nextBody.length === 0
+        || (nextBody.length === 1 && /^\(.*\)$/.test(nextBody[0].trim()));
+      if (placeholder) {
+        block.endLine = nextEnd;
+        block.feedbackHeading = next.text;
+        i++;
+      }
+    }
+    blocks.push(block);
+  }
+  return blocks;
+}
+
+/** The document split into plain-markdown runs and collapsible bookkeeping runs. */
+export type ArtifactSegment =
+  | { kind: "markdown"; text: string }
+  | { kind: "bookkeeping"; text: string; block: GateBookkeepingBlock };
+
+export function segmentArtifact(content: string, blocks: GateBookkeepingBlock[]): ArtifactSegment[] {
+  if (blocks.length === 0) return [{ kind: "markdown", text: content }];
+  const lines = splitLines(content);
+  const segments: ArtifactSegment[] = [];
+  let cursor = 0;
+  for (const block of blocks) {
+    if (block.startLine > cursor) {
+      segments.push({ kind: "markdown", text: lines.slice(cursor, block.startLine).join("\n") });
+    }
+    segments.push({ kind: "bookkeeping", text: lines.slice(block.startLine, block.endLine + 1).join("\n"), block });
+    cursor = block.endLine + 1;
+  }
+  if (cursor < lines.length) segments.push({ kind: "markdown", text: lines.slice(cursor).join("\n") });
+  return segments.filter((s) => s.kind === "bookkeeping" || s.text.trim().length > 0);
+}
+
+/** Flatten a ReactMarkdown heading's children back to text so it can carry a stable anchor id. */
+function reactNodeText(node: unknown): string {
+  if (node == null || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(reactNodeText).join("");
+  if (typeof node === "object" && "props" in (node as Record<string, unknown>)) {
+    return reactNodeText((node as { props?: { children?: unknown } }).props?.children);
+  }
+  return "";
+}
+
 type ArtifactResponse = {
   path: string;
   exists: boolean;
@@ -851,7 +1073,7 @@ type ArtifactResponse = {
   hasPreviousVersion?: boolean;
 };
 
-export function ArtifactViewer({ pluginId, loopName, projectId, path, step, onOpenArtifact, onClose, onLineNotesChange }: {
+export function ArtifactViewer({ pluginId, loopName, projectId, path, step, gateActionLabels, findHints, initialFind, onOpenArtifact, onClose, onLineNotesChange }: {
   pluginId: string;
   loopName: string;
   projectId: string;
@@ -863,6 +1085,20 @@ export function ArtifactViewer({ pluginId, loopName, projectId, path, step, onOp
    * from the gate card or the unit list, which have their own per-file affordances.
    */
   step?: { label: string; version?: string; artifacts?: string[]; index?: number; total?: number };
+  /**
+   * The gate's own action labels (#454). Supplied, the viewer can tell a file-backed gate's
+   * `[ ] Approved / [ ] Needs revision` machinery apart from ordinary checklist content and
+   * collapse it. Omitted, detection falls back to a generic approval heading vocabulary — and
+   * when neither matches, the file renders exactly as before.
+   */
+  gateActionLabels?: string[];
+  /**
+   * Identifiers a failing check quoted (#452) — offered as one-click "jump to" chips. The
+   * caller extracts them with `checkLocationTokens` from `gateCardPolicy`.
+   */
+  findHints?: string[];
+  /** Open the viewer already searching for this token, scrolled to the first hit (#452). */
+  initialFind?: string;
   /** Switch to a sibling artifact of the same step without closing the viewer. */
   onOpenArtifact?: (path: string) => void;
   onClose: () => void;
@@ -877,6 +1113,12 @@ export function ArtifactViewer({ pluginId, loopName, projectId, path, step, onOp
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<"rendered" | "raw" | "diff">("rendered");
   const [diffComments, setDiffComments] = useState<DiffComment[]>([]);
+  // Find-in-document (#452). It operates on the RAW lines, which is the only representation
+  // whose positions we can address: the rendered tree is arbitrary markdown output with no
+  // line identity. So typing a query moves the viewer to the raw line view and highlights
+  // there; the outline works in both tabs (rendered headings carry anchor ids).
+  const [query, setQuery] = useState(initialFind ?? "");
+  const [matchIndex, setMatchIndex] = useState(0);
 
   function publishNotes(comments: DiffComment[]) {
     onLineNotesChange?.(comments
@@ -939,10 +1181,12 @@ export function ArtifactViewer({ pluginId, loopName, projectId, path, step, onOp
     let cancelled = false;
     setArtifact(null);
     setError(null);
-    setTab("rendered");
+    setTab(initialFind ? "raw" : "rendered");
     setWantDiff(false);
+    setQuery(initialFind ?? "");
+    setMatchIndex(0);
     return () => { cancelled = true; void cancelled; };
-  }, [pluginId, loopName, projectId, path]);
+  }, [pluginId, loopName, projectId, path, initialFind]);
 
   useEffect(() => {
     let cancelled = false;
@@ -968,13 +1212,74 @@ export function ArtifactViewer({ pluginId, loopName, projectId, path, step, onOp
 
   const isMarkdown = /\.(md|markdown)$/i.test(path);
 
+  const content = artifact?.content ?? "";
+  const outline = useMemo(
+    () => (isMarkdown && content ? parseMarkdownOutline(content) : []),
+    [isMarkdown, content],
+  );
+  const bookkeeping = useMemo(
+    () => (isMarkdown && content ? detectGateBookkeeping(content, gateActionLabels) : []),
+    [isMarkdown, content, gateActionLabels],
+  );
+  const segments = useMemo(() => segmentArtifact(content, bookkeeping), [content, bookkeeping]);
+  const matches = useMemo(() => findMatchingLines(content, query), [content, query]);
+  const rawLines = useMemo(() => splitLines(content), [content]);
+  const currentMatchLine = matches.length > 0 ? matches[Math.min(matchIndex, matches.length - 1)] : null;
+
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+
+  function scrollToLine(line: number) {
+    const el = bodyRef.current?.querySelector(`[data-artifact-line="${line}"]`);
+    (el as HTMLElement | null)?.scrollIntoView?.({ block: "center" });
+  }
+
+  function search(next: string) {
+    setQuery(next);
+    setMatchIndex(0);
+    if (next.trim() && tab !== "raw") setTab("raw");
+  }
+
+  function stepMatch(delta: number) {
+    if (matches.length === 0) return;
+    setMatchIndex((i) => (i + delta + matches.length) % matches.length);
+  }
+
+  // Scroll the current hit into view once the raw lines are on screen.
+  useEffect(() => {
+    if (tab !== "raw" || currentMatchLine == null) return;
+    scrollToLine(currentMatchLine);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, currentMatchLine, artifact?.content]);
+
+  function jumpToHeading(heading: MarkdownHeading) {
+    if (tab === "rendered") {
+      // `slugifyHeading` only ever emits [a-z0-9-], so the id is selector-safe as written.
+      const el = bodyRef.current?.querySelector(`#artifact-h-${heading.slug}`);
+      (el as HTMLElement | null)?.scrollIntoView?.({ block: "start" });
+      return;
+    }
+    if (tab !== "raw") setTab("raw");
+    // The raw lines may not be mounted yet on a tab switch — retry after paint.
+    scrollToLine(heading.line);
+    setTimeout(() => scrollToLine(heading.line), 0);
+  }
+
+  /** Anchor ids on rendered headings, so the outline works in the Rendered tab too. */
+  const markdownComponents = useMemo(() => {
+    const heading = (Tag: "h1" | "h2" | "h3" | "h4" | "h5" | "h6") =>
+      function Heading({ children }: { children?: ReactNode }) {
+        return <Tag id={`artifact-h-${slugifyHeading(reactNodeText(children))}`}>{children}</Tag>;
+      };
+    return { h1: heading("h1"), h2: heading("h2"), h3: heading("h3"), h4: heading("h4"), h5: heading("h5"), h6: heading("h6") };
+  }, []);
+
   // The viewer renders inline BELOW the gate card / loop stats, so opening it from
   // a chip near the top of a long pane put it entirely below the fold — the click
   // appeared to do nothing (measured in the 2026-08-11 UX round). Scroll it into
   // view whenever it opens or switches artifact.
   const containerRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    containerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    containerRef.current?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
   }, [path]);
 
   // Below sm the viewer is a FULL-SCREEN sheet, not an inline max-h-[60vh] box (#434).
@@ -1061,8 +1366,88 @@ export function ArtifactViewer({ pluginId, loopName, projectId, path, step, onOp
             })}
           </div>
         )}
+        {/* Find-in-document + outline (#452). A check detail names one row of a 50-row table;
+            before this the only tool was the browser's Ctrl+F, which inside a 60vh nested
+            scroller scrolls the wrong layer as often as the right one. */}
+        {artifact?.exists && artifact.content !== null && tab !== "diff" && (
+          <div className="flex flex-wrap items-center gap-1.5" data-testid="plugin-artifact-find-bar">
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => search(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); stepMatch(e.shiftKey ? -1 : 1); } }}
+              placeholder="Find in file…"
+              // text-base below sm: iOS Safari zooms the page on focus for any input under
+              // 16px and never zooms back out (same guard as the gate textarea, #433).
+              className="text-base sm:text-[11px] px-2 py-2 sm:py-0.5 min-h-11 sm:min-h-0 w-40 sm:w-52 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900"
+              data-testid="plugin-artifact-find"
+            />
+            {query.trim() && (
+              <>
+                <span className="text-[11px] text-gray-500 dark:text-gray-400" data-testid="plugin-artifact-find-count">
+                  {matches.length === 0 ? "no matches" : `${Math.min(matchIndex, matches.length - 1) + 1}/${matches.length}`}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => stepMatch(-1)}
+                  disabled={matches.length === 0}
+                  className="text-[11px] px-3 py-2 sm:px-1.5 sm:py-0.5 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 rounded border border-gray-200 dark:border-gray-700 text-gray-500 disabled:opacity-40"
+                  aria-label="Previous match"
+                >↑</button>
+                <button
+                  type="button"
+                  onClick={() => stepMatch(1)}
+                  disabled={matches.length === 0}
+                  className="text-[11px] px-3 py-2 sm:px-1.5 sm:py-0.5 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 rounded border border-gray-200 dark:border-gray-700 text-gray-500 disabled:opacity-40"
+                  aria-label="Next match"
+                  data-testid="plugin-artifact-find-next"
+                >↓</button>
+              </>
+            )}
+            {/* Identifiers a failing check quoted — the whole point is not having to retype
+                `STORY-2-1 Sz.3` from a paragraph two panes up. */}
+            {(findHints ?? []).slice(0, 6).map((hint) => (
+              <button
+                key={hint}
+                type="button"
+                onClick={() => search(hint)}
+                title={`Find "${hint}" in this file`}
+                className={`text-[11px] font-mono px-2.5 py-2 sm:px-1.5 sm:py-0.5 min-h-11 sm:min-h-0 rounded border ${
+                  query === hint
+                    ? "border-brand-500 bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300"
+                    : "border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+                }`}
+                data-testid="plugin-artifact-find-hint"
+              >
+                🔎 {hint}
+              </button>
+            ))}
+            {outline.length > 1 && (
+              <details className="relative" data-testid="plugin-artifact-outline">
+                <summary className="cursor-pointer select-none text-[11px] px-2.5 py-2 sm:px-1.5 sm:py-0.5 min-h-11 sm:min-h-0 rounded border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400">
+                  ☰ Outline ({outline.length})
+                </summary>
+                <ul className="absolute z-10 mt-1 max-h-64 w-72 overflow-auto rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-1 shadow-lg">
+                  {outline.map((heading, i) => (
+                    <li key={`${heading.slug}-${i}`}>
+                      <button
+                        type="button"
+                        onClick={() => jumpToHeading(heading)}
+                        style={{ paddingLeft: `${(heading.depth - 1) * 10 + 6}px` }}
+                        className="block w-full truncate text-left text-[11px] py-1.5 rounded text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                        title={heading.text}
+                      >
+                        {heading.text}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </div>
+        )}
       </div>
-      <div className="flex-1 min-h-0 overflow-auto p-3">
+      <div ref={bodyRef} className="flex-1 min-h-0 overflow-auto p-3">
         {error && <div className="text-xs text-red-600 dark:text-red-400">{error}</div>}
         {!artifact && !error && <div className="text-xs text-gray-500 dark:text-gray-400">Loading…</div>}
         {artifact && !artifact.exists && (
@@ -1090,10 +1475,53 @@ export function ArtifactViewer({ pluginId, loopName, projectId, path, step, onOp
             // A PM Pipeline PRD routinely contains wide tables and fenced code. Typography's
             // table/pre do not wrap, so without this they push the whole pane sideways (#434).
             <div className="prose prose-sm dark:prose-invert max-w-none prose-pre:whitespace-pre-wrap prose-pre:break-words prose-table:block prose-table:overflow-x-auto prose-img:max-w-full">
-              <ReactMarkdown>{artifact.content}</ReactMarkdown>
+              {segments.map((segment, i) =>
+                segment.kind === "markdown" ? (
+                  <ReactMarkdown key={`md-${i}`} components={markdownComponents}>{segment.text}</ReactMarkdown>
+                ) : (
+                  <details
+                    key={`bk-${i}`}
+                    className="not-prose my-2 rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/40 px-2.5 py-1.5"
+                    data-testid="plugin-artifact-bookkeeping"
+                    data-bookkeeping-answered={segment.block.answered ? "true" : "false"}
+                  >
+                    <summary className="cursor-pointer select-none text-[11px] text-gray-500 dark:text-gray-400">
+                      🔒 Plugin bookkeeping: {segment.block.heading}
+                      {segment.block.feedbackHeading ? ` + ${segment.block.feedbackHeading}` : ""} —{" "}
+                      {segment.block.answered
+                        ? `recorded in the file (${segment.block.items.filter((it) => it.checked).map((it) => it.label).join(", ")})`
+                        : "not yet answered; use the gate buttons, not this file"}
+                    </summary>
+                    <pre className="mt-1 text-[11px] whitespace-pre-wrap break-words text-gray-500 dark:text-gray-400">
+                      {segment.text.trim()}
+                    </pre>
+                  </details>
+                ),
+              )}
             </div>
           ) : (
-            <pre className="text-[11px] whitespace-pre-wrap break-all text-gray-700 dark:text-gray-300">{artifact.content}</pre>
+            // Raw is line-addressed (#452): every line carries its number so find, the outline
+            // and a check's quoted identifier can all scroll to it and highlight it.
+            <pre className="text-[11px] text-gray-700 dark:text-gray-300" data-testid="plugin-artifact-raw">
+              {rawLines.map((line, i) => (
+                <div
+                  key={i}
+                  data-artifact-line={i}
+                  className={`whitespace-pre-wrap break-all ${
+                    currentMatchLine === i ? "bg-amber-100 dark:bg-amber-900/40 rounded" : ""
+                  }`}
+                >
+                  {query.trim()
+                    ? splitHighlight(line, query).map((part, j) =>
+                        part.hit
+                          ? <mark key={j} className="bg-amber-300 dark:bg-amber-600 dark:text-white rounded-sm">{part.text}</mark>
+                          : <span key={j}>{part.text}</span>,
+                      )
+                    : line}
+                  {line.trim() === "" ? " " : ""}
+                </div>
+              ))}
+            </pre>
           )
         )}
         {artifact?.truncated && (
