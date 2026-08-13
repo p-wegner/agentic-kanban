@@ -21,9 +21,6 @@ import {
   type PluginProgressStep,
   type StartPolicy,
 } from "./PluginLoopExtras.js";
-import { PluginSkillPane } from "./PluginSkillPane.js";
-
-export { PluginSkillPane };
 
 /**
  * The non-iframe halves of the board's Plugins panel: the panes for a plugin's
