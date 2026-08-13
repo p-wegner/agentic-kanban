@@ -12,7 +12,7 @@
  *   "id": "refactor-safety-net",
  *   "name": "Refactor Safety Net",
  *   "version": "0.1.0",
- *   "skills": [{ "dir": ".claude/skills/requirement-extraction" }],
+ *   "skills": [{ "dir": ".claude/skills/requirement-extraction", "init": true }],
  *   "views": [{ "id": "coverage", "label": "Coverage", "kind": "iframe",
  *               "serve": { "command": "node tools/coverage/serve.mjs", "portEnv": "PORT",
  *                          "healthPath": "/health",
@@ -107,6 +107,14 @@ export interface PluginSkillDef {
   workflow?: string;
   /** Who this skill is for (#456). Default `operator`; `developer` collapses it under Diagnostics. */
   audience?: PluginAudience;
+  /**
+   * Marks this as the plugin's ENTRY skill for a codebase that has never used the plugin
+   * before (#462) — e.g. refactor-safety-net's API-documentation skill, which must run
+   * once against a fresh project before the plugin's other skills produce useful output.
+   * The board cannot infer this; only the plugin author knows which skill is the on-ramp.
+   * Optional and absent by default, so a pre-#462 manifest keeps parsing unchanged.
+   */
+  init?: boolean;
 }
 
 export interface PluginViewServeDef {
@@ -363,6 +371,12 @@ function optionalString(value: unknown, field: string): string | undefined {
   return value.trim() || undefined;
 }
 
+function optionalBoolean(value: unknown, field: string): boolean | undefined {
+  if (value == null) return undefined;
+  if (typeof value !== "boolean") fail(`"${field}" must be a boolean`);
+  return value;
+}
+
 function optionalEnv(value: unknown, field: string): Record<string, string> | undefined {
   if (value == null) return undefined;
   if (typeof value !== "object" || Array.isArray(value)) fail(`"${field}" must be an object of string values`);
@@ -452,6 +466,7 @@ export function parsePluginManifest(input: string | unknown): PluginManifest {
       description: optionalString(rec.description, `skills[${i}].description`),
       workflow: optionalString(rec.workflow, `skills[${i}].workflow`),
       audience: optionalAudience(rec.audience, `skills[${i}].audience`),
+      init: optionalBoolean(rec.init, `skills[${i}].init`),
     };
   });
 

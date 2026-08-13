@@ -3,7 +3,7 @@ import { apiPost, apiPut, apiDelete } from "../../lib/api.js";
 import { EditSkillForm, type SkillSetting } from "../SettingsPanel.shared.js";
 import { showToast } from "../Toast.js";
 
-type NewSkill = { name: string; description: string; prompt: string; model: string };
+type NewSkill = { name: string; description: string; prompt: string; model: string; isInit?: boolean };
 
 type SkillsSettingsProps = {
   skills: SkillSetting[];
@@ -43,6 +43,9 @@ export function SkillsSettings({ skills, setSkills, editingSkill, setEditingSkil
                               <span className="text-sm font-medium text-gray-900">{skill.name}</span>
                               {skill.isBuiltin && (
                                 <span className="text-[10px] px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded">builtin</span>
+                              )}
+                              {skill.isInit && (
+                                <span title="One-time project-init step" className="text-[10px] px-1.5 py-0.5 bg-amber-50 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 rounded">Init</span>
                               )}
                               {skill.projectId ? (
                                 <span className="text-[10px] px-1.5 py-0.5 bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 rounded">project</span>
@@ -100,7 +103,7 @@ export function SkillsSettings({ skills, setSkills, editingSkill, setEditingSkil
                   {newSkill ? (
                     <div className="border border-gray-200 rounded-md p-3">
                       <EditSkillForm
-                        skill={{ name: newSkill.name, description: newSkill.description, prompt: newSkill.prompt, model: newSkill.model || null, projectId: null }}
+                        skill={{ name: newSkill.name, description: newSkill.description, prompt: newSkill.prompt, model: newSkill.model || null, projectId: null, isInit: newSkill.isInit }}
                         isNew
                         onSave={async (data) => {
                           const created = await apiPost<{ id: string }>("/api/agent-skills", data);

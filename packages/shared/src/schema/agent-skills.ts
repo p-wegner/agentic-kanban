@@ -9,6 +9,10 @@ export const agentSkills = sqliteTable("agent_skills", {
   model: text("model"),
   projectId: text("project_id").references(() => projects.id),
   isBuiltin: integer("is_builtin", { mode: "boolean" }).notNull().default(false),
+  // An init skill is meant to run once, early, against a newly imported project — its
+  // output is a durable artifact (docs, a profile, a review), never a code change. It is
+  // a *suggestion* surfaced to the onboarding flow, never auto-run by the board itself.
+  isInit: integer("is_init", { mode: "boolean" }).notNull().default(false),
   type: text("type").notNull().default("skill"),
   // Hash of the canonical built-in content this row was last seeded/refreshed with
   // (null for user-created skills and for legacy rows seeded before the hash existed).

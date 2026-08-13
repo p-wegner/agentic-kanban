@@ -12,7 +12,8 @@ export function createAgentSkillsRoute(database: Database) {
   router.get("/", async (c) => {
     const projectId = c.req.query("projectId");
     const globalOnly = c.req.query("global") === "true";
-    return c.json(await agentSkillService.listSkills(projectId, globalOnly));
+    const initOnly = c.req.query("init") === "true";
+    return c.json(await agentSkillService.listSkills(projectId, globalOnly, initOnly));
   });
 
   // POST /api/agent-skills/enhance — AI-enhance a skill name, description, and prompt
@@ -37,7 +38,7 @@ export function createAgentSkillsRoute(database: Database) {
 
   // POST /api/agent-skills — create a skill
   router.post("/", async (c) => {
-    const body = await parseJsonBody<{ name: string; description: string; prompt: string; model?: string; projectId?: string | null }>(c);
+    const body = await parseJsonBody<{ name: string; description: string; prompt: string; model?: string; projectId?: string | null; isInit?: boolean }>(c);
     const skill = await agentSkillService.createSkill(body);
     return c.json(skill, 201);
   });
@@ -45,7 +46,7 @@ export function createAgentSkillsRoute(database: Database) {
   // PUT /api/agent-skills/:id — update a skill
   router.put("/:id", async (c) => {
     const id = c.req.param("id");
-    const body = await parseJsonBody<{ name?: string; description?: string; prompt?: string; model?: string; projectId?: string | null }>(c);
+    const body = await parseJsonBody<{ name?: string; description?: string; prompt?: string; model?: string; projectId?: string | null; isInit?: boolean }>(c);
     const updated = await agentSkillService.updateSkill(id, body);
     return c.json(updated);
   });

@@ -106,6 +106,7 @@ export async function ensureBuiltinSkills(database: Database = db): Promise<void
       prompt: agentSkills.prompt,
       model: agentSkills.model,
       contentHash: agentSkills.contentHash,
+      isInit: agentSkills.isInit,
     })
     .from(agentSkills)
     .where(and(isNull(agentSkills.projectId), eq(agentSkills.isBuiltin, true)));
@@ -113,9 +114,11 @@ export async function ensureBuiltinSkills(database: Database = db): Promise<void
 
   let added = 0;
   let refreshed = 0;
+  let flagsSynced = 0;
   for (const skill of BUILTIN_SKILLS) {
     const canonicalHash = builtinSkillContentHash(skill);
     const row = byName.get(skill.name);
+    const desiredIsInit = "isInit" in skill && skill.isInit === true;
 
     if (!row) {
       await database.insert(agentSkills).values({
@@ -125,6 +128,7 @@ export async function ensureBuiltinSkills(database: Database = db): Promise<void
         prompt: skill.prompt,
         model: skill.model,
         isBuiltin: true,
+        isInit: desiredIsInit,
         contentHash: canonicalHash,
         createdAt: now,
         updatedAt: now,
@@ -133,13 +137,33 @@ export async function ensureBuiltinSkills(database: Database = db): Promise<void
       continue;
     }
 
-    if (row.contentHash === canonicalHash) continue; // already up to date
+    // `isInit` is metadata, not content — sync it independently of the content-hash
+    // gate below so flagging/unflagging a builtin as an init step never depends on
+    // (and never clobbers) whether the row's prompt/description was user-edited.
+    const isInitStale = row.isInit !== desiredIsInit;
+
+    if (row.contentHash === canonicalHash) {
+      if (isInitStale) {
+        await database.update(agentSkills).set({ isInit: desiredIsInit, updatedAt: now })
+          .where(and(eq(agentSkills.name, skill.name), isNull(agentSkills.projectId), eq(agentSkills.isBuiltin, true)));
+        flagsSynced++;
+      }
+      continue; // content already up to date
+    }
 
     // Refresh only unedited rows (see the refresh-policy doc comment above). A legacy
     // row with a NULL hash predates the column — adopt the shipped content.
     const currentContentHash = builtinSkillContentHash(row);
     const unedited = row.contentHash === null || row.contentHash === currentContentHash;
-    if (!unedited) continue; // user-customized — preserve
+    if (!unedited) {
+      // user-customized content is preserved, but the init flag still syncs
+      if (isInitStale) {
+        await database.update(agentSkills).set({ isInit: desiredIsInit, updatedAt: now })
+          .where(and(eq(agentSkills.name, skill.name), isNull(agentSkills.projectId), eq(agentSkills.isBuiltin, true)));
+        flagsSynced++;
+      }
+      continue;
+    }
 
     await database
       .update(agentSkills)
@@ -147,6 +171,7 @@ export async function ensureBuiltinSkills(database: Database = db): Promise<void
         description: skill.description,
         prompt: skill.prompt,
         model: skill.model,
+        isInit: desiredIsInit,
         contentHash: canonicalHash,
         updatedAt: now,
       })
@@ -160,8 +185,8 @@ export async function ensureBuiltinSkills(database: Database = db): Promise<void
     refreshed++;
   }
 
-  if (added > 0 || refreshed > 0) {
-    console.log(`Built-in skills: ${added} added, ${refreshed} refreshed.`);
+  if (added > 0 || refreshed > 0 || flagsSynced > 0) {
+    console.log(`Built-in skills: ${added} added, ${refreshed} refreshed, ${flagsSynced} flag(s) synced.`);
   } else {
     console.log("Agent skills already up to date.");
   }

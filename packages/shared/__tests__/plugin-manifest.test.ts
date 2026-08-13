@@ -165,6 +165,28 @@ describe("parsePluginManifest", () => {
       parsePluginManifest({ id: "p", name: "P", scripts: [{ name: "s", command: "x", audience: "admin" }] }),
     ).toThrow(/must be one of operator, developer/);
   });
+
+  // #462 — a plugin author marks its entry skill for a codebase that has never used the
+  // plugin before; the board cannot infer this.
+  it("parses skills[].init when present", () => {
+    const m = parsePluginManifest({
+      id: "p",
+      name: "P",
+      skills: [{ dir: ".claude/skills/onboarding", init: true }],
+    });
+    expect(m.skills?.[0].init).toBe(true);
+  });
+
+  it("leaves skills[].init undefined when the manifest omits it (backward compatible)", () => {
+    const m = parsePluginManifest(JSON.stringify(FULL_MANIFEST));
+    expect(m.skills?.[0].init).toBeUndefined();
+  });
+
+  it("rejects a non-boolean skills[].init", () => {
+    expect(() =>
+      parsePluginManifest({ id: "p", name: "P", skills: [{ dir: "skills/x", init: "yes" }] }),
+    ).toThrow(/"skills\[0]\.init" must be a boolean/);
+  });
 });
 
 describe("substitutePluginPlaceholders", () => {

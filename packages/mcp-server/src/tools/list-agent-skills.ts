@@ -9,15 +9,20 @@ export function registerListAgentSkills(server: McpServer) {
     "List all available agent skills that can be applied to workspaces",
     {
       projectId: z.string().optional().describe("Filter to project-specific + global skills for this project"),
+      init: z.boolean().optional().describe("Filter to init skills only — one-time project-init steps"),
     },
-    async ({ projectId }) => {
+    async ({ projectId, init }) => {
+      const initCondition = init ? sql`${schema.agentSkills.isInit} = 1` : undefined;
       let rows;
       if (projectId) {
+        const scopeCondition = sql`${schema.agentSkills.projectId} IS NULL OR ${schema.agentSkills.projectId} = ${projectId}`;
         rows = await db.select().from(schema.agentSkills)
-          .where(sql`${schema.agentSkills.projectId} IS NULL OR ${schema.agentSkills.projectId} = ${projectId}`)
+          .where(initCondition ? sql`(${scopeCondition}) AND ${initCondition}` : scopeCondition)
           .orderBy(schema.agentSkills.name);
       } else {
-        rows = await db.select().from(schema.agentSkills).orderBy(schema.agentSkills.name);
+        rows = await db.select().from(schema.agentSkills)
+          .where(initCondition)
+          .orderBy(schema.agentSkills.name);
       }
       const summary = rows.map(s => ({
         id: s.id,
@@ -26,6 +31,7 @@ export function registerListAgentSkills(server: McpServer) {
         model: s.model,
         projectId: s.projectId,
         isBuiltin: s.isBuiltin,
+        isInit: s.isInit,
       }));
       return {
         content: [{ type: "text" as const, text: JSON.stringify(summary, null, 2) }],

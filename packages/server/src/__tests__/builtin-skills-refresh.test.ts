@@ -124,6 +124,38 @@ describe("builtin skills — single source + content-hash refresh", () => {
     expect(row!.prompt).toBe(userPrompt);
   });
 
+  it("seeds isInit true/false per the canonical BUILTIN_SKILLS definition", async () => {
+    await ensureBuiltinSkills(db as never);
+    const architectureReview = await getGlobalBuiltin(db, "architecture-review");
+    const codeReview = await getGlobalBuiltin(db, "code-review");
+    expect(architectureReview!.isInit).toBe(true);
+    expect(codeReview!.isInit).toBe(false);
+  });
+
+  it("syncs the isInit flag on a stale row WITHOUT touching a user-edited prompt", async () => {
+    await ensureBuiltinSkills(db as never);
+
+    const canonical = BUILTIN_SKILLS.find((s) => s.name === "architecture-review")!;
+    const userPrompt = "MY custom architecture-review prompt — please keep this.";
+    const olderBaselineHash = builtinSkillContentHash({
+      name: "architecture-review",
+      description: canonical.description,
+      prompt: "some earlier shipped prompt",
+      model: canonical.model,
+    });
+    // Simulate: user edited the prompt, AND the flag predates this ticket (still false).
+    await db
+      .update(schema.agentSkills)
+      .set({ prompt: userPrompt, contentHash: olderBaselineHash, isInit: false })
+      .where(and(eq(schema.agentSkills.name, "architecture-review"), isNull(schema.agentSkills.projectId)));
+
+    await ensureBuiltinSkills(db as never);
+
+    const row = await getGlobalBuiltin(db, "architecture-review");
+    expect(row!.prompt).toBe(userPrompt); // content untouched
+    expect(row!.isInit).toBe(true); // flag still synced
+  });
+
   it("is idempotent — a second seed adds/refreshes nothing", async () => {
     await ensureBuiltinSkills(db as never);
     const before = await db

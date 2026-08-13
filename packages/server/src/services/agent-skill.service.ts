@@ -25,9 +25,13 @@ export class AgentSkillError extends Error {
 const INVALID_NAME_PATTERN = /[/\\]|\.\./;
 
 export function createAgentSkillService({ database }: { database: Database }) {
-  async function listSkills(projectId?: string, globalOnly?: boolean) {
-    const dbSkills = await listAgentSkills(projectId, globalOnly ?? false, database);
+  async function listSkills(projectId?: string, globalOnly?: boolean, initOnly?: boolean) {
+    const dbSkills = await listAgentSkills(projectId, globalOnly ?? false, database, initOnly ?? false);
     const dbResult = dbSkills.map(s => ({ ...s, source: "db" as const }));
+
+    // Init skills are always DB rows (built-ins or user-created) — disk skills scanned
+    // from .claude/skills/ carry no isInit flag, so never merge them into an init=true list.
+    if (initOnly) return dbResult;
 
     // Only merge disk skills when scoped to a project (and not filtering global-only)
     if (!projectId || globalOnly) return dbResult;
@@ -48,6 +52,7 @@ export function createAgentSkillService({ database }: { database: Database }) {
         prompt: d.prompt,
         projectId: projectId,
         isBuiltin: false,
+        isInit: false,
         createdAt: null,
         updatedAt: null,
         source: "disk" as const,
@@ -68,6 +73,7 @@ export function createAgentSkillService({ database }: { database: Database }) {
     prompt: string;
     model?: string;
     projectId?: string | null;
+    isInit?: boolean;
   }) {
     if (!input.name || !input.description || !input.prompt) {
       throw new AgentSkillError("name, description, and prompt are required", "BAD_REQUEST");
@@ -86,6 +92,7 @@ export function createAgentSkillService({ database }: { database: Database }) {
       prompt: input.prompt,
       model: input.model,
       projectId,
+      isInit: input.isInit ?? false,
     }, database);
   }
 
@@ -95,6 +102,7 @@ export function createAgentSkillService({ database }: { database: Database }) {
     prompt?: string;
     model?: string;
     projectId?: string | null;
+    isInit?: boolean;
   }) {
     const skill = await getAgentSkillById(id, database);
     if (!skill) throw new AgentSkillError("Skill not found", "NOT_FOUND");
@@ -118,6 +126,7 @@ export function createAgentSkillService({ database }: { database: Database }) {
     if (body.prompt !== undefined) updates.prompt = body.prompt;
     if (body.model !== undefined) updates.model = body.model || null;
     if (body.projectId !== undefined) updates.projectId = body.projectId || null;
+    if (body.isInit !== undefined) updates.isInit = body.isInit;
 
     return updateAgentSkill(id, updates, database);
   }
