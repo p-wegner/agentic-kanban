@@ -68,3 +68,13 @@ while (true) {
   // parse SSE lines from decoder.decode(value)
 }
 ```
+
+## URL scheme (#446) — the URL is derived state, never written ad hoc
+`/p/<project-slug>/<view>[/<tab>][/issue/<n>[/workspace]]`. A raw project id works anywhere a slug does, so an id link never rots; slugs come from `lib/projectSlug.ts` and every colliding name is disambiguated (never just the newcomer, or an existing project's URL would silently change).
+
+- **Parse/build only through `lib/appRoutes.ts`** (`parseAppPath`/`buildAppPath`). `parsed.tab` is RESOLVED — a container view always reports a tab, its default when the path names none — so use `tabIsExplicit` when you need "did the path actually say this".
+- **Components do not write the URL.** They change state (project, view, tab, selected issue); `routes/boardRouteSync.ts` decides the path and whether it is a push or a replace, and `useBoardPageRoute` performs it. Writing `history.pushState` from a component is how the two disagree.
+- **One logical navigation = one history entry.** Call `markProgrammaticNavigation()` before a multi-step deep link (project → view → issue); the burst makes the first write push and the rest replace.
+- **In-place upgrades are replaces**: a legacy flat path gaining its project scope, an absorbed view's old path (`/burndown` → `/p/<slug>/analytics/burndown`), a raw-id path canonicalised to the slug. None is a navigation.
+- **Anything read from the URL must be honoured BEFORE the sync effect runs.** The container view mounts ~100ms after the sync canonicalises the path, so a value only readable inside the container has already lost — that is why the legacy `?tab=` is promoted into the path at router init (`planLegacyTabParamUpgrade`), not read by `useViewTab`.
+- `lib/viewTabs.ts` (`VIEW_TAB_REGISTRY`) is the single source of tab ids and defaults for both the router and the container components. `issue`/`issues`/`workspace` are reserved segments — a tab id may not collide with them (asserted by a test).
