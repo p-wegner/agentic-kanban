@@ -10,6 +10,7 @@ import {
   navigationBurst,
   planDeepLinkIssue,
   planDeepLinkProject,
+  planLegacyTabParamUpgrade,
   planUrlSync,
   type PendingDeepLink,
 } from "./boardRouteSync.js";
@@ -52,6 +53,17 @@ export interface BoardPageRouteOptions {
   onCloseIssue: () => void;
 }
 
+/**
+ * Rewrite `…/analytics?tab=burndown` to `…/analytics/burndown` in place, once,
+ * before anything else reads the URL. A React 18 strict-mode double render
+ * calls this twice; the second call is a no-op because the param is gone.
+ */
+function upgradeLegacyTabParam(): void {
+  const next = planLegacyTabParamUpgrade(window.location.pathname, window.location.search);
+  if (!next) return;
+  window.history.replaceState(null, "", `${next.pathname}${next.search}${window.location.hash}`);
+}
+
 const NO_PROJECTS: SlugProject[] = [];
 const NO_COLUMNS: readonly unknown[] = [];
 
@@ -73,6 +85,9 @@ export function useBoardPageRoute(options?: Partial<BoardPageRouteOptions>): Boa
   const columns = options?.columns ?? NO_COLUMNS;
 
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    // Promote a legacy `?tab=` into the path FIRST — during this first render,
+    // while nothing has run that could flatten the path to the default tab.
+    upgradeLegacyTabParam();
     // A deep link beats the stored preference. `parseAppPath` still reports the
     // project for a path whose tail is junk, so an unknown view segment falls
     // through to the preference rather than blanking the board.
