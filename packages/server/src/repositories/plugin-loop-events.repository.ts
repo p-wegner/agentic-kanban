@@ -62,6 +62,31 @@ export async function insertPluginLoopEvent(
   `);
 }
 
+/**
+ * Restamp one event in place (#448).
+ *
+ * The ONLY sanctioned use is collapsing a repeated, byte-identical no-op `advance` onto the row it
+ * repeats instead of appending another one — see `collapseRepeatedNoOpAdvance` in
+ * `plugin-loop.service.ts` for the full contract. `created_at` moves to the LATEST repeat on
+ * purpose: every other reader (the timeline's ordering, `latestPluginLoopEvent`, the monitor's
+ * blocked-advance interval gate in `plugin-loop-monitor.ts`) treats it as "when the loop last
+ * advanced", and freezing it would make a live loop look stalled. When the run began is preserved
+ * in the payload's `firstSeenAt`.
+ *
+ * The timeline is otherwise append-only; do not generalise this into an "edit any event" helper.
+ */
+export async function restampPluginLoopEvent(
+  id: string,
+  payload: unknown,
+  createdAt: string,
+  database: Database = db,
+): Promise<void> {
+  await database
+    .update(pluginLoopEvents)
+    .set({ payloadJson: payload == null ? null : JSON.stringify(payload), createdAt })
+    .where(eq(pluginLoopEvents.id, id));
+}
+
 /** Newest first. */
 export async function listPluginLoopEvents(
   key: LoopEventKey,

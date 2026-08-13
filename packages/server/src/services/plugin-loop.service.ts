@@ -25,6 +25,7 @@ import {
   insertPluginLoopEvent,
   latestPluginLoopEvent,
   listPluginLoopEvents,
+  restampPluginLoopEvent,
   type PluginLoopEventRow,
 } from "../repositories/plugin-loop-events.repository.js";
 import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-preference-write";
@@ -298,6 +299,86 @@ interface AdvanceEventPayload {
    * statement that a plan exists with nothing about what the human should do about it.
    */
   startNotices?: string[];
+  /**
+   * #448 — how many advances this ONE row stands for, including the first. Absent or 1 means
+   * "happened once"; 47 means the same no-op advance was observed 47 times. See
+   * `collapseRepeatedNoOpAdvance` for the exact contract. Renderable as `×47`.
+   */
+  repeatCount?: number;
+  /**
+   * #448 — when the FIRST of those repeats happened (ISO). Only present on a collapsed row; the
+   * row's own `createdAt` is the MOST RECENT repeat, so this is the other end of the run
+   * ("unchanged since <firstSeenAt>").
+   */
+  firstSeenAt?: string;
+}
+
+/**
+ * #448 — is this advance a pure no-op? It planned nothing, created nothing, skipped nothing and
+ * capped nothing; all it carries is the planner's restated view of the world (note/gate/progress).
+ */
+function isNoOpAdvance(payload: AdvanceEventPayload): boolean {
+  return payload.planned === 0
+    && payload.created.length === 0
+    && payload.skippedExisting === 0
+    && payload.capped === 0;
+}
+
+/**
+ * The part of an advance payload that says WHAT HAPPENED, with the repeat bookkeeping stripped.
+ * Both sides are built by the same object literal (and a stored payload round-trips through
+ * JSON.parse, which preserves key order), so string equality is a sound identity test here.
+ */
+function advanceIdentity(payload: AdvanceEventPayload): string {
+  const { repeatCount: _count, firstSeenAt: _first, ...rest } = payload;
+  return JSON.stringify(rest);
+}
+
+/**
+ * #448 — the no-op-advance collapse contract, for anything rendering the loop timeline.
+ *
+ * MEASURED PROBLEM: the monitor re-plans a gated loop every ~4 minutes, and every one of those
+ * advances used to persist a byte-identical `advance` row carrying the full gate note. On the live
+ * `mealplan` loop that was ~50 consecutive identical rows over 13 hours (~360 rows/day per gated
+ * loop), which pushed `gate-reached`, `gate-resolved`, `converged`, butler pre-reads and every step
+ * completion out of the client's `limit=50` window — the timeline became pure heartbeat.
+ *
+ * THE CONTRACT, which consumers may rely on:
+ * - An `advance` row is inserted whenever the advance DID something (planned/created/skipped/capped)
+ *   OR its payload differs in any way from the previous `advance` — note, gate, progress, checks,
+ *   startNotices. So the FIRST no-op after any state change is always a real, new row.
+ * - A repeat of an unchanged no-op inserts NOTHING. Instead the previous row is restamped:
+ *   `repeatCount` incremented, `firstSeenAt` pinned to the run's start, and `createdAt` moved to
+ *   NOW — because `createdAt` is what every reader already means by "when did this loop last
+ *   advance" (`lastAdvanceAt`, the timeline's ordering, and the monitor's blocked-advance interval
+ *   gate in `plugin-loop-monitor.ts`, which would stop throttling if the stamp went stale).
+ * - No information is lost. The count is exact (`repeatCount: 47` stands for 47 advances), the run
+ *   is bounded by `firstSeenAt`…`createdAt`, and liveness is unchanged from before #448.
+ * - A row with no `repeatCount` happened exactly once (also true of every row written before #448).
+ *
+ * Returns true when it collapsed (caller must NOT insert).
+ */
+async function collapseRepeatedNoOpAdvance(
+  priorRow: PluginLoopEventRow | null,
+  priorPayload: AdvanceEventPayload | null,
+  next: AdvanceEventPayload,
+  now: string,
+  database: Database,
+): Promise<boolean> {
+  if (!priorRow || !priorPayload) return false;
+  if (!isNoOpAdvance(next)) return false;
+  if (advanceIdentity(priorPayload) !== advanceIdentity(next)) return false;
+  await restampPluginLoopEvent(
+    priorRow.id,
+    {
+      ...priorPayload,
+      repeatCount: (priorPayload.repeatCount ?? 1) + 1,
+      firstSeenAt: priorPayload.firstSeenAt ?? priorRow.createdAt,
+    },
+    now,
+    database,
+  );
+  return true;
 }
 
 export interface GateResolveResult {
@@ -408,6 +489,9 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
         paused: pausedValue === "true",
         converged: convergedValue === "true",
         note: payload?.note ?? null,
+        // Still the row's `createdAt` after #448: a collapsed repeat RESTAMPS that row to the
+        // latest advance, so this keeps meaning "the loop was polled at ...". See
+        // `collapseRepeatedNoOpAdvance`.
         lastAdvanceAt: lastAdvance?.createdAt ?? null,
         gate: payload?.gate ?? null,
         gateSince,
@@ -638,9 +722,9 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
     // Timeline (#292): every advance leaves its result behind. The advance payload doubles as
     // the loop's current display state (gate/progress/checks) — see loopStatuses.
     const eventKey = { pluginSlug: args.pluginSlug, loopName: loop.name, projectId: args.projectId };
-    const priorGate = parseAdvancePayload(
-      await latestPluginLoopEvent(eventKey, "advance", database),
-    )?.gate ?? null;
+    const priorAdvanceRow = await latestPluginLoopEvent(eventKey, "advance", database);
+    const priorAdvance = parseAdvancePayload(priorAdvanceRow);
+    const priorGate = priorAdvance?.gate ?? null;
     // #357/#360 — one sentence per PLANNED unit, not per CREATED unit. The units this advance
     // found already ticketed are resolved from their real workspace/provisioning state, so the
     // report is identical whichever advance won the lock.
@@ -663,7 +747,14 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
       checks: plan.checks ?? null,
       startNotices,
     };
-    await insertPluginLoopEvent(eventKey, "advance", advancePayload, database);
+    // #448 — a repeat of an unchanged no-op advance bumps the previous row's counter instead of
+    // appending another identical one. See `collapseRepeatedNoOpAdvance` for the full contract.
+    const collapsed = await collapseRepeatedNoOpAdvance(
+      priorAdvanceRow, priorAdvance, advancePayload, new Date().toISOString(), database,
+    );
+    if (!collapsed) {
+      await insertPluginLoopEvent(eventKey, "advance", advancePayload, database);
+    }
     if (isDone && !wasDone) {
       await insertPluginLoopEvent(eventKey, "converged", { note: plan.note ?? null }, database);
     }
