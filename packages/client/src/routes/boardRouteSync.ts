@@ -157,6 +157,56 @@ export interface UrlSyncInput {
   preferReplace?: boolean;
 }
 
+/**
+ * The legacy `?tab=` link, promoted into the path (#446).
+ *
+ * Reading the param inside the container view is too late, and MEASURED so:
+ * the container mounts ~500ms after load, while the outbound sync canonicalises
+ * the tabless path to the registry default at ~400ms. By mount the path names
+ * "throughput" explicitly, so the param can never win — and honouring it then
+ * would also PUSH a second history entry for one inbound link.
+ *
+ * So the upgrade happens at router INIT, during the first render, before any
+ * sync effect can run: the param's tab is written into the path and the param
+ * is dropped. Returns null when there is nothing to do (no param, unknown view,
+ * a view without tabs, a tab that does not exist, or a path that already names
+ * a tab explicitly — an explicit path tab outranks the legacy param).
+ */
+export function planLegacyTabParamUpgrade(
+  pathname: string,
+  search: string,
+): { pathname: string; search: string } | null {
+  const params = new URLSearchParams(search ?? "");
+  const requested = params.get("tab");
+  if (requested === null) return null;
+
+  params.delete("tab");
+  const nextSearch = params.toString() ? `?${params.toString()}` : "";
+
+  const current = parseAppPath(pathname);
+  if (
+    current.view === null ||
+    current.tabIsExplicit ||
+    !viewHasTabs(current.view) ||
+    !isRoutableViewTab(current.view, requested)
+  ) {
+    // Nothing usable in the param, but it must still not linger in the URL —
+    // two statements of the same fact, one of them ignored.
+    return { pathname: normalizePathname(pathname), search: nextSearch };
+  }
+
+  return {
+    pathname: buildAppPath({
+      projectSlug: current.projectSlug,
+      view: current.view,
+      tab: requested,
+      issueNumber: current.issueNumber,
+      panel: current.panel,
+    }),
+    search: nextSearch,
+  };
+}
+
 function normalizePathname(pathname: string): string {
   const path = (pathname ?? "").split(/[?#]/, 1)[0] || "/";
   return path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;

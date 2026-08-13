@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useViewTabStore, viewTabActions } from "../stores/viewTabStore.js";
-import { buildAppPath, parseAppPath } from "../lib/appRoutes.js";
+import { parseAppPath } from "../lib/appRoutes.js";
 import { getDefaultViewTab, getViewTabIds } from "../lib/viewTabs.js";
 
 /**
@@ -12,8 +12,11 @@ import { getDefaultViewTab, getViewTabIds } from "../lib/viewTabs.js";
  * container does not have (and vice versa).
  *
  * Resolution order at mount: a pending viewTabStore request (palette action,
- * inbound route, popstate) wins, then the tab segment in the path, then the
- * legacy `?tab=` query param, then the registry default.
+ * inbound route, popstate) wins, then the tab in the path, then the registry
+ * default. A legacy `?tab=` link is NOT read here — the router promotes it into
+ * the path at init (`planLegacyTabParamUpgrade`), because this hook mounts
+ * ~100ms after the sync effect has already canonicalised the path and by then
+ * the param has lost.
  *
  * Selecting a tab does NOT write the URL here: it publishes the tab to the
  * store and useBoardPageRoute's sync effect writes the canonical path. That is
@@ -30,13 +33,6 @@ export function useViewTab<T extends string>(viewId: string): [T, (tab: T) => vo
 
   const [tab, setTab] = useState<T>(() => {
     const fromPath = parseAppPath(window.location.pathname);
-    // Only a tab the PATH NAMED outranks `?tab=`. `parseAppPath` resolves the
-    // tab, so a container view always reports one — testing validity alone made
-    // the defaulted tab of a tabless path (`/analytics` → "throughput") beat an
-    // explicit `?tab=burndown`, and the legacy branch became unreachable.
-    if (fromPath.view === viewId && fromPath.tabIsExplicit && isValid(fromPath.tab)) return fromPath.tab;
-    const fromQuery = new URLSearchParams(window.location.search).get("tab");
-    if (isValid(fromQuery)) return fromQuery;
     if (fromPath.view === viewId && isValid(fromPath.tab)) return fromPath.tab;
     return (getDefaultViewTab(viewId) ?? getViewTabIds(viewId)[0] ?? "") as T;
   });
@@ -54,35 +50,6 @@ export function useViewTab<T extends string>(viewId: string): [T, (tab: T) => vo
     viewTabActions.setActive(viewId, tab);
   }, [viewId, tab]);
   useEffect(() => () => viewTabActions.clearActive(viewId), [viewId]);
-
-  // Legacy `?tab=` links are still honoured above, but the param is dropped on
-  // arrival — the path segment is the canonical form, and keeping both would
-  // leave two disagreeing statements of the same fact in one URL.
-  //
-  // The param is not merely deleted: the tab it asked for is written INTO the
-  // path in the same replaceState. Deleting it alone left the path naming the
-  // default tab, so the route sync wrote that first and then PUSHED the real
-  // tab — one inbound link, two history entries, and Back landing on a tab the
-  // user never asked for.
-  useEffect(() => {
-    const url = new URL(window.location.href);
-    if (!url.searchParams.has("tab")) return;
-    url.searchParams.delete("tab");
-    const parsed = parseAppPath(url.pathname);
-    const pathname =
-      parsed.view === viewId && isValid(tab)
-        ? buildAppPath({
-            projectSlug: parsed.projectSlug,
-            view: parsed.view,
-            tab,
-            issueNumber: parsed.issueNumber,
-            panel: parsed.panel,
-          })
-        : url.pathname;
-    window.history.replaceState(null, "", `${pathname}${url.search}${url.hash}`);
-    // Mount-only: a later tab change is the route sync's job, not a rewrite.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   return [tab, setTab as (tab: T) => void];
 }

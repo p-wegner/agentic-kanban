@@ -6,6 +6,7 @@ import {
   isDeepLinkSettled,
   planDeepLinkIssue,
   planDeepLinkProject,
+  planLegacyTabParamUpgrade,
   planUrlSync,
   resolveSyncTab,
   type PendingDeepLink,
@@ -380,5 +381,58 @@ describe("planUrlSync — the tab dimension", () => {
     expect(resolveSyncTab("analytics", null, "provider-mix")).toBe("provider-mix");
     expect(resolveSyncTab("analytics", "nope", null)).toBe("throughput");
     expect(resolveSyncTab("runtime", null, null)).toBe("flight-recorder");
+  });
+});
+
+describe("legacy ?tab= links are promoted into the path at router init", () => {
+  // MEASURED: the container view mounts ~500ms after load, while the outbound
+  // sync canonicalises a tabless path to the registry default at ~400ms. So by
+  // the time anything inside the container could read `?tab=`, the path already
+  // names "throughput" explicitly and the param has lost. The promotion has to
+  // happen at init, which is what this plans.
+  it("writes the requested tab into the path and drops the param", () => {
+    expect(planLegacyTabParamUpgrade("/p/pantry/analytics", "?tab=burndown")).toEqual({
+      pathname: "/p/pantry/analytics/burndown",
+      search: "",
+    });
+    expect(planLegacyTabParamUpgrade("/runtime", "?tab=health-events")).toEqual({
+      pathname: "/runtime/health-events",
+      search: "",
+    });
+  });
+
+  it("keeps the issue deep link and any other query params", () => {
+    expect(planLegacyTabParamUpgrade("/p/pantry/analytics/issue/12/workspace", "?tab=lead-time&q=x")).toEqual({
+      pathname: "/p/pantry/analytics/lead-time/issue/12/workspace",
+      search: "?q=x",
+    });
+  });
+
+  it("lets an explicit path tab outrank the legacy param", () => {
+    expect(planLegacyTabParamUpgrade("/p/pantry/analytics/burndown", "?tab=lead-time")).toEqual({
+      pathname: "/p/pantry/analytics/burndown",
+      search: "",
+    });
+  });
+
+  it("drops an unusable param rather than leaving it to be ignored", () => {
+    // Unknown tab, a view with no tabs, and a path that is not a route at all.
+    expect(planLegacyTabParamUpgrade("/p/pantry/analytics", "?tab=nope")).toEqual({
+      pathname: "/p/pantry/analytics",
+      search: "",
+    });
+    expect(planLegacyTabParamUpgrade("/p/pantry/board", "?tab=burndown")).toEqual({
+      pathname: "/p/pantry/board",
+      search: "",
+    });
+    expect(planLegacyTabParamUpgrade("/api/projects", "?tab=burndown")).toEqual({
+      pathname: "/api/projects",
+      search: "",
+    });
+  });
+
+  it("does nothing when there is no param — including on a second render", () => {
+    expect(planLegacyTabParamUpgrade("/p/pantry/analytics/burndown", "")).toBeNull();
+    expect(planLegacyTabParamUpgrade("/p/pantry/analytics", "?q=x")).toBeNull();
   });
 });
