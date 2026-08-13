@@ -905,8 +905,15 @@ export function GateCard({ pluginId, loopName, projectId, gate, gateSince, check
       {/* Wraps, and the buttons are full-width 44px targets below sm (#433): this row is
           THE thing you tap to answer a gate from a phone. It was a non-wrapping
           `flex items-center` of ~32px buttons whose longest label ("Confirm: Needs
-          revision") cannot share a line with the others at any phone width. */}
-      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2">
+          revision") cannot share a line with the others at any phone width.
+
+          From `lg` it also STICKS to the bottom of the loop pane's decision column (#447).
+          MEASURED on the live gate: even with the card leading its column, the butler
+          pre-read plus two blocking findings make it ~700px tall, so "Needs revision" landed
+          at y=892 in a 900px viewport and was clipped by the column's own bottom edge. The
+          whole point of the split layout is that the answer is reachable while you read, so
+          the answer must not depend on where the card happens to end. */}
+      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 lg:sticky lg:bottom-0 lg:-mx-4 lg:-mb-4 lg:px-4 lg:py-2 lg:bg-amber-50 lg:dark:bg-[#3a2a12] lg:border-t lg:border-amber-200 lg:dark:border-amber-800">
         {gate.actions.map((action) => {
           // #450 — styled by SEMANTICS, not by `action.input === "text"`. At a QA gate both the
           // approve and the revise action require text, so the old rule rendered the two
@@ -1382,10 +1389,17 @@ export function ArtifactViewer({ pluginId, loopName, projectId, path, step, gate
   // vertical swipe inside it moved neither the page nor reliably the intended layer, and
   // ~60vh of a phone (with dynamic browser chrome) is too little to read a PRD in. The
   // sheet also makes the ✕ meaningful instead of a way to shrink one box inside another.
+  //
+  // At `lg` this is the LEFT column of the loop pane's split review layout (#447): the pane
+  // stops scrolling there, so the viewer takes the full pane height (`max-h-none`) and its
+  // body is the only scroller on this side — which is what puts the document and the gate's
+  // decision buttons on screen at the same time. The pane only ever renders this component
+  // when an artifact is open, and an open artifact at `lg` IS the split layout, so these
+  // variants need no flag to stay in step with it.
   return (
     <div
       ref={containerRef}
-      className="fixed inset-0 z-40 rounded-none max-h-none sm:static sm:z-auto sm:rounded sm:max-h-[60vh] border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 flex flex-col"
+      className="fixed inset-0 z-40 rounded-none max-h-none sm:static sm:z-auto sm:rounded sm:max-h-[60vh] lg:order-first lg:flex-1 lg:min-w-0 lg:min-h-0 lg:max-h-none border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 flex flex-col"
       data-testid="plugin-artifact-viewer"
     >
       <div className="border-b border-gray-100 dark:border-gray-800 px-3 py-2 space-y-1">

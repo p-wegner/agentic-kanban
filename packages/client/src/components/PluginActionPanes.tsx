@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 import { setProjectPref } from "../lib/settingsStore.js";
 import { requestIssueFocus, requestViewNavigation } from "../lib/navigateView.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
+import { checkLocationTokens } from "./gateCardPolicy.js";
+import { deriveProductIdentity, type ProductIdentity, type ScaffoldForm } from "./PluginScaffoldPane.js";
 import {
   ArtifactViewer,
   AwaitingMergeCard,
@@ -13,6 +15,7 @@ import {
   LoopTimeline,
   ProgressStepper,
   type LoopStall,
+  type LoopUnitCost,
   type PluginCheck,
   type PluginGate,
   type PluginProgressStep,
@@ -152,13 +155,83 @@ type SkillRunProgress =
   | ({ stage: "done" } & SkillRunResult)
   | { stage: "error"; message: string };
 
-function PaneHeading({ title, subtitle, mono }: { title: string; subtitle?: string | null; mono?: boolean }) {
+function PaneHeading({ title, subtitle, mono, identity }: {
+  title: string;
+  subtitle?: string | null;
+  mono?: boolean;
+  /** The product this pane's work is FOR (#455) — stated above the pane's own name. */
+  identity?: string | null;
+}) {
   return (
     <div className="space-y-1">
+      {identity && (
+        <p
+          className="text-xs font-medium text-gray-700 dark:text-gray-200"
+          data-testid="plugin-pane-product-identity"
+          title={identity}
+        >
+          {identity}
+        </p>
+      )}
       <h2 className={`text-base font-medium text-gray-900 dark:text-gray-100 ${mono ? "font-mono" : ""}`}>{title}</h2>
       {subtitle && <p className="text-xs text-gray-500 dark:text-gray-400">{subtitle}</p>}
     </div>
   );
+}
+
+/**
+ * The identifiers the gate's checks quote, as the artifact viewer's jump chips (#457/#452).
+ *
+ * Union over the checks that can actually withdraw an approval — a passing check names nothing
+ * the reviewer has to go and find. Order preserved (blocking findings tend to be listed in the
+ * order they matter), deduped, capped: a chip that finds nothing is worse than no chip.
+ */
+export function gateFindHints(checks?: PluginCheck[] | null, limit = 6): string[] {
+  const tokens: string[] = [];
+  for (const check of checks ?? []) {
+    if (check.verdict === "pass") continue;
+    for (const token of checkLocationTokens(check.detail)) {
+      if (!tokens.includes(token)) tokens.push(token);
+    }
+  }
+  return tokens.slice(0, limit);
+}
+
+/**
+ * The token an artifact opened FROM the gate should land on (#457/#452).
+ *
+ * Only `fail` arms it: a `warn` is usually a summary rather than a location, and an artifact
+ * opened from the stepper is being read rather than adjudicated — pushing that to the raw tab
+ * mid-search would be wrong. Undefined when no failing check quotes anything, which leaves the
+ * viewer exactly as it was.
+ */
+export function gateInitialFind(checks?: PluginCheck[] | null): string | undefined {
+  for (const check of checks ?? []) {
+    if (check.verdict !== "fail") continue;
+    const [first] = checkLocationTokens(check.detail);
+    if (first) return first;
+  }
+  return undefined;
+}
+
+/**
+ * Tailwind for the loop pane's two review layouts (#447) — see the long note at the render.
+ *
+ * `stacked` is today's single scrolling column and must stay byte-identical to it, because the
+ * sub-`sm` full-screen sheet (#434) and the 44px touch targets were measured against it.
+ * `split` only ever engages at `lg`, so every difference is behind an `lg:` variant.
+ */
+export function loopPaneLayoutClasses(artifactOpen: boolean): { pane: string; decisionColumn: string } {
+  const pane = "p-3 sm:p-6 space-y-4 overflow-y-auto";
+  const column = "space-y-4";
+  if (!artifactOpen) return { pane, decisionColumn: column };
+  return {
+    pane: `${pane} lg:flex lg:flex-row lg:items-stretch lg:gap-4 lg:space-y-0 lg:p-4 lg:flex-1 lg:min-h-0 lg:overflow-hidden`,
+    // `flex flex-col` + `gap` rather than the stacked `space-y`: the column REORDERS at `lg`
+    // (the gate leads), and `space-y` puts its margins by DOM order, which reordering breaks.
+    decisionColumn:
+      `${column} lg:flex lg:flex-col lg:gap-4 lg:space-y-0 lg:w-[26rem] xl:w-[32rem] lg:shrink-0 lg:min-h-0 lg:overflow-y-auto lg:pr-1`,
+  };
 }
 
 /** Converging analysis loop: advance a round, then let the board's monitor run it. */
@@ -191,6 +264,47 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
   // Line-anchored review notes collected on the artifact diff (#304).
   const [lineNotes, setLineNotes] = useState<string[]>([]);
   const [switchingMode, setSwitchingMode] = useState(false);
+  /**
+   * Per-unit agent cost for the stepper (#457/#453). The events endpoint computes the cost
+   * rollup independently of the event window, so `limit=1` buys the whole `byUnit` join for
+   * the price of one row — the timeline's own fetch (limit=200, ~1 MB on a long-lived loop)
+   * is not duplicated here.
+   */
+  const [costByUnit, setCostByUnit] = useState<LoopUnitCost[] | null>(null);
+  /**
+   * What product this pipeline is building (#455). Sourced from the plugin's scaffold profile
+   * the same way PluginViewsPanel fetches it, then reduced by the profile pane's own
+   * `deriveProductIdentity` so the two panes cannot disagree. Silent on failure: a plugin with
+   * no scaffold (404) or an unreadable profile simply keeps today's header.
+   */
+  const [identity, setIdentity] = useState<ProductIdentity | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCostByUnit(null);
+    apiFetch<{ cost: { byUnit: LoopUnitCost[] } }>(
+      `/api/plugins/${loop.pluginId}/loops/${encodeURIComponent(loop.name)}/events`
+      + `?projectId=${projectId}&limit=1`,
+    )
+      .then((res) => { if (!cancelled) setCostByUnit(res.cost?.byUnit ?? null); })
+      .catch(() => { /* cost is decoration — a failure must not blank the pane */ });
+    return () => { cancelled = true; };
+  }, [loop.pluginId, loop.name, projectId, timelineKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIdentity(null);
+    apiFetch<ScaffoldForm>(`/api/plugins/${loop.pluginId}/scaffold?projectId=${projectId}`)
+      .then((res) => { if (!cancelled) setIdentity(deriveProductIdentity(res.content)); })
+      .catch(() => { /* 404 = this plugin declares no scaffold */ });
+    return () => { cancelled = true; };
+  }, [loop.pluginId, projectId]);
+
+  /** The viewer's jump chips and its opening search, derived from the gate's checks (#457). */
+  const findHints = useMemo(() => gateFindHints(loop.checks), [loop.checks]);
+  const initialFind = useMemo(() => gateInitialFind(loop.checks), [loop.checks]);
+  /** Set when the open artifact came from the gate card, i.e. it is the thing under review. */
+  const [artifactFromGate, setArtifactFromGate] = useState(false);
 
   /**
    * One-click fix for the manual-Start-Mode warning (#428): the loop planned tickets that
@@ -258,10 +372,52 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
   const roundRunning = loop.openTickets > 0;
   const strandedRefs = (loop.openTicketRefs ?? []).filter((ref) => ref.stranded);
   const liveRefs = (loop.openTicketRefs ?? []).filter((ref) => !ref.stranded);
+  /**
+   * #447 — reading the artifact and deciding on it used to be mutually exclusive.
+   *
+   * MEASURED on the live `mealplan` step-7 gate at 1440x900: the viewer mounted BELOW the gate
+   * card and the stats row, so the document and the Approve/Revise buttons were never on screen
+   * together — you scrolled down to read and back up to act, losing the checks and the butler
+   * verdict on the way. Meanwhile the gate card was `max-w-2xl` in a ~1200px pane (~500px of
+   * empty whitespace) and the artifact was squeezed into a `max-h-[60vh]` NESTED scroller.
+   *
+   * So from `lg` up, an open artifact turns the pane into the review shape the board already
+   * uses for diffs: the document on the left taking the full pane height with its own scroll,
+   * the decision column on the right with its own. Two SIBLING scrollers — the pane itself
+   * stops scrolling in that mode, which is what removes the nesting.
+   *
+   * Below `lg` nothing changes: the pane scrolls as one column, and below `sm` the viewer is
+   * still the full-screen sheet (#434, a measured fix — a 60vh box inside a scrolling pane is
+   * unusable on a phone). The one visible difference in the stacked layout is that the viewer
+   * now sits at the BOTTOM of the pane rather than between the advance result and the timeline;
+   * it scrolls itself into view on open (#288), and below `sm` it is a sheet, so its position
+   * in the flow is not what the reader navigates by.
+   */
+  const splitReview = !!openArtifact;
+  const layout = loopPaneLayoutClasses(splitReview);
   return (
-    <div className="p-3 sm:p-6 space-y-4 overflow-y-auto" data-testid="plugin-loop-pane">
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-3">
-        <PaneHeading title={loop.label} subtitle={loop.description} />
+    <div
+      className={layout.pane}
+      data-testid="plugin-loop-pane"
+      data-review-layout={splitReview ? "split" : "stacked"}
+    >
+      {/* The decision column: everything that is not the document under review. It keeps its
+          own scroll at `lg` so the gate's buttons stay reachable while the artifact scrolls. */}
+      <div className={layout.decisionColumn} data-testid="plugin-loop-decision-column">
+      {/* `order-first` on the header and the gate, so in the split layout the column opens on
+          WHAT is being decided and the decision itself. MEASURED without it: the 9-row stepper,
+          the checks strip and the stats row pushed the Approve/Revise buttons to y=1213 in a
+          900px viewport — co-visible with the artifact in principle, off screen in fact. The
+          class is inert in the stacked layout, where the column is not a flex container. */}
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-3 lg:order-first">
+        <PaneHeading
+          title={loop.label}
+          subtitle={loop.description}
+          /* #455 — the pane never said WHICH product this pipeline is building, so deciding
+             "approve step 7 of a pipeline for what?" after a 13h gap meant opening step 2's
+             PRD. Degrades silently to today's header when the profile names neither. */
+          identity={identity?.oneLiner ?? null}
+        />
         <LoopStateChips
           loop={loop}
           startPolicy={startPolicy}
@@ -314,9 +470,20 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
       <ProgressStepper
         steps={loop.progress?.steps}
         activePath={openArtifact}
+        /* #457 — per-step cost, joined `step-<n>:v<m>` → step id by `stepCost`. */
+        costByUnit={costByUnit}
         onOpenStep={(step, index, total) => {
           setOpenArtifact(step.artifacts![0]);
           setOpenArtifactStep({ label: step.label, version: step.version, artifacts: step.artifacts, index, total });
+          setArtifactFromGate(false);
+        }}
+        /* #457 — open the artifact that was actually clicked. Without this an artifact chip
+           fell back to `onOpenStep`, which always opens `artifacts[0]`: on a step with three
+           outputs, two of the three chips opened the wrong file. */
+        onOpenStepArtifact={(step, artifactPath, index, total) => {
+          setOpenArtifact(artifactPath);
+          setOpenArtifactStep({ label: step.label, version: step.version, artifacts: step.artifacts, index, total });
+          setArtifactFromGate(false);
         }}
       />
       <ChecksBadges checks={loop.checks} />
@@ -328,6 +495,7 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
 
       {/* The human gate (#286): the single thing this loop needs from a person right now. */}
       {loop.gate && loop.openTickets === 0 && (
+        <div className="lg:order-first">
         <GateCard
           pluginId={loop.pluginId}
           loopName={loop.name}
@@ -337,9 +505,10 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
           checks={loop.checks}
           recommendation={loop.gateRecommendation ?? null}
           lineNotes={lineNotes}
-          onOpenArtifact={(p) => { setOpenArtifact(p); setOpenArtifactStep(null); }}
+          onOpenArtifact={(p) => { setOpenArtifact(p); setOpenArtifactStep(null); setArtifactFromGate(true); }}
           onResolved={() => { setTimelineKey((k) => k + 1); setLineNotes([]); onChanged(); }}
         />
+        </div>
       )}
       {!loop.gate && loop.note && loop.openTickets === 0 && !loop.converged && (
         <p className="text-xs text-amber-700 dark:text-amber-400 max-w-2xl" data-testid="plugin-loop-note">
@@ -363,16 +532,28 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
             <div className="text-[11px] text-gray-500 dark:text-gray-400">agent cost so far</div>
           </div>
         )}
+        {/* #450 — while a gate is waiting, this button plans NOTHING by design (its own tooltip
+            says so), and it was the only `bg-brand-600` control on the whole pane: the eye was
+            drawn to the one thing that cannot help while the two real answers sat in the gate
+            card below. It stays reachable — a replan is occasionally what you want — but the
+            gate's decision is now the pane's only primary action. */}
         <button
           onClick={() => void advance()}
           disabled={advancing || !!setupRequired}
-          className="text-sm px-4 py-2.5 sm:px-3 sm:py-1.5 min-h-11 sm:min-h-0 rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
+          className={`text-sm px-4 py-2.5 sm:px-3 sm:py-1.5 min-h-11 sm:min-h-0 rounded disabled:opacity-50 ${
+            loop.gate
+              ? "border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800"
+              : "bg-brand-600 text-white hover:bg-brand-700"
+          }`}
           data-testid="plugin-loop-advance"
+          data-demoted={loop.gate ? "gate" : undefined}
           title={setupRequired
             ? `Fill in the ${setupRequired.pendingFields} outstanding profile field(s) first — the plugin refuses to plan without them`
-            : roundRunning
-              ? "The current round is still running — advancing now plans nothing new"
-              : "Plan the next round"}
+            : loop.gate
+              ? "A gate is waiting for a decision — advancing plans nothing until it is resolved. Answer the gate above."
+              : roundRunning
+                ? "The current round is still running — advancing now plans nothing new"
+                : "Plan the next round"}
         >
           {advancing ? "Planning…" : loop.closedTickets === 0 && loop.openTickets === 0 ? "Start loop" : "Advance now"}
         </button>
@@ -456,7 +637,7 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
                         <button
                           key={path}
                           type="button"
-                          onClick={() => { setOpenArtifact(path); setOpenArtifactStep(null); }}
+                          onClick={() => { setOpenArtifact(path); setOpenArtifactStep(null); setArtifactFromGate(false); }}
                           className="text-[11px] font-mono text-brand-600 dark:text-brand-400 hover:underline ml-1"
                         >
                           📄 {path.split("/").pop()}
@@ -471,20 +652,6 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
         </div>
       )}
 
-      {/* Inline artifact viewer (#288) — opened from the gate card, stepper, or unit list. */}
-      {openArtifact && (
-        <ArtifactViewer
-          pluginId={loop.pluginId}
-          loopName={loop.name}
-          projectId={projectId}
-          path={openArtifact}
-          step={openArtifactStep ?? undefined}
-          onOpenArtifact={setOpenArtifact}
-          onClose={() => { setOpenArtifact(null); setOpenArtifactStep(null); }}
-          onLineNotesChange={setLineNotes}
-        />
-      )}
-
       <LoopTimeline
         pluginId={loop.pluginId}
         loopName={loop.name}
@@ -492,6 +659,33 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
         refreshKey={timelineKey}
         hasGate={!!loop.gate}
       />
+      </div>
+
+      {/* Inline artifact viewer (#288) — opened from the gate card, stepper, or unit list.
+          At `lg` with the pane in split mode this is the LEFT column (#447); stacked below
+          that, and a full-screen sheet below `sm` (#434). */}
+      {openArtifact && (
+        <ArtifactViewer
+          pluginId={loop.pluginId}
+          loopName={loop.name}
+          projectId={projectId}
+          path={openArtifact}
+          step={openArtifactStep ?? undefined}
+          /* #457 — label-driven bookkeeping detection (#454). With the gate's own action
+             labels the viewer folds away a file-backed gate's `[ ] Approved / [ ] Needs
+             revision` machinery even when the plugin heads that section its own way; without
+             them it falls back to the generic approval vocabulary. */
+          gateActionLabels={loop.gate?.actions.map((a) => a.label)}
+          /* #457/#452 — the identifiers the failing checks quote, as one-click jump chips,
+             and (from a gate-card open) the first FAILED check's token as the opening search
+             so the viewer lands on the row the check names instead of the top of the file. */
+          findHints={findHints}
+          initialFind={artifactFromGate ? initialFind : undefined}
+          onOpenArtifact={setOpenArtifact}
+          onClose={() => { setOpenArtifact(null); setOpenArtifactStep(null); setArtifactFromGate(false); }}
+          onLineNotesChange={setLineNotes}
+        />
+      )}
     </div>
   );
 }
