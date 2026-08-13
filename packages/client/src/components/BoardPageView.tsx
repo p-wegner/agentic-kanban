@@ -30,6 +30,7 @@ import { ViewLoadingFallback } from "./ViewLoadingFallback.js";
 import { MentionProvider } from "../lib/MentionContext.js";
 import { RUNTIME_VIEW_ID } from "../lib/viewTabs.js";
 import { viewTabActions } from "../stores/viewTabStore.js";
+import { markProgrammaticNavigation } from "../routes/boardRouteSync.js";
 import { useBoardSelectionStore } from "../stores/boardSelectionStore.js";
 import { boardBulkSelectionActions } from "../stores/boardBulkSelectionStore.js";
 import type { Dispatch, MouseEvent as ReactMouseEvent, MutableRefObject, SetStateAction } from "react";
@@ -321,7 +322,9 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
       onShowLiveActivityTicker={() => panels.setShowLiveActivityTicker((prev) => !prev)}
       liveActivityCount={tickerEntries.length}
       onViewAllHealthEvents={() => {
-        // Health events live in the Runtime feed's health tab (#235).
+        // Health events live in the Runtime feed's health tab (#235). View and
+        // tab are two URL writes for one click — burst them into one entry (#446).
+        markProgrammaticNavigation();
         viewTabActions.request(RUNTIME_VIEW_ID, "health-events");
         handleViewModeChange("runtime");
       }}

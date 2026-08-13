@@ -1,4 +1,4 @@
-import { ACTIVITY_TABS, ACTIVITY_TAB_IDS, ACTIVITY_VIEW_ID, type ActivityTabId } from "../lib/viewTabs.js";
+import { ACTIVITY_TABS, ACTIVITY_VIEW_ID, type ActivityTabId } from "../lib/viewTabs.js";
 import { useViewTab } from "../hooks/useViewTab.js";
 import { useProjectRepos } from "../hooks/useProjectRepos.js";
 import { ViewTabBar } from "./ViewTabBar.js";
@@ -23,7 +23,7 @@ interface BoardFeedViewProps {
  */
 export function BoardFeedView({ projectId, resolveIssue, onIssueClick }: BoardFeedViewProps) {
   const { isMultiRepo } = useProjectRepos(projectId);
-  const [tab, selectTab] = useViewTab<ActivityTabId>(ACTIVITY_VIEW_ID, ACTIVITY_TAB_IDS, "activity");
+  const [tab, selectTab] = useViewTab<ActivityTabId>(ACTIVITY_VIEW_ID);
   const tabs = isMultiRepo ? ACTIVITY_TABS : ACTIVITY_TABS.filter((t) => t.id !== "cross-repo");
   // A stale cross-repo selection (deep link, project switch) on a single-repo
   // project falls back to the activity tab instead of a blank feed.

@@ -3,7 +3,7 @@ import { VIEW_IDS, type ViewMode } from "../lib/viewRegistry.js";
 import { buildAppPath, getAppRouteTab, parseAppPath, type IssuePanel } from "../lib/appRoutes.js";
 import { buildProjectSlugMap, resolveProjectIdFromSlug, type SlugProject } from "../lib/projectSlug.js";
 import { NAVIGATE_VIEW_EVENT, type NavigateViewDetail } from "../lib/navigateView.js";
-import { viewTabActions } from "../stores/viewTabStore.js";
+import { useViewTabStore, viewTabActions } from "../stores/viewTabStore.js";
 import {
   createPendingDeepLink,
   isDeepLinkSettled,
@@ -84,6 +84,10 @@ export function useBoardPageRoute(options?: Partial<BoardPageRouteOptions>): Boa
 
   const [graphFocusIssueId, setGraphFocusIssueId] = useState<string | undefined>(undefined);
 
+  // The tab the mounted container view is showing (#446). Null until it mounts,
+  // and for every view that has no tabs — planUrlSync handles both.
+  const activeTab = useViewTabStore((s) => s.active[viewMode] ?? null);
+
   // Callbacks BoardPage owns. Assigned on every render (same pattern as
   // BoardPage's own projectChangeRef) so the effects and window listeners below
   // never need them as dependencies.
@@ -130,9 +134,10 @@ export function useBoardPageRoute(options?: Partial<BoardPageRouteOptions>): Boa
     }
   }, []);
 
-  // Legacy absorbed-view deep links (#234/#235): /burndown (and the scoped
-  // /p/<slug>/burndown) resolve to a container view; forward the tab to
-  // preselect so no old bookmark loses information. One-shot on mount — the
+  // Inbound tab (#446) and legacy absorbed-view deep links (#234/#235):
+  // /p/<slug>/analytics/burndown, /burndown and /p/<slug>/burndown all name a
+  // container view + tab; forward it so no old bookmark loses information and a
+  // pasted canonical URL opens the tab it names. One-shot on mount — the
   // container consumes the request.
   useEffect(() => {
     const parsed = parseAppPath(window.location.pathname);
@@ -196,7 +201,7 @@ export function useBoardPageRoute(options?: Partial<BoardPageRouteOptions>): Boa
     }
   }, [projects, activeProjectId, columns]);
 
-  // ---- Outbound: the address bar reflects (project, view, issue). ----
+  // ---- Outbound: the address bar reflects (project, view, tab, issue). ----
   useEffect(() => {
     const pending = pendingRef.current;
     if (!isDeepLinkSettled(pending)) return; // don't overwrite a link still being applied
@@ -206,6 +211,7 @@ export function useBoardPageRoute(options?: Partial<BoardPageRouteOptions>): Boa
       projects,
       activeProjectId,
       view: viewMode,
+      tab: activeTab,
       issueNumber: selectedIssueNumber,
       panel: openPanel,
       preferReplace: pending.unresolved || navigationBurst.isCoalescing(now),
@@ -219,7 +225,7 @@ export function useBoardPageRoute(options?: Partial<BoardPageRouteOptions>): Boa
       window.history.pushState(null, "", nextUrl);
       navigationBurst.notePush(now);
     }
-  }, [projects, activeProjectId, viewMode, selectedIssueNumber, openPanel, columns]);
+  }, [projects, activeProjectId, viewMode, activeTab, selectedIssueNumber, openPanel, columns]);
 
   // ---- Back/forward across all three dimensions. ----
   useEffect(() => {

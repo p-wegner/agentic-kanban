@@ -1,4 +1,4 @@
-import { ANALYTICS_TABS, ANALYTICS_TAB_IDS, ANALYTICS_VIEW_ID, type AnalyticsTabId } from "../lib/viewTabs.js";
+import { ANALYTICS_TABS, ANALYTICS_VIEW_ID, type AnalyticsTabId } from "../lib/viewTabs.js";
 import { useViewTab } from "../hooks/useViewTab.js";
 import { ViewTabBar } from "./ViewTabBar.js";
 import { BoardErrorBoundary } from "./BoardErrorBoundary.js";
@@ -24,7 +24,7 @@ interface AnalyticsViewProps {
  * (columns + issue interaction), not a projectId-driven chart.
  */
 export function AnalyticsView({ projectId }: AnalyticsViewProps) {
-  const [tab, selectTab] = useViewTab<AnalyticsTabId>(ANALYTICS_VIEW_ID, ANALYTICS_TAB_IDS, "throughput");
+  const [tab, selectTab] = useViewTab<AnalyticsTabId>(ANALYTICS_VIEW_ID);
   return (
     <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
       <ViewTabBar tabs={ANALYTICS_TABS} active={tab} onSelect={selectTab} />
