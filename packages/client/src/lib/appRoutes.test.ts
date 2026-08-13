@@ -91,6 +91,7 @@ describe("parseAppPath — legacy flat paths (#446)", () => {
       projectSlug: null,
       view: "kanban",
       tab: null,
+      tabIsExplicit: false,
       issueNumber: null,
       panel: null,
     });
@@ -98,6 +99,7 @@ describe("parseAppPath — legacy flat paths (#446)", () => {
       projectSlug: null,
       view: "kanban",
       tab: null,
+      tabIsExplicit: false,
       issueNumber: null,
       panel: null,
     });
@@ -112,6 +114,7 @@ describe("parseAppPath — legacy flat paths (#446)", () => {
       projectSlug: null,
       view: "analytics",
       tab: "burndown",
+      tabIsExplicit: true,
       issueNumber: null,
       panel: null,
     });
@@ -119,6 +122,7 @@ describe("parseAppPath — legacy flat paths (#446)", () => {
       projectSlug: null,
       view: "runtime",
       tab: "monitor-cycles",
+      tabIsExplicit: true,
       issueNumber: null,
       panel: null,
     });
@@ -144,6 +148,7 @@ describe("parseAppPath — legacy flat paths (#446)", () => {
       projectSlug: null,
       view: "kanban",
       tab: null,
+      tabIsExplicit: false,
       issueNumber: 42,
       panel: "issue",
     });
@@ -151,6 +156,7 @@ describe("parseAppPath — legacy flat paths (#446)", () => {
       projectSlug: null,
       view: "table",
       tab: null,
+      tabIsExplicit: false,
       issueNumber: 7,
       panel: "issue",
     });
@@ -161,6 +167,7 @@ describe("parseAppPath — legacy flat paths (#446)", () => {
       projectSlug: null,
       view: null,
       tab: null,
+      tabIsExplicit: false,
       issueNumber: null,
       panel: null,
     });
@@ -175,6 +182,7 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       projectSlug: "mealplan",
       view: "kanban",
       tab: null,
+      tabIsExplicit: false,
       issueNumber: null,
       panel: null,
     });
@@ -186,6 +194,7 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       projectSlug: "mealplan",
       view: "plugin-views",
       tab: null,
+      tabIsExplicit: false,
       issueNumber: null,
       panel: null,
     });
@@ -204,6 +213,7 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       projectSlug: "mealplan",
       view: "analytics",
       tab: "burndown",
+      tabIsExplicit: true,
       issueNumber: null,
       panel: null,
     });
@@ -214,6 +224,7 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       projectSlug: "mealplan",
       view: "kanban",
       tab: null,
+      tabIsExplicit: false,
       issueNumber: 446,
       panel: "issue",
     });
@@ -221,6 +232,7 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       projectSlug: "mealplan",
       view: "analytics",
       tab: "burndown",
+      tabIsExplicit: true,
       issueNumber: 9,
       panel: "issue",
     });
@@ -231,6 +243,7 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       projectSlug: "mealplan",
       view: "kanban",
       tab: null,
+      tabIsExplicit: false,
       issueNumber: 12,
       panel: "issue",
     });
@@ -245,6 +258,7 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       projectSlug: null,
       view: null,
       tab: null,
+      tabIsExplicit: false,
       issueNumber: null,
       panel: null,
     });
@@ -252,6 +266,7 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       projectSlug: null,
       view: null,
       tab: null,
+      tabIsExplicit: false,
       issueNumber: null,
       panel: null,
     });
@@ -260,6 +275,7 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       projectSlug: "mealplan",
       view: null,
       tab: null,
+      tabIsExplicit: false,
       issueNumber: null,
       panel: null,
     });
@@ -344,6 +360,7 @@ describe("issue panel segment — /issue/<n>/workspace", () => {
       projectSlug: "eventhub",
       view: "kanban",
       tab: null,
+      tabIsExplicit: false,
       issueNumber: 28,
       panel: "workspace",
     });
@@ -351,6 +368,7 @@ describe("issue panel segment — /issue/<n>/workspace", () => {
       projectSlug: null,
       view: "table",
       tab: null,
+      tabIsExplicit: false,
       issueNumber: 7,
       panel: "workspace",
     });
@@ -394,6 +412,7 @@ describe("tab segment — /p/<slug>/<view>/<tab>", () => {
       projectSlug: "taskflow",
       view: "analytics",
       tab: "burndown",
+      tabIsExplicit: true,
       issueNumber: null,
       panel: null,
     });
@@ -401,6 +420,7 @@ describe("tab segment — /p/<slug>/<view>/<tab>", () => {
       projectSlug: null,
       view: "runtime",
       tab: "health-events",
+      tabIsExplicit: true,
       issueNumber: null,
       panel: null,
     });
@@ -415,6 +435,22 @@ describe("tab segment — /p/<slug>/<view>/<tab>", () => {
     expect(parseAppPath("/activity/nonsense").tab).toBe("activity");
   });
 
+  // `tab` is resolved, so a defaulted tab and a chosen one look identical —
+  // which is what made the legacy `?tab=` param unreachable: it was compared
+  // against a path tab that was never absent. `tabIsExplicit` is that missing
+  // distinction, and an unknown segment counts as NOT explicit because it was
+  // downgraded to the default and must not outrank a `?tab=` naming a real one.
+  it("says whether the PATH named the tab or it was defaulted", () => {
+    expect(parseAppPath("/p/taskflow/analytics/burndown").tabIsExplicit).toBe(true);
+    expect(parseAppPath("/burndown").tabIsExplicit).toBe(true);
+    expect(parseAppPath("/p/taskflow/burndown").tabIsExplicit).toBe(true);
+    expect(parseAppPath("/p/taskflow/analytics").tabIsExplicit).toBe(false);
+    expect(parseAppPath("/analytics").tabIsExplicit).toBe(false);
+    expect(parseAppPath("/p/taskflow/analytics/nonsense").tabIsExplicit).toBe(false);
+    // A view with no tab dimension never claims an explicit tab.
+    expect(parseAppPath("/p/taskflow/board").tabIsExplicit).toBe(false);
+  });
+
   it("never invents a tab for a plain view", () => {
     expect(parseAppPath("/p/taskflow/board").tab).toBeNull();
     // …and an extra segment on a plain view is junk, not a tab.
@@ -427,6 +463,7 @@ describe("tab segment — /p/<slug>/<view>/<tab>", () => {
       projectSlug: "taskflow",
       view: "analytics",
       tab: "burndown",
+      tabIsExplicit: true,
       issueNumber: 12,
       panel: "issue",
     });
