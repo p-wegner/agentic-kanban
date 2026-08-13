@@ -181,6 +181,27 @@ agent model used for board tasks. It runs in-process via the Claude Agent SDK
   the plugin's literal backtick pseudo-elements around inline code and adds a pill.
 - `permissionMode: "bypassPermissions"` (+ `allowDangerouslySkipPermissions`) —
   there is no human in the chat loop to approve tool prompts.
+- **`AskUserQuestion` is parked for the human, not auto-denied** (#459/#460/#461).
+  The `claude_code` preset advertises the tool; with no `canUseTool` handler the SDK
+  auto-denies it and the model gets an `is_error` tool_result whose whole content is
+  the permission title `"Answer questions?"` — which the model then works around by
+  re-asking in prose, one wasted turn each time. `butlerCanUseTool` therefore parks the
+  call, broadcasts `{type:"question", askId, questions}`, and resolves when the user
+  answers via `POST /:id/butler/answer`. Everything else stays allowed (bypass semantics).
+  - **The answer is returned as `{behavior:"allow", updatedInput:{...input, answers}}`** —
+    MEASURED end-to-end against the live butler; the CLI's own AskUserQuestion accepts
+    pre-filled answers headlessly, so the tool completes normally. The alternative,
+    `{behavior:"deny", message:"<answer>"}`, also reaches the model but records an
+    answered question as a denied tool call (red error card, dishonest transcript) and
+    was rejected for that reason. See the comment on `buildAnsweredPermissionResult`.
+  - **No human ⇒ deny immediately**, never park: `hasInteractiveButlerListener` (i.e.
+    `listenersByKey.get(key)?.size`) gates it, because `POST /:id/butler/ask` (CLI/MCP)
+    blocks its caller and would otherwise hang for the full timeout — strictly worse
+    than the old instant failure. Same for the timeout/interrupt/stop paths, each of
+    which denies with a message that names the remedy.
+  - Only ANSWERED questions go into the replayed `ButlerTurn` transcript (role
+    `"question"`), so a reload shows what was chosen and never resurrects a parked
+    question as answerable.
 
 **Caution — worktree DB resolution:** a git worktree has no `packages/server/kanban.db`
 (the file is gitignored, so it is never checked out into a fresh worktree). `data-dir.ts`

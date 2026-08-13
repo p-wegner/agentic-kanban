@@ -190,6 +190,17 @@ export function butlerSessionKey(projectId: string, butlerId: string = "default"
  */
 const listenersByKey = new Map<string, Set<Listener>>();
 
+/**
+ * The subset of {@link listenersByKey} that is a HUMAN — i.e. the SSE stream behind an
+ * open Butler chat tab. Kept separate because "is a listener attached" is not the same
+ * question as "can somebody answer" (#461): `POST /:id/butler/ask` and `startSession`
+ * subscribe internal listeners too, and counting those would make the synchronous
+ * CLI/MCP door — where the caller is blocked waiting for ONE answer and no UI exists —
+ * look interactive, park the question, and hang it for the full timeout.
+ * Non-interactive is the default; only the stream route opts in.
+ */
+const interactiveListenersByKey = new Map<string, Set<Listener>>();
+
 function broadcast(s: ButlerSession, e: ButlerEvent): void {
   const ls = listenersByKey.get(s.key);
   if (!ls) return;
@@ -227,9 +238,9 @@ export const QUESTION_TIMED_OUT_MESSAGE =
   "The question timed out — nobody answered it. Ask in plain text in your reply instead, " +
   "or state your assumption and proceed.";
 
-/** True when at least one SSE stream (a Butler chat tab) is attached to this butler. */
+/** True when at least one HUMAN SSE stream (an open Butler chat tab) is attached. */
 export function hasInteractiveButlerListener(projectId: string, butlerId: string = "default"): boolean {
-  return (listenersByKey.get(butlerSessionKey(projectId, butlerId))?.size ?? 0) > 0;
+  return (interactiveListenersByKey.get(butlerSessionKey(projectId, butlerId))?.size ?? 0) > 0;
 }
 
 /** Coerce the AskUserQuestion tool input into the shape the chat UI renders. */
@@ -275,6 +286,16 @@ function askButlerQuestion(
   if (questions.length === 0) {
     return Promise.resolve({ behavior: "deny", message: "The question payload was empty or malformed." });
   }
+  // #461 — the guard that makes parking safe. The butler is reachable from surfaces
+  // where NOBODY can answer: `POST /:id/butler/ask` (the synchronous CLI/MCP door,
+  // whose caller is blocked on one answer), a Butler view with no tab open, a
+  // scheduled turn. Parking there would hang until the abort or the timeout, which is
+  // strictly worse than the instant failure this ticket set out to fix. So deny at
+  // once, with a message that names the remedy — one turn, once, instead of the model
+  // re-discovering the same wall (which is exactly what "Answer questions?" caused).
+  if (!hasInteractiveButlerListener(session.projectId, session.butlerId)) {
+    return Promise.resolve({ behavior: "deny", message: NO_INTERACTIVE_CLIENT_MESSAGE });
+  }
   const askId = randomUUID();
   return new Promise<PermissionResult>((resolve) => {
     let settled = false;
@@ -313,6 +334,15 @@ function butlerCanUseTool(session: ButlerSession): CanUseTool {
     if (toolName !== "AskUserQuestion") return { behavior: "allow", updatedInput: input };
     return askButlerQuestion(session, input, options.signal);
   };
+}
+
+/**
+ * The `canUseTool` handler of a live session — the same closure the SDK holds.
+ * Exposed so the deny/park/answer paths can be exercised without a real SDK query.
+ */
+export function getButlerCanUseTool(projectId: string, butlerId: string = "default"): CanUseTool | undefined {
+  const session = sessions.get(butlerSessionKey(projectId, butlerId));
+  return session ? butlerCanUseTool(session) : undefined;
 }
 
 /**
@@ -490,7 +520,13 @@ export function getButlerTranscript(projectId: string, butlerId: string = "defau
   return sessions.get(butlerSessionKey(projectId, butlerId))?.transcript ?? [];
 }
 
-export function subscribeButler(projectId: string, listener: Listener, butlerId: string = "default"): () => void {
+export function subscribeButler(
+  projectId: string,
+  listener: Listener,
+  butlerId: string = "default",
+  /** True only for a stream backed by a human UI — see {@link interactiveListenersByKey}. */
+  opts?: { interactive?: boolean },
+): () => void {
   const key = butlerSessionKey(projectId, butlerId);
   let ls = listenersByKey.get(key);
   if (!ls) {
@@ -498,6 +534,14 @@ export function subscribeButler(projectId: string, listener: Listener, butlerId:
     listenersByKey.set(key, ls);
   }
   ls.add(listener);
+  if (opts?.interactive) {
+    let interactive = interactiveListenersByKey.get(key);
+    if (!interactive) {
+      interactive = new Set();
+      interactiveListenersByKey.set(key, interactive);
+    }
+    interactive.add(listener);
+  }
   // Replay current state so a freshly-connected stream is immediately in sync.
   const s = sessions.get(key);
   if (s) {
@@ -506,6 +550,11 @@ export function subscribeButler(projectId: string, listener: Listener, butlerId:
     if (s.contextTokens) listener({ type: "usage", contextTokens: s.contextTokens });
   }
   return () => {
+    const interactive = interactiveListenersByKey.get(key);
+    if (interactive) {
+      interactive.delete(listener);
+      if (interactive.size === 0) interactiveListenersByKey.delete(key);
+    }
     const set = listenersByKey.get(key);
     if (!set) return;
     set.delete(listener);

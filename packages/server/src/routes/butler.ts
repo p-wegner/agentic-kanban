@@ -710,9 +710,12 @@ export function createButlerRoute(
     const projectId = c.req.param("id");
     const butlerId = resolveButlerId(c);
     return streamSSE(c, async (stream) => {
+      // The ONE interactive subscriber: a human has the Butler chat open, so a parked
+      // AskUserQuestion can actually be answered here (#461). Every other subscriber
+      // (the /ask collector, the session-id persister) is deliberately not.
       const unsubscribe = subscribeButler(projectId, (e) => {
         void stream.writeSSE({ data: JSON.stringify(e) });
-      }, butlerId);
+      }, butlerId, { interactive: true });
       stream.onAbort(() => unsubscribe());
       // Hold the connection open with periodic heartbeats until the client disconnects.
       while (!c.req.raw.signal.aborted) {
