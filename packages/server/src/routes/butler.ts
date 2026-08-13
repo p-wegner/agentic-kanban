@@ -32,6 +32,8 @@ import {
   setButlerModel,
   interruptButler,
   listProjectButlerStates,
+  answerButlerQuestion,
+  type ButlerQuestionAnswer,
 } from "../services/butler-sdk.service.js";
 import {
   listButlerDefinitions,
@@ -626,6 +628,34 @@ export function createButlerRoute(
     const ok = sendButlerTurn(projectId, body.content, { butlerId });
     if (!ok) return c.json({ error: "Butler is already processing a turn" }, 409);
     return c.json({ ok });
+  });
+
+  // POST /api/projects/:id/butler/answer — answer a parked AskUserQuestion (#460).
+  // The butler's canUseTool handler suspended the SDK turn on this askId; resolving
+  // it hands the model the user's choices and the turn continues.
+  router.post("/:id/butler/answer", async (c) => {
+    const projectId = c.req.param("id");
+    const butlerId = resolveButlerId(c);
+    const body = await parseJsonBody<{ askId?: string; answers?: ButlerQuestionAnswer[] }>(c);
+    const askId = body.askId?.trim();
+    if (!askId) return c.json({ error: "askId is required" }, 400);
+    if (!Array.isArray(body.answers) || body.answers.length === 0) {
+      return c.json({ error: "answers is required" }, 400);
+    }
+    const answers: ButlerQuestionAnswer[] = body.answers
+      .filter((a) => typeof a?.question === "string" && Array.isArray(a?.answers))
+      .map((a) => ({
+        question: a.question,
+        header: typeof a.header === "string" && a.header ? a.header : a.question.slice(0, 12),
+        answers: a.answers.filter((x): x is string => typeof x === "string" && x.trim().length > 0),
+      }))
+      .filter((a) => a.answers.length > 0);
+    if (answers.length === 0) return c.json({ error: "answers is required" }, 400);
+    const ok = answerButlerQuestion(projectId, askId, answers, butlerId);
+    // 409, not 404: the question existed but is no longer answerable (timed out,
+    // already answered, or the session was restarted).
+    if (!ok) return c.json({ error: "No question is waiting for this answer", ok: false }, 409);
+    return c.json({ ok: true });
   });
 
   // POST /api/projects/:id/butler/ask — synchronous: send a turn, wait for the full

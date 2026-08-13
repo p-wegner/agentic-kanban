@@ -13,8 +13,9 @@
  * Auth/model come from the active Claude profile env (Bedrock/z.ai/API key),
  * reusing `buildSpawnEnv` so the butler behaves like the rest of the agents.
  */
+import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
-import { query, type Options, type Query, type SDKUserMessage, type SlashCommand } from "@anthropic-ai/claude-agent-sdk";
+import { query, type CanUseTool, type Options, type PermissionResult, type Query, type SDKUserMessage, type SlashCommand } from "@anthropic-ai/claude-agent-sdk";
 import { buildSpawnEnv, getMcpServersConfig } from "./agent-provider/helpers.js";
 import { ensureBoardGuideFile } from "../butler/board-guide.js";
 import { isTransientNetworkError } from "../startup/transient-errors.js";
@@ -28,6 +29,27 @@ export interface ButlerCommand {
   argumentHint?: string;
 }
 
+/** One selectable choice of an AskUserQuestion question. */
+export interface ButlerQuestionOption {
+  label: string;
+  description?: string;
+}
+
+/** One question of an AskUserQuestion call, normalised for the chat UI. */
+export interface ButlerQuestion {
+  question: string;
+  header: string;
+  multiSelect: boolean;
+  options: ButlerQuestionOption[];
+}
+
+/** The user's answer to one question (one entry for single-select, N for multi). */
+export interface ButlerQuestionAnswer {
+  question: string;
+  header: string;
+  answers: string[];
+}
+
 export type ButlerEvent =
   | { type: "ready" }
   | { type: "session"; sessionId: string }
@@ -39,15 +61,23 @@ export type ButlerEvent =
   | { type: "result"; text?: string; isError?: boolean }
   | { type: "usage"; contextTokens: number }
   | { type: "meta"; model?: string; contextWindow?: number; mcpConnected?: boolean }
+  /** The butler asked a structured question; the chat renders choice chips for it. */
+  | { type: "question"; askId: string; questions: ButlerQuestion[] }
+  /** The parked question is over — answered by the user, or denied (timeout/abort/stop). */
+  | { type: "question-resolved"; askId: string; answers?: ButlerQuestionAnswer[]; reason?: string }
   | { type: "error"; message: string };
 
 type Listener = (e: ButlerEvent) => void;
 
 /** A persisted conversation turn, replayed when the chat UI reloads. */
 export interface ButlerTurn {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "question";
   text: string;
   ts: number;
+  /** Only for role "question": the asked questions plus what the user picked.
+   *  Only ANSWERED questions are recorded, so a reload never resurrects a parked
+   *  question as answerable (its turn is long gone — #460). */
+  question?: { askId: string; questions: ButlerQuestion[]; answers: ButlerQuestionAnswer[] };
 }
 
 /** Queue-backed AsyncIterable: push() enqueues a turn, end() closes the stream. */
@@ -124,6 +154,18 @@ interface ButlerSession {
   /** For a codex butler running under an OAuth license: the CODEX_HOME dir to spawn
    *  under (its own auth.json + rollouts). Set when `profile` was reduced to "default". */
   codexHome?: string;
+  /** AskUserQuestion calls parked waiting for a human answer, keyed by askId. */
+  pendingQuestions: Map<string, PendingButlerQuestion>;
+}
+
+/** A parked AskUserQuestion: the SDK turn is suspended on `settle`. */
+interface PendingButlerQuestion {
+  askId: string;
+  questions: ButlerQuestion[];
+  /** The raw AskUserQuestion tool input, kept so the answer can be shaped from it. */
+  input: Record<string, unknown>;
+  /** Resolves the canUseTool promise exactly once and clears the timer/abort hook. */
+  settle: (result: PermissionResult) => void;
 }
 
 /**
@@ -158,6 +200,185 @@ function broadcast(s: ButlerSession, e: ButlerEvent): void {
       console.error(`[butler-sdk] listener error: project=${s.projectId} butler=${s.butlerId}`, err);
     }
   }
+}
+
+// ── AskUserQuestion: park it for the human instead of auto-denying (#459/#460) ──
+//
+// The butler runs the Agent SDK with the `claude_code` system-prompt preset, which
+// advertises `AskUserQuestion`. Without a `canUseTool` handler the SDK auto-denies
+// every such call and hands the model an is_error tool_result whose whole content is
+// the permission-prompt title ("Answer questions?") — an opaque failure the user sees
+// as a red tool card, and which the model then works around by re-asking in prose
+// (#459, measured on butler session 32280042-19e3-4a74-b9e4-59924a25cb5a).
+//
+// The butler is the ONE agent surface with a human at the keyboard, so instead we park
+// the call, broadcast the questions to the chat, and resolve when the user answers.
+
+/** How long a parked question waits for a human before it is denied (#461). */
+export const BUTLER_QUESTION_TIMEOUT_MS = 10 * 60_000;
+
+/** Denial handed to the model when nothing can render the question (#461). */
+export const NO_INTERACTIVE_CLIENT_MESSAGE =
+  "No interactive client is attached to this butler session, so this question cannot be answered. " +
+  "Ask your question in plain text in your reply instead, or state your assumption and proceed.";
+
+/** Denial handed to the model when the human never answered (#461). */
+export const QUESTION_TIMED_OUT_MESSAGE =
+  "The question timed out — nobody answered it. Ask in plain text in your reply instead, " +
+  "or state your assumption and proceed.";
+
+/** True when at least one SSE stream (a Butler chat tab) is attached to this butler. */
+export function hasInteractiveButlerListener(projectId: string, butlerId: string = "default"): boolean {
+  return (listenersByKey.get(butlerSessionKey(projectId, butlerId))?.size ?? 0) > 0;
+}
+
+/** Coerce the AskUserQuestion tool input into the shape the chat UI renders. */
+export function normalizeButlerQuestions(input: Record<string, unknown>): ButlerQuestion[] {
+  const raw = (input as { questions?: unknown }).questions;
+  if (!Array.isArray(raw)) return [];
+  const out: ButlerQuestion[] = [];
+  for (const q of raw.slice(0, 4)) {
+    const item = q as { question?: unknown; header?: unknown; multiSelect?: unknown; options?: unknown };
+    const question = typeof item.question === "string" ? item.question : "";
+    if (!question) continue;
+    const options: ButlerQuestionOption[] = Array.isArray(item.options)
+      ? item.options
+          .map((o) => o as { label?: unknown; description?: unknown })
+          .filter((o) => typeof o.label === "string" && o.label.length > 0)
+          .map((o) => ({ label: o.label as string, description: typeof o.description === "string" ? o.description : undefined }))
+      : [];
+    out.push({
+      question,
+      header: typeof item.header === "string" && item.header ? item.header : question.slice(0, 12),
+      multiSelect: item.multiSelect === true,
+      options,
+    });
+  }
+  return out;
+}
+
+/** Human-readable rendering of the answers, used for the transcript entry. */
+export function formatButlerAnswers(answers: ButlerQuestionAnswer[]): string {
+  return answers.map((a) => `${a.header}: ${a.answers.join(", ")}`).join("\n");
+}
+
+/**
+ * Park an AskUserQuestion call until a human answers it (or it is denied).
+ * Resolves the `canUseTool` promise the SDK is awaiting.
+ */
+function askButlerQuestion(
+  session: ButlerSession,
+  input: Record<string, unknown>,
+  signal: AbortSignal,
+): Promise<PermissionResult> {
+  const questions = normalizeButlerQuestions(input);
+  if (questions.length === 0) {
+    return Promise.resolve({ behavior: "deny", message: "The question payload was empty or malformed." });
+  }
+  const askId = randomUUID();
+  return new Promise<PermissionResult>((resolve) => {
+    let settled = false;
+    const settle = (result: PermissionResult): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      session.pendingQuestions.delete(askId);
+      resolve(result);
+    };
+    const onAbort = (): void => {
+      broadcast(session, { type: "question-resolved", askId, reason: "interrupted" });
+      settle({ behavior: "deny", message: "The turn was interrupted before the question could be answered." });
+    };
+    const timer = setTimeout(() => {
+      broadcast(session, { type: "question-resolved", askId, reason: "timeout" });
+      settle({ behavior: "deny", message: QUESTION_TIMED_OUT_MESSAGE });
+    }, BUTLER_QUESTION_TIMEOUT_MS);
+    // Node keeps the process alive for a pending timer; a 10-minute question must not.
+    timer.unref?.();
+    signal.addEventListener("abort", onAbort, { once: true });
+    session.pendingQuestions.set(askId, { askId, questions, input, settle });
+    broadcast(session, { type: "question", askId, questions });
+  });
+}
+
+/**
+ * `canUseTool` for the butler. Every tool other than AskUserQuestion keeps the
+ * pre-existing behaviour (allowed — the butler runs with `bypassPermissions`
+ * because there is no human approving filesystem prompts); only AskUserQuestion
+ * is routed to the chat UI.
+ */
+function butlerCanUseTool(session: ButlerSession): CanUseTool {
+  return async (toolName, input, options) => {
+    if (toolName !== "AskUserQuestion") return { behavior: "allow", updatedInput: input };
+    return askButlerQuestion(session, input, options.signal);
+  };
+}
+
+/**
+ * Turn the user's answers into the `PermissionResult` the SDK is awaiting.
+ *
+ * `PermissionResult` is only `allow | deny` (sdk.d.ts:1993), so an answered question
+ * had two candidate encodings. Which one is used here was MEASURED, not guessed:
+ *
+ *  1. `{behavior:"allow", updatedInput:{...input, answers}}` — **this one. VERIFIED**
+ *     end-to-end on 2026-08-13 against the live `mealplan` butler (Opus, Agent SDK
+ *     0.3.152): the butler was asked to call AskUserQuestion for a colour, the card
+ *     was answered "Green" in the chat, and the butler continued the SAME turn with
+ *     `PICKED=Green`. So the CLI's own AskUserQuestion implementation DOES accept
+ *     pre-filled answers headlessly — it does not re-prompt and does not hang. The
+ *     tool therefore completes normally and its real `AskUserQuestionOutput`
+ *     (`{questions, answers}`, sdk-tools.d.ts:2768) reaches the model.
+ *  2. `{behavior:"deny", message:"<the user's answer text>"}` — REJECTED. It would
+ *     also reach the model (a deny message becomes the tool_result), but only by
+ *     recording an answered question as a DENIED tool call: the chat would show a red
+ *     error card, the transcript would claim a refusal that never happened, and the
+ *     model would have to infer that a denial is really an answer. Since (1) was
+ *     measured to work, paying that cost is unjustifiable.
+ *
+ * `answers` is keyed by question TEXT with multi-select answers comma-joined, which
+ * is the shape `AskUserQuestionOutput.answers` declares.
+ */
+function buildAnsweredPermissionResult(
+  pending: PendingButlerQuestion,
+  answers: ButlerQuestionAnswer[],
+): PermissionResult {
+  const byQuestion: Record<string, string> = {};
+  for (const a of answers) byQuestion[a.question] = a.answers.join(", ");
+  return { behavior: "allow", updatedInput: { ...pending.input, answers: byQuestion } };
+}
+
+/**
+ * Answer a parked question. Returns false when no such question is parked
+ * (already answered, timed out, or the session was recreated).
+ */
+export function answerButlerQuestion(
+  projectId: string,
+  askId: string,
+  answers: ButlerQuestionAnswer[],
+  butlerId: string = "default",
+): boolean {
+  const session = sessions.get(butlerSessionKey(projectId, butlerId));
+  const pending = session?.pendingQuestions.get(askId);
+  if (!session || !pending) return false;
+  session.transcript.push({
+    role: "question",
+    text: formatButlerAnswers(answers),
+    ts: Date.now(),
+    question: { askId, questions: pending.questions, answers },
+  });
+  broadcast(session, { type: "question-resolved", askId, answers });
+  pending.settle(buildAnsweredPermissionResult(pending, answers));
+  return true;
+}
+
+/** Deny every parked question of a session (teardown / stop). */
+function rejectPendingQuestions(session: ButlerSession, message: string): void {
+  for (const pending of [...session.pendingQuestions.values()]) {
+    broadcast(session, { type: "question-resolved", askId: pending.askId, reason: "cancelled" });
+    pending.settle({ behavior: "deny", message });
+  }
+  session.pendingQuestions.clear();
 }
 
 function buildButlerSystemPrompt(projectName: string, repoPath: string): string {
@@ -250,6 +471,9 @@ export async function interruptButler(projectId: string, butlerId: string = "def
     return true;
   }
   if (!s?.query) return false;
+  // A parked question belongs to the turn being interrupted — release it, or the
+  // SDK stays blocked on a promise nobody will ever resolve.
+  rejectPendingQuestions(s, "The turn was interrupted before the question could be answered.");
   try {
     await s.query.interrupt();
   } catch (err) {
@@ -336,6 +560,7 @@ export function ensureButlerSession(opts: {
     agentCommand: opts.agentCommand,
     agentArgs: opts.agentArgs,
     codexHome: opts.codexHome,
+    pendingQuestions: new Map(),
   };
   sessions.set(key, session);
 
@@ -374,6 +599,9 @@ export function ensureButlerSession(opts: {
     env: env,
     abortController: session.abort,
     systemPrompt: { type: "preset", preset: "claude_code", append: systemPromptAppend },
+    // Without this the SDK auto-denies AskUserQuestion with the opaque permission
+    // title "Answer questions?" (#459). The handler routes it to the chat UI.
+    canUseTool: butlerCanUseTool(session),
     mcpServers: getMcpServersConfig(),
     ...(opts.model ? { model: opts.model } : {}),
     ...(opts.resumeSessionId ? { resume: opts.resumeSessionId } : {}),
@@ -761,6 +989,7 @@ async function runLoop(session: ButlerSession, input: Pushable<SDKUserMessage>, 
     }
   } finally {
     if (!retrying) {
+      rejectPendingQuestions(session, "The butler session ended before the question could be answered.");
       session.query = undefined;
       sessions.delete(session.key);
     }
@@ -805,6 +1034,7 @@ export function stopButlerSession(projectId: string, butlerId: string = "default
   const s = sessions.get(key);
   if (!s) return;
   console.log(`[butler-sdk] stopping session: project=${s.projectId} butler=${s.butlerId}`);
+  rejectPendingQuestions(s, "The butler session was stopped before the question could be answered.");
   if (s.process?.pid) s.process.kill();
   s.input?.end();
   s.abort.abort();
