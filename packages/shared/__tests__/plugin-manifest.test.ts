@@ -11,6 +11,7 @@ import {
   pluginLoopPausedPreferenceKey,
   pluginSkillName,
   countScaffoldPlaceholders,
+  DEFAULT_PLUGIN_AUDIENCE,
 } from "../src/lib/plugin-manifest.js";
 import {
   isPluginEnabledPreferenceKey,
@@ -126,6 +127,43 @@ describe("parsePluginManifest", () => {
     expect(() =>
       parsePluginManifest({ id: "p", name: "P", scaffold: { profileTemplate: "t.md", targetPath: "../outside.md" } }),
     ).toThrow(/must not contain ".."/);
+  });
+
+  // #456 — `audience` marks an entry as diagnostics so the board's capability rail can
+  // collapse it instead of listing a plugin selftest at the same weight as the workflow.
+  it("parses audience on views, scripts and skills", () => {
+    const m = parsePluginManifest({
+      id: "p",
+      name: "P",
+      skills: [{ dir: "skills/runner", audience: "developer" }],
+      scripts: [{ name: "selftest", command: "node selftest.mjs", audience: "developer" }],
+      views: [
+        {
+          id: "debug",
+          label: "Debug",
+          kind: "iframe",
+          audience: "developer",
+          serve: { command: "node serve.mjs" },
+        },
+      ],
+    });
+    expect(m.skills?.[0].audience).toBe("developer");
+    expect(m.scripts?.[0].audience).toBe("developer");
+    expect(m.views?.[0].audience).toBe("developer");
+  });
+
+  it("leaves audience undefined when the manifest omits it (backward compatible)", () => {
+    const m = parsePluginManifest(JSON.stringify(FULL_MANIFEST));
+    expect(m.skills?.[0].audience).toBeUndefined();
+    expect(m.scripts?.[0].audience).toBeUndefined();
+    expect(m.views?.[0].audience).toBeUndefined();
+    expect(DEFAULT_PLUGIN_AUDIENCE).toBe("operator");
+  });
+
+  it("rejects an unknown audience value", () => {
+    expect(() =>
+      parsePluginManifest({ id: "p", name: "P", scripts: [{ name: "s", command: "x", audience: "admin" }] }),
+    ).toThrow(/must be one of operator, developer/);
   });
 });
 

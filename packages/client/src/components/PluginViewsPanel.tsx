@@ -14,8 +14,16 @@ import {
 } from "./PluginActionPanes.js";
 import { PluginScaffoldPane, type ScaffoldForm } from "./PluginScaffoldPane.js";
 
+/**
+ * Who a rail entry is for (#456). Mirrors `PluginAudience` in the manifest contract; the
+ * field is optional on the wire because an older server never sends it — absent means
+ * `operator`, which is what every pre-#456 manifest gets.
+ */
+type Audience = "operator" | "developer";
+type WithAudience = { audience?: Audience | null };
+
 /** A plugin-served page, plus whether its server is currently up. */
-type PluginView = PluginOwner & {
+type PluginView = PluginOwner & WithAudience & {
   id: string;
   label: string;
   kind: "iframe";
@@ -27,12 +35,34 @@ type PluginView = PluginOwner & {
   healthy?: boolean;
 };
 
+type RailScript = PluginScript & WithAudience;
+type RailSkill = PluginSkill & WithAudience;
+
+/**
+ * Split a rail group into the workflow half and the diagnostics half (#456).
+ *
+ * The rail listed seven pm-pipeline entries at identical weight, five of which were
+ * operator/developer debris (`Plugin selftest` validates the plugin's own fixtures;
+ * `pm-step-runner` is the skill the LOOP launches, so pressing it by hand duplicates loop
+ * work) — and the one entry that was the actual workflow sat in the middle of them. A
+ * manifest can now mark an entry `audience: "developer"`; those collapse under a
+ * "Diagnostics" disclosure at the bottom instead of competing with the job.
+ *
+ * Anything unmarked is `operator`, so a manifest that says nothing renders unchanged.
+ */
+export function splitByAudience<T extends WithAudience>(items: T[]): { operator: T[]; developer: T[] } {
+  const operator: T[] = [];
+  const developer: T[] = [];
+  for (const item of items) (item.audience === "developer" ? developer : operator).push(item);
+  return { operator, developer };
+}
+
 /** GET /api/projects/:projectId/plugin-surface — everything the enabled plugins offer. */
 type PluginSurface = {
   views: PluginView[];
   loops: PluginLoop[];
-  scripts: PluginScript[];
-  skills: PluginSkill[];
+  scripts: RailScript[];
+  skills: RailSkill[];
   /**
    * Enabled plugins whose on-disk manifest is ahead of the one the board runs (#442).
    * The marketplace has warned about this since #295, but an operator drives loops from
@@ -256,6 +286,24 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
     };
   }, [surface, pluginSlug]);
 
+  // Workflow vs. diagnostics split of each group (#456). Loops are always workflow — a loop
+  // IS the job the panel exists for — so only views/scripts/skills carry an audience.
+  const railViews = useMemo(() => splitByAudience(filtered.views), [filtered.views]);
+  const railScripts = useMemo(() => splitByAudience(filtered.scripts), [filtered.scripts]);
+  const railSkills = useMemo(() => splitByAudience(filtered.skills), [filtered.skills]);
+  const operatorViews = railViews.operator;
+  const diagnosticsCount =
+    railViews.developer.length + railScripts.developer.length + railSkills.developer.length;
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  /** Never let the disclosure hide the row the pane is showing (deep link, refetch, reselect). */
+  const selectionIsDiagnostic = useMemo(() => {
+    if (!selection) return false;
+    if (selection.kind === "view") return railViews.developer.some((v) => ownerKey(v, v.id) === selection.key);
+    if (selection.kind === "script") return railScripts.developer.some((s) => ownerKey(s, s.name) === selection.key);
+    if (selection.kind === "skill") return railSkills.developer.some((s) => ownerKey(s, s.name) === selection.key);
+    return false;
+  }, [selection, railViews.developer, railScripts.developer, railSkills.developer]);
+
   // The shown plugin's scaffold form state (#291): a "Setup" rail entry appears while
   // TODO markers remain — the same gate that blocks its scripts and loops.
   const shownPlugin = useMemo(
@@ -305,8 +353,10 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
     // only possible outcome was that refusal (observed on a fresh project, #427).
     if (scaffoldNeedsSetup) {
       setSelection({ kind: "scaffold", key: "scaffold" });
-    } else if (filtered.views.length > 0) {
-      const first = filtered.views[0];
+    } else if (operatorViews.length > 0) {
+      // #456 — land on a WORKFLOW view. A diagnostics view is opt-in from the disclosure;
+      // auto-starting its server (and its pane) on arrival would defeat the point.
+      const first = operatorViews[0];
       setSelection({ kind: "view", key: ownerKey(first, first.id) });
       void startView(first);
     } else if (filtered.loops.length > 0) {
@@ -314,7 +364,7 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
     } else {
       setSelection(null);
     }
-  }, [loading, pluginSlug, projectId, filtered, startView, scaffoldNeedsSetup, scaffold, scaffoldLoading]);
+  }, [loading, pluginSlug, projectId, filtered, operatorViews, startView, scaffoldNeedsSetup, scaffold, scaffoldLoading]);
 
   // Deep-link consumption (#300): a gate toast/notification/bell click asked for a
   // specific loop. Runs after the surface has loaded; one-shot per focus request.
@@ -470,6 +520,34 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
     );
   }
 
+  // One renderer per kind, so a workflow entry and its diagnostics twin are literally the
+  // same row — the audience decides only WHERE it is rendered, never how it behaves.
+  function renderViewButton(view: PluginView) {
+    return railButton(
+      ownerKey(view, view.id),
+      view.label,
+      selection?.kind === "view" && selection.key === ownerKey(view, view.id),
+      () => selectView(view),
+      view.running ? "live" : undefined,
+    );
+  }
+  function renderScriptButton(script: RailScript) {
+    return railButton(
+      ownerKey(script, script.name),
+      script.label,
+      selection?.kind === "script" && selection.key === ownerKey(script, script.name),
+      () => setSelection({ kind: "script", key: ownerKey(script, script.name) }),
+    );
+  }
+  function renderSkillButton(skill: RailSkill) {
+    return railButton(
+      ownerKey(skill, skill.name),
+      skill.name,
+      selection?.kind === "skill" && selection.key === ownerKey(skill, skill.name),
+      () => setSelection({ kind: "skill", key: ownerKey(skill, skill.name) }),
+    );
+  }
+
   return (
     <div className="flex-1 min-h-0 flex relative" data-testid="plugin-views-panel">
       {/* Mobile scrim (#432): tapping outside the drawer dismisses it. `md:hidden` because on
@@ -537,14 +615,8 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
             )}
           </div>
         )}
-        {railGroup("Views", filtered.views, (view) =>
-          railButton(
-            ownerKey(view, view.id),
-            view.label,
-            selection?.kind === "view" && selection.key === ownerKey(view, view.id),
-            () => selectView(view),
-            view.running ? "live" : undefined,
-          ))}
+        {/* Loops first (#456): the loop is the workflow this panel exists to drive, and it
+            used to sit in the MIDDLE of the rail with diagnostics above and below it. */}
         {railGroup("Loops", filtered.loops, (loop) =>
           railButton(
             ownerKey(loop, loop.name),
@@ -564,20 +636,32 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
                     : String(loop.openTickets))
                 : undefined,
           ))}
-        {railGroup("Scripts", filtered.scripts, (script) =>
-          railButton(
-            ownerKey(script, script.name),
-            script.label,
-            selection?.kind === "script" && selection.key === ownerKey(script, script.name),
-            () => setSelection({ kind: "script", key: ownerKey(script, script.name) }),
-          ))}
-        {railGroup("Skills", filtered.skills, (skill) =>
-          railButton(
-            ownerKey(skill, skill.name),
-            skill.name,
-            selection?.kind === "skill" && selection.key === ownerKey(skill, skill.name),
-            () => setSelection({ kind: "skill", key: ownerKey(skill, skill.name) }),
-          ))}
+        {railGroup("Views", railViews.operator, renderViewButton)}
+        {railGroup("Scripts", railScripts.operator, renderScriptButton)}
+        {railGroup("Skills", railSkills.operator, renderSkillButton)}
+        {/* Diagnostics (#456): developer-audience entries, collapsed at the bottom. Still one
+            click away — the disclosure opens itself whenever the selected entry lives inside
+            it, so a deep link or a re-render never points at a hidden row. */}
+        {diagnosticsCount > 0 && (
+          <details
+            className="mt-2"
+            open={diagnosticsOpen || selectionIsDiagnostic}
+            onToggle={(e) => setDiagnosticsOpen((e.currentTarget as HTMLDetailsElement).open)}
+            data-testid="plugin-rail-diagnostics"
+          >
+            <summary className="cursor-pointer list-none px-2 py-2 md:py-1.5 rounded text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center gap-1">
+              <span className="flex-1">Diagnostics</span>
+              <span className="text-[10px] font-normal normal-case text-gray-400 dark:text-gray-500">
+                {diagnosticsCount}
+              </span>
+            </summary>
+            <div className="space-y-0.5">
+              {railViews.developer.map(renderViewButton)}
+              {railScripts.developer.map(renderScriptButton)}
+              {railSkills.developer.map(renderSkillButton)}
+            </div>
+          </details>
+        )}
       </div>
 
       {/* Detail pane */}

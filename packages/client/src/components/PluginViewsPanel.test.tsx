@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { PluginViewsPanel, createStartLatch } from "./PluginViewsPanel.js";
+import { PluginViewsPanel, createStartLatch, splitByAudience } from "./PluginViewsPanel.js";
 
 describe("createStartLatch (#251 staleness guard)", () => {
   it("drops the response of a superseded start", () => {
@@ -53,6 +53,45 @@ describe("createStartLatch (#251 staleness guard)", () => {
     if (latch.isCurrent("p:b")) applied.push("p:b");
     if (latch.isCurrent("p:a")) applied.push("p:a");
     expect(applied).toEqual(["p:b"]);
+  });
+});
+
+describe("splitByAudience (#456 rail weighting)", () => {
+  it("treats an unmarked entry as operator — a pre-#456 manifest renders unchanged", () => {
+    const items = [{ name: "a" }, { name: "b" }, { name: "c" }];
+    const { operator, developer } = splitByAudience(items);
+    expect(operator.map((i) => i.name)).toEqual(["a", "b", "c"]);
+    expect(developer).toEqual([]);
+  });
+
+  it("collapses only the entries explicitly marked developer", () => {
+    // The measured pm-pipeline rail: one workflow script among diagnostics.
+    const scripts = [
+      { name: "status", audience: "operator" as const },
+      { name: "plan-dry-run", audience: "developer" as const },
+      { name: "selftest", audience: "developer" as const },
+    ];
+    const { operator, developer } = splitByAudience(scripts);
+    expect(operator.map((s) => s.name)).toEqual(["status"]);
+    expect(developer.map((s) => s.name)).toEqual(["plan-dry-run", "selftest"]);
+  });
+
+  it("keeps each half in manifest order", () => {
+    const items = [
+      { id: "1", audience: "developer" as const },
+      { id: "2" },
+      { id: "3", audience: "developer" as const },
+      { id: "4", audience: "operator" as const },
+    ];
+    const { operator, developer } = splitByAudience(items);
+    expect(operator.map((i) => i.id)).toEqual(["2", "4"]);
+    expect(developer.map((i) => i.id)).toEqual(["1", "3"]);
+  });
+
+  it("tolerates a null audience (older server sends the field as null)", () => {
+    const { operator, developer } = splitByAudience([{ id: "x", audience: null }]);
+    expect(operator).toHaveLength(1);
+    expect(developer).toHaveLength(0);
   });
 });
 

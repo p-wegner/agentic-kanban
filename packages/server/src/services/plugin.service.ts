@@ -22,6 +22,7 @@ import {
   PLUGIN_MANIFEST_FILENAME,
   PLUGIN_OUTPUT_LOCATIONS,
   countScaffoldPlaceholders,
+  DEFAULT_PLUGIN_AUDIENCE,
   isPluginOutputLocation,
   parsePluginManifest,
   pluginEnabledPreferenceKey,
@@ -899,6 +900,9 @@ export function createPluginService(deps: {
           label: view.label,
           kind: view.kind,
           description: view.description ?? null,
+          // #456 — resolved here, so every consumer sees the same default and a manifest
+          // written before the field existed reads as `operator` rather than as unknown.
+          audience: view.audience ?? DEFAULT_PLUGIN_AUDIENCE,
           ...(await getViewStatus(row.id, view.id, projectId)),
         });
       }
@@ -914,13 +918,20 @@ export function createPluginService(deps: {
           label: script.label ?? script.name,
           description: script.description ?? null,
           command: script.command,
+          audience: script.audience ?? DEFAULT_PLUGIN_AUDIENCE,
         });
       }
       for (const skill of manifest.skills ?? []) {
         const name = pluginSkillName(skill.dir);
         // `workflow` travels to the UI so the launcher can SEE which workflow the plugin
         // chose for this skill, and change it, instead of discovering it after the fact.
-        skills.push({ ...owner, name, description: skill.description ?? null, workflow: skill.workflow ?? null });
+        skills.push({
+          ...owner,
+          name,
+          description: skill.description ?? null,
+          workflow: skill.workflow ?? null,
+          audience: skill.audience ?? DEFAULT_PLUGIN_AUDIENCE,
+        });
       }
     }
     // Start policy (#293): under `manual` the monitor never runs the planner, which is
