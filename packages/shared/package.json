@@ -395,6 +395,12 @@
       "types": "./dist/lib/worker-protocol.d.ts",
       "import": "./dist/lib/worker-protocol.js",
       "default": "./src/lib/worker-protocol.ts"
+    },
+    "./lib/onboarding-plan": {
+      "development": "./src/lib/onboarding-plan.ts",
+      "types": "./dist/lib/onboarding-plan.d.ts",
+      "import": "./dist/lib/onboarding-plan.js",
+      "default": "./src/lib/onboarding-plan.ts"
     }
   },
   "scripts": {

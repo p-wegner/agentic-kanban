@@ -75,6 +75,8 @@ export async function insertBatchIssue(
     projectId: string;
     createdAt: string;
     updatedAt: string;
+    externalKey?: string | null;
+    externalUrl?: string | null;
   },
   database: DbOrTx = db,
 ): Promise<void> {

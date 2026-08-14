@@ -63,6 +63,10 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // timeouts that fail gates and trigger whole-pipeline retries.
   "verify_max_workers",
   "verify_file_scope",
+  // Onboarding plan state (#463): `onboarding_state_<projectId>` holds the JSON record of
+  // explicit user skips + a dismissal timestamp — the plan's steps themselves are derived from
+  // the world (prefs/columns/issues), never stored, so this is the only piece that needs a key.
+  "onboarding_state",
 ] as const;
 
 /**
