@@ -9,6 +9,11 @@ const HOOKS = [
   "vital-file-guard.js",
   "prevent-cross-worktree-writes.js",
   "smart-hooks-runner.js",
+  // #392: the runner requires this at load time to memoize the git topology lookups (#279).
+  // It drifted in the other direction — the live copy had the speedups and the scaffold source
+  // did not — so scaffolded projects were getting the SLOW runner. Pinned here so the pair
+  // cannot separate again.
+  "git-topology-cache.js",
 ];
 
 const SCAFFOLD_DIR = join(__dirname, "../scaffold");

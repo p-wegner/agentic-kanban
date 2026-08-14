@@ -18,6 +18,7 @@ const fs = require("fs");
 const path = require("path");
 const { execSync } = require("child_process");
 const readline = require("readline");
+const { cachedTopology } = require("./git-topology-cache.js");
 
 let hookInput = {};
 
@@ -39,7 +40,10 @@ const gitLookupCache = new Map();
 function cachedGitLookup(kind, startDir, resolve) {
   const cacheKey = `${kind} ${startDir}`;
   if (gitLookupCache.has(cacheKey)) return gitLookupCache.get(cacheKey);
-  const value = resolve();
+  // Constant per start directory, but each hook call is a fresh process, so this
+  // re-spawned git every time — 1.9s/4.0s for toplevel/common-dir while the board's
+  // reconcilers are running. Persist across invocations (#279).
+  const value = cachedTopology(kind, startDir, resolve);
   gitLookupCache.set(cacheKey, value);
   return value;
 }
@@ -164,12 +168,63 @@ function matchesPatterns(filePath, patterns) {
   });
 }
 
+// Local hooks that expose an in-process entry point, keyed by the script basename
+// their configured `command` ends with. Calling these via require() instead of
+// execSync saves a full node cold start per invocation — on Windows under RAM
+// pressure that is 0.5–1.2s EVERY shell tool call, and it was the direct cause of
+// the spurious "timed out after 30s … Blocking anyway" fail-closed blocks on
+// read-only commands (#279). The spawn path below is still the fallback for any
+// hook without an in-process API, and the scripts remain standalone-runnable for
+// Codex/Pi.
+const IN_PROCESS_HOOKS = {
+  "validate-command-safety.js": {
+    module: "./validate-command-safety.js",
+    run: (mod, inputData) => mod.evaluateCommand(inputData || {}),
+  },
+};
+
+function inProcessHookFor(command) {
+  if (typeof command !== "string") return null;
+  for (const [basename, entry] of Object.entries(IN_PROCESS_HOOKS)) {
+    // `node <any path>/<basename>` and nothing else — so a command that merely
+    // passes the script to something else (or appends extra args we'd drop) still
+    // takes the spawn path.
+    const re = new RegExp(
+      `^\\s*node\\s+(["']?)[^"']*${basename.replace(/[.]/g, "\\.")}\\1\\s*$`,
+    );
+    if (re.test(command)) return entry;
+  }
+  return null;
+}
+
 function runCheck(check, inputData, editedFiles) {
   const timeout = (check.timeout || 30) * 1000;
   const env = {
     ...process.env,
     ...(editedFiles ? { SMART_HOOKS_EDITED_FILES: JSON.stringify(editedFiles) } : {}),
   };
+
+  const inProcess = inProcessHookFor(check.command);
+  if (inProcess) {
+    try {
+      const mod = require(inProcess.module);
+      const verdict = inProcess.run(mod, inputData);
+      const stderr = Array.isArray(verdict?.stderr) ? verdict.stderr.join("\n") : "";
+      if (verdict?.decision === "block") {
+        return { success: false, output: verdict.reason || stderr };
+      }
+      if (stderr) console.error(stderr);
+      return { success: true, output: "" };
+    } catch (err) {
+      // A broken in-process hook must not silently allow: fall through to the
+      // spawn path so the guard still gets its say.
+      console.error(
+        `[smart-hooks] in-process ${check.name || check.command} failed (${err && err.message}); ` +
+        `falling back to spawning it.`
+      );
+    }
+  }
+
   try {
     execSync(check.command, {
       cwd: check.cwd || getProjectDir(),
