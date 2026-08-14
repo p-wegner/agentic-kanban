@@ -34,7 +34,12 @@
  *        board at agent launch and therefore NOT under the agent's control — and only
  *        falls back to CLAUDE_PROJECT_DIR/cwd when no board-supplied root exists.
  *
- * Override: set ALLOW_CROSS_WORKTREE_WRITE=1 (explicit, for the rare legit case).
+ * Override (#408): prefix the shell command itself —
+ *   ALLOW_CROSS_WORKTREE_WRITE=1 <your command>
+ * The env-var form only works when it is in the environment this hook is SPAWNED with (the
+ * session's), because the hook is its own process: `VAR=1 cmd` sets it for `cmd`, not for the
+ * guard that inspects `cmd`. Write/Edit calls carry no command, so only the session-env form
+ * applies to them.
  */
 
 const path = require("path");
@@ -236,11 +241,42 @@ function block(reason) {
   process.exit(2);
 }
 
-async function main() {
-  if (process.env.ALLOW_CROSS_WORKTREE_WRITE === "1") allow();
+/**
+ * Is the documented override in force? (#408)
+ *
+ * `process.env` alone was wrong for every form an agent can actually use. The hook runs as its
+ * OWN process, spawned by the harness with the SESSION's environment — so an agent writing
+ * `ALLOW_CROSS_WORKTREE_WRITE=1 pnpm install …` sets the variable for the child command, never
+ * for this guard, and the documented escape hatch silently did nothing. The message said "set
+ * ALLOW_CROSS_WORKTREE_WRITE=1 for that one call" and there was no call for which that worked.
+ *
+ * So the inline prefix on the COMMAND ITSELF is now honoured for shell tools, which is the one
+ * form an agent can express per-call. The session-env form still works for a human who exports it
+ * before launching. Write/Edit tools carry no command string, so for those the session env
+ * remains the only channel — said plainly in their message rather than implied.
+ */
+function overrideActive(command) {
+  if (process.env.ALLOW_CROSS_WORKTREE_WRITE === "1") return true;
+  if (typeof command !== "string") return false;
+  // `VAR=1 cmd`, `export VAR=1 && cmd`, `set VAR=1` — anchored at the start of the command or of
+  // a segment, so a mention inside an argument (e.g. echoing this very message) does not disarm
+  // the guard.
+  return /(^|[;&|]\s*)(export\s+|set\s+)?ALLOW_CROSS_WORKTREE_WRITE=(1|true)\b/i.test(command);
+}
 
+async function main() {
   const input = await readInput();
-  if (!input) allow();
+  if (!input) {
+    // #391: this is a silent no-guard state — during #369's own verification two bypass replays
+    // reported exit 0 and were nearly recorded as "not blocked", when the real cause was
+    // malformed JSON hitting exactly this path. Fail open (never wedge an agent on a parse
+    // error) but SAY SO, with a stable marker the board can grep for.
+    console.error(
+      "[cross-worktree-guard] ALLOWED WITHOUT CHECKING: stdin was empty or not valid JSON, " +
+      "so the tool call could not be inspected. This is a no-guard state, not a pass."
+    );
+    allow();
+  }
 
   const toolName = input.tool_name || input.toolName;
   const isShell = SHELL_TOOLS.has(toolName);
@@ -251,6 +287,9 @@ async function main() {
   const targets = isShell ? [] : targetPaths(toolName, toolInput);
   if (!isShell && targets.length === 0) allow();
   if (isShell && !command) allow();
+
+  // Checked HERE, not before readInput(), so the inline form on the command can be seen (#408).
+  if (overrideActive(command)) allow();
 
   // The worktree this instance is AUTHORIZED to operate in — board-declared where possible.
   const { root: currentRoot, source: rootSource, cwd } = authorizedRoot(input.cwd);
@@ -285,8 +324,11 @@ async function main() {
           "worktree) and committing there bypasses the ticket's branch/merge gate entirely.\n" +
           "Reading another worktree is fine; mutating it is not.\n\n" +
           "Fix: do the work in your own worktree above and commit there. If you genuinely\n" +
-          "need to mutate another worktree, set ALLOW_CROSS_WORKTREE_WRITE=1 for that one\n" +
-          "call. Do NOT bypass by editing this hook."
+          "need to mutate another worktree, prefix THIS command with the override:\n" +
+          "  ALLOW_CROSS_WORKTREE_WRITE=1 <your command>\n" +
+          "(the prefix must be on the command itself — this guard runs as its own process, so\n" +
+          "an env var exported elsewhere in the session does not reach it). Do NOT bypass by\n" +
+          "editing this hook."
       );
     }
     allow();
@@ -306,9 +348,12 @@ async function main() {
           "Each agent must stay inside its own worktree. Writing into another worktree\n" +
           "(or the main checkout) leaves work uncommitted in someone else's tree, blocks\n" +
           "merges, and has corrupted the dev DB (see issue #43).\n\n" +
-          "Fix: write to a path inside your own worktree above. If you genuinely need to\n" +
-          "edit another worktree, do it from an instance running there — or, for a rare\n" +
-          "authorized case, set ALLOW_CROSS_WORKTREE_WRITE=1. Do NOT bypass by editing this hook."
+          "Fix: write to a path inside your own worktree above, or edit it from an instance\n" +
+          "running there. A Write/Edit call carries no command string, so the per-call override\n" +
+          "does NOT apply here — the only channel is ALLOW_CROSS_WORKTREE_WRITE=1 in the\n" +
+          "environment this guard is spawned with (i.e. exported before the session starts).\n" +
+          "To do it in-session, run the edit as a shell command and prefix THAT with the\n" +
+          "override. Do NOT bypass by editing this hook."
       );
     }
     // Target is outside every worktree (temp, home, etc.) → not our concern.

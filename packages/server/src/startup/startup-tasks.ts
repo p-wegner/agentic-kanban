@@ -4,6 +4,8 @@ import { workspaces, issues, projects, preferences, sessions, pluginViewProcesse
 import { and, eq, isNotNull, ne } from "drizzle-orm";
 import { applyMigrations } from "../db/manual-migrate.js";
 import { deduplicateProjects, unregisterLeakedTempProjects, findProjectsWithMissingRepoPath } from "../services/project-registration.js";
+import { getAllProjects } from "../repositories/project.repository.js";
+import { sweepHookWiring, formatHookWiringReport } from "../services/hook-wiring-audit.service.js";
 import type * as agentServiceType from "../services/agent.service.js";
 import * as agentService from "../services/agent.service.js";import * as gitService from "../services/git.service.js";
 import { cleanupSiblingWorktrees } from "../services/workspace-repos.service.js";
@@ -212,6 +214,21 @@ export async function runMigrations(): Promise<void> {
     }
   } catch (err) {
     console.warn("[startup] leaked temp-project cleanup failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
+
+  // #391/#396: every registered project's cross-worktree guard is audited on boot, and repaired
+  // if it ships the script without registering it on both matchers. That state — script on disk,
+  // hook unwired — is what let the #369 incident land 17 writes into another worktree with the
+  // guard sitting right there, and an audit found 9 of 20 projects in it (mostly missing the
+  // SHELL matcher, which is the vector the incident actually used). It is silent by
+  // construction, so it has to be checked rather than assumed. Repair is additive and
+  // idempotent (ensureHookScaffold appends missing entries, never overwrites).
+  try {
+    const projects = await getAllProjects(db);
+    const sweep = sweepHookWiring(projects.map((p) => ({ id: p.id, name: p.name, repoPath: p.repoPath })), { repair: true });
+    for (const line of formatHookWiringReport(sweep)) console.warn(line);
+  } catch (err) {
+    console.warn("[startup] hook-wiring audit failed (non-fatal):", err instanceof Error ? err.message : String(err));
   }
 
   // Disable auto_monitor on every startup — prevents mass agent spawns from idle workspaces
