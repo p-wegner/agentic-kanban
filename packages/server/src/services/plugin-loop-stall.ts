@@ -47,7 +47,21 @@ export type LoopStallReason =
    * Still DB-only: the evidence is a SIBLING workspace on the same issue with `mergedAt` set, not
    * a git reachability check — `loopStatuses` runs on every plugin-surface read (#359).
    */
-  | "unit-already-landed";
+  | "unit-already-landed"
+  /**
+   * The workspace CLOSED without ever merging while its ticket is still non-terminal (#445).
+   *
+   * MEASURED on eventhub: 9 of 28 open `requirement-extraction` tickets, In Review since
+   * 2026-08-05, each with one `closed` workspace holding `mergedAt: null`. The query excluded
+   * closed workspaces entirely, so these produced no stall, no inbox item and no nudge — and
+   * because a loop only replans once its round is terminal, they are a permanent brake.
+   *
+   * `mergeSafe: false` deliberately, and NOT because the branch is empty (that is #363's case):
+   * the branch may still exist and be perfectly landable, or the work may be gone with the
+   * worktree. Those need different remedies and the row alone cannot tell them apart, so the
+   * affordance is "go look", never "click Merge".
+   */
+  | "workspace-closed-unmerged";
 
 export interface LoopStall {
   workspaceId: string;
@@ -93,6 +107,27 @@ export function classifyLoopStall(row: LoopUnmergedWorkspaceRow): LoopStall {
       detail: `${ref} already has a MERGED workspace, so this step's work is on the base branch — `
         + `this open workspace is a leftover (typically the after-merge review). Do not merge it; `
         + `it closes on its own, and the loop advances from the merge that already landed.`,
+      since: row.workspaceUpdatedAt,
+      contradictoryReadyFlag: parkedByWorkspace && !row.workspaceReadyForMerge,
+    };
+  }
+
+  // #445 — checked before the issue-status branch, because these rows ARE mostly In Review and
+  // would otherwise be classified `builder-finished-unmerged` and offered a one-click Merge on a
+  // workspace that no longer exists. A closed workspace has had its worktree removed, so "merge
+  // it" is not a click the board can honour.
+  if (row.workspaceStatus === "closed") {
+    return {
+      workspaceId: row.workspaceId,
+      issueNumber: row.issueNumber,
+      issueTitle: row.issueTitle,
+      reason: "workspace-closed-unmerged",
+      mergeSafe: false,
+      detail: `${ref} is "${row.issueStatusName}" but its workspace CLOSED without merging — the `
+        + `ticket can never reach a terminal state on its own, so this loop stops advancing once its `
+        + `other tickets finish. Inspect the branch: if it still holds the work, land it; if the work `
+        + `is gone, relaunch the unit or cancel the ticket. Do not merge blind — a closed workspace `
+        + `may have produced nothing at all (#363).`,
       since: row.workspaceUpdatedAt,
       contradictoryReadyFlag: parkedByWorkspace && !row.workspaceReadyForMerge,
     };
@@ -159,9 +194,17 @@ export function selectLoopStall(
     // by issue number, so a leftover review workspace on an earlier unit could win the slot and
     // hide a later unit that genuinely never landed — swapping a misleading card for a missing one.
     // It is still reported when it is the only row, because "nothing to do here" is a real answer.
+    // #445 — a CLOSED-unmerged row sorts after every live one. Those rows are old by construction
+    // (eventhub's were 8 days old) and their remedy is manual inspection, while a live unmerged
+    // builder is both newer and one click from resolved. Ordering purely by issue number would let
+    // nine ancient strandings permanently occupy the single slot and hide every actionable stall
+    // behind them — surfacing a week-old problem one cycle later costs nothing, hiding today's
+    // costs the affordance #299 exists for. They still surface as soon as the live rows clear.
     .sort((a, b) => {
       const landed = Number(a.issueHasMergedWorkspace) - Number(b.issueHasMergedWorkspace);
       if (landed !== 0) return landed;
+      const closed = Number(a.workspaceStatus === "closed") - Number(b.workspaceStatus === "closed");
+      if (closed !== 0) return closed;
       return (a.issueNumber ?? Number.MAX_SAFE_INTEGER) - (b.issueNumber ?? Number.MAX_SAFE_INTEGER);
     });
   return relevant.length > 0 ? classifyLoopStall(relevant[0]) : null;

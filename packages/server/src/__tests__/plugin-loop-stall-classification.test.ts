@@ -165,3 +165,62 @@ describe("#337: an ALREADY-LANDED unit must never be offered a merge", () => {
     expect(stall?.reason).toBe("unit-already-landed");
   });
 });
+
+/**
+ * #445 — the complement of every stall above: the workspace CLOSED without merging.
+ *
+ * MEASURED on eventhub (`44beaae2-…`), refactor-safety-net `requirement-extraction`: 28 open
+ * tickets, 9 of them In Review since 2026-08-05 with one `closed` workspace holding
+ * `mergedAt: null`. The query filtered `status != 'closed'`, so none of the nine produced a stall,
+ * an inbox item or a nudge — and a loop only replans once its round is terminal, so they are a
+ * permanent brake. A week in that state with no signal anywhere.
+ */
+describe("classifyLoopStall — closed without merging (#445)", () => {
+  const closedStranded = (overrides: Partial<LoopUnmergedWorkspaceRow> = {}) => row({
+    workspaceId: "ws-closed",
+    issueNumber: 41,
+    issueStatusName: "In Review",
+    workspaceStatus: "closed",
+    workspaceUpdatedAt: "2026-08-05T06:58:12.851Z",
+    ...overrides,
+  });
+
+  it("gets its own reason rather than being folded into builder-finished-unmerged", () => {
+    // These rows ARE mostly In Review, so without the dedicated branch they would land on
+    // `builder-finished-unmerged` — and be offered a one-click Merge on a workspace whose worktree
+    // no longer exists.
+    const stall = classifyLoopStall(closedStranded());
+    expect(stall.reason).toBe("workspace-closed-unmerged");
+    expect(stall.mergeSafe).toBe(false);
+    expect(stall.detail).toContain("CLOSED without merging");
+    expect(stall.since).toBe("2026-08-05T06:58:12.851Z");
+  });
+
+  it("still defers to unit-already-landed when a sibling workspace did merge", () => {
+    // Then the unit's artifacts ARE on the base branch and nothing is stranded.
+    expect(classifyLoopStall(closedStranded({ issueHasMergedWorkspace: true })).reason)
+      .toBe("unit-already-landed");
+  });
+
+  it("sorts behind a live unmerged builder, which is newer and one click from resolved", () => {
+    // eventhub had NINE of these, all with low issue numbers. Ordering purely by issue number
+    // would let them occupy the single stall slot permanently and hide every actionable stall.
+    const stall = selectLoopStall([
+      closedStranded(),
+      row({ workspaceId: "ws-live", issueNumber: 90, issueStatusName: "In Review", workspaceStatus: "idle" }),
+    ], null, null);
+    expect(stall?.workspaceId).toBe("ws-live");
+  });
+
+  it("surfaces once the live rows clear — deferred, never dropped", () => {
+    expect(selectLoopStall([closedStranded()], null, null)?.reason).toBe("workspace-closed-unmerged");
+  });
+
+  it("sorts ahead of an already-landed leftover, which is the one state with nothing to do", () => {
+    const stall = selectLoopStall([
+      row({ workspaceId: "ws-leftover", issueNumber: 2, issueStatusName: "Done", workspaceStatus: "reviewing", issueHasMergedWorkspace: true }),
+      closedStranded(),
+    ], null, null);
+    expect(stall?.workspaceId).toBe("ws-closed");
+  });
+});

@@ -600,6 +600,9 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
           const minutes = parseInt(prefMap.get("auto_monitor_interval") || "4", 10);
           return Number.isFinite(minutes) && minutes > 0 ? minutes * 60 * 1000 : undefined;
         })(),
+        // #444 — recovery for an autoLand unit whose exit hook never ran. `RUN_GATE` by way of
+        // `workspaceActions.merge`'s default, so this lands nothing the ordinary path would not.
+        land: (workspaceId) => workspaceActions.merge(workspaceId),
       });
       setPhase("auto-start");
       const autoStartSkips = await runAutoStart(prefMap, { serverPort, boardEvents, allowProject: shouldAutoStartProject, isAutoDrivenProject: (projectId) => resolveStartPolicy(prefMap, projectId).mode !== "manual", logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
