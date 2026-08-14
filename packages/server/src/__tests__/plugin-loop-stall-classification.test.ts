@@ -272,3 +272,35 @@ describe("gateBlockingTickets (#431)", () => {
     expect(gateBlockingTickets(null, null, [ticket(null)])).toEqual([]);
   });
 });
+
+/**
+ * #384 — the near side of the merge stamp.
+ *
+ * MEASURED on shelfwise round 12, all ten pipeline steps: the git merge commit lands on master
+ * BEFORE `workspaces.mergedAt` is written, every time, with a gap of 3.7s to 158.5s (n=10,
+ * p50 146.9s). Read inside that window, `awaitingMerge` said the workspace was "still open and
+ * unmerged" while `git log` on master already carried the merge commit — and the operator
+ * documentation maps that wording to "click Merge now".
+ *
+ * The row genuinely cannot tell the two apart (the classifier is DB-only by design, #359), so the
+ * fix is to stop asserting what it cannot know: the claim is now that the merge is UNRECORDED,
+ * with the check that distinguishes the two cases named.
+ */
+describe("classifyLoopStall — the unrecorded-merge window (#384)", () => {
+  const finished = () => row({ issueStatusName: "In Review", workspaceStatus: "idle" });
+
+  it("no longer asserts the branch is unmerged", () => {
+    const detail = classifyLoopStall(finished()).detail;
+    expect(detail).not.toContain("still open and unmerged");
+    expect(detail).toContain("no recorded merge");
+  });
+
+  it("tells the reader how to tell a real stall from a pending finalization", () => {
+    expect(classifyLoopStall(finished()).detail).toContain("base branch");
+  });
+
+  it("still offers the merge — an unrecorded merge is the rarer case and merging is idempotent", () => {
+    // The affordance #299 exists for must survive the wording fix.
+    expect(classifyLoopStall(finished()).mergeSafe).toBe(true);
+  });
+});
