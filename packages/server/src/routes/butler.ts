@@ -1,5 +1,7 @@
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
+import { listPluginRows } from "../repositories/plugins.repository.js";
+import { parsePluginManifest } from "@agentic-kanban/shared/lib/plugin-manifest";
 import type { Database } from "../db/index.js";
 import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS, GLOBAL_BUTLER_PROJECT_ID, GLOBAL_BUTLER_PROJECT_NAME } from "@agentic-kanban/shared";
 import { homedir } from "node:os";
@@ -226,6 +228,41 @@ export function createButlerRoute(
 
   /** System prompt for the GLOBAL (project-less) butler. No project is registered/active,
    *  so its job is to help the user import or create their first project. */
+  /**
+   * What the board-level butler can say about PLUGINS (#390 gap 1).
+   *
+   * `getButlerFragments` is project-scoped by construction — it resolves `{{repoPath}}` and
+   * friends against a real project — so the global butler could never use it, and was blind to
+   * plugins entirely. What it actually needs is different anyway: not a plugin's project-specific
+   * fragment, but the fact that a plugin EXISTS and can be enabled for the project it is about to
+   * help create. Best-effort: a plugin listing must never keep the butler from starting.
+   */
+  async function describeInstalledPlugins(): Promise<string> {
+    try {
+      const rows = await listPluginRows(database);
+      if (rows.length === 0) return "";
+      const lines = rows.map((row) => {
+        let summary = "";
+        try {
+          const manifest = parsePluginManifest(row.manifestJson);
+          summary = manifest.description ? ` — ${manifest.description}` : "";
+        } catch { /* a broken manifest still gets named */ }
+        return `  - ${row.name} (id ${row.id}, slug ${row.pluginId})${summary}`;
+      });
+      return [
+        "Installed plugins you can offer to enable once a project exists:",
+        ...lines,
+        "Use enable_plugin({ pluginId, projectId, location }) — enabling SCAFFOLDS the plugin, so pass"
+        + " location: \"sidecar\" AT THAT POINT if its output belongs in a separate repo; setting it"
+        + " afterwards leaves the scaffold in the wrong repo (#318). Then get_plugin_scaffold to read the"
+        + " interview questions, ask the USER, and fill_plugin_scaffold to submit the answers.",
+      ].join("\n");
+    } catch (err) {
+      console.warn("[butler] plugin listing failed (ignored):", err instanceof Error ? err.message : err);
+      return "";
+    }
+  }
+
   function buildGlobalButlerPrompt(baseDir: string): string {
     const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
     const boardGuidePath = ensureBoardGuideFile();
@@ -398,8 +435,9 @@ export function createButlerRoute(
     // Model is a property of the (global) butler definition, not a per-project pref.
     const model = normalizeModelForBackend(def?.model, sdkBackend) || undefined;
     const resumeSessionId = (await getRuntimeState(butlerSessionStateKey(projectId, butlerId), database)) || undefined;
+    const pluginNote = projectId === GLOBAL_BUTLER_PROJECT_ID ? await describeInstalledPlugins() : "";
     const systemPromptAppend = projectId === GLOBAL_BUTLER_PROJECT_ID
-      ? buildGlobalButlerPrompt(project.repoPath)
+      ? [buildGlobalButlerPrompt(project.repoPath), pluginNote].filter(Boolean).join("\n\n")
       : await resolveButlerPrompt(projectId, project.name, project.repoPath);
     const wasActive = getButlerSession(projectId, butlerId).active;
     // When the resolved profile is "mock", use the in-process mock backend instead

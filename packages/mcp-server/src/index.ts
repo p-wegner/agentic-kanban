@@ -49,6 +49,7 @@ import { registerRelaunchWorkspace } from "./tools/relaunch-workspace.js";
 import { registerReviewWorkspace } from "./tools/review-workspace.js";
 import { registerAskButler } from "./tools/ask-butler.js";
 import { registerListPluginGates, registerGetPluginGate, registerResolvePluginGate, registerAdvancePluginLoop, registerListInbox } from "./tools/plugin-gates.js";
+import { registerEnablePlugin, registerSetPluginOutputLocation, registerGetPluginScaffold, registerFillPluginScaffold } from "./tools/plugin-onboarding.js";
 import { registerButlerInterrupt } from "./tools/butler-interrupt.js";
 import { registerButlerSetModel } from "./tools/butler-set-model.js";
 import { registerButlerSetProfile } from "./tools/butler-set-profile.js";
@@ -154,6 +155,11 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   get_plugin_gate: registerGetPluginGate,
   resolve_plugin_gate: registerResolvePluginGate,
   advance_plugin_loop: registerAdvancePluginLoop,
+  // #390 — plugin onboarding as tools instead of hand-rolled curl against a drifting port.
+  enable_plugin: registerEnablePlugin,
+  set_plugin_output_location: registerSetPluginOutputLocation,
+  get_plugin_scaffold: registerGetPluginScaffold,
+  fill_plugin_scaffold: registerFillPluginScaffold,
   list_inbox: registerListInbox,
   butler_interrupt: registerButlerInterrupt,
   butler_set_model: registerButlerSetModel,
