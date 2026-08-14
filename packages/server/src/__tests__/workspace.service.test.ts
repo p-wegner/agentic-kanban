@@ -48,6 +48,60 @@ async function flushDeferred(times = 25): Promise<void> {
   }
 }
 
+/**
+ * Wait until `predicate` holds, instead of assuming a fixed number of event-loop turns was
+ * enough (#470).
+ *
+ * `flushDeferred()` spends 25 ticks and then asserts. But the deferred chain it is draining
+ * contains REAL fs and DB awaits, and a tick is not a unit of work — under CPU contention (the
+ * gate runs this file alongside 14 others across forked workers) those 25 ticks can elapse
+ * before the chain reaches its `service_state` persist, and the assertion reads a row the code
+ * was still about to write. That is precisely the reported signature: reliably green in
+ * isolation, ~1-in-8 red inside the 15-file gate selection, on a machine where every process
+ * spawn costs ~1s.
+ *
+ * Polling on the condition removes the guess: a fast machine returns on the first check, a
+ * loaded one waits as long as it needs, and a genuine regression still fails — just at the
+ * timeout instead of instantly.
+ */
+async function waitFor<T>(
+  read: () => Promise<T | null | undefined>,
+  what: string,
+  timeoutMs = 15_000,
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  let last: T | null | undefined;
+  for (;;) {
+    last = await read();
+    if (last !== null && last !== undefined) return last;
+    if (Date.now() > deadline) {
+      throw new Error(`timed out after ${timeoutMs}ms waiting for ${what}`);
+    }
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+}
+
+/** Wait until a spy has been called at least `n` times, rather than after a tick count (#470). */
+async function waitForCalls(
+  spy: { mock: { calls: unknown[][] } },
+  n: number,
+  what: string,
+): Promise<void> {
+  await waitFor(async () => (spy.mock.calls.length >= n ? true : null), `${what} (${n} call(s))`);
+}
+
+/** The workspace's persisted `serviceState`, once the deferred chain has written one (#470). */
+async function waitForServiceState(
+  db: TestDb,
+  workspaceId: string,
+): Promise<{ status: string; error?: string }> {
+  return waitFor(async () => {
+    const rows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+    const raw = rows[0]?.serviceState;
+    return raw ? (JSON.parse(raw) as { status: string; error?: string }) : null;
+  }, `workspace ${workspaceId} to persist a serviceState`);
+}
+
 /** Seed a project (with Todo/In Progress/Done statuses) and one issue. */
 async function seedProjectAndIssue(
   db: TestDb,
@@ -1787,15 +1841,18 @@ describe("createWorkspace — service stack deferred chain", () => {
 
     const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-badrepo" });
     expect(result.error).toBeUndefined();
-    await flushDeferred();
 
-    // The engine was NEVER invoked — no unrelated compose file was brought up.
-    expect(provisionSpy).not.toHaveBeenCalled();
-
-    const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, result.id));
-    const state = JSON.parse(wsRows[0].serviceState!) as { status: string; error?: string };
+    // Wait for the state the chain WRITES rather than for a tick count (#470) — under load the
+    // old fixed flush could read the row before the persist landed.
+    const state = await waitForServiceState(db, result.id);
     expect(state.status).toBe("error");
     expect(state.error).toContain("composeRepo 'infra'");
+
+    // The engine was NEVER invoked — no unrelated compose file was brought up. Checked after
+    // the state exists, so this asserts "never called by the finished chain", not "not called
+    // yet" (which a fixed flush could pass by arriving early).
+    expect(provisionSpy).not.toHaveBeenCalled();
+    await flushDeferred();
 
     // The workspace itself still lives and the agent still launches (non-fatal error).
     expect(sessionManager.startSession).toHaveBeenCalledOnce();
@@ -1817,6 +1874,7 @@ describe("createWorkspace — service stack deferred chain", () => {
 
     const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-deleted" });
     expect(result.error).toBeUndefined();
+    await waitForCalls(teardownSpy, 1, "the convergent teardown after a delete during provisioning");
     await flushDeferred();
 
     expect(provisionSpy).toHaveBeenCalledOnce();
@@ -1845,6 +1903,7 @@ describe("createWorkspace — service stack deferred chain", () => {
 
     const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-closed" });
     expect(result.error).toBeUndefined();
+    await waitForCalls(teardownSpy, 1, "the convergent teardown after a close during provisioning");
     await flushDeferred();
 
     expect(teardownSpy).toHaveBeenCalledOnce();
