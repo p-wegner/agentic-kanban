@@ -6,7 +6,7 @@ import type { Command } from "commander";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { runMigrations, getActiveProjectId } from "../shared.js";
+import { runMigrations, getActiveProjectId, describeIssueNumberMiss } from "../shared.js";
 import { getIssueIdByNumberInProject, getOutgoingDependencies, getIncomingDependencies } from "../../repositories/issue.repository.js";
 import {
   getIssueIdsAndProjectsForBatch,
@@ -192,7 +192,7 @@ Examples:
         const issueId = await getIssueIdByNumberInProject(num, projectId);
 
         if (!issueId) {
-          console.error(`Issue #${num} not found in active project.`);
+          console.error(await describeIssueNumberMiss(num, projectId));
           process.exit(1);
         }
 
