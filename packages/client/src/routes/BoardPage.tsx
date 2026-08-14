@@ -53,6 +53,7 @@ import type {
   IssueWithStatus,
 } from "@agentic-kanban/shared";
 import { GLOBAL_BUTLER_PROJECT_ID } from "@agentic-kanban/shared";
+import { registerAction } from "../lib/actions.js";
 import { ButlerView } from "../components/ButlerView.js";
 import type { SavedViewReference } from "../lib/boardSavedViews.js";
 import { resolveVisibleView } from "../lib/viewRegistry.js";
@@ -183,6 +184,16 @@ export function BoardPage() {
   // Extracted hooks
   const prefs = useBoardPreferences(activeProjectId);
   const panels = useBoardPanels();
+  // #390 — one palette entry is what makes the board-level butler reachable at all once a project
+  // exists. Registered here because `setShowGlobalButler` is BoardPage state.
+  useEffect(() => registerAction({
+    id: "board-butler",
+    label: "Board Butler",
+    description: "Ask the board-level butler to set up a new project or plugin (not scoped to the active project)",
+    icon: "\u2617",
+    category: "navigation",
+    handler: () => setShowGlobalButler(true),
+  }), []);
   const agentQuestionsCount = useAgentQuestionsCount(activeProjectId);
   const { columnWidths, handleColumnResizeStart, resetColumnWidth } = useColumnResize();
 
@@ -634,10 +645,31 @@ export function BoardPage() {
     );
   }
 
+  // #390 — the board-level butler used to be reachable ONLY on an empty board, so "tell a butler
+  // on a populated board: build me X" simply did not work. It is the same butler either way; the
+  // empty-board case is just where it was first needed. Rendered ahead of the empty-board branch
+  // so one code path serves both, reachable from the command palette ("Board Butler").
+  if (showGlobalButler) {
+    return (
+      <Layout onRegisterProject={handleRegisterProject} onCreateProject={handleCreateProject}>
+        <div className="h-[calc(100vh-3rem)]">
+          <ButlerView
+            projectId={GLOBAL_BUTLER_PROJECT_ID}
+            columns={[]}
+            liveActivity={{}}
+            liveStats={{}}
+            onIssueClick={() => {}}
+            onExit={() => setShowGlobalButler(false)}
+          />
+        </div>
+      </Layout>
+    );
+  }
+
   if (projects.length === 0 || !activeProjectId) {
     return (
       <Layout onRegisterProject={handleRegisterProject} onCreateProject={handleCreateProject}>
-        {showGlobalButler ? (
+        {false ? (
           <div className="h-[calc(100vh-3rem)]">
             <ButlerView
               projectId={GLOBAL_BUTLER_PROJECT_ID}
