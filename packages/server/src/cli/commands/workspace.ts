@@ -9,7 +9,7 @@ import { getIssueTitleAndDescription } from "../../repositories/workspace-sessio
 import { getProjectIssueIds } from "../../repositories/review-effectiveness.repository.js";
 import { randomUUID } from "node:crypto";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
-import { runMigrations, getActiveProjectId, describeIssueNumberMiss } from "../shared.js";
+import { runMigrations, resolveProjectIdArg, describeIssueNumberMiss } from "../shared.js";
 import { buildWorkspaceApiUrl, buildApiUrl } from "./workspace-api-url.js";
 import { registerWorkspaceInteractionCommands } from "./workspace-interaction.js";
 
@@ -84,10 +84,11 @@ Examples:
   $ agentic-kanban workspace list -s active    # only active workspaces
   $ agentic-kanban workspace list -s closed    # only closed/merged workspaces
 `)
-    .action(async (options: { status?: string }) => {
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(async (options: { project?: string; status?: string }) => {
       try {
         await runMigrations();
-        const projectId = await getActiveProjectId();
+        const projectId = await resolveProjectIdArg(options.project);
 
         const projectIssues = await getProjectIssueIds(projectId);
 
@@ -131,7 +132,7 @@ Examples:
 
 Tip: Use 'issue list' to find the issue ID.
 `)
-    .action(async (issueId: string, options: { branch?: string; base?: string }) => {
+    .action(async (issueId: string, options: { project?: string; branch?: string; base?: string }) => {
       try {
         await runMigrations();
 
@@ -197,7 +198,7 @@ Examples:
   $ agentic-kanban workspace launch <workspace-id>
   $ agentic-kanban workspace launch <workspace-id> --prompt "Fix the failing tests"
 `)
-    .action(async (workspaceId: string, options: { prompt?: string; port?: string }) => {
+    .action(async (workspaceId: string, options: { project?: string; prompt?: string; port?: string }) => {
       try {
         await runMigrations();
 
@@ -250,10 +251,11 @@ Examples:
   $ agentic-kanban workspace resume 17
   $ agentic-kanban workspace resume 17 --prompt "Continue fixing the setup script"
 `)
-    .action(async (issueNumberArg: string, options: { prompt?: string; port?: string }) => {
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(async (issueNumberArg: string, options: { project?: string; prompt?: string; port?: string }) => {
       try {
         await runMigrations();
-        const projectId = await getActiveProjectId();
+        const projectId = await resolveProjectIdArg(options.project);
 
         const num = Number(issueNumberArg);
         if (!Number.isInteger(num) || num <= 0) {
@@ -317,7 +319,7 @@ Examples:
   $ agentic-kanban workspace wait 118                # block until #118 finishes
   $ agentic-kanban workspace wait 118 --timeout 600  # give up after 10 minutes
 `)
-    .action(async (issueNumberArg: string, options: { port?: string; timeout?: string }) => {
+    .action(async (issueNumberArg: string, options: { project?: string; port?: string; timeout?: string }) => {
       try {
         const { runWorkspaceWait } = await import("./workspace-wait.js");
         const code = await runWorkspaceWait(issueNumberArg, options);
@@ -336,7 +338,7 @@ Examples:
 Example:
   $ agentic-kanban workspace review <workspace-id>
 `)
-    .action(async (workspaceId: string, options: { port?: string }) => {
+    .action(async (workspaceId: string, options: { project?: string; port?: string }) => {
       try {
         await runMigrations();
 
@@ -381,7 +383,7 @@ Examples:
   $ agentic-kanban workspace start <issue-id> --base develop
   $ agentic-kanban workspace start <issue-id> --profile anth
 `)
-    .action(async (issueId: string, options: { base?: string; profile?: string; port?: string }) => {
+    .action(async (issueId: string, options: { project?: string; base?: string; profile?: string; port?: string }) => {
       try {
         const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
         const body: Record<string, unknown> = { issueId };
@@ -422,7 +424,7 @@ Examples:
   $ agentic-kanban workspace diff <workspace-id>
   $ agentic-kanban workspace diff <workspace-id> --json
 `)
-    .action(async (workspaceId: string, options: { json?: boolean; port?: string }) => {
+    .action(async (workspaceId: string, options: { project?: string; json?: boolean; port?: string }) => {
       try {
         const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
         const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "diff"));
@@ -460,7 +462,7 @@ Examples:
   $ agentic-kanban workspace scorecard <workspace-id>
   $ agentic-kanban workspace scorecard <workspace-id> --json
 `)
-    .action(async (workspaceId: string, options: { json?: boolean; port?: string }) => {
+    .action(async (workspaceId: string, options: { project?: string; json?: boolean; port?: string }) => {
       try {
         const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
         const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "scorecard"));
@@ -498,7 +500,7 @@ Examples:
 Example:
   $ agentic-kanban workspace merge <workspace-id>
 `)
-    .action(async (workspaceId: string, options: { port?: string }) => {
+    .action(async (workspaceId: string, options: { project?: string; port?: string }) => {
       try {
         const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
         const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "merge"), {
@@ -530,7 +532,7 @@ Example:
 Example:
   $ agentic-kanban workspace close <workspace-id>
 `)
-    .action(async (workspaceId: string, options: { port?: string }) => {
+    .action(async (workspaceId: string, options: { project?: string; port?: string }) => {
       try {
         const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
         const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "close"), {
@@ -562,7 +564,7 @@ Example:
 Example:
   $ agentic-kanban workspace stop <workspace-id>
 `)
-    .action(async (workspaceId: string, options: { port?: string }) => {
+    .action(async (workspaceId: string, options: { project?: string; port?: string }) => {
       try {
         const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
         const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "stop"), {
@@ -596,7 +598,7 @@ Examples:
   $ agentic-kanban workspace delete <workspace-id>
   $ agentic-kanban workspace delete <workspace-id> --force
 `)
-    .action(async (workspaceId: string, options: { force?: boolean; port?: string }) => {
+    .action(async (workspaceId: string, options: { project?: string; force?: boolean; port?: string }) => {
       try {
         const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
         const res = await fetch(buildApiUrl(port, `/api/workspaces/${encodeURIComponent(workspaceId)}`), {
@@ -632,7 +634,7 @@ Examples:
   $ agentic-kanban workspace relaunch <workspace-id>
   $ agentic-kanban workspace relaunch <workspace-id> --prompt "Fix the failing tests"
 `)
-    .action(async (workspaceId: string, options: { prompt?: string; port?: string }) => {
+    .action(async (workspaceId: string, options: { project?: string; prompt?: string; port?: string }) => {
       try {
         await runMigrations();
 
@@ -683,7 +685,7 @@ Examples:
 Example:
   $ agentic-kanban workspace mark-ready <workspace-id>
 `)
-    .action(async (workspaceId: string, options: { port?: string }) => {
+    .action(async (workspaceId: string, options: { project?: string; port?: string }) => {
       try {
         const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
         const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "ready-for-merge"), {
@@ -717,7 +719,7 @@ Examples:
   $ agentic-kanban workspace propose-transition <workspace-id> Done
   $ agentic-kanban workspace propose-transition <workspace-id> Review --summary "Implementation complete"
 `)
-    .action(async (workspaceId: string, targetStatus: string, options: { summary?: string; port?: string }) => {
+    .action(async (workspaceId: string, targetStatus: string, options: { project?: string; summary?: string; port?: string }) => {
       try {
         const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
         const body: Record<string, unknown> = { toNodeName: targetStatus };

@@ -6,7 +6,7 @@ import {
   cliCreateWorkflowTemplate,
   cliDeleteWorkflowTemplate,
 } from "../../services/workflow.service.js";
-import { runMigrations, getActiveProjectId } from "../shared.js";
+import { runMigrations, resolveProjectIdArg } from "../shared.js";
 import { normalizeImportedTemplate, validateImportedTemplate } from "../../lib/workflow-template-import.js";
 import type { TemplateInput } from "@agentic-kanban/shared/lib/workflow-engine";
 
@@ -45,10 +45,11 @@ export function registerWorkflowCommand(program: Command) {
   wf
     .command("list")
     .description("List workflow templates for the active project (project-scoped + global built-ins).")
-    .action(async () => {
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(async (options: { project?: string }) => {
       try {
         await runMigrations();
-        const projectId = await getActiveProjectId();
+        const projectId = await resolveProjectIdArg(options.project);
         const tpls = await cliListWorkflowTemplates(projectId);
         if (tpls.length === 0) {
           console.log("No workflow templates.");
@@ -89,6 +90,7 @@ export function registerWorkflowCommand(program: Command) {
   wf
     .command("export <templateId>")
     .description("Print a workflow template's importable JSON (metadata + nodes + edges).")
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
     .action(async (templateId: string) => {
       try {
         await runMigrations();
@@ -108,10 +110,11 @@ export function registerWorkflowCommand(program: Command) {
   wf
     .command("create <jsonFile>")
     .description("Create a workflow template from a JSON file: { name, description?, ticketType?, isDefault?, nodes:[{id,name,nodeType,statusName?,skillName?,maxVisits?,config?}], edges:[{fromNodeId,toNodeId,label?,condition?}] }")
-    .action(async (jsonFile: string) => {
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(async (jsonFile: string, options: { project?: string }) => {
       try {
         await runMigrations();
-        const projectId = await getActiveProjectId();
+        const projectId = await resolveProjectIdArg(options.project);
         const spec = readJsonFile(jsonFile) as Omit<TemplateInput, "projectId">;
         const res = await cliCreateWorkflowTemplate({
           projectId,
@@ -139,10 +142,11 @@ export function registerWorkflowCommand(program: Command) {
   wf
     .command("import <jsonFile>")
     .description("Import a workflow template JSON file into the active project as a new template.")
-    .action(async (jsonFile: string) => {
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(async (jsonFile: string, options: { project?: string }) => {
       try {
         await runMigrations();
-        const projectId = await getActiveProjectId();
+        const projectId = await resolveProjectIdArg(options.project);
         const spec = normalizeImportedTemplate(readJsonFile(jsonFile));
         const importErrors = validateImportedTemplate(spec);
         if (importErrors.length > 0) {

@@ -6,7 +6,7 @@ import type { Command } from "commander";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { runMigrations, getActiveProjectId, describeIssueNumberMiss } from "../shared.js";
+import { runMigrations, resolveProjectIdArg, describeIssueNumberMiss } from "../shared.js";
 import { getIssueIdByNumberInProject, getOutgoingDependencies, getIncomingDependencies } from "../../repositories/issue.repository.js";
 import {
   getIssueIdsAndProjectsForBatch,
@@ -76,7 +76,7 @@ Examples:
   $ agentic-kanban issue dependency add abc123 def456 -t blocked_by         # abc123 is blocked_by def456
   $ agentic-kanban issue dependency add abc123 def456 -t parent_of          # abc123 is parent_of def456
 `)
-    .action(async (issueId: string, targetId: string, options: { type?: string }) => {
+    .action(async (issueId: string, targetId: string, options: { project?: string; type?: string }) => {
       try {
         await runMigrations();
 
@@ -178,10 +178,11 @@ Examples:
   $ agentic-kanban issue dependency analyze 42
   $ agentic-kanban issue dependency analyze 42 --json
 `)
-    .action(async (issueNumberArg: string, options: { json?: boolean }) => {
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(async (issueNumberArg: string, options: { project?: string; json?: boolean }) => {
       try {
         await runMigrations();
-        const projectId = await getActiveProjectId();
+        const projectId = await resolveProjectIdArg(options.project);
 
         const num = Number(issueNumberArg);
         if (!Number.isInteger(num) || num <= 0) {
@@ -243,7 +244,7 @@ JSON file format:
 Valid types: depends_on, blocked_by, related_to, duplicates, parent_of, child_of
 Valid actions: add, remove
 `)
-    .action(async (jsonFile: string, options: { json?: boolean }) => {
+    .action(async (jsonFile: string, options: { project?: string; json?: boolean }) => {
       try {
         await runMigrations();
 

@@ -183,13 +183,32 @@ Current prompt: ${prompt?.trim() || "(none)"}`;
     return Object.fromEntries(entries);
   }
 
-  async function installSkill(id: string) {
+  /**
+   * Write a skill's SKILL.md into a project's checkout.
+   *
+   * `projectId` is optional and the active project stays the fallback (#389), so no existing
+   * caller changes behaviour. It exists because the implicit active project is the same trap the
+   * CLI had: on 2026-08-08 two board bugs were filed against a fixture project and sat there
+   * unactionable, purely because the write path had no way to be explicit. A skill installed into
+   * the wrong repo is the same mistake with a file instead of a ticket.
+   *
+   * The resolved `repoPath` comes back in the response for the same reason — the caller should be
+   * able to SEE where the file went rather than infer it.
+   */
+  async function installSkill(id: string, projectId?: string | null) {
     const skill = await getAgentSkillById(id, database);
     if (!skill) throw new AgentSkillError("Skill not found", "NOT_FOUND");
-    const repoPath = await getActiveProjectRepoPath(database);
-    if (!repoPath) throw new AgentSkillError("No active project found", "BAD_REQUEST");
+    const repoPath = projectId
+      ? await getProjectRepoPath(projectId, database)
+      : await getActiveProjectRepoPath(database);
+    if (!repoPath) {
+      throw new AgentSkillError(
+        projectId ? `Project ${projectId} not found, or it has no repo path` : "No active project found",
+        "BAD_REQUEST",
+      );
+    }
     await writeAgentSkillFile(repoPath, skill);
-    return { installed: true, repoPath };
+    return { installed: true, repoPath, projectId: projectId ?? null };
   }
 
   return { listSkills, getSkill, createSkill, updateSkill, deleteSkill, enhanceSkill, getInstallStatus, getAllInstallStatuses, installSkill };
