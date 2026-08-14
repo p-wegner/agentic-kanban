@@ -12,6 +12,7 @@ import { apiDelete, apiPost } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
 import type { ProjectRepoResponse } from "@agentic-kanban/shared";
 import { AddProjectModal } from "./AddProjectModal.js";
+import { OnboardingWizard } from "./OnboardingWizard.js";
 
 export interface Project {
   id: string;
@@ -608,6 +609,10 @@ export function Layout({
         archivedProjects={archivedProjects}
         onUnarchiveProject={onUnarchiveProject}
       />
+
+      {/* #464 — self-contained: it reads its target project from onboardingStore and its plan
+          from the server, so mounting it costs nothing until something opens it. */}
+      <OnboardingWizard />
 
       {showAddRepo && (
         <div

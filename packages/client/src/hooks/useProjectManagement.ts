@@ -2,6 +2,7 @@ import type { StatusWithIssues } from "@agentic-kanban/shared";
 import { apiPost, apiPut, apiDelete } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
 import { boardSelectionActions } from "../stores/boardSelectionStore.js";
+import { onboardingActions } from "../stores/onboardingStore.js";
 
 type ProjectRef = { id: string; name: string };
 
@@ -78,6 +79,10 @@ export function useProjectManagement(deps: UseProjectManagementDeps) {
     } else {
       showToast(`Registered "${result.name}"`, "success");
     }
+    // #464: a registered project is only half board-ready — Start Mode is `manual`, there are no
+    // plugins and the backlog is empty. Open the wizard AFTER the import completes, never as a
+    // gate in front of it: a user who wants a bare project must still reach the board in one click.
+    onboardingActions.openOnboarding(result.id, result.name, { justImported: true });
   }
 
   async function handleCreateProject(name: string, path: string, gitignoreTemplate: string, generateReadme: boolean) {
@@ -90,6 +95,7 @@ export function useProjectManagement(deps: UseProjectManagementDeps) {
     await loadProjects();
     await handleProjectChange(result.id);
     showToast(`Created "${result.name}"`, "success");
+    onboardingActions.openOnboarding(result.id, result.name, { justImported: true });
   }
 
   async function handleUnregisterProject(id: string) {
