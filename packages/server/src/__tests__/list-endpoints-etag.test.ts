@@ -12,6 +12,7 @@ import { projects, projectStatuses, issues, workspaces } from "@agentic-kanban/s
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createProjectsRoute } from "../routes/projects.js";
 import { createWorkspacesRoute } from "../routes/workspaces.js";
+import { conditionalJsonResponse, computeBodyEtag } from "../services/board-etag-cache.service.js";
 
 let db: TestDb;
 let projectId: string;
@@ -181,5 +182,48 @@ describe("GET /api/projects/:id/graph conditional GET (G15)", () => {
     expect(after.status).toBe(200);
     expect(after.etag).not.toBe(first.etag);
     expect((JSON.parse(after.body) as { nodes: { title: string }[] }).nodes[0].title).toBe("Renamed");
+  });
+});
+
+/**
+ * #426 — a header set on a handler-returned raw `Response` is silently dropped by Hono.
+ *
+ * Measured while adding `X-Total-Count` to `GET /api/issues` (#424): the body and the ETag, both
+ * passed through the constructor's `init`, arrived fine; the header set on the object afterwards
+ * never reached the wire. Three spellings failed identically and silently — `res.headers.set`,
+ * `c.header(...)`, and assigning `c.res` then mutating it — with no error and a green suite unless
+ * someone asserts the header. Verified against the backend directly (port 13001), so it is neither
+ * the dev proxy nor the gzip middleware.
+ *
+ * The fix is not a workaround at one call site but a parameter that puts extra headers where they
+ * survive, so the NEXT route with a custom header gets it right by default.
+ */
+describe("conditionalJsonResponse extra headers (#426)", () => {
+  it("attaches an extra header to the 200", async () => {
+    const res = conditionalJsonResponse('{"a":1}', undefined, { "X-Total-Count": "42" });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-Total-Count")).toBe("42");
+    expect(res.headers.get("Content-Type")).toBe("application/json");
+  });
+
+  it("attaches it to the 304 as well — an intermittent header is worse than an absent one", async () => {
+    const body = '{"a":1}';
+    const etag = conditionalJsonResponse(body, undefined).headers.get("ETag")!;
+    const notModified = conditionalJsonResponse(body, etag, { "X-Total-Count": "42" });
+    expect(notModified.status).toBe(304);
+    expect(notModified.headers.get("X-Total-Count")).toBe("42");
+  });
+
+  it("still works with no extra headers at all", async () => {
+    const res = conditionalJsonResponse('{"a":1}', undefined);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("ETag")).toBeTruthy();
+  });
+
+  it("does not let an extra header overwrite the ETag the caller depends on", async () => {
+    // Spreading extraHeaders last means a caller COULD clobber ETag; assert the contract we want
+    // so a future reorder is a red test rather than a broken conditional GET.
+    const res = conditionalJsonResponse('{"a":1}', undefined, { "X-Total-Count": "1" });
+    expect(res.headers.get("ETag")).toBe(computeBodyEtag('{"a":1}'));
   });
 });

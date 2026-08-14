@@ -42,7 +42,7 @@ import { getIssueActivity } from "../services/issue-activity.service.js";
 import { createIssueMergedCommitsService } from "../services/issue-merged-commits.service.js";
 import { getIssueCycleTime } from "../services/cycle-time.service.js";
 import { createWebhookSender } from "../services/outbound-webhook.service.js";
-import { computeBodyEtag } from "../services/board-etag-cache.service.js";
+import { conditionalJsonResponse } from "../services/board-etag-cache.service.js";
 
 /** Shape of the domain errors thrown by the issue service (see IssueError + the `index`-tagged batch errors). */
 interface IssueRouteError {
@@ -96,29 +96,21 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
         ? { excludeDescription: slim, limit, offset }
         : undefined,
     );
-    // Conditional GET (#418, the #400 pattern): the full project list is the largest
-    // payload in the app (~1MB of descriptions on a big board) and mostly unchanged
-    // between polls — hash the serialized body, answer 304 when If-None-Match matches.
-    // Conditional GET (#418, the #400 pattern): the full project list is the largest
-    // payload in the app (~1MB of descriptions on a big board) and mostly unchanged
-    // between polls — hash the serialized body, answer 304 when If-None-Match matches.
+    // Conditional GET (#418, the #400 pattern): the full issue list is the largest payload in the
+    // app (~1MB of descriptions on a big board) and mostly unchanged between polls — hash the
+    // serialized body and answer 304 when If-None-Match matches.
     //
-    // Built through `c.body()` rather than by returning a bare `Response`: a header set
-    // on a hand-constructed Response does NOT survive Hono's raw-Response adoption (nor
-    // does `c.header()`), which silently swallowed X-Total-Count. Everything Hono itself
-    // constructs keeps its headers.
+    // #426: the extra header goes through `conditionalJsonResponse`'s `extraHeaders`, NOT onto the
+    // returned Response. A header set on a returned raw Response is silently dropped by Hono; only
+    // what goes into the constructor's `init` survives. See that function for the measurement.
     const body = JSON.stringify(result);
-    const etag = computeBodyEtag(body);
-    if (c.req.header("if-none-match") === etag) return c.body(null, 304, { ETag: etag });
-
-    const headers: Record<string, string> = { "Content-Type": "application/json", ETag: etag };
-    if (limit !== undefined) {
-      // The denominator, so a paginating caller knows whether another page exists without
-      // fetching one and finding it empty. A header keeps the body an array — turning it
-      // into `{items,total}` would break every existing consumer.
-      headers["X-Total-Count"] = String(await issueService.countIssues(projectId, statusName));
-    }
-    return c.body(body, 200, headers);
+    const extraHeaders = limit === undefined
+      ? undefined
+      // The denominator, so a paginating caller knows whether another page exists without fetching
+      // one and finding it empty. A header keeps the body an array — turning it into
+      // `{items,total}` would break every existing consumer.
+      : { "X-Total-Count": String(await issueService.countIssues(projectId, statusName)) };
+    return conditionalJsonResponse(body, c.req.header("if-none-match"), extraHeaders);
   });
 
   // POST /api/issues/enhance — AI-enhance a ticket title and description
