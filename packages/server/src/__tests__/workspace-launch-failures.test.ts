@@ -508,4 +508,148 @@ describe("getWorkspaceLaunchFailures", () => {
     // Most recent first
     expect(result.failures[0].failedAt >= result.failures[1].failedAt).toBe(true);
   });
+
+  // ─── #218: empty-branch + dirty-main signal ────────────────────────────────
+  describe("empty-branch-dirty-main", () => {
+    function fakeGitDeps(overrides: {
+      dirtyFiles?: string[];
+      uniqueCommits?: number;
+      revParseFails?: boolean;
+    } = {}) {
+      return {
+        getDirtyTrackedSourceFiles: async () => overrides.dirtyFiles ?? ["packages/server/src/foo.ts"],
+        revParse: async (_repo: string, ref: string) => {
+          if (overrides.revParseFails) throw new Error("unknown revision");
+          return `sha-${ref}`;
+        },
+        countUniqueCommits: async () => overrides.uniqueCommits ?? 0,
+      };
+    }
+
+    it("flags an idle workspace with 0 unique commits while the main checkout is dirty", async () => {
+      const { db } = createTestDb();
+      const now = new Date().toISOString();
+      const projectId = randomUUID();
+      const statusId = randomUUID();
+      const issueId = randomUUID();
+      const wsId = randomUUID();
+
+      await db.insert(projects).values(baseProject(projectId, now));
+      await db.insert(projectStatuses).values(baseStatus(statusId, projectId, "In Progress", now));
+      await db.insert(issues).values(baseIssue(issueId, projectId, statusId, now));
+      await db.insert(workspaces).values(baseWorkspace(wsId, issueId, now));
+
+      const result = await getWorkspaceLaunchFailures(projectId, db, fakeGitDeps());
+      expect(result.failures).toHaveLength(1);
+      expect(result.failures[0].failureCategory).toBe("empty-branch-dirty-main");
+      expect(result.failures[0].lastMessage).toContain("uncommitted tracked change");
+    });
+
+    it("does not flag when the main checkout is clean", async () => {
+      const { db } = createTestDb();
+      const now = new Date().toISOString();
+      const projectId = randomUUID();
+      const statusId = randomUUID();
+      const issueId = randomUUID();
+      const wsId = randomUUID();
+
+      await db.insert(projects).values(baseProject(projectId, now));
+      await db.insert(projectStatuses).values(baseStatus(statusId, projectId, "In Progress", now));
+      await db.insert(issues).values(baseIssue(issueId, projectId, statusId, now));
+      await db.insert(workspaces).values(baseWorkspace(wsId, issueId, now));
+
+      const result = await getWorkspaceLaunchFailures(projectId, db, fakeGitDeps({ dirtyFiles: [] }));
+      expect(result.failures).toHaveLength(0);
+    });
+
+    it("does not flag when the branch has unique commits (a normal in-progress workspace)", async () => {
+      const { db } = createTestDb();
+      const now = new Date().toISOString();
+      const projectId = randomUUID();
+      const statusId = randomUUID();
+      const issueId = randomUUID();
+      const wsId = randomUUID();
+
+      await db.insert(projects).values(baseProject(projectId, now));
+      await db.insert(projectStatuses).values(baseStatus(statusId, projectId, "In Progress", now));
+      await db.insert(issues).values(baseIssue(issueId, projectId, statusId, now));
+      await db.insert(workspaces).values(baseWorkspace(wsId, issueId, now));
+
+      const result = await getWorkspaceLaunchFailures(projectId, db, fakeGitDeps({ uniqueCommits: 3 }));
+      expect(result.failures).toHaveLength(0);
+    });
+
+    it("does not flag a non-idle (e.g. running) workspace even with dirty main and 0 unique commits", async () => {
+      const { db } = createTestDb();
+      const now = new Date().toISOString();
+      const projectId = randomUUID();
+      const statusId = randomUUID();
+      const issueId = randomUUID();
+      const wsId = randomUUID();
+
+      await db.insert(projects).values(baseProject(projectId, now));
+      await db.insert(projectStatuses).values(baseStatus(statusId, projectId, "In Progress", now));
+      await db.insert(issues).values(baseIssue(issueId, projectId, statusId, now));
+      await db.insert(workspaces).values(baseWorkspace(wsId, issueId, now, { status: "active" }));
+
+      const result = await getWorkspaceLaunchFailures(projectId, db, fakeGitDeps());
+      expect(result.failures).toHaveLength(0);
+    });
+
+    it("does not flag a direct workspace", async () => {
+      const { db } = createTestDb();
+      const now = new Date().toISOString();
+      const projectId = randomUUID();
+      const statusId = randomUUID();
+      const issueId = randomUUID();
+      const wsId = randomUUID();
+
+      await db.insert(projects).values(baseProject(projectId, now));
+      await db.insert(projectStatuses).values(baseStatus(statusId, projectId, "In Progress", now));
+      await db.insert(issues).values(baseIssue(issueId, projectId, statusId, now));
+      await db.insert(workspaces).values(baseWorkspace(wsId, issueId, now, { isDirect: true, workingDir: null }));
+
+      const result = await getWorkspaceLaunchFailures(projectId, db, fakeGitDeps());
+      expect(result.failures).toHaveLength(0);
+    });
+
+    it("does not override a higher-priority classification (e.g. setup-failed)", async () => {
+      const { db } = createTestDb();
+      const now = new Date().toISOString();
+      const projectId = randomUUID();
+      const statusId = randomUUID();
+      const issueId = randomUUID();
+      const wsId = randomUUID();
+
+      await db.insert(projects).values(baseProject(projectId, now));
+      await db.insert(projectStatuses).values(baseStatus(statusId, projectId, "In Progress", now));
+      await db.insert(issues).values(baseIssue(issueId, projectId, statusId, now));
+      await db.insert(workspaces).values(baseWorkspace(wsId, issueId, now, {
+        latestSetupState: "failed",
+        latestSetupStderrTail: "npm install failed",
+        latestSetupEndedAt: now,
+      }));
+
+      const result = await getWorkspaceLaunchFailures(projectId, db, fakeGitDeps());
+      expect(result.failures).toHaveLength(1);
+      expect(result.failures[0].failureCategory).toBe("setup-failed");
+    });
+
+    it("skips the check entirely (never spawns the unique-commits probe) when refs cannot be resolved", async () => {
+      const { db } = createTestDb();
+      const now = new Date().toISOString();
+      const projectId = randomUUID();
+      const statusId = randomUUID();
+      const issueId = randomUUID();
+      const wsId = randomUUID();
+
+      await db.insert(projects).values(baseProject(projectId, now));
+      await db.insert(projectStatuses).values(baseStatus(statusId, projectId, "In Progress", now));
+      await db.insert(issues).values(baseIssue(issueId, projectId, statusId, now));
+      await db.insert(workspaces).values(baseWorkspace(wsId, issueId, now));
+
+      const result = await getWorkspaceLaunchFailures(projectId, db, fakeGitDeps({ revParseFails: true }));
+      expect(result.failures).toHaveLength(0);
+    });
+  });
 });
