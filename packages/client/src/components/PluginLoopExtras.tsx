@@ -89,7 +89,8 @@ export type LoopStall = {
   workspaceId: string;
   issueNumber: number | null;
   issueTitle: string;
-  reason?: "builder-finished-unmerged" | "workspace-parked-issue-unfinished" | "unit-already-landed";
+  reason?: "builder-finished-unmerged" | "workspace-parked-issue-unfinished" | "unit-already-landed"
+    | "workspace-closed-unmerged";
   mergeSafe?: boolean;
   detail?: string;
   since?: string;
@@ -126,9 +127,13 @@ export function LoopStateChips({ loop, startPolicy, onSwitchToMonitor, switching
     // Merge now", which on already-merged work is the wrong action.
     chips.push(loop.awaitingMerge.reason === "unit-already-landed"
       ? { text: "Step landed — leftover workspace closing", tone: "gray" }
-      : loop.awaitingMerge.mergeSafe === false
-        ? { text: "Step parked — ticket never finished", tone: "red" }
-        : { text: "Step done — waiting for merge", tone: "amber" });
+      // #445: a workspace that CLOSED unmerged is a third failure, and calling it "parked" would
+      // suggest something is still holding it. Nothing is — the ticket can no longer finish.
+      : loop.awaitingMerge.reason === "workspace-closed-unmerged"
+        ? { text: "Step stranded — workspace closed without merging", tone: "red" }
+        : loop.awaitingMerge.mergeSafe === false
+          ? { text: "Step parked — ticket never finished", tone: "red" }
+          : { text: "Step done — waiting for merge", tone: "amber" });
   }
   else if (loop.openTickets > 0) chips.push({ text: "Round running", tone: "blue" });
   else if (loop.converged) chips.push({ text: "Converged", tone: "green" });
@@ -232,6 +237,7 @@ export function AwaitingMergeCard({ awaitingMerge, onMergeStarted }: {
   // (the work is already on the base branch). It gets its own, calm copy: the previous wording
   // told the operator to click Merge now on a step whose merge commit was already on master.
   const landed = awaitingMerge.reason === "unit-already-landed";
+  const stranded = awaitingMerge.reason === "workspace-closed-unmerged";
   const parked = !landed && awaitingMerge.mergeSafe === false;
   const ref = awaitingMerge.issueNumber != null ? `#${awaitingMerge.issueNumber} ` : "";
   return (
@@ -250,7 +256,9 @@ export function AwaitingMergeCard({ awaitingMerge, onMergeStarted }: {
           ? "flex-1 text-xs text-gray-700 dark:text-gray-300"
           : "flex-1 text-xs text-amber-900 dark:text-amber-200"}>
         <span className="font-medium">
-          {parked
+          {stranded
+            ? "Step stranded, workspace closed without merging:"
+            : parked
             ? "Step parked, ticket never finished:"
             : landed
               ? "Step already landed — nothing to merge:"

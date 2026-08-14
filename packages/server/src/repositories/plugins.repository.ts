@@ -195,8 +195,24 @@ export interface LoopUnmergedWorkspaceRow {
  * the two states need DIFFERENT affordances: #299's is safe to one-click merge, and #363's branch
  * turned out to have zero commits — offering "Merge now" there would be a fix built on the
  * assumption that parked means finished. Classification lives in the service.
+ *
+ * ── The CLOSED-and-never-merged arm (#445) ──
+ *
+ * `status != 'closed'` was an additional requirement for years, and it hid its own stall shape.
+ * MEASURED on eventhub (2026-08-13): 9 of 28 open `requirement-extraction` tickets sat In Review
+ * since 2026-08-05 with their ONE workspace `closed`, `mergedAt: null`, `readyForMerge: false`.
+ * A loop only replans once its round's tickets are all terminal, so those nine are a permanent
+ * brake — and being outside this query, they produced no stall, no inbox item and no nudge.
+ *
+ * So a CLOSED workspace with no merge whose ISSUE is still non-terminal is now returned too. The
+ * terminal-status exclusion is what keeps it narrow: a closed unmerged workspace under a Done or
+ * Cancelled ticket is ordinary history (a superseded workspace, a cancelled unit) and blocks
+ * nothing. The service gives this arm its own reason and `mergeSafe: false` — the branch may still
+ * exist and be landable, or the work may be genuinely lost, and those need different remedies.
  */
 const WORKSPACE_PARKED_STATUSES = ["ready_for_merge"] as const;
+/** Issue statuses that make a closed-unmerged workspace ordinary history rather than a stall. */
+const TERMINAL_ISSUE_STATUSES = ["Done", "Cancelled"] as const;
 
 export async function listPluginLoopUnmergedWorkspaces(
   projectId: string,
@@ -232,12 +248,34 @@ export async function listPluginLoopUnmergedWorkspaces(
     .where(and(
       eq(issues.projectId, projectId),
       sql`${issues.externalKey} LIKE ${pattern} ESCAPE '\\'`,
-      sql`${workspaces.status} != 'closed'`,
       sql`${workspaces.mergedAt} IS NULL`,
-      sql`(${projectStatuses.name} IN ('In Review', 'AI Reviewed', 'Done')
-        OR ${workspaces.status} IN ${WORKSPACE_PARKED_STATUSES})`,
+      sql`(
+        (${workspaces.status} != 'closed'
+          AND (${projectStatuses.name} IN ('In Review', 'AI Reviewed', 'Done')
+            OR ${workspaces.status} IN ${WORKSPACE_PARKED_STATUSES}))
+        OR
+        (${workspaces.status} = 'closed'
+          AND ${projectStatuses.name} NOT IN ${TERMINAL_ISSUE_STATUSES})
+      )`,
     ));
   return rows;
+}
+
+/**
+ * The git coordinates of one stalled workspace, for the autoLand recovery's commits-ahead
+ * re-check (#444). Deliberately three columns: the recovery must never land on a status, only on
+ * a verified commit count, and nothing else about the row informs that decision.
+ */
+export async function getWorkspaceGitCoordinates(
+  workspaceId: string,
+  database: Database = db,
+): Promise<{ id: string; workingDir: string | null; baseBranch: string | null } | null> {
+  const rows = await database
+    .select({ id: workspaces.id, workingDir: workspaces.workingDir, baseBranch: workspaces.baseBranch })
+    .from(workspaces)
+    .where(eq(workspaces.id, workspaceId))
+    .limit(1);
+  return rows[0] ?? null;
 }
 
 /**

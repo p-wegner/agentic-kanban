@@ -2,7 +2,8 @@ import { parsePluginManifest } from "@agentic-kanban/shared/lib/plugin-manifest"
 import { isPluginEnabledPreferenceKey } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
 import type { Database } from "../db/index.js";
-import { listPluginEnabledPreferences, listPluginRows } from "../repositories/plugins.repository.js";
+import { getWorkspaceGitCoordinates, listPluginEnabledPreferences, listPluginRows } from "../repositories/plugins.repository.js";
+import { recoverStrandedAutoLand } from "./plugin-loop-autoland-recovery.js";
 import { latestPluginLoopEvent } from "../repositories/plugin-loop-events.repository.js";
 import { getPluginService } from "./plugin.service.js";
 
@@ -66,6 +67,14 @@ export async function advanceDuePluginLoops(
     minBlockedAdvanceIntervalMs?: number;
     /** Injectable clock for tests. */
     now?: number;
+    /**
+     * Land a stranded `autoLand` unit (#444). Injected rather than imported so this module stays
+     * free of the merge machinery — and so a caller that does not pass it gets the previous
+     * behaviour exactly (detect and report, never land).
+     */
+    land?: (workspaceId: string) => Promise<void>;
+    /** Minimum age of a stall before recovery will land it (#444). */
+    autoLandRecoveryMinAgeMs?: number;
   },
 ): Promise<number> {
   const log = options.log ?? ((message: string) => console.log(`[monitor] ${message}`));
@@ -94,13 +103,13 @@ export async function advanceDuePluginLoops(
   for (const [projectId, slugs] of enabled) {
     for (const row of pluginRows) {
       if (!slugs.has(row.pluginId)) continue;
-      let hasLoops = false;
+      let loopDefs: { name: string; autoLand?: boolean }[] = [];
       try {
-        hasLoops = (parsePluginManifest(row.manifestJson).loops ?? []).length > 0;
+        loopDefs = parsePluginManifest(row.manifestJson).loops ?? [];
       } catch {
         continue; // broken cached manifest — never take the monitor down for it
       }
-      if (!hasLoops) continue;
+      if (loopDefs.length === 0) continue;
 
       let statuses;
       try {
@@ -117,6 +126,25 @@ export async function advanceDuePluginLoops(
         if (loop.converged) continue;
         // Not started by a human yet, or the current round is still running.
         if (loop.closedTickets === 0 && loop.openTickets === 0) continue;
+        // #444 — a finished-but-unlanded unit on an autoLand loop. Checked BEFORE the
+        // still-running bail below, because that is exactly the state it presents as: the ticket
+        // is Done/In Review, so it counts as open, and the loop can never replan while it does.
+        // Nothing here starts an agent; the worst case is a merge the gate then refuses.
+        if (options.land && loop.awaitingMerge) {
+          const autoLand = loopDefs.find((def) => def.name === loop.name)?.autoLand === true;
+          const landed = await recoverStrandedAutoLand(
+            loop.awaitingMerge,
+            { autoLand, nowMs, minAgeMs: options.autoLandRecoveryMinAgeMs },
+            {
+              workspace: await getWorkspaceGitCoordinates(loop.awaitingMerge.workspaceId, database),
+              land: options.land,
+              log,
+            },
+          );
+          // The merge tail advances the loop itself (#298), so this cycle is done with it either
+          // way: a landed unit replans from the merge, an unlanded one is unchanged.
+          if (landed) continue;
+        }
         if (loop.openTickets > 0) continue;
         // Interval gating (#372). This pass runs once per monitor CYCLE, and cycles are
         // event-triggered (a board mutation fires one after a 1.5s debounce) — not once per
