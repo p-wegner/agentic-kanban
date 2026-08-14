@@ -49,6 +49,25 @@ export async function getUncommittedTrackedChanges(repoPath: string): Promise<st
 }
 
 /**
+ * Everything a commit would still have to capture in `repoPath` — tracked modifications AND
+ * untracked new files (#469).
+ *
+ * Distinct from {@link getUncommittedTrackedChanges}, which excludes untracked files because
+ * they do not block `git merge`. Here they are the point: the failure this detects is an agent
+ * session that ended having WRITTEN its work but never committed it, and that work is very often
+ * mostly new files (a decomposition that extracts 14 modules shows up almost entirely as `??`).
+ * Excluding untracked would report a clean tree for the exact case worth catching.
+ */
+export async function getWorkingTreeChanges(repoPath: string): Promise<string[]> {
+  try {
+    const output = await execGit(["status", "--porcelain", "--untracked-files=all"], repoPath);
+    return output.trim().split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Paths that are DELETED relative to HEAD in `repoPath` — in the index, in the working
  * tree, or both. This is the exact signature of the #350 corruption: a merge advances
  * `refs/heads/<base>` via `update-ref` while that branch is checked out here, and until
