@@ -18,6 +18,7 @@ import { computeNavTarget, type NavKey } from "../lib/boardKeyboardNav.js";
 import { showToast } from "../lib/toast.js";
 import type { BoardPanelState } from "./useBoardPanels.js";
 import { useBoardSelectionStore } from "../stores/boardSelectionStore.js";
+import { onboardingActions } from "../stores/onboardingStore.js";
 import { useBoardCursorStore } from "../stores/boardCursorStore.js";
 import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 
@@ -308,6 +309,18 @@ export function useBoardKeyboardShortcuts(
     }
 
     unregisters.push(registerAction({ id: "open-settings", label: "Open Settings", description: "Configure agent, preferences, and project settings", icon: "⚙", category: "settings", handler: () => actions.panels.setShowSettings(true) }));
+    // #464 — the wizard opens itself once after an import; this is how you get back to it.
+    if (state.activeProjectId) {
+      const activeProject = state.projects.find((p) => p.id === state.activeProjectId);
+      unregisters.push(registerAction({
+        id: "open-onboarding",
+        label: "Project Setup",
+        description: "Finish onboarding this project: stack, Start Mode, plugins, init skills, first tickets",
+        icon: "◑",
+        category: "settings",
+        handler: () => onboardingActions.openOnboarding(state.activeProjectId!, activeProject?.name ?? "this project"),
+      }));
+    }
     unregisters.push(registerAction({ id: "view-all-workspaces", label: "All Workspaces", description: "View all workspaces with status, diff stats, and session activity", icon: "⊞", category: "navigation", handler: () => actions.panels.setShowAllWorkspaces(true) }));
     unregisters.push(registerAction({ id: "view-cleanup-queue", label: "Cleanup Queue", description: "View closed workspaces with failed worktree cleanup warnings", icon: "🧹", category: "navigation", handler: () => actions.panels.setShowCleanupQueue(true) }));
     unregisters.push(registerAction({ id: "view-file-contention", label: "File Contention Heatmap", description: "Show which active workspaces touch the same files (merge-risk clusters)", icon: "⚡", category: "navigation", handler: () => actions.panels.setShowFileContention(true) }));
