@@ -5,7 +5,7 @@ import {
   agentSkills,
   repos,
 } from "@agentic-kanban/shared/schema";
-import { desc, eq, inArray, and, sql } from "drizzle-orm";
+import { desc, eq, inArray, and, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 
 /**
@@ -251,4 +251,30 @@ export async function findOpenUnmergedWorkspace(
   database: Database = db,
 ): Promise<{ id: string; branch: string } | null> {
   return findOpenUnmergedWorkspaceShared(database, issueId);
+}
+
+/**
+ * Live (non-closed) workspaces already holding a branch (#394).
+ *
+ * Git allows exactly one worktree per branch, so a second workspace created on the same branch
+ * adopts the first one's directory and can never own it. Measured on eventhub as two pairs of
+ * workspaces sharing one worktree path each, all four born `blocked`.
+ */
+export async function findLiveWorkspacesOnBranch(
+  branch: string,
+  database: Database = db,
+) {
+  return database
+    .select({
+      id: workspaces.id,
+      status: workspaces.status,
+      workingDir: workspaces.workingDir,
+      issueId: workspaces.issueId,
+    })
+    .from(workspaces)
+    .where(and(
+      eq(workspaces.branch, branch),
+      ne(workspaces.status, "closed"),
+    ))
+    .limit(3);
 }

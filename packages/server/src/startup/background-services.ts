@@ -9,6 +9,7 @@ import { startStrandedReviewReconciler, stopStrandedReviewReconciler } from "./s
 import { startStrandedPlanReconciler, stopStrandedPlanReconciler } from "./plan-mode-reconciler.js";
 import { startZombieFixSessionReconciler, stopZombieFixSessionReconciler } from "./zombie-fix-session-reconciler.js";
 import { startAncestorBranchReconciler, stopAncestorBranchReconciler } from "./ancestor-branch-reconciler.js";
+import { startBornBlockedReconciler, stopBornBlockedReconciler } from "./born-blocked-reconciler.js";
 import { startDoneUnmergedScanner, stopDoneUnmergedScanner } from "./done-unmerged-invariant-scanner.js";
 import { startTerminalWorkspaceReaper, stopTerminalWorkspaceReaper } from "./terminal-workspace-reaper.js";
 import { startServiceStackReaper, stopServiceStackReaper } from "./service-stack-reaper.js";
@@ -108,6 +109,16 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
     start() {
       startAncestorBranchReconciler();
       return stopAncestorBranchReconciler;
+    },
+  },
+  {
+    // The one wedge no other reconciler can even SEE (#394): a workspace born `blocked` with zero
+    // session rows. `reconcileCompletionStates` innerJoins sessions, so it is excluded under every
+    // configuration, and the monitor's blocked branch only releases a quota block.
+    name: "born-blocked-reconciler",
+    start() {
+      startBornBlockedReconciler();
+      return stopBornBlockedReconciler;
     },
   },
   {
