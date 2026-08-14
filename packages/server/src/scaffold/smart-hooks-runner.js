@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @board-hook-version: 1
 /**
  * Smart Hooks Runner — config-driven hook runner for agentic-kanban.
  *

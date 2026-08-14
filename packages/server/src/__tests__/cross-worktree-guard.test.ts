@@ -169,6 +169,54 @@ describe("cross-worktree guard — self-authorization (#369 gap ii)", () => {
     expect(res.blocked).toBe(true);
   });
 
+  /**
+   * #472 — the CWD itself is the violation, and nothing was checking it.
+   *
+   * MEASURED: a background subagent launched for a ticket in `.worktrees/ak-111` committed to the
+   * SHARED `eventhub-backend` checkout on master (`fe83a33`), and a later unrelated merge carried
+   * that stray commit forward. The guard was fully wired in that project — both matchers — and
+   * still allowed it, because `shellViolation` only inspects PATH TOKENS IN THE COMMAND and a
+   * bare `git commit -am "…"` names no path. The guard was implicitly trusting that the process's
+   * cwd WAS the authorized worktree.
+   */
+  it("BLOCKS a bare commit whose CWD is another worktree, though it names no path", () => {
+    const res = runHook(
+      {
+        tool_name: "Bash",
+        // No path anywhere in the command — this is the whole point.
+        tool_input: { command: `git commit -am "stray finding"` },
+        cwd: mainCheckout,
+      },
+      { KANBAN_WORKTREE_DIR: worktree },
+    );
+    expect(res.blocked).toBe(true);
+  });
+
+  it("keeps allowing a bare commit issued from the authorized worktree", () => {
+    const res = runHook(
+      { tool_name: "Bash", tool_input: { command: `git commit -am "mine"` }, cwd: worktree },
+      { KANBAN_WORKTREE_DIR: worktree },
+    );
+    expect(res.blocked).toBe(false);
+  });
+
+  it("keeps allowing a READ from another worktree — the promise the guard already made", () => {
+    // "Reading another worktree is fine; mutating it is not." Gating the cwd check on a mutating
+    // command is what keeps that true; without it this became a new restriction, not a fix.
+    const res = runHook(
+      { tool_name: "Bash", tool_input: { command: `git log -1` }, cwd: mainCheckout },
+      { KANBAN_WORKTREE_DIR: worktree },
+    );
+    expect(res.blocked).toBe(false);
+  });
+
+  it("does not fire when the board declared NO worktree — cwd is then the authority itself", () => {
+    // Without KANBAN_WORKTREE_DIR the authorized root is DERIVED from cwd, so comparing the two
+    // would compare a value to itself.
+    const res = runHook({ tool_name: "Bash", tool_input: { command: `git commit -am "hand-run"` }, cwd: mainCheckout });
+    expect(res.blocked).toBe(false);
+  });
+
   it("still ALLOWS writes inside the board-declared worktree", () => {
     const res = runHook(
       {
