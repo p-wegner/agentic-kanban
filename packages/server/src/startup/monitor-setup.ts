@@ -490,9 +490,17 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       const candidates = await db.select({ wsId: workspaces.id, wsStatus: workspaces.status, workingDir: workspaces.workingDir, isDirect: workspaces.isDirect, projectId: issues.projectId, issueId: issues.id, issueTitle: issues.title, issueNumber: issues.issueNumber, issueStatusName: projectStatuses.name, baseBranch: workspaces.baseBranch, readyForMerge: workspaces.readyForMerge, diffStatCacheFilesChanged: workspaces.diffStatCacheFilesChanged, diffStatCacheInsertions: workspaces.diffStatCacheInsertions, diffStatCacheDeletions: workspaces.diffStatCacheDeletions, mergeGateRanAt: workspaces.mergeGateRanAt, mergeGateStage: workspaces.mergeGateStage, mergeGateSource: workspaces.mergeGateSource, mergeGateBranchSha: workspaces.mergeGateBranchSha, mergeGateBaseSha: workspaces.mergeGateBaseSha }).from(workspaces)
         .innerJoin(issues, eq(workspaces.issueId, issues.id)).innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
         .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
+        // #395 — the second arm used to require `currentNodeId IS NULL`, so an issue whose node
+        // was an `end` node left the walk ENTIRELY, whatever its status said and whatever state
+        // its workspaces were in. Measured on eventhub: eight issues sat on an `end` node while
+        // their status was still In Review, two of them holding `ready_for_merge` workspaces that
+        // had not merged in ~1000 minutes with auto-merge on — the merge code never ran on them
+        // because they were never candidates. Dropping that clause admits any issue with a
+        // non-terminal status; an end-node issue that IS Done stays excluded exactly as before,
+        // and the outer `status != 'closed'` still means only live workspaces are considered.
         .where(sql`${workspaces.status} != 'closed' AND (
           (${issues.currentNodeId} IS NOT NULL AND (${workflowNodes.nodeType} IS NULL OR ${workflowNodes.nodeType} != 'end'))
-          OR (${issues.currentNodeId} IS NULL AND ${issues.statusId} IN (${sql.join(activeStatusIds.map((id) => sql`${id}`), sql`, `)}))
+          OR ${issues.statusId} IN (${sql.join(activeStatusIds.map((id) => sql`${id}`), sql`, `)})
         )`);
       const allowedCandidates = candidates.filter((candidate) => allowProject(candidate.projectId));
       // #416: plan which projects this cycle walks. The scheduler rotates the order to the
