@@ -1,9 +1,10 @@
-import { useEffect, type Dispatch, type RefObject, type SetStateAction } from "react";
+import { useEffect, useMemo, type Dispatch, type RefObject, type SetStateAction } from "react";
 import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { apiPost } from "../lib/api.js";
 import { registerAction } from "../lib/actions.js";
-import { SHORTCUT_TO_VIEW, VIEW_REGISTRY, type ViewMode } from "../lib/viewRegistry.js";
+import { visibleViews, type ViewMode } from "../lib/viewRegistry.js";
+import { useHiddenViews } from "./useHiddenViews.js";
 import {
   ACTIVITY_TABS,
   ACTIVITY_VIEW_ID,
@@ -54,6 +55,13 @@ export function useBoardKeyboardShortcuts(
   state: BoardKeyboardShortcutState,
   actions: BoardKeyboardShortcutActions,
 ) {
+  // #233 — hidden views must not keep their key or their palette entry: a shortcut to a view the
+  // toolbar no longer offers navigates to a panel with no visible way back.
+  const { hidden: hiddenViews } = useHiddenViews(state.activeProjectId);
+  // Memoized: it lands in an effect dependency list, and a fresh object per render would
+  // rebuild the whole keydown handler on every render.
+  const visibleShortcutToView = useMemo(() => visibleViews(hiddenViews).shortcutToView, [hiddenViews]);
+  const visibleRegistryViews = useMemo(() => visibleViews(hiddenViews).all, [hiddenViews]);
   useEffect(() => {
     function isTextEntryTarget(target: EventTarget | null) {
       if (!(target instanceof HTMLElement)) return false;
@@ -77,7 +85,7 @@ export function useBoardKeyboardShortcuts(
     const noMods = (e: KeyboardEvent) => !e.ctrlKey && !e.metaKey && !e.altKey;
     const simpleBindings: { match: (e: KeyboardEvent) => boolean; run: (e: KeyboardEvent) => void }[] = [
       { match: (e) => e.key === "?" && !e.ctrlKey && !e.metaKey, run: () => actions.panels.setShowShortcutHelp((prev) => !prev) },
-      { match: (e) => !!SHORTCUT_TO_VIEW[e.key] && noMods(e), run: (e) => actions.handleViewModeChange(SHORTCUT_TO_VIEW[e.key]) },
+      { match: (e) => !!visibleShortcutToView[e.key] && noMods(e), run: (e) => actions.handleViewModeChange(visibleShortcutToView[e.key]) },
       { match: (e) => e.key === "a" && noMods(e), run: () => actions.panels.setShowAllWorkspaces((prev) => !prev) },
       { match: (e) => e.key === "h" && noMods(e), run: () => actions.panels.setShowFileContention((prev) => !prev) },
       { match: (e) => e.key === "t" && noMods(e), run: () => actions.panels.setShowTranscriptSearch(true) },
@@ -252,6 +260,9 @@ export function useBoardKeyboardShortcuts(
     state.archiveColumns,
     state.archiveExpanded,
     state.viewMode,
+    // #233: the key map changes when the project's hidden set loads or changes, so the handler
+    // must be rebuilt — otherwise a key keeps navigating to a view that is no longer offered.
+    visibleShortcutToView,
   ]);
 
   useEffect(() => {
@@ -338,7 +349,7 @@ export function useBoardKeyboardShortcuts(
     unregisters.push(registerAction({ id: "open-codemod-factory", label: "Codemod Factory", description: "Describe a refactor in plain English — AI generates a ts-morph codemod", icon: "⚙", shortcut: "x", category: "board", handler: () => actions.panels.setShowCodemod(true) }));
     unregisters.push(registerAction({ id: "toggle-live-activity", label: "Live Activity Ticker", description: "Toggle compact stream of running agent output (l)", icon: "▶", shortcut: "l", category: "board", handler: () => actions.panels.setShowLiveActivityTicker((prev) => !prev) }));
 
-    for (const view of VIEW_REGISTRY) {
+    for (const view of visibleRegistryViews) {
       unregisters.push(registerAction({
         id: `view-${view.id}`,
         label: `Switch to ${view.label} View`,
@@ -449,5 +460,6 @@ export function useBoardKeyboardShortcuts(
     state.filteredColumns,
     state.hasAdditionalRepos,
     state.projects,
+    visibleRegistryViews,
   ]);
 }

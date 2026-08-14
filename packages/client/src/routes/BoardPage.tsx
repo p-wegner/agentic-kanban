@@ -55,6 +55,8 @@ import type {
 import { GLOBAL_BUTLER_PROJECT_ID } from "@agentic-kanban/shared";
 import { ButlerView } from "../components/ButlerView.js";
 import type { SavedViewReference } from "../lib/boardSavedViews.js";
+import { resolveVisibleView } from "../lib/viewRegistry.js";
+import { useHiddenViews } from "../hooks/useHiddenViews.js";
 
 
 export interface Project {
@@ -311,7 +313,7 @@ export function BoardPage() {
   // the stored view preference, every state change is reflected in the address
   // bar, and back/forward restores all three.
   const {
-    viewMode,
+    viewMode: routedViewMode,
     graphFocusIssueId,
     setGraphFocusIssueId,
     handleViewModeChange,
@@ -327,6 +329,14 @@ export function BoardPage() {
     onOpenIssueNumber: openIssueNumber,
     onCloseIssue: closeSelectedIssue,
   });
+
+  // #233 — a view hidden for this project must not remain the RENDERED one. It can still be the
+  // routed one (a deep link, or a stored preference from before it was hidden), and rendering it
+  // would leave the toolbar with no active tab and the user with no way back short of editing the
+  // URL. Falls back to the board; the URL is left alone so a link keeps working once the view is
+  // un-hidden again.
+  const { hidden: hiddenViews } = useHiddenViews(activeProjectId);
+  const viewMode = resolveVisibleView(routedViewMode, hiddenViews);
 
   // #323: cross-project deep links (inbox gate entries, sticky gate toasts,
   // desktop notifications) dispatch SELECT_PROJECT_EVENT from lib-layer code;

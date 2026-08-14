@@ -21,6 +21,11 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   "backlog_filter_presets",
   "board_saved_views",
   "board_hidden_columns",
+  // Per-project toolbar curation (#233): a JSON array of ViewMode ids to hide from the toolbar,
+  // the "More" overflow, the command palette and the shortcut overlay. `VIEW_REGISTRY` holds 41
+  // views and had no hiding mechanism at all — curating the toolbar meant editing the registry
+  // and rebuilding, on a board whose whole premise is per-project configuration.
+  "hidden_views",
   "board_show_priority_legend",
   "board_recent_merges_collapsed",
   "board_card_aging_heatmap",

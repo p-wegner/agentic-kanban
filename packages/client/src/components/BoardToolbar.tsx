@@ -1,11 +1,12 @@
-import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { useState, useRef, useMemo, useEffect, useLayoutEffect } from "react";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { MonitorPopover, type MonitorStatus } from "./MonitorPopover.js";
 import { useOrchestrator } from "../hooks/useOrchestrator.js";
 import { getSettings } from "../lib/settingsStore.js";
 import { VoiceInboxButton } from "./VoiceInboxButton.js";
 import { ProjectScriptsMenu } from "./ProjectScriptsMenu.js";
-import { PRIMARY_VIEWS, SECONDARY_VIEWS, VIEW_REGISTRY, type ViewDescriptor } from "../lib/viewRegistry.js";
+import { PRIMARY_VIEWS, VIEW_REGISTRY, visibleViews, type ViewDescriptor } from "../lib/viewRegistry.js";
+import { useHiddenViews } from "../hooks/useHiddenViews.js";
 import { PluginViewsTab } from "./PluginViewsTab.js";
 import type { StatusWithIssues } from "@agentic-kanban/shared";
 import type { CardDensity } from "../hooks/useBoardPreferences.js";
@@ -31,8 +32,7 @@ const INACTIVE = "text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:
 // unreachable — worse, when plugin-views is active the More trigger relabels to "Plugins" and
 // opens the hidden-views list instead. So it is PINNED: excluded from the overflow fold and
 // always rendered beside More, with its width reserved in the fit computation.
-const OVERFLOWABLE_PRIMARY_VIEWS = PRIMARY_VIEWS.filter((v) => v.id !== "plugin-views");
-const PLUGIN_TAB_VIEW = PRIMARY_VIEWS.find((v) => v.id === "plugin-views");
+const ALL_OVERFLOWABLE_PRIMARY_VIEWS = PRIMARY_VIEWS.filter((v) => v.id !== "plugin-views");
 
 interface AgingHeatmapLegendProps {
   warmDays: number;
@@ -216,7 +216,18 @@ export function BoardToolbar({
   // A hidden measurement row mirrors the real tabs; we compare their intrinsic
   // widths against the available row width and show as many tabs as fit, folding
   // the rest (plus the analytics/secondary views) into "More".
-  const [visibleViewCount, setVisibleViewCount] = useState(OVERFLOWABLE_PRIMARY_VIEWS.length);
+  // #233 — per-project view visibility. Every list below derives from ONE filtered registry
+  // rather than each consumer re-filtering, which is how the toolbar, the "More" overflow and the
+  // phone dropdown stay in agreement about what exists.
+  const { hidden: hiddenViews } = useHiddenViews(projectId);
+  const { all: allVisibleViews, primary: primaryViews, secondary: secondaryViews } = useMemo(
+    () => visibleViews(hiddenViews), [hiddenViews],
+  );
+  const overflowablePrimaryViews = useMemo(
+    () => primaryViews.filter((v) => v.id !== "plugin-views"), [primaryViews],
+  );
+  const pluginTabView = primaryViews.find((v) => v.id === "plugin-views");
+  const [visibleViewCount, setVisibleViewCount] = useState(ALL_OVERFLOWABLE_PRIMARY_VIEWS.length);
   const viewTabsWrapRef = useRef<HTMLDivElement>(null);
   const viewTabsMeasureRef = useRef<HTMLDivElement>(null);
   // Below sm the action cluster (Tasks/Scripts/Queue/Capacity/Voice/Monitor) is
@@ -332,20 +343,20 @@ export function BoardToolbar({
       const avail = wrap!.clientWidth;
       if (avail <= 0) return;
       // Fixed trailing children of the measurement row: the pinned Plugins dropdown
-      // tab (only rendered when PLUGIN_TAB_VIEW resolves) and the "More" trigger.
+      // tab (only rendered when pluginTabView resolves) and the "More" trigger.
       // Everything before them is an overflowable primary tab — so the offset has to
       // follow whether the Plugins tab is actually there, otherwise the last real
       // tab's width is counted twice AND dropped from `tabWidths`, silently
       // miscounting how many tabs fit.
-      const fixedTrailing = PLUGIN_TAB_VIEW ? 2 : 1;
+      const fixedTrailing = pluginTabView ? 2 : 1;
       const children = Array.from(measure!.children) as HTMLElement[];
       if (children.length < fixedTrailing) return;
       const moreWidth = children[children.length - 1].offsetWidth;
-      const pluginTabWidth = PLUGIN_TAB_VIEW ? children[children.length - 2].offsetWidth : 0;
+      const pluginTabWidth = pluginTabView ? children[children.length - 2].offsetWidth : 0;
       const tabWidths = children.slice(0, -fixedTrailing).map((el) => el.offsetWidth);
       setVisibleViewCount(
         computeVisibleTabCount({
-          availableWidth: avail - (PLUGIN_TAB_VIEW ? pluginTabWidth + 4 : 0),
+          availableWidth: avail - (pluginTabView ? pluginTabWidth + 4 : 0),
           tabWidths,
           moreWidth,
         }),
@@ -359,7 +370,7 @@ export function BoardToolbar({
   }, [butlerBadgeCount, boardActivitySummary, backlogCount]);
 
   const { visiblePrimaryViews, moreViews, activeMoreView } =
-    splitToolbarViews(OVERFLOWABLE_PRIMARY_VIEWS, SECONDARY_VIEWS, visibleViewCount, viewMode);
+    splitToolbarViews(overflowablePrimaryViews, secondaryViews, visibleViewCount, viewMode);
 
   function renderViewTab(view: ViewDescriptor, measuring = false) {
     if (view.id === "plugin-views") {
@@ -593,7 +604,7 @@ export function BoardToolbar({
         </button>
         {showAllViews && (
           <div role="menu" className="absolute left-0 top-full z-30 mt-1 max-h-[70vh] w-52 overflow-y-auto rounded-md border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
-            {VIEW_REGISTRY.map((view) => {
+            {allVisibleViews.map((view) => {
               const isActive = viewMode === view.id;
               const activeClass = view.activeClass ?? ACTIVE_DEFAULT;
               const showBadge = view.badge === "butler" && butlerBadgeCount > 0;
@@ -635,7 +646,7 @@ export function BoardToolbar({
         <div className="flex w-fit items-center gap-1 border border-black/[0.07] dark:border-white/10 rounded-md p-0.5 bg-surface-raised dark:bg-surface-raised-dark">
           {visiblePrimaryViews.map((view) => renderViewTab(view))}
           {/* Pinned: the Plugins dropdown tab never folds into More (its menu would be lost). */}
-          {PLUGIN_TAB_VIEW && renderViewTab(PLUGIN_TAB_VIEW)}
+          {pluginTabView && renderViewTab(pluginTabView)}
           {moreViews.length > 0 && (
             <div className="relative" ref={moreViewsRef}>
               <button
@@ -703,8 +714,8 @@ export function BoardToolbar({
           aria-hidden="true"
           className="pointer-events-none invisible absolute left-0 top-0 flex items-center gap-1 p-0.5"
         >
-          {OVERFLOWABLE_PRIMARY_VIEWS.map((view) => renderViewTab(view, true))}
-          {PLUGIN_TAB_VIEW && renderViewTab(PLUGIN_TAB_VIEW, true)}
+          {overflowablePrimaryViews.map((view) => renderViewTab(view, true))}
+          {pluginTabView && renderViewTab(pluginTabView, true)}
           <button tabIndex={-1} className="px-2.5 py-1 text-xs rounded flex items-center gap-1.5 whitespace-nowrap">
             More
             <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>

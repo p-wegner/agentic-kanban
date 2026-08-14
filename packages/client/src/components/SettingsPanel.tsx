@@ -60,6 +60,7 @@ import { SkillsSettings } from "./settings/SkillsSettings.js";
 import { McpSettings } from "./settings/McpSettings.js";
 import { PluginsSettings } from "./settings/PluginsSettings.js";
 import { AppearanceSettings } from "./settings/AppearanceSettings.js";
+import { ViewVisibilitySettings } from "./settings/ViewVisibilitySettings.js";
 import { ProjectSettings } from "./settings/ProjectSettings.js";
 import { TagsSettings } from "./settings/TagsSettings.js";
 import { TemplatesSettings } from "./settings/TemplatesSettings.js";
@@ -506,12 +507,20 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
 
               {/* UI tab */}
               {tab === "ui" && (
-                <AppearanceSettings
-                  boardToolsSlot={boardToolsSlot}
-                  settings={settings}
-                  set={set}
-                  setBool={setBool}
-                />
+                <>
+                  <AppearanceSettings
+                    boardToolsSlot={boardToolsSlot}
+                    settings={settings}
+                    set={set}
+                    setBool={setBool}
+                  />
+                  {/* #233 — per-project view visibility. Lives on the UI tab beside the other
+                      toolbar/appearance controls, since that is what it curates. */}
+                  <div className="mt-6 border-t border-gray-200 dark:border-gray-700 pt-4">
+                    <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1">Views</h3>
+                    <ViewVisibilitySettings activeProjectId={activeProjectId ?? null} />
+                  </div>
+                </>
               )}
 
               {/* Project tab */}
