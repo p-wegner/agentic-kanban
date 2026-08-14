@@ -268,3 +268,55 @@ describe("validate-command-safety — backup covers the db actually in use (#137
     expect(result.reason).toContain("kanban.db");
   });
 });
+
+/**
+ * #420 — two false positives, both reproduced live (2026-08-11/12).
+ *
+ * Guard precision matters double here: every false positive trains agents to reflexively split or
+ * obfuscate commands, which erodes exactly the scrutiny the guard depends on. Both workarounds
+ * people had learned (split the chain into two Bash calls; write the payload to a file and pass
+ * it by reference) are pure evasion practice.
+ */
+describe("validate-command-safety — false positives from DATA that merely names the db (#420)", () => {
+  it("allows a read-only file: URL query chained with a CLI subcommand named 'move'", () => {
+    // Shape 1: the SELECT supplied the db reference and the word "move" in `issue move` supplied
+    // the "verb". Each half ran fine alone; only the chain tripped it.
+    const command = [
+      `node -e "const{createClient}=require('@libsql/client');`,
+      `const c=createClient({url:'file:C:/Users/x/.agentic-kanban/kanban.db'});`,
+      `c.execute('select count(*) from issues')"`,
+      "&& pnpm cli -- issue move 4f1c Done",
+    ].join(" ");
+    expect(runGuard(command).blocked).toBe(false);
+  });
+
+  it("allows an INLINE curl payload whose prose names the db beside a destructive word", () => {
+    // Shape 2: a bug report ABOUT this guard was blocked by its own subject matter.
+    const command = `curl -s -X POST http://localhost:3001/api/issues `
+      + `-d '{"title":"guard false positive","description":"rm of kanban.db is refused even when reading"}'`;
+    expect(runGuard(command).blocked).toBe(false);
+  });
+
+  it("still blocks a REAL destructive path, so the stripping is not a bypass", () => {
+    // A `file:` URL cannot be deleted; a plain path can. This is the line the fix walks.
+    expect(runGuard(`rm -f D:/live/packages/server/kanban.db`).blocked).toBe(true);
+  });
+
+  it("still blocks when the payload flag names a FILE rather than inline data", () => {
+    // `-d @x` is a path on disk — a filesystem argument, so it stays visible to the guard.
+    expect(runGuard(`rm -f D:/live/kanban.db && curl -d @payload.json http://x/`).blocked).toBe(true);
+  });
+
+  it("blocks an fs call inside node -e against a plain db path", () => {
+    // Found while fixing the above: `\bunlink\b` never matched `unlinkSync`, so this was ALLOWED.
+    // A destructive call is as destructive inside `node -e` as it is in the shell.
+    const command = `node -e "require('fs').unlinkSync('D:/live/packages/server/kanban.db')"`;
+    expect(runGuard(command).blocked).toBe(true);
+  });
+
+  it("does not treat the mere WORD unlink in prose as a verb", () => {
+    // The call parenthesis is what makes it a verb — the same discipline the stripping preserves.
+    const command = `curl -s -X POST http://x/ -d '{"body":"we should unlink the stale kanban.db stub"}'`;
+    expect(runGuard(command).blocked).toBe(false);
+  });
+});
