@@ -34,12 +34,40 @@ export function applyMigrationsToClient(client: Client): void {
  * across a full test run.
  */
 const createdTempDbFiles: string[] = [];
+
+/**
+ * Every client handed out by createTestDb, so the fork can CLOSE them before it exits (#471).
+ *
+ * Measured: 248 test files call `createTestDb`, 7 of them ever call `dispose`. Most create a DB
+ * per test in `beforeEach`, so a worker reaches teardown holding hundreds of open libsql clients
+ * — and libsql's client is a native (Rust/napi) handle, not a JS object the GC can simply drop.
+ *
+ * That matches the failure this exists to remove: a vitest worker dying with NO failing test and
+ * no JS error ("Worker exited unexpectedly"), in a run where all 174 files passed. A crash during
+ * native teardown looks exactly like that — every test is green and the run still exits non-zero,
+ * because vitest counts an unhandled worker exit as a failure. The pre-merge gate then withholds
+ * every merge board-wide for a reason no log names.
+ *
+ * Closing them here is a fork-wide fix that does not require editing 241 files (and being right
+ * in all of them). Individual `dispose()` calls remain the tidier per-test option and still work.
+ */
+const createdClients: Client[] = [];
 let exitCleanupRegistered = false;
 
 function registerExitCleanup(): void {
   if (exitCleanupRegistered) return;
   exitCleanupRegistered = true;
   process.on("exit", () => {
+    // Close BEFORE unlinking: a client still holding the file keeps its -wal/-shm alive on
+    // Windows, which is also why the old sweep left files behind.
+    for (const client of createdClients) {
+      try {
+        client.close();
+      } catch {
+        /* already closed, or closing during teardown — never fail the run over cleanup */
+      }
+    }
+    createdClients.length = 0;
     for (const file of createdTempDbFiles) {
       for (const suffix of ["", "-wal", "-shm"]) {
         try {
@@ -69,6 +97,8 @@ export function createTestDb() {
   const file = join(tmpdir(), `test-db-${randomUUID()}.db`);
   createdTempDbFiles.push(file);
   const client = createClient({ url: `file:${file}` });
+  // Tracked so the fork closes it at exit even when the caller never disposes (#471).
+  createdClients.push(client);
   applyMigrationsToClient(client);
   client.execute("PRAGMA foreign_keys=ON");
   const db = drizzle(client, { schema });
@@ -78,6 +108,8 @@ export function createTestDb() {
     } catch {
       /* ignore */
     }
+    const tracked = createdClients.indexOf(client);
+    if (tracked !== -1) createdClients.splice(tracked, 1);
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         rmSync(`${file}${suffix}`, { force: true });
