@@ -834,6 +834,13 @@
       "when": 1787212800000,
       "tag": "0118_repo_summary_projection",
       "breakpoints": true
+    },
+    {
+      "idx": 119,
+      "version": "6",
+      "when": 1787299200000,
+      "tag": "0119_agent_skill_is_init",
+      "breakpoints": true
     }
   ]
 }

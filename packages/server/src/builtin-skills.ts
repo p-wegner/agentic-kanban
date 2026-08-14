@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { MERGE_RECONCILER_PROMPT } from "./services/merge-reconciler-prompt.js";
 import { FLEET_WORKER_PROMPT } from "./services/fleet-worker-prompt.js";
+import { BUILTIN_INIT_SKILLS } from "./builtin-skills/init-skills.js";
 
 const SPEC_PHASE_CONSTITUTION_GATE = `## Constitution Gate
 
@@ -12,6 +13,7 @@ Before drafting or revising this phase artifact, load the project's constitution
 Every generated phase artifact must include a short \`## Constitution Alignment\` section that cites \`CLAUDE.md\` and states how the proposal respects the project's scope discipline and relevant rules. If the requested work conflicts with the constitution, stop and ask a clarifying question instead of designing around it.`;
 
 export const BUILTIN_SKILLS = [
+  ...BUILTIN_INIT_SKILLS,
   {
     name: "board-navigator",
     description: "Comprehensive guide for agents to interact with the kanban board using MCP tools",
@@ -552,6 +554,7 @@ Gate:
   {
     name: "architecture-review",
     description: "Exhaustive architecture review — spawns parallel analysis agents, synthesizes findings, and creates kanban tickets for the top weaknesses",
+    isInit: true,
     prompt: `You are a senior software architect performing an exhaustive architecture review. Your goal is to identify the most severe weaknesses and technical debts, then create actionable kanban tickets for the top findings.
 
 ## Process

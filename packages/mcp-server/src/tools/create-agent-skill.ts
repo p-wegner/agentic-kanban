@@ -15,8 +15,9 @@ export function registerCreateAgentSkill(server: McpServer) {
       prompt: z.string().describe("The full prompt template that gets injected into the agent's context"),
       model: z.string().optional().describe("Optional model override (e.g. 'haiku', 'sonnet', 'opus')"),
       projectId: z.string().optional().describe("Optional project ID to scope this skill to a specific project. Omit for global."),
+      isInit: z.boolean().optional().describe("Mark as a one-time project-init skill (runs once, early, against a newly imported project; never auto-run)"),
     },
-    async ({ name, description, prompt, model, projectId }) => {
+    async ({ name, description, prompt, model, projectId, isInit }) => {
       if (!isSafeSkillName(name)) {
         return { content: [{ type: "text" as const, text: "Error: Skill name must be a single safe path segment (no '/', '\\', '..', '.', empty, NUL, or drive-relative names like 'C:')" }] };
       }
@@ -43,12 +44,13 @@ export function registerCreateAgentSkill(server: McpServer) {
         model: model ?? null,
         projectId: scopeProjectId,
         isBuiltin: false,
+        isInit: isInit ?? false,
         createdAt: now,
         updatedAt: now,
       });
 
       return {
-        content: [{ type: "text" as const, text: JSON.stringify({ id, name, description, model: model ?? null, projectId: scopeProjectId }, null, 2) }],
+        content: [{ type: "text" as const, text: JSON.stringify({ id, name, description, model: model ?? null, projectId: scopeProjectId, isInit: isInit ?? false }, null, 2) }],
       };
     },
   );
