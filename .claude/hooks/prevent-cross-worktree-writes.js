@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @board-hook-version: 2
 /**
  * Prevent cross-worktree writes — keep each Claude Code instance inside its own
  * git worktree.
@@ -311,6 +312,58 @@ async function main() {
   }
 
   const others = worktrees.filter((w) => w !== currentRoot);
+
+  // #472 — the cwd ITSELF can be the violation, and nothing was checking it.
+  //
+  // MEASURED: a background subagent launched for a ticket in `.worktrees/ak-111` committed to the
+  // SHARED `eventhub-backend` checkout on master (`fe83a33`), and a later unrelated merge carried
+  // that stray commit forward. The guard was fully wired in that project and still allowed it —
+  // because `shellViolation` only inspects PATH TOKENS IN THE COMMAND, and a bare
+  // `git commit -am "…"` names no path. The guard was implicitly trusting that the process's cwd
+  // WAS the authorized worktree.
+  //
+  // `KANBAN_WORKTREE_DIR` is set by the board when it launches the agent and cannot be moved by
+  // cd-ing anywhere (#369 gap ii), so where it is present it is authoritative about which worktree
+  // this session belongs to — and a command running somewhere else is a violation whatever it
+  // says. Applied ONLY when the board declared the root: without it the root is DERIVED from cwd,
+  // so comparing the two would be comparing a value to itself.
+  //
+  // Containment, not equality: running in `<worktree>/packages/server` is normal.
+  //
+  // `input.cwd`, NOT the destructured `cwd`: when the board declared the root, `authorizedRoot`
+  // returns the DECLARED path as its cwd, so comparing that would compare a value to itself and
+  // never fire (it did not, on the first attempt at this fix).
+  // Gated on MUTATION, so the guard keeps its standing promise that reading another worktree is
+  // fine — an inspection command run from over there is odd, not dangerous, and blocking it would
+  // be a new restriction rather than a fix.
+  // SHELL only, and only for a MUTATING command. A structured Write/Edit always names its target,
+  // so the per-target loop below already judges it correctly — extending this check to those
+  // blocked a write into the CORRECT worktree issued from a session whose cwd was elsewhere,
+  // which is legitimate and is asserted by cross-worktree-guard.test.ts. And reads stay allowed:
+  // an inspection command run from another worktree is odd, not dangerous.
+  if (
+    rootSource === "KANBAN_WORKTREE_DIR" &&
+    input.cwd &&
+    isShell &&
+    MUTATING_PATTERNS.some((re) => re.test(command))
+  ) {
+    const here = norm(gitToplevel(input.cwd) || input.cwd);
+    if (!isInside(norm(input.cwd), currentRoot) && others.includes(here)) {
+      block(
+        "⛔ Cross-worktree command blocked — WRONG WORKING DIRECTORY.\n\n" +
+          `This session is authorized for (via KANBAN_WORKTREE_DIR):\n  ${currentRoot}\n\n` +
+          `but it is running in a DIFFERENT git worktree:\n  ${here}\n\n` +
+          "This is the #472 vector: the command names no path at all (`git commit -am ...`), so\n" +
+          "there is nothing for a path check to catch — the working directory is the whole\n" +
+          "violation. A background subagent that starts in, or is moved to, another checkout\n" +
+          "commits there without ever mentioning it, bypassing the ticket's branch/merge gate.\n\n" +
+          "Fix: run the command from your own worktree above. If you genuinely need to operate\n" +
+          "in another worktree, prefix THIS command with the override:\n" +
+          "  ALLOW_CROSS_WORKTREE_WRITE=1 <your command>\n" +
+          "Do NOT bypass by editing this hook."
+      );
+    }
+  }
 
   if (isShell) {
     const offending = shellViolation(command, currentRoot, others, cwd);

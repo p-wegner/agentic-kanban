@@ -303,6 +303,47 @@ function mergeSettingsHooks(
  *   .claude/hooks/README.md               — explains the hooks
  *   .claude/settings.json                 — hook entries appended (never overwritten)
  */
+
+/**
+ * Write a board-owned hook script, REFRESHING an out-of-date copy (#472).
+ *
+ * These files were written once and never again (`if (!existsSync(...))`), so every fix to a
+ * guard reached only NEWLY registered projects. That is how the #472 cross-worktree hole would
+ * have survived in `eventhub-backend` indefinitely: the guard was present and correctly wired
+ * there, just built before the fix existed. It is the same distribution defect as #392, one
+ * level up — there the scaffold source had drifted from the deployed copy; here the deployed
+ * copy can never catch up.
+ *
+ * The shipped sources carry `// @board-hook-version: N`. A copy with a lower version (or none,
+ * i.e. predating this mechanism) is replaced; an equal or higher one is left alone, so this is
+ * idempotent and cannot downgrade a project that is somehow ahead.
+ *
+ * These are BOARD-OWNED artifacts, not user files — CLAUDE.md already forbids weakening or
+ * routing around them, so a local edit is not a state worth preserving. Bumping the version in
+ * the source is what ships a fix to every project.
+ */
+function boardHookVersion(source: string): number {
+  const match = /^\/\/ @board-hook-version: (\d+)/m.exec(source);
+  return match ? Number(match[1]) : 0;
+}
+
+function writeBoardHookIfOutdated(targetPath: string, source: string | null): void {
+  if (!source) return;
+  if (existsSync(targetPath)) {
+    let current = "";
+    try {
+      current = readFileSync(targetPath, "utf8");
+    } catch {
+      return; // unreadable — leave it alone rather than clobber something we cannot inspect
+    }
+    if (boardHookVersion(current) >= boardHookVersion(source)) return;
+    console.log(
+      `[scaffold] refreshing ${targetPath} (v${boardHookVersion(current)} -> v${boardHookVersion(source)})`,
+    );
+  }
+  writeFileSync(targetPath, source, "utf8");
+}
+
 export function ensureHookScaffold(repoPath: string, options: HookScaffoldOptions = {}): void {
   try {
     const hooksDir = join(repoPath, ".claude", "hooks");
@@ -310,10 +351,7 @@ export function ensureHookScaffold(repoPath: string, options: HookScaffoldOption
 
     // --- vital-file-guard.js ---
     const vitalGuardPath = join(hooksDir, "vital-file-guard.js");
-    if (!existsSync(vitalGuardPath)) {
-      const src = getVitalGuardSource();
-      if (src) writeFileSync(vitalGuardPath, src, "utf8");
-    }
+    writeBoardHookIfOutdated(vitalGuardPath, getVitalGuardSource());
 
     // --- vital-files.json ---
     const vitalFilesPath = join(hooksDir, "vital-files.json");
@@ -328,9 +366,8 @@ export function ensureHookScaffold(repoPath: string, options: HookScaffoldOption
     // is safe and is what makes it present by the time the first worktree IS created.
     const includeWorktree = options.includeWorktreeGuard !== undefined ? options.includeWorktreeGuard : true;
     const worktreeGuardPath = join(hooksDir, "prevent-cross-worktree-writes.js");
-    if (includeWorktree && !existsSync(worktreeGuardPath)) {
-      const src = getWorktreeGuardSource();
-      if (src) writeFileSync(worktreeGuardPath, src, "utf8");
+    if (includeWorktree) {
+      writeBoardHookIfOutdated(worktreeGuardPath, getWorktreeGuardSource());
     }
 
     // --- smart-hooks-config.json ---
@@ -348,22 +385,11 @@ export function ensureHookScaffold(repoPath: string, options: HookScaffoldOption
     // Written BEFORE the runner: the runner requires it at load time, so a repo that got the
     // runner without it would throw on every hook call (#392).
     const topologyCachePath = join(hooksDir, "git-topology-cache.js");
-    if (!existsSync(topologyCachePath)) {
-      const src = getTopologyCacheSource();
-      if (src) writeFileSync(topologyCachePath, src, "utf8");
-    }
+    writeBoardHookIfOutdated(topologyCachePath, getTopologyCacheSource());
 
     const smartRunnerPath = join(hooksDir, "smart-hooks-runner.js");
-    const smartRunnerWritten =
-      existsSync(smartRunnerPath) ||
-      (() => {
-        const src = getSmartRunnerSource();
-        if (src) {
-          writeFileSync(smartRunnerPath, src, "utf8");
-          return true;
-        }
-        return false;
-      })();
+    writeBoardHookIfOutdated(smartRunnerPath, getSmartRunnerSource());
+    const smartRunnerWritten = existsSync(smartRunnerPath);
 
     // --- hooks README ---
     const readmePath = join(hooksDir, "README.md");
