@@ -146,3 +146,30 @@ export function buildIndeterminateExitStats(executor: string, durationMs: number
     agentSummary: reason,
   };
 }
+
+/**
+ * The operator-facing sentence for a launch failure, in the butler feed.
+ *
+ * Three genuinely different failures share this route and each needs its own wording: a stale
+ * `--resume` (recovering itself), a non-zero exit (which carries the provider's own error text),
+ * and a zero-output crash (where the only fact available is that nothing came back at all).
+ */
+export function launchFailureButlerText(input: {
+  workspaceId: string;
+  isStaleResume: boolean;
+  isNonZeroExit: boolean;
+  effectiveExitCode: number | null;
+  durationMs: number;
+  errorText?: string | null;
+}): string {
+  const seconds = Math.round(input.durationMs / 1000);
+  if (input.isStaleResume) {
+    return `Agent resume failed for workspace ${input.workspaceId}: the previous conversation transcript was missing. `
+      + "Clearing the stale resume id and relaunching fresh.";
+  }
+  if (input.isNonZeroExit) {
+    return `Agent launch failed for workspace ${input.workspaceId}: exited with code ${input.effectiveExitCode} in ${seconds}s`
+      + `${input.errorText ? ` — ${input.errorText.slice(0, 200)}` : ""}.`;
+  }
+  return `Agent launch failed for workspace ${input.workspaceId}: zero output within ${seconds}s.`;
+}
