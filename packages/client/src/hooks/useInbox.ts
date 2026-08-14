@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { requestIssueFocus, requestProjectSelection, requestViewNavigation } from "../lib/navigateView.js";
 import { planInboxNavigation } from "../lib/inboxNavigation.js";
-import { markProgrammaticNavigation } from "../routes/boardRouteSync.js";
+import { markProgrammaticNavigation } from "../lib/navigationBurst.js";
 import { usePluginViewStore } from "../stores/pluginViewStore.js";
 
 /** GET /api/inbox (#302) — everything blocked on a human, across ALL projects. */

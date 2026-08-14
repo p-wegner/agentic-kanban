@@ -276,55 +276,15 @@ export function planUrlSync(input: UrlSyncInput): UrlSyncPlan {
 }
 
 /* ------------------------------------------------------------------ *
- * One logical navigation == one history entry
+ * One logical navigation == one history entry — moved to
+ * lib/navigationBurst.ts (#465) so hooks/components can start a burst
+ * without importing UP into routes/; re-exported here unchanged for this
+ * module's own existing consumers (BoardPage.tsx, useBoardPageRoute.ts).
  * ------------------------------------------------------------------ */
-
-export interface NavigationBurst {
-  /** Start a burst: the first URL write may push, later ones replace. */
-  mark(now: number, windowMs?: number): void;
-  /** Start a burst in which NO write may push (popstate restore). */
-  markSilent(now: number, windowMs?: number): void;
-  /** True when the next write must replace rather than push. */
-  isCoalescing(now: number): boolean;
-  /** Record that a push happened, so the rest of the burst coalesces. */
-  notePush(now: number): void;
-}
-
-/** How long the steps of one logical navigation are treated as a single burst. */
-export const NAVIGATION_BURST_MS = 1000;
-
-export function createNavigationBurst(defaultWindowMs = NAVIGATION_BURST_MS): NavigationBurst {
-  let openUntil = 0;
-  let pushUsed = true;
-  return {
-    mark(now, windowMs = defaultWindowMs) {
-      // Re-marking INSIDE an open burst only extends it — the steps of one
-      // logical navigation each mark, and must still share a single entry.
-      if (now >= openUntil) pushUsed = false;
-      openUntil = now + windowMs;
-    },
-    markSilent(now, windowMs = defaultWindowMs) {
-      openUntil = now + windowMs;
-      pushUsed = true;
-    },
-    isCoalescing(now) {
-      return now < openUntil && pushUsed;
-    },
-    notePush(now) {
-      if (now < openUntil) pushUsed = true;
-    },
-  };
-}
-
-/**
- * Shared by every place that starts a multi-step navigation: the three
- * CustomEvent handlers (SELECT_PROJECT / NAVIGATE_VIEW / FOCUS_ISSUE) and the
- * popstate restore. They live in different modules, so the burst is a module
- * singleton rather than hook state.
- */
-export const navigationBurst = createNavigationBurst();
-
-/** Mark that a programmatic, multi-step navigation is starting. */
-export function markProgrammaticNavigation(now: number = Date.now()): void {
-  navigationBurst.mark(now);
-}
+export {
+  type NavigationBurst,
+  NAVIGATION_BURST_MS,
+  createNavigationBurst,
+  navigationBurst,
+  markProgrammaticNavigation,
+} from "../lib/navigationBurst.js";

@@ -1,5 +1,3 @@
-import { and, eq, inArray, ne } from "drizzle-orm";
-import { issues, projects, repos, workspaces } from "@agentic-kanban/shared/schema";
 import type {
   DiffStatsRepoEntry,
   DiffStatsResponse,
@@ -15,6 +13,11 @@ import type { GitService } from "./workspace-internals.js";
 import { computeRepoMergeEntry, type RepoMergeStatus } from "./repo-merge-status.service.js";
 import { siblingRefFromRow, type WorkspaceRepoRef } from "./workspace-all-repos.js";
 import { readHandoffMeta } from "./handoff.service.js";
+import {
+  getProjectRepoFields,
+  listBatchRepoRows,
+  listBatchWorkspaceRows,
+} from "../repositories/workspace-repo-status-batch.repository.js";
 
 /**
  * #415 — GET /api/projects/:id/workspace-repo-status: the batched replacement for the
@@ -108,47 +111,16 @@ export async function buildWorkspaceRepoStatusBatch(
   const database = deps.database ?? db;
   const gitService = deps.gitService ?? (realGitService as GitService);
 
-  const [project] = await database
-    .select({ repoPath: projects.repoPath, defaultBranch: projects.defaultBranch })
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .limit(1);
+  const project = await getProjectRepoFields(projectId, database);
   if (!project) {
     return { projectId, include, workspaces: [] };
   }
 
   // One query over all non-closed, non-direct workspaces of the project…
-  const wsRows = await database
-    .select({
-      id: workspaces.id,
-      issueId: workspaces.issueId,
-      branch: workspaces.branch,
-      status: workspaces.status,
-      mergedAt: workspaces.mergedAt,
-      workingDir: workspaces.workingDir,
-      baseBranch: workspaces.baseBranch,
-      baseCommitSha: workspaces.baseCommitSha,
-      mergedHeadSha: workspaces.mergedHeadSha,
-      diffStatCacheCheckedAt: workspaces.diffStatCacheCheckedAt,
-      diffStatCacheFilesChanged: workspaces.diffStatCacheFilesChanged,
-      diffStatCacheInsertions: workspaces.diffStatCacheInsertions,
-      diffStatCacheDeletions: workspaces.diffStatCacheDeletions,
-    })
-    .from(workspaces)
-    .innerJoin(issues, eq(issues.id, workspaces.issueId))
-    .where(and(
-      eq(issues.projectId, projectId),
-      ne(workspaces.status, "closed"),
-      eq(workspaces.isDirect, false),
-    ));
+  const wsRows = await listBatchWorkspaceRows(projectId, database);
 
   // …and one IN-query for every repos row (leading + siblings) those workspaces span.
-  const repoRows = wsRows.length > 0
-    ? await database
-        .select()
-        .from(repos)
-        .where(inArray(repos.workspaceId, wsRows.map((w) => w.id)))
-    : [];
+  const repoRows = await listBatchRepoRows(wsRows.map((w) => w.id), database);
   const repoRowsByWs = new Map<string, typeof repoRows>();
   for (const row of repoRows) {
     const list = repoRowsByWs.get(row.workspaceId as string) ?? [];

@@ -1,7 +1,6 @@
-import { projects } from "@agentic-kanban/shared/schema";
-import { isNull } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
+import { getActiveProjectSummaries } from "../repositories/project.repository.js";
 import { listPendingApprovals } from "./approvals.js";
 import { listPendingQuestionsForProject } from "./agent-questions/listing.js";
 import { getPluginService } from "./plugin.service.js";
@@ -129,10 +128,7 @@ export async function listInbox(database: Database = db): Promise<{ items: Inbox
   // Archived projects are excluded (2026-08-11 perf audit) — also a correctness fix:
   // an archived project's gates surfaced here with deep links into a project the UI
   // can no longer navigate to, and its whole plugin/question scan was wasted work.
-  const projectRows = await database
-    .select({ id: projects.id, name: projects.name })
-    .from(projects)
-    .where(isNull(projects.archivedAt));
+  const projectRows = await getActiveProjectSummaries(database);
   const pluginService = getPluginService(database);
 
   // #348: this used to be `for (const project of projectRows) { await ...; await ...; }`

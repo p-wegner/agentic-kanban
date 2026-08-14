@@ -6,12 +6,12 @@ import { usePluginViewStore } from "../stores/pluginViewStore.js";
 import {
   PluginLoopPane,
   PluginScriptPane,
-  PluginSkillPane,
   type PluginLoop,
   type PluginOwner,
   type PluginScript,
   type PluginSkill,
 } from "./PluginActionPanes.js";
+import { PluginSkillPane } from "./PluginSkillPane.js";
 import { PluginScaffoldPane, type ScaffoldForm } from "./PluginScaffoldPane.js";
 
 /**
