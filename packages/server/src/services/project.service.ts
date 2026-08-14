@@ -1,4 +1,11 @@
 import { randomUUID } from "node:crypto";
+import {
+  startRegistrationProgress,
+  beginRegistrationPhase,
+  endRegistrationPhase,
+  finishRegistrationProgress,
+} from "./registration-progress.service.js";
+import { exportBuiltinSkillsToProject } from "./project-skill-export.js";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { resolve, sep, join } from "node:path";
@@ -120,6 +127,23 @@ const ARCHIVE_STATUS_NAMES = new Set(["done", "cancelled"]);
 // and 75ms let one burst trigger multiple full rebuilds.
 const BOARD_WARMUP_DEBOUNCE_MS = 300;
 
+/** Registration input, shared by the public entry point and its progress-tracked body (#388). */
+interface RegisterProjectInput {
+  repoPath?: string;
+  cloneUrl?: string;
+  name?: string;
+  description?: string;
+  color?: string;
+  gitignoreTemplate?: string;
+  generateReadme?: boolean;
+  exportSkillsOnRegistration?: boolean;
+  /**
+   * Client-minted id for polling per-phase progress while this call is in flight (#388).
+   * Optional: a caller that does not want progress omits it and nothing is recorded.
+   */
+  progressId?: string;
+}
+
 export function createProjectService(deps: { database: Database; workspaceSummaryCache?: WorkspaceSummaryCache }) {
   const { database, workspaceSummaryCache } = deps;
 
@@ -134,16 +158,17 @@ export function createProjectService(deps: { database: Database; workspaceSummar
   // Pending warm-ahead debounce timers keyed by projectId.
   const boardWarmupTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  async function registerProject(body: {
-    repoPath?: string;
-    cloneUrl?: string;
-    name?: string;
-    description?: string;
-    color?: string;
-    gitignoreTemplate?: string;
-    generateReadme?: boolean;
-    exportSkillsOnRegistration?: boolean;
-  }) {
+  async function registerProject(body: RegisterProjectInput) {
+    const progress = startRegistrationProgress(body.progressId);
+    try {
+      return await registerProjectTracked(body, progress);
+    } catch (err) {
+      finishRegistrationProgress(progress, err instanceof Error ? err.message : String(err));
+      throw err;
+    }
+  }
+
+  async function registerProjectTracked(body: RegisterProjectInput, progress: string | null) {
     if (!body.repoPath && !body.cloneUrl) {
       throw new ProjectError("repoPath or cloneUrl is required", "BAD_REQUEST");
     }
@@ -153,6 +178,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
 
     let localPath = body.repoPath;
     if (body.cloneUrl) {
+      beginRegistrationPhase(progress, "clone");
       try {
         localPath = await cloneRepo(body.cloneUrl, { name: body.name });
       } catch (err) {
@@ -160,6 +186,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       }
     }
 
+    beginRegistrationPhase(progress, "inspect-repo");
     let repoInfo;
     try {
       repoInfo = await detectRepoInfo(localPath!);
@@ -175,6 +202,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     }
 
     // Default onboarding skill so a freshly-registered project's worktrees aren't skill-less (#531).
+    beginRegistrationPhase(progress, "create-project");
     const id = randomUUID();
     const result = await insertProject(id, {
       name,
@@ -196,9 +224,15 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     //
     // This path also never called populateSetupScript at all, so REST-registered projects had
     // setup_script = null forever — the #37 bug, fixed by routing through the shared step (#43).
+    // Two nameable steps in one call: the scaffold writes guards/config, the population derives
+    // the stack profile and setup command. Reported as `scaffold` because that is what starts
+    // first; `stack-profile` follows it below so a slow derivation is visibly its own wait.
+    beginRegistrationPhase(progress, "scaffold");
     await scaffoldAndPopulateProject(id, repoInfo.repoPath, database, {
       gitignoreTemplate: body.gitignoreTemplate ? GITIGNORE_TEMPLATES[body.gitignoreTemplate] : undefined,
     });
+    beginRegistrationPhase(progress, "stack-profile");
+    endRegistrationPhase(progress, "done");
 
     if (body.generateReadme) {
       const readmePath = join(repoInfo.repoPath, "README.md");
@@ -207,30 +241,14 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       }
     }
 
+    beginRegistrationPhase(progress, "seed-skills");
     const shouldExport = body.exportSkillsOnRegistration ??
       ((await getPreference("export_skills_on_registration", database)) === "true");
-    if (shouldExport) {
-      const isEmpty = await isSkillsDirAbsentOrEmpty(repoInfo.repoPath);
-      if (isEmpty) {
-        try {
-          const builtinSkills = await listAgentSkills(undefined, false, database);
-          for (const skill of builtinSkills) {
-            // #129: only export the skills a worktree agent actually fires. Every
-            // exported skill rides into every worktree and pays an always-on
-            // name+description context tax per turn; board-side skills (monitor,
-            // conductor, enhancer) run from their DB prompt against the main
-            // checkout and would be pure tax here.
-            if (!isBuilderRelevantSkill(skill.name)) continue;
-            if (skill.isBuiltin && !/[/\\]|\.\./.test(skill.name)) {
-              await writeAgentSkillFile(repoInfo.repoPath, skill);
-            }
-          }
-        } catch {
-          // non-fatal â€” export failure should not block registration
-        }
-      }
-    }
+    if (!shouldExport) endRegistrationPhase(progress, "skipped", "skill export is off for this board");
+    if (shouldExport) await exportBuiltinSkillsToProject(repoInfo.repoPath, database);
 
+    beginRegistrationPhase(progress, "finalize");
+    finishRegistrationProgress(progress);
     return { ...result, id };
   }
 

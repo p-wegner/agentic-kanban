@@ -1,5 +1,6 @@
 import type { Database } from "../db/index.js";
 import { createProjectService } from "../services/project.service.js";
+import { getRegistrationProgress } from "../services/registration-progress.service.js";
 import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.js";
 import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../middleware/ai-operation.js";
@@ -236,6 +237,19 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
   });
 
   // POST /api/projects
+  // GET /api/projects/registration-progress/:id — per-phase progress for a registration in
+  // flight (#388). The POST is what blocks, so progress has to travel on a second connection;
+  // the client mints the id, sends it with the POST, and polls this while it waits. Declared
+  // BEFORE `/:id` routes that could otherwise swallow the path.
+  router.get("/registration-progress/:id", (c) => {
+    const progress = getRegistrationProgress(c.req.param("id"));
+    // 404 rather than an empty shell: "I have never heard of this registration" and "it has not
+    // reached its first phase" are different answers, and a spinner that cannot tell them apart
+    // is the thing this ticket is about.
+    if (!progress) return c.json({ error: "No such registration in progress" }, 404);
+    return c.json(progress);
+  });
+
   router.post("/", async (c) => {
     const body = await parseJsonBody<{
       repoPath?: string;
@@ -246,6 +260,7 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
       gitignoreTemplate?: string;
       generateReadme?: boolean;
       exportSkillsOnRegistration?: boolean;
+      progressId?: string;
     }>(c);
     const result = await projectService.registerProject(body);
     options?.boardEvents?.broadcastProjectsChanged(result.id, "project_created");
