@@ -45,3 +45,5 @@ export type * from "./container-dep-volumes.js";
 export * from "./butler-scope.js";
 // Docs-only diff detection (#198) — pure string logic, no Node builtins.
 export * from "./docs-only-diff.js";
+// Onboarding plan model (#463): step catalog + pure key derivations, no Node builtins.
+export * from "./onboarding-plan.js";

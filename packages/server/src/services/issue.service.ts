@@ -389,6 +389,8 @@ export function createIssueService(deps: {
               projectId,
               createdAt: now,
               updatedAt: now,
+              externalKey: normalizeExternalKey(input.externalKey),
+              externalUrl: validateExternalUrl(input.externalUrl),
             }, tx);
             if (opts?.parentIssueId) {
               await insertDependency({
