@@ -58,6 +58,8 @@ const makeGitH = vi.hoisted(() => {
       countUniqueCommits: vi.fn(async () => 1),
       rebaseOntoBase: vi.fn(async () => ({ success: true })),
       mergeBaseIntoBranch: vi.fn(async () => ({ success: true })),
+      // #377: runPreMergeGate reads the diff to decide docs-only/package-scoped skips.
+      getChangedFileNames: vi.fn(async () => [] as string[]),
       ...overrides,
     } as Record<string, (...a: unknown[]) => unknown>;
   };
@@ -84,13 +86,14 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { issues, projectStatuses, projects, repos, workspaces, preferences } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
+import { makeTempRepo } from "./helpers/temp-repo.js";
 import { createWorkspaceActionsRoute } from "../routes/workspace-actions.js";
 import { activeMerges } from "../services/workspace-internals.js";
 
 /** Seed a project (In Review + Done), an In-Review issue, and an idle reviewed workspace. */
 async function seedWorkspace(
   db: ReturnType<typeof createTestDb>["db"],
-  opts: { status?: string; readyForMerge?: boolean } = {},
+  opts: { status?: string; readyForMerge?: boolean; repoPath?: string } = {},
 ) {
   const now = new Date().toISOString();
   const projectId = randomUUID();
@@ -98,9 +101,10 @@ async function seedWorkspace(
   const doneStatusId = randomUUID();
   const issueId = randomUUID();
   const workspaceId = randomUUID();
+  const repoPath = opts.repoPath ?? "/repo";
 
   await db.insert(projects).values({
-    id: projectId, name: "Test", repoPath: "/repo", repoName: "repo",
+    id: projectId, name: "Test", repoPath, repoName: "repo",
     defaultBranch: "master", createdAt: now, updatedAt: now,
   });
   await db.insert(projectStatuses).values([
@@ -114,7 +118,7 @@ async function seedWorkspace(
   await db.insert(workspaces).values({
     id: workspaceId, issueId,
     branch: "feature/ak-548-test",
-    workingDir: "/repo/.worktrees/feature_ak-548-test",
+    workingDir: `${repoPath}/.worktrees/feature_ak-548-test`,
     baseBranch: "master", isDirect: false,
     status: opts.status ?? "idle",
     readyForMerge: opts.readyForMerge ?? true,
@@ -318,7 +322,10 @@ describe("POST /api/workspaces/:id/merge — a clean merge does NOT launch a fix
   });
 
   it("a clean, non-conflicting merge just lands (workspace closed, issue Done) without entering fixing", async () => {
-    const { workspaceId, issueId } = await seedWorkspace(db);
+    // #273: this test drives the REAL repo-lock/merge path, which fails fast (not just
+    // hangs) on a repoPath with no `.git` — unlike the fix-and-merge tests above, which
+    // never reach the lock. Needs a real on-disk repo.
+    const { workspaceId, issueId } = await seedWorkspace(db, { repoPath: makeTempRepo() });
     const startSession = vi.fn(async () => "should-not-launch");
     const app = mountRoute(db, startSession, new Set<string>());
 
