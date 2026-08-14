@@ -9,7 +9,7 @@ import { getIssueTitleAndDescription } from "../../repositories/workspace-sessio
 import { getProjectIssueIds } from "../../repositories/review-effectiveness.repository.js";
 import { randomUUID } from "node:crypto";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
-import { runMigrations, getActiveProjectId } from "../shared.js";
+import { runMigrations, getActiveProjectId, describeIssueNumberMiss } from "../shared.js";
 import { buildWorkspaceApiUrl, buildApiUrl } from "./workspace-api-url.js";
 import { registerWorkspaceInteractionCommands } from "./workspace-interaction.js";
 
@@ -263,7 +263,7 @@ Examples:
 
         const issueId = await getIssueIdByNumberInProject(num, projectId);
         if (issueId === null) {
-          console.error(`Issue #${num} not found.`);
+          console.error(await describeIssueNumberMiss(num, projectId));
           process.exit(1);
         }
 

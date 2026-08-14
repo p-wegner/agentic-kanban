@@ -5,7 +5,7 @@
  * #957 pattern: the blanket /repositories/ exemption is gone, so this facade
  * ships its OWN sub-modules rather than growing past the flat threshold).
  */
-import { issues, projectStatuses, issueDependencies } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, issueDependencies, projects } from "@agentic-kanban/shared/schema";
 import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { eq, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
@@ -61,6 +61,27 @@ export async function getIssueHeaderByNumber(projectId: string, issueNumber: num
     .where(and(eq(issues.issueNumber, issueNumber), eq(issues.projectId, projectId)))
     .limit(1);
   return rows[0] ?? null;
+}
+
+/**
+ * Every project that has an issue with this number, newest project first (#467).
+ *
+ * Issue numbers are per-project, so `#462` is ambiguous across the board. When a lookup in the
+ * ACTIVE project misses, the CLI used to say "not found" — which reads as "that ticket does not
+ * exist" and sends the reader off investigating a phantom, when in fact the number belongs to
+ * another project. This is what lets the CLI say which one instead.
+ */
+export async function findProjectsWithIssueNumber(issueNumber: number, database: Database = db) {
+  return database
+    .select({
+      projectId: projects.id,
+      projectName: projects.name,
+      issueId: issues.id,
+      title: issues.title,
+    })
+    .from(issues)
+    .innerJoin(projects, eq(issues.projectId, projects.id))
+    .where(eq(issues.issueNumber, issueNumber));
 }
 
 /**

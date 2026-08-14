@@ -2,7 +2,7 @@ import type { Command } from "commander";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { parseSessionSummary, isTerminalStatusName } from "@agentic-kanban/shared";
-import { runMigrations, getActiveProjectId } from "../shared.js";
+import { runMigrations, getActiveProjectId, describeIssueNumberMiss } from "../shared.js";
 import { isAnalyticsNoise } from "../../services/session-filter.js";
 import { getWorkspaceDiffStats, type WorkspaceDiffStats } from "../../services/workspace-diff-stats.js";
 import {
@@ -108,7 +108,7 @@ Examples:
         const issue = await getIssueHeaderByNumber(projectId, num);
 
         if (!issue) {
-          console.error(`Issue #${num} not found in active project.`);
+          console.error(await describeIssueNumberMiss(num, projectId));
           process.exit(1);
         }
 
@@ -355,7 +355,7 @@ Examples:
         const issue = await getIssueHeaderByNumber(projectId, num);
 
         if (!issue) {
-          console.error(`Issue #${num} not found.`);
+          console.error(await describeIssueNumberMiss(num, projectId));
           process.exit(1);
         }
 
@@ -453,7 +453,7 @@ Examples:
         const issue = await getIssueByNumberOrId(String(num), projectId);
 
         if (!issue) {
-          console.error(`Issue #${num} not found.`);
+          console.error(await describeIssueNumberMiss(num, projectId));
           process.exit(1);
         }
 
@@ -559,7 +559,7 @@ Examples:
         const parent = await getIssueByNumberOrId(String(parentNum), projectId);
 
         if (!parent) {
-          console.error(`Parent issue #${parentNum} not found in active project.`);
+          console.error(await describeIssueNumberMiss(parentNum, projectId));
           process.exit(1);
         }
 
@@ -647,7 +647,7 @@ Note: deletion is permanent. There is no undo. The issue number will not be reus
         const issue = await getIssueByNumberOrId(String(num), projectId);
 
         if (!issue) {
-          console.error(`Issue #${num} not found in active project.`);
+          console.error(await describeIssueNumberMiss(num, projectId));
           process.exit(1);
         }
 
@@ -712,7 +712,7 @@ Valid types: text, link, image
         const issueId = await getIssueIdByNumberInProject(num, projectId);
 
         if (!issueId) {
-          console.error(`Issue #${num} not found in active project.`);
+          console.error(await describeIssueNumberMiss(num, projectId));
           process.exit(1);
         }
 
@@ -829,7 +829,7 @@ Each dependency: issueIndex, dependsOnIndex (0-based indices), type (optional, d
           }
           const resolvedParentId = await getIssueIdByNumberInProject(parentNum, projectId);
           if (!resolvedParentId) {
-            console.error(`Parent issue #${parentNum} not found in active project.`);
+            console.error(await describeIssueNumberMiss(parentNum, projectId));
             process.exit(1);
           }
           parentIssueId = resolvedParentId;
@@ -910,7 +910,7 @@ At least 2 issue numbers are required.
         const foundNums = new Set(issueRows.map((r) => r.issueNumber));
         for (const n of nums) {
           if (!foundNums.has(n)) {
-            console.error(`Issue #${n} not found in active project.`);
+            console.error(await describeIssueNumberMiss(n, projectId));
             process.exit(1);
           }
         }
