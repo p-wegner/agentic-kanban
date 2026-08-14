@@ -209,6 +209,7 @@ export interface GateResolveResult {
 
 /** Re-exported from its own module (#363) — see `plugin-loop-accounting.ts` for why. */
 export { isLoopUnitAccountedForByPlanner } from "./plugin-loop-accounting.js";
+import { gateBlockingTickets } from "./plugin-loop-accounting.js";
 
 export function createPluginLoopEngine(deps: PluginLoopDeps) {
   const { database, createIssue, createWorkspace, boardUrl, boardEvents } = deps;
@@ -303,6 +304,11 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
             statusName: r.statusName,
             stranded: r.hasAnyWorkspace && !r.hasLiveWorkspace,
           })),
+        // #431 — which open tickets actually suppress the gate card. Decided HERE, from the unit
+        // keys, rather than by the client comparing a bare count: `openTickets` includes the
+        // gate's OWN ticket, so anything holding that ticket non-terminal used to hide the gate.
+        gateBlockedBy: gateBlockingTickets(gate, payload?.progress ?? null, rows.filter((r) => !isTerminalStatusName(r.statusName)))
+          .map((r) => r.issueNumber),
         closedTickets: rows.filter((r) => isTerminalStatusName(r.statusName)).length,
         paused: pausedValue === "true",
         converged: convergedValue === "true",

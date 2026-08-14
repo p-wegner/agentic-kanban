@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 import type { PluginLoopGate, PluginLoopProgressStep } from "@agentic-kanban/shared/lib/plugin-manifest";
 import type { LoopUnmergedWorkspaceRow } from "../repositories/plugins.repository.js";
 import { classifyLoopStall, selectLoopStall } from "../services/plugin-loop-stall.js";
+import { gateBlockingTickets } from "../services/plugin-loop-accounting.js";
 
 function row(overrides: Partial<LoopUnmergedWorkspaceRow> = {}): LoopUnmergedWorkspaceRow {
   return {
@@ -222,5 +223,52 @@ describe("classifyLoopStall — closed without merging (#445)", () => {
       closedStranded(),
     ], null, null);
     expect(stall?.workspaceId).toBe("ws-closed");
+  });
+});
+
+/**
+ * #431 — the gate card's render guard.
+ *
+ * MEASURED on a live `mealplan` step-1 gate: with the step's own ticket #1 parked In Review the
+ * gate was ABSENT from the pane while fully present in the API (question, `approve`
+ * recommendation and checks all populated); moving #1 to Done flipped `openTickets` 1 → 0 and the
+ * same card rendered unchanged. The guard counted the gate's own ticket against it.
+ *
+ * The normal path does reach zero on its own — the same run's step 2 did. What matters is which
+ * cases don't: a review parked for a human, a blocked or refused merge, an orphaned workspace.
+ * In exactly those the gate, which is what would tell the operator what to do, disappears.
+ */
+describe("gateBlockingTickets (#431)", () => {
+  const gateAt = (id: string) => gate(id);
+  const ticket = (externalKey: string | null) => ({ externalKey });
+
+  it("does not let the gate's OWN unit suppress the gate", () => {
+    const blocking = gateBlockingTickets(gateAt("step-1:v1"), null, [
+      ticket("plugin-loop:pm-pipeline:pipeline:step-1:v1"),
+    ]);
+    expect(blocking).toEqual([]);
+  });
+
+  it("still suppresses the gate while a DIFFERENT unit is running", () => {
+    // Otherwise a stale gate from an earlier round would sit over live work.
+    const blocking = gateBlockingTickets(gateAt("step-1:v1"), null, [
+      ticket("plugin-loop:pm-pipeline:pipeline:step-2:v1"),
+    ]);
+    expect(blocking.length).toBe(1);
+  });
+
+  it("does not count a unit the planner reports done", () => {
+    const blocking = gateBlockingTickets(gateAt("step-3:v1"), steps(["step-1", "done"]), [
+      ticket("plugin-loop:pm-pipeline:pipeline:step-1:v1"),
+    ]);
+    expect(blocking).toEqual([]);
+  });
+
+  it("treats an unattributable ticket as blocking — the conservative direction", () => {
+    expect(gateBlockingTickets(gateAt("step-1:v1"), null, [ticket(null)]).length).toBe(1);
+  });
+
+  it("blocks nothing when there is no gate", () => {
+    expect(gateBlockingTickets(null, null, [ticket(null)])).toEqual([]);
   });
 });

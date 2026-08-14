@@ -92,6 +92,16 @@ export interface LoopStatus {
     statusName: string;
     stranded: boolean;
   }>;
+  /**
+   * Issue numbers of the open tickets that genuinely belong to a round still in flight (#431).
+   *
+   * The gate card renders when this is EMPTY, which is not the same question as
+   * `openTickets === 0`: that count includes the gate's own ticket, so anything holding it
+   * non-terminal — a review parked for a human, a refused merge, an orphaned workspace — used to
+   * take the gate off the screen precisely when it was the thing the operator needed. See
+   * `gateBlockingTickets`.
+   */
+  gateBlockedBy: Array<number | null>;
   /** Terminal (Done/Cancelled) tickets this loop has created. */
   closedTickets: number;
   /** True when a human has paused this loop's monitor-driven auto-advance. */
