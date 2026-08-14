@@ -1,4 +1,5 @@
 import type { PluginLoopGate, PluginLoopProgressStep } from "@agentic-kanban/shared";
+import { parsePluginLoopUnitKey } from "@agentic-kanban/shared/lib/plugin-manifest";
 
 /**
  * Has the PLANNER already accounted for this unit's work? (#353, generalising #326.)
@@ -34,4 +35,43 @@ export function isLoopUnitAccountedForByPlanner(
     if (unitId === step.id || unitId.startsWith(`${step.id}:`)) return true;
   }
   return false;
+}
+
+/**
+ * Which OPEN tickets genuinely belong to a round still in flight — i.e. which of them should
+ * suppress the loop's gate card (#431).
+ *
+ * The render guard was a bare count: `loop.gate && loop.openTickets === 0`. `openTickets` counts
+ * every non-terminal ticket of the loop INCLUDING THE ONE THE GATE IS ABOUT, so any ticket held
+ * open by something other than the work itself takes the gate off the screen. Confirmed causally
+ * on a live `mealplan` step-1 gate: with ticket #1 parked In Review the gate was absent from the
+ * pane while fully present in the API (question, `approve` recommendation, checks all populated);
+ * moving #1 to Done flipped the count 1 → 0 and the same card rendered unchanged.
+ *
+ * The normal path does reach `openTickets === 0` on its own — step 2 of the same run did. What
+ * makes this worth fixing is WHICH cases don't: a review parked for a human, a blocked or refused
+ * merge, an orphaned workspace from a crash. In exactly those cases the gate — the thing that
+ * would tell the operator what to do — is the thing that disappears, silently, behind a pane that
+ * looks like an ordinary running round.
+ *
+ * So the question becomes "is there open work the planner has NOT accounted for", asked per
+ * ticket via the same unit↔step convention `isLoopUnitAccountedForByPlanner` already uses. A gate
+ * whose own unit is the only thing open still renders; a genuinely stale gate from a round with
+ * real work in it still does not.
+ *
+ * A ticket whose unit cannot be attributed counts as blocking: that is the conservative direction
+ * (it preserves the old behaviour for anything unrecognised) and matches how `selectLoopStall`
+ * treats the same unattributable row.
+ */
+export function gateBlockingTickets<T extends { externalKey?: string | null }>(
+  gate: PluginLoopGate | null,
+  progress: { steps: PluginLoopProgressStep[] } | null,
+  openTickets: T[],
+): T[] {
+  if (!gate) return [];
+  return openTickets.filter((ticket) => {
+    const unitId = parsePluginLoopUnitKey(ticket.externalKey ?? null)?.unitId;
+    if (!unitId) return true;
+    return !isLoopUnitAccountedForByPlanner(unitId, gate, progress);
+  });
 }

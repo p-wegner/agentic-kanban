@@ -85,6 +85,11 @@ export type PluginLoop = PluginOwner & {
     /** Open, has had a workspace, none live â€” nothing will ever close it (#413/#397). */
     stranded?: boolean;
   }>;
+  /**
+   * Open tickets that belong to a round still in flight (#431) — the gate renders when this is
+   * empty. NOT the same question as `openTickets === 0`, which includes the gate's own ticket.
+   */
+  gateBlockedBy?: Array<number | null>;
   closedTickets: number;
   paused: boolean;
   converged: boolean;
@@ -476,8 +481,17 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
         <AwaitingMergeCard awaitingMerge={loop.awaitingMerge} onMergeStarted={onChanged} />
       )}
 
-      {/* The human gate (#286): the single thing this loop needs from a person right now. */}
-      {loop.gate && loop.openTickets === 0 && (
+      {/*
+        The human gate (#286): the single thing this loop needs from a person right now.
+
+        #431 — the guard used to be `loop.openTickets === 0`, and `openTickets` counts the gate's
+        OWN ticket. So anything holding that ticket non-terminal (a review parked for a human, a
+        refused merge, an orphaned workspace from a crash) hid the gate — silently, behind a pane
+        that looked like an ordinary running round. The server now says which open tickets belong
+        to a round genuinely in flight; an absent field (an older cached response) renders the
+        gate, since a stale gate is a far smaller failure than a missing current one.
+      */}
+      {loop.gate && (loop.gateBlockedBy ?? []).length === 0 && (
         <div className="lg:order-first">
         <GateCard
           pluginId={loop.pluginId}
