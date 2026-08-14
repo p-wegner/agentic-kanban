@@ -28,7 +28,7 @@ function versionOf(repoPath: string): number | null {
 
 async function main(): Promise<void> {
   const dryRun = process.argv.includes("--dry-run");
-  const projects = await getAllProjects(undefined, { includeArchived: true }, db);
+  const projects = await getAllProjects(undefined, { includeArchived: true });
   let refreshed = 0;
   let absent = 0;
   for (const project of projects) {
