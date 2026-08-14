@@ -2,7 +2,7 @@ import type { Command } from "commander";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { parseSessionSummary, isTerminalStatusName } from "@agentic-kanban/shared";
-import { runMigrations, getActiveProjectId, describeIssueNumberMiss } from "../shared.js";
+import { runMigrations, resolveProjectIdArg, describeIssueNumberMiss } from "../shared.js";
 import { isAnalyticsNoise } from "../../services/session-filter.js";
 import { getWorkspaceDiffStats, type WorkspaceDiffStats } from "../../services/workspace-diff-stats.js";
 import {
@@ -53,10 +53,11 @@ Examples:
   $ agentic-kanban issue list -s "In Progress" -p high
   $ agentic-kanban issue list --json                 # machine-readable output
 `)
-    .action(async (options: { status?: string; priority?: string; json?: boolean }) => {
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(async (options: { project?: string; status?: string; priority?: string; json?: boolean }) => {
       try {
         await runMigrations();
-        const projectId = await getActiveProjectId();
+        const projectId = await resolveProjectIdArg(options.project);
 
         let rows = await getIssueListForProject(projectId);
 
@@ -94,10 +95,11 @@ Examples:
   $ agentic-kanban issue get 42
   $ agentic-kanban issue get 42 --json
 `)
-    .action(async (issueNumberArg: string, options: { json?: boolean }) => {
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(async (issueNumberArg: string, options: { project?: string; json?: boolean }) => {
       try {
         await runMigrations();
-        const projectId = await getActiveProjectId();
+        const projectId = await resolveProjectIdArg(options.project);
 
         const num = Number(issueNumberArg);
         if (!Number.isInteger(num) || num <= 0) {
@@ -151,10 +153,11 @@ Examples:
   $ agentic-kanban issue create "Add dark mode" -d "Support theme switching" -t feature
   $ agentic-kanban issue create "Hotfix" -t bug -s "In Progress"
 `)
-    .action(async (title: string, options: { description?: string; priority?: string; type?: string; status?: string }) => {
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(async (title: string, options: { project?: string; description?: string; priority?: string; type?: string; status?: string }) => {
       try {
         await runMigrations();
-        const projectId = await getActiveProjectId();
+        const projectId = await resolveProjectIdArg(options.project);
 
         const statuses = await getProjectStatuses(projectId);
 
@@ -209,13 +212,14 @@ Examples:
 
 Tip: to change an issue's STATUS, use 'issue move' instead.
 `)
-    .action(async (issueArg: string, options: { title?: string; description?: string; descriptionFile?: string; priority?: string; type?: string }) => {
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(async (issueArg: string, options: { project?: string; title?: string; description?: string; descriptionFile?: string; priority?: string; type?: string }) => {
       try {
         await runMigrations();
 
         // Resolve by issue number (active project) or by full ID, like 'issue move'.
         const isNumeric = /^\d+$/.test(issueArg);
-        const projectId = isNumeric ? await getActiveProjectId() : undefined;
+        const projectId = isNumeric ? await resolveProjectIdArg(options.project) : undefined;
 
         const issue = await getIssueByNumberOrId(issueArg, projectId);
         if (!issue) {
@@ -292,12 +296,13 @@ Examples:
 
 Tip: Use 'issue list' to find the issue ID and see available status names.
 `)
-    .action(async (issueId: string, statusName: string) => {
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(async (issueId: string, statusName: string, options: { project?: string }) => {
       try {
         await runMigrations();
 
         const isNumeric = /^\d+$/.test(issueId);
-        const projectId = isNumeric ? await getActiveProjectId() : undefined;
+        const projectId = isNumeric ? await resolveProjectIdArg(options.project) : undefined;
 
         const issue = await getIssueByNumberOrId(issueId, projectId);
         if (!issue) {
@@ -341,10 +346,11 @@ Examples:
   $ agentic-kanban issue status 17
   $ agentic-kanban issue status 17 --json
 `)
-    .action(async (issueNumberArg: string, options: { json?: boolean }) => {
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(async (issueNumberArg: string, options: { project?: string; json?: boolean }) => {
       try {
         await runMigrations();
-        const projectId = await getActiveProjectId();
+        const projectId = await resolveProjectIdArg(options.project);
 
         const num = Number(issueNumberArg);
         if (!Number.isInteger(num) || num <= 0) {
@@ -439,10 +445,11 @@ Examples:
   $ agentic-kanban issue summary 1          # formatted summary
   $ agentic-kanban issue summary 5 --json   # machine-readable JSON
 `)
-    .action(async (issueNumber: string, options: { json?: boolean }) => {
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(async (issueNumber: string, options: { project?: string; json?: boolean }) => {
       try {
         await runMigrations();
-        const projectId = await getActiveProjectId();
+        const projectId = await resolveProjectIdArg(options.project);
 
         const num = Number(issueNumber);
         if (!Number.isInteger(num) || num <= 0) {
@@ -540,10 +547,11 @@ Examples:
   $ agentic-kanban issue create-sub 10 "Fix edge case" -t bug -p high
   $ agentic-kanban issue create-sub 10 "Design UI" --status "In Progress" --json
 `)
-    .action(async (parentNumberArg: string, title: string, options: { description?: string; priority?: string; type?: string; status?: string; json?: boolean }) => {
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(async (parentNumberArg: string, title: string, options: { project?: string; description?: string; priority?: string; type?: string; status?: string; json?: boolean }) => {
       try {
         await runMigrations();
-        const projectId = await getActiveProjectId();
+        const projectId = await resolveProjectIdArg(options.project);
 
         if (!title.trim()) {
           console.error("Title cannot be empty.");
@@ -633,10 +641,11 @@ Examples:
 
 Note: deletion is permanent. There is no undo. The issue number will not be reused.
 `)
-    .action(async (issueNumberArg: string, options: { force?: boolean; json?: boolean }) => {
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(async (issueNumberArg: string, options: { project?: string; force?: boolean; json?: boolean }) => {
       try {
         await runMigrations();
-        const projectId = await getActiveProjectId();
+        const projectId = await resolveProjectIdArg(options.project);
 
         const num = Number(issueNumberArg);
         if (!Number.isInteger(num) || num <= 0) {
@@ -697,10 +706,11 @@ Examples:
 
 Valid types: text, link, image
 `)
-    .action(async (issueNumberArg: string, options: { type?: string; content?: string; mimeType?: string; caption?: string; workspace?: string; json?: boolean }) => {
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(async (issueNumberArg: string, options: { project?: string; type?: string; content?: string; mimeType?: string; caption?: string; workspace?: string; json?: boolean }) => {
       try {
         await runMigrations();
-        const projectId = await getActiveProjectId();
+        const projectId = await resolveProjectIdArg(options.project);
 
         const validated = validateAttachArtifactOptions(issueNumberArg, options);
         if (!validated.ok) {
@@ -779,10 +789,11 @@ JSON file format:
 Each issue: title (required), description, priority, issueType, estimate, sortOrder, statusName, tags
 Each dependency: issueIndex, dependsOnIndex (0-based indices), type (optional, default: depends_on)
 `)
-    .action(async (jsonFile: string, options: { parent?: string; json?: boolean }) => {
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(async (jsonFile: string, options: { project?: string; parent?: string; json?: boolean }) => {
       try {
         await runMigrations();
-        const projectId = await getActiveProjectId();
+        const projectId = await resolveProjectIdArg(options.project);
 
         let fileContent: string;
         try {
@@ -887,10 +898,11 @@ Examples:
 Note: run 'analyze_touched_files' (via MCP) on each issue first to populate the prediction cache.
 At least 2 issue numbers are required.
 `)
-    .action(async (issueNumberArgs: string[], options: { json?: boolean }) => {
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(async (issueNumberArgs: string[], options: { project?: string; json?: boolean }) => {
       try {
         await runMigrations();
-        const projectId = await getActiveProjectId();
+        const projectId = await resolveProjectIdArg(options.project);
 
         if (issueNumberArgs.length < 2) {
           console.error("At least 2 issue numbers are required.");

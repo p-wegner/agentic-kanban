@@ -58,7 +58,10 @@ export function createAgentSkillsRoute(database: Database) {
 
   // POST /api/agent-skills/:id/install
   router.post("/:id/install", async (c) => {
-    return c.json(await agentSkillService.installSkill(c.req.param("id")));
+    // #389 — optional explicit target; the active project remains the fallback, so every existing
+    // caller is unaffected. The response names the repoPath the file actually went to.
+    const body = await parseJsonBody<{ projectId?: string }>(c).catch(() => ({} as { projectId?: string }));
+    return c.json(await agentSkillService.installSkill(c.req.param("id"), body?.projectId));
   });
 
   // DELETE /api/agent-skills/:id
