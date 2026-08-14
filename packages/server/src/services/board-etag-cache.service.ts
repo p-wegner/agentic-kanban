@@ -45,15 +45,39 @@ export function computeBodyEtag(body: string): string {
  * data set has no generation counter to memo against, unlike the board route)
  * but skips the response body — and, downstream, the jsonGzip middleware
  * passes 304s through untouched, so the gzip cost disappears too.
+ *
+ * ── Pass extra headers HERE, never on the returned Response (#426) ──
+ *
+ * A Hono handler that returns its own `Response` LOSES any header set on that object afterwards.
+ * Measured while adding `X-Total-Count` to `GET /api/issues` (#424): the body and the `ETag` —
+ * both passed through the constructor's `init` — arrived fine, while the header set afterwards
+ * never reached the wire. All three obvious spellings failed the same silent way:
+ *
+ *     const res = conditionalJsonResponse(...); res.headers.set("X-Total-Count", n); return res;
+ *     c.header("X-Total-Count", n); return conditionalJsonResponse(...);
+ *     c.res = conditionalJsonResponse(...); c.res.headers.set(...); return c.res;
+ *
+ * Verified against the backend directly (port 13001), so it is neither the dev proxy nor the gzip
+ * middleware — that one copies headers via `new Headers(res.headers)`, and the response was under
+ * `COMPRESS_MIN_BYTES` anyway. No error, no warning, just a missing header, with a green test
+ * suite unless someone asserts the header explicitly.
+ *
+ * `extraHeaders` therefore folds into the `init`, where headers survive. They are attached to the
+ * 304 too: a conditional response that drops a header the 200 carried would make the header
+ * intermittent, which is worse than absent.
  */
-export function conditionalJsonResponse(body: string, ifNoneMatch: string | undefined): Response {
+export function conditionalJsonResponse(
+  body: string,
+  ifNoneMatch: string | undefined,
+  extraHeaders?: Record<string, string>,
+): Response {
   const etag = computeBodyEtag(body);
   if (ifNoneMatch === etag) {
-    return new Response(null, { status: 304, headers: { ETag: etag } });
+    return new Response(null, { status: 304, headers: { ETag: etag, ...extraHeaders } });
   }
   return new Response(body, {
     status: 200,
-    headers: { "Content-Type": "application/json", ETag: etag },
+    headers: { "Content-Type": "application/json", ETag: etag, ...extraHeaders },
   });
 }
 
