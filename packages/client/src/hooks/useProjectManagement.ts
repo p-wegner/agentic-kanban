@@ -54,8 +54,9 @@ export function useProjectManagement(deps: UseProjectManagementDeps) {
     }
   }
 
-  async function handleRegisterProject({ repoPath, cloneUrl, gitignoreTemplate, generateReadme, additionalRepos }: { repoPath?: string; cloneUrl?: string; gitignoreTemplate: string; generateReadme: boolean; additionalRepos?: string[] }) {
-    const result = await apiPost<{ id: string; name: string; error?: string }>("/api/projects", { repoPath, cloneUrl, gitignoreTemplate: gitignoreTemplate || undefined, generateReadme: generateReadme || undefined });
+  async function handleRegisterProject({ repoPath, cloneUrl, gitignoreTemplate, generateReadme, additionalRepos, progressId }: { repoPath?: string; cloneUrl?: string; gitignoreTemplate: string; generateReadme: boolean; additionalRepos?: string[]; progressId?: string }) {
+    // `progressId` (#388) is minted by the caller so it can poll phases while this POST blocks.
+    const result = await apiPost<{ id: string; name: string; error?: string }>("/api/projects", { repoPath, cloneUrl, gitignoreTemplate: gitignoreTemplate || undefined, generateReadme: generateReadme || undefined, progressId });
     if (result.error) throw new Error(result.error);
     // Multi-repo setup: the registered repo is the leading repo; attach the rest as siblings.
     // Each is a separate POST so one bad path is reported without discarding the good ones.

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useRegistrationProgress } from "../hooks/useRegistrationProgress.js";
 import type { Project } from "./Layout.js";
 
 /**
@@ -18,7 +19,7 @@ export function AddProjectModal({
 }: {
   open: boolean;
   onClose: () => void;
-  onRegisterProject?: (args: { repoPath?: string; cloneUrl?: string; gitignoreTemplate: string; generateReadme: boolean; additionalRepos?: string[] }) => Promise<void>;
+  onRegisterProject?: (args: { repoPath?: string; cloneUrl?: string; gitignoreTemplate: string; generateReadme: boolean; additionalRepos?: string[]; progressId?: string }) => Promise<void>;
   onCreateProject?: (name: string, path: string, gitignoreTemplate: string, generateReadme: boolean) => Promise<void>;
   archivedProjects: Project[];
   onUnarchiveProject?: (id: string) => Promise<void>;
@@ -30,6 +31,8 @@ export function AddProjectModal({
   const [generateReadme, setGenerateReadme] = useState(false);
   const [registering, setRegistering] = useState(false);
   const [registerError, setRegisterError] = useState<string | null>(null);
+  // #388 — which phase is running, so a slow step is visibly slow rather than a bare spinner.
+  const { progress, elapsedMs, begin: beginProgress, end: endProgress } = useRegistrationProgress();
   // Multi-repo setup: additional sibling repo paths entered alongside the leading repo.
   const [additionalRepos, setAdditionalRepos] = useState<string[]>([]);
   const [createName, setCreateName] = useState("");
@@ -64,12 +67,14 @@ export function AddProjectModal({
     if (!repoPath.trim()) return;
     setRegistering(true);
     setRegisterError(null);
+    const progressId = beginProgress();
     try {
       await onRegisterProject?.({
         ...(importMode === "clone" ? { cloneUrl: repoPath.trim() } : { repoPath: repoPath.trim() }),
         gitignoreTemplate,
         generateReadme,
         additionalRepos: additionalRepos.map((r) => r.trim()).filter(Boolean),
+        progressId,
       });
       onClose();
       setRepoPath("");
@@ -80,6 +85,7 @@ export function AddProjectModal({
       setRegisterError(err instanceof Error ? err.message : String(err));
     } finally {
       setRegistering(false);
+      endProgress();
     }
   }
 
@@ -247,6 +253,45 @@ export function AddProjectModal({
             </div>
             {registerError && (
               <p className="text-sm text-red-600">{registerError}</p>
+            )}
+            {/*
+              #388 — a 30-40s spinner with nothing to read left the user unable to tell cloning
+              from stack detection from a hang. A phase list with checkmarks and an elapsed clock
+              is enough: a slow phase is then VISIBLY slow rather than indistinguishable from
+              wedged. No duration target is claimed anywhere — timing on this box is unusable and
+              any before/after comparison would be noise (#368).
+            */}
+            {registering && (
+              <div
+                className="rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/40 p-2 text-xs"
+                data-testid="registration-progress"
+              >
+                <div className="flex items-center justify-between text-gray-600 dark:text-gray-300">
+                  <span>Registering…</span>
+                  <span className="tabular-nums">{Math.floor(elapsedMs / 1000)}s</span>
+                </div>
+                {(progress?.phases ?? []).length === 0 ? (
+                  <p className="mt-1 text-gray-500 dark:text-gray-400">Starting…</p>
+                ) : (
+                  <ul className="mt-1 space-y-0.5">
+                    {progress!.phases.map((phase) => (
+                      <li key={phase.phase} className="flex items-start gap-1.5">
+                        <span className="w-3 shrink-0 text-center">
+                          {phase.status === "done" ? "✓"
+                            : phase.status === "skipped" ? "–"
+                              : phase.status === "failed" ? "✕" : "…"}
+                        </span>
+                        <span className={phase.status === "running"
+                          ? "text-gray-900 dark:text-gray-100"
+                          : "text-gray-500 dark:text-gray-400"}>
+                          {phase.label}
+                          {phase.note && <span className="italic"> — {phase.note}</span>}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             )}
             <div className="flex justify-end gap-2">
               <button
