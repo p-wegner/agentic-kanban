@@ -1,6 +1,7 @@
 import type { Database } from "../db/index.js";
 import { createProjectService } from "../services/project.service.js";
 import { getRegistrationProgress } from "../services/registration-progress.service.js";
+import { searchGraphIssueIds } from "../repositories/graph-search.repository.js";
 import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.js";
 import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../middleware/ai-operation.js";
@@ -610,6 +611,17 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
     // payload is large (measured >1MB pre-diet) and the graph view refetches on
     // board digests, so an unchanged graph answers 304 with no body (and no gzip).
     return conditionalJsonResponse(JSON.stringify(result), c.req.header("if-none-match"));
+  });
+
+  // GET /api/projects/:id/graph/search?q= — search-by-description WITHOUT shipping descriptions
+  // (#370). Returns matching issue IDs only: a few KB whatever the board's size, and exact
+  // matching, because the text never leaves the server. The client-side index this replaced
+  // MEASURED 364,380 gzipped bytes on this board — larger than the payload the ticket exists to
+  // shrink. An empty query returns nothing and the client does not call this at all.
+  router.get("/:id/graph/search", async (c) => {
+    const query = c.req.query("q") ?? "";
+    const issueIds = await searchGraphIssueIds(c.req.param("id"), query, database);
+    return conditionalJsonResponse(JSON.stringify({ issueIds }), c.req.header("if-none-match"));
   });
 
   // GET /api/projects/:id/activity — project-wide activity feed (latest N events across all issues)
