@@ -114,14 +114,28 @@ export async function buildReviewPrompt(
     skillModel = globalSkill?.model ?? null;
   }
 
-  // When a workspaceId is available, signal approval via mark_ready_for_merge with the
-  // literal id (NOT the {{workspaceId}} placeholder — if the id were ever empty the
-  // placeholder collapses to "workspaceId=" and the agent has no actionable tool call).
-  // When it is missing (e.g. direct/in-place review), fall back to the issue-status path
-  // so the approval branch is always actionable.
+  // Approval signalling (#466).
+  //
+  // For a WORKSPACE review the reviewer must NOT be told to call `mark_ready_for_merge`: the
+  // board sets `readyForMerge` itself in `handleReviewSessionExit`, and only after its own
+  // pre-merge gate (verify + smoke) passes. The tool call was therefore redundant — the board
+  // ignores it and re-decides — but not harmless: when the tool was unreachable the reviewer
+  // ended a CLEAN review with "Blocked: mark_ready_for_merge is not available", which reads as
+  // "the review could not approve this" and sends the reader hunting an MCP fault. The actual
+  // reason such a workspace sits unapproved is almost always that the gate FAILED, which the
+  // board logs and emits a butler event for. One misleading sentence cost a real
+  // misdiagnosis; the reviewer's job is to judge the code and report, not to flip a flag whose
+  // owner is the exit workflow.
+  //
+  // Without a workspaceId (direct/in-place review) there IS no exit-workflow gate to set the
+  // flag, so that branch keeps its issue-status signal — it is the only thing recording approval.
   const approvalInstruction = workspaceId
-    ? `1. Use the mark_ready_for_merge MCP tool with workspaceId=${workspaceId} to signal the workspace is approved
-2. Exit normally (the scheduled merge orchestrator will merge it)`
+    ? `1. State clearly that the review found no CRITICAL or MAJOR issues
+2. Exit normally
+
+Do NOT mark the workspace ready for merge yourself, and do not call a tool to do it. The board
+runs its own pre-merge gate (verify + smoke) when you exit and marks readiness only if that
+passes — so approval is not yours to signal, and a missing tool is never what blocks it.`
     : `1. Use the move_issue MCP tool to move issue ${issueId} to 'AI Reviewed' to signal approval
 2. Exit normally (the scheduled merge orchestrator will merge it)`;
 
@@ -237,7 +251,7 @@ After completing your code review and fixing any CRITICAL/MAJOR issues:
 
 2. **Report** your verification result.
 
-3. **Signal approval** exactly as instructed above (mark_ready_for_merge / move to 'AI Reviewed')
+3. **Signal approval** exactly as instructed above (report the verdict / move to 'AI Reviewed')
    and exit normally. Do NOT call the merge endpoint yourself — the verify_script + smoke gate
    runs on your exit and the system merges once it passes.
 
