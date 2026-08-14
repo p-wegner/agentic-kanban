@@ -23,6 +23,7 @@ import { withTransaction, type Database, type TransactionClient } from "../db/in
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
 import * as crudRepo from "../repositories/workspace-crud.repository.js";
+import { warnIfBranchHeldByLiveWorkspace } from "./workspace-branch-holders.js";
 import type { ProviderName } from "./agent-provider.js";
 import { estimateBudget } from "./budget-estimator.service.js";
 import type { BudgetEstimate } from "./budget-estimator.service.js";
@@ -532,6 +533,7 @@ export function createWorkspaceCreateService(deps: {
 
       t = Date.now();
       await assertNoOpenDirectWorkspaceForIssue(input.issueId);
+      if (!isDirect) await warnIfBranchHeldByLiveWorkspace(input.branch || suggestBranchName(issue), database);
       timing("assert-no-open-direct", t);
 
       // Default plan mode on for high/critical priority when not explicitly set.
