@@ -25,12 +25,17 @@
  *    learns about the blocker without reading monitor logs.
  */
 import { createHash } from "node:crypto";
-import { projects, workspaces } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getUncommittedTrackedChanges, revParse } from "./git.service.js";
 import { getPreference } from "../repositories/preferences.repository.js";
+import { getProjectRepoPath } from "../repositories/project.repository.js";
+import {
+  clearMergeBackoffState,
+  getMergeBackoffSignatureState,
+  getMergeBackoffState,
+  setMergeBackoffState,
+} from "../repositories/merge-backoff.repository.js";
 import { verifyScriptPrefKey } from "./stack-profile.service.js";
 import { recordDriveObstacle, type ObstacleBroadcaster } from "./drive-obstacles.service.js";
 import { emitButlerSystemEvent } from "./butler-event-feed.js";
@@ -120,10 +125,9 @@ async function defaultBranchHeadSha(workingDir: string): Promise<string | null> 
 function makeDefaultIsMainCheckoutClean(database: Database) {
   return async (projectId: string): Promise<boolean | null> => {
     try {
-      const [project] = await database.select({ repoPath: projects.repoPath }).from(projects)
-        .where(eq(projects.id, projectId)).limit(1);
-      if (!project?.repoPath) return null;
-      const dirty = await getUncommittedTrackedChanges(project.repoPath);
+      const repoPath = await getProjectRepoPath(projectId, database);
+      if (!repoPath) return null;
+      const dirty = await getUncommittedTrackedChanges(repoPath);
       return dirty.length === 0;
     } catch {
       return null;
@@ -146,15 +150,7 @@ function makeDefaultVerifyScriptHash(database: Database) {
 /** Drop any merge backoff recorded for a workspace — on success or a relevant state change. */
 export async function clearMergeBackoff(database: Database, workspaceId: string): Promise<void> {
   try {
-    await database.update(workspaces).set({
-      mergeBackoffFailures: 0,
-      mergeBackoffSignature: null,
-      mergeBackoffError: null,
-      mergeBackoffBranchSha: null,
-      mergeBackoffVerifyHash: null,
-      mergeBackoffNextRetryAt: null,
-      mergeBackoffSince: null,
-    }).where(eq(workspaces.id, workspaceId));
+    await clearMergeBackoffState(workspaceId, database);
   } catch (err) {
     console.warn(`[merge-backoff] could not clear backoff for ${workspaceId}:`, err instanceof Error ? err.message : err);
   }
@@ -180,13 +176,7 @@ export async function shouldSkipMergeForBackoff(
 ): Promise<MergeBackoffSkipDecision> {
   const database = deps.database ?? db;
   const now = (deps.now ?? (() => new Date()))();
-  const [row] = await database.select({
-    failures: workspaces.mergeBackoffFailures,
-    signature: workspaces.mergeBackoffSignature,
-    branchSha: workspaces.mergeBackoffBranchSha,
-    verifyHash: workspaces.mergeBackoffVerifyHash,
-    nextRetryAt: workspaces.mergeBackoffNextRetryAt,
-  }).from(workspaces).where(eq(workspaces.id, ws.wsId)).limit(1);
+  const row = await getMergeBackoffState(ws.wsId, database);
 
   if (!row || !row.failures || !row.nextRetryAt) return { skip: false };
   if (now.toISOString() >= row.nextRetryAt) return { skip: false };
@@ -248,11 +238,7 @@ export async function recordMergeFailure(
     const cls = classifyMergeFailure(message);
     const signature = computeMergeFailureSignature(cls, message);
 
-    const [row] = await database.select({
-      failures: workspaces.mergeBackoffFailures,
-      signature: workspaces.mergeBackoffSignature,
-      since: workspaces.mergeBackoffSince,
-    }).from(workspaces).where(eq(workspaces.id, ws.wsId)).limit(1);
+    const row = await getMergeBackoffSignatureState(ws.wsId, database);
     if (!row) return null;
 
     const identical = row.signature === signature;
@@ -262,16 +248,16 @@ export async function recordMergeFailure(
     const branchSha = ws.workingDir ? await (deps.getBranchHeadSha ?? defaultBranchHeadSha)(ws.workingDir) : null;
     const verifyHash = await (deps.getVerifyScriptHash ?? makeDefaultVerifyScriptHash(database))(ws.projectId);
 
-    await database.update(workspaces).set({
-      mergeBackoffFailures: failures,
-      mergeBackoffSignature: signature,
-      mergeBackoffError: message.slice(0, 2000),
-      mergeBackoffBranchSha: branchSha,
-      mergeBackoffVerifyHash: verifyHash,
-      mergeBackoffNextRetryAt: nextRetryAt,
-      mergeBackoffSince: since,
+    await setMergeBackoffState(ws.wsId, {
+      failures,
+      signature,
+      error: message.slice(0, 2000),
+      branchSha,
+      verifyHash,
+      nextRetryAt,
+      since,
       updatedAt: now.toISOString(),
-    }).where(eq(workspaces.id, ws.wsId));
+    }, database);
 
     // Surface the blocker ONCE, when the same failure has repeated (edge-triggered at the
     // threshold, mirroring #283's single obstacle at exhaustion — not one per cycle).

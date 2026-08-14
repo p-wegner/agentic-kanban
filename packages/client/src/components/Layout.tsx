@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+﻿import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { fetchProjectRepos, invalidateProjectRepos } from "../lib/projectReposQuery.js";
 import { ProjectTabs } from "./ProjectTabs.js";
@@ -11,8 +11,9 @@ import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 import { apiDelete, apiPost } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
 import type { ProjectRepoResponse } from "@agentic-kanban/shared";
+import { AddProjectModal } from "./AddProjectModal.js";
 
-interface Project {
+export interface Project {
   id: string;
   name: string;
   color?: string | null;
@@ -29,7 +30,7 @@ interface LayoutProps {
    * Board controls hoisted INTO the header row on phone widths (#436). The board toolbar is
    * its own 44px band under the header; on a 390px screen those two bands cost ~93px before
    * any content. The caller decides (via useIsNarrow) whether to render its toolbar in place
-   * or hand it here — one instance either way, so BoardToolbar's popovers never double up.
+   * or hand it here â€” one instance either way, so BoardToolbar's popovers never double up.
    */
   headerExtra?: ReactNode;
   projects?: Project[];
@@ -99,39 +100,23 @@ export function Layout({
   const [unregistering, setUnregistering] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState<Project | null>(null);
   const [archiving, setArchiving] = useState(false);
-  const [unarchivingId, setUnarchivingId] = useState<string | null>(null);
-  const [modalTab, setModalTab] = useState<"import" | "create">("import");
-  const [importMode, setImportMode] = useState<"path" | "clone">("path");
-  const [repoPath, setRepoPath] = useState("");
-  const [gitignoreTemplate, setGitignoreTemplate] = useState("");
-  const [generateReadme, setGenerateReadme] = useState(false);
-  const [registering, setRegistering] = useState(false);
-  const [registerError, setRegisterError] = useState<string | null>(null);
-  // Multi-repo setup: additional sibling repo paths entered alongside the leading repo.
-  const [additionalRepos, setAdditionalRepos] = useState<string[]>([]);
   // "++" add-repo-to-current-project modal.
   const [showAddRepo, setShowAddRepo] = useState(false);
   const [addRepoMode, setAddRepoMode] = useState<"path" | "clone" | "create">("path");
   const [addRepoInput, setAddRepoInput] = useState("");
   const [addingRepo, setAddingRepo] = useState(false);
   const [addRepoError, setAddRepoError] = useState<string | null>(null);
-  const [createName, setCreateName] = useState("");
-  const [createPath, setCreatePath] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const createNameInvalid = /[/\\<>:"|?*\x00]/.test(createName);
-  // Additional (sibling) repos of the active project — powers the ++ button badge
+  // Additional (sibling) repos of the active project â€” powers the ++ button badge
   // and the manage-repositories modal (list + remove). The leading repo is not a
   // row here; it lives on the project's repoPath/repoName and is shown separately.
   const queryClient = useQueryClient();
   const [projectRepos, setProjectRepos] = useState<ProjectRepoResponse[]>([]);
   const [removingRepoId, setRemovingRepoId] = useState<string | null>(null);
   const [promotingRepoId, setPromotingRepoId] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
   // Below sm the utility icons (workspaces/failures/worktrees/theme/settings)
-  // collapse into a single ⋯ menu so the header fits on one row.
+  // collapse into a single â‹¯ menu so the header fits on one row.
   const [showUtilMenu, setShowUtilMenu] = useState(false);
-  /** Mobile search is an icon until tapped (#435) — see the header. */
+  /** Mobile search is an icon until tapped (#435) â€” see the header. */
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const utilMenuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -149,30 +134,6 @@ export function Layout({
       document.removeEventListener("keydown", handleKey);
     };
   }, [showUtilMenu]);
-
-  async function handleRegisterSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!repoPath.trim()) return;
-    setRegistering(true);
-    setRegisterError(null);
-    try {
-      await onRegisterProject?.({
-        ...(importMode === "clone" ? { cloneUrl: repoPath.trim() } : { repoPath: repoPath.trim() }),
-        gitignoreTemplate,
-        generateReadme,
-        additionalRepos: additionalRepos.map((r) => r.trim()).filter(Boolean),
-      });
-      setShowRegister(false);
-      setRepoPath("");
-      setGitignoreTemplate("");
-      setGenerateReadme(false);
-      setAdditionalRepos([]);
-    } catch (err) {
-      setRegisterError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setRegistering(false);
-    }
-  }
 
   // Served from the shared repos cache (#403); `fresh: true` (after a mutation)
   // invalidates first so every cached consumer sees the change too.
@@ -266,25 +227,6 @@ export function Layout({
     void loadProjectRepos(activeProjectId);
   }
 
-  async function handleCreateSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!createName.trim()) return;
-    setCreating(true);
-    setCreateError(null);
-    try {
-      await onCreateProject?.(createName.trim(), createPath.trim(), gitignoreTemplate, generateReadme);
-      setShowRegister(false);
-      setCreateName("");
-      setCreatePath("");
-      setGitignoreTemplate("");
-      setGenerateReadme(false);
-    } catch (err) {
-      setCreateError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setCreating(false);
-    }
-  }
-
   async function handleConfirmUnregister() {
     if (!confirmUnregister || !onUnregisterProject) return;
     setUnregistering(true);
@@ -307,28 +249,8 @@ export function Layout({
     }
   }
 
-  async function handleUnarchive(id: string) {
-    if (!onUnarchiveProject) return;
-    setUnarchivingId(id);
-    try {
-      await onUnarchiveProject(id);
-    } finally {
-      setUnarchivingId(null);
-    }
-  }
-
   function openRegister() {
-    setRegisterError(null);
-    setCreateError(null);
-    setRepoPath("");
-    setCreateName("");
-    setCreatePath("");
-    setGitignoreTemplate("");
-    setGenerateReadme(false);
-    setAdditionalRepos([]);
-    setModalTab("import");
     setShowRegister(true);
-    setTimeout(() => inputRef.current?.focus(), 50);
   }
 
   return (
@@ -346,7 +268,7 @@ export function Layout({
                 autoFocus
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search issues…"
+                placeholder="Search issuesâ€¦"
                 className="w-full pl-8 pr-3 py-2 min-h-11 text-base border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
               />
             </div>
@@ -426,7 +348,7 @@ export function Layout({
                   ? `Manage repositories (${projectRepos.length + 1} repos in this project)`
                   : "Add a repository to this project (multi-repo)"}
               >
-                {/* two overlapped plus glyphs → "++" = add another repo to the current project */}
+                {/* two overlapped plus glyphs â†’ "++" = add another repo to the current project */}
                 <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <path d="M8 5v9M4 9.5h8M16 10v9M12 14.5h8" />
                 </svg>
@@ -446,7 +368,7 @@ export function Layout({
           )}
           <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
             {/* Below sm the field is an ICON until tapped (#435): at w-28 it showed a truncated
-                "Search i…" while eating a quarter of the header. Tapping expands it over the
+                "Search iâ€¦" while eating a quarter of the header. Tapping expands it over the
                 header row, which is the only place a real query field fits on a phone. */}
             <button
               type="button"
@@ -562,7 +484,7 @@ export function Layout({
             </div>
             {/* The bell is the ONLY cross-project list of gates waiting on a human
                 (GET /api/inbox), and it used to live inside the `hidden sm:flex` cluster
-                above — so on a phone it was display:none and the ⋯ menu's "Notifications"
+                above â€” so on a phone it was display:none and the â‹¯ menu's "Notifications"
                 row toggled a dropdown inside that hidden subtree, i.e. tapping it did
                 nothing visible (#433). It renders at ALL widths now; only the other
                 utility icons fold. */}
@@ -575,7 +497,7 @@ export function Layout({
               onMarkRead={onNotificationMarkRead ?? (() => {})}
               onEventClick={onNotificationEventClick ?? (() => {})}
             />
-            {/* < sm : all utility actions fold into one ⋯ menu */}
+            {/* < sm : all utility actions fold into one â‹¯ menu */}
             <div className="relative sm:hidden" ref={utilMenuRef}>
               <button
                 onClick={() => setShowUtilMenu((v) => !v)}
@@ -595,7 +517,7 @@ export function Layout({
                     { label: "Launch Failures", onClick: onLaunchFailuresClick },
                     { label: "Worktrees", onClick: onWorktreeOverviewClick },
                     { label: "Project Health", onClick: onProjectHealthClick },
-                    // Folded off the mobile header (#435) — but folded AWAY is not the same as
+                    // Folded off the mobile header (#435) â€” but folded AWAY is not the same as
                     // removed, so they keep a route here. Archive/Unregister are last and still
                     // go through their existing confirm dialogs.
                     { label: "Register project", onClick: openRegister },
@@ -656,7 +578,7 @@ export function Layout({
           <div className="bg-surface-raised dark:bg-surface-raised-dark rounded-lg shadow-xl w-full max-w-sm mx-4 p-6">
             <h2 className="text-lg font-semibold text-ink dark:text-stone-100 mb-2">Archive project?</h2>
             <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">
-              Archive <span className="font-medium">{confirmArchive.name}</span>? It will be hidden from the project list and its data is kept — restore it any time from the Add Project dialog.
+              Archive <span className="font-medium">{confirmArchive.name}</span>? It will be hidden from the project list and its data is kept â€” restore it any time from the Add Project dialog.
             </p>
             <div className="flex justify-end gap-3">
               <button
@@ -678,278 +600,14 @@ export function Layout({
         </div>
       )}
 
-      {showRegister && (
-        <div
-          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
-          onClick={(e) => { if (e.target === e.currentTarget) setShowRegister(false); }}
-        >
-          <div className="bg-surface-raised dark:bg-surface-raised-dark rounded-lg shadow-xl w-full max-w-md mx-4 p-6">
-            <h2 className="text-lg font-semibold text-ink dark:text-stone-100 mb-4">Add Project</h2>
-            <div className="flex border-b border-gray-200 dark:border-gray-700 mb-4">
-              <button
-                type="button"
-                onClick={() => setModalTab("import")}
-                className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${modalTab === "import" ? "border-brand-600 text-brand-600" : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"}`}
-              >
-                Import existing
-              </button>
-              <button
-                type="button"
-                onClick={() => setModalTab("create")}
-                className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${modalTab === "create" ? "border-brand-600 text-brand-600" : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"}`}
-              >
-                Create new
-              </button>
-            </div>
-
-            {modalTab === "import" && (
-              <form onSubmit={handleRegisterSubmit} className="space-y-4">
-                <div>
-                  <div className="flex items-center gap-4 mb-1">
-                    <label className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
-                      <input
-                        type="radio"
-                        name="import-mode"
-                        checked={importMode === "path"}
-                        onChange={() => setImportMode("path")}
-                        className="h-3.5 w-3.5 text-brand-600 focus:ring-brand-500"
-                      />
-                      Local path
-                    </label>
-                    <label className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
-                      <input
-                        type="radio"
-                        name="import-mode"
-                        checked={importMode === "clone"}
-                        onChange={() => setImportMode("clone")}
-                        className="h-3.5 w-3.5 text-brand-600 focus:ring-brand-500"
-                      />
-                      Clone from URL
-                    </label>
-                  </div>
-                  <input
-                    ref={inputRef}
-                    type="text"
-                    value={repoPath}
-                    onChange={(e) => setRepoPath(e.target.value)}
-                    placeholder={importMode === "clone" ? "https://github.com/user/repo.git" : "C:/path/to/repo"}
-                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
-                  />
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    {additionalRepos.length > 0
-                      ? "The leading repository — the agent starts here. The repos below are worked on alongside it."
-                      : importMode === "clone"
-                      ? "Git URL to clone into the server's repos directory. Branch and remote URL are auto-detected."
-                      : "Absolute path to a git repository. Branch and remote URL are auto-detected."}
-                  </p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Additional repositories <span className="text-gray-400 dark:text-gray-500 font-normal">(optional — makes this a multi-repo project)</span>
-                  </label>
-                  {additionalRepos.map((val, i) => (
-                    <div key={i} className="flex gap-2 mb-1.5">
-                      <input
-                        type="text"
-                        value={val}
-                        onChange={(e) => setAdditionalRepos((rs) => rs.map((r, j) => (j === i ? e.target.value : r)))}
-                        placeholder="C:/path/to/other-repo  or  https://github.com/user/repo.git"
-                        className="flex-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 font-mono focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setAdditionalRepos((rs) => rs.filter((_, j) => j !== i))}
-                        className="shrink-0 px-2 text-sm text-red-600 hover:text-red-800 border border-gray-300 dark:border-gray-600 rounded-md"
-                        title="Remove this repository"
-                      >
-                        &times;
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => setAdditionalRepos((rs) => [...rs, ""])}
-                    className="text-xs text-brand-600 hover:text-brand-800 dark:text-brand-400"
-                  >
-                    + Add another repository
-                  </button>
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    Each sibling repo gets a worktree on the same branch per workspace; merge lands every repo with commits. Local absolute paths or clone URLs.
-                  </p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Language <span className="text-gray-400 dark:text-gray-500 font-normal">(optional)</span>
-                  </label>
-                  <select
-                    value={gitignoreTemplate}
-                    onChange={(e) => setGitignoreTemplate(e.target.value)}
-                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white dark:bg-gray-800"
-                  >
-                    <option value="">None</option>
-                    <option value="node">Node.js</option>
-                    <option value="python">Python</option>
-                    <option value="java">Java</option>
-                    <option value="go">Go</option>
-                    <option value="rust">Rust</option>
-                    <option value="ruby">Ruby</option>
-                    <option value="dotnet">.NET</option>
-                  </select>
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    Adds language-specific entries to .gitignore.
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    id="import-generate-readme"
-                    type="checkbox"
-                    checked={generateReadme}
-                    onChange={(e) => setGenerateReadme(e.target.checked)}
-                    className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
-                  />
-                  <label htmlFor="import-generate-readme" className="text-sm text-gray-700 dark:text-gray-300">
-                    Generate README.md <span className="text-gray-400 dark:text-gray-500">(skipped if file already exists)</span>
-                  </label>
-                </div>
-                {registerError && (
-                  <p className="text-sm text-red-600">{registerError}</p>
-                )}
-                <div className="flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowRegister(false)}
-                    className="px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={registering || !repoPath.trim()}
-                    className="px-3 py-1.5 text-sm text-white bg-brand-600 rounded-md hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {registering ? "Registering…" : "Register"}
-                  </button>
-                </div>
-              </form>
-            )}
-
-            {modalTab === "create" && (
-              <form onSubmit={handleCreateSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Project name <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={createName}
-                    onChange={(e) => setCreateName(e.target.value)}
-                    placeholder="my-project"
-                    className={`w-full text-sm border rounded-md px-3 py-2 focus:outline-none focus:ring-1 ${createNameInvalid ? "border-red-400 focus:ring-red-400 focus:border-red-400" : "border-gray-300 dark:border-gray-600 focus:ring-brand-500 focus:border-brand-500"}`}
-                    autoFocus
-                  />
-                  {createNameInvalid && (
-                    <p className="mt-1 text-xs text-red-600">Name cannot contain: / \ &lt; &gt; : " | ? *</p>
-                  )}
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Path <span className="text-gray-400 dark:text-gray-500 font-normal">(optional)</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={createPath}
-                    onChange={(e) => setCreatePath(e.target.value)}
-                    placeholder="Defaults to projects base directory / name"
-                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
-                  />
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    Leave blank to use the base directory from Settings › Project. A new folder and git repo will be created.
-                  </p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Language <span className="text-gray-400 dark:text-gray-500 font-normal">(optional)</span>
-                  </label>
-                  <select
-                    value={gitignoreTemplate}
-                    onChange={(e) => setGitignoreTemplate(e.target.value)}
-                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white dark:bg-gray-800"
-                  >
-                    <option value="">None</option>
-                    <option value="node">Node.js</option>
-                    <option value="python">Python</option>
-                    <option value="java">Java</option>
-                    <option value="go">Go</option>
-                    <option value="rust">Rust</option>
-                    <option value="ruby">Ruby</option>
-                    <option value="dotnet">.NET</option>
-                  </select>
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    Adds language-specific entries to .gitignore.
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    id="create-generate-readme"
-                    type="checkbox"
-                    checked={generateReadme}
-                    onChange={(e) => setGenerateReadme(e.target.checked)}
-                    className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
-                  />
-                  <label htmlFor="create-generate-readme" className="text-sm text-gray-700 dark:text-gray-300">
-                    Generate README.md <span className="text-gray-400 dark:text-gray-500">(skipped if file already exists)</span>
-                  </label>
-                </div>
-                {createError && (
-                  <p className="text-sm text-red-600">{createError}</p>
-                )}
-                <div className="flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowRegister(false)}
-                    className="px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={creating || !createName.trim() || createNameInvalid}
-                    className="px-3 py-1.5 text-sm text-white bg-brand-600 rounded-md hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {creating ? "Creating…" : "Create project"}
-                  </button>
-                </div>
-              </form>
-            )}
-
-            {onUnarchiveProject && archivedProjects.length > 0 && (
-              <div className="mt-5 pt-4 border-t border-gray-200 dark:border-gray-700">
-                <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Archived projects</h3>
-                <ul className="space-y-1 max-h-48 overflow-y-auto">
-                  {archivedProjects.map((p) => (
-                    <li key={p.id} className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800">
-                      <span className="flex items-center gap-2 min-w-0">
-                        {p.color && (
-                          <span className="h-2.5 w-2.5 rounded-full border border-black/10 dark:border-white/20 shrink-0" style={{ backgroundColor: p.color }} />
-                        )}
-                        <span className="truncate text-sm text-gray-700 dark:text-gray-200">{p.name}</span>
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => handleUnarchive(p.id)}
-                        disabled={unarchivingId === p.id}
-                        className="shrink-0 px-2 py-1 text-xs font-medium text-brand-700 dark:text-brand-300 border border-brand-300 dark:border-brand-700 rounded-md hover:bg-brand-50 dark:hover:bg-brand-950/50 disabled:opacity-50"
-                      >
-                        {unarchivingId === p.id ? "Restoring…" : "Restore"}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      <AddProjectModal
+        open={showRegister}
+        onClose={() => setShowRegister(false)}
+        onRegisterProject={onRegisterProject}
+        onCreateProject={onCreateProject}
+        archivedProjects={archivedProjects}
+        onUnarchiveProject={onUnarchiveProject}
+      />
 
       {showAddRepo && (
         <div
@@ -961,7 +619,7 @@ export function Layout({
             <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
               Repos that{" "}
               <span className="font-medium">{projects.find((p) => p.id === activeProjectId)?.name ?? "this project"}</span>{" "}
-              spans. Every new workspace gets a worktree on the same branch in each; merge lands each repo that has commits. Edit a repo's name/setup/compose in Settings → Project Settings.
+              spans. Every new workspace gets a worktree on the same branch in each; merge lands each repo that has commits. Edit a repo's name/setup/compose in Settings â†’ Project Settings.
             </p>
             {(() => {
               const activeProject = projects.find((p) => p.id === activeProjectId);
@@ -992,7 +650,7 @@ export function Layout({
                           className="text-xs text-brand-600 hover:text-brand-800 disabled:opacity-50 disabled:cursor-not-allowed"
                           title="Make this the project's leading repo (demotes the current leading to a sibling)"
                         >
-                          {promotingRepoId === repo.id ? "Promoting…" : "Make leading"}
+                          {promotingRepoId === repo.id ? "Promotingâ€¦" : "Make leading"}
                         </button>
                         <button
                           type="button"
@@ -1000,7 +658,7 @@ export function Layout({
                           disabled={removingRepoId === repo.id || promotingRepoId === repo.id}
                           className="text-xs text-red-600 hover:text-red-800 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          {removingRepoId === repo.id ? "Removing…" : "Remove"}
+                          {removingRepoId === repo.id ? "Removingâ€¦" : "Remove"}
                         </button>
                       </div>
                     </li>
@@ -1053,7 +711,7 @@ export function Layout({
                   disabled={addingRepo || !addRepoInput.trim()}
                   className="px-3 py-1.5 text-sm text-white bg-brand-600 rounded-md hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {addingRepo ? "Adding…" : "Add repository"}
+                  {addingRepo ? "Addingâ€¦" : "Add repository"}
                 </button>
               </div>
             </form>
