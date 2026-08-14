@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import * as schema from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createProjectService } from "../services/project.service.js";
+import { invalidatePreferencesCache } from "../repositories/preferences.repository.js";
 
 let db: TestDb;
 let projectId: string;
@@ -184,6 +185,8 @@ describe("In Progress column staleness warning", () => {
       value: "7",
       updatedAt: new Date().toISOString(),
     }).onConflictDoUpdate({ target: schema.preferences.key, set: { value: "7" } });
+    // Raw pref write bypasses the repository — bust the short-TTL prefs cache (#402).
+    invalidatePreferencesCache();
 
     const issueId = randomUUID();
     const now = new Date().toISOString();
@@ -212,5 +215,6 @@ describe("In Progress column staleness warning", () => {
       value: "3",
       updatedAt: new Date().toISOString(),
     }).onConflictDoUpdate({ target: schema.preferences.key, set: { value: "3" } });
+    invalidatePreferencesCache();
   });
 });
