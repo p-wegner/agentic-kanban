@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useGraphSearch, graphNodeMatches } from "../hooks/useGraphSearch.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
 import { STATUS_COLORS } from "../lib/chartColors";
@@ -103,6 +104,8 @@ function GraphFilterControls({ statusFilters, statusNames, onStatusFiltersChange
 // ---------------------------------------------------------------------------
 
 export function GraphView({ columns, projectId, onIssueClick, searchQuery, focusIssueId }: GraphViewProps) {
+  // Requested on the first keystroke only — a user who never searches never pays for it (#370).
+  const { matches: searchMatches } = useGraphSearch(projectId, searchQuery ?? "");
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [loading, setLoading] = useState(true);
   const [statusFilters, setStatusFilters] = useState<string[]>(["active"]);
@@ -201,10 +204,14 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery, focus
     const depFiltered = hasAnyEdges
       ? statusFiltered.filter((n) => nodesWithDepsIds.has(n.id))
       : statusFiltered;
-    // Title-only search: /graph no longer ships issue descriptions (G15a payload
-    // diet — they measured 1.15MB and the nodes render titles only).
+    // #370 — the payload diet took `description` off /graph (309,477 -> ~62,000 gzipped bytes)
+    // and search silently became title-only, which is the semantics-for-bytes trade #345 refused
+    // twice. The descriptions come back through a LAZY index fetched on the first keystroke, so
+    // the unsearched graph load is unchanged and search matches what it used to match. Until the
+    // index arrives, `graphNodeMatches` falls back to the title — i.e. to today's behaviour,
+    // never to an empty graph.
     const filtered = searchQuery
-      ? depFiltered.filter((n) => n.title.toLowerCase().includes(searchQuery.toLowerCase()))
+      ? depFiltered.filter((n) => graphNodeMatches(searchQuery, n.id, n.title, searchMatches))
       : depFiltered;
     const filteredIds = new Set(filtered.map((n) => n.id));
     const filteredEdges = graphData.edges.filter(
@@ -246,7 +253,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery, focus
       setZoom(z);
       setPan({ x: px, y: py });
     });
-  }, [graphData, searchQuery, statusFilters, nodesWithDepsIds, focusIssueId]);
+  }, [graphData, searchQuery, searchMatches, statusFilters, nodesWithDepsIds, focusIssueId]);
 
   const fitView = useCallback(() => {
     if (nodes.length === 0 || !containerRef.current) return;
@@ -666,6 +673,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery, focus
             selectedNode={selectedNode}
             focusIssueId={focusIssueId}
             searchQuery={searchQuery}
+            searchMatches={searchMatches}
             isCriticalPathMode={isCriticalPathMode}
             criticalPathResult={criticalPathResult}
             rootBlockerIds={rootBlockerIds}
