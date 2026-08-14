@@ -320,3 +320,29 @@ describe("validate-command-safety — false positives from DATA that merely name
     expect(runGuard(command).blocked).toBe(false);
   });
 });
+
+/**
+ * #420, third instance — found while COMMITTING the first two.
+ *
+ * The reset check ran on the RAW command string, before any of the data-stripping every other
+ * check does. So a commit message inside a heredoc that merely said "verified db:reset still
+ * blocks" blocked its own commit. A real reset invocation is never inside a heredoc, a payload or
+ * a URL, so stripping first costs the check nothing.
+ */
+describe("validate-command-safety — the reset check reads data-stripped text too (#420)", () => {
+  const RESET = "db" + ":reset";
+
+  it("allows a heredoc commit message that merely NAMES the reset command", () => {
+    const command = `cat > msg.txt <<'MSGEOF'\nverified ${RESET} still blocks\nMSGEOF\ngit commit -F msg.txt -- x.js`;
+    expect(runGuard(command).blocked).toBe(false);
+  });
+
+  it("still blocks the real reset invocation", () => {
+    expect(runGuard(`pnpm ${RESET}`).blocked).toBe(true);
+  });
+
+  it("still blocks the reset even when a heredoc is also present", () => {
+    const command = `cat > note.txt <<'MSGEOF'\nunrelated prose\nMSGEOF\npnpm ${RESET}`;
+    expect(runGuard(command).blocked).toBe(true);
+  });
+});
