@@ -39,6 +39,57 @@ const START_MODES = [
 
 type StepStatus = OnboardingStep["status"];
 
+/** Draft values the user has typed, keyed by step id (setup/verify use `<id>:setup` / `<id>:verify`). */
+export type OnboardingDrafts = Record<string, string>;
+
+/**
+ * What to send when applying a step — or why it can't be applied yet.
+ *
+ * - an object: ready, send it as `input`
+ * - `null`: the step needs a value the user has not supplied, so Apply stays disabled
+ * - `"external"`: there is no inline apply path; point at the real editor instead
+ *
+ * Pure and exported so the enable/disable rules are testable — the component itself fetches on
+ * mount, which the repo's static-markup test convention cannot exercise.
+ */
+export function onboardingStepInput(
+  step: OnboardingStep,
+  drafts: OnboardingDrafts,
+): Record<string, unknown> | null | "external" {
+  if (step.kind !== "config") return {};
+  switch (step.configKey) {
+    case "stack-profile":
+      return {}; // confirmation only — the server rejects it if no profile exists yet
+    case "setup-verify-scripts": {
+      const setupScript = drafts[`${step.id}:setup`] ?? "";
+      const verifyScript = drafts[`${step.id}:verify`] ?? "";
+      if (!setupScript.trim() && !verifyScript.trim()) return null;
+      const input: Record<string, unknown> = {};
+      if (setupScript.trim()) input.setupScript = setupScript;
+      if (verifyScript.trim()) input.verifyScript = verifyScript;
+      return input;
+    }
+    case "start-mode": {
+      const value = drafts[step.id];
+      return value ? { value } : null;
+    }
+    case "wip-limit": {
+      const raw = drafts[step.id];
+      const value = Number(raw);
+      return raw && Number.isFinite(value) && value >= 1 ? { value } : null;
+    }
+    // Both are real settings with real editors already. A cramped second editor here would be a
+    // worse version of an existing screen, so the wizard points at it instead of duplicating.
+    // `extra-repos` additionally has no apply path at all — the server rejects it, because repos
+    // are attached via POST /api/projects/:id/repos.
+    case "strategy-bullseye":
+    case "extra-repos":
+      return "external";
+    default:
+      return {};
+  }
+}
+
 function StatusChip({ status }: { status: StepStatus }) {
   const tones: Record<StepStatus, string> = {
     "done": "border-green-300 dark:border-green-800 text-green-800 dark:text-green-300 bg-green-50 dark:bg-green-900/20",
@@ -107,48 +158,12 @@ export function OnboardingWizard() {
     closeOnboarding();
   }
 
-  /** The input a config step needs before it can be applied, if any. */
-  function configInput(step: OnboardingStep): Record<string, unknown> | null | "external" {
-    if (step.kind !== "config") return {};
-    switch (step.configKey) {
-      case "stack-profile":
-        return {}; // confirmation only — the server rejects it if no profile exists yet
-      case "setup-verify-scripts": {
-        const setupScript = drafts[`${step.id}:setup`] ?? "";
-        const verifyScript = drafts[`${step.id}:verify`] ?? "";
-        if (!setupScript.trim() && !verifyScript.trim()) return null;
-        const input: Record<string, unknown> = {};
-        if (setupScript.trim()) input.setupScript = setupScript;
-        if (verifyScript.trim()) input.verifyScript = verifyScript;
-        return input;
-      }
-      case "start-mode": {
-        const value = drafts[step.id];
-        return value ? { value } : null;
-      }
-      case "wip-limit": {
-        const raw = drafts[step.id];
-        const value = Number(raw);
-        return raw && Number.isFinite(value) && value >= 1 ? { value } : null;
-      }
-      // Both are real settings with real editors already. A cramped second editor here would be
-      // a worse version of an existing screen, so the wizard points at it instead of duplicating.
-      // `extra-repos` additionally has no apply path at all — the server rejects it, because repos
-      // are attached via POST /api/projects/:id/repos.
-      case "strategy-bullseye":
-      case "extra-repos":
-        return "external";
-      default:
-        return {};
-    }
-  }
-
   function renderStepControls(step: OnboardingStep) {
     const busy = busyStepId === step.id;
     const terminal = step.status === "done" || step.status === "not-applicable";
     if (terminal) return null;
 
-    const input = configInput(step);
+    const input = onboardingStepInput(step, drafts);
     const external = input === "external";
     return (
       <div className="flex flex-wrap items-center gap-2">
