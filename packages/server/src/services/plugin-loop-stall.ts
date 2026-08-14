@@ -142,8 +142,16 @@ export function classifyLoopStall(row: LoopUnmergedWorkspaceRow): LoopStall {
       issueTitle: row.issueTitle,
       reason: "builder-finished-unmerged",
       mergeSafe: true,
-      detail: `${ref} is "${row.issueStatusName}" but its workspace is still open and unmerged — `
-        + `the planner reads the main checkout, so this step stays invisible to it until the branch lands.`,
+      // #384 — the wording used to ASSERT "still open and unmerged", which the board cannot know
+      // from the row. There is a measured window (n=10, 3.7s to 158.5s on one pipeline run) in
+      // which the git merge has already landed on the base branch and `workspaces.mergedAt` has
+      // not been written yet. Read during that window, the old sentence stated something false and
+      // pointed the operator at "Merge now" for a branch already on master. What the row actually
+      // supports is that the merge is UNRECORDED, so that is what it now says.
+      detail: `${ref} is "${row.issueStatusName}" and its workspace has no recorded merge — `
+        + `the planner reads the main checkout, so this step stays invisible to it until the merge is recorded. `
+        + `Check the base branch first: if the merge commit is already there, finalization is simply pending `
+        + `(the ancestor-branch reconciler completes it on its next tick) and there is nothing to click.`,
       since: row.workspaceUpdatedAt,
       contradictoryReadyFlag: parkedByWorkspace && !row.workspaceReadyForMerge,
     };
