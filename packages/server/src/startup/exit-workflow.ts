@@ -41,6 +41,7 @@ import type { ColdCloneCheckResult } from "../services/cold-clone-build-check.se
 import type { ProviderId, ProviderName } from "../services/agent-provider.js";
 import type { RateLimitProvider } from "./rate-limit-exit-decision.js";
 import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.repository.js";
+import { findUncommittedWork } from "./uncommitted-work-report.js";
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
 
@@ -851,27 +852,12 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         console.log(`[workflow] non-direct workspace ${workspaceId} closed on agent exit (no committed changes, was In Review, work already landed  mergedAt stamped)  issue moved to Done`);
         return;
       }
-      // #469 — "no commits" has two very different meanings and the board used to treat them
-      // the same. An agent that genuinely did nothing leaves a CLEAN worktree. An agent that did
-      // the work and never committed it leaves a DIRTY one — and that state is indistinguishable
-      // from success here: the session exited (often with code 0), the workspace goes idle, and
-      // only a hand-run `git rev-list --count base..HEAD` reveals nothing landed.
-      //
-      // It is not rare. In one session three separate agents produced correct, complete work and
-      // committed none of it — killed by the hang watchdog mid-verify, and twice by ending their
-      // turn to wait on background tasks the harness then terminated (in print mode, ending the
-      // turn ends the session, so nothing they waited for could ever report back). Two of the
-      // three exited 0. ~$17 of agent time produced zero commits, silently.
-      //
-      // Recovery is cheap once you can SEE it — relaunching with "your work is uncommitted,
-      // commit it first" recovered all three — so the only thing missing was the signal.
-      const uncommitted = workspace.workingDir
-        ? await gitService.getWorkingTreeChanges(workspace.workingDir)
-        : [];
-      if (uncommitted.length > 0) {
-        const summary = `Agent session finished without committing, but its worktree has ${uncommitted.length} uncommitted change(s). The work is still there — relaunch the workspace and tell it to commit first.`;
-        console.warn(`[workflow] session ${sessionId} exited with UNCOMMITTED work in ${workspace.workingDir} (${uncommitted.length} path(s)) — issue left in current status; this is recoverable by relaunching`);
-        emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: summary });
+      // #469 — a dirty worktree with no commits means the work was DONE and never committed,
+      // which is otherwise indistinguishable from success here. See uncommitted-work-report.ts.
+      const uncommitted = await findUncommittedWork(workspace.workingDir);
+      if (uncommitted) {
+        console.warn(`[workflow] session ${sessionId} exited with UNCOMMITTED work in ${workspace.workingDir} (${uncommitted.paths.length} path(s)) — recoverable by relaunching`);
+        emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: uncommitted.summary });
         boardEvents.broadcast(projectId, "workflow_error");
         return;
       }
