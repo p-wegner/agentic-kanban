@@ -11,6 +11,8 @@ import { extractPlanFromMessages } from "../plan-mode.service.js";
 import { computeScorecard } from "../workspace-scorecard.service.js";
 import { computeWorkspaceCodeMetrics } from "../workspace-code-metrics.service.js";
 import { recordAgentProfileLaunchFailure } from "../agent-profile-health.service.js";
+import { recordAgentProfileLaunchSuccess } from "../agent-profile-failure-record.js";
+import { applyAuthFailureRecovery } from "../provider-auth-recovery.js";
 import { emitButlerSystemEvent } from "../butler-event-feed.js";
 import type { ProviderName } from "../agent-provider.js";
 import { narrowProviderName } from "../agent-provider.js";
@@ -37,6 +39,7 @@ import {
   buildCodexUsageLimitStats,
   buildClaudeUsageLimitStats,
   buildIndeterminateExitStats,
+  launchFailureButlerText,
 } from "./session-exit-stats.js";
 import {
   CODEX_SPARK_MODEL,
@@ -396,21 +399,23 @@ export function createSessionLifecycle(
           data: stats.failureReason,
           exitCode: null,
         }, db);
+        // #430 — a TERMINAL auth failure must not be handed back to the relaunch path unchanged
+        // (see `applyAuthFailureRecovery`: it rotates off a dead login and returns true when it
+        // parked the workspace `blocked` instead, which is what stops the retry loop).
+        const authHandled = isStaleResume ? false : await applyAuthFailureRecovery(db, {
+          provider: narrowProviderName(executor), profileName: profile?.name ?? claudeProfile,
+          errorText: errorText || capturedStderr, workspaceId, projectId, sessionId, now: endNow,
+          setWorkspaceStatus: (status) => lifecycleRepo.updateWorkspaceStatus(workspaceId, status, endNow, db),
+        }).catch(() => false);
         if (isStaleResume) {
           if (resumeFromId) await lifecycleRepo.clearProviderSessionId(resumeFromId, db);
-        } else {
+        } else if (!authHandled) {
           await lifecycleRepo.updateWorkspaceStatus(workspaceId, "idle", endNow, db);
         }
         if (projectId) {
           emitButlerSystemEvent({
-            projectId,
-            kind: "session_failed",
-            workspaceId,
-            text: isStaleResume
-              ? `Agent resume failed for workspace ${workspaceId}: the previous conversation transcript was missing. Clearing the stale resume id and relaunching fresh.`
-              : isNonZeroExit
-                ? `Agent launch failed for workspace ${workspaceId}: exited with code ${effectiveExitCode} in ${Math.round(durationMs / 1000)}s${errorText ? ` — ${errorText.slice(0, 200)}` : ""}.`
-                : `Agent launch failed for workspace ${workspaceId}: zero output within ${Math.round(durationMs / 1000)}s.`,
+            projectId, kind: "session_failed", workspaceId,
+            text: launchFailureButlerText({ workspaceId, isStaleResume, isNonZeroExit, effectiveExitCode, durationMs, errorText }),
           });
         }
       })()
@@ -455,6 +460,11 @@ export function createSessionLifecycle(
     ): void {
       const sessionFinalized = (async () => {
         await lifecycleRepo.updateSessionCompleted(sessionId, endNow, String(exitCode ?? 0), db);
+        // #430 — a session that actually RAN clears the profile's failure streak, so the breaker
+        // can never outlive the problem (a re-authenticated profile would else stay "unusable").
+        await recordAgentProfileLaunchSuccess(db, {
+          provider: narrowProviderName(executor), profileName: profile?.name ?? claudeProfile,
+        }).catch(() => {});
 
         // Write HANDOFF.md before workflow callbacks can launch the next session.
         if (effectiveWorkingDir) {
