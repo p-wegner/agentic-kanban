@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import * as schema from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createProjectService } from "../services/project.service.js";
-import { invalidatePreferencesCache } from "../repositories/preferences.repository.js";
+import { setPreference } from "../repositories/preferences.repository.js";
 
 let db: TestDb;
 let projectId: string;
@@ -180,13 +180,11 @@ describe("In Progress column staleness warning", () => {
   });
 
   it("respects inprogress_stale_days preference", async () => {
-    await db.insert(schema.preferences).values({
-      key: "inprogress_stale_days",
-      value: "7",
-      updatedAt: new Date().toISOString(),
-    }).onConflictDoUpdate({ target: schema.preferences.key, set: { value: "7" } });
-    // Raw pref write bypasses the repository — bust the short-TTL prefs cache (#402).
-    invalidatePreferencesCache();
+    // Write through the repository (not a raw insert) so the short-TTL prefs cache (#402)
+    // is invalidated on the correct db instance by the same production write path every
+    // reader uses — a hand-rolled invalidatePreferencesCache() call bypasses that per-db
+    // keying and is a global bust with no relation to which db actually changed.
+    await setPreference("inprogress_stale_days", "7", db);
 
     const issueId = randomUUID();
     const now = new Date().toISOString();
@@ -210,11 +208,6 @@ describe("In Progress column staleness warning", () => {
     expect(issue?.isColumnStale).toBeUndefined();
 
     // Restore default
-    await db.insert(schema.preferences).values({
-      key: "inprogress_stale_days",
-      value: "3",
-      updatedAt: new Date().toISOString(),
-    }).onConflictDoUpdate({ target: schema.preferences.key, set: { value: "3" } });
-    invalidatePreferencesCache();
+    await setPreference("inprogress_stale_days", "3", db);
   });
 });
