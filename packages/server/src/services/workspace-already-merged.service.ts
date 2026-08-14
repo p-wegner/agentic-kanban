@@ -25,6 +25,12 @@ export type AlreadyMergedCheck = {
   mergeCommitSha: string | null;
   issueNumber: number | null;
   reason?: string;
+  /**
+   * True when `isAlreadyMerged` was granted only because the caller passed
+   * `adoptMainCheckout` to override the "no unique commits" refusal — the work is
+   * asserted (not git-verified) to have landed on the base branch out-of-band (#218).
+   */
+  adopted?: boolean;
 };
 
 /**
@@ -34,12 +40,24 @@ export type AlreadyMergedCheck = {
  *
  * Extracted from workspace-merge.service.ts (with reconcileAlreadyMerged) behind a thin
  * delegating facade to keep that module under the god-module ceiling (#103).
+ *
+ * `adoptMainCheckout` (#218): the ticket's own report showed a case where an agent
+ * committed its work directly to the base branch out-of-band instead of the feature
+ * branch (round-6 work landed straight on pantry's master). The branch genuinely has 0
+ * unique commits relative to base — the leading-branch checks above already proved
+ * there's no diff and the tip is a clean ancestor, so this is NOT the "nothing was ever
+ * committed anywhere" case the refusal below exists to catch, it's just unprovable from
+ * branch history alone. There is no git signal that distinguishes "empty ticket" from
+ * "work landed on base directly", so this is an explicit, operator-asserted override —
+ * it must never be inferred automatically, and it does NOT bypass any of the earlier
+ * diff/ancestry/pending-sibling/dirty-sibling refusals (those represent real unmerged or
+ * uncommitted state and stay hard blocks).
  */
 export async function checkAlreadyMerged(
   id: string,
-  deps: { database: Database; gitService: GitService },
+  deps: { database: Database; gitService: GitService; adoptMainCheckout?: boolean },
 ): Promise<AlreadyMergedCheck> {
-  const { database, gitService } = deps;
+  const { database, gitService, adoptMainCheckout } = deps;
   const workspace = await getWorkspaceById(id, database);
   if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
   if (workspace.isDirect) throw new WorkspaceError("Not applicable to direct workspaces", "BAD_REQUEST");
@@ -158,21 +176,29 @@ export async function checkAlreadyMerged(
     };
   }
 
+  let adopted = false;
   if (!leadingHasUnique) {
     // Leading repo contributed nothing and no sibling is pending. This is "already
     // merged" ONLY if a sibling actually DID contribute work that has since landed
     // (mergedHeadSha stamped by the sibling merge pipeline) — otherwise the whole
-    // workspace is genuinely empty (nothing was ever committed anywhere).
+    // workspace is genuinely empty (nothing was ever committed anywhere), UNLESS the
+    // operator explicitly asserts (`adoptMainCheckout`) that the work landed directly
+    // on the base branch out-of-band (#218) — see the function doc above.
     const anySiblingLanded = (await listWorkspaceRepos(id, database)).some((r) => r.mergedHeadSha);
     if (!anySiblingLanded) {
-      return {
-        isAlreadyMerged: false,
-        branch: workspace.branch,
-        baseBranch,
-        mergeCommitSha: null,
-        issueNumber,
-        reason: "Branch has no unique commits relative to " + baseBranch,
-      };
+      if (!adoptMainCheckout) {
+        return {
+          isAlreadyMerged: false,
+          branch: workspace.branch,
+          baseBranch,
+          mergeCommitSha: null,
+          issueNumber,
+          reason: `Branch has no unique commits relative to ${baseBranch}. If this work legitimately ` +
+            `landed directly on ${baseBranch} out-of-band, retry with adoptMainCheckout=true to close ` +
+            `it as Done without a git merge.`,
+        };
+      }
+      adopted = true;
     }
   }
 
@@ -188,6 +214,7 @@ export async function checkAlreadyMerged(
     baseBranch,
     mergeCommitSha,
     issueNumber,
+    ...(adopted ? { adopted: true } : {}),
   };
 }
 
@@ -201,6 +228,8 @@ export async function reconcileAlreadyMerged(
     database: Database;
     gitService: GitService;
     boardEvents?: BoardEvents;
+    /** Operator-asserted recovery override — see `checkAlreadyMerged`'s doc (#218). */
+    adoptMainCheckout?: boolean;
     recordMergeAttempt: (
       workspace: typeof workspaces.$inferSelect,
       eventType: "already-merged",
@@ -210,12 +239,12 @@ export async function reconcileAlreadyMerged(
     ) => Promise<void>;
   },
 ) {
-  const { database, gitService, boardEvents, recordMergeAttempt } = deps;
+  const { database, gitService, boardEvents, adoptMainCheckout, recordMergeAttempt } = deps;
   const workspace = await getWorkspaceById(id, database);
   if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
   if (workspace.status === "closed") throw new WorkspaceError("Workspace is already closed", "BAD_REQUEST");
 
-  const check = await checkAlreadyMerged(id, { database, gitService });
+  const check = await checkAlreadyMerged(id, { database, gitService, adoptMainCheckout });
   if (!check.isAlreadyMerged) {
     throw new WorkspaceError(
       check.reason ?? "Branch is not fully merged into " + check.baseBranch,
@@ -281,8 +310,11 @@ export async function reconcileAlreadyMerged(
     await recordMergeAttempt(
       workspace,
       "already-merged",
-      `Reconciled as Done: branch ${workspace.branch} was already merged into ${check.baseBranch} (commit ${check.mergeCommitSha ?? "unknown"}).`,
-      { baseBranch: check.baseBranch, mergeCommitSha: check.mergeCommitSha, reconciledAt: now },
+      check.adopted
+        ? `Reconciled as Done: branch ${workspace.branch} had no unique commits, but was adopted as already ` +
+          `landed on ${check.baseBranch} out-of-band per operator confirmation (commit ${check.mergeCommitSha ?? "unknown"}).`
+        : `Reconciled as Done: branch ${workspace.branch} was already merged into ${check.baseBranch} (commit ${check.mergeCommitSha ?? "unknown"}).`,
+      { baseBranch: check.baseBranch, mergeCommitSha: check.mergeCommitSha, reconciledAt: now, adopted: check.adopted ?? false },
       now,
     );
   } catch { /* non-fatal */ }
@@ -294,5 +326,6 @@ export async function reconcileAlreadyMerged(
     mergeCommitSha: check.mergeCommitSha,
     issueNumber: check.issueNumber,
     reconciledAt: now,
+    adopted: check.adopted ?? false,
   };
 }

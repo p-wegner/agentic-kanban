@@ -917,9 +917,10 @@ export function createWorkspaceMergeService(deps: {
   // workspace-already-merged.service.ts to keep this module under the god-module ceiling.
   // These thin facades preserve the closure-captured deps (database/gitService/boardEvents
   // + the recordMergeAttempt closure) so importers and the returned API are unchanged.
-  const checkAlreadyMerged = (id: string) => checkAlreadyMergedImpl(id, { database, gitService });
-  const reconcileAlreadyMerged = (id: string) =>
-    reconcileAlreadyMergedImpl(id, { database, gitService, boardEvents, recordMergeAttempt });
+  const checkAlreadyMerged = (id: string, opts: { adoptMainCheckout?: boolean } = {}) =>
+    checkAlreadyMergedImpl(id, { database, gitService, adoptMainCheckout: opts.adoptMainCheckout });
+  const reconcileAlreadyMerged = (id: string, opts: { adoptMainCheckout?: boolean } = {}) =>
+    reconcileAlreadyMergedImpl(id, { database, gitService, boardEvents, recordMergeAttempt, adoptMainCheckout: opts.adoptMainCheckout });
 
   /**
    * Deduplicating entry point for HTTP merge requests: if a merge for this workspace is
