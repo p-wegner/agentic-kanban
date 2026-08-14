@@ -184,7 +184,17 @@ describe("MergeService — clean merge advances base", () => {
     });
     const result = await svc.mergeWorkspace(workspaceId);
 
-    expect(git.mergeBranch).toHaveBeenCalledWith(REPO_PATH, "feature/ak-548-test", "master", { deferWorkingTreeSync: true, autoResolveAppendConflicts: true });
+    // #350/#410: `deferWorkingTreeSync` is passed by the HTTP route only — it exists to protect
+    // that route's in-flight response — so an opts-less service call syncs inline and must NOT
+    // be asserted to request deferral. Matching loosely on the option that IS the service's own
+    // (autoResolveAppendConflicts) keeps the test about this call's contract rather than the
+    // caller's.
+    expect(git.mergeBranch).toHaveBeenCalledWith(
+      REPO_PATH,
+      "feature/ak-548-test",
+      "master",
+      expect.objectContaining({ autoResolveAppendConflicts: true }),
+    );
     expect(result.merged).toBe(true);
     expect(result.baseBranch).toBe("master");
     expect(result.mergeOutput).toContain("ort");
