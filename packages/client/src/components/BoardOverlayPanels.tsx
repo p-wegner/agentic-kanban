@@ -402,7 +402,7 @@ export function BoardOverlayPanels({
         />
       )}
       {showShortcutHelp && (
-        <ShortcutHelp onClose={onCloseShortcutHelp} currentView={viewMode} />
+        <ShortcutHelp onClose={onCloseShortcutHelp} currentView={viewMode} projectId={activeProjectId ?? null} />
       )}
       {/* Full session transcript viewer — self-mounted; opened via the
           openSessionTranscript() window event from any launch site (#87). */}

@@ -573,3 +573,81 @@ export const SECONDARY_VIEWS: ViewDescriptor[] = VIEW_REGISTRY.filter((v) => v.g
 export const SHORTCUT_TO_VIEW: Record<string, ViewMode> = Object.fromEntries(
   VIEW_REGISTRY.filter((v) => v.shortcut && !v.chord).map((v) => [v.shortcut as string, v.id]),
 );
+
+// ── Per-project view visibility (#233) ───────────────────────────────────────
+
+/**
+ * The one view that can never be hidden.
+ *
+ * Guarded HERE rather than only in the picker UI, because the pref is writable by the CLI, MCP
+ * and any other client: a board whose only remaining view is hidden has no way back.
+ */
+export const UNHIDEABLE_VIEWS: ViewMode[] = ["kanban"];
+
+/**
+ * Parse a `hidden_views_<projectId>` preference value into a set of view ids.
+ *
+ * Tolerant by design and silent about junk: this value is per-project configuration, and a
+ * malformed one must degrade to "hide nothing" rather than blank the toolbar. Unknown ids are
+ * dropped rather than kept — a view removed from the registry in a later release would otherwise
+ * sit in the pref forever, and keeping it would make `hiddenCount` lie.
+ */
+export function parseHiddenViews(raw: string | null | undefined): Set<ViewMode> {
+  if (!raw) return new Set();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return new Set();
+  }
+  if (!Array.isArray(parsed)) return new Set();
+  const valid = new Set<string>(VIEW_IDS);
+  return new Set(
+    parsed.filter((id): id is ViewMode =>
+      typeof id === "string" && valid.has(id) && !UNHIDEABLE_VIEWS.includes(id as ViewMode)),
+  );
+}
+
+/** Serialize a hidden-view selection, dropping anything that may not be hidden. */
+export function serializeHiddenViews(hidden: Iterable<ViewMode>): string {
+  const kept = [...new Set(hidden)].filter((id) => !UNHIDEABLE_VIEWS.includes(id));
+  // Registry order, so the stored value is stable regardless of click order and two equivalent
+  // selections produce the same string (which keeps a no-op save from looking like a change).
+  kept.sort((a, b) => VIEW_IDS.indexOf(a) - VIEW_IDS.indexOf(b));
+  return JSON.stringify(kept);
+}
+
+/**
+ * The registry minus the hidden set, in the shapes the five consumers need.
+ *
+ * All five (toolbar primary tabs, "More" overflow, command palette, shortcut overlay, shortcut
+ * key map) already derived from `VIEW_REGISTRY`; this filters ONCE and hands each the same
+ * answer, rather than adding a second source of truth per consumer.
+ */
+export function visibleViews(hidden: Set<ViewMode>): {
+  all: ViewDescriptor[];
+  primary: ViewDescriptor[];
+  secondary: ViewDescriptor[];
+  shortcutToView: Record<string, ViewMode>;
+} {
+  const all = VIEW_REGISTRY.filter((v) => !hidden.has(v.id));
+  return {
+    all,
+    primary: all.filter((v) => v.group !== "secondary"),
+    secondary: all.filter((v) => v.group === "secondary"),
+    shortcutToView: Object.fromEntries(
+      all.filter((v) => v.shortcut && !v.chord).map((v) => [v.shortcut as string, v.id]),
+    ),
+  };
+}
+
+/**
+ * The view to actually render, given what the user last had open.
+ *
+ * A hidden view that is still the persisted `viewMode` must fall back rather than render a panel
+ * the user can no longer navigate back to — the toolbar would show no active tab and the only
+ * escape would be a URL edit.
+ */
+export function resolveVisibleView(viewMode: ViewMode, hidden: Set<ViewMode>): ViewMode {
+  return hidden.has(viewMode) ? "kanban" : viewMode;
+}

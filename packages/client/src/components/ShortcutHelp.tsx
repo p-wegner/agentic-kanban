@@ -1,9 +1,12 @@
-import { VIEW_REGISTRY, type ViewMode } from "../lib/viewRegistry.js";
+import { VIEW_REGISTRY, visibleViews, type ViewMode } from "../lib/viewRegistry.js";
+import { useHiddenViews } from "../hooks/useHiddenViews.js";
 import { SHORTCUT_REGISTRY, type ShortcutCategory } from "../lib/shortcutRegistry.js";
 
 interface ShortcutHelpProps {
   onClose: () => void;
   currentView?: ViewMode;
+  /** Scopes the view-shortcut list to what this project actually shows (#233). */
+  projectId?: string | null;
 }
 
 interface Shortcut {
@@ -12,7 +15,10 @@ interface Shortcut {
   sequential?: boolean;
 }
 
-export function ShortcutHelp({ onClose, currentView }: ShortcutHelpProps) {
+export function ShortcutHelp({ onClose, currentView, projectId = null }: ShortcutHelpProps) {
+  // #233 — a shortcut for a hidden view is a shortcut to nowhere; listing it teaches a key that
+  // does nothing.
+  const { hidden } = useHiddenViews(projectId);
   const view = VIEW_REGISTRY.find((v) => v.id === currentView);
   const viewShortcuts = currentView ? VIEW_SPECIFIC_SHORTCUTS[currentView] ?? [] : [];
 
@@ -26,7 +32,7 @@ export function ShortcutHelp({ onClose, currentView }: ShortcutHelpProps) {
   ) as unknown as Record<ShortcutCategory, Shortcut[]>;
 
   // View shortcuts derived from VIEW_REGISTRY — single source of truth (#116)
-  const viewSwitchShortcuts: Shortcut[] = VIEW_REGISTRY.filter((v) => v.shortcut).map((v) => ({
+  const viewSwitchShortcuts: Shortcut[] = visibleViews(hidden).all.filter((v) => v.shortcut).map((v) => ({
     keys: v.chord ? ["g", v.shortcut as string] : [v.shortcut as string],
     description: `Switch to ${v.label}`,
     sequential: v.chord,
