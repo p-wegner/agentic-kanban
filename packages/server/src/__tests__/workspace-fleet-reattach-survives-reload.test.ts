@@ -207,6 +207,11 @@ describe("workspaces.lifecycle.reattach-survives-reload — whole-fleet boot rea
       checkAncestor,
       countCommits,
       enabled: true,
+      // The seeded repoPath ("/tmp/repo") is synthetic and never exists on disk (esp. on
+      // Windows) — without this override the #277 pathExists short-circuit skips every
+      // candidate before checkAncestor is ever called. Every other reconciler-driving suite
+      // injects this same override for the same reason (see ancestor-branch-reconciler.test.ts).
+      pathExists: () => true,
     });
 
     // DEAD / INTERACTION arm: routine 1 (cleanupStaleSessions) stops the session + idles the ws;

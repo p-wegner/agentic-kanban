@@ -520,11 +520,14 @@ describe("workspace.service", () => {
 
       expect(result.id).toBe(wsId);
       expect(result.mergeOutput).toContain("Merge made");
+      // The service's own mergeWorkspace() call — not the HTTP route — owns its sync window
+      // inline, so it does not ask for deferral (#350: only POST /api/workspaces/:id/merge
+      // passes deferMainCheckoutSync to protect its in-flight response).
       expect(gitService.mergeBranch).toHaveBeenCalledWith(
         "/tmp/test-repo",
         "feature/ak-1-test",
         "main",
-        expect.objectContaining({ deferWorkingTreeSync: true, autoResolveAppendConflicts: true }),
+        expect.objectContaining({ autoResolveAppendConflicts: true }),
       );
       expect(gitService.removeWorktree).toHaveBeenCalled();
 
@@ -538,8 +541,16 @@ describe("workspace.service", () => {
       const statusRow = await db.select().from(projectStatuses).where(eq(projectStatuses.id, issueRow[0].statusId));
       expect(statusRow[0].name).toBe("Done");
 
+      // #377: the seeded project has no verify_script, so the merge also records an
+      // "unverified" warning note ahead of the "merged" note.
       const events = await db.select().from(issueComments).where(eq(issueComments.issueId, issueId));
       expect(events).toEqual([
+        expect.objectContaining({
+          kind: "merge-attempt",
+          author: "system",
+          workspaceId: wsId,
+          body: expect.stringContaining("Merging WITHOUT verification"),
+        }),
         expect.objectContaining({
           kind: "merge-attempt",
           author: "system",
@@ -548,6 +559,10 @@ describe("workspace.service", () => {
         }),
       ]);
       expect(JSON.parse(events[0].payload ?? "{}")).toEqual(expect.objectContaining({
+        eventType: "warning",
+        mergeReason: "merged_without_verification",
+      }));
+      expect(JSON.parse(events[1].payload ?? "{}")).toEqual(expect.objectContaining({
         eventType: "merged",
         workspaceId: wsId,
         commitSha: "base-sha-123",
@@ -575,11 +590,12 @@ describe("workspace.service", () => {
       await flushDeferred();
 
       expect(result.mergeOutput).toContain("already merged");
+      // #350: only the HTTP route asks for deferral; a direct mergeWorkspace() call syncs inline.
       expect(gitService.mergeBranch).toHaveBeenCalledWith(
         "/tmp/test-repo",
         "feature/ak-1-test",
         "main",
-        expect.objectContaining({ deferWorkingTreeSync: true, autoResolveAppendConflicts: true }),
+        expect.objectContaining({ autoResolveAppendConflicts: true }),
       );
       expect(gitService.removeWorktree).toHaveBeenCalledWith("/tmp/test-repo", "/tmp/test-repo/.worktrees/feature-1");
       expect(gitService.deleteBranch).toHaveBeenCalledWith("/tmp/test-repo", "feature/ak-1-test");
@@ -731,11 +747,12 @@ describe("workspace.service", () => {
       expect(dbStateWhenCleanupRan!.mergedAt).toBeTruthy();
       expect(dbStateWhenCleanupRan!.issueStatus).toBe("Done");
 
-      // Warning comment was recorded asynchronously.
+      // Warning comment was recorded asynchronously. The seeded project has no verify_script,
+      // so an "unverified" warning (#377) also lands ahead of the synchronous "merged" note.
       const events = await db.select().from(issueComments).where(eq(issueComments.issueId, issueId));
-      expect(events.map((event) => JSON.parse(event.payload ?? "{}").eventType)).toEqual(["merged", "warning"]);
-      expect(events[1].body).toContain("recoverable warning");
-      expect(events[1].body).toContain("already merged before this response returned");
+      expect(events.map((event) => JSON.parse(event.payload ?? "{}").eventType)).toEqual(["warning", "merged", "warning"]);
+      expect(events[2].body).toContain("recoverable warning");
+      expect(events[2].body).toContain("already merged before this response returned");
     });
 
     it("returns success, closes the workspace, and moves the issue to Done when worktree removal fails after merge", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, async () => {
@@ -785,8 +802,15 @@ describe("workspace.service", () => {
       });
       expect(gitService.mergeBranch).not.toHaveBeenCalled();
 
+      // #377: the pre-lock gate runs (and records its "unverified" note, since the seeded
+      // project has no verify_script) before conflict detection ever runs.
       const events = await db.select().from(issueComments).where(eq(issueComments.issueId, issueId));
       expect(events).toEqual([
+        expect.objectContaining({
+          kind: "merge-attempt",
+          workspaceId: wsId,
+          body: expect.stringContaining("Merging WITHOUT verification"),
+        }),
         expect.objectContaining({
           kind: "merge-attempt",
           workspaceId: wsId,
@@ -794,6 +818,10 @@ describe("workspace.service", () => {
         }),
       ]);
       expect(JSON.parse(events[0].payload ?? "{}")).toEqual(expect.objectContaining({
+        eventType: "warning",
+        mergeReason: "merged_without_verification",
+      }));
+      expect(JSON.parse(events[1].payload ?? "{}")).toEqual(expect.objectContaining({
         eventType: "conflict",
         conflictingFiles: ["src/foo.ts"],
       }));
@@ -888,11 +916,12 @@ describe("workspace.service", () => {
       const result = await service.mergeWorkspace(wsId);
 
       expect(result.id).toBe(wsId);
+      // #350: only the HTTP route asks for deferral; a direct mergeWorkspace() call syncs inline.
       expect(gitService.mergeBranch).toHaveBeenCalledWith(
         "/tmp/test-repo",
         "feature/ak-1-test",
         "main",
-        expect.objectContaining({ deferWorkingTreeSync: true, autoResolveAppendConflicts: true }),
+        expect.objectContaining({ autoResolveAppendConflicts: true }),
       );
       // #970: the merge result resolves early, but the lock is intentionally
       // held until the deferred post-merge cleanup settles — await release.
@@ -1106,9 +1135,14 @@ describe("workspace.service", () => {
       const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, wsId));
       expect(wsRows[0].status).toBe("active");
 
-      // Conflict recorded in audit trail
+      // Conflict recorded in audit trail. #377: the pre-lock gate's "unverified" note (the
+      // seeded project has no verify_script) lands first, ahead of the conflict note.
       const events = await db.select().from(issueComments).where(eq(issueComments.issueId, issueId));
       expect(events).toEqual([
+        expect.objectContaining({
+          kind: "merge-attempt",
+          body: expect.stringContaining("Merging WITHOUT verification"),
+        }),
         expect.objectContaining({
           kind: "merge-attempt",
           body: expect.stringContaining("Merge attempt blocked by conflicts"),

@@ -16,6 +16,7 @@ import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { projects, workspaces, issues, projectStatuses } from "@agentic-kanban/shared/schema";
+import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import * as gitService from "../services/git.service.js";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { insertProjectRepo, listWorkspaceRepos } from "../repositories/repo.repository.js";
@@ -343,8 +344,13 @@ describe("multi-repo sibling worktrees", () => {
     expect(existsSync(join(siblings[0].worktreePath, "extra.txt"))).toBe(true);
     expect((await exec("git", ["branch", "--list", "feature/dirty-sibling"], extraRepo)).trim()).not.toBe("");
 
-    // Once the working tree is clean again (edit discarded), cleanup proceeds.
-    await exec("git", ["clean", "-fd"], siblings[0].worktreePath);
+    // Once the working tree is clean again (edit discarded), cleanup proceeds. Mutate via
+    // the sanctioned git-exec adapter, not the raw `exec()` helper above: `getWorkingTreeDiff`
+    // reads `diff`/`ls-files`, both memoized for GIT_DEDUPE_MEMO_TTL_MS (#398) and only
+    // invalidated by a mutation that goes through the adapter — a raw child_process spawn
+    // (as the agent/user actually clean a worktree) is invisible to that cache and left the
+    // very next cleanupSiblingWorktrees() call reading the pre-clean, still-dirty memo.
+    await gitExec(["clean", "-fd"], { cwd: siblings[0].worktreePath });
     await cleanupSiblingWorktrees(gitService, wsDirty, db as unknown as Database, { preserveUnmerged: true });
     expect(existsSync(siblings[0].worktreePath)).toBe(false);
   }, 60000);

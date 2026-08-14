@@ -14,6 +14,8 @@
 vi.mock("../db/index.js", () => ({ db: {} }));
 vi.mock("../services/git.service.js", () => ({
   prepareForReview: vi.fn(async () => ({ success: true, diffRef: "master", conflictingFiles: [], uncommittedChanges: [] })),
+  // #377: runPreMergeGate reads the diff to decide docs-only/package-scoped skips.
+  getChangedFileNames: vi.fn(async () => [] as string[]),
 }));
 vi.mock("../services/butler-event-feed.js", () => ({ emitButlerSystemEvent: vi.fn() }));
 vi.mock("../services/agent-settings.service.js", () => ({
@@ -31,13 +33,15 @@ vi.mock("../startup/review-helpers.js", () => ({
 vi.mock("../startup/merge-strategy.js", () => ({
   isAutomaticMergeEnabled: vi.fn(() => false),
 }));
-// hasCommittedChanges spawns git — make it report "no diff" (exit 0)
+// hasCommittedChanges() counts commits with `git rev-list --count <base>..HEAD` (#365 — it
+// used to ask `git diff --quiet <base>`). Report ZERO commits ahead: no committed changes.
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
   return {
     ...actual,
     execFile: vi.fn(
-      (_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null) => void) => cb(null),
+      (_cmd: string, args: string[], _opts: unknown, cb: (err: Error | null, stdout: string, stderr: string) => void) =>
+        args[0] === "rev-list" ? cb(null, "0\n", "") : cb(null, "", ""),
     ),
   };
 });
