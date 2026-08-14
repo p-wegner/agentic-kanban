@@ -10,6 +10,7 @@ import { startStrandedPlanReconciler, stopStrandedPlanReconciler } from "./plan-
 import { startZombieFixSessionReconciler, stopZombieFixSessionReconciler } from "./zombie-fix-session-reconciler.js";
 import { startAncestorBranchReconciler, stopAncestorBranchReconciler } from "./ancestor-branch-reconciler.js";
 import { startBornBlockedReconciler, stopBornBlockedReconciler } from "./born-blocked-reconciler.js";
+import { startWorkflowNodeDivergenceReconciler, stopWorkflowNodeDivergenceReconciler } from "./workflow-node-divergence-reconciler.js";
 import { startDoneUnmergedScanner, stopDoneUnmergedScanner } from "./done-unmerged-invariant-scanner.js";
 import { startTerminalWorkspaceReaper, stopTerminalWorkspaceReaper } from "./terminal-workspace-reaper.js";
 import { startServiceStackReaper, stopServiceStackReaper } from "./service-stack-reaper.js";
@@ -119,6 +120,16 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
     start() {
       startBornBlockedReconciler();
       return stopBornBlockedReconciler;
+    },
+  },
+  {
+    // Resolves an issue whose workflow NODE and STATUS disagree (#395/#397). The `end`-node case
+    // is the expensive one: such an issue left the monitor walk entirely, so committed work sat
+    // unmerged for ~1000 minutes with auto-merge on and nothing ever looked at it.
+    name: "workflow-node-divergence-reconciler",
+    start() {
+      startWorkflowNodeDivergenceReconciler();
+      return stopWorkflowNodeDivergenceReconciler;
     },
   },
   {
