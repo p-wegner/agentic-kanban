@@ -1,6 +1,6 @@
 import type { Database } from "../db/index.js";
 import { createProjectService } from "../services/project.service.js";
-import { parseJsonBody } from "../middleware/parse-body.js";
+import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.js";
 import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../middleware/ai-operation.js";
 import { getProjectActivity } from "../services/project-activity.service.js";
@@ -18,6 +18,11 @@ import { parseIncludeParam, serveWorkspaceRepoStatusBatch } from "../services/wo
 import { cloneRepo } from "../services/repo-clone.service.js";
 import type { ProjectRepoResponse, ServiceStackConfig } from "@agentic-kanban/shared";
 import { DEFAULT_SERVICE_STACK_CONFIG } from "@agentic-kanban/shared";
+import { createOnboardingService } from "../services/onboarding.service.js";
+import { createIssueService } from "../services/issue.service.js";
+import { getPluginService } from "../services/plugin.service.js";
+import { createAgentSkillService } from "../services/agent-skill.service.js";
+import { createWebhookSender } from "../services/outbound-webhook.service.js";
 
 function toProjectRepoResponse(row: RepoRow): ProjectRepoResponse {
   return {
@@ -171,6 +176,17 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
 
   const workspaceSummaryCache = createWorkspaceSummaryCache();
   const projectService = createProjectService({ database, workspaceSummaryCache });
+  const onboardingIssueService = createIssueService({
+    database,
+    boardEvents: options?.boardEvents,
+    sendWebhook: createWebhookSender(database),
+  });
+  const onboardingService = createOnboardingService({
+    database,
+    pluginService: getPluginService(database),
+    agentSkillService: createAgentSkillService({ database }),
+    createIssuesBatch: onboardingIssueService.createIssuesBatch,
+  });
   // The fast path is only sound when boardEvents is wired: without the invalidation
   // listener below, mutations would never bump the cache generation and the memo
   // could serve a wrong 304. Disabled (never permissive) when boardEvents is absent.
@@ -589,6 +605,44 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
     const limit = Number.isFinite(parsed) ? Math.min(200, Math.max(1, parsed)) : 100;
     const result = await getProjectActivity(projectId, database, limit);
     return c.json(result);
+  });
+
+  // --- Onboarding plan (#463): the model/apply API behind the onboarding wizard for a
+  // freshly imported project. Every step is derived from project/pref/issue state on read —
+  // only explicit skips and a dismissal timestamp are persisted (`onboarding_state_<id>`).
+
+  // GET /api/projects/:id/onboarding
+  router.get("/:id/onboarding", async (c) => {
+    const projectId = c.req.param("id");
+    return c.json(await onboardingService.buildOnboardingPlan(projectId));
+  });
+
+  // POST /api/projects/:id/onboarding/apply { stepId, input? } — applies the step (config
+  // write, plugin enable, or ticket filing) and returns the RECOMPUTED plan.
+  router.post("/:id/onboarding/apply", async (c) => {
+    const projectId = c.req.param("id");
+    const body = await parseJsonBody<{ stepId?: string; input?: Record<string, unknown> }>(c);
+    if (!body.stepId) return c.json({ error: "stepId is required" }, 400);
+    const result = await onboardingService.applyOnboardingStep(projectId, body.stepId, body.input);
+    options?.boardEvents?.broadcastProjectsChanged(projectId, "project_updated");
+    return c.json(result);
+  });
+
+  // POST /api/projects/:id/onboarding/skip { stepId } — records an explicit skip; never
+  // applied by an issue/plugin/config write.
+  router.post("/:id/onboarding/skip", async (c) => {
+    const projectId = c.req.param("id");
+    const body = await parseJsonBody<{ stepId?: string }>(c);
+    if (!body.stepId) return c.json({ error: "stepId is required" }, 400);
+    return c.json(await onboardingService.skipOnboardingStep(projectId, body.stepId));
+  });
+
+  // POST /api/projects/:id/onboarding/dismiss — stamps the plan dismissed (e.g. "close the
+  // wizard"); the plan itself stays queryable, just carries a dismissedAt.
+  router.post("/:id/onboarding/dismiss", async (c) => {
+    const projectId = c.req.param("id");
+    await parseOptionalJsonBody(c);
+    return c.json(await onboardingService.dismissOnboarding(projectId));
   });
 
   return router;
