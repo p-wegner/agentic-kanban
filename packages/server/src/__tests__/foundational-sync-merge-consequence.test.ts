@@ -38,6 +38,8 @@ vi.mock("../db/index.js", () => ({ db: {} }));
 vi.mock("../services/git.service.js", () => ({
   prepareForReview: vi.fn(async () => ({ success: true, diffRef: "master", conflictingFiles: [], uncommittedChanges: [] })),
   commitPaths: vi.fn(async () => false),
+  // #377: runPreMergeGate reads the diff to decide docs-only/package-scoped skips.
+  getChangedFileNames: vi.fn(async () => [] as string[]),
 }));
 vi.mock("../services/butler-event-feed.js", () => ({ emitButlerSystemEvent: vi.fn() }));
 vi.mock("../services/agent-settings.service.js", () => ({
@@ -64,6 +66,8 @@ vi.mock("../services/stack-profile.service.js", () => ({
   // via verifyScriptPrefKey — no verify_script is set for this test's project, so the gate is a
   // clean no-op, but the export must exist on the mock.
   verifyScriptPrefKey: (projectId: string) => `verify_script_${projectId}`,
+  // #377: runPreMergeGate re-derives a verify_script once at gate time when none is configured.
+  populateVerifyScript: vi.fn(async () => null),
 }));
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
