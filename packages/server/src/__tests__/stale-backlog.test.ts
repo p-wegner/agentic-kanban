@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import * as schema from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createProjectService } from "../services/project.service.js";
+import { invalidatePreferencesCache } from "../repositories/preferences.repository.js";
 
 let db: TestDb;
 let projectId: string;
@@ -149,6 +150,8 @@ describe("stale backlog flagging", () => {
       value: "30",
       updatedAt: new Date().toISOString(),
     }).onConflictDoUpdate({ target: schema.preferences.key, set: { value: "30" } });
+    // Raw pref write bypasses the repository — bust the short-TTL prefs cache (#402).
+    invalidatePreferencesCache();
 
     const issueId = randomUUID();
     const now = new Date().toISOString();
@@ -177,5 +180,6 @@ describe("stale backlog flagging", () => {
       value: "14",
       updatedAt: new Date().toISOString(),
     }).onConflictDoUpdate({ target: schema.preferences.key, set: { value: "14" } });
+    invalidatePreferencesCache();
   });
 });
