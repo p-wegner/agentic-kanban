@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import * as schema from "@agentic-kanban/shared/schema";
@@ -13,6 +16,16 @@ import { createOnboardingService, OnboardingError } from "../services/onboarding
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 
 const NOW = "2026-08-14T00:00:00.000Z";
+
+// A few tests below install/enable a REAL plugin (temp manifest dir, temp marketplace
+// catalog, or a temp project repo for a scaffold write) — tracked here so afterEach can
+// reap them, same convention as plugin-service.test.ts.
+const tempDirs: string[] = [];
+function makeTempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
 
 async function seedProject(database: TestDb, repoPath = "C:/tmp/onboarding-project") {
   const projectId = randomUUID();
@@ -54,7 +67,13 @@ describe("onboarding.service", () => {
     dispose = created.dispose;
   });
 
-  afterEach(() => dispose());
+  afterEach(() => {
+    dispose();
+    while (tempDirs.length) {
+      const dir = tempDirs.pop()!;
+      try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort cleanup */ }
+    }
+  });
 
   it("throws NOT_FOUND for an unknown project", async () => {
     const service = buildOnboardingServiceFor(db);
@@ -177,7 +196,7 @@ describe("onboarding.service", () => {
     expect(afterConfigure.steps.find((s) => s.id === "wip-limit")?.status).toBe("done");
   });
 
-  it("applying a plugin step enables it for the project", async () => {
+  it("applying an installed plugin step enables it for the project with the chosen location", async () => {
     const { projectId } = await seedProject(db);
     const pluginRow = await upsertPluginRow({
       id: randomUUID(),
@@ -191,11 +210,86 @@ describe("onboarding.service", () => {
 
     const service = buildOnboardingServiceFor(db);
     const before = await service.buildOnboardingPlan(projectId);
-    expect(before.steps.find((s) => s.id === "plugin:test-plugin")?.status).toBe("pending");
+    const beforeStep = before.steps.find((s) => s.id === "plugin:test-plugin");
+    expect(beforeStep?.status).toBe("pending");
+    expect(beforeStep?.kind === "plugin" && beforeStep.pluginRowId).toBe(pluginRow.id);
+    expect(beforeStep?.kind === "plugin" && beforeStep.installSource).toBeNull();
 
-    const after = await service.applyOnboardingStep(projectId, "plugin:test-plugin");
+    // No location supplied — rejected rather than silently defaulting into the leading repo (#473).
+    await expect(service.applyOnboardingStep(projectId, "plugin:test-plugin")).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
+
+    const after = await service.applyOnboardingStep(projectId, "plugin:test-plugin", { location: "leading" });
     expect(after.steps.find((s) => s.id === "plugin:test-plugin")?.status).toBe("done");
     expect(pluginRow.pluginId).toBe("test-plugin");
+  });
+
+  it("offers an uninstalled marketplace plugin as a step, and applying it installs then enables it", async () => {
+    const { projectId } = await seedProject(db);
+    // A local-directory "install source" so the test needs no network/git clone: installPlugin
+    // accepts an existing directory as-is. Its manifest is what the marketplace catalog entry
+    // must also declare (gitUrl doubles as install source here — see plugin-fs's looksLikeGitUrl
+    // vs local-directory branch in installPlugin).
+    const pluginDir = makeTempDir("onboarding-plugin-");
+    writeFileSync(
+      join(pluginDir, "kanban-plugin.json"),
+      JSON.stringify({ id: "catalog-plugin", name: "Catalog Plugin", version: "0.1.0" }),
+    );
+    const marketplaceDir = makeTempDir("onboarding-marketplace-");
+    writeFileSync(
+      join(marketplaceDir, "marketplace.json"),
+      JSON.stringify([{ name: "Catalog Plugin", slug: "catalog-plugin", gitUrl: pluginDir }]),
+    );
+    const prevPluginsHome = process.env.AGENTIC_KANBAN_PLUGINS_DIR;
+    process.env.AGENTIC_KANBAN_PLUGINS_DIR = marketplaceDir;
+    try {
+      const service = buildOnboardingServiceFor(db);
+      const before = await service.buildOnboardingPlan(projectId);
+      const beforeStep = before.steps.find((s) => s.id === "plugin:catalog-plugin");
+      expect(beforeStep?.status).toBe("pending");
+      expect(beforeStep?.kind === "plugin" && beforeStep.pluginRowId).toBeNull();
+      expect(beforeStep?.kind === "plugin" && beforeStep.installSource).toBe(pluginDir);
+
+      const after = await service.applyOnboardingStep(projectId, "plugin:catalog-plugin", { location: "leading" });
+      const afterStep = after.steps.find((s) => s.id === "plugin:catalog-plugin");
+      expect(afterStep?.status).toBe("done");
+      expect(afterStep?.kind === "plugin" && afterStep.pluginRowId).not.toBeNull();
+    } finally {
+      if (prevPluginsHome === undefined) delete process.env.AGENTIC_KANBAN_PLUGINS_DIR;
+      else process.env.AGENTIC_KANBAN_PLUGINS_DIR = prevPluginsHome;
+    }
+  });
+
+  it("surfaces unfilled scaffold placeholders on an enabled plugin step instead of a bare done", async () => {
+    // A real project repoPath: enabling this plugin actually writes its scaffold template to
+    // disk, so a fake path (as the other tests use) would silently mkdir a stray directory.
+    const projectRepo = makeTempDir("onboarding-scaffold-project-");
+    const { projectId } = await seedProject(db, projectRepo);
+    const pluginDir = makeTempDir("onboarding-scaffold-plugin-");
+    const manifestJson = JSON.stringify({
+      id: "scaffold-plugin",
+      name: "Scaffold Plugin",
+      version: "0.1.0",
+      scaffold: { targetPath: "PROFILE.md", profileTemplate: "profile.template.md" },
+    });
+    writeFileSync(join(pluginDir, "kanban-plugin.json"), manifestJson);
+    writeFileSync(join(pluginDir, "profile.template.md"), "# Profile\n\nTODO: what does this project do\n");
+    const pluginRow = await upsertPluginRow({
+      id: randomUUID(),
+      pluginId: "scaffold-plugin",
+      name: "Scaffold Plugin",
+      sourceUrl: null,
+      localPath: pluginDir,
+      version: "0.1.0",
+      manifestJson,
+    }, db);
+
+    const service = buildOnboardingServiceFor(db);
+    const after = await service.applyOnboardingStep(projectId, `plugin:${pluginRow.pluginId}`, { location: "leading" });
+    const step = after.steps.find((s) => s.id === `plugin:${pluginRow.pluginId}`);
+    expect(step?.status).toBe("done");
+    expect(step?.kind === "plugin" && step.scaffoldPlaceholders).toBe(1);
   });
 
   it("applying an init-skill step files a ticket carrying that skill", async () => {
