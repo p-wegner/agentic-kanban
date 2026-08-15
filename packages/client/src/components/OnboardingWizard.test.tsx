@@ -10,7 +10,13 @@
 
 import { describe, expect, it } from "vitest";
 import type { OnboardingStep } from "@agentic-kanban/shared/lib/onboarding-plan";
-import { onboardingStepInput } from "./OnboardingWizard.js";
+import {
+  nextWizardPage,
+  onboardingStepInput,
+  prevWizardPage,
+  visibleOnboardingSections,
+  type OnboardingWizardPage,
+} from "./OnboardingWizard.js";
 import { useOnboardingStore } from "../stores/onboardingStore.js";
 
 function configStep(id: string, configKey: OnboardingStep extends { configKey: infer K } ? K : never): OnboardingStep {
@@ -50,11 +56,69 @@ describe("onboardingStepInput — config steps that need a value", () => {
   });
 });
 
-describe("onboardingStepInput — steps with no inline apply path", () => {
-  // extra-repos has no server apply path at all (it throws — repos go through
-  // POST /api/projects/:id/repos), so offering an Apply button would be a guaranteed error.
-  it.each(["strategy-bullseye", "extra-repos"] as const)("routes %s to its real editor", (key) => {
-    expect(onboardingStepInput(configStep(key, key), {})).toBe("external");
+describe("onboardingStepInput — strategy-bullseye (#475 inline apply)", () => {
+  it("blocks apply until a provider is picked", () => {
+    const step = configStep("strategy-bullseye", "strategy-bullseye");
+    expect(onboardingStepInput(step, {})).toBeNull();
+    // Junk provider values (e.g. a stray draft key collision) must not slip through.
+    expect(onboardingStepInput(step, { "strategy-bullseye:provider": "not-a-provider" })).toBeNull();
+  });
+
+  it("sends a JSON-encoded config with a single fill policy for the picked provider", () => {
+    const step = configStep("strategy-bullseye", "strategy-bullseye");
+    const result = onboardingStepInput(step, { "strategy-bullseye:provider": "codex" });
+    expect(result).not.toBeNull();
+    const config = JSON.parse((result as { value: string }).value);
+    expect(config.providerPolicies).toHaveLength(1);
+    expect(config.providerPolicies[0]).toMatchObject({ provider: "codex", profileName: "", mode: "fill" });
+  });
+
+  it("carries an optional profile name into the fill policy", () => {
+    const step = configStep("strategy-bullseye", "strategy-bullseye");
+    const result = onboardingStepInput(step, {
+      "strategy-bullseye:provider": "claude",
+      "strategy-bullseye:profile": "  fast  ",
+    });
+    const config = JSON.parse((result as { value: string }).value);
+    expect(config.providerPolicies[0]).toMatchObject({ provider: "claude", profileName: "fast" });
+  });
+});
+
+describe("onboardingStepInput — extra-repos (#475: routed to its own control, not this apply path)", () => {
+  it("always returns null — the extra-repos control posts to POST /api/projects/:id/repos directly", () => {
+    expect(onboardingStepInput(configStep("extra-repos", "extra-repos"), {})).toBeNull();
+    expect(onboardingStepInput(configStep("extra-repos", "extra-repos"), { "extra-repos:repo": "../sibling" })).toBeNull();
+  });
+});
+
+describe("wizard paging (#475)", () => {
+  function step(kind: OnboardingStep["kind"], id: string): OnboardingStep {
+    return { id, kind, title: id, rationale: "", status: "pending", optional: true, ...(kind === "config" ? { configKey: "stack-profile" } : {}) } as OnboardingStep;
+  }
+
+  it("visibleOnboardingSections skips a section with no steps of that kind", () => {
+    const steps = [step("config", "c1"), step("ticket", "t1")];
+    const kinds = visibleOnboardingSections(steps).map((s) => s.kind);
+    expect(kinds).toEqual(["config", "ticket"]);
+  });
+
+  it("nextWizardPage advances through sections and lands on summary after the last", () => {
+    let page: OnboardingWizardPage = { kind: "section", index: 0 };
+    page = nextWizardPage(page, 3);
+    expect(page).toEqual({ kind: "section", index: 1 });
+    page = nextWizardPage(page, 3);
+    expect(page).toEqual({ kind: "section", index: 2 });
+    page = nextWizardPage(page, 3);
+    expect(page).toEqual({ kind: "summary" });
+    // Idempotent once on the summary — no section beyond the last.
+    page = nextWizardPage(page, 3);
+    expect(page).toEqual({ kind: "summary" });
+  });
+
+  it("prevWizardPage steps back through sections, from the summary to the last section, and clamps at the first", () => {
+    expect(prevWizardPage({ kind: "summary" }, 3)).toEqual({ kind: "section", index: 2 });
+    expect(prevWizardPage({ kind: "section", index: 1 }, 3)).toEqual({ kind: "section", index: 0 });
+    expect(prevWizardPage({ kind: "section", index: 0 }, 3)).toEqual({ kind: "section", index: 0 });
   });
 });
 

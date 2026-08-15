@@ -6,16 +6,17 @@ import { apiFetch, apiPost } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
 import { useOnboardingStore } from "../stores/onboardingStore.js";
 import { usePluginViewStore } from "../stores/pluginViewStore.js";
+import { normalizeConfig, setProviderFillPolicy, type ConcreteProvider } from "../lib/strategy-targets.js";
 
 /**
- * Onboarding wizard (#464) — takes a freshly imported project from "it shows on the board" to
- * "the board can actually drive it".
+ * Onboarding wizard (#464, paged in #475) — takes a freshly imported project from "it shows on
+ * the board" to "the board can actually drive it".
  *
  * Registration stops at `scaffoldAndPopulateProject`: stack profile, setup/verify scripts, hooks,
  * starter docs. Everything after that (Start Mode — which defaults to `manual`, so NOTHING
  * auto-starts — WIP, plugins, project-scoped init skills, a non-empty backlog) was left for the
  * user to find in Settings or never happened at all. This renders the plan from #463 as a
- * checklist and applies one step at a time.
+ * checklist, one section at a time, and applies one step at a time.
  *
  * Two rules it inherits from the plan model and must not break:
  *  - **Status is derived server-side.** Every apply/skip returns the recomputed plan and we render
@@ -25,12 +26,33 @@ import { usePluginViewStore } from "../stores/pluginViewStore.js";
  *    see, edit or delete it, and it goes through the normal workspace/review/merge flow.
  */
 
-const SECTIONS: { kind: OnboardingStep["kind"]; title: string; blurb: string }[] = [
+export const SECTIONS: { kind: OnboardingStep["kind"]; title: string; blurb: string }[] = [
   { kind: "config", title: "Detected setup", blurb: "How the board provisions, verifies and drives this project." },
   { kind: "plugin", title: "Plugins", blurb: "Optional. Enabling one materializes its skills into the repo." },
   { kind: "init-skill", title: "Init skills", blurb: "One-time passes over a fresh codebase. Each files a ticket — nothing runs now." },
   { kind: "ticket", title: "Suggested first tickets", blurb: "A starter backlog, so the board has something to pick up." },
 ];
+
+/** Sections that have at least one step — an empty section (e.g. no plugins installed) is never
+ *  its own page. Order-preserving; pure so the paging rules are directly testable. */
+export function visibleOnboardingSections(steps: OnboardingStep[]): typeof SECTIONS {
+  return SECTIONS.filter((section) => steps.some((s) => s.kind === section.kind));
+}
+
+/** Which page the wizard is showing: one of the visible sections, or the closing summary. */
+export type OnboardingWizardPage = { kind: "section"; index: number } | { kind: "summary" };
+
+/** Next section, or the summary once the last section's Next is clicked. Idempotent on summary. */
+export function nextWizardPage(page: OnboardingWizardPage, sectionCount: number): OnboardingWizardPage {
+  if (page.kind === "summary") return page;
+  return page.index + 1 < sectionCount ? { kind: "section", index: page.index + 1 } : { kind: "summary" };
+}
+
+/** Previous section; from the summary, back to the last section. Clamps at the first section. */
+export function prevWizardPage(page: OnboardingWizardPage, sectionCount: number): OnboardingWizardPage {
+  if (page.kind === "summary") return { kind: "section", index: Math.max(0, sectionCount - 1) };
+  return { kind: "section", index: Math.max(0, page.index - 1) };
+}
 
 const START_MODES = [
   { value: "manual", label: "Manual — nothing auto-starts" },
@@ -48,7 +70,6 @@ export type OnboardingDrafts = Record<string, string>;
  *
  * - an object: ready, send it as `input`
  * - `null`: the step needs a value the user has not supplied, so Apply stays disabled
- * - `"external"`: there is no inline apply path; point at the real editor instead
  *
  * Pure and exported so the enable/disable rules are testable — the component itself fetches on
  * mount, which the repo's static-markup test convention cannot exercise.
@@ -56,7 +77,7 @@ export type OnboardingDrafts = Record<string, string>;
 export function onboardingStepInput(
   step: OnboardingStep,
   drafts: OnboardingDrafts,
-): Record<string, unknown> | null | "external" {
+): Record<string, unknown> | null {
   if (step.kind === "plugin") {
     // #473: enabling scaffolds immediately, so — exactly like the marketplace panel — the
     // leading/sidecar choice must be made BEFORE Enable is even clickable, never defaulted.
@@ -85,13 +106,23 @@ export function onboardingStepInput(
       const value = Number(raw);
       return raw && Number.isFinite(value) && value >= 1 ? { value } : null;
     }
-    // Both are real settings with real editors already. A cramped second editor here would be a
-    // worse version of an existing screen, so the wizard points at it instead of duplicating.
-    // `extra-repos` additionally has no apply path at all — the server rejects it, because repos
-    // are attached via POST /api/projects/:id/repos.
-    case "strategy-bullseye":
+    case "strategy-bullseye": {
+      // #475: a minimal per-project provider/profile picker, not the full Strategy Targets
+      // editor. Writes a single "fill" provider policy — exactly what Settings → Agent's
+      // simple per-project provider control writes — through the same onboarding/apply path,
+      // which the server persists via `setPreferenceChecked` (regenerates objective.md, runs
+      // the #903 divergence guard).
+      const provider = drafts[`${step.id}:provider`];
+      if (provider !== "claude" && provider !== "codex" && provider !== "copilot" && provider !== "pi") return null;
+      const profileName = (drafts[`${step.id}:profile`] ?? "").trim();
+      const config = setProviderFillPolicy(normalizeConfig({}), provider as ConcreteProvider, profileName);
+      return { value: JSON.stringify(config) };
+    }
+    // #475: extra-repos has its OWN dedicated control (POST /api/projects/:id/repos) instead
+    // of the generic onboarding/apply endpoint — the server rejects that endpoint for this key.
+    // renderStepControls short-circuits before ever consulting this value; null is defensive.
     case "extra-repos":
-      return "external";
+      return null;
     default:
       return {};
   }
@@ -121,6 +152,9 @@ export function OnboardingWizard() {
   const [busyStepId, setBusyStepId] = useState<string | null>(null);
   // Per-step draft values for the config steps that take one. Keyed by step id.
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  // #475: one section per page, plus a closing summary — see visibleOnboardingSections/
+  // nextWizardPage/prevWizardPage above for the (tested) paging rules this drives.
+  const [page, setPage] = useState<OnboardingWizardPage>({ kind: "section", index: 0 });
 
   const load = useCallback(async (id: string) => {
     setLoading(true);
@@ -135,6 +169,7 @@ export function OnboardingWizard() {
   }, []);
 
   useEffect(() => {
+    setPage({ kind: "section", index: 0 });
     if (!projectId) { setPlan(null); setDrafts({}); return; }
     void load(projectId);
   }, [projectId, load]);
@@ -165,13 +200,71 @@ export function OnboardingWizard() {
     closeOnboarding();
   }
 
+  /** #475: extra-repos proxies straight to the repos endpoint, never the onboarding/apply one
+   *  (the server rejects that for this key) — so it needs its own request + refresh, not `act`. */
+  async function applyExtraRepo(step: OnboardingStep) {
+    const raw = (drafts[`${step.id}:repo`] ?? "").trim();
+    if (!raw || !projectId) return;
+    setBusyStepId(step.id);
+    setError(null);
+    try {
+      const body = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) || raw.endsWith(".git") ? { cloneUrl: raw } : { path: raw };
+      await apiPost(`/api/projects/${projectId}/repos`, body);
+      setDrafts((d) => ({ ...d, [`${step.id}:repo`]: "" }));
+      // The step's status is derived from listProjectRepos, so a plain plan reload is enough
+      // to flip it to done — same "never optimistic" contract as every other step.
+      await load(projectId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      showToast(message, "error");
+    } finally {
+      setBusyStepId(null);
+    }
+  }
+
+  function renderExtraReposControl(step: OnboardingStep) {
+    const busy = busyStepId === step.id;
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          value={drafts[`${step.id}:repo`] ?? ""}
+          onChange={(e) => setDrafts((d) => ({ ...d, [`${step.id}:repo`]: e.target.value }))}
+          placeholder="Repo path or git URL"
+          data-testid={`onboarding-repo-input-${step.id}`}
+          className="min-w-0 flex-1 rounded border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1 text-xs"
+        />
+        <button
+          type="button"
+          disabled={busy || !(drafts[`${step.id}:repo`] ?? "").trim()}
+          onClick={() => void applyExtraRepo(step)}
+          data-testid={`onboarding-apply-${step.id}`}
+          className="rounded bg-brand-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+        >
+          {busy ? "Working…" : "Add repo"}
+        </button>
+        {step.status !== "skipped" && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void act("skip", { stepId: step.id }, step.id)}
+            data-testid={`onboarding-skip-${step.id}`}
+            className="rounded border border-gray-300 dark:border-gray-600 px-2.5 py-1 text-xs hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+          >
+            Skip
+          </button>
+        )}
+      </div>
+    );
+  }
+
   function renderStepControls(step: OnboardingStep) {
     const busy = busyStepId === step.id;
     const terminal = step.status === "done" || step.status === "not-applicable";
     if (terminal) return null;
+    if (step.kind === "config" && step.configKey === "extra-repos") return renderExtraReposControl(step);
 
     const input = onboardingStepInput(step, drafts);
-    const external = input === "external";
     return (
       <div className="flex flex-wrap items-center gap-2">
         {step.kind === "config" && step.configKey === "setup-verify-scripts" && (
@@ -210,6 +303,30 @@ export function OnboardingWizard() {
             className="w-24 rounded border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1 text-xs"
           />
         )}
+        {step.kind === "config" && step.configKey === "strategy-bullseye" && (
+          <>
+            <select
+              value={drafts[`${step.id}:provider`] ?? ""}
+              onChange={(e) => setDrafts((d) => ({ ...d, [`${step.id}:provider`]: e.target.value }))}
+              aria-label="Provider"
+              data-testid={`onboarding-bullseye-provider-${step.id}`}
+              className="rounded border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1 text-xs"
+            >
+              <option value="">Pick a provider…</option>
+              <option value="claude">Claude</option>
+              <option value="codex">Codex</option>
+              <option value="copilot">Copilot</option>
+              <option value="pi">Pi</option>
+            </select>
+            <input
+              value={drafts[`${step.id}:profile`] ?? ""}
+              onChange={(e) => setDrafts((d) => ({ ...d, [`${step.id}:profile`]: e.target.value }))}
+              placeholder="profile (optional)"
+              data-testid={`onboarding-bullseye-profile-${step.id}`}
+              className="min-w-0 flex-1 rounded border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1 text-xs"
+            />
+          </>
+        )}
         {step.kind === "plugin" && (
           <select
             value={drafts[`${step.id}:location`] ?? ""}
@@ -225,26 +342,22 @@ export function OnboardingWizard() {
           </select>
         )}
 
-        {external ? (
-          <span className="text-[11px] text-gray-500 dark:text-gray-400">Set this in Settings → Project Settings.</span>
-        ) : (
-          <button
-            type="button"
-            disabled={busy || input === null}
-            onClick={() => void act("apply", { stepId: step.id, input: input as Record<string, unknown> }, step.id)}
-            title={input === null ? "Fill in a value first" : undefined}
-            data-testid={`onboarding-apply-${step.id}`}
-            className="rounded bg-brand-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-          >
-            {busy
-              ? "Working…"
-              : step.kind === "config"
-                ? "Apply"
-                : step.kind === "plugin"
-                  ? (step.installSource ? "Install & enable" : "Enable")
-                  : "File ticket"}
-          </button>
-        )}
+        <button
+          type="button"
+          disabled={busy || input === null}
+          onClick={() => void act("apply", { stepId: step.id, input: input as Record<string, unknown> }, step.id)}
+          title={input === null ? "Fill in a value first" : undefined}
+          data-testid={`onboarding-apply-${step.id}`}
+          className="rounded bg-brand-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+        >
+          {busy
+            ? "Working…"
+            : step.kind === "config"
+              ? "Apply"
+              : step.kind === "plugin"
+                ? (step.installSource ? "Install & enable" : "Enable")
+                : "File ticket"}
+        </button>
         {step.status !== "skipped" && (
           <button
             type="button"
@@ -260,8 +373,91 @@ export function OnboardingWizard() {
     );
   }
 
+  function renderSection(section: (typeof SECTIONS)[number]) {
+    const sectionSteps = steps.filter((s) => s.kind === section.kind);
+    return (
+      <section data-testid={`onboarding-section-${section.kind}`}>
+        <h3 className="text-sm font-medium text-ink dark:text-stone-100">{section.title}</h3>
+        <p className="mb-2 text-[11px] text-gray-500 dark:text-gray-400">{section.blurb}</p>
+        <ul className="space-y-1.5">
+          {sectionSteps.map((step) => (
+            <li
+              key={step.id}
+              data-testid={`onboarding-step-${step.id}`}
+              data-step-status={step.status}
+              className="rounded border border-gray-200 dark:border-gray-700 px-2.5 py-2"
+            >
+              <div className="flex items-start gap-2">
+                <StatusChip status={step.status} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-x-2">
+                    <span className="text-xs font-medium text-ink dark:text-stone-100">{step.title}</span>
+                    {!step.optional && <span className="text-[10px] text-amber-700 dark:text-amber-400">recommended</span>}
+                  </div>
+                  {/* A done step keeps its title and status but drops the rationale and
+                      its controls — it is reference, not work. */}
+                  {step.status !== "done" && (
+                    <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">{step.rationale}</p>
+                  )}
+                  {/* #473: enabled ≠ usable — an unfilled scaffold blocks every script/loop
+                      (requireScaffoldReady), so a bare ✓ here would be a lie. Shown even on
+                      a "done" step, since that's exactly when this matters. */}
+                  {step.kind === "plugin" && step.scaffoldPlaceholders > 0 && (
+                    <p
+                      className="mt-0.5 rounded border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-1.5 py-0.5 text-[11px] text-amber-800 dark:text-amber-300"
+                      data-testid={`onboarding-scaffold-placeholders-${step.id}`}
+                    >
+                      ⚠ {step.scaffoldPlaceholders} scaffold placeholder{step.scaffoldPlaceholders === 1 ? "" : "s"} still need filling in —{" "}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (step.pluginSlug) usePluginViewStore.getState().setSelection({ kind: "plugin", slug: step.pluginSlug });
+                          closeOnboarding();
+                        }}
+                        data-testid={`onboarding-scaffold-open-${step.id}`}
+                        className="underline hover:no-underline"
+                      >
+                        fill them in on the Plugins tab
+                      </button>
+                      .
+                    </p>
+                  )}
+                </div>
+              </div>
+              {step.status !== "done" && <div className="mt-1.5 pl-6">{renderStepControls(step)}</div>}
+            </li>
+          ))}
+        </ul>
+      </section>
+    );
+  }
+
+  function renderSummary() {
+    const applied = steps.filter((s) => s.status === "done");
+    const skipped = steps.filter((s) => s.status === "skipped");
+    const stillPending = steps.filter((s) => s.status === "pending");
+    return (
+      <div data-testid="onboarding-summary">
+        <h3 className="text-sm font-medium text-ink dark:text-stone-100">Setup summary</h3>
+        <p className="mb-2 text-[11px] text-gray-500 dark:text-gray-400">
+          {applied.length} applied, {skipped.length} skipped, {stillPending.length} still to do.
+        </p>
+        <ul className="space-y-1">
+          {steps.filter((s) => s.status !== "not-applicable").map((s) => (
+            <li key={s.id} className="flex items-center gap-2 text-xs text-ink dark:text-stone-100">
+              <StatusChip status={s.status} />
+              <span>{s.title}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
   const steps = plan?.steps ?? [];
   const remaining = steps.filter((s) => s.status === "pending").length;
+  const visibleSections = visibleOnboardingSections(steps);
+  const hasPages = steps.length > 0;
 
   return (
     <div
@@ -278,6 +474,27 @@ export function OnboardingWizard() {
               ? "The repo is registered and scaffolded. These are the steps left before the board can drive it — all of them are optional and you can close this at any time."
               : "What is left before the board can drive this project. Steps already done are shown for reference."}
           </p>
+          {hasPages && (
+            <div className="mt-3" data-testid="onboarding-progress">
+              <div className="flex gap-1">
+                {visibleSections.map((section, i) => (
+                  <span
+                    key={section.kind}
+                    className={`h-1.5 flex-1 rounded ${
+                      (page.kind === "section" && i <= page.index) || page.kind === "summary"
+                        ? "bg-brand-600"
+                        : "bg-gray-200 dark:bg-gray-700"
+                    }`}
+                  />
+                ))}
+              </div>
+              <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400" data-testid="onboarding-page-label">
+                {page.kind === "summary"
+                  ? "Summary"
+                  : `Step ${page.index + 1} of ${visibleSections.length}: ${visibleSections[page.index]?.title ?? ""}`}
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-5">
@@ -291,65 +508,8 @@ export function OnboardingWizard() {
             <p className="text-sm text-gray-500 dark:text-gray-400">Nothing to configure for this project.</p>
           )}
 
-          {SECTIONS.map((section) => {
-            const sectionSteps = steps.filter((s) => s.kind === section.kind);
-            if (sectionSteps.length === 0) return null;
-            return (
-              <section key={section.kind} className="mb-5" data-testid={`onboarding-section-${section.kind}`}>
-                <h3 className="text-sm font-medium text-ink dark:text-stone-100">{section.title}</h3>
-                <p className="mb-2 text-[11px] text-gray-500 dark:text-gray-400">{section.blurb}</p>
-                <ul className="space-y-1.5">
-                  {sectionSteps.map((step) => (
-                    <li
-                      key={step.id}
-                      data-testid={`onboarding-step-${step.id}`}
-                      data-step-status={step.status}
-                      className="rounded border border-gray-200 dark:border-gray-700 px-2.5 py-2"
-                    >
-                      <div className="flex items-start gap-2">
-                        <StatusChip status={step.status} />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-x-2">
-                            <span className="text-xs font-medium text-ink dark:text-stone-100">{step.title}</span>
-                            {!step.optional && <span className="text-[10px] text-amber-700 dark:text-amber-400">recommended</span>}
-                          </div>
-                          {/* A done step keeps its title and status but drops the rationale and
-                              its controls — it is reference, not work. */}
-                          {step.status !== "done" && (
-                            <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">{step.rationale}</p>
-                          )}
-                          {/* #473: enabled ≠ usable — an unfilled scaffold blocks every script/loop
-                              (requireScaffoldReady), so a bare ✓ here would be a lie. Shown even on
-                              a "done" step, since that's exactly when this matters. */}
-                          {step.kind === "plugin" && step.scaffoldPlaceholders > 0 && (
-                            <p
-                              className="mt-0.5 rounded border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-1.5 py-0.5 text-[11px] text-amber-800 dark:text-amber-300"
-                              data-testid={`onboarding-scaffold-placeholders-${step.id}`}
-                            >
-                              ⚠ {step.scaffoldPlaceholders} scaffold placeholder{step.scaffoldPlaceholders === 1 ? "" : "s"} still need filling in —{" "}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (step.pluginSlug) usePluginViewStore.getState().setSelection({ kind: "plugin", slug: step.pluginSlug });
-                                  closeOnboarding();
-                                }}
-                                data-testid={`onboarding-scaffold-open-${step.id}`}
-                                className="underline hover:no-underline"
-                              >
-                                fill them in on the Plugins tab
-                              </button>
-                              .
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                      {step.status !== "done" && <div className="mt-1.5 pl-6">{renderStepControls(step)}</div>}
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            );
-          })}
+          {!loading && hasPages && page.kind === "section" && visibleSections[page.index] && renderSection(visibleSections[page.index])}
+          {!loading && hasPages && page.kind === "summary" && renderSummary()}
         </div>
 
         <div className="flex items-center justify-between gap-3 border-t border-gray-200 dark:border-gray-700 p-4">
@@ -357,6 +517,27 @@ export function OnboardingWizard() {
             {remaining === 0 ? "Nothing left to do." : `${remaining} step${remaining === 1 ? "" : "s"} left`}
           </span>
           <div className="flex gap-2">
+            {hasPages && (
+              <button
+                type="button"
+                disabled={page.kind === "section" && page.index === 0}
+                onClick={() => setPage(prevWizardPage(page, visibleSections.length))}
+                data-testid="onboarding-back"
+                className="rounded border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+              >
+                Back
+              </button>
+            )}
+            {hasPages && page.kind === "section" && (
+              <button
+                type="button"
+                onClick={() => setPage(nextWizardPage(page, visibleSections.length))}
+                data-testid="onboarding-next"
+                className="rounded border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
+              >
+                {page.index + 1 < visibleSections.length ? "Next" : "Review summary"}
+              </button>
+            )}
             <button
               type="button"
               onClick={closeOnboarding}

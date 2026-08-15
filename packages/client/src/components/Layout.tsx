@@ -13,6 +13,8 @@ import { showToast } from "../lib/toast.js";
 import type { ProjectRepoResponse } from "@agentic-kanban/shared";
 import { AddProjectModal } from "./AddProjectModal.js";
 import { OnboardingWizard } from "./OnboardingWizard.js";
+import { onboardingActions, useOnboardingStore } from "../stores/onboardingStore.js";
+import { useOnboardingStatus } from "../hooks/useOnboardingStatus.js";
 
 export interface Project {
   id: string;
@@ -155,6 +157,35 @@ export function Layout({
   useEffect(() => {
     void loadProjectRepos(activeProjectId);
   }, [activeProjectId, loadProjectRepos]);
+
+  // #475: persistent "setup incomplete" affordance — the wizard otherwise only ever opens right
+  // after register/create or from the command palette, so closing it once leaves no way back and
+  // no signal that required steps (stack-profile, setup-verify-scripts) are still outstanding.
+  const wizardProjectId = useOnboardingStore((s) => s.projectId);
+  const { pendingRequiredCount, dismissed, refresh: refreshOnboardingStatus } = useOnboardingStatus(activeProjectId);
+  const [dismissingOnboarding, setDismissingOnboarding] = useState(false);
+  const prevWizardProjectIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    // Refresh right after the wizard closes for the active project — apply/skip/dismiss inside
+    // it can change the plan, and this component never sees those responses directly.
+    if (prevWizardProjectIdRef.current && !wizardProjectId && prevWizardProjectIdRef.current === activeProjectId) {
+      void refreshOnboardingStatus();
+    }
+    prevWizardProjectIdRef.current = wizardProjectId;
+  }, [wizardProjectId, activeProjectId, refreshOnboardingStatus]);
+
+  async function handleDismissOnboardingBanner() {
+    if (!activeProjectId) return;
+    setDismissingOnboarding(true);
+    try {
+      await apiPost(`/api/projects/${activeProjectId}/onboarding/dismiss`, {});
+      await refreshOnboardingStatus();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to dismiss", "error");
+    } finally {
+      setDismissingOnboarding(false);
+    }
+  }
 
   async function handleAddRepoSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -545,6 +576,35 @@ export function Layout({
           </div>
         </div>
       </header>
+      {activeProjectId && !dismissed && pendingRequiredCount > 0 && (
+        <div
+          data-testid="onboarding-banner"
+          className="flex shrink-0 items-center justify-between gap-3 border-b border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-3 py-1.5 text-xs text-amber-800 dark:text-amber-300"
+        >
+          <span>
+            Setup incomplete — {pendingRequiredCount} required step{pendingRequiredCount === 1 ? "" : "s"} left.
+          </span>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onboardingActions.openOnboarding(activeProjectId, projects.find((p) => p.id === activeProjectId)?.name ?? "this project")}
+              data-testid="onboarding-banner-continue"
+              className="rounded bg-amber-600 px-2 py-0.5 font-medium text-white hover:bg-amber-700"
+            >
+              Finish setup
+            </button>
+            <button
+              type="button"
+              disabled={dismissingOnboarding}
+              onClick={() => void handleDismissOnboardingBanner()}
+              data-testid="onboarding-banner-dismiss"
+              className="rounded border border-amber-300 dark:border-amber-700 px-2 py-0.5 hover:bg-amber-100 dark:hover:bg-amber-900/40 disabled:opacity-50"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
       <main className="flex-1 min-h-0 overflow-hidden">{children}</main>
 
       {confirmUnregister && (
