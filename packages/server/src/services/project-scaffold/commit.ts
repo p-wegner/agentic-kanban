@@ -6,13 +6,19 @@ import { takeScaffoldWrites } from "./scaffold-writes.js";
 
 const SCAFFOLD_COMMIT_MESSAGE = "chore: scaffold agent guards and onboarding";
 
-const DURABLE_CLAUDE_SCAFFOLD_PATHS = [
+export const DURABLE_CLAUDE_SCAFFOLD_PATHS = [
   ".claude/settings.json",
   ".claude/hooks/README.md",
   ".claude/hooks/smart-hooks-runner.js",
   ".claude/hooks/vital-file-guard.js",
   ".claude/hooks/vital-files.json",
   ".claude/hooks/prevent-cross-worktree-writes.js",
+  // Hard load-time dependency of smart-hooks-runner.js (#392/#279). It was written by the
+  // scaffold but MISSING from this list, so registration left it untracked and the main
+  // checkout went dirty from registration onward — the exact #38 `dirty_main` shape this
+  // commit exists to prevent, reintroduced by a hook that was added without touching this
+  // hand-maintained list. `scaffold-commit-covers-hooks.test.ts` now ties the two together.
+  ".claude/hooks/git-topology-cache.js",
   ".claude/hooks/smart-hooks-config.json",
   ".claude/hooks/verify-gate-runner.js",
   ".claude/hooks/verify-gate.config.json",

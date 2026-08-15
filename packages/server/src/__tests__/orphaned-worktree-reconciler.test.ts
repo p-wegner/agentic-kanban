@@ -53,6 +53,11 @@ function makeGit(overrides: Partial<OrphanedWorktreeGitPort> = {}): OrphanedWork
     // Both surviving branches are at/behind master, so nothing is unshipped.
     countUniqueCommits: vi.fn(async () => 0),
     getWorkingTreeDiff: vi.fn(async () => ""),
+    // The fixture paths above are REAL paths from the #361 investigation. Without this the
+    // suite consulted the actual filesystem: once a cleanup removed `.worktrees/ak-12`, the
+    // fail-closed case stopped reaching `getWorkingTreeDiff` at all and started asserting the
+    // opposite of its own name. Pin both worktrees as present so the probe is exercised.
+    pathExists: vi.fn(() => true),
     ...overrides,
   };
 }

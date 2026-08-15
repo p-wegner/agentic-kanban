@@ -26,6 +26,18 @@ const GATE: PluginLoopGate = {
   ],
 };
 
+/**
+ * #485 — this suite is the reason `plugin_loop_events.project_id` stays FK-LESS while
+ * `plugin_view_processes.project_id` gained a cascading FK. The second case below records a
+ * skip for a project id that resolves to nothing, on purpose. Add an FK and that insert is
+ * rejected; because the trace write is deliberately wrapped in a swallowing try/catch (a
+ * diagnostic must never break the gate flow), the rejection surfaces as ZERO EVENTS — exactly
+ * the "silent bail-out" this suite exists to make visible. A constraint that erases the
+ * diagnostic in the case the diagnostic was written for is the wrong constraint.
+ *
+ * Orphan rows are handled where they belong instead: `deleteProjectCascade` deletes the
+ * table's rows explicitly and asserts none survive.
+ */
 function gateArgs(projectId: string): GateNotifyArgs {
   return {
     projectId,
