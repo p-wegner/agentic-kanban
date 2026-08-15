@@ -40,6 +40,11 @@ const ROUTE_ALIASES: Record<string, ViewMode> = {
   "/all-workspaces": "agents",
   "/queue": "agents",
   "/merge-queue": "agents",
+  // The toolbar tab reads "Plugins" but the ViewMode id (and canonical route) is
+  // "plugin-views" — every other view's URL matches its label, so this is the one
+  // a human types from the UI and misses (#478). Inbound-only: buildAppPath still
+  // emits the canonical "/plugin-views".
+  "/plugins": "plugin-views",
 };
 
 /**
@@ -163,6 +168,13 @@ export interface ParsedAppRoute {
   issueNumber: number | null;
   /** WHICH panel that issue opens — detail or workspace. Null when no issue. */
   panel: IssuePanel | null;
+  /**
+   * The raw segment the path named as its view when that segment matched no
+   * known route (#478) — e.g. "monitor" in `/p/<slug>/monitor`. Null whenever
+   * `view` resolved, or when the path named no view segment at all. Lets a
+   * caller surface "unknown view" instead of silently falling back.
+   */
+  unknownViewSegment: string | null;
 }
 
 const NO_ROUTE: ParsedAppRoute = {
@@ -172,6 +184,7 @@ const NO_ROUTE: ParsedAppRoute = {
   tabIsExplicit: false,
   issueNumber: null,
   panel: null,
+  unknownViewSegment: null,
 };
 
 function parseIssueNumber(raw: string | undefined): number | null {
@@ -266,6 +279,7 @@ export function parseAppPath(pathname: string): ParsedAppRoute {
     tabIsExplicit: false,
     issueNumber: null,
     panel: null,
+    unknownViewSegment: null,
   };
 
   // /p/<slug>
@@ -281,7 +295,7 @@ export function parseAppPath(pathname: string): ParsedAppRoute {
   }
 
   const resolved = resolveViewSegment(rest[0]);
-  if (!resolved) return base;
+  if (!resolved) return { ...base, unknownViewSegment: rest[0] };
 
   // /p/<slug>/<viewPath>[/<tab>][/issue/<n>[/workspace]]
   const tail = parseViewTail(resolved.view, resolved.tab, rest.slice(1));
@@ -305,6 +319,7 @@ function parseFlatPath(normalized: string): ParsedAppRoute {
       tabIsExplicit: tab !== null && tab === legacyTab,
       issueNumber: null,
       panel: null,
+      unknownViewSegment: null,
     };
   }
 
@@ -319,15 +334,19 @@ function parseFlatPath(normalized: string): ParsedAppRoute {
       tabIsExplicit: false,
       issueNumber,
       panel: "issue",
+      unknownViewSegment: null,
     };
   }
 
   // /<viewPath>[/<tab>][/issue/<n>[/workspace]]
+  // Unknown-view surfacing (#478) is scoped to project-scoped paths, where the
+  // ticket's bug actually lives (a real project + real segment the user typed);
+  // a legacy flat non-route (e.g. an API path) stays a plain non-match.
   const resolved = segments[0] ? resolveViewSegment(segments[0]) : null;
   if (!resolved) return NO_ROUTE;
   const tail = parseViewTail(resolved.view, resolved.tab, segments.slice(1));
   if (!tail) return NO_ROUTE;
-  return { projectSlug: null, ...tail };
+  return { projectSlug: null, unknownViewSegment: null, ...tail };
 }
 
 function decodeSegment(segment: string): string {

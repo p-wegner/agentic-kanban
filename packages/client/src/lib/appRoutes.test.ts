@@ -94,6 +94,7 @@ describe("parseAppPath — legacy flat paths (#446)", () => {
       tabIsExplicit: false,
       issueNumber: null,
       panel: null,
+      unknownViewSegment: null,
     });
     expect(parseAppPath("/board")).toEqual({
       projectSlug: null,
@@ -102,6 +103,7 @@ describe("parseAppPath — legacy flat paths (#446)", () => {
       tabIsExplicit: false,
       issueNumber: null,
       panel: null,
+      unknownViewSegment: null,
     });
     expect(parseAppPath("/plugin-views").view).toBe("plugin-views");
     expect(parseAppPath("/merge-queue").view).toBe("agents");
@@ -117,6 +119,7 @@ describe("parseAppPath — legacy flat paths (#446)", () => {
       tabIsExplicit: true,
       issueNumber: null,
       panel: null,
+      unknownViewSegment: null,
     });
     expect(parseAppPath("/monitor-history")).toEqual({
       projectSlug: null,
@@ -125,6 +128,7 @@ describe("parseAppPath — legacy flat paths (#446)", () => {
       tabIsExplicit: true,
       issueNumber: null,
       panel: null,
+      unknownViewSegment: null,
     });
     // A container view with no tab segment resolves to its default (#446) —
     // never null, so the canonical URL can always name a tab.
@@ -151,6 +155,7 @@ describe("parseAppPath — legacy flat paths (#446)", () => {
       tabIsExplicit: false,
       issueNumber: 42,
       panel: "issue",
+      unknownViewSegment: null,
     });
     expect(parseAppPath("/table/issue/7")).toEqual({
       projectSlug: null,
@@ -159,6 +164,7 @@ describe("parseAppPath — legacy flat paths (#446)", () => {
       tabIsExplicit: false,
       issueNumber: 7,
       panel: "issue",
+      unknownViewSegment: null,
     });
   });
 
@@ -170,6 +176,7 @@ describe("parseAppPath — legacy flat paths (#446)", () => {
       tabIsExplicit: false,
       issueNumber: null,
       panel: null,
+      unknownViewSegment: null,
     });
     expect(parseAppPath("/not-a-view").view).toBeNull();
     expect(parseAppPath("").view).toBe("kanban");
@@ -185,6 +192,7 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       tabIsExplicit: false,
       issueNumber: null,
       panel: null,
+      unknownViewSegment: null,
     });
     expect(parseAppPath("/p/mealplan/")).toEqual(parseAppPath("/p/mealplan"));
   });
@@ -197,9 +205,26 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       tabIsExplicit: false,
       issueNumber: null,
       panel: null,
+      unknownViewSegment: null,
     });
     expect(parseAppPath("/p/agentic-kanban/board").view).toBe("kanban");
     expect(parseAppPath("/p/agentic-kanban/merge-queue").view).toBe("agents");
+  });
+
+  it("accepts /plugins as an inbound alias for the Plugins tab (#478)", () => {
+    // The toolbar tab reads "Plugins" but the ViewMode id (and canonical URL)
+    // is "plugin-views" — every other view's URL matches its label, so this is
+    // the one a human guesses wrong from the UI.
+    expect(parseAppPath("/p/mealplan/plugins")).toEqual({
+      projectSlug: "mealplan",
+      view: "plugin-views",
+      tab: null,
+      tabIsExplicit: false,
+      issueNumber: null,
+      panel: null,
+      unknownViewSegment: null,
+    });
+    expect(parseAppPath("/plugins").view).toBe("plugin-views");
   });
 
   it("supports a raw project id in place of the slug", () => {
@@ -216,6 +241,7 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       tabIsExplicit: true,
       issueNumber: null,
       panel: null,
+      unknownViewSegment: null,
     });
   });
 
@@ -227,6 +253,7 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       tabIsExplicit: false,
       issueNumber: 446,
       panel: "issue",
+      unknownViewSegment: null,
     });
     expect(parseAppPath("/p/mealplan/burndown/issue/9")).toEqual({
       projectSlug: "mealplan",
@@ -235,6 +262,7 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       tabIsExplicit: true,
       issueNumber: 9,
       panel: "issue",
+      unknownViewSegment: null,
     });
   });
 
@@ -246,6 +274,7 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       tabIsExplicit: false,
       issueNumber: 12,
       panel: "issue",
+      unknownViewSegment: null,
     });
   });
 
@@ -261,6 +290,7 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       tabIsExplicit: false,
       issueNumber: null,
       panel: null,
+      unknownViewSegment: null,
     });
     expect(parseAppPath("/p/")).toEqual({
       projectSlug: null,
@@ -269,8 +299,11 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       tabIsExplicit: false,
       issueNumber: null,
       panel: null,
+      unknownViewSegment: null,
     });
-    // Unknown view segment — project is still known, view is not.
+    // Unknown view segment — project is still known, view is not, and the raw
+    // segment is reported (#478) so a caller can surface it rather than
+    // silently falling back.
     expect(parseAppPath("/p/mealplan/not-a-view")).toEqual({
       projectSlug: "mealplan",
       view: null,
@@ -278,6 +311,7 @@ describe("parseAppPath — project-scoped paths (#446)", () => {
       tabIsExplicit: false,
       issueNumber: null,
       panel: null,
+      unknownViewSegment: "not-a-view",
     });
     // Non-numeric / invalid issue numbers.
     expect(parseAppPath("/p/mealplan/board/issue/abc").view).toBeNull();
@@ -363,6 +397,7 @@ describe("issue panel segment — /issue/<n>/workspace", () => {
       tabIsExplicit: false,
       issueNumber: 28,
       panel: "workspace",
+      unknownViewSegment: null,
     });
     expect(parseAppPath("/table/issue/7/workspace")).toEqual({
       projectSlug: null,
@@ -371,6 +406,7 @@ describe("issue panel segment — /issue/<n>/workspace", () => {
       tabIsExplicit: false,
       issueNumber: 7,
       panel: "workspace",
+      unknownViewSegment: null,
     });
   });
 
@@ -415,6 +451,7 @@ describe("tab segment — /p/<slug>/<view>/<tab>", () => {
       tabIsExplicit: true,
       issueNumber: null,
       panel: null,
+      unknownViewSegment: null,
     });
     expect(parseAppPath("/runtime/health-events")).toEqual({
       projectSlug: null,
@@ -423,6 +460,7 @@ describe("tab segment — /p/<slug>/<view>/<tab>", () => {
       tabIsExplicit: true,
       issueNumber: null,
       panel: null,
+      unknownViewSegment: null,
     });
   });
 
@@ -466,6 +504,7 @@ describe("tab segment — /p/<slug>/<view>/<tab>", () => {
       tabIsExplicit: true,
       issueNumber: 12,
       panel: "issue",
+      unknownViewSegment: null,
     });
     expect(parseAppPath("/p/taskflow/runtime/monitor-cycles/issue/12/workspace")).toMatchObject({
       view: "runtime",
