@@ -159,7 +159,7 @@ Spell out ownership in each ticket body ("edit ONLY `test/invaders.test.js`") so
 
 - Autodrive (Step 1) makes the in-process monitor auto-start unblocked Backlog tickets and auto-merge (with fix-and-merge on conflict — `monitor-cycle.ts`). You normally don't launch workspaces by hand.
 - If nothing starts within a cycle, kick it: `POST /api/projects/<projectId>/dependency-waves/start-next`, or launch the shell once via `POST /api/workspaces` and let the wave cascade on its merge.
-- `/board` can lag (stale cache, #551/#552) — **verify progress via `GET /api/issues?projectId=`**, never conclude "stuck" from `/board` alone.
+- `/board` can lag (stale cache, #551/#552) — **verify progress via `GET /api/issues?projectId=&slim=1`**, never conclude "stuck" from `/board` alone.
 
 ## Step 4 — Leave a resident watch (REQUIRED)
 
@@ -185,15 +185,15 @@ Never resume many stale workspaces at once — one, then at most two more once h
 
 ## Step 6 — Close out (drive the meta to Done, not Review)
 
-Only when `GET /api/issues?projectId=` shows all children Done/Cancelled and `git -C <projectPath> log master` confirms the merges, run **in order**:
+Only when `GET /api/issues?projectId=&slim=1` shows all children Done/Cancelled and `git -C <projectPath> log master` confirms the merges, run **in order**:
 
-1. **N/N children Done** — `GET /api/issues?projectId=` shows every child Done/Cancelled (`done == total`). Trust `/api/issues`, not `/board` (#551/#552).
+1. **N/N children Done** — `GET /api/issues?projectId=&slim=1` shows every child Done/Cancelled (`done == total`). Trust `/api/issues`, not `/board` (#551/#552).
 2. **Master advanced** — `git -C <projectPath> log master` confirms each child's work is on master, not just a board flag ([[pitfall_silent_merge_loss]]).
 3. **Build green** — integration/smoke passes on master.
 4. Tear down the resident `/loop`.
 5. Write a short run doc under `docs/board-runs/<project>.md` (seeded tickets, parallelism achieved, escalations).
 6. **Move the meta-ticket to Done** — its terminal column, NOT Review. `mcp__agentic-kanban__update_issue` (resolve the meta's UUID via `get_issue`, set `statusId`/move to the Done node) or `move_issue`. **Do not stop with the meta in Review.**
-7. Re-read `GET /api/issues?projectId=`, confirm the meta is in **Done**, then commit.
+7. Re-read `GET /api/issues?projectId=&slim=1`, confirm the meta is in **Done**, then commit.
 
 ## Anti-patterns (the #664 failure modes — do not repeat)
 
