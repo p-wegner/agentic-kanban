@@ -106,6 +106,23 @@ describe("plugin loop — stranded open ticket (#413)", () => {
     ]);
   });
 
+  it("does NOT flag a ticket whose workspace finished and is awaiting a routine merge", async () => {
+    // `ready_for_merge` means the builder FINISHED and its commits are sitting on the branch —
+    // the healthy "builder-finished-unmerged" shape plugin-loop-stall.ts already classifies with
+    // mergeSafe: true. It must not read as the #479 stranded/stalled shape (nothing landed).
+    const { db } = createTestDb();
+    const { projectId, statusId } = await seedProject(db, "Awaiting Merge Project");
+    const issueId = await seedIssue(db, projectId, statusId, 12, "PM pipeline step 2", { externalKey: unit("step-2") });
+    const workspaceId = await seedWorkspace(db, issueId, "feature/ak-12-step-2", null);
+    await db.update(schema.workspaces).set({ status: "ready_for_merge" }).where(eq(schema.workspaces.id, workspaceId));
+
+    const loop = await loopSurface(db, projectId);
+
+    expect(loop.openTicketRefs).toEqual([
+      { issueId, issueNumber: 12, statusName: expect.any(String), stranded: false },
+    ]);
+  });
+
   it("does NOT flag a ticket a live workspace is still working", async () => {
     const { db } = createTestDb();
     const { projectId, statusId } = await seedProject(db, "Live Project");
