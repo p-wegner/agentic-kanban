@@ -52,8 +52,20 @@ export interface OnboardingPluginStep extends OnboardingStepCommon {
 
 export interface OnboardingInitSkillStep extends OnboardingStepCommon {
   kind: "init-skill";
-  skillId: string;
   skillName: string;
+  /**
+   * Where this init skill comes from (#474): `"db"` is a DB-row skill (a builtin or a
+   * user-created one flagged `isInit`); `"plugin"` is a manifest-declared `skills[].init`
+   * entry of an ENABLED plugin, which has no `agent_skills` row at all — it is a disk skill
+   * materialized from the plugin's checkout. The launch-time resolver needs to tell these
+   * apart to know whether to resolve `skillId` against the DB or `pluginSlug`+`skillName`
+   * against the plugin's manifest.
+   */
+  source: "db" | "plugin";
+  /** DB row id — set only when `source === "db"`. */
+  skillId?: string;
+  /** Owning plugin slug — set only when `source === "plugin"`. */
+  pluginSlug?: string;
 }
 
 export interface OnboardingTicketStep extends OnboardingStepCommon {
@@ -128,6 +140,49 @@ export function parseOnboardingUnitKey(
   const stepId = rest.slice(firstColon + 1);
   if (!stepId) return null;
   return { projectId, stepId };
+}
+
+/**
+ * Step id of a DB-row init-skill step (a builtin or user-created skill flagged `isInit`).
+ * Unchanged from #463/#462 — a UUID skill id, so it can never collide with the `"plugin:"`
+ * prefix a manifest-declared init skill's step id below starts with.
+ */
+export function dbInitSkillStepId(skillId: string): string {
+  return `init-skill:${skillId}`;
+}
+
+/**
+ * Step id of a plugin manifest-declared init skill (`skills[].init: true`, #474) — a disk
+ * skill with no `agent_skills` row, so it can't be identified by a DB id. `pluginSlug` matches
+ * `PLUGIN_ID_PATTERN` (colon-free), so the first-colon split in {@link parseInitSkillStepId}
+ * is unambiguous; `skillName` (a `skills[].dir` basename) is the unconstrained tail.
+ */
+export function pluginInitSkillStepId(pluginSlug: string, skillName: string): string {
+  return `init-skill:plugin:${pluginSlug}:${skillName}`;
+}
+
+/**
+ * Inverse of {@link dbInitSkillStepId} / {@link pluginInitSkillStepId} — recognises an
+ * init-skill step id (as embedded in an onboarding ticket's `external_key` via
+ * {@link onboardingUnitKey}) and identifies which skill it names. Returns null for anything
+ * that is not an init-skill step id.
+ */
+export function parseInitSkillStepId(
+  stepId: string,
+): { source: "db"; skillId: string } | { source: "plugin"; pluginSlug: string; skillName: string } | null {
+  if (!stepId.startsWith("init-skill:")) return null;
+  const rest = stepId.slice("init-skill:".length);
+  if (!rest) return null;
+  if (rest.startsWith("plugin:")) {
+    const tail = rest.slice("plugin:".length);
+    const firstColon = tail.indexOf(":");
+    if (firstColon <= 0) return null;
+    const pluginSlug = tail.slice(0, firstColon);
+    const skillName = tail.slice(firstColon + 1);
+    if (!skillName) return null;
+    return { source: "plugin", pluginSlug, skillName };
+  }
+  return { source: "db", skillId: rest };
 }
 
 export interface OnboardingConfigStepDef {
