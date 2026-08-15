@@ -26,7 +26,13 @@ vi.mock("../db/index.js", () => ({
   },
 }));
 
+// Every export the module has, not just the one this test drives: the mock replaces the
+// WHOLE module, so an unmocked export is a hard load error for any importer in the graph
+// (here `workspace-launch-failures.service.ts` → `routes/project-analytics.ts`), which
+// fails the suite before a single test runs.
 vi.mock("../services/dirty-main-checkout.js", () => ({
+  resetMissingRepoScanCounts: vi.fn(),
+  getDirtyTrackedSourceFiles: vi.fn(() => Promise.resolve([])),
   scanDirtyMainCheckouts: vi.fn(() => Promise.resolve([])),
 }));
 
