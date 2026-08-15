@@ -10,6 +10,7 @@
 import { existsSync, readFileSync, appendFileSync, mkdirSync, statSync, lstatSync, unlinkSync, rmdirSync } from "node:fs";
 import { join, resolve, sep, dirname } from "node:path";
 import { homedir } from "node:os";
+import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { PLUGIN_MANIFEST_FILENAME, parsePluginManifest, type PluginManifest } from "@agentic-kanban/shared/lib/plugin-manifest";
 import { PluginError } from "./plugin-errors.js";
 
@@ -95,4 +96,24 @@ export function removeLink(path: string): void {
   } catch {
     rmdirSync(path);
   }
+}
+
+/**
+ * Pathspec-limited add+commit-if-dirty, with the #296 index.lock retry — the board's own
+ * merge jobs contend on `.git/index.lock`. Returns true when `relPath` ends up committed
+ * (including when it was already clean), false when every attempt failed or the repo has
+ * no git. Shared by every plugin write path that leaves a file in a repo a worktree will
+ * later fork from (#477): an uncommitted scaffold/artifact is invisible to that worktree.
+ */
+export async function commitPathWithRetry(repoPath: string, relPath: string, message: string): Promise<boolean> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 1500 * attempt));
+    const add = await gitExec(["add", "--", relPath], { cwd: repoPath });
+    if (add.code !== 0) continue;
+    const diff = await gitExec(["diff", "--cached", "--quiet", "--", relPath], { cwd: repoPath });
+    if (diff.code === 0) return true; // nothing staged — already committed/clean
+    const commit = await gitExec(["commit", "-m", message, "--", relPath], { cwd: repoPath });
+    if (commit.code === 0) return true;
+  }
+  return false;
 }

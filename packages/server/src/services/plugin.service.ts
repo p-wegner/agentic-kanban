@@ -283,7 +283,7 @@ export function createPluginService(deps: {
     const script = (plugin.manifest.scripts ?? []).find((s) => s.name === scriptName);
     if (!script) throw new PluginError(`Script "${scriptName}" not found in plugin manifest`, "NOT_FOUND");
     const outputRepoPath = await resolveOutputRepoPath(plugin, project);
-    requireScaffoldReady(plugin, outputRepoPath, "scripts");
+    await requireScaffoldReady(plugin, outputRepoPath, "scripts");
 
     const vars: PluginPlaceholderVars = {
       repoPath: outputRepoPath,
@@ -418,7 +418,7 @@ export function createPluginService(deps: {
     const plugin = await requirePlugin(pluginRowId);
     const project = await requireProject(projectId);
     const outputRepoPath = await resolveOutputRepoPath(plugin, project);
-    requireScaffoldReady(plugin, outputRepoPath, "loops");
+    await requireScaffoldReady(plugin, outputRepoPath, "loops");
     // A loop declares its own workflow, or inherits the one its skill declares — nobody is at
     // the keyboard when the monitor advances a round, so the manifest is the only place this
     // choice can come from.

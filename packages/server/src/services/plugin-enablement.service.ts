@@ -87,7 +87,7 @@ export function createPluginEnablementOps(deps: {
     const report: EnableReport = { prefKey, skills: [], scaffoldWritten: false, scaffoldPlaceholders: 0, warnings: [] };
     fanOutSkills(plugin, project.repoPath, report);
     const outputRepoPath = await resolveOutputRepoPath(plugin, project);
-    fanOutScaffold(plugin, outputRepoPath, project.repoPath, project.name, report);
+    await fanOutScaffold(plugin, outputRepoPath, project.repoPath, project.name, report);
     return report;
   }
 

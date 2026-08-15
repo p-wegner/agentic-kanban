@@ -15,7 +15,7 @@ import {
 } from "@agentic-kanban/shared/lib/plugin-manifest";
 import type { PluginRow } from "../repositories/plugins.repository.js";
 import { PluginError } from "./plugin-errors.js";
-import { resolveInside } from "./plugin-fs.js";
+import { resolveInside, commitPathWithRetry } from "./plugin-fs.js";
 
 /** The subset of EnableReport the scaffold fan-out writes into. */
 export interface ScaffoldReportSink {
@@ -30,14 +30,18 @@ type PluginWithManifest = PluginRow & { manifest: PluginManifest };
  * Write the plugin's scaffold template into the target repo, substituting placeholders.
  * No-op when the plugin declares no scaffold or the target already exists (never clobbers a
  * file the human may have filled in).
+ *
+ * Commits the written file (#477): a worktree only materializes COMMITTED content, so an
+ * uncommitted scaffold is invisible to the very first worktree a loop/script ticket creates —
+ * best-effort, matching the registration scaffold's own `commitProjectScaffoldArtifacts`.
  */
-export function fanOutScaffold(
+export async function fanOutScaffold(
   plugin: PluginWithManifest,
   repoPath: string,
   leadingRepoPath: string,
   projectName: string,
   report: ScaffoldReportSink,
-): void {
+): Promise<void> {
   const scaffold = plugin.manifest.scaffold;
   if (!scaffold) return;
   const target = resolveInside(repoPath, scaffold.targetPath, `scaffold targetPath "${scaffold.targetPath}"`);
@@ -63,6 +67,7 @@ export function fanOutScaffold(
       + `need filling in ${scaffold.targetPath} before this plugin's scripts/loops will run`,
     );
   }
+  await commitPathWithRetry(repoPath, scaffold.targetPath, `plugin: scaffold ${plugin.pluginId} ${scaffold.targetPath}`);
 }
 
 /**
@@ -192,17 +197,39 @@ export function applyScaffoldValues(
   return { content: out, remaining: countScaffoldPlaceholders(out) };
 }
 
-/** Throws a clear, actionable error instead of letting a script/loop fail on unfilled scaffold TODOs. */
-export function requireScaffoldReady(
+/**
+ * Throws a clear, actionable error instead of letting a script/loop fail on unfilled scaffold
+ * TODOs. Also the single choke point every scripts/loops launch passes through (#477): once the
+ * scaffold reads as ready, it COMMITS the file before returning, so a ticket this call unblocks
+ * always launches a worktree that can actually see the filled profile — regardless of whether it
+ * got filled via `fillScaffoldForm`, `saveScaffoldContent`, or a human/agent editing the file
+ * directly in the leading repo (neither of the DB-backed writers is the only way this file gets
+ * written, and an edit that skips them would otherwise skip their commit too).
+ */
+export async function requireScaffoldReady(
   plugin: PluginWithManifest,
   repoPath: string,
   action: "scripts" | "loops",
-): void {
+): Promise<void> {
   const status = scaffoldPlaceholderStatus(plugin, repoPath);
-  if (!status || status.remaining === 0) return;
-  throw new PluginError(
-    `Scaffold "${status.targetPath}" still has ${status.remaining} unresolved TODO: placeholder${status.remaining === 1 ? "" : "s"} `
-    + `— fill them in before running this plugin's ${action}.`,
-    "CONFLICT",
+  if (!status) return;
+  if (status.remaining > 0) {
+    throw new PluginError(
+      `Scaffold "${status.targetPath}" still has ${status.remaining} unresolved TODO: placeholder${status.remaining === 1 ? "" : "s"} `
+      + `— fill them in before running this plugin's ${action}.`,
+      "CONFLICT",
+    );
+  }
+  const committed = await commitPathWithRetry(
+    repoPath,
+    status.targetPath,
+    `plugin: commit ${plugin.pluginId} scaffold ${status.targetPath}`,
   );
+  if (!committed) {
+    throw new PluginError(
+      `Scaffold "${status.targetPath}" is filled but could not be committed in ${repoPath} `
+      + `— commit it manually before running this plugin's ${action} (a worktree only sees committed content).`,
+      "CONFLICT",
+    );
+  }
 }
