@@ -295,6 +295,7 @@ describe("deduplicateProjects — lossless across the FULL project-child FK grap
       runHistoryId: randomUUID(), milestoneId: randomUUID(), driveId: randomUUID(),
       obstacleId: randomUUID(), templateId: randomUUID(), healthId: randomUUID(),
       flakyId: randomUUID(), shortcutId: randomUUID(), metricId: randomUUID(),
+      viewProcessId: randomUUID(),
     };
     const earlier = new Date(Date.now() - 60_000).toISOString();
     const later = new Date().toISOString();
@@ -327,6 +328,11 @@ describe("deduplicateProjects — lossless across the FULL project-child FK grap
     await d.insert(schema.flakyTests).values({ id: ids.flakyId, projectId: ids.dupId, testName: "sometimes fails", createdAt: earlier });
     await d.insert(schema.projectScriptShortcuts).values({ id: ids.shortcutId, projectId: ids.dupId, name: "build", command: "pnpm build", cwdMode: "project", sortOrder: 0, createdAt: earlier, updatedAt: earlier });
     await d.insert(schema.qualityMetrics).values({ id: ids.metricId, projectId: ids.dupId, metricKey: "coverage", value: 0.9, collectedAt: earlier });
+    // #485 — plugin_view_processes joined the project-child FK graph when project_id gained
+    // its cascading FK (migration 0120), so dedup must rehome it like every other child.
+    // reassignProjectChildren derives its edges from the schema, so this needs no product
+    // change; seeding it here is what proves that derivation actually covered the new table.
+    await d.insert(schema.pluginViewProcesses).values({ id: ids.viewProcessId, pluginRowId: randomUUID(), viewId: "dashboard", projectId: ids.dupId, pid: 4242, port: 51234, command: "npm run serve", createdAt: earlier });
     await d.insert(schema.preferences).values({ key: "activeProjectId", value: ids.dupId, updatedAt: later });
     return ids;
   }
@@ -342,6 +348,8 @@ describe("deduplicateProjects — lossless across the FULL project-child FK grap
       "issues", "agent_skills", "repos", "scheduled_runs", "scheduled_run_history",
       "milestones", "drives", "drive_obstacles", "workflow_templates",
       "board_health_events", "flaky_tests", "project_script_shortcuts", "quality_metrics",
+      // #485 — joined the FK graph with migration 0120's cascading project_id.
+      "plugin_view_processes",
     ]);
     expect(exercised).toEqual(schemaChildren);
   });
