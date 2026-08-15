@@ -46,8 +46,16 @@ export interface OnboardingConfigStep extends OnboardingStepCommon {
 
 export interface OnboardingPluginStep extends OnboardingStepCommon {
   kind: "plugin";
-  pluginRowId: string;
-  pluginSlug: string;
+  /** The installed plugin's DB row id — null when this is a marketplace-only entry
+   *  never installed on this machine (applying it installs first). */
+  pluginRowId: string | null;
+  /** The plugin's manifest id — null for a catalog entry that declares no slug. */
+  pluginSlug: string | null;
+  /** Install source (git URL) for a not-yet-installed marketplace entry; null once installed. */
+  installSource: string | null;
+  /** Unfilled `TODO:` markers left in this plugin's scaffold file for this project —
+   *  0 when not enabled yet, the plugin declares no scaffold, or nothing is unfilled. */
+  scaffoldPlaceholders: number;
 }
 
 export interface OnboardingInitSkillStep extends OnboardingStepCommon {
