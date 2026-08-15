@@ -123,12 +123,28 @@ Two branches that both edit one file (e.g. both append to `CLAUDE.md`) conflict 
 
 This mirrors the app's built-in monitor exactly (`monitor-cycle.ts` reads the same two prefs) — same policy, same gates.
 
-**Auto-start:** if fewer than 3 issues In Progress, start the highest-priority Todo:
+**Auto-start:** if fewer than 3 issues In Progress, start the highest-priority Todo by POSTing
+`/api/workspaces` with **`{ issueId }` only**:
+
 ```powershell
-$slug = ($issue.title -replace '[^a-zA-Z0-9\s]','' -replace '\s+','-').ToLower().Substring(0,[Math]::Min(40,$issue.title.Length))
-$branch = "feature/ak-$($issue.issueNumber)-$slug"
-# POST /api/workspaces with { issueId, branch }
+# POST /api/workspaces with { issueId }  -- do NOT send a `branch`
 ```
+
+**Never derive the branch name here.** The server derives it from the issue with the ONE canonical
+producer (`suggestBranchName`, `packages/shared/src/lib/branch.ts`) whenever `branch` is omitted
+(`workspace-provision.service.ts:96`). This step used to build its own slug in PowerShell, with a
+different sanitizer than the server's — and that divergence is a measured defect, not a theoretical
+one (#220, and #361 Observation C):
+
+| producer | `PM pipeline 6/9: Code Generation (MVP skeleton)` |
+|---|---|
+| server (`suggestBranchName`): `[^a-z0-9]+` → `-` | `feature/ak-6-pm-pipeline-6-9-code-generation-mvp-skel` |
+| the removed one-liner: `[^a-zA-Z0-9\s]` → `""` | `feature/ak-6-pm-pipeline-69-code-generation-mvp-skele` |
+
+Both of those names existed at once for kassenbuch issue #6: the work landed and merged on the
+second, while the first stayed on a worktree "created from master" that never received any of it and
+was then orphaned. Two slugs for one issue also defeat any duplicate-start guard that compares
+branch names, which is how #220's two concurrent workspaces on one ticket happened.
 
 ## SECTION 5 — Summary
 
