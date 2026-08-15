@@ -86,12 +86,22 @@ export async function listPluginLoopIssues(
 ): Promise<LoopIssueRow[]> {
   const pattern = `${escapeLikeLiteral(keyPrefix)}%`;
   // #479 — "not closed" is NOT the same claim as "live". A workspace whose agent exited with
-  // no commits sits at `idle` (or `error`/`ready_for_merge`/`blocked`) forever — none of those
-  // is "closed", so the old `status != 'closed'` test called it live and `stranded` came back
-  // false on the exact ticket it exists to catch. `ACTIVE_WORKSPACE_STATUSES` is the one shared
-  // definition of "an agent is actually working this" (workspace-activity-state.ts); every
-  // other status, including `idle`, means nothing is driving the ticket right now.
-  const liveStatusList = sql.join([...ACTIVE_WORKSPACE_STATUSES].map((s) => sql`${s}`), sql`, `);
+  // no commits sits at `idle` (or `error`/`blocked`) forever — neither is "closed", so the old
+  // `status != 'closed'` test called it live and `stranded` came back false on the exact ticket
+  // it exists to catch. `ACTIVE_WORKSPACE_STATUSES` is the shared definition of "an agent is
+  // actually working this" (workspace-activity-state.ts).
+  //
+  // `ready_for_merge` is added back on top of it deliberately: that status means the builder
+  // FINISHED and its commits are sitting on the branch awaiting the routine merge step — the
+  // healthy, expected "builder-finished-unmerged" shape `plugin-loop-stall.ts` already classifies
+  // with `mergeSafe: true`. Treating it as not-live would flag every ordinary finished-and-
+  // awaiting-merge ticket as `stranded`/"stalled — agent exited, nothing landed", which is false:
+  // something WAS landed, it just hasn't been merged yet. Only a truly idle/errored/blocked
+  // workspace with nothing driving it should read as stranded.
+  const liveStatusList = sql.join(
+    [...ACTIVE_WORKSPACE_STATUSES, "ready_for_merge"].map((s) => sql`${s}`),
+    sql`, `,
+  );
   const rows = await database
     .select({
       id: issues.id,
