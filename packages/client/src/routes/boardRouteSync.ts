@@ -128,6 +128,13 @@ export type HistoryAction = "none" | "push" | "replace";
 export interface UrlSyncPlan {
   path: string;
   action: HistoryAction;
+  /**
+   * The raw segment the CURRENT url named as its view when it matched no known
+   * route (#478) — e.g. "monitor" from `/p/<slug>/monitor`. Null otherwise.
+   * Lets a caller surface an "unknown view" toast instead of silently rewriting
+   * the address bar with no explanation.
+   */
+  unknownViewSegment: string | null;
 }
 
 export interface UrlSyncInput {
@@ -243,17 +250,20 @@ export function planUrlSync(input: UrlSyncInput): UrlSyncPlan {
   const { currentPath, projects, activeProjectId, view, issueNumber } = input;
   const panel: IssuePanel | null = issueNumber === null ? null : input.panel ?? "issue";
   const current = parseAppPath(currentPath);
+  const unknownViewSegment = current.unknownViewSegment;
   const tab = resolveSyncTab(view, input.tab, current.view === view ? current.tab : null);
   const slug = activeProjectId ? buildProjectSlugMap(projects).get(activeProjectId) ?? null : null;
   // No slug and no loaded projects = the projects query is still in flight.
   // Writing now would flatten a scoped inbound URL and lose the link.
   // (With projects loaded but no slug — no active project, or an archived one —
   // fall back to the flat path so view routing keeps working.)
-  if (!slug && projects.length === 0) return { path: normalizePathname(currentPath), action: "none" };
+  if (!slug && projects.length === 0) {
+    return { path: normalizePathname(currentPath), action: "none", unknownViewSegment };
+  }
 
   const path = buildAppPath({ projectSlug: slug, view, tab, issueNumber, panel });
-  if (normalizePathname(currentPath) === path) return { path, action: "none" };
-  if (input.preferReplace) return { path, action: "replace" };
+  if (normalizePathname(currentPath) === path) return { path, action: "none", unknownViewSegment };
+  if (input.preferReplace) return { path, action: "replace", unknownViewSegment };
 
   const sameTarget =
     current.view === view &&
@@ -270,9 +280,9 @@ export function planUrlSync(input: UrlSyncInput): UrlSyncPlan {
   // its container + tab (`/burndown` -> `/p/<slug>/analytics/burndown`), or a
   // raw-id/alias path canonicalised to the slug. None deserves a history entry.
   if (sameTarget && (current.projectSlug === null || currentIsActiveProject)) {
-    return { path, action: "replace" };
+    return { path, action: "replace", unknownViewSegment };
   }
-  return { path, action: "push" };
+  return { path, action: "push", unknownViewSegment };
 }
 
 /* ------------------------------------------------------------------ *
