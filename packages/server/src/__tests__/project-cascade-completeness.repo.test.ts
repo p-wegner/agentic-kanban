@@ -180,6 +180,17 @@ const SUBTREE_SEEDERS: Record<string, (c: SeedCtx) => Promise<void>> = {
       id: randomUUID(), projectId: c.projectId, path: `C:/tmp/${c.projectId}`, createdAt: c.now,
     });
   },
+  plugin_view_processes: async (c) => {
+    // #485 — entered the project deletion subtree when `project_id` gained its cascading FK
+    // (migration 0120). It is an ephemeral pid/port registry of supervised plugin view
+    // servers, so an orphan is a stale process record nobody will reap, not history.
+    // (Its sibling `plugin_loop_events` is deliberately FK-less and so is NOT in the
+    // schema-derived subtree; `deleteProjectCascade` clears it explicitly instead.)
+    await c.db.insert(schema.pluginViewProcesses).values({
+      id: randomUUID(), pluginRowId: randomUUID(), viewId: "dashboard",
+      projectId: c.projectId, pid: 4242, port: 51234, command: "npm run serve", createdAt: c.now,
+    });
+  },
   workflow_transitions: async (c) => {
     await c.db.insert(schema.workflowTransitions).values({
       id: randomUUID(), workspaceId: c.workspaceId, toNodeId: "review",

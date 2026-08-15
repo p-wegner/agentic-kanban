@@ -245,13 +245,31 @@ function runCheck(check, inputData, editedFiles) {
     const timedOut = err.signal === "SIGTERM" || err.code === "ETIMEDOUT";
     const output = [err.stdout || "", err.stderr || ""].join("\n").trim();
     if (timedOut) {
+      // #487 — a timeout is INCONCLUSIVE, not evidence the code is broken: the check never
+      // got to evaluate the command. For a SAFETY check (`alwaysRun`, e.g.
+      // validate-command-safety) that ambiguity must still block — refusing to run beats
+      // running something unvetted. For a speculative correctness check (typecheck, tests) it
+      // must NOT: a command that cannot finish inside its budget then blocks unconditionally,
+      // which makes the gate permanently red and therefore signal-free, and floods every
+      // response with its own truncated output. Measured case: a generated rule ran the whole
+      // `test:mine` suite (10+ min here) under a 180s timeout, so it could only ever time out.
+      //
+      // Same reasoning the merge gate already applies to a timed-out verify_script (#192:
+      // "inconclusive/retryable, NOT proof the code is broken"). A REAL failure — the command
+      // ran and exited non-zero — still blocks exactly as before.
+      const isSafetyCheck = check.alwaysRun === true;
       return {
-        success: false,
+        success: !isSafetyCheck,
         timedOut: true,
+        advisory: !isSafetyCheck,
         output:
           `${check.name || check.command} could not evaluate this command: ` +
           `the check timed out after ${timeout / 1000}s and was killed. ` +
-          `Blocking anyway (fail closed) — this is a hook infrastructure failure, not a safety violation.` +
+          (isSafetyCheck
+            ? `Blocking anyway (fail closed) — an unevaluated SAFETY check must not pass.`
+            : `NOT blocking — a timeout is inconclusive, not a failure. If this check ` +
+              `routinely times out, narrow its command (file-scoped instead of whole-suite) ` +
+              `or raise its timeout; a check that can never finish carries no signal.`) +
           (output ? `\n${output}` : ""),
       };
     }
@@ -455,6 +473,12 @@ function handlePostToolUse(input) {
     const command = check.command.replace(/\{file\}/g, rel);
     const result = runCheck({ ...check, command }, input, state.editedFiles);
 
+    if (result.advisory) {
+      // #487 — inconclusive (timed out), deliberately not blocking. Say so on stderr so the
+      // timeout is visible rather than silently swallowed.
+      console.error(`[smart-hooks] ${check.name}: SKIPPED (inconclusive)`);
+      if (result.output) console.error(result.output);
+    }
     if (!result.success) {
       console.error(`[smart-hooks] ${check.name}: FAILED`);
       if (result.output) console.error(result.output);
@@ -511,6 +535,11 @@ function handleStop(input) {
     }
 
     const result = runCheck(check, input, state.editedFiles);
+
+    if (result.advisory) {
+      console.error(`[smart-hooks] ${check.name || check.command}: SKIPPED (inconclusive)`);
+      if (result.output) console.error(result.output);
+    }
 
     if (!result.success && check.blocking) {
       // If the check itself output a JSON block decision, use it directly
