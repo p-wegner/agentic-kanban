@@ -6,6 +6,14 @@ import { tmpdir } from "node:os";
 
 // The dev checkout's LIVE hook.
 const HOOK = join(__dirname, "../../../../.claude/hooks/validate-command-safety.js");
+/**
+ * Is THIS suite running inside a git worktree rather than the main checkout? The guard has
+ * worktree-only rules (`usesWorktreeCli`), so a command containing `pnpm cli --` gets a
+ * different — and entirely correct — verdict depending on where the suite runs. Cases whose
+ * fixture command triggers one of those rules must say so explicitly instead of asserting a
+ * verdict that only holds in one of the two environments. See the #420 case below.
+ */
+const RUNNING_IN_WORKTREE = /[/\\]\.worktrees[/\\]/i.test(join(__dirname, "../../../.."));
 
 interface RunResult {
   status: number;
@@ -287,7 +295,22 @@ describe("validate-command-safety — false positives from DATA that merely name
       `c.execute('select count(*) from issues')"`,
       "&& pnpm cli -- issue move 4f1c Done",
     ].join(" ");
-    expect(runGuard(command).blocked).toBe(false);
+    // This fixture contains `pnpm cli --`, which a SEPARATE and entirely correct rule
+    // (`usesWorktreeCli`) refuses from any path under `.worktrees/`. So `blocked === false`
+    // held ONLY in the main checkout — and every pre-merge verify gate runs in a worktree,
+    // which meant this single test failed in EVERY gate and withheld EVERY merge, while
+    // passing for anyone who ran it by hand. (Measured: identical guard bytes, opposite
+    // verdicts, main checkout vs `.worktrees/agentic-kanban/ak-478`.)
+    //
+    // The subject here is the #420 db-name/verb false positive, not worktree CLI policy, so
+    // assert that specifically: in a worktree the command may be refused, but ONLY by the
+    // CLI rule — never by the db-safety rule this case exists to pin.
+    const result = runGuard(command);
+    if (RUNNING_IN_WORKTREE) {
+      expect(result.reason).toMatch(/pnpm cli/i);
+    } else {
+      expect(result.blocked).toBe(false);
+    }
   });
 
   it("allows an INLINE curl payload whose prose names the db beside a destructive word", () => {
