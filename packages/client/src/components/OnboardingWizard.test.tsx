@@ -63,13 +63,43 @@ describe("onboardingStepInput — steps that apply with no input", () => {
     expect(onboardingStepInput(configStep("stack-profile", "stack-profile"), {})).toEqual({});
   });
 
-  it("applies plugin / init-skill / ticket steps with no input", () => {
+  it("applies init-skill / ticket steps with no input", () => {
     const steps: OnboardingStep[] = [
-      { id: "plugin:x", kind: "plugin", pluginRowId: "r", pluginSlug: "x", title: "", rationale: "", status: "pending", optional: true },
       { id: "init-skill:y", kind: "init-skill", skillId: "y", skillName: "y", title: "", rationale: "", status: "pending", optional: true },
       { id: "ticket:z", kind: "ticket", catalogId: "z", title: "", rationale: "", status: "pending", optional: true },
     ];
     for (const step of steps) expect(onboardingStepInput(step, {})).toEqual({});
+  });
+});
+
+describe("onboardingStepInput — plugin steps require an explicit output-location choice", () => {
+  function pluginStep(overrides: Partial<Extract<OnboardingStep, { kind: "plugin" }>> = {}): OnboardingStep {
+    return {
+      id: "plugin:x",
+      kind: "plugin",
+      pluginRowId: "r",
+      pluginSlug: "x",
+      installSource: null,
+      scaffoldPlaceholders: 0,
+      title: "",
+      rationale: "",
+      status: "pending",
+      optional: true,
+      ...overrides,
+    };
+  }
+
+  it("blocks apply until leading/sidecar is picked, then sends it — never a silent default", () => {
+    const step = pluginStep();
+    expect(onboardingStepInput(step, {})).toBeNull();
+    expect(onboardingStepInput(step, { "plugin:x:location": "leading" })).toEqual({ location: "leading" });
+    expect(onboardingStepInput(step, { "plugin:x:location": "sidecar" })).toEqual({ location: "sidecar" });
+  });
+
+  it("also applies to a not-yet-installed marketplace plugin (installSource set)", () => {
+    const step = pluginStep({ pluginRowId: null, installSource: "https://example.com/plugin.git" });
+    expect(onboardingStepInput(step, {})).toBeNull();
+    expect(onboardingStepInput(step, { "plugin:x:location": "sidecar" })).toEqual({ location: "sidecar" });
   });
 });
 

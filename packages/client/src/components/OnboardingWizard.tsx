@@ -5,6 +5,7 @@ import type { OnboardingPlan, OnboardingStep } from "@agentic-kanban/shared/lib/
 import { apiFetch, apiPost } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
 import { useOnboardingStore } from "../stores/onboardingStore.js";
+import { usePluginViewStore } from "../stores/pluginViewStore.js";
 
 /**
  * Onboarding wizard (#464) — takes a freshly imported project from "it shows on the board" to
@@ -56,6 +57,12 @@ export function onboardingStepInput(
   step: OnboardingStep,
   drafts: OnboardingDrafts,
 ): Record<string, unknown> | null | "external" {
+  if (step.kind === "plugin") {
+    // #473: enabling scaffolds immediately, so — exactly like the marketplace panel — the
+    // leading/sidecar choice must be made BEFORE Enable is even clickable, never defaulted.
+    const location = drafts[`${step.id}:location`];
+    return location === "leading" || location === "sidecar" ? { location } : null;
+  }
   if (step.kind !== "config") return {};
   switch (step.configKey) {
     case "stack-profile":
@@ -203,6 +210,20 @@ export function OnboardingWizard() {
             className="w-24 rounded border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1 text-xs"
           />
         )}
+        {step.kind === "plugin" && (
+          <select
+            value={drafts[`${step.id}:location`] ?? ""}
+            onChange={(e) => setDrafts((d) => ({ ...d, [`${step.id}:location`]: e.target.value }))}
+            title="Where this plugin writes its output. Choose before enabling — enabling writes the scaffold."
+            aria-label="Plugin output location"
+            data-testid={`onboarding-plugin-location-${step.id}`}
+            className="rounded border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1 text-xs"
+          >
+            <option value="">Choose output location…</option>
+            <option value="leading">Output: leading repo</option>
+            <option value="sidecar">Output: sidecar repo</option>
+          </select>
+        )}
 
         {external ? (
           <span className="text-[11px] text-gray-500 dark:text-gray-400">Set this in Settings → Project Settings.</span>
@@ -215,7 +236,13 @@ export function OnboardingWizard() {
             data-testid={`onboarding-apply-${step.id}`}
             className="rounded bg-brand-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-50"
           >
-            {busy ? "Working…" : step.kind === "config" ? "Apply" : step.kind === "plugin" ? "Enable" : "File ticket"}
+            {busy
+              ? "Working…"
+              : step.kind === "config"
+                ? "Apply"
+                : step.kind === "plugin"
+                  ? (step.installSource ? "Install & enable" : "Enable")
+                  : "File ticket"}
           </button>
         )}
         {step.status !== "skipped" && (
@@ -290,6 +317,29 @@ export function OnboardingWizard() {
                               its controls — it is reference, not work. */}
                           {step.status !== "done" && (
                             <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">{step.rationale}</p>
+                          )}
+                          {/* #473: enabled ≠ usable — an unfilled scaffold blocks every script/loop
+                              (requireScaffoldReady), so a bare ✓ here would be a lie. Shown even on
+                              a "done" step, since that's exactly when this matters. */}
+                          {step.kind === "plugin" && step.scaffoldPlaceholders > 0 && (
+                            <p
+                              className="mt-0.5 rounded border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-1.5 py-0.5 text-[11px] text-amber-800 dark:text-amber-300"
+                              data-testid={`onboarding-scaffold-placeholders-${step.id}`}
+                            >
+                              ⚠ {step.scaffoldPlaceholders} scaffold placeholder{step.scaffoldPlaceholders === 1 ? "" : "s"} still need filling in —{" "}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (step.pluginSlug) usePluginViewStore.getState().setSelection({ kind: "plugin", slug: step.pluginSlug });
+                                  closeOnboarding();
+                                }}
+                                data-testid={`onboarding-scaffold-open-${step.id}`}
+                                className="underline hover:no-underline"
+                              >
+                                fill them in on the Plugins tab
+                              </button>
+                              .
+                            </p>
                           )}
                         </div>
                       </div>
