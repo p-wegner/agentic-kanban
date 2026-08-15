@@ -17,7 +17,8 @@ import { buildAgentPrompt } from "./workspace-create/policy.js";
 import type { Database } from "../db/index.js";
 import * as crudRepo from "../repositories/workspace-crud.repository.js";
 import { listPluginRows } from "../repositories/plugins.repository.js";
-import { parsePluginManifest, pluginEnabledPreferenceKey, parsePluginLoopUnitKey } from "@agentic-kanban/shared/lib/plugin-manifest";
+import { parsePluginManifest, pluginEnabledPreferenceKey, parsePluginLoopUnitKey, pluginSkillName } from "@agentic-kanban/shared/lib/plugin-manifest";
+import { parseOnboardingUnitKey, parseInitSkillStepId } from "@agentic-kanban/shared/lib/onboarding-plan";
 import type { ProviderName } from "./agent-provider.js";
 import { runSetupScript } from "./setup-script.js";
 import type { SetupScriptContainer } from "@agentic-kanban/shared/lib/setup-script";
@@ -307,6 +308,48 @@ export function createWorkspaceProvisionService(deps: {
     }
   }
 
+  /**
+   * The skill an onboarding init-skill ticket must launch with (#474).
+   *
+   * Mirrors {@link resolvePluginLoopSkillName}: `applyOnboardingStep` files a ticket whose whole
+   * body names the skill in prose, with no `skillId` passed to `createWorkspace`, so launch fell
+   * through to the project default and the init skill's prompt was never loaded. The ticket's
+   * `external_key` (`onboarding:<projectId>:<stepId>`) already embeds which skill — a DB row
+   * (builtin/user-created `isInit` skill) or a plugin's manifest-declared entry skill — via
+   * `parseInitSkillStepId`, so no schema change is needed.
+   *
+   * Returns a DB `skillId`, a disk `diskSkillName`, or both null when this is not an onboarding
+   * init-skill ticket / the referenced skill no longer exists / its plugin is no longer enabled
+   * here (mirrors the loop resolver: a disabled plugin's skill is never materialized into the
+   * worktree, so naming it would point the agent at a file that isn't there).
+   */
+  async function resolveOnboardingInitSkillName(
+    externalKey: string | null | undefined,
+    projectId: string,
+  ): Promise<{ skillId: string | null; diskSkillName: string | null }> {
+    const none = { skillId: null, diskSkillName: null };
+    const unit = parseOnboardingUnitKey(externalKey);
+    if (!unit || unit.projectId !== projectId) return none;
+    const parsed = parseInitSkillStepId(unit.stepId);
+    if (!parsed) return none;
+    if (parsed.source === "db") {
+      return { skillId: parsed.skillId, diskSkillName: null };
+    }
+    try {
+      const row = (await listPluginRows(database)).find((r) => r.pluginId === parsed.pluginSlug);
+      if (!row) return none;
+      if (await getPreference(pluginEnabledPreferenceKey(row.pluginId, projectId), database) !== "true") return none;
+      const stillDeclared = (parsePluginManifest(row.manifestJson).skills ?? [])
+        .some((s) => pluginSkillName(s.dir) === parsed.skillName);
+      return stillDeclared ? { skillId: null, diskSkillName: parsed.skillName } : none;
+    } catch (err) {
+      // Best-effort, exactly like the loop resolution above: a broken manifest must not fail a
+      // launch. The old project-default fallback still applies.
+      console.warn(`[workspaces] onboarding init-skill resolution failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+      return none;
+    }
+  }
+
   async function buildAgentConfig(
     input: Pick<CreateWorkspaceInput, "profile" | "claudeProfile" | "model">,
     projectId?: string,
@@ -490,6 +533,14 @@ exit 1
     // behind an explicit choice and a workflow node, both of which are deliberate selections.
     if (!effectiveSkillId && !effectiveDiskSkill) {
       effectiveDiskSkill = await resolvePluginLoopSkillName(issue.externalKey, issue.projectId);
+    }
+
+    // An onboarding init-skill ticket carries its skill in the external key too (#474) — same
+    // precedence as the plugin-loop resolution above.
+    if (!effectiveSkillId && !effectiveDiskSkill) {
+      const onboarding = await resolveOnboardingInitSkillName(issue.externalKey, issue.projectId);
+      effectiveSkillId = onboarding.skillId;
+      effectiveDiskSkill = onboarding.diskSkillName;
     }
 
     // Fall back to the project-level default skill so Insights "By Skill" can

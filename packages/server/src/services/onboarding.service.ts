@@ -4,6 +4,8 @@ import {
   emptyOnboardingState,
   onboardingUnitKey,
   parseOnboardingUnitKey,
+  dbInitSkillStepId,
+  pluginInitSkillStepId,
   type OnboardingConfigKey,
   type OnboardingPlan,
   type OnboardingState,
@@ -12,6 +14,7 @@ import {
 } from "@agentic-kanban/shared/lib/onboarding-plan";
 import { START_MODE_VALUES } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-preference-write";
+import { pluginSkillName } from "@agentic-kanban/shared/lib/plugin-manifest";
 import type { Database } from "../db/index.js";
 import { getProjectById } from "../repositories/project.repository.js";
 import { getPreference } from "../repositories/preferences.repository.js";
@@ -132,7 +135,7 @@ export function createOnboardingService(deps: OnboardingServiceDeps) {
   }
 
   function initSkillStepId(skill: ListedSkill): string {
-    return `init-skill:${skill.id}`;
+    return dbInitSkillStepId(skill.id);
   }
 
   function ticketStepId(catalogId: string): string {
@@ -188,10 +191,37 @@ export function createOnboardingService(deps: OnboardingServiceDeps) {
         title: `Run "${skill.name}"`,
         rationale: skill.description || "A one-time init skill for a freshly imported project.",
         optional: true,
+        source: "db",
         skillId: skill.id,
         skillName: skill.name,
         status: resolveStatus(id, ticketedStepIds.has(id), skipped),
       });
+    }
+
+    // A plugin's own manifest-declared entry skill (`skills[].init: true`, #462) is read by
+    // NOTHING today — `listSkills(projectId, false, true)` above deliberately returns only DB
+    // rows, so a plugin's init skill (e.g. refactor-safety-net's API-documenting entry skill)
+    // could never surface here. Merge it in for every ENABLED plugin, alongside the DB-backed
+    // init skills above — a disabled plugin's skill is not materialized into any worktree
+    // (`materializeEnabledPluginSkills`), so it would resolve to a file that isn't there.
+    for (const plugin of plugins) {
+      if (!(plugin as { enabled?: boolean }).enabled) continue;
+      for (const skillDef of plugin.manifest?.skills ?? []) {
+        if (!skillDef.init) continue;
+        const skillName = pluginSkillName(skillDef.dir);
+        const id = pluginInitSkillStepId(plugin.pluginId, skillName);
+        steps.push({
+          id,
+          kind: "init-skill",
+          title: `Run "${skillName}"`,
+          rationale: skillDef.description || `The "${plugin.name}" plugin's entry skill for a freshly imported project.`,
+          optional: true,
+          source: "plugin",
+          pluginSlug: plugin.pluginId,
+          skillName,
+          status: resolveStatus(id, ticketedStepIds.has(id), skipped),
+        });
+      }
     }
 
     for (const entry of ONBOARDING_TICKET_CATALOG) {
@@ -311,7 +341,7 @@ export function createOnboardingService(deps: OnboardingServiceDeps) {
       case "init-skill":
         await fileOnboardingTicket(projectId, step.id, {
           title: `Run skill: ${step.skillName}`,
-          description: `Run the "${step.skillName}" init skill against this freshly imported project.`,
+          description: `Run the "${step.skillName}" init skill against this freshly imported project — a one-time pass a codebase that has never used this skill needs before its other work is useful. The workspace launched from this ticket is bound to this skill automatically (via its external key); no manual skill selection is needed.`,
         });
         break;
       case "ticket": {
