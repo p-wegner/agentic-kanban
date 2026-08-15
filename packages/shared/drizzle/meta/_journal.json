@@ -841,6 +841,13 @@
       "when": 1787299200000,
       "tag": "0119_agent_skill_is_init",
       "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "6",
+      "when": 1787385600000,
+      "tag": "0120_plugin_project_fk",
+      "breakpoints": true
     }
   ]
 }

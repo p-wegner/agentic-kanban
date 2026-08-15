@@ -13,6 +13,16 @@ import { sqliteTable, text, index } from "drizzle-orm/sqlite-core";
  * Keyed by (plugin_slug, loop_name, project_id) — the same identity as the
  * loop's preference keys, NOT the plugins row UUID, so reinstalling a plugin
  * keeps its history.
+ *
+ * `project_id` is deliberately FK-LESS (#485), unlike `plugin_view_processes.project_id`
+ * which cascades. This is a TRACE table, and some of what it must record is precisely the
+ * case where the project cannot be resolved — `gate-recommendation-skipped` for a project
+ * that has no row is a real, tested scenario. Its writes are also deliberately wrapped in a
+ * swallowing try/catch so a diagnostic can never break the gate flow, which means an FK
+ * rejection would not surface as an error but as SILENCE: zero events, indistinguishable
+ * from the silent bail-out the trace exists to expose. Orphans are handled where they
+ * belong instead — `deleteProjectCascade` deletes these rows explicitly and asserts none
+ * survive. See `gate-recommendation-skip-trace.test.ts` for the case that decided it.
  */
 export const pluginLoopEvents = sqliteTable("plugin_loop_events", {
   id: text("id").primaryKey(),

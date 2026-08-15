@@ -1,4 +1,5 @@
 import { sqliteTable, text, integer, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { projects } from "./projects.js";
 
 /**
  * Installed board plugins (plugin-system core). A plugin is a git repo (or local
@@ -33,12 +34,18 @@ export const plugins = sqliteTable("plugins", {
  * new process has no in-memory handle on them, so without this row they are
  * orphaned forever (#228). One row per `(plugin_row_id, view_id, project_id)`,
  * upserted on spawn and deleted on stop/exit/restart-reap.
+ *
+ * `project_id` carries a real cascading FK as of migration 0120 (#485). This is an
+ * EPHEMERAL runtime registry, not history: a row outliving its project is a stale process
+ * record nobody will ever reap, so cascade is the honest model. (Contrast
+ * `scheduled_run_history.{issue_id,workspace_id}`, which are deliberately FK-less so run
+ * history survives issue deletion — that rationale does not apply to a pid/port registry.)
  */
 export const pluginViewProcesses = sqliteTable("plugin_view_processes", {
   id: text("id").primaryKey(),
   pluginRowId: text("plugin_row_id").notNull(),
   viewId: text("view_id").notNull(),
-  projectId: text("project_id").notNull(),
+  projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
   pid: integer("pid").notNull(),
   port: integer("port").notNull(),
   command: text("command").notNull(),

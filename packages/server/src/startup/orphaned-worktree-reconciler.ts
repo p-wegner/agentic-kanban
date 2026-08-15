@@ -99,6 +99,17 @@ export interface OrphanedWorktreeGitPort {
   revParse(repoPath: string, ref: string): Promise<string>;
   countUniqueCommits(repoPath: string, base: string, branch: string): Promise<number>;
   getWorkingTreeDiff(worktreePath: string): Promise<string>;
+  /**
+   * Does the worktree directory still exist on disk? Optional — defaults to `existsSync`,
+   * which is what production wants (a directory that is gone has no working-tree diff to read).
+   *
+   * It is on the PORT so tests can control it. Without this the fail-closed case reached the
+   * real filesystem: its fixture paths are real ones from the #361 investigation, so the test
+   * passed only while those directories happened to still exist, and silently changed meaning
+   * when a cleanup removed one — the `getWorkingTreeDiff` throw was then never reached and the
+   * worktree was classified removable, i.e. the exact behaviour the test exists to forbid.
+   */
+  pathExists?(worktreePath: string): boolean;
 }
 
 export interface OrphanedWorktreeReport {
@@ -120,7 +131,7 @@ async function hasUnshippedWork(
   baseBranch: string,
   worktree: { path: string; branch: string },
 ): Promise<boolean> {
-  if (existsSync(worktree.path)) {
+  if ((git.pathExists ?? existsSync)(worktree.path)) {
     try {
       if ((await git.getWorkingTreeDiff(worktree.path)).trim() !== "") return true;
     } catch {

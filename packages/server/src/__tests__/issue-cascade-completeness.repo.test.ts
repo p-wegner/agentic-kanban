@@ -275,20 +275,22 @@ describe("deleteIssueCascade — completeness vs the schema FK graph", () => {
     // Allowlist: scheduled_run_history.{issue_id,workspace_id} are HISTORICAL log
     // references, intentionally FK-less so run history survives issue/workspace deletion.
     //
-    // plugin_view_processes.project_id / plugin_loop_events.project_id are QUARANTINED, not
-    // blessed (#483). Both tables landed after this guard was written (migrations 0109/0112,
-    // whose DDL declares `project_id text NOT NULL` with no REFERENCES), and the gate did not
-    // run in that window because test:mine is file-scoped. Whether they SHOULD carry an FK is
-    // a real design decision — plugin_loop_events is an append-only event log (so the
-    // scheduled_run_history rationale may apply) while plugin_view_processes is an ephemeral
-    // runtime process registry — and adding one in SQLite requires a table-rebuild migration.
-    // Declaring `.references()` in the schema alone would be worse: the schema would claim an
-    // FK the database does not have. Tracked for a deliberate decision; do NOT extend this
-    // list further without one.
+    // plugin_loop_events.project_id is BLESSED FK-less as of #485 (the quarantine #483 opened
+    // is now a decision). It is a TRACE table, and one of the things it must record is the
+    // case where the project cannot be resolved — `gate-recommendation-skipped` for an
+    // unresolvable project is a real, tested scenario. Its writes are also deliberately
+    // wrapped in a swallowing try/catch so a diagnostic can never break the gate flow, so an
+    // FK rejection would surface not as an error but as SILENCE: zero events, which is
+    // exactly the silent bail-out the trace exists to expose. Orphans are handled in
+    // `deleteProjectCascade` instead, which deletes its rows and asserts none survive.
+    // See `gate-recommendation-skip-trace.test.ts` for the case that decided it.
+    //
+    // plugin_view_processes.project_id went the OTHER way and now carries a real cascading FK
+    // (migration 0120) — it is an ephemeral pid/port registry, so a row outliving its project
+    // is a stale process record nobody will reap, not history worth keeping.
     const ALLOWED_FKLESS = new Set([
       "scheduled_run_history.issue_id",
       "scheduled_run_history.workspace_id",
-      "plugin_view_processes.project_id",
       "plugin_loop_events.project_id",
     ]);
     const offenders: string[] = [];
