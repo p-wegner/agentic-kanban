@@ -28,8 +28,10 @@ export async function probeHealth(port: number, healthPath = "/health"): Promise
   // SELF-HTTP OK: see server/CLAUDE.md "Self-HTTP calls are an anti-pattern".
   const path = healthPath.startsWith("/") ? healthPath : `/${healthPath}`;
   try {
+    // SELF-HTTP OK: a plugin's supervised child view-server, not this board server.
     const res = await fetch(`http://127.0.0.1:${port}${path}`, { signal: AbortSignal.timeout(1500) });
     if (res.status === 404 && path !== "/") {
+      // SELF-HTTP OK: same child process, root-path fallback when it has no /health.
       const fallback = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(1500) });
       return fallback.status < 500;
     }

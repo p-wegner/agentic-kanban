@@ -45,7 +45,19 @@ vi.mock("node:fs", async (importOriginal) => {
   };
 });
 
-const ENV_KEYS = ["DB_URL", "AGENTIC_KANBAN_DIR"] as const;
+// VITEST/NODE_ENV are cleared alongside the real overrides because #231
+// (`4964268fe8`) added a test-runner short-circuit to `resolveDbLocation`: under a test
+// runner with no explicit override it returns a per-process throwaway DB, so a stray
+// module-load can never open the live board DB. That guard is correct and is covered by
+// `packages/shared/__tests__/db-path.test.ts` (which injects `env` directly).
+//
+// But it sits ABOVE the local-checkout/home-fallback branch that THIS suite exists to
+// pin, and `data-dir.ts` resolves through the real `process.env` at module load — so
+// under vitest every case here silently resolved to the throwaway and the precedence
+// assertions became unreachable. The suite was red from 2026-08-06 and nobody saw it,
+// because `test:mine` is file-scoped and no merge in that window touched server/shared.
+// Clearing the markers restores the branch under test; afterEach puts them back.
+const ENV_KEYS = ["DB_URL", "AGENTIC_KANBAN_DIR", "VITEST", "NODE_ENV"] as const;
 
 async function loadDataDir() {
   vi.resetModules();
