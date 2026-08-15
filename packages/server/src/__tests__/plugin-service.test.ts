@@ -12,6 +12,7 @@ import { createPluginService, PluginError, stopAllPluginViewsAsync } from "../se
 import type { PluginSkillRunProgress } from "../services/plugin.service.js";
 import type { Database } from "../db/index.js";
 import { reapOrphanedPluginViewProcesses } from "../startup/startup-tasks.js";
+import * as gitService from "../services/git.service.js";
 
 /**
  * Plugin service integration tests against real temp dirs: a temp git repo as
@@ -505,6 +506,58 @@ describe("plugin.service", () => {
     writeFileSync(target, readFileSync(target, "utf8").replace(/TODO:[^\n]*/g, "filled in"));
     const result = await service.runScript(plugin.id, "print-env", projectId);
     expect(result.code).toBe(0);
+  });
+
+  // #477 — a worktree only materializes COMMITTED content. The live repro: the butler edited
+  // the scaffold file directly in the leading repo (not via fillScaffoldForm/saveScaffoldContent),
+  // the readiness gate read it as filled and let a loop advance, and the step ticket's worktree
+  // forked from HEAD before that edit was ever committed — so it saw no profile at all.
+  it("commits a scaffold filled by directly editing the file, so a fresh worktree sees it (#477)", async () => {
+    const pluginDir = makePluginDirWithTodoScaffold();
+    const repo = makeProjectRepo();
+    const plugin = await service.installPlugin({ source: pluginDir });
+    const projectId = await insertProject(db, repo);
+    await service.enableForProject(plugin.id, projectId);
+
+    // Simulate the butler/human editing the scaffold directly on disk — the exact path that
+    // skips both `fillScaffoldForm` and `saveScaffoldContent`, and therefore their own commits.
+    const target = join(repo, "docs", "analysis", "_project-profile.md");
+    writeFileSync(target, readFileSync(target, "utf8").replace(/TODO:[^\n]*/g, "filled in"));
+
+    // The gate reads ready (no TODOs left) and must commit the file as part of unblocking —
+    // this is `requireScaffoldReady`'s new choke-point behavior, exercised via runScript.
+    const result = await service.runScript(plugin.id, "print-env", projectId);
+    expect(result.code).toBe(0);
+    expect(gitExecSync(["status", "--porcelain", "--", "docs/analysis/_project-profile.md"], { cwd: repo }).trim()).toBe("");
+
+    // The actual regression check: a worktree forked from HEAD right now must contain it.
+    const worktreePath = await gitService.createWorktree(repo, "feature/ak-477-direct-edit-check");
+    try {
+      const worktreeTarget = join(worktreePath, "docs", "analysis", "_project-profile.md");
+      expect(existsSync(worktreeTarget)).toBe(true);
+      const content = readFileSync(worktreeTarget, "utf8");
+      expect(content).not.toContain("TODO:");
+      expect(content).toContain("filled in");
+    } finally {
+      await gitService.removeWorktree(repo, worktreePath);
+    }
+  });
+
+  it("commits the scaffold template at enable time, so a fresh worktree sees it even before it's filled (#477)", async () => {
+    const pluginDir = makePluginDir(); // stock template has no TODO markers
+    const repo = makeProjectRepo();
+    const plugin = await service.installPlugin({ source: pluginDir });
+    const projectId = await insertProject(db, repo);
+    await service.enableForProject(plugin.id, projectId);
+
+    const worktreePath = await gitService.createWorktree(repo, "feature/ak-477-enable-commit-check");
+    try {
+      const worktreeTarget = join(worktreePath, "docs", "analysis", "_project-profile.md");
+      expect(existsSync(worktreeTarget)).toBe(true);
+      expect(readFileSync(worktreeTarget, "utf8")).toContain("# Profile for Plugin Project");
+    } finally {
+      await gitService.removeWorktree(repo, worktreePath);
+    }
   });
 
   it("runSkill creates a ticket and launches a workspace against the named skill", async () => {

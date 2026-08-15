@@ -8,7 +8,7 @@ import {
 } from "@agentic-kanban/shared/lib/plugin-manifest";
 import type { Database } from "../db/index.js";
 import { PluginError } from "./plugin-errors.js";
-import { looksLikeGitUrl, readManifestFromDir, resolveInside } from "./plugin-fs.js";
+import { looksLikeGitUrl, readManifestFromDir, resolveInside, commitPathWithRetry } from "./plugin-fs.js";
 import { parseScaffoldFields, applyScaffoldValues } from "./plugin-scaffold.js";
 import { listPluginLoopSessionStats } from "../repositories/plugins.repository.js";
 import type { PluginRow } from "../repositories/plugins.repository.js";
@@ -258,22 +258,6 @@ export function createPluginLoopExtras(ctx: PluginLoopExtrasCtx) {
       content: newContent,
       committed,
     };
-  }
-
-  /**
-   * Pathspec-limited add+commit with the #296 index.lock retry — the board's own
-   * merge jobs contend on `.git/index.lock`. Returns false when the repo has no
-   * git / nothing changed / all attempts failed; callers treat that as non-fatal.
-   */
-  async function commitPathWithRetry(repoPath: string, relPath: string, message: string): Promise<boolean> {
-    for (let attempt = 0; attempt < 5; attempt++) {
-      if (attempt > 0) await new Promise((r) => setTimeout(r, 1500 * attempt));
-      const add = await gitExec(["add", "--", relPath], { cwd: repoPath });
-      if (add.code !== 0) continue;
-      const commit = await gitExec(["commit", "-m", message, "--", relPath], { cwd: repoPath });
-      if (commit.code === 0) return true;
-    }
-    return false;
   }
 
   /** The loop's CURRENT gate + the context the concierge endpoints need. */
