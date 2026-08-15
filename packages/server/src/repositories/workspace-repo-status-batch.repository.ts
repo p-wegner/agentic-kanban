@@ -1,20 +1,7 @@
 import { and, eq, inArray, ne } from "drizzle-orm";
-import { issues, projects, repos, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, repos, workspaces } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
-
-/** The project fields the batch's leading-repo fallback needs. */
-export async function getProjectRepoFields(
-  projectId: string,
-  database: Database = db,
-): Promise<{ repoPath: string; defaultBranch: string | null } | undefined> {
-  const [project] = await database
-    .select({ repoPath: projects.repoPath, defaultBranch: projects.defaultBranch })
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .limit(1);
-  return project;
-}
 
 export type BatchWorkspaceRow = {
   id: string;

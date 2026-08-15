@@ -14,10 +14,10 @@ import { computeRepoMergeEntry, type RepoMergeStatus } from "./repo-merge-status
 import { siblingRefFromRow, type WorkspaceRepoRef } from "./workspace-all-repos.js";
 import { readHandoffMeta } from "./handoff.service.js";
 import {
-  getProjectRepoFields,
   listBatchRepoRows,
   listBatchWorkspaceRows,
 } from "../repositories/workspace-repo-status-batch.repository.js";
+import { getProjectRepoFields } from "../repositories/project.repository.js";
 
 /**
  * #415 — GET /api/projects/:id/workspace-repo-status: the batched replacement for the

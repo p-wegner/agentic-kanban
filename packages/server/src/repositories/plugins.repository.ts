@@ -330,3 +330,24 @@ export async function getInProgressStatusId(
     .limit(1);
   return rows[0]?.id ?? null;
 }
+
+/**
+ * Is `pluginSlug` enabled for `projectId`?
+ *
+ * The canonical read of `plugin_enabled_<slug>_<projectId>`, and deliberately the ONLY place
+ * that compares that preference against its truthy literal — the #947 polarity ratchet
+ * baselines this one site for exactly that reason. The raw comparison had been copy-pasted
+ * across call sites, and each copy re-decided the default independently, so a missing pref
+ * could mean "disabled" in one place and "enabled" in another. Enablement is opt-in: an
+ * absent preference means NOT enabled, and that decision now lives here once.
+ */
+export async function isPluginEnabledForProject(
+  pluginSlug: string,
+  projectId: string,
+  database: Database = db,
+): Promise<boolean> {
+  const rows = await database.select({ value: preferences.value }).from(preferences)
+    .where(eq(preferences.key, `plugin_enabled_${pluginSlug}_${projectId}`))
+    .limit(1);
+  return rows[0]?.value === "true";
+}
