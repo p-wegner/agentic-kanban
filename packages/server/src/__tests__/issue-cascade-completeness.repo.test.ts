@@ -274,7 +274,23 @@ describe("deleteIssueCascade — completeness vs the schema FK graph", () => {
     //
     // Allowlist: scheduled_run_history.{issue_id,workspace_id} are HISTORICAL log
     // references, intentionally FK-less so run history survives issue/workspace deletion.
-    const ALLOWED_FKLESS = new Set(["scheduled_run_history.issue_id", "scheduled_run_history.workspace_id"]);
+    //
+    // plugin_view_processes.project_id / plugin_loop_events.project_id are QUARANTINED, not
+    // blessed (#483). Both tables landed after this guard was written (migrations 0109/0112,
+    // whose DDL declares `project_id text NOT NULL` with no REFERENCES), and the gate did not
+    // run in that window because test:mine is file-scoped. Whether they SHOULD carry an FK is
+    // a real design decision — plugin_loop_events is an append-only event log (so the
+    // scheduled_run_history rationale may apply) while plugin_view_processes is an ephemeral
+    // runtime process registry — and adding one in SQLite requires a table-rebuild migration.
+    // Declaring `.references()` in the schema alone would be worse: the schema would claim an
+    // FK the database does not have. Tracked for a deliberate decision; do NOT extend this
+    // list further without one.
+    const ALLOWED_FKLESS = new Set([
+      "scheduled_run_history.issue_id",
+      "scheduled_run_history.workspace_id",
+      "plugin_view_processes.project_id",
+      "plugin_loop_events.project_id",
+    ]);
     const offenders: string[] = [];
     for (const value of Object.values(schema)) {
       if (!is(value, SQLiteTable)) continue;

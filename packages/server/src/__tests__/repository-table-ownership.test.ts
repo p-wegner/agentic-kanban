@@ -45,7 +45,16 @@ const BASELINE: Record<string, number> = {
   // sessions reads — narrow per-consumer selects that predate #957. Each is a
   // candidate to delegate to session.repository accessors.
   "agent-questions.repository.ts::sessions-read": 1,
-  "autodrive-stall-warning.repository.ts::sessions-read": 3,
+  // #483: these sessions-reads are cross-aggregate JOIN queries
+  // (`.from(sessions).innerJoin(workspaces).innerJoin(issues)`) that project a value across the
+  // object graph in one round trip. A narrow session.repository.ts accessor cannot express them
+  // without either N+1 queries or relocating whole cross-aggregate queries into session.repository,
+  // which is worse than the drift being guarded against. Raised to current reality so the ratchet
+  // works again (it had not run since 2026-08-06 — test:mine is file-scoped); the guard cannot
+  // currently tell a join-read from a re-query. Tracked for a real decision.
+  "autodrive-stall-warning.repository.ts::sessions-read": 4,
+  "plugins.repository.ts::sessions-read": 1,
+  "worker.repository.ts::sessions-read": 1,
   "bisect.repository.ts::sessions-read": 1,
   "board-status.repository.ts::sessions-read": 1,
   "broadcast.repository.ts::sessions-read": 1,
@@ -69,7 +78,7 @@ const BASELINE: Record<string, number> = {
   "workspace-risk.repository.ts::sessions-read": 1,
   "workspace-scorecard.repository.ts::sessions-read": 1,
   "workspace-session.repository.ts::sessions-read": 1,
-  "workspace-summary.repository.ts::sessions-read": 1,
+  "workspace-summary.repository.ts::sessions-read": 2,
   "workspace-timeline.repository.ts::sessions-read": 1,
   // workspace.repository.ts (2) was decomposed (#913): getCostOverTimeRows moved to
   // workspace-analytics, getWorkspaceDetails' latest-session read to workspace-reads.

@@ -58,12 +58,20 @@ const BASELINE: Record<string, number> = {
   "server/src/services/start-policy.service.ts::board_autodrive_${projectId}": 1,
   "server/src/startup/ancestor-branch-reconciler.ts::<row-value>": 1,
   "server/src/startup/auto-merge-orchestrator.ts::<row-value>": 1,
+  // The canonical plugin-enablement accessor (isPluginEnabledForProject). Baselined for the
+  // same reason isAutoReviewEnabled/isAutoMergeEnabled are: a canonical accessor is the ONE
+  // sanctioned home for a key's polarity. This entry must stay at 1 — a second raw read of
+  // plugin_enabled_* anywhere is the violation this ratchet exists to catch.
+  "server/src/repositories/plugins.repository.ts::<row-value>": 1,
   "server/src/startup/done-unmerged-invariant-scanner.ts::<row-value>": 1,
   "server/src/startup/exit-workflow.ts::<row-value>": 1,
   "server/src/startup/monitor-setup.ts::<row-value>": 2,
-  "server/src/startup/plan-mode-reconciler.ts::<row-value>": 1,
+  // Both reconcilers now read their toggle through a NAMED constant rather than an inline
+  // row value, so the ratchet id moved from `<row-value>` to the constant. Same single read
+  // in each (a tri-state default-on check: absent pref means enabled), not a new violation.
+  "server/src/startup/plan-mode-reconciler.ts::PREF_RECONCILER_STRANDED_PLAN_ENABLED": 1,
   "server/src/startup/project-completion-reconciler.ts::markerKey": 1,
-  "server/src/startup/stranded-review-reconciler.ts::<row-value>": 1,
+  "server/src/startup/stranded-review-reconciler.ts::PREF_RECONCILER_STRANDED_REVIEW_ENABLED": 1,
   "server/src/startup/zombie-fix-session-reconciler.ts::<row-value>": 1,
 };
 

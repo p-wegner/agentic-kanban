@@ -16,7 +16,7 @@ import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { buildAgentPrompt } from "./workspace-create/policy.js";
 import type { Database } from "../db/index.js";
 import * as crudRepo from "../repositories/workspace-crud.repository.js";
-import { listPluginRows } from "../repositories/plugins.repository.js";
+import { listPluginRows, isPluginEnabledForProject } from "../repositories/plugins.repository.js";
 import { parsePluginManifest, pluginEnabledPreferenceKey, parsePluginLoopUnitKey, pluginSkillName } from "@agentic-kanban/shared/lib/plugin-manifest";
 import { parseOnboardingUnitKey, parseInitSkillStepId } from "@agentic-kanban/shared/lib/onboarding-plan";
 import type { ProviderName } from "./agent-provider.js";
@@ -253,8 +253,7 @@ export function createWorkspaceProvisionService(deps: {
     try {
       const rows = await listPluginRows(database);
       for (const row of rows) {
-        const enabled = await getPreference(pluginEnabledPreferenceKey(row.pluginId, projectId), database);
-        if (enabled !== "true") continue;
+        if (!(await isPluginEnabledForProject(row.pluginId, projectId, database))) continue;
         let manifest;
         try {
           manifest = parsePluginManifest(row.manifestJson);
@@ -297,7 +296,7 @@ export function createWorkspaceProvisionService(deps: {
     try {
       const row = (await listPluginRows(database)).find((r) => r.pluginId === unit.pluginSlug);
       if (!row) return null;
-      if (await getPreference(pluginEnabledPreferenceKey(row.pluginId, projectId), database) !== "true") return null;
+      if (!(await isPluginEnabledForProject(row.pluginId, projectId, database))) return null;
       const loop = (parsePluginManifest(row.manifestJson).loops ?? []).find((l) => l.name === unit.loopName);
       return loop?.skill ?? null;
     } catch (err) {
@@ -344,7 +343,7 @@ export function createWorkspaceProvisionService(deps: {
     try {
       const row = (await listPluginRows(database)).find((r) => r.pluginId === parsed.pluginSlug);
       if (!row) return none;
-      if (await getPreference(pluginEnabledPreferenceKey(row.pluginId, projectId), database) !== "true") return none;
+      if (!(await isPluginEnabledForProject(row.pluginId, projectId, database))) return none;
       const stillDeclared = (parsePluginManifest(row.manifestJson).skills ?? [])
         .some((s) => pluginSkillName(s.dir) === parsed.skillName);
       return stillDeclared ? { skillId: null, diskSkillName: parsed.skillName } : none;

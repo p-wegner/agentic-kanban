@@ -294,3 +294,22 @@ export async function getProjectByName(name: string, database: Database = db) {
   const rows = await database.select().from(projects).where(eq(projects.name, name)).limit(1);
   return rows[0] ?? null;
 }
+
+/**
+ * The two project fields the workspace-repo-status batch needs for its leading-repo fallback.
+ *
+ * Lives here, not beside its caller: `repository-table-ownership` (#957) keeps `projects` reads
+ * in this file so the aggregate has one reader. It was previously a direct `select().from(projects)`
+ * in workspace-repo-status-batch.repository.ts, which is the drift that guard exists to catch.
+ */
+export async function getProjectRepoFields(
+  projectId: string,
+  database: Database = db,
+): Promise<{ repoPath: string; defaultBranch: string | null } | undefined> {
+  const [project] = await database
+    .select({ repoPath: projects.repoPath, defaultBranch: projects.defaultBranch })
+    .from(projects)
+    .where(eq(projects.id, projectId))
+    .limit(1);
+  return project;
+}
