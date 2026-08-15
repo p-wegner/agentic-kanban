@@ -104,8 +104,15 @@ export function removeLink(path: string): void {
  * (including when it was already clean), false when every attempt failed or the repo has
  * no git. Shared by every plugin write path that leaves a file in a repo a worktree will
  * later fork from (#477): an uncommitted scaffold/artifact is invisible to that worktree.
+ *
+ * `requireScaffoldReady` calls this on EVERY script/loop launch (#477), so the common case —
+ * already committed, nothing to do — must be a single cheap spawn, not the full add+commit
+ * dance: that extra latency landed on every launch and pushed unrelated tests (repeated
+ * enable/disable cycles in one test body) past the default 10s hook timeout.
  */
 export async function commitPathWithRetry(repoPath: string, relPath: string, message: string): Promise<boolean> {
+  const clean = await gitExec(["status", "--porcelain", "--", relPath], { cwd: repoPath });
+  if (clean.code === 0 && clean.stdout.trim() === "") return true;
   for (let attempt = 0; attempt < 5; attempt++) {
     if (attempt > 0) await new Promise((r) => setTimeout(r, 1500 * attempt));
     const add = await gitExec(["add", "--", relPath], { cwd: repoPath });
