@@ -1,10 +1,24 @@
 import { projects, projectStatuses, issues, workspaces } from "@agentic-kanban/shared/schema";
 import { deleteProjectCascade as deleteProjectCascadeShared } from "@agentic-kanban/shared/lib/cascade-delete";
 import { eq, sql, and, isNull, isNotNull, gte, inArray } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { initializeProjectStatuses } from "./issue.repository.js";
+
+/**
+ * Facade barrel (#889 god-module gate). The `project_statuses` lifecycle — list, create,
+ * reorder, delete — is one cohesive responsibility and now lives in its own module; this file
+ * kept growing past the 20-declaration cohesion ceiling otherwise. Re-exported here so every
+ * existing `from "./project.repository.js"` importer is unaffected by the split.
+ */
+export {
+  getProjectStatuses,
+  createProjectStatus,
+  updateProjectStatusSortOrder,
+  deleteProjectStatus,
+  getProjectStatusById,
+  deleteProjectStatusById,
+} from "./project-status.repository.js";
 
 export async function getProjectById(
   projectId: string,
@@ -91,17 +105,6 @@ export async function setProjectArchived(
     .update(projects)
     .set({ archivedAt: archived ? new Date().toISOString() : null, updatedAt: new Date().toISOString() })
     .where(eq(projects.id, projectId));
-}
-
-export async function getProjectStatuses(
-  projectId: string,
-  database: Database = db,
-) {
-  return database
-    .select()
-    .from(projectStatuses)
-    .where(eq(projectStatuses.projectId, projectId))
-    .orderBy(projectStatuses.sortOrder);
 }
 
 export async function insertProject(
@@ -207,86 +210,6 @@ export async function getDoneIssueProviderAttribution(
         gte(issues.statusChangedAt, cutoffDay),
       ),
     );
-}
-
-export async function createProjectStatus(
-  projectId: string,
-  name: string,
-  sortOrder: number,
-  database: Database = db,
-) {
-  const id = randomUUID();
-  const now = new Date().toISOString();
-  await database.insert(projectStatuses).values({
-    id,
-    projectId,
-    name,
-    sortOrder,
-    createdAt: now,
-  });
-  return { id, projectId, name };
-}
-
-export async function updateProjectStatusSortOrder(
-  projectId: string,
-  statusId: string,
-  sortOrder: number,
-  database: Database = db,
-): Promise<{ success: true } | { error: string; status: number }> {
-  const rows = await database
-    .select()
-    .from(projectStatuses)
-    .where(and(eq(projectStatuses.id, statusId), eq(projectStatuses.projectId, projectId)));
-
-  if (rows.length === 0) {
-    return { error: "Status not found", status: 404 };
-  }
-
-  await database
-    .update(projectStatuses)
-    .set({ sortOrder })
-    .where(and(eq(projectStatuses.id, statusId), eq(projectStatuses.projectId, projectId)));
-
-  return { success: true };
-}
-
-export async function deleteProjectStatus(
-  projectId: string,
-  statusId: string,
-  database: Database = db,
-): Promise<{ success: true } | { error: string; status: number }> {
-  const statusRows = await database
-    .select()
-    .from(projectStatuses)
-    .where(and(eq(projectStatuses.id, statusId), eq(projectStatuses.projectId, projectId)));
-
-  if (statusRows.length === 0) {
-    return { error: "Status not found", status: 404 };
-  }
-
-  const linkedIssues = await database
-    .select({ id: issues.id })
-    .from(issues)
-    .where(eq(issues.statusId, statusId))
-    .limit(1);
-
-  if (linkedIssues.length > 0) {
-    return { error: "Cannot delete status with linked issues", status: 409 };
-  }
-
-  await database.delete(projectStatuses).where(eq(projectStatuses.id, statusId));
-  return { success: true };
-}
-
-/** A single project status by its id (no project scoping), or null. */
-export async function getProjectStatusById(statusId: string, database: Database = db) {
-  const rows = await database.select().from(projectStatuses).where(eq(projectStatuses.id, statusId)).limit(1);
-  return rows[0] ?? null;
-}
-
-/** Delete a project status by id alone (caller has already validated). */
-export async function deleteProjectStatusById(statusId: string, database: Database = db): Promise<void> {
-  await database.delete(projectStatuses).where(eq(projectStatuses.id, statusId));
 }
 
 /** A project by its exact name (first match), or null. */
