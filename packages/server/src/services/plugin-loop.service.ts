@@ -38,6 +38,7 @@ import type { CreateWorkspaceInput, CreateWorkspaceResult } from "./workspace-in
 import { describeLoopStartOutcome, startPlannedLoopTickets, type LoopStartOutcome } from "./plugin-loop-start.service.js";
 import { describeExistingUnits } from "./plugin-loop-unit-state.js";
 import { selectLoopStall, type LoopStall } from "./plugin-loop-stall.js";
+import { reconcileProgressStepStates } from "./plugin-loop-step-state.js";
 import {
   beginGateRecommendationAttempt,
   endGateRecommendationAttempt,
@@ -287,28 +288,36 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
           }
         } catch { /* malformed event — no chip */ }
       }
+      const openRows = rows.filter((r) => !isTerminalStatusName(r.statusName));
+      // #479/#481 — a planner only ever reports "generating" because a ticket EXISTS for the
+      // step; it cannot see whether a session is actually live. Override that claim with what
+      // the board can see: no workspace at all → "planned" (nothing running, nothing will start
+      // unless Start Mode or a human does), a workspace but no LIVE one → "stalled" (the agent
+      // exited, nothing landed, and nothing will ever close the ticket on its own). Every other
+      // reported state is left untouched.
+      const rawProgress = payload?.progress ?? null;
+      const progress = rawProgress
+        ? { steps: reconcileProgressStepStates(rawProgress.steps, openRows) }
+        : null;
       return {
         name: loop.name,
         label: loop.label ?? loop.name,
         description: loop.description ?? null,
         skill: loop.skill,
-        openTickets: rows.filter((r) => !isTerminalStatusName(r.statusName)).length,
+        openTickets: openRows.length,
         // The open tickets THEMSELVES, not just their count (#429). The pane said "1 ticket(s)
         // still open" and offered no way to reach the work — the reader had to go to the board
         // and find it. Costs nothing: these rows are already loaded for the counts above.
-        openTicketRefs: rows
-          .filter((r) => !isTerminalStatusName(r.statusName))
-          .map((r) => ({
-            issueId: r.id,
-            issueNumber: r.issueNumber,
-            statusName: r.statusName,
-            stranded: r.hasAnyWorkspace && !r.hasLiveWorkspace,
-          })),
+        openTicketRefs: openRows.map((r) => ({
+          issueId: r.id,
+          issueNumber: r.issueNumber,
+          statusName: r.statusName,
+          stranded: r.hasAnyWorkspace && !r.hasLiveWorkspace,
+        })),
         // #431 — which open tickets actually suppress the gate card. Decided HERE, from the unit
         // keys, rather than by the client comparing a bare count: `openTickets` includes the
         // gate's OWN ticket, so anything holding that ticket non-terminal used to hide the gate.
-        gateBlockedBy: gateBlockingTickets(gate, payload?.progress ?? null, rows.filter((r) => !isTerminalStatusName(r.statusName)))
-          .map((r) => r.issueNumber),
+        gateBlockedBy: gateBlockingTickets(gate, progress, openRows).map((r) => r.issueNumber),
         closedTickets: rows.filter((r) => isTerminalStatusName(r.statusName)).length,
         paused: pausedValue === "true",
         converged: convergedValue === "true",
@@ -319,7 +328,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
         lastAdvanceAt: lastAdvance?.createdAt ?? null,
         gate: payload?.gate ?? null,
         gateSince,
-        progress: payload?.progress ?? null,
+        progress,
         checks: payload?.checks ?? null,
         // What the last advance did about starting its tickets (#357). The surface must be able to
         // say "step 5 planned, starting now" rather than leaving a blank where the gate card was.
@@ -327,7 +336,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
         // Staleness filtering, ordering and CLASSIFICATION all live in `plugin-loop-stall.ts`
         // (#363): the query now returns two genuinely different stalls and they need different
         // affordances, so the surface has to be told which one it is looking at.
-        awaitingMerge: selectLoopStall(unmerged, gate, payload?.progress ?? null),
+        awaitingMerge: selectLoopStall(unmerged, gate, progress),
         gateRecommendation,
         totalCostUsd,
       };

@@ -89,6 +89,23 @@ describe("plugin loop — stranded open ticket (#413)", () => {
     ]);
   });
 
+  it("flags an open ticket whose workspace exited idle with no commits (#479)", async () => {
+    // The measured shape: the agent exited, the workspace never closes on its own (it sits at
+    // `idle`), and there are zero commits. `status != 'closed'` used to call this "live" — the
+    // exact false negative #479 reported (`stranded: false` on a workspace nothing is driving).
+    const { db } = createTestDb();
+    const { projectId, statusId } = await seedProject(db, "Idle No-Commit Project");
+    const issueId = await seedIssue(db, projectId, statusId, 11, "PM pipeline step 1", { externalKey: unit("step-1") });
+    const workspaceId = await seedWorkspace(db, issueId, "feature/ak-11-step-1", null);
+    await db.update(schema.workspaces).set({ status: "idle" }).where(eq(schema.workspaces.id, workspaceId));
+
+    const loop = await loopSurface(db, projectId);
+
+    expect(loop.openTicketRefs).toEqual([
+      { issueId, issueNumber: 11, statusName: expect.any(String), stranded: true },
+    ]);
+  });
+
   it("does NOT flag a ticket a live workspace is still working", async () => {
     const { db } = createTestDb();
     const { projectId, statusId } = await seedProject(db, "Live Project");
