@@ -225,6 +225,46 @@ describe("onboarding.service", () => {
     expect(pluginRow.pluginId).toBe("test-plugin");
   });
 
+  it("surfaces a plugin manifest's `init: true` skill as an init-skill step, only when the plugin is enabled", async () => {
+    const { projectId } = await seedProject(db);
+    await upsertPluginRow({
+      id: randomUUID(),
+      pluginId: "safety-net",
+      name: "Safety Net",
+      sourceUrl: null,
+      localPath: "C:/tmp/safety-net",
+      version: "0.1.0",
+      manifestJson: JSON.stringify({
+        id: "safety-net",
+        name: "Safety Net",
+        version: "0.1.0",
+        skills: [{ dir: ".claude/skills/requirement-extraction", init: true, description: "Document the API surface." }],
+      }),
+    }, db);
+
+    const service = buildOnboardingServiceFor(db);
+
+    // Not enabled yet — the manifest's init skill must not appear as a step (its bundle isn't
+    // materialized into any worktree until the plugin is enabled for this project).
+    const before = await service.buildOnboardingPlan(projectId);
+    expect(before.steps.find((s) => s.kind === "init-skill" && s.skillName === "requirement-extraction")).toBeUndefined();
+
+    await service.applyOnboardingStep(projectId, "plugin:safety-net", { location: "leading" });
+
+    const after = await service.buildOnboardingPlan(projectId);
+    const step = after.steps.find((s) => s.kind === "init-skill" && s.skillName === "requirement-extraction");
+    expect(step).toBeDefined();
+    expect(step?.status).toBe("pending");
+    if (step?.kind === "init-skill") {
+      expect(step.source).toBe("plugin");
+      expect(step.pluginSlug).toBe("safety-net");
+      expect(step.id).toBe("init-skill:plugin:safety-net:requirement-extraction");
+    }
+
+    const applied = await service.applyOnboardingStep(projectId, step!.id);
+    expect(applied.steps.find((s) => s.id === step!.id)?.status).toBe("done");
+  });
+
   it("offers an uninstalled marketplace plugin as a step, and applying it installs then enables it", async () => {
     const { projectId } = await seedProject(db);
     // A local-directory "install source" so the test needs no network/git clone: installPlugin
