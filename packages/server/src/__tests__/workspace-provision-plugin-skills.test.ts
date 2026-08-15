@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as schema from "@agentic-kanban/shared/schema";
 import { gitExecSync } from "@agentic-kanban/shared/lib/git-exec";
+import { onboardingUnitKey, dbInitSkillStepId, pluginInitSkillStepId } from "@agentic-kanban/shared/lib/onboarding-plan";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createPluginService } from "../services/plugin.service.js";
 import { createWorkspaceProvisionService } from "../services/workspace-provision.service.js";
@@ -268,6 +269,176 @@ describe("workspace-provision.service loop-ticket skill resolution (#321)", () =
       worktreePath,
       project: { repoPath: repo, defaultSkillId },
       skillId: null,
+    });
+
+    expect(out.effectiveSkillId).toBe(defaultSkillId);
+    expect(out.skillName).toBe("board-navigator");
+  });
+});
+
+/**
+ * Regression for #474: an onboarding init-skill ticket carries no `skillId` either — same class
+ * of bug as #321, just for the OTHER caller of a ticket-body-only skill name
+ * (`applyOnboardingStep`). The fix resolves the skill from the ticket's own `external_key`
+ * (`onboarding:<projectId>:init-skill:...`), for both a DB-row init skill and a plugin
+ * manifest-declared `skills[].init` entry.
+ */
+describe("workspace-provision.service onboarding init-skill ticket resolution (#474)", () => {
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {
+        /* Windows file locks — temp cleanup is best-effort */
+      }
+    }
+  });
+
+  async function setup() {
+    const { db } = createTestDb();
+    const pluginDir = makePluginDir();
+    const repo = makeProjectRepo();
+    const pluginService = createPluginService({ database: db as unknown as Database });
+    const plugin = await pluginService.installPlugin({ source: pluginDir });
+    const projectId = await insertProject(db, repo);
+    const provision = createWorkspaceProvisionService({
+      database: db as unknown as Database,
+      gitService: {} as GitService,
+    });
+    return { db, repo, plugin, projectId, pluginService, provision };
+  }
+
+  const defaultSkillId = randomUUID();
+
+  async function seedDefaultSkill(db: TestDb): Promise<void> {
+    const now = new Date().toISOString();
+    await db.insert(schema.agentSkills).values({
+      id: defaultSkillId,
+      name: "board-navigator",
+      description: "the project default",
+      prompt: "# board-navigator\nUse the board.",
+      isBuiltin: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  const dbInitSkillId = randomUUID();
+
+  async function seedDbInitSkill(db: TestDb): Promise<void> {
+    const now = new Date().toISOString();
+    await db.insert(schema.agentSkills).values({
+      id: dbInitSkillId,
+      name: "project-context-init",
+      description: "Write project context docs.",
+      prompt: "# project-context-init\nWrite CLAUDE.md.",
+      isBuiltin: true,
+      isInit: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  function onboardingIssue(projectId: string, externalKey: string | null) {
+    return {
+      projectId,
+      issueNumber: 30,
+      title: "Onboarding step",
+      description: "onboarding-filed ticket",
+      priority: "medium" as string | null,
+      externalKey,
+    };
+  }
+
+  it("launches a plugin init-skill ticket with the plugin's disk skill, not the project default", async () => {
+    const { repo, plugin, projectId, pluginService, provision, db } = await setup();
+    await pluginService.enableForProject(plugin.id, projectId);
+    await seedDefaultSkill(db);
+    const worktreePath = makeTempDir("provision-test-worktree-");
+
+    const stepId = pluginInitSkillStepId("test-safety-net", "requirement-extraction");
+    const externalKey = onboardingUnitKey(projectId, stepId);
+
+    const out = await provision.resolveAgentPromptAndSkill({
+      issue: onboardingIssue(projectId, externalKey),
+      input: { issueId: randomUUID() },
+      includeVisualProof: false,
+      workspaceId: randomUUID(),
+      worktreePath,
+      project: { repoPath: repo, defaultSkillId },
+      skillId: null,
+    });
+
+    expect(out.skillName).toBe("requirement-extraction");
+    expect(out.effectiveSkillId).toBeNull();
+    // The bundle, not just the name — materialized into the worktree, not just referenced.
+    expect(existsSync(join(worktreePath, ".claude", "skills", "requirement-extraction", "SKILL.md"))).toBe(true);
+  });
+
+  it("launches a DB init-skill ticket with that DB skill, not the project default", async () => {
+    const { repo, projectId, provision, db } = await setup();
+    await seedDefaultSkill(db);
+    await seedDbInitSkill(db);
+    const worktreePath = makeTempDir("provision-test-worktree-");
+
+    const stepId = dbInitSkillStepId(dbInitSkillId);
+    const externalKey = onboardingUnitKey(projectId, stepId);
+
+    const out = await provision.resolveAgentPromptAndSkill({
+      issue: onboardingIssue(projectId, externalKey),
+      input: { issueId: randomUUID() },
+      includeVisualProof: false,
+      workspaceId: randomUUID(),
+      worktreePath,
+      project: { repoPath: repo, defaultSkillId },
+      skillId: null,
+    });
+
+    expect(out.skillName).toBe("project-context-init");
+    expect(out.effectiveSkillId).toBe(dbInitSkillId);
+    expect(existsSync(join(worktreePath, ".claude", "skills", "project-context-init", "SKILL.md"))).toBe(true);
+  });
+
+  it("leaves the project default in place when the plugin init skill's plugin is not enabled here", async () => {
+    const { repo, projectId, provision, db } = await setup();
+    // Deliberately not enabled.
+    await seedDefaultSkill(db);
+    const worktreePath = makeTempDir("provision-test-worktree-");
+
+    const stepId = pluginInitSkillStepId("test-safety-net", "requirement-extraction");
+    const externalKey = onboardingUnitKey(projectId, stepId);
+
+    const out = await provision.resolveAgentPromptAndSkill({
+      issue: onboardingIssue(projectId, externalKey),
+      input: { issueId: randomUUID() },
+      includeVisualProof: false,
+      workspaceId: randomUUID(),
+      worktreePath,
+      project: { repoPath: repo, defaultSkillId },
+      skillId: null,
+    });
+
+    expect(out.effectiveSkillId).toBe(defaultSkillId);
+    expect(out.skillName).toBe("board-navigator");
+  });
+
+  it("does not override an explicitly chosen skill", async () => {
+    const { repo, plugin, projectId, pluginService, provision, db } = await setup();
+    await pluginService.enableForProject(plugin.id, projectId);
+    await seedDefaultSkill(db);
+    const worktreePath = makeTempDir("provision-test-worktree-");
+
+    const stepId = pluginInitSkillStepId("test-safety-net", "requirement-extraction");
+    const externalKey = onboardingUnitKey(projectId, stepId);
+
+    const out = await provision.resolveAgentPromptAndSkill({
+      issue: onboardingIssue(projectId, externalKey),
+      input: { issueId: randomUUID() },
+      includeVisualProof: false,
+      workspaceId: randomUUID(),
+      worktreePath,
+      project: { repoPath: repo, defaultSkillId },
+      skillId: defaultSkillId,
     });
 
     expect(out.effectiveSkillId).toBe(defaultSkillId);
