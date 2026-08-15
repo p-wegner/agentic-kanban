@@ -13,6 +13,28 @@
     ],
     "Stop": [
       {
+        "name": "Uncommitted worktree changes",
+        "command": "node .claude/hooks/check-uncommitted.js",
+        "enabled": true,
+        "blocking": true,
+        "timeout": 10
+      },
+      {
+        "name": "Remind Playwright",
+        "command": "node .claude/hooks/remind-playwright.js",
+        "enabled": true,
+        "blocking": true,
+        "timeout": 10
+      },
+      {
+        "name": "Remind Cleanup",
+        "command": "node .claude/hooks/remind-cleanup.js",
+        "enabled": true,
+        "blocking": true,
+        "timeout": 10,
+        "alwaysRun": true
+      },
+      {
         "name": "Vitest (edited files only)",
         "command": "node .claude/hooks/scoped-vitest.js",
         "filePatterns": ["packages/**/*.ts", "packages/**/*.tsx"],
@@ -29,28 +51,6 @@
         "blocking": true,
         "timeout": 300,
         "containerSkippable": true
-      },
-      {
-        "name": "Remind Playwright",
-        "command": "node .claude/hooks/remind-playwright.js",
-        "enabled": true,
-        "blocking": true,
-        "timeout": 10
-      },
-      {
-        "name": "Uncommitted worktree changes",
-        "command": "node .claude/hooks/check-uncommitted.js",
-        "enabled": true,
-        "blocking": true,
-        "timeout": 10
-      },
-      {
-        "name": "Remind Cleanup",
-        "command": "node .claude/hooks/remind-cleanup.js",
-        "enabled": true,
-        "blocking": true,
-        "timeout": 10,
-        "alwaysRun": true
       }
     ]
   }
