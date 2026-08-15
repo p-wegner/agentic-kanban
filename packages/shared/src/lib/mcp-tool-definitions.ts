@@ -149,18 +149,18 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
   { name: "get_butler_skill", description: "Get the butler's editable system prompt (skill) for a project. Returns the prompt text and whether it is a project-scoped override or the global default. Equivalent to CLI `butler skill get`.", category: "butler" },
   { name: "set_butler_skill", description: "Set (upsert) the butler's system prompt (skill) for a project, creating a project-scoped override. Pass an empty string to reset to the global default. Equivalent to CLI `butler skill set <prompt>`.", category: "butler" },
 
-  // plugins — the four plugin-gate tools were registered at runtime but absent here for a week (#371),
-  // so `mcp-catalog-parity` was red and any agent that consulted the catalog concluded the gate tools
-  // did not exist. Descriptions are byte-identical to `mcp-server/src/tools/plugin-gates.ts`, which the
-  // parity test asserts — copy from there, never paraphrase.
+  // plugins — descriptions are byte-identical to `mcp-server/src/tools/plugin-gates.ts`; the
+  // mcp-catalog-parity test asserts this — copy from there, never paraphrase. That test now runs
+  // as part of `pnpm check:arch`, which is merge-blocking CI (#476), so a runtime tool registered
+  // without a matching entry here fails the PR that introduces it instead of leaving this gate
+  // red for every later branch to inherit.
   { name: "list_plugin_gates", description: "List plugin-loop approval gates waiting on a HUMAN decision for ONE project (question, verification checks, artifacts, the butler's recommendation if any). Also reports loops whose finished ticket is still waiting for its merge to land. For a question spanning MULTIPLE projects use list_inbox instead — calling this once per project and stitching the results mis-attributes items to the wrong project.", category: "plugins" },
   { name: "get_plugin_gate", description: "Get the full detail of one pending plugin gate: question, actions, verification checks, artifact paths (read those files for the content), and the butler's recommendation.", category: "plugins" },
   { name: "resolve_plugin_gate", description: "Apply a HUMAN's decision to a pending plugin gate (approve / request revisions). HARD RULE: only call this after the user has EXPLICITLY stated their decision in the current conversation — never resolve a gate on your own judgment or a recommendation alone. Revision-style actions require the user's feedback text.", category: "plugins" },
   { name: "advance_plugin_loop", description: "Re-run a plugin loop's planner now (plan → dedupe → create tickets). Safe and idempotent; use after a merge landed or to refresh a loop's gate/progress state.", category: "plugins" },
   { name: "list_inbox", description: "Everything blocked on a HUMAN across ALL projects at once: plugin-loop gates, finished-but-unlanded loop merges, unanswered agent questions and pending tool approvals — each carrying its own project. USE THIS for any cross-project \"what needs my attention / what is waiting on me\" question instead of calling the per-project tools once per project; fanning out by hand mis-attributes items to the wrong project.", category: "plugins" },
 
-  // plugin onboarding — added at runtime by #390 but not catalogued, which re-broke `mcp-catalog-parity`
-  // in exactly the way the note above describes. Same rule applies: descriptions are byte-identical to
+  // plugin onboarding — same rule as above: descriptions are byte-identical to
   // `mcp-server/src/tools/plugin-onboarding.ts` (the parity test asserts it) — copy, never paraphrase.
   { name: "enable_plugin", description: "Enable an installed plugin for ONE project. Enabling SCAFFOLDS the plugin's profile into the output repo, so if the plugin should write to a sidecar repo rather than the product repo, pass `location: \"sidecar\"` HERE — setting it afterwards leaves the scaffold stranded in the wrong repo (#318). Use list_plugins to get the plugin row id.", category: "plugins" },
   { name: "set_plugin_output_location", description: "Set where a plugin writes its output for one project: \"leading\" (the product repo) or \"sidecar\" (a separate <slug>-requirements repo). Prefer passing `location` to enable_plugin instead — enabling scaffolds, so changing the location afterwards does not move what was already written.", category: "plugins" },
