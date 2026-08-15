@@ -333,7 +333,13 @@ export function createWorkspaceProvisionService(deps: {
     const parsed = parseInitSkillStepId(unit.stepId);
     if (!parsed) return none;
     if (parsed.source === "db") {
-      return { skillId: parsed.skillId, diskSkillName: null };
+      try {
+        const rows = await crudRepo.getAgentSkillById(parsed.skillId, database);
+        return rows.length > 0 ? { skillId: parsed.skillId, diskSkillName: null } : none;
+      } catch (err) {
+        console.warn(`[workspaces] onboarding init-skill resolution failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+        return none;
+      }
     }
     try {
       const row = (await listPluginRows(database)).find((r) => r.pluginId === parsed.pluginSlug);
