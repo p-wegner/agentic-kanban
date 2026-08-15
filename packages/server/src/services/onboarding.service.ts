@@ -38,12 +38,15 @@ export function onboardingStatePreferenceKey(projectId: string): string {
   return `onboarding_state_${projectId}`;
 }
 
-type ListedPlugin = Awaited<ReturnType<PluginService["listPlugins"]>>[number];
+type MarketplaceEntry = Awaited<ReturnType<PluginService["listMarketplace"]>>["entries"][number];
 type ListedSkill = Awaited<ReturnType<ReturnType<typeof createAgentSkillService>["listSkills"]>>[number];
 
 export interface OnboardingServiceDeps {
   database: Database;
-  pluginService: Pick<PluginService, "listPlugins" | "enableForProject">;
+  pluginService: Pick<
+    PluginService,
+    "listMarketplace" | "installPlugin" | "enableForProject" | "getScaffoldForm"
+  >;
   agentSkillService: Pick<ReturnType<typeof createAgentSkillService>, "listSkills">;
   createIssuesBatch: (
     projectId: string,
@@ -127,8 +130,20 @@ export function createOnboardingService(deps: OnboardingServiceDeps) {
     }
   }
 
-  function pluginStepId(plugin: ListedPlugin): string {
-    return `plugin:${plugin.pluginId}`;
+  /** Stable across a plan rebuild: the manifest slug when known, else the (unique) git URL. */
+  function pluginStepId(entry: MarketplaceEntry): string {
+    return `plugin:${entry.slug ?? entry.gitUrl ?? entry.name}`;
+  }
+
+  /** Unfilled `TODO:` markers in an enabled plugin's live scaffold file, for this project. */
+  async function pluginScaffoldPlaceholders(entry: MarketplaceEntry, projectId: string): Promise<number> {
+    if (!entry.installed || !entry.installedId || !entry.enabled) return 0;
+    try {
+      const form = await pluginService.getScaffoldForm(entry.installedId, projectId);
+      return form.exists ? form.fields.length : 0;
+    } catch {
+      return 0; // plugin declares no scaffold, or it can't be read — nothing to surface
+    }
   }
 
   function initSkillStepId(skill: ListedSkill): string {
@@ -164,18 +179,23 @@ export function createOnboardingService(deps: OnboardingServiceDeps) {
       });
     }
 
-    const plugins = await pluginService.listPlugins(projectId);
-    for (const plugin of plugins) {
-      const id = pluginStepId(plugin);
+    // Marketplace, not just installed rows (#473): a plugin never installed on this machine
+    // is exactly what a freshly imported project should be offered — the panel's "Available"
+    // section already knows about it, so the wizard would otherwise hide it entirely.
+    const { entries: marketplace } = await pluginService.listMarketplace(projectId);
+    for (const entry of marketplace) {
+      const id = pluginStepId(entry);
       steps.push({
         id,
         kind: "plugin",
-        title: `Enable "${plugin.name}"`,
-        rationale: `Turns on the "${plugin.name}" plugin's skills/loops/scaffold for this project.`,
+        title: `Enable "${entry.name}"`,
+        rationale: entry.description || `Turns on the "${entry.name}" plugin's skills/loops/scaffold for this project.`,
         optional: true,
-        pluginRowId: plugin.id,
-        pluginSlug: plugin.pluginId,
-        status: resolveStatus(id, Boolean((plugin as { enabled?: boolean }).enabled), skipped),
+        pluginRowId: entry.installedId,
+        pluginSlug: entry.slug,
+        installSource: entry.installed ? null : entry.gitUrl,
+        scaffoldPlaceholders: await pluginScaffoldPlaceholders(entry, projectId),
+        status: resolveStatus(id, entry.enabled, skipped),
       });
     }
 
@@ -305,9 +325,23 @@ export function createOnboardingService(deps: OnboardingServiceDeps) {
       case "config":
         await applyConfigStep(projectId, step.configKey, input);
         break;
-      case "plugin":
-        await pluginService.enableForProject(step.pluginRowId, projectId);
+      case "plugin": {
+        // #473: enabling scaffolds immediately (#318), so the leading/sidecar choice must
+        // arrive WITH the enable call, exactly like the plugin panel — never defaulted here.
+        const location = input?.location;
+        if (location !== "leading" && location !== "sidecar") {
+          throw new OnboardingError("input.location must be \"leading\" or \"sidecar\"", "BAD_REQUEST");
+        }
+        let pluginRowId = step.pluginRowId;
+        if (!pluginRowId) {
+          if (!step.installSource) {
+            throw new OnboardingError("This plugin has no install source", "BAD_REQUEST");
+          }
+          pluginRowId = (await pluginService.installPlugin({ source: step.installSource })).id;
+        }
+        await pluginService.enableForProject(pluginRowId, projectId, location);
         break;
+      }
       case "init-skill":
         await fileOnboardingTicket(projectId, step.id, {
           title: `Run skill: ${step.skillName}`,
