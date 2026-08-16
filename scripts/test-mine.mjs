@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // test:mine — the fast, opinionated unit-test loop for day-to-day iteration.
 //
 // Runs ONLY the suites that are reliably green in this environment (main checkout
@@ -213,14 +212,59 @@ const scopedFiles = fileScopeRaw
   ? fileScopeRaw.split(",").map((s) => s.trim().replace(/\\/g, "/")).filter(Boolean)
   : [];
 
-/** The changed files under a package, as paths relative to that package's directory. */
-function ownedChangedFiles(pkgDir) {
+/**
+ * The changed files under a package, as paths relative to that package's directory.
+ *
+ * Pure function of its arguments (no module-level state) so it is unit-testable in isolation —
+ * `files` defaults to the `KANBAN_TEST_FILES`-derived `scopedFiles` and `exists` to a real
+ * filesystem check, but a test can inject both.
+ */
+export function ownedChangedFiles(pkgDir, files = scopedFiles, exists = (p) => existsSync(resolve(ROOT, p))) {
   const prefix = `${pkgDir.replace(/\\/g, "/")}/`;
-  return scopedFiles
+  return files
     .filter((f) => f.startsWith(prefix))
     .map((f) => f.slice(prefix.length))
     // A deleted file cannot be related to anything and makes `vitest related` error out.
-    .filter((rel) => existsSync(resolve(ROOT, pkgDir, rel)));
+    .filter((rel) => exists(`${pkgDir}/${rel}`));
+}
+
+/**
+ * Packages whose OWN vitest config resolves `@agentic-kanban/shared` to the shared package's
+ * `src/` directly (both do — `vitest.config.ts` aliases it), so `vitest related` run from that
+ * package can walk straight through the alias into a shared source file (#537 leak A).
+ *
+ * Without this, a `packages/shared`-only diff expands to server/mcp-server as DOWNSTREAM
+ * dependents (`changed-packages.ts`), but `ownedChangedFiles` only matches files under a
+ * package's own directory — so server/mcp-server own nothing changed and fall back to their
+ * full suites even though shared is the most frequently touched package (imported by
+ * `git-service`, `settings-registry`, `ticket-context`, ...).
+ */
+export const UPSTREAM_DEPENDENCIES = {
+  server: ["packages/shared"],
+  "mcp-server": ["packages/shared"],
+};
+
+/**
+ * Changed files owned by an UPSTREAM package this package depends on, given as ABSOLUTE paths
+ * (resolved against `root`) — `vitest related` resolves them through the alias regardless of
+ * which package's cwd it runs from, as long as the path is one vitest can stat.
+ *
+ * Pure function of its arguments so it is unit-testable without touching the real filesystem.
+ */
+export function upstreamChangedFiles(
+  label,
+  files = scopedFiles,
+  exists = (p) => existsSync(resolve(ROOT, p)),
+  root = ROOT,
+) {
+  const upstreamDirs = UPSTREAM_DEPENDENCIES[label] ?? [];
+  const result = [];
+  for (const upstreamDir of upstreamDirs) {
+    for (const rel of ownedChangedFiles(upstreamDir, files, exists)) {
+      result.push(resolve(root, upstreamDir, rel));
+    }
+  }
+  return result;
 }
 
 function runPackage({ dir, label, exclude }, mode = null) {
@@ -284,22 +328,41 @@ if (scopeLabels && toRun !== PACKAGES) {
   console.log(`[test:mine] scoped to: ${toRun.map((p) => p.label).join(", ")} (KANBAN_TEST_PACKAGES)`);
 }
 
-let failed = false;
-for (const pkg of toRun) {
-  const owned = scopedFiles.length > 0 ? ownedChangedFiles(pkg.dir) : [];
-  if (owned.length === 0) {
-    // Nothing of this package changed (or no file scope at all) — full suite, as before.
-    if (await runPackage(pkg) !== 0) failed = true;
-    continue;
+// Guarded so this file can be `import`ed (e.g. by unit tests exercising the pure functions
+// above) without spawning real vitest processes. `pnpm test:mine` runs this file directly, so
+// `process.argv[1]` is its own path in that case.
+if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
+  let failed = false;
+  for (const pkg of toRun) {
+    const owned = scopedFiles.length > 0 ? ownedChangedFiles(pkg.dir) : [];
+    let relatedFiles = owned;
+    if (owned.length === 0 && scopedFiles.length > 0) {
+      // Nothing of THIS package's own files changed — it may still be in scope purely as a
+      // downstream dependent (e.g. server/mcp-server pulled in by a shared-only diff). Relate
+      // against the upstream package's changed files instead of falling back to the full suite.
+      const upstream = upstreamChangedFiles(pkg.label);
+      if (upstream.length > 0) {
+        console.log(`\n[test:mine] ${pkg.label}: no own changes; file-scoped to ${upstream.length} upstream changed file(s)`);
+        if (await runPackage(pkg, { kind: "related", files: upstream }) !== 0) failed = true;
+        const guards = (ALWAYS_RUN_TESTS[pkg.label] ?? []).filter((f) => existsSync(resolve(ROOT, pkg.dir, f)));
+        if (guards.length > 0 && await runPackage(pkg, { kind: "guards", files: guards }) !== 0) failed = true;
+        continue;
+      }
+    }
+    if (relatedFiles.length === 0) {
+      // Nothing of this package changed (or no file scope at all) — full suite, as before.
+      if (await runPackage(pkg) !== 0) failed = true;
+      continue;
+    }
+    console.log(`\n[test:mine] ${pkg.label}: file-scoped to ${relatedFiles.length} changed file(s) (KANBAN_TEST_FILES)`);
+    if (await runPackage(pkg, { kind: "related", files: relatedFiles }) !== 0) failed = true;
+    const guards = (ALWAYS_RUN_TESTS[pkg.label] ?? []).filter((f) => existsSync(resolve(ROOT, pkg.dir, f)));
+    if (guards.length > 0 && await runPackage(pkg, { kind: "guards", files: guards }) !== 0) failed = true;
   }
-  console.log(`\n[test:mine] ${pkg.label}: file-scoped to ${owned.length} changed file(s) (KANBAN_TEST_FILES)`);
-  if (await runPackage(pkg, { kind: "related", files: owned }) !== 0) failed = true;
-  const guards = (ALWAYS_RUN_TESTS[pkg.label] ?? []).filter((f) => existsSync(resolve(ROOT, pkg.dir, f)));
-  if (guards.length > 0 && await runPackage(pkg, { kind: "guards", files: guards }) !== 0) failed = true;
-}
 
-if (failed) {
-  console.error("\n[test:mine] One or more packages had failing tests.");
-  process.exit(1);
+  if (failed) {
+    console.error("\n[test:mine] One or more packages had failing tests.");
+    process.exit(1);
+  }
+  console.log("\n[test:mine] All reliable suites passed.");
 }
-console.log("\n[test:mine] All reliable suites passed.");

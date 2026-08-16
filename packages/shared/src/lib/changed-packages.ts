@@ -23,8 +23,15 @@ const PACKAGE_PREFIXES: ReadonlyArray<{ prefix: string; label: TestPackageLabel 
 
 /**
  * Paths that are owned by no single package and can change the behaviour of ANY suite:
- * root build/test config, the shared dependency graph, CI, and the gate's own scripts.
- * A diff touching one of these forfeits scoping entirely.
+ * root build/test config, the shared dependency graph, and the gate's own scripts. A diff
+ * touching one of these forfeits scoping entirely.
+ *
+ * `.github/**` is deliberately NOT here (#537 leak B): the gate is a local `vitest`/`build`
+ * run, it never executes CI workflow config, so a workflow-file edit cannot change what the
+ * gate's own commands do — voiding scope for it bought nothing but a wasted full run (#476
+ * paid a 40-minute gate partly for exactly this). `scripts/**` is narrowed to only the
+ * scripts the gate itself invokes or that its own test suites read — most of `scripts/` (e.g.
+ * `scripts/board-monitor/`) has no bearing on what `pnpm test:mine && pnpm build` does.
  */
 const GLOBAL_SCOPE_BREAKERS: ReadonlyArray<RegExp> = [
   /^package\.json$/,
@@ -33,8 +40,22 @@ const GLOBAL_SCOPE_BREAKERS: ReadonlyArray<RegExp> = [
   /^tsconfig(\.[a-z]+)?\.json$/,
   /^vitest\.[a-z.]*config\.[cm]?[jt]s$/,
   /^\.dependency-cruiser\.cjs$/,
-  /^scripts\//,
+  /^scripts\/test-mine\.mjs$/,
+  /^scripts\/check-god-modules\.mjs$/,
+  /^scripts\/build-.*\.mjs$/,
+  /^scripts\/copy-assets\.mjs$/,
+];
+
+/**
+ * Paths that are owned by no package but ALSO cannot affect what the gate's own commands
+ * (`pnpm test:mine && pnpm build`) do, so a diff touching only these can still be scoped
+ * (#537 leak B). This is narrower than "not a breaker" — it is an explicit allowlist, not the
+ * absence of one, because the default for an unrecognised path must stay fail-open (see the
+ * `!owner` branch below). CI workflow config is the concrete case: the gate never executes it.
+ */
+const IGNORABLE_UNOWNED_PATHS: ReadonlyArray<RegExp> = [
   /^\.github\//,
+  /^scripts\/board-monitor\//,
 ];
 
 /**
@@ -97,6 +118,7 @@ export function scopedTestPackages(changedFiles: readonly string[]): TestPackage
     const path = normalise(raw);
     if (!path) continue;
     if (GLOBAL_SCOPE_BREAKERS.some((re) => re.test(path))) return null;
+    if (IGNORABLE_UNOWNED_PATHS.some((re) => re.test(path))) continue;
     const owner = PACKAGE_PREFIXES.find((p) => path.startsWith(p.prefix));
     // A tracked file under no package (a root doc, a stray config, a new top-level dir) is
     // something this map does not model — fail open rather than guess.

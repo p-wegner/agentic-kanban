@@ -38,9 +38,27 @@ describe("scopedTestPackages", () => {
     ["vitest.workspace.ts"],
     [".dependency-cruiser.cjs"],
     ["scripts/test-mine.mjs"],
-    [".github/workflows/arch-gate.yml"],
+    ["scripts/check-god-modules.mjs"],
+    ["scripts/build-server.mjs"],
+    ["scripts/copy-assets.mjs"],
   ])("refuses to scope when the diff touches the global config %s", (file) => {
     expect(scopedTestPackages([file, "packages/client/src/App.tsx"])).toBeNull();
+  });
+
+  /**
+   * #537 leak B: `.github/**` never runs through the gate's own commands
+   * (`pnpm test:mine && pnpm build`), so it must not void scoping — and most of
+   * `scripts/**` (e.g. the board-monitor loop) has nothing to do with the gate either.
+   */
+  it("does NOT treat .github/** or an unrelated scripts/ file as a global scope breaker", () => {
+    expect(scopedTestPackages([".github/workflows/arch-gate.yml", "packages/client/src/App.tsx"])).toEqual([
+      "shared",
+      "client",
+    ]);
+    expect(scopedTestPackages(["scripts/board-monitor/loop.sh", "packages/client/src/App.tsx"])).toEqual([
+      "shared",
+      "client",
+    ]);
   });
 
   it("refuses to scope a path owned by no known package", () => {
