@@ -7,7 +7,7 @@ import type { BoardEvents } from "../services/board-events.js";
 import { PREF_RECONCILER_ZOMBIE_FIX_ENABLED } from "../constants/preference-keys.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { getMergeJob } from "../services/merge-job.service.js";
-import { startPeriodicSweep, type PeriodicSweepHandle } from "./periodic-sweep.js";
+import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 
 /** Grace window: a fix-and-merge session must be this old before it is a candidate. */
 const GRACE_WINDOW_MS = 60_000;
@@ -208,7 +208,7 @@ export function startZombieFixSessionReconciler(
 ): PeriodicSweepHandle {
   stopZombieFixSessionReconciler();
   activeZombieFixSweep = startPeriodicSweep({
-    tag: "zombie-fix",
+    name: "zombie-fix",
     tick: () => reconcileZombieFixSessions(deps),
     bootDelayMs: 30_000,
     intervalMs,

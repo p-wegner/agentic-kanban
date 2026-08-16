@@ -10,7 +10,7 @@ import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.servic
 import { listWorkspaceRepos, type RepoRow } from "../repositories/repo.repository.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import { startPeriodicSweep, type PeriodicSweepHandle } from "./periodic-sweep.js";
+import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 
 const REAPABLE_WORKSPACE_STATUSES = ["idle", "reviewing", "blocked"];
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
@@ -311,7 +311,7 @@ export function startTerminalWorkspaceReaper(
 ): PeriodicSweepHandle {
   stopTerminalWorkspaceReaper();
   activeTerminalReaperSweep = startPeriodicSweep({
-    tag: "terminal-workspace-reaper",
+    name: "terminal-workspace-reaper",
     // `onTick` is the test seam — it replaces the sweep, not just its logging.
     tick: deps.onTick ?? (() => reapTerminalWorkspaces(deps)),
     bootDelayMs: 45_000,
