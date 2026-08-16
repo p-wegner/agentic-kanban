@@ -3,7 +3,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { RepoMergeStatusResponse, WorkspaceHandoffResponse } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { fetchWorkspaceRepoStatus } from "../lib/workspaceRepoStatusQuery.js";
-import { BOARD_WS_EVENT, type BoardWsEventDetail } from "../lib/useBoardEvents.js";
 import {
   reduceRepoMergeStatusDelta,
   reduceConflictsDelta,
@@ -12,6 +11,7 @@ import {
   type CrossRepoActivityEntry,
 } from "../lib/crossRepoActivity.js";
 import { LEADING_REPO_LABEL } from "../lib/groupConflictsByRepo.js";
+import { useBoardWsRefresh } from "./useBoardWsRefresh.js";
 
 /**
  * WS `board_changed` reasons that can move cross-repo state (a merge landing, a
@@ -176,30 +176,13 @@ export function useCrossRepoActivity(
   useEffect(() => {
     if (!projectId) return;
     void refresh();
-    let debounceTimer: number | null = null;
-    const scheduleRefresh = () => {
-      if (debounceTimer != null) window.clearTimeout(debounceTimer);
-      debounceTimer = window.setTimeout(() => {
-        debounceTimer = null;
-        if (inFlightRef.current) {
-          // Still snapshotting — re-arm so the event's changes are picked up after.
-          scheduleRefresh();
-          return;
-        }
-        void refresh();
-      }, 250);
-    };
-    const onWsEvent = (ev: Event) => {
-      const detail = (ev as CustomEvent<BoardWsEventDetail>).detail;
-      if (!detail || detail.projectId !== projectId) return;
-      if (shouldRefetch(detail.reason)) scheduleRefresh();
-    };
-    window.addEventListener(BOARD_WS_EVENT, onWsEvent);
-    return () => {
-      window.removeEventListener(BOARD_WS_EVENT, onWsEvent);
-      if (debounceTimer != null) window.clearTimeout(debounceTimer);
-    };
   }, [projectId, refresh]);
+
+  // #514: the debounce + re-arm-while-in-flight logic that used to live here is the
+  // controller's job now. `refresh` still guards itself with inFlightRef, so a call that
+  // arrives mid-snapshot is a no-op there; the controller is what makes sure the event
+  // is not simply LOST in that case — it re-arms once the in-flight call settles.
+  useBoardWsRefresh({ projectId, shouldRefetch, refresh });
 
   // Reset accumulated state when the project changes.
   useEffect(() => {

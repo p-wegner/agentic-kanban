@@ -8,11 +8,11 @@
  * Rendered inline above the Butler chat so the user gets one place to clear
  * agent-blocking questions.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { apiPost, apiDelete } from "../lib/api.js";
 import { getAgentQuestions, invalidateAgentQuestions } from "../lib/agentQuestionsStore.js";
 import { startStaggeredPoll } from "../lib/pollScheduler.js";
-import { BOARD_WS_EVENT, type BoardWsEventDetail } from "../lib/useBoardEvents.js";
+import { useBoardWsRefresh } from "../hooks/useBoardWsRefresh.js";
 
 export interface AgentQuestionOption {
   label: string;
@@ -570,47 +570,46 @@ const QUESTION_EVENT_REASONS = new Set(["session_completed", "session_stopped", 
  *  while polling 3x less. */
 export function useAgentQuestionsCount(projectId: string | null): number {
   const [count, setCount] = useState(0);
+  // A generation counter rather than the old effect-local `cancelled` flag: `load` now
+  // outlives any single effect run, so "is this response still wanted?" has to be keyed
+  // to the project it was issued for, not to a closure that has since been torn down.
+  const generationRef = useRef(0);
+
+  const load = useCallback(async () => {
+    if (!projectId) return;
+    const generation = ++generationRef.current;
+    try {
+      const questions = await getAgentQuestions(projectId);
+      if (generationRef.current === generation) setCount(questions.length);
+    } catch {
+      if (generationRef.current === generation) setCount(0);
+    }
+  }, [projectId]);
+
   useEffect(() => {
     if (!projectId) {
+      generationRef.current++;
       setCount(0);
       return;
     }
-    const pid = projectId;
-    let cancelled = false;
-    async function load() {
-      try {
-        const questions = await getAgentQuestions(pid);
-        if (!cancelled) setCount(questions.length);
-      } catch {
-        if (!cancelled) setCount(0);
-      }
-    }
     void load();
     const poll = startStaggeredPoll(() => void load(), 60_000);
+    return () => poll.stop();
+  }, [projectId, load]);
 
-    // Event-driven refresh: a session just ended, so questions may have
-    // appeared. Trailing debounce collapses event cascades (3-6 board events
-    // within 1-2s observed on merge/exit) into a single fresh fetch.
-    let debounce: ReturnType<typeof setTimeout> | null = null;
-    const onWsEvent = (event: Event) => {
-      const detail = (event as CustomEvent<BoardWsEventDetail>).detail;
-      if (!detail || detail.projectId !== pid) return;
-      if (!QUESTION_EVENT_REASONS.has(detail.reason)) return;
-      if (debounce !== null) clearTimeout(debounce);
-      debounce = setTimeout(() => {
-        debounce = null;
-        invalidateAgentQuestions(pid);
-        void load();
-      }, 3_000);
-    };
-    window.addEventListener(BOARD_WS_EVENT, onWsEvent);
+  // Event-driven refresh (#514): a session just ended, so questions may have appeared.
+  // The 3s window is this badge's own — the endpoint costs the server ~500ms per call
+  // and a merge/exit emits 3-6 board events within 1-2s — so it is passed explicitly
+  // rather than taking the 250ms default.
+  useBoardWsRefresh({
+    projectId,
+    shouldRefetch: (reason) => QUESTION_EVENT_REASONS.has(reason),
+    refresh: () => {
+      if (projectId) invalidateAgentQuestions(projectId);
+      return load();
+    },
+    debounceMs: 3_000,
+  });
 
-    return () => {
-      cancelled = true;
-      poll.stop();
-      if (debounce !== null) clearTimeout(debounce);
-      window.removeEventListener(BOARD_WS_EVENT, onWsEvent);
-    };
-  }, [projectId]);
   return count;
 }
