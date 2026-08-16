@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { startStaggeredPoll } from "../lib/pollScheduler.js";
 
 /** Mirrors the WorkerView the /api/workers list route returns. */
 interface WorkerRow {
@@ -72,8 +73,9 @@ export function WorkerFleetPanel({ onClose }: WorkerFleetPanelProps) {
   useEffect(() => {
     load();
     // Heartbeat staleness is time-derived, so refresh while the panel is open.
-    const timer = setInterval(load, 15000);
-    return () => clearInterval(timer);
+    // #518: staggered + visibility-gated like the other background pollers.
+    const poll = startStaggeredPoll(load, 15000);
+    return () => poll.stop();
   }, [load]);
 
   const mintPairingToken = async () => {
