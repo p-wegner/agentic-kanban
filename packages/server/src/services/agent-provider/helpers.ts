@@ -433,3 +433,51 @@ export function resolvePiExecutable(command: string, fs: FileSystem = nodeFileSy
 
   return candidates.find((candidate) => fs.existsSync(candidate));
 }
+
+// --- Mock-agent launch resolution (#526) -------------------------------------------
+//
+// All four provider adapters open-coded the same two lines plus the same mock branch,
+// and `agent-profile-health.service.ts` sniffed "mock-agent" a fifth way. The risk is
+// not the duplication itself but that `isMockAgent` gates whether REAL provider flags
+// are added: a copy that drifts sends production arguments to the mock binary, or the
+// reverse, and the failure surfaces as an unexplained agent launch failure.
+
+/** Whether a resolved agent command is the mock agent. The single sniff. */
+export function isMockAgentCommand(command: string | null | undefined): boolean {
+  return (command ?? "").includes("mock-agent");
+}
+
+export interface MockLaunchResolution {
+  /** True when this launch must use the mock binary's argument shape. */
+  isMockAgent: boolean;
+  /** The binary to spawn: AGENT_COMMAND override, explicit command, else the default. */
+  command: string;
+  /**
+   * The mock binary's own arguments for this launch. Empty when not mocking, so a
+   * caller can splice unconditionally.
+   */
+  mockArgs: string[];
+}
+
+/**
+ * Resolve the mock-vs-real launch shape shared by every provider adapter.
+ *
+ * `AGENT_COMMAND` forces mock mode regardless of the command's name — that is how the
+ * E2E harness substitutes the agent — which is why the check is an OR and not just a
+ * name sniff.
+ */
+export function resolveMockLaunch(
+  options: { agentCommand?: string | null; providerSessionId?: string | null; keepAlive?: boolean },
+  defaultBinary: string,
+): MockLaunchResolution {
+  const { agentCommand, providerSessionId, keepAlive } = options;
+  const isMockAgent = !!process.env.AGENT_COMMAND || isMockAgentCommand(agentCommand);
+  const command = process.env.AGENT_COMMAND || agentCommand || defaultBinary;
+
+  const mockArgs: string[] = [];
+  if (isMockAgent) {
+    if (providerSessionId) mockArgs.push("--resume", providerSessionId);
+    if (keepAlive) mockArgs.push("--profile", "multi-turn");
+  }
+  return { isMockAgent, command, mockArgs };
+}
