@@ -12,23 +12,17 @@ import { projects as projectsTable } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { verifyBaseBranchHealth } from "../services/base-branch-health.service.js";
+import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 
 const DEFAULT_INTERVAL_MS = 30 * 60 * 1000;
 const INITIAL_DELAY_MS = 2 * 60 * 1000;
 
-let activeTimeout: ReturnType<typeof setTimeout> | null = null;
-let activeInterval: ReturnType<typeof setInterval> | null = null;
+let activeSweep: PeriodicSweepHandle | null = null;
 let tickInFlight = false;
 
 export function stopBaseBranchHealthReconciler(): void {
-  if (activeTimeout !== null) {
-    clearTimeout(activeTimeout);
-    activeTimeout = null;
-  }
-  if (activeInterval !== null) {
-    clearInterval(activeInterval);
-    activeInterval = null;
-  }
+  activeSweep?.stop();
+  activeSweep = null;
 }
 
 /** Run one pass: verify every registered project's base branch, sequentially (never overlapping the build gate). */
@@ -56,15 +50,10 @@ export async function runBaseBranchHealthCheckOnce(database: Database = db): Pro
 /** Start the periodic base-branch health reconciler (background-services registry). */
 export function startBaseBranchHealthReconciler(database: Database = db, intervalMs = DEFAULT_INTERVAL_MS): void {
   stopBaseBranchHealthReconciler();
-  const tick = () => {
-    runBaseBranchHealthCheckOnce(database).catch((err) =>
-      console.warn("[base-branch-health] tick error:", err instanceof Error ? err.message : String(err)),
-    );
-  };
-  const timer = setTimeout(tick, INITIAL_DELAY_MS);
-  const interval = setInterval(tick, intervalMs);
-  activeTimeout = timer;
-  activeInterval = interval;
-  timer.unref?.();
-  interval.unref?.();
+  activeSweep = startPeriodicSweep({
+    name: "base-branch-health",
+    intervalMs,
+    bootDelayMs: INITIAL_DELAY_MS,
+    tick: () => runBaseBranchHealthCheckOnce(database),
+  });
 }
