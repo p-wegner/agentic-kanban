@@ -43,7 +43,7 @@ import { resolveWorkflowStart, buildTransitionBlock } from "@agentic-kanban/shar
 import { loadProjectRuntimeConfig } from "./project-runtime-config.service.js";
 import { WorkspaceError, type CreateWorkspaceInput, type GitService } from "./workspace-internals.js";
 import { buildContextPrimer } from "./context-packer.service.js";
-import { getStackProfile } from "./stack-profile.service.js";
+import { getStackProfile, verifyScriptPrefKey } from "./stack-profile.service.js";
 import { resolveBoardFeedbackRouting } from "./board-feedback-routing.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -481,6 +481,17 @@ exit 1
     } catch (err) {
       console.warn(`[workspaces] stack-profile read failed (non-fatal): ${errorMessage(err)}`);
     }
+    // #575: the gate reads the `verify_script_<projectId>` preference FIRST and only
+    // falls back to the profile derivation. Read the SAME pref here so the ticket's
+    // "this is the exact command the board runs" promise is true on projects that have
+    // an override (onboarding writes one; the projects route's AI generation writes one;
+    // operators edit it by hand).
+    let verifyCommandOverride: string | null = null;
+    try {
+      verifyCommandOverride = await getPreference(verifyScriptPrefKey(issue.projectId), database);
+    } catch (err) {
+      console.warn(`[workspaces] verify_script pref read failed (non-fatal): ${errorMessage(err)}`);
+    }
     // Best-effort like the stack profile: a builder still gets its ticket even if we
     // can't tell it where to route board feedback.
     let boardFeedback = null;
@@ -495,6 +506,7 @@ exit 1
       description: issue.description,
       contextPrimer,
       stackProfile,
+      verifyCommandOverride,
       additionalRepos,
       serviceStack,
       boardFeedback,

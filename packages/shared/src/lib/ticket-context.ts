@@ -16,6 +16,20 @@ export type TicketContext = {
    */
   stackProfile?: StackProfile | null;
   /**
+   * The verify command the merge gate will ACTUALLY run (#575).
+   *
+   * The gate reads the `verify_script_<projectId>` preference FIRST and only falls back
+   * to the stack-profile derivation. Rendering the derived command unconditionally made
+   * the file's own "this is the same command the board runs" promise false on every
+   * project with an override — onboarding writes one, the projects route's AI generation
+   * writes one, and operators edit it by hand. The builder then verified with command A
+   * while the gate ran command B.
+   *
+   * Pass the resolved effective command (pref ?? derived); null/undefined falls back to
+   * the derivation, which is correct when no override exists.
+   */
+  verifyCommandOverride?: string | null;
+  /**
    * Multi-repo projects: the sibling worktrees created for the project's additional
    * repos (same branch as this worktree). Rendered so the agent knows it may edit
    * them and where they live.
@@ -82,7 +96,10 @@ export type BoardFeedbackRouting =
  * when the profile carries nothing actionable. Driven-project builders otherwise guess
  * their build/test/dev commands; this hands them the detected ones up front.
  */
-export function buildStackProfileSection(profile: StackProfile | null | undefined): string | null {
+export function buildStackProfileSection(
+  profile: StackProfile | null | undefined,
+  verifyCommandOverride?: string | null,
+): string | null {
   if (!profile) return null;
   const rows: Array<[string, string | null]> = [
     ["Quick test (fast feedback)", profile.quickTestCommand],
@@ -121,7 +138,14 @@ export function buildStackProfileSection(profile: StackProfile | null | undefine
   // gate will run against this branch, so the builder must be told it verbatim — and told
   // how to run it, since the stack-specific traps (PowerShell native-stderr, raw XML reports)
   // are what turned the jvm-gradle cohort into the fleet's re-run outlier.
-  const verify = deriveVerifyCommandPlan(profile);
+  // #575: the OVERRIDE wins, because that is what the gate runs.
+  const derived = deriveVerifyCommandPlan(profile);
+  const overrideCommand = verifyCommandOverride?.trim();
+  // Keep the derived plan's rules/onFailure guidance (the stack traps are still true —
+  // the override only changes WHICH command runs), but render the command the gate uses.
+  const verify = overrideCommand && derived
+    ? { ...derived, command: overrideCommand }
+    : derived;
   if (verify) {
     lines.push(
       "",
@@ -342,7 +366,7 @@ export function buildTicketContextMarkdown(ctx: TicketContext): string {
     ctx.description?.trim() ? ctx.description.trim() : "_(No description provided.)_",
     "",
   ];
-  const stackSection = buildStackProfileSection(ctx.stackProfile);
+  const stackSection = buildStackProfileSection(ctx.stackProfile, ctx.verifyCommandOverride);
   if (stackSection) {
     lines.push(stackSection);
     lines.push("");

@@ -99,6 +99,44 @@ describe("ticket-context", () => {
     });
   });
 
+  describe("verify command vs the merge gate (#575)", () => {
+    it("renders the OVERRIDE when one exists — that is what the gate runs", () => {
+      // The gate reads `verify_script_<projectId>` FIRST (pre-merge-gate.service.ts:309)
+      // and only falls back to the profile derivation. Rendering the derived command
+      // unconditionally made this file's own "the same command the board runs" promise
+      // false on every project with an override.
+      const section = buildStackProfileSection(makeProfile(), "pnpm check:arch && pnpm typecheck && pnpm test:mine");
+      expect(section).toContain("pnpm check:arch && pnpm typecheck && pnpm test:mine");
+    });
+
+    it("falls back to the derived command when there is no override", () => {
+      const withOverride = buildStackProfileSection(makeProfile(), null);
+      const plain = buildStackProfileSection(makeProfile());
+      expect(withOverride).toBe(plain);
+    });
+
+    it("ignores a blank/whitespace override rather than promising an empty command", () => {
+      const plain = buildStackProfileSection(makeProfile());
+      expect(buildStackProfileSection(makeProfile(), "   ")).toBe(plain);
+      expect(buildStackProfileSection(makeProfile(), "")).toBe(plain);
+    });
+
+    it("keeps the derived stack RULES alongside an overridden command", () => {
+      // The override changes WHICH command runs, not the stack's traps (PowerShell
+      // native-stderr, raw XML reports) — dropping those was the fleet's re-run outlier.
+      const plain = buildStackProfileSection(makeProfile()) ?? "";
+      const overridden = buildStackProfileSection(makeProfile(), "custom-verify.sh") ?? "";
+      const ruleLines = plain
+        .split(String.fromCharCode(10))
+        .map((l) => l.trimEnd())
+        .filter((l) => l.startsWith("- ") && !l.includes("Quick test"));
+      expect(ruleLines.length).toBeGreaterThan(0);
+      for (const rule of ruleLines.slice(0, 3)) {
+        expect(overridden).toContain(rule);
+      }
+    });
+  });
+
   describe("buildStackProfileSection", () => {
     it("returns null for a null/empty profile", () => {
       expect(buildStackProfileSection(null)).toBeNull();
