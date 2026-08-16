@@ -4,6 +4,7 @@ import { requestIssueFocus, requestProjectSelection, requestViewNavigation } fro
 import { planInboxNavigation } from "../lib/inboxNavigation.js";
 import { markProgrammaticNavigation } from "../lib/navigationBurst.js";
 import { usePluginViewStore } from "../stores/pluginViewStore.js";
+import { startStaggeredPoll, type PollHandle } from "../lib/pollScheduler.js";
 
 /** GET /api/inbox (#302) — everything blocked on a human, across ALL projects. */
 export interface InboxItem {
@@ -41,7 +42,7 @@ export const INBOX_KIND_MARK: Record<InboxItem["kind"], string> = {
  */
 let items: InboxItem[] | null = null;
 let inFlight: Promise<void> | null = null;
-let timer: ReturnType<typeof setInterval> | null = null;
+let timer: PollHandle | null = null;
 const subscribers = new Set<(next: InboxItem[] | null) => void>();
 
 /** Force a re-read — e.g. when the bell opens, so a resolved gate vanishes at once. */
@@ -65,11 +66,12 @@ export function useInbox(): { items: InboxItem[] | null; count: number } {
   useEffect(() => {
     subscribers.add(setSnapshot);
     void refreshInbox();
-    if (!timer) timer = setInterval(() => { void refreshInbox(); }, 60_000);
+    // #518: shared scheduler — staggered phase + skipped while the tab is hidden.
+    if (!timer) timer = startStaggeredPoll(() => { void refreshInbox(); }, 60_000);
     return () => {
       subscribers.delete(setSnapshot);
       if (subscribers.size === 0 && timer) {
-        clearInterval(timer);
+        timer.stop();
         timer = null;
       }
     };
@@ -127,7 +129,7 @@ export function openInboxItem(item: InboxItem): void {
 export function __resetInboxCacheForTests(): void {
   items = null;
   inFlight = null;
-  if (timer) clearInterval(timer);
+  if (timer) timer.stop();
   timer = null;
   subscribers.clear();
 }
