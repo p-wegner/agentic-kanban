@@ -1,3 +1,4 @@
+// @gate:always-run — cross-checks the settings registry parity invariant (#538).
 import { describe, it, expect } from "vitest";
 import {
   SETTINGS_REGISTRY,

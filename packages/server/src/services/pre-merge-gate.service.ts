@@ -15,6 +15,13 @@ import { getProjectSetupScript } from "../repositories/stack-profile.repository.
 import { getProjectById } from "../repositories/project.repository.js";
 import { buildSmokeCheck, getStackProfile, populateVerifyScript, verifyScriptPrefKey } from "./stack-profile.service.js";
 import { runUnderBuildGate } from "./jvm-build-gate.js";
+import {
+  resolveVerifyGateStrategy,
+  countAlwaysRunGuardSuites,
+  buildGateTierMessage,
+  type GateTierInfo,
+  type VerifyGateStrategy,
+} from "./pre-merge-gate-tier.js";
 
 /**
  * Default verify-gate timeout (#192). The verify gate runs a full build+test suite in a
@@ -71,6 +78,10 @@ async function resolveVerifyFileScope(projectId: string, database: Database): Pr
   const raw = await getPreference(verifyFileScopePrefKey(projectId), database).catch(() => null);
   return raw?.trim().toLowerCase() !== "false";
 }
+
+// `verify_gate_strategy` (the named tier pref), the always-run guard-suite scan, and the
+// pass-message builder live in `pre-merge-gate-tier.ts` (#538) — kept out of this file to stay
+// under the god-module cohesion ceiling (`max-file-size.test.ts` / `check-god-modules.mjs`).
 
 const MAX_VERIFY_WORKERS = 32;
 
@@ -328,6 +339,11 @@ export async function runPreMergeGate(
     : ([] as string[]);
   const docsOnly = changedFiles.length > 0 && isDocsOnlyDiff(changedFiles);
 
+  // Populated once verify_script actually runs, so the final message can NAME what ran even on
+  // a passing gate (#538) — a level may only weaken verification VISIBLY, so the tier that was
+  // actually used must be sayable regardless of outcome.
+  let gateTierInfo: GateTierInfo | null = null;
+
   if (verifyConfigured && workspace.workingDir && docsOnly) {
     // #198 skipped only the SMOKE boot for a docs-only diff while still paying the full
     // verify suite — on this repo that is a ~40-minute build+test run to prove that editing
@@ -394,7 +410,17 @@ export async function runPreMergeGate(
     // any in-scope package the diff owns no files in. Only ever set alongside a package
     // scope: when the diff is unreadable or spans un-modelled paths, `testScope` is null and
     // this stays unset too, so ignorance keeps running everything.
-    const fileScope = testScope ? await resolveVerifyFileScope(projectId, database) : false;
+    //
+    // #538: `verify_gate_strategy` is the named tier an operator sets; `full` disables
+    // file-scoping outright regardless of the legacy `verify_file_scope` boolean (a level may
+    // only WEAKEN verification visibly, so `full` must actually mean full). `scoped` and
+    // `scoped-base-watch` both enable file-scoping today — `scoped-base-watch` additionally
+    // implies a base-health backstop once that mechanism exists (tracked separately); until
+    // then it behaves identically to `scoped`, which is itself the honest description of what
+    // this gate is currently proven to do.
+    const gateStrategy = await resolveVerifyGateStrategy(projectId, database);
+    const fileScope =
+      testScope && gateStrategy !== "full" ? await resolveVerifyFileScope(projectId, database) : false;
     const verifyEnv = testScope
       ? {
           ...isolationEnv,
@@ -405,6 +431,13 @@ export async function runPreMergeGate(
     if (testScope && fileScope && changedFiles.length > 0) {
       console.log(`[pre-merge-gate] file-scoping verify tests to ${changedFiles.length} changed file(s) for workspace ${workspace.id}`);
     }
+    gateTierInfo = {
+      strategy: gateStrategy,
+      fileScoped: Boolean(fileScope && changedFiles.length > 0),
+      changedFileCount: changedFiles.length,
+      guardSuiteCount: countAlwaysRunGuardSuites(workingDir),
+      maxWorkers: gateMaxWorkers,
+    };
     const runVerify = () =>
       runUnderBuildGate(() =>
         runSetupScript(workingDir, verifyScript!, { timeoutMs: verifyTimeoutMs, env: verifyEnv }).catch((e) => ({
@@ -527,7 +560,7 @@ export async function runPreMergeGate(
     skipped: !ranSomething,
     stage: ranSomething ? (verifyRan ? "verify" : "smoke") : "none",
     message: ranSomething
-      ? "pre-merge gate passed"
+      ? buildGateTierMessage(gateTierInfo)
       : docsOnly
         ? `pre-merge gate skipped — docs-only diff (${changedFiles.length} file(s))`
         : "NOT VERIFIED: this project has no verify_script and no smoke check, so nothing checked this merge (#377)",

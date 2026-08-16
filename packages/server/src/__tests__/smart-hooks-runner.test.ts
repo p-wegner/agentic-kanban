@@ -1,3 +1,4 @@
+// @gate:always-run — requires the live smart-hooks-runner script outside src/; imports nothing it checks (#538).
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
