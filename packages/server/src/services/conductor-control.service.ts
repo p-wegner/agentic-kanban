@@ -104,7 +104,7 @@ export function stopConductor(repoPath: string): ConductorActionResult {
   try {
     if (pid) {
       if (process.platform === "win32") {
-        execFile("taskkill", ["/F", "/T", "/PID", String(pid)], () => { /* best-effort */ });
+        execFile("taskkill", ["/F", "/T", "/PID", String(pid)], { windowsHide: true }, () => { /* best-effort */ });
       } else {
         try { process.kill(-pid, "SIGTERM"); } catch { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
       }
@@ -117,7 +117,7 @@ export function stopConductor(repoPath: string): ConductorActionResult {
         "Get-CimInstance Win32_Process -Filter \"Name='bash.exe'\" -ErrorAction SilentlyContinue | " +
         "Where-Object { $_.CommandLine -match 'board-monitor.loop\\.sh' } | " +
         "ForEach-Object { Start-Process -NoNewWindow taskkill -ArgumentList '/F','/T','/PID',$_.ProcessId }";
-      execFile("powershell", ["-NoProfile", "-Command", ps], () => { /* best-effort */ });
+      execFile("powershell", ["-NoProfile", "-Command", ps], { windowsHide: true }, () => { /* best-effort */ });
     }
     // Clear the pid files so the status reader reports stopped on its next poll.
     try { unlinkSync(pidPath); } catch { /* already gone */ }

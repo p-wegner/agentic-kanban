@@ -40,7 +40,9 @@ export class ClaudeProvider implements AgentProvider {
 
     if (isWindows && !isMockAgent && !agentCommand) {
       try {
-        const resolved = execSync("where claude.exe 2>nul", { encoding: "utf8" }).trim().split("\n")[0]?.trim();
+        // windowsHide: this runs on EVERY claude launch, and a console flash here steals
+        // focus and (per the CLAUDE.md hard constraint) can disrupt other agents' sessions.
+        const resolved = execSync("where claude.exe 2>nul", { encoding: "utf8", windowsHide: true }).trim().split("\n")[0]?.trim();
         if (resolved) command = resolved;
       } catch {}
     }
