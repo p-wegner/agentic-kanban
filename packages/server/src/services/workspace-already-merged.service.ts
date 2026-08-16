@@ -17,6 +17,7 @@ import {
   listDirtySiblingWorktrees,
   type GitService,
 } from "./workspace-internals.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export type AlreadyMergedCheck = {
   isAlreadyMerged: boolean;
@@ -296,7 +297,7 @@ export async function reconcileAlreadyMerged(
       console.log(`[workspace-merge] reconcile-as-done: stamped ${stamped.leading ? "leading + " : ""}${stamped.siblings} landed sibling repo(s) for workspace ${id}`);
     }
   } catch (err) {
-    console.warn(`[workspace-merge] reconcile-as-done: reconcile stamp failed (non-fatal) for workspace ${id}:`, err instanceof Error ? err.message : String(err));
+    console.warn(`[workspace-merge] reconcile-as-done: reconcile stamp failed (non-fatal) for workspace ${id}:`, errorMessage(err));
   }
 
   // Multi-repo: drop the sibling worktrees + branches too (no-op single-repo) —

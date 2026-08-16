@@ -10,6 +10,7 @@ import type { ButlerSession } from "./types.js";
 import type { Pushable } from "./pushable.js";
 import { broadcast, sessions } from "./registry.js";
 import { rejectPendingQuestions } from "./questions.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** Pull the available slash commands from the live session (best-effort). */
 async function fetchSessionCapabilities(session: ButlerSession, q: Query): Promise<void> {
@@ -17,7 +18,7 @@ async function fetchSessionCapabilities(session: ButlerSession, q: Query): Promi
     const commands: SlashCommand[] = await q.supportedCommands();
     session.commands = commands.map((c) => ({ name: c.name, description: c.description, argumentHint: c.argumentHint }));
   } catch (err) {
-    console.warn(`[butler-sdk] supportedCommands failed: project=${session.projectId} ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`[butler-sdk] supportedCommands failed: project=${session.projectId} ${errorMessage(err)}`);
   }
 }
 
@@ -44,7 +45,7 @@ async function broadcastContextUsage(session: ButlerSession, q: Query): Promise<
       broadcast(session, { type: "meta", model: session.model, contextWindow: max, mcpConnected: session.mcpConnected });
     }
   } catch (err) {
-    console.warn(`[butler-sdk] getContextUsage failed: project=${session.projectId} ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`[butler-sdk] getContextUsage failed: project=${session.projectId} ${errorMessage(err)}`);
   }
 }
 
@@ -198,7 +199,7 @@ export async function runLoop(session: ButlerSession, input: Pushable<SDKUserMes
     }
     console.log(`[butler-sdk] session loop ended: project=${session.projectId}`);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     const outcome = classifyButlerLoopError({
       aborted: session.abort.signal.aborted,
       transient: isTransientNetworkError(err),

@@ -25,6 +25,7 @@ import { createIssueService } from "../services/issue.service.js";
 import { getPluginService } from "../services/plugin.service.js";
 import { createAgentSkillService } from "../services/agent-skill.service.js";
 import { createWebhookSender } from "../services/outbound-webhook.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 function toProjectRepoResponse(row: RepoRow): ProjectRepoResponse {
   return {
@@ -428,7 +429,7 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
       try {
         localPath = await cloneRepo(body.cloneUrl, { name: body.name });
       } catch (err) {
-        return c.json({ error: `Clone failed: ${err instanceof Error ? err.message : String(err)}` }, 400);
+        return c.json({ error: `Clone failed: ${errorMessage(err)}` }, 400);
       }
     } else if (body.createName) {
       // Throws ProjectError (mapped to 400/404/409 by the domain error handler) on failure.
@@ -438,7 +439,7 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
     try {
       repoInfo = await detectRepoInfo(localPath!);
     } catch (err) {
-      return c.json({ error: `Invalid repo: ${err instanceof Error ? err.message : String(err)}` }, 400);
+      return c.json({ error: `Invalid repo: ${errorMessage(err)}` }, 400);
     }
     if (repoInfo.repoPath === project.repoPath) {
       return c.json({ error: "This is already the project's leading repo" }, 409);

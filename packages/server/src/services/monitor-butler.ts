@@ -39,6 +39,7 @@ import { getProjectById } from "../repositories/project.repository.js";
 import { buildSpawnEnv, getMcpServersConfig } from "./agent-provider/helpers.js";
 import { getBoardStatus } from "./board-status.js";
 import { isTransientNetworkError } from "../startup/transient-errors.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 // Single source of truth for monitor policy, shared with the codex board-monitor
 // loop (scripts/board-monitor/loop.sh). Edit that one file to steer both.
@@ -167,7 +168,7 @@ export async function runMonitorButlerCycle(opts?: { projectId?: string }): Prom
       details: { toolsUsed: result.toolsUsed, isError: result.isError },
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     console.error(`[monitor-butler] cycle error: ${message}`);
     if (projectId) {
       await logBoardHealthEvent({ projectId, cycleId, eventType: "error", summary: `Monitor cycle failed: ${message}` }).catch(() => {});
@@ -258,7 +259,7 @@ async function runAgentTurn(opts: {
       return { text: "Monitor cycle aborted (timeout or shutdown)", isError: true, toolsUsed };
     }
     if (isTransientNetworkError(err)) {
-      console.warn(`[monitor-butler] transient network error (ignored): ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[monitor-butler] transient network error (ignored): ${errorMessage(err)}`);
       return { text: "Transient network error", isError: true, toolsUsed };
     }
     throw err;

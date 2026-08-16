@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { notifyBoard } from "../notify.js";
 import { requireEntity } from "../db-utils.js";
 import { boardApiUrl } from "../server-url.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function registerReviewWorkspace(server: McpServer) {
   server.tool(
@@ -49,7 +50,7 @@ export function registerReviewWorkspace(server: McpServer) {
         };
       } catch (err) {
         return {
-          content: [{ type: "text" as const, text: `Review failed: ${err instanceof Error ? err.message : String(err)}` }],
+          content: [{ type: "text" as const, text: `Review failed: ${errorMessage(err)}` }],
         };
       }
     },

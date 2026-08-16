@@ -10,6 +10,7 @@ import { issues, projectStatuses, workspaces } from "@agentic-kanban/shared/sche
 import { and, eq, notInArray, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { parseTouchedFilePaths } from "../services/issue-ai.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Auto-start gate for shared-registration-file contention (#119).
@@ -170,7 +171,7 @@ export async function buildFileContentionGate(
     };
   } catch (err) {
     // Best-effort: a snapshot failure must never block auto-start.
-    console.warn(`[monitor] File-contention gate unavailable for project ${projectId}: ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`[monitor] File-contention gate unavailable for project ${projectId}: ${errorMessage(err)}`);
     return OPEN_GATE;
   }
 }

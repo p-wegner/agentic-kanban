@@ -36,6 +36,7 @@ import type { WorkerConnectionManager } from "./worker-connection.service.js";
 import { ensureGitHttpServer } from "./git-http.service.js";
 import { syncIncomingBranch, clearIncomingRef, incomingRefFor } from "./worker-remote-sync.service.js";
 import { listAgentSkills } from "../repositories/agent-skill.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** How long a disconnected worker may take to reconnect before its sessions are failed. */
 export const WORKER_RECONNECT_GRACE_MS = 60 * 1000;
@@ -114,7 +115,7 @@ export function createRemoteAgentService(
             exitCode = exitCode === 0 || exitCode === null ? 1 : exitCode;
           }
         } catch (err) {
-          const text = err instanceof Error ? err.message : String(err);
+          const text = errorMessage(err);
           session.onOutput({ type: "stderr", sessionId, data: `Branch sync failed: ${text}` });
           exitCode = exitCode === 0 || exitCode === null ? 1 : exitCode;
         }
@@ -302,7 +303,7 @@ export function createRemoteAgentService(
           if (!delivered) throw new Error(`fleet worker ${workerId} is not connected`);
           console.log(`[agent-remote] git-transport assignment sent: sessionId=${sessionId} branch=${repo.branch}`);
         } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
+          const message = errorMessage(err);
           console.error(`[agent-remote] git-transport assignment failed: sessionId=${sessionId}: ${message}`);
           const session = sessions.get(sessionId);
           if (session) finishSession(sessionId, session, `Could not dispatch to worker: ${message}`, 1);

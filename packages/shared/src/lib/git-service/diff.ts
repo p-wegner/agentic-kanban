@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { execGit, isGitWorkingTree } from "./internal.js";
+import { errorMessage } from "../error-message.js";
 
 /** Generate unified diff entries for untracked files (not yet git-add'd). */
 async function getUntrackedDiffEntries(workdirPath: string): Promise<string> {
@@ -122,7 +123,7 @@ export async function getDiffShortstat(
 
     return { filesChanged, insertions, deletions };
   } catch (err) {
-    console.error(`[git] diff --shortstat failed in ${worktreePath}:`, err instanceof Error ? err.message : String(err));
+    console.error(`[git] diff --shortstat failed in ${worktreePath}:`, errorMessage(err));
     return { filesChanged: 0, insertions: 0, deletions: 0 };
   }
 }

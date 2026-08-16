@@ -8,6 +8,7 @@ import {
 } from "@agentic-kanban/shared/lib/openspec";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { requireEntity } from "../db-utils.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 async function resolveRepoPath(projectId: string, deps: ToolDeps): Promise<string | null> {
   const rows = await deps.db.select({
@@ -53,7 +54,7 @@ export function registerShowSpec(server: McpServer, deps: ToolDeps = prodDeps) {
         const spec = await showOpenSpec(repoPath, domain);
         return { content: [{ type: "text" as const, text: JSON.stringify(spec, null, 2) }] };
       } catch (err) {
-        return { content: [{ type: "text" as const, text: err instanceof Error ? err.message : String(err) }] };
+        return { content: [{ type: "text" as const, text: errorMessage(err) }] };
       }
     },
   );

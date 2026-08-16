@@ -7,6 +7,7 @@ import { showToast } from "../lib/toast.js";
 import { useOnboardingStore } from "../stores/onboardingStore.js";
 import { usePluginViewStore } from "../stores/pluginViewStore.js";
 import { normalizeConfig, setProviderFillPolicy, type ConcreteProvider } from "../lib/strategy-targets.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Onboarding wizard (#464, paged in #475) — takes a freshly imported project from "it shows on
@@ -162,7 +163,7 @@ export function OnboardingWizard() {
     try {
       setPlan(await apiFetch<OnboardingPlan>(`/api/projects/${id}/onboarding`));
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -183,7 +184,7 @@ export function OnboardingWizard() {
       // Render what the SERVER recomputed — never a locally flipped status.
       setPlan(await apiPost<OnboardingPlan>(`/api/projects/${projectId}/onboarding/${path}`, body));
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       setError(message);
       showToast(message, "error");
     } finally {
@@ -215,7 +216,7 @@ export function OnboardingWizard() {
       // to flip it to done — same "never optimistic" contract as every other step.
       await load(projectId);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       setError(message);
       showToast(message, "error");
     } finally {

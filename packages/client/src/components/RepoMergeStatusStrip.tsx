@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { LEADING_REPO_KEY } from "@agentic-kanban/shared";
 import type { RepoMergeStatusResponse, RepoMergeStatusRepoEntry, RepoRebaseResponse } from "@agentic-kanban/shared";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 type ActionPhase = "idle" | "running" | "done";
 
@@ -193,7 +194,7 @@ export function RepoMergeStatusStrip({ workspaceId, refreshKey }: { workspaceId:
       setActionState((prev) => ({ ...prev, [key]: { phase: "done", result } }));
       if (result.success) setNonce((n) => n + 1); // refresh status after a clean rebase
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       setActionState((prev) => ({ ...prev, [key]: { phase: "done", result: { repo: key, success: false, error: message } } }));
     }
   }, [workspaceId]);
@@ -205,7 +206,7 @@ export function RepoMergeStatusStrip({ workspaceId, refreshKey }: { workspaceId:
       setRetryState({ phase: "done" });
       setNonce((n) => n + 1); // refresh status after the coordinated merge
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       setRetryState({ phase: "done", error: message });
     }
   }, [workspaceId]);

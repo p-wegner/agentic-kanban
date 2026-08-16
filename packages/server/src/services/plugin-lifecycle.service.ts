@@ -19,6 +19,7 @@ import { stopPluginViews } from "./plugin-views.service.js";
 import { deletePluginViewProcessesForPlugin } from "../repositories/plugin-view-processes.repository.js";
 import { PluginError } from "./plugin-errors.js";
 import type { EnableReport } from "./plugin-enablement.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export interface PluginUpdateResult {
   row: PluginRow;
@@ -196,7 +197,7 @@ export function createPluginLifecycleOps(deps: {
         // A project whose repo has gone missing must not fail the update itself.
         skillsRefreshed.push({
           projectId, skills: [],
-          warnings: [`skill refresh skipped: ${err instanceof Error ? err.message : String(err)}`],
+          warnings: [`skill refresh skipped: ${errorMessage(err)}`],
         });
       }
     }

@@ -1,5 +1,6 @@
 import { mergeBranch, isAncestor, revParse } from "@agentic-kanban/shared/lib/git-service";
 import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Release trains: gate N tickets ONCE instead of N times.
@@ -101,7 +102,7 @@ export async function assembleMergeTrain(args: {
       await mergeBranch(repoPath, member.branch, trainRef);
       included.push(member);
     } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
+      const reason = errorMessage(err);
       dropped.push({ member, reason });
       console.warn(
         `[merge-train] dropped ${member.branch}${member.issueNumber ? ` (#${member.issueNumber})` : ""} from train ${trainRef}: ${reason.slice(0, 200)}`,
@@ -272,7 +273,7 @@ export async function runMergeTrain(args: {
       try {
         await closeMember(member.workspaceId);
       } catch (err) {
-        const reason = err instanceof Error ? err.message : String(err);
+        const reason = errorMessage(err);
         closeFailures.push({ member, reason });
         console.warn(`[merge-train] landed ${member.branch} but could not close its workspace: ${reason.slice(0, 200)}`);
       }

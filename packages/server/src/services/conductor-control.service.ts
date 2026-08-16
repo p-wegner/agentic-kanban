@@ -13,6 +13,7 @@ import { spawn, execFile } from "child_process";
 import { existsSync, writeFileSync, readFileSync, unlinkSync } from "fs";
 import { join } from "path";
 import { readOrchestratorStatus } from "./orchestrator-monitor.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 function boardMonitorDir(repoPath: string): string {
   return join(repoPath, "scripts", "board-monitor");
@@ -67,7 +68,7 @@ function spawnConductorLoop(
     }
     return { ok: true, pid };
   } catch (err) {
-    return { ok: false, pid: null, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, pid: null, error: errorMessage(err) };
   }
 }
 
@@ -126,6 +127,6 @@ export function stopConductor(repoPath: string): ConductorActionResult {
     try { writeFileSync(stopMarkerPath(repoPath), new Date().toISOString(), "utf8"); } catch { /* non-fatal */ }
     return { ok: true, pid };
   } catch (err) {
-    return { ok: false, pid, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, pid, error: errorMessage(err) };
   }
 }

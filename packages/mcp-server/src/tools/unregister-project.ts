@@ -3,6 +3,7 @@ import { z } from "zod";
 import { eq, or } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { boardApiUrl } from "../server-url.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function registerUnregisterProject(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema } = deps;
@@ -53,7 +54,7 @@ export function registerUnregisterProject(server: McpServer, deps: ToolDeps = pr
         return {
           content: [{
             type: "text" as const,
-            text: `Failed to unregister project: ${err instanceof Error ? err.message : String(err)}`,
+            text: `Failed to unregister project: ${errorMessage(err)}`,
           }],
         };
       }

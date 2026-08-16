@@ -23,6 +23,7 @@
 
 import { existsSync } from "node:fs";
 import { dockerExec, dockerAvailable } from "@agentic-kanban/shared/lib/docker-exec";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export type DockerDeploymentMode = "native" | "dood" | "dind" | "unknown";
 
@@ -169,7 +170,7 @@ export async function runServiceStackPreflight(
     }
     return { ran: true, mode, warnings };
   } catch (err) {
-    warn(`preflight failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    warn(`preflight failed (non-fatal): ${errorMessage(err)}`);
     return { ran: false, mode: "unknown", warnings: [] };
   }
 }

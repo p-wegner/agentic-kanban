@@ -7,6 +7,7 @@ import {
   getOrCreateServiceStackInstanceId,
   getNonTerminalWorkspaceIds,
 } from "../../repositories/workspace-service-state.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * `services reap` — the deliberate, operator-driven wide sweep for orphaned Docker
@@ -145,7 +146,7 @@ Examples:
         }
         process.exit(failed.length > 0 ? 1 : 0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });

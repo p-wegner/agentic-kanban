@@ -11,6 +11,7 @@ import {
 import { updateWorkspaceDiffStatCache } from "../repositories/workspace-summary.repository.js";
 import { notifySummaryWriteThrough } from "./summary-write-through-notifier.js";
 import type { Database } from "../db/index.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * #399 (decision 014) — the workspace-summary GIT PROJECTION.
@@ -260,7 +261,7 @@ export async function healWorkspaceSummaryProjection(
     }
     return candidates.length + repoCandidates.length;
   } catch (err) {
-    console.warn("[summary-projection] heal pass failed:", err instanceof Error ? err.message : String(err));
+    console.warn("[summary-projection] heal pass failed:", errorMessage(err));
     return 0;
   }
 }

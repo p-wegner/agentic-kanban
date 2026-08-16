@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { mcpStructuredError, workspaceNotFoundError, workspaceClosedError } from "../db-utils.js";
 import { boardApiUrl } from "../server-url.js";
 import { prodDeps, type ToolDeps } from "./deps.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * launch_workspace — mirror of CLI `workspace launch <workspace-id>`.
@@ -97,7 +98,7 @@ export function registerLaunchWorkspace(server: McpServer, deps: ToolDeps = prod
           content: [
             {
               type: "text" as const,
-              text: `Launch failed: ${err instanceof Error ? err.message : String(err)}`,
+              text: `Launch failed: ${errorMessage(err)}`,
             },
           ],
         };

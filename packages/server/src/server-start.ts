@@ -32,6 +32,7 @@ import { checkHealthDeps } from "./services/health-deps.service.js";
 import { reapOrphanServiceStacksOnce } from "./startup/service-stack-reaper.js";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const serverStartRepoRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../../");
 
@@ -179,7 +180,7 @@ export async function startServer(port?: number, hostname?: string) {
     try {
       tls = { key: readFileSync(tlsKeyPath), cert: readFileSync(tlsCertPath) };
     } catch (err) {
-      console.warn(`[http2] KANBAN_TLS_KEY/CERT set but unreadable — staying on HTTP/1.1: ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[http2] KANBAN_TLS_KEY/CERT set but unreadable — staying on HTTP/1.1: ${errorMessage(err)}`);
     }
   }
   const onListen = (info: { port: number }) => {
@@ -232,7 +233,7 @@ export async function startServer(port?: number, hostname?: string) {
       });
       ipv6Server = companion;
     } catch (err) {
-      console.warn(`[ipv6] could not bind [::1]:${serverPort} (non-fatal, IPv4 still serving): ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[ipv6] could not bind [::1]:${serverPort} (non-fatal, IPv4 still serving): ${errorMessage(err)}`);
     }
   }
   if (ipv6Server) cleanupCallbacks.push(() => { ipv6Server?.close(); });
@@ -292,7 +293,7 @@ export async function startServer(port?: number, hostname?: string) {
     } catch (err) {
       console.error(
         `[fleet-listener] failed to bind KANBAN_FLEET_PORT=${fleetPort}; remote workers cannot connect:`,
-        err instanceof Error ? err.message : String(err),
+        errorMessage(err),
       );
     }
   }

@@ -18,6 +18,7 @@ import {
 import { executeSiblingMerges, cleanupSiblingWorktrees, stampReconciledLeadingMerge } from "../services/workspace-repos.service.js";
 import { createBackup } from "../db/backup.js";
 import { reconcileSilentlyMergedWorkspaces } from "./silently-merged-reconciler.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** Issue status names that are already terminal; skip these workspaces. */
 const TERMINAL_STATUS_NAMES = ["Done", "AI Reviewed", "Closed", "Cancelled"];
@@ -79,7 +80,7 @@ async function recordSiblingComment(
     payload: { eventType, workspaceId: candidate.wsId, branch: candidate.branch, ...payload },
     createdAt: new Date().toISOString(),
   }, database).catch((err) => {
-    console.warn("[ancestor-reconciler] failed to record issue comment:", err instanceof Error ? err.message : String(err));
+    console.warn("[ancestor-reconciler] failed to record issue comment:", errorMessage(err));
   });
 }
 
@@ -288,7 +289,7 @@ export async function reconcileAncestorBranchWorkspaces(
       try {
         await stampReconciledLeadingMerge({ gitService: gitSvc, database, workspaceId: c.wsId, now });
       } catch (err) {
-        console.warn(`[ancestor-reconciler] leading mergedHeadSha stamp failed (non-fatal) for workspace ${c.wsId}:`, err instanceof Error ? err.message : String(err));
+        console.warn(`[ancestor-reconciler] leading mergedHeadSha stamp failed (non-fatal) for workspace ${c.wsId}:`, errorMessage(err));
       }
 
       if (pendingSiblings.length > 0) {

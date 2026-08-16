@@ -4,6 +4,7 @@ import { getActiveProjectSummaries } from "../repositories/project.repository.js
 import { listPendingApprovals } from "./approvals.js";
 import { listPendingQuestionsForProject } from "./agent-questions/listing.js";
 import { getPluginService } from "./plugin.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Cross-project "Waiting on you" inbox (#302) — the union of every decision that is
@@ -119,7 +120,7 @@ async function collectQuestionItems(
       });
     }
   } catch (err) {
-    console.warn(`[inbox] agent questions failed for project ${project.id}:`, err instanceof Error ? err.message : String(err));
+    console.warn(`[inbox] agent questions failed for project ${project.id}:`, errorMessage(err));
   }
   return items;
 }
@@ -142,7 +143,7 @@ export async function listInbox(database: Database = db): Promise<{ items: Inbox
   const surfacesPromise = pluginService
     .listLoopSurfacesForProjects(projectRows.map((p) => p.id))
     .catch((err: unknown) => {
-      console.warn(`[inbox] plugin loop surfaces failed:`, err instanceof Error ? err.message : String(err));
+      console.warn(`[inbox] plugin loop surfaces failed:`, errorMessage(err));
       return new Map<string, InboxLoopStatus[]>();
     });
   const [loopSurfaces, questionItems] = await Promise.all([

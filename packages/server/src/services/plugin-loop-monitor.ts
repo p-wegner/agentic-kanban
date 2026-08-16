@@ -6,6 +6,7 @@ import { getWorkspaceGitCoordinates, listPluginEnabledPreferences, listPluginRow
 import { recoverStrandedAutoLand } from "./plugin-loop-autoland-recovery.js";
 import { latestPluginLoopEvent } from "../repositories/plugin-loop-events.repository.js";
 import { getPluginService } from "./plugin.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * How often this pass may retry a loop whose previous advance produced NOTHING (#372).
@@ -174,7 +175,7 @@ export async function advanceDuePluginLoops(
             log(`plugin loop ${row.pluginId}:${loop.name} converged${result.note ? ` — ${result.note}` : ""}`);
           }
         } catch (err) {
-          log(`plugin loop ${row.pluginId}:${loop.name} advance failed: ${err instanceof Error ? err.message : String(err)}`);
+          log(`plugin loop ${row.pluginId}:${loop.name} advance failed: ${errorMessage(err)}`);
         }
       }
     }

@@ -11,6 +11,7 @@ import {
   splitLines,
   type MarkdownHeading,
 } from "./markdownNavigation.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export { findMatchingLines, parseMarkdownOutline, slugifyHeading, splitHighlight, type MarkdownHeading };
 
@@ -294,7 +295,7 @@ export function ArtifactViewer({ pluginId, loopName, projectId, path, step, gate
       + `?projectId=${projectId}&path=${encodeURIComponent(path)}${wantDiff ? "&withDiff=1" : ""}`,
     )
       .then((res) => { if (!cancelled) setArtifact(res); })
-      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); });
+      .catch((err) => { if (!cancelled) setError(errorMessage(err)); });
     return () => { cancelled = true; };
   }, [pluginId, loopName, projectId, path, wantDiff]);
 

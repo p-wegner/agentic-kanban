@@ -57,6 +57,7 @@ import { getRepoMergeStatus } from "./repo-merge-status.service.js";
 import { checkAlreadyMerged as checkAlreadyMergedImpl, reconcileAlreadyMerged as reconcileAlreadyMergedImpl } from "./workspace-already-merged.service.js";
 import { resolveMergeGate, RUN_GATE, type MergeGateToken } from "./pre-merge-gate.service.js";
 import { recordGateFailureNote as recordGateFailureNoteImpl, runPreLockGate } from "./workspace-merge-gate.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function createWorkspaceMergeService(deps: {
   database: Database;
@@ -111,7 +112,7 @@ export function createWorkspaceMergeService(deps: {
   };
 
   function warningMessage(err: unknown): string {
-    return err instanceof Error ? err.message : String(err);
+    return errorMessage(err);
   }
 
   function addRecoverableWarning(warnings: MergeWarning[], step: string, err: unknown): void {
@@ -138,7 +139,7 @@ export function createWorkspaceMergeService(deps: {
         createdAt,
       }, database);
     } catch (err) {
-      console.warn("[workspace-merge] failed to record merge timeline event:", err instanceof Error ? err.message : String(err));
+      console.warn("[workspace-merge] failed to record merge timeline event:", errorMessage(err));
     }
   }
 
@@ -158,7 +159,7 @@ export function createWorkspaceMergeService(deps: {
       const killed = await killProcesses(workingDir);
       if (killed > 0) console.log(`[workspace-merge] ${label}: killed ${killed} leftover process(es) in ${workingDir}`);
     } catch (err) {
-      console.warn(`[workspace-merge] ${label}: killWorktreeProcesses failed (non-fatal):`, err instanceof Error ? err.message : String(err));
+      console.warn(`[workspace-merge] ${label}: killWorktreeProcesses failed (non-fatal):`, errorMessage(err));
     }
   }
 
@@ -433,7 +434,7 @@ export function createWorkspaceMergeService(deps: {
           { onMainCheckoutSettled },
         )
           .catch((err) => {
-            console.warn("[workspace-merge] post-merge cleanup failed (non-fatal):", err instanceof Error ? err.message : String(err));
+            console.warn("[workspace-merge] post-merge cleanup failed (non-fatal):", errorMessage(err));
           })
           // Safety net: resolve is idempotent — this only matters if the cleanup
           // threw before signalling.
@@ -507,7 +508,7 @@ export function createWorkspaceMergeService(deps: {
         try {
           repoResult = await runUpdate(worktree, ref.branch, repoBase);
         } catch (err) {
-          repoResult = { success: false, error: `${ns}: ${err instanceof Error ? err.message : String(err)}` };
+          repoResult = { success: false, error: `${ns}: ${errorMessage(err)}` };
         }
       }
       await killWorktreeProcesses(worktree, isLeading ? `update-base:post` : `update-base:sibling-post:${ns}`);
@@ -742,7 +743,7 @@ export function createWorkspaceMergeService(deps: {
       return await rebaseWorkspaceForFixAndMerge(id, workspace, baseBranch);
     } catch (err) {
       return `Before launching this fix-and-merge agent, the app tried to rebuild the workspace branch on '${baseBranch}' ` +
-        `but the rebuild preflight failed: ${err instanceof Error ? err.message : String(err)}`;
+        `but the rebuild preflight failed: ${errorMessage(err)}`;
     }
   }
 
@@ -879,7 +880,7 @@ export function createWorkspaceMergeService(deps: {
       await gitService.syncBranchToHead(workspace.workingDir, workspace.branch);
       await gitService.rebaseOntoBase(workspace.workingDir, baseBranch, workspace.branch, { preferLocalBase: true });
     } catch (err) {
-      console.warn(`[workspace-merge] reconcile preflight rebase failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[workspace-merge] reconcile preflight rebase failed (non-fatal): ${errorMessage(err)}`);
     }
 
     const prompt = await buildReconcilerPrompt(database, {
@@ -945,7 +946,7 @@ export function createWorkspaceMergeService(deps: {
     tracked.catch((err) => {
       console.warn(
         `[workspace-merge] deduped merge failed for workspace ${id}:`,
-        err instanceof Error ? err.message : String(err),
+        errorMessage(err),
       );
     });
     return tracked;

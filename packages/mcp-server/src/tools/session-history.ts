@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { readdirSync, statSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseOfflineTranscript } from "@agentic-kanban/shared/lib/offline-transcript";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 interface SessionResult {
   issueNum: number | null;
@@ -52,7 +53,7 @@ export function registerSessionHistory(server: McpServer) {
           content: [
             {
               type: "text" as const,
-              text: `Cannot read ${claudeProjects}: ${err instanceof Error ? err.message : String(err)}`,
+              text: `Cannot read ${claudeProjects}: ${errorMessage(err)}`,
             },
           ],
         };

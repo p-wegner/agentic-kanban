@@ -19,6 +19,7 @@ import {
   getBlockerStatuses,
   insertAutoChainAuditComment,
 } from "../repositories/dependency-auto-chain.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const BLOCKING_DEPENDENCY_TYPES = ["depends_on", "blocked_by"] as const;
 const AUTO_CHAIN_TRIGGER_TYPES = ["depends_on", "blocked_by", "child_of"] as const;
@@ -259,7 +260,7 @@ export async function autoStartUnblockedDependencyIssue(args: {
       : await createWorkspaceCrudService({ database, getSessionManager, boardEvents, gitService }).createWorkspace({ issueId: candidate.id, branch });
     completeCreateJob(claim.jobId, workspace);
   } catch (err) {
-    workspace = { error: err instanceof Error ? err.message : String(err) };
+    workspace = { error: errorMessage(err) };
     failCreateJob(claim.jobId, err);
   }
   if (workspace.error) {

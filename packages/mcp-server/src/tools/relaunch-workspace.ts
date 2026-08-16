@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { mcpStructuredError, workspaceClosedError, workspaceMissingWorkingDirError, workspaceNotFoundError } from "../db-utils.js";
 import { boardApiUrl } from "../server-url.js";
 import { prodDeps, type ToolDeps } from "./deps.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function registerRelaunchWorkspace(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, notifyBoard } = deps;
@@ -59,7 +60,7 @@ export function registerRelaunchWorkspace(server: McpServer, deps: ToolDeps = pr
         };
       } catch (err) {
         return {
-          content: [{ type: "text" as const, text: `Launch failed: ${err instanceof Error ? err.message : String(err)}` }],
+          content: [{ type: "text" as const, text: `Launch failed: ${errorMessage(err)}` }],
         };
       }
     },

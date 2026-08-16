@@ -9,6 +9,7 @@ import { logBoardHealthEvent } from "../repositories/board-health-events.reposit
 import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
 import { listWorkspaceRepos, type RepoRow } from "../repositories/repo.repository.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const REAPABLE_WORKSPACE_STATUSES = ["idle", "reviewing", "blocked"];
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
@@ -149,7 +150,7 @@ async function verifyNoAheadWork(
 
     return { safe: false, reason: "missing-ref", message: ancestry.branchSha === null ? ancestry.reason : "branch is not an ancestor" };
   } catch (err) {
-    return { safe: false, reason: "git-error", message: err instanceof Error ? err.message : String(err) };
+    return { safe: false, reason: "git-error", message: errorMessage(err) };
   }
 }
 
@@ -250,7 +251,7 @@ export async function reapTerminalWorkspaces(
           createdAt: now,
         }, database);
       } catch (err) {
-        console.warn(`[terminal-workspace-reaper] failed to record unmerged-sibling comment for ${c.wsId}:`, err instanceof Error ? err.message : String(err));
+        console.warn(`[terminal-workspace-reaper] failed to record unmerged-sibling comment for ${c.wsId}:`, errorMessage(err));
       }
     }
 
@@ -289,7 +290,7 @@ export async function reapTerminalWorkspaces(
         }, database);
       } catch { /* health event logging is non-fatal */ }
     } catch (err) {
-      console.warn(`[terminal-workspace-reaper] failed to close workspace ${c.wsId}:`, err instanceof Error ? err.message : String(err));
+      console.warn(`[terminal-workspace-reaper] failed to close workspace ${c.wsId}:`, errorMessage(err));
     }
   }
 

@@ -6,6 +6,7 @@ import { activeMerges } from "../services/workspace-internals.js";
 import { stopMcpHttpBridge } from "../services/mcp-http-bridge.service.js";
 import { stopAllPluginViewsAsync } from "../services/plugin.service.js";
 import { appendExitRecord, recordProcessStart } from "../lib/exit-record.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** First ~3 stack lines: enough to place the throw, short enough to keep the log readable. */
 function describeError(value: unknown): string {
@@ -86,7 +87,7 @@ export function setupProcessHandlers(
   process.on("unhandledRejection", (reason) => {
     if (isTransientNetworkError(reason)) {
       const code = (reason as NodeJS.ErrnoException).code ?? "?";
-      const msg = reason instanceof Error ? reason.message : String(reason);
+      const msg = errorMessage(reason);
       console.warn(`[warn] Transient network rejection (ignored): ${code} ${msg}`);
       return;
     }

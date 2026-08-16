@@ -2,6 +2,7 @@ import type { Command } from "commander";
 import { DEFAULT_STATUSES } from "../../repositories/issue.repository.js";
 import { runMigrations, logDefaultBranch } from "../shared.js";
 import { registerProject } from "../../services/project-registration.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function registerRegisterCommand(program: Command) {
   program
@@ -71,7 +72,7 @@ Examples:
         console.log(`  Set as active project.`);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });

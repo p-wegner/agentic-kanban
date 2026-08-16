@@ -53,6 +53,7 @@ import { issues, projectStatuses, workflowNodes, workspaces } from "@agentic-kan
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { reconcileMergedIssue } from "../services/merge-cleanup.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const SWEEP_INTERVAL_MS = 15 * 60 * 1000;
 const TERMINAL_ISSUE_STATUSES = ["Done", "Cancelled"];
@@ -164,7 +165,7 @@ export async function reconcileWorkflowNodeDivergence(
       result.convergedToDone.push(row.issueId);
       log(`converged ${ref} to Done — ${reason}`);
     } catch (err) {
-      log(`failed to reconcile ${ref}: ${err instanceof Error ? err.message : String(err)}`);
+      log(`failed to reconcile ${ref}: ${errorMessage(err)}`);
     }
   }
   return result;
@@ -176,7 +177,7 @@ export function startWorkflowNodeDivergenceReconciler(opts: { intervalMs?: numbe
   if (timer) return;
   timer = setInterval(() => {
     void reconcileWorkflowNodeDivergence().catch((err) => {
-      console.warn("[node-divergence] sweep failed (non-fatal):", err instanceof Error ? err.message : String(err));
+      console.warn("[node-divergence] sweep failed (non-fatal):", errorMessage(err));
     });
   }, opts.intervalMs ?? SWEEP_INTERVAL_MS);
   timer.unref?.();

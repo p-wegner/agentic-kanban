@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getServerPort } from "../server-url.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * First-class plugin-gate tools (#308) — so the butler (and any MCP consumer) can list,
@@ -79,7 +80,7 @@ export function registerListPluginGates(server: McpServer) {
           }));
         return text(gates.length ? gates : "No plugin gates are waiting.");
       } catch (err) {
-        return text(`Failed: ${err instanceof Error ? err.message : String(err)}`);
+        return text(`Failed: ${errorMessage(err)}`);
       }
     },
   );
@@ -103,7 +104,7 @@ export function registerGetPluginGate(server: McpServer) {
           awaitingMerge: loop.awaitingMerge, openTickets: loop.openTickets, note: loop.note,
         });
       } catch (err) {
-        return text(`Failed: ${err instanceof Error ? err.message : String(err)}`);
+        return text(`Failed: ${errorMessage(err)}`);
       }
     },
   );

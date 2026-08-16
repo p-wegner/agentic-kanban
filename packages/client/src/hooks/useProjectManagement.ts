@@ -3,6 +3,7 @@ import { apiPost, apiPut, apiDelete } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
 import { boardSelectionActions } from "../stores/boardSelectionStore.js";
 import { onboardingActions } from "../stores/onboardingStore.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 type ProjectRef = { id: string; name: string };
 
@@ -68,7 +69,7 @@ export function useProjectManagement(deps: UseProjectManagementDeps) {
         const r = await apiPost<{ error?: string }>(`/api/projects/${result.id}/repos`, body);
         if (r.error) failed.push(`${entry}: ${r.error}`);
       } catch (err) {
-        failed.push(`${entry}: ${err instanceof Error ? err.message : String(err)}`);
+        failed.push(`${entry}: ${errorMessage(err)}`);
       }
     }
     await loadProjects();

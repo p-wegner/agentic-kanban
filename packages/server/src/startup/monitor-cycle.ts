@@ -34,6 +34,7 @@ import {
 import type { MonitorWorkspaceActions } from "./monitor-workspace-actions.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { shouldSkipMergeForBackoff, type MergeBackoffDeps } from "../services/merge-backoff.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export { DEFAULT_STUCK_BUILDER_TIMEOUT_MS } from "./monitor-cycle-rules.js";
 
@@ -420,7 +421,7 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
     const needsReviewStatusId = await getProjectStatusIdByName(ws.projectId, "Needs Review");
     const inReviewStatusId = await getProjectStatusIdByName(ws.projectId, "In Review");
     const fallbackStatusId = needsReviewStatusId ?? inReviewStatusId;
-    if (fallbackStatusId) await transitionIssueStatus(db, ws.issueId, fallbackStatusId).catch((err) => console.warn(`[monitor] failed to move issue ${ws.issueId} to review fallback status:`, err instanceof Error ? err.message : String(err)));
+    if (fallbackStatusId) await transitionIssueStatus(db, ws.issueId, fallbackStatusId).catch((err) => console.warn(`[monitor] failed to move issue ${ws.issueId} to review fallback status:`, errorMessage(err)));
     await setWorkspaceStatus(db, ws.wsId, "closed");
     logAction("mark_idle", ws.wsId, ws.issueId, { responseSummary: `${sessionCount} sessions — flagged stuck`, verificationResult: "ok" });
     console.log(`[monitor] Workspace ${ws.wsId} has ${sessionCount} sessions  flagged as stuck, closing`);
@@ -483,7 +484,7 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
         await deps.workspaceActions.updateBase(ws.wsId, "rebase");
         rebased = true;
       } catch (err) {
-        console.warn(`[monitor] update-base before relaunch failed for workspace ${ws.wsId}:`, err instanceof Error ? err.message : String(err));
+        console.warn(`[monitor] update-base before relaunch failed for workspace ${ws.wsId}:`, errorMessage(err));
       }
     }
     let launchOk = true;
@@ -514,7 +515,7 @@ async function handleReviewingWorkspace(ws: WorkspaceCandidate, sess: LatestSess
     // we still reset the issue to In Progress and log the action either way.
     await deps.workspaceActions.delete(ws.wsId).catch(() => {});
     const inProgressStatusId = await getProjectStatusIdByName(ws.projectId, "In Progress");
-    if (inProgressStatusId) await transitionIssueStatus(db, ws.issueId, inProgressStatusId).catch((err) => console.warn(`[monitor] failed to reset ghost-workspace issue ${ws.issueId} to In Progress:`, err instanceof Error ? err.message : String(err)));
+    if (inProgressStatusId) await transitionIssueStatus(db, ws.issueId, inProgressStatusId).catch((err) => console.warn(`[monitor] failed to reset ghost-workspace issue ${ws.issueId} to In Progress:`, errorMessage(err)));
     logAction("mark_idle", ws.wsId, ws.issueId, {
       endpoint: `DELETE /api/workspaces/${ws.wsId}`,
       responseSummary: "Ghost workspace deleted",

@@ -15,6 +15,7 @@ import {
   updateProjectScriptShortcut,
   deleteProjectScriptShortcut,
 } from "../repositories/project-scripts.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export class ProjectScriptsError extends Error {
   constructor(
@@ -210,7 +211,7 @@ export function createProjectScriptsService(deps: { database: Database }) {
       }
 
       child.on("error", (err) => {
-        finish("error", null, `${err instanceof Error ? err.message : String(err)}\n`);
+        finish("error", null, `${errorMessage(err)}\n`);
       });
       child.on("close", (code) => {
         const status: LastRunStatus = code === 0 ? "success" : "failed";

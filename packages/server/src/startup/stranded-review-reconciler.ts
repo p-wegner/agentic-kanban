@@ -11,6 +11,7 @@ import { startManualReview, isReviewLaunchPending } from "../services/review.ser
 import { getMergeJob } from "../services/merge-job.service.js";
 import { recordDriveObstacle } from "../services/drive-obstacles.service.js";
 import { PREF_RECONCILER_STRANDED_REVIEW_ENABLED } from "../constants/preference-keys.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * How many times the reconciler may attempt a review preflight for the SAME pair of
@@ -189,7 +190,7 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
       }
       recovered++;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       console.warn(`[reconcile] failed to recover stranded workspace ${c.wsId}:`, message);
       // #283 — remember the failure so the next cycle does not repeat it blindly.
       signature ??= await computePreflightSignature(c.workingDir, c.baseBranch);

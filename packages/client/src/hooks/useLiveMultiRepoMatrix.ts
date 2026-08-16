@@ -10,6 +10,7 @@ import {
 } from "../lib/multiRepoMatrix.js";
 import { diffMultiRepoMatrix, type MatrixSnapshot } from "../lib/diffMultiRepoMatrix.js";
 import { BOARD_WS_EVENT, type BoardWsEventDetail } from "../lib/useBoardEvents.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Board-event reasons that can change a repo × workspace cell. A merge landing, a
@@ -149,7 +150,7 @@ export function useLiveMultiRepoMatrix(
         }
       } catch (err) {
         if (seq !== requestSeqRef.current) return;
-        setError(err instanceof Error ? err.message : String(err));
+        setError(errorMessage(err));
         setLoading(false);
       }
     })();

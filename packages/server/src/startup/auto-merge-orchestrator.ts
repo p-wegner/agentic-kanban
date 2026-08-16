@@ -15,6 +15,7 @@ import { reconcileCompletionStates } from "./completion-state-reconciler.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { reconcileDriveCompletion } from "./drive-completion-reconciler.js";
 import { reconcileProjectCompletion } from "./project-completion-reconciler.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const DEFAULT_INTERVAL_MS = 30_000;
 /**
@@ -213,7 +214,7 @@ export function createAutoMergeOrchestrator(deps: {
       };
       console.log(`[auto-merge] launched batch reconciler session=${sessionId} integration=${integration.id} over ${open.length} stranded workspaces`);
     } catch (err) {
-      console.warn(`[auto-merge] reconciler launch failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[auto-merge] reconciler launch failed (non-fatal): ${errorMessage(err)}`);
     }
   }
 
@@ -279,7 +280,7 @@ export function createAutoMergeOrchestrator(deps: {
         // Enforce the drive completion contract (#801): keep each active drive's meta in
         // In Progress until all its children are Done, then drive the meta itself to Done.
         const driveChanges = await reconcileDriveCompletion(database, { boardEvents }).catch((err) => {
-          console.warn("[auto-merge] reconcileDriveCompletion failed (non-fatal):", err instanceof Error ? err.message : String(err));
+          console.warn("[auto-merge] reconcileDriveCompletion failed (non-fatal):", errorMessage(err));
           return 0;
         });
         if (driveChanges > 0) {
@@ -289,7 +290,7 @@ export function createAutoMergeOrchestrator(deps: {
         // Inform the user when a project's backlog is fully implemented (#848). Edge-triggered:
         // broadcasts `project_completed` once per completion, not every cycle.
         const completionChanges = await reconcileProjectCompletion(database, { boardEvents }).catch((err) => {
-          console.warn("[auto-merge] reconcileProjectCompletion failed (non-fatal):", err instanceof Error ? err.message : String(err));
+          console.warn("[auto-merge] reconcileProjectCompletion failed (non-fatal):", errorMessage(err));
           return 0;
         });
         if (completionChanges > 0) {

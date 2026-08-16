@@ -6,6 +6,7 @@ import { getPreference } from "../../repositories/preferences.repository.js";
 import { runMigrations, getActiveProjectId } from "../shared.js";
 import { unregisterLeakedTempProjects, findProjectsWithMissingRepoPath } from "../../services/project-registration.js";
 import { exportBacklogSnapshot, importBacklogSnapshot, validateBacklogSnapshot } from "../../services/backlog-snapshot.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** Resolve a project by name or id, defaulting to the active project when omitted. */
 async function resolveProject(nameOrId: string | undefined) {
@@ -40,7 +41,7 @@ Examples:
         console.log(`Unregistered project "${project.name}" (${project.id})`);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -77,7 +78,7 @@ Example:
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -110,7 +111,7 @@ Examples:
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -137,7 +138,7 @@ Examples:
         try {
           raw = JSON.parse(readFileSync(file, "utf8"));
         } catch (e) {
-          console.error(`Could not read/parse ${file}: ${e instanceof Error ? e.message : String(e)}`);
+          console.error(`Could not read/parse ${file}: ${errorMessage(e)}`);
           process.exit(1);
         }
         const { snapshot, errors } = validateBacklogSnapshot(raw);
@@ -156,7 +157,7 @@ Examples:
         for (const w of result.warnings) console.log(`  ! ${w}`);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -208,7 +209,7 @@ Example:
 
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });

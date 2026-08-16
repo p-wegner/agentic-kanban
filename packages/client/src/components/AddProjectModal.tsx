@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRegistrationProgress } from "../hooks/useRegistrationProgress.js";
 import type { Project } from "./Layout.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * The "Add Project" modal (register-existing / create-new tabs, plus the archived-projects
@@ -82,7 +83,7 @@ export function AddProjectModal({
       setGenerateReadme(false);
       setAdditionalRepos([]);
     } catch (err) {
-      setRegisterError(err instanceof Error ? err.message : String(err));
+      setRegisterError(errorMessage(err));
     } finally {
       setRegistering(false);
       endProgress();
@@ -102,7 +103,7 @@ export function AddProjectModal({
       setGitignoreTemplate("");
       setGenerateReadme(false);
     } catch (err) {
-      setCreateError(err instanceof Error ? err.message : String(err));
+      setCreateError(errorMessage(err));
     } finally {
       setCreating(false);
     }

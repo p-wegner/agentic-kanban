@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { samePath as sharedSamePath } from "@agentic-kanban/shared/lib/path-key";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * #361 (Observation C, second half) — a git worktree left registered after its unit merged, which
@@ -172,7 +173,7 @@ export async function reconcileOrphanedWorktrees(args: {
   try {
     worktrees = await args.git.listWorktrees(args.repoPath);
   } catch (err) {
-    console.warn(`[worktree-reconcile] could not list worktrees for ${args.repoPath}: ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`[worktree-reconcile] could not list worktrees for ${args.repoPath}: ${errorMessage(err)}`);
     return report;
   }
 
@@ -200,7 +201,7 @@ export async function reconcileOrphanedWorktrees(args: {
       console.log(`[worktree-reconcile] removed orphaned worktree ${worktree.path} (${worktree.branch || "detached"}) — no workspace claims it and it holds nothing unshipped (#361)`);
       report.removed.push(worktree.path);
     } catch (err) {
-      console.warn(`[worktree-reconcile] could not remove orphaned worktree ${worktree.path}: ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[worktree-reconcile] could not remove orphaned worktree ${worktree.path}: ${errorMessage(err)}`);
     }
   }
 

@@ -1,6 +1,7 @@
 import { access, cp, lstat, mkdir, readFile, readdir, symlink, unlink, writeFile } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import { join, relative } from "node:path";
+import { errorMessage } from "./error-message.js";
 
 /**
  * True for a directory entry that may hold a skill.
@@ -270,7 +271,7 @@ export async function copySkillToWorktree(repoPath: string, skillName: string, w
   } catch (err) {
     console.warn(
       `[skills] copied SKILL.md for "${skillName}" but not its bundled assets: `
-      + `${err instanceof Error ? err.message : String(err)}`,
+      + `${errorMessage(err)}`,
     );
   }
   return true;

@@ -6,6 +6,7 @@ import {
   resolveVoiceLanguage,
 } from "../lib/voice-language.js";
 import { showToast } from "./Toast.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 interface VoiceInboxButtonProps {
   projectId: string | null;
@@ -118,7 +119,7 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
         onIssueCreated?.();
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       showToast(`Voice capture failed: ${message}`, "error");
     } finally {
       setState("idle");

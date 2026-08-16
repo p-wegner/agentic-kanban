@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { apiFetch } from "../lib/api.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 interface ContentionWorkspace {
   workspaceId: string;
@@ -85,7 +86,7 @@ export function FileContentionPanel({ activeProjectId, onClose }: FileContention
         setLoading(false);
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(errorMessage(err));
         setLoading(false);
       });
   }, [activeProjectId]);

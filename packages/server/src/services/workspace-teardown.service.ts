@@ -28,6 +28,7 @@ import { runScript } from "./script-runner.js";
 import { resolveWorktreeDevPorts } from "./worktree-ports.js";
 import { auditProcessEvent, guardProcessKill } from "./process-guard.js";
 import { removeGradleUserHomeForWorktree } from "@agentic-kanban/shared/lib/gradle-env";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Best-effort kill of a process and its descendants by PID. Windows uses
@@ -147,7 +148,7 @@ export async function teardownWorktree(
   try {
     result.killedInDir = await killDir(workingDir);
   } catch (err) {
-    console.warn(`[teardown:${label}] dir cleanup failed (non-fatal):`, err instanceof Error ? err.message : String(err));
+    console.warn(`[teardown:${label}] dir cleanup failed (non-fatal):`, errorMessage(err));
   }
 
   // Layer 1b — free the app-convention dev ports for this worktree (exact ports only).
@@ -164,12 +165,12 @@ export async function teardownWorktree(
     try {
       await killSupervisor(portList);
     } catch (err) {
-      console.warn(`[teardown:${label}] supervisor cleanup failed (non-fatal):`, err instanceof Error ? err.message : String(err));
+      console.warn(`[teardown:${label}] supervisor cleanup failed (non-fatal):`, errorMessage(err));
     }
     try {
       result.killedOnPorts = await killPorts(portList);
     } catch (err) {
-      console.warn(`[teardown:${label}] port cleanup failed (non-fatal):`, err instanceof Error ? err.message : String(err));
+      console.warn(`[teardown:${label}] port cleanup failed (non-fatal):`, errorMessage(err));
     }
   }
 
@@ -188,7 +189,7 @@ export async function teardownWorktree(
       result.scriptRan = true;
       console.log(`[teardown:${label}] script ${r.ok ? "ok" : "failed"} — ${r.output.slice(0, 100)}`);
     } catch (err) {
-      console.warn(`[teardown:${label}] script threw (non-fatal):`, err instanceof Error ? err.message : String(err));
+      console.warn(`[teardown:${label}] script threw (non-fatal):`, errorMessage(err));
     }
   }
 
@@ -199,7 +200,7 @@ export async function teardownWorktree(
   try {
     await removeGradleUserHomeForWorktree(workingDir);
   } catch (err) {
-    console.warn(`[teardown:${label}] gradle home cleanup failed (non-fatal):`, err instanceof Error ? err.message : String(err));
+    console.warn(`[teardown:${label}] gradle home cleanup failed (non-fatal):`, errorMessage(err));
   }
 
   if (result.killedInDir || result.killedOnPorts) {

@@ -17,6 +17,7 @@ import { db } from "../db/index.js";
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
 import { finalizeMergeCleanup, reconcileMergedIssue } from "../services/merge-cleanup.service.js";
 import * as gitService from "../services/git.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Reconcile workspaces whose branch was merged (mergedAt IS NOT NULL) but whose
@@ -60,7 +61,7 @@ export async function reconcileSilentlyMergedWorkspaces(database: Database = db)
           } catch (err) {
             console.warn(
               `[startup] reconcileSilentlyMergedWorkspaces: failed to delete branch ${ws.branch} for workspace ${ws.id}:`,
-              err instanceof Error ? err.message : String(err),
+              errorMessage(err),
             );
           }
         }
@@ -99,10 +100,10 @@ export async function reconcileSilentlyMergedWorkspaces(database: Database = db)
           }, database);
         } catch { /* health event logging is non-fatal */ }
       } catch (err) {
-        console.warn(`[startup] reconcileSilentlyMergedWorkspaces: failed for workspace ${ws.id}:`, err instanceof Error ? err.message : String(err));
+        console.warn(`[startup] reconcileSilentlyMergedWorkspaces: failed for workspace ${ws.id}:`, errorMessage(err));
       }
     }
   } catch (err) {
-    console.warn("[startup] reconcileSilentlyMergedWorkspaces failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] reconcileSilentlyMergedWorkspaces failed (non-fatal):", errorMessage(err));
   }
 }

@@ -39,6 +39,7 @@ import {
 import { stopBisectSession } from "./bisect.service.js";
 import * as realGitService from "./git.service.js";
 import { resolveEffectiveModel } from "./effective-config.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function createWorkspaceSessionService(deps: {
   database: Database;
@@ -75,7 +76,7 @@ export function createWorkspaceSessionService(deps: {
       } catch (err) {
         if (err instanceof WorkspaceError) throw err;
         throw new WorkspaceError(
-          `Workspace has no working directory and auto-setup failed: ${err instanceof Error ? err.message : String(err)}. ` +
+          `Workspace has no working directory and auto-setup failed: ${errorMessage(err)}. ` +
             `Call POST /api/workspaces/${id}/setup first, then retry launch.`,
           "BAD_REQUEST",
         );

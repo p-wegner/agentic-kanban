@@ -20,6 +20,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import * as gitService from "./git.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** Budget for the inlined review diff (~15k tokens). Over this, fall back to the file list. */
 export const MAX_REVIEW_DIFF_CHARS = 60_000;
@@ -140,7 +141,7 @@ export async function buildReviewContext(input: ReviewContextInput): Promise<str
   } catch (err) {
     console.warn(
       `[phase-context] review context unavailable for ${workingDir}:`,
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
     return null;
   }

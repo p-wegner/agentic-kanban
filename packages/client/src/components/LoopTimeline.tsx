@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 // ── Timeline + cost (#292, #294) ─────────────────────────────────────
 //
@@ -188,7 +189,7 @@ export function LoopTimeline({ pluginId, loopName, projectId, refreshKey, hasGat
       `/api/plugins/${pluginId}/loops/${encodeURIComponent(loopName)}/events?projectId=${projectId}&limit=${TIMELINE_EVENT_LIMIT}`,
     )
       .then((res) => { if (!cancelled) { setData(res); setError(null); } })
-      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); });
+      .catch((err) => { if (!cancelled) setError(errorMessage(err)); });
     return () => { cancelled = true; };
   }, [pluginId, loopName, projectId, refreshKey]);
 

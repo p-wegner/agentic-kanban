@@ -14,8 +14,7 @@ import { recordAgentProfileLaunchFailure } from "../agent-profile-health.service
 import { recordAgentProfileLaunchSuccess } from "../agent-profile-failure-record.js";
 import { applyAuthFailureRecovery } from "../provider-auth-recovery.js";
 import { emitButlerSystemEvent } from "../butler-event-feed.js";
-import type { ProviderName } from "../agent-provider.js";
-import { narrowProviderName } from "../agent-provider.js";
+import { narrowProviderName, type ProviderName } from "../agent-provider.js";
 import { getProviderExitBehavior } from "../agent-provider/provider-exit-behavior.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import { modelBelongsToProvider } from "@agentic-kanban/shared";
@@ -52,6 +51,7 @@ import {
   resolveProviderRotation,
 } from "./session-launch-helpers.js";
 import { finalizePlanModeExit } from "./plan-mode-exit.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** Bounds the missing-transcript fallback (#26) to one automatic retry per workspace. */
 const MAX_STALE_RESUME_RECOVERIES = 1;
@@ -677,7 +677,7 @@ export function createSessionLifecycle(
       await recordAgentProfileLaunchFailure(db, {
         provider: lifecycleProviderName(provider, profile),
         profileName: profile?.name,
-        summary: err instanceof Error ? err.message : String(err),
+        summary: errorMessage(err),
         exitCode: 1,
         sessionId,
         workspaceId,

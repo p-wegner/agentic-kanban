@@ -9,6 +9,7 @@ import {
   PROJECT_CONDUCTOR_STATE_RELATIVE_DIR,
   writeStrategyObjective,
 } from "./strategy-objective.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export interface ProjectConductorConfig {
   enabled: boolean;
@@ -149,18 +150,18 @@ export function startProjectConductorSupervisor(options: { database: Database; b
             launched.delete(projectId);
             noteSpawnFailure(projectId);
             const next = failures.get(projectId);
-            console.warn(`[conductor] failed to launch project ${projectId} (attempt ${next?.count}, backing off ${Math.round((next ? next.until - Date.now() : 0) / 1000)}s):`, err instanceof Error ? err.message : String(err));
+            console.warn(`[conductor] failed to launch project ${projectId} (attempt ${next?.count}, backing off ${Math.round((next ? next.until - Date.now() : 0) / 1000)}s):`, errorMessage(err));
           });
           child.unref();
           launched.set(projectId, project.repoPath);
           console.log(`[conductor] launched project ${projectId} (${project.name}) agent=${config.agent} cadence=${config.cadenceSeconds}s`);
         } catch (err) {
           noteSpawnFailure(projectId);
-          console.warn(`[conductor] spawn threw for project ${projectId}:`, err instanceof Error ? err.message : String(err));
+          console.warn(`[conductor] spawn threw for project ${projectId}:`, errorMessage(err));
         }
       }
     } catch (err) {
-      console.warn("[conductor] supervisor sync failed:", err instanceof Error ? err.message : String(err));
+      console.warn("[conductor] supervisor sync failed:", errorMessage(err));
     } finally {
       syncRunning = false;
     }

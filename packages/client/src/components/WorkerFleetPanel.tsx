@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** Mirrors the WorkerView the /api/workers list route returns. */
 interface WorkerRow {
@@ -63,7 +64,7 @@ export function WorkerFleetPanel({ onClose }: WorkerFleetPanelProps) {
         setLoading(false);
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(errorMessage(err));
         setLoading(false);
       });
   }, []);
@@ -79,7 +80,7 @@ export function WorkerFleetPanel({ onClose }: WorkerFleetPanelProps) {
     try {
       setPairing(await apiPost<{ pairingToken: string; expiresAt: string }>("/api/workers/pairing-token"));
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     }
   };
 
@@ -90,7 +91,7 @@ export function WorkerFleetPanel({ onClose }: WorkerFleetPanelProps) {
       await apiDelete(`/api/workers/${worker.id}`);
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setBusyId(null);
     }

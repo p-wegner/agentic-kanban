@@ -23,6 +23,7 @@ import {
   getSessionMessageTypesAndData,
   deleteFailurePattern,
 } from "../repositories/failure-pattern.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export interface FailurePattern {
   id: string;
@@ -148,7 +149,7 @@ export async function backfillFromLearnings(learningsDir: string, db: Database =
       const ingested = await ingestLearningFile(resolve(learningsDir, f), db);
       if (ingested) count++;
     } catch (err) {
-      console.warn(`[failure-patterns] failed to ingest ${f}:`, err instanceof Error ? err.message : String(err));
+      console.warn(`[failure-patterns] failed to ingest ${f}:`, errorMessage(err));
     }
   }
   return count;

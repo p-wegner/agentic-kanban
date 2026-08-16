@@ -60,6 +60,7 @@ import {
 } from "./workspace-repos.service.js";
 import { listProjectRepos } from "../repositories/repo.repository.js";
 import { basename } from "node:path";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function createWorkspaceCreateService(deps: {
   database: Database;
@@ -271,7 +272,7 @@ export function createWorkspaceCreateService(deps: {
       await gitService.removeWorktree(repoPath, worktreePath);
       console.log(`[workspaces] cleaned up orphaned worktree: ${worktreePath}`);
     } catch (cleanupErr) {
-      console.warn(`[workspaces] failed to remove worktree after create error: ${cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)}`);
+      console.warn(`[workspaces] failed to remove worktree after create error: ${errorMessage(cleanupErr)}`);
     }
   }
 
@@ -293,7 +294,7 @@ export function createWorkspaceCreateService(deps: {
     resolvedProvider: ProviderName;
     now: string;
   }): Promise<CreateWorkspaceResult> {
-    const errorMsg = err instanceof Error ? err.message : String(err);
+    const errorMsg = errorMessage(err);
     console.error(`[workspaces] create failed: ${errorMsg}`);
 
     try {
@@ -394,7 +395,7 @@ export function createWorkspaceCreateService(deps: {
               // #F5b: if the state can't be persisted, no teardown path can find the stack
               // (they all gate on the STORED state) — it would orphan. Tear it down now.
               // Never for an ADOPTED stack: the co-resident owner still references it.
-              console.warn(`[services] failed to persist service_state for ${workspaceId}; ${stackAdopted ? "adopted stack left to its owner" : "tearing the stack down to avoid an orphan"}: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`);
+              console.warn(`[services] failed to persist service_state for ${workspaceId}; ${stackAdopted ? "adopted stack left to its owner" : "tearing the stack down to avoid an orphan"}: ${errorMessage(dbErr)}`);
               if (serviceState.status === "up" && !stackAdopted) {
                 await workspaceServicesService.teardownWorkspaceServices({
                   composeProjectName: serviceState.composeProjectName,
@@ -469,7 +470,7 @@ export function createWorkspaceCreateService(deps: {
         await launchAgent(agentLaunchArgs);
         timing("agent-launch", t2);
       })().catch((err: unknown) => {
-        const errorMsg = err instanceof Error ? err.message : String(err);
+        const errorMsg = errorMessage(err);
         const staleSafetyPolicy =
           err instanceof WorkspaceError && err.data?.code === "STALE_SAFETY_POLICY";
         const persistedError = staleSafetyPolicy ? `STALE_SAFETY_POLICY: ${errorMsg}` : errorMsg;
@@ -488,7 +489,7 @@ export function createWorkspaceCreateService(deps: {
           latestLaunchError: persistedError,
           updatedAt: new Date().toISOString(),
         }, database)
-          .catch((dbErr: unknown) => console.warn(`[workspaces] failed to update workspace status after deferred launch failure: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`));
+          .catch((dbErr: unknown) => console.warn(`[workspaces] failed to update workspace status after deferred launch failure: ${errorMessage(dbErr)}`));
       });
     });
   }
@@ -666,7 +667,7 @@ export function createWorkspaceCreateService(deps: {
       if (setupCompletion) {
         setupCompletion
           .then((run) => updateLatestSetupRun(id, run, issue.projectId))
-          .catch((err) => console.warn(`[workspaces] failed to persist setup status: ${err instanceof Error ? err.message : String(err)}`));
+          .catch((err) => console.warn(`[workspaces] failed to persist setup status: ${errorMessage(err)}`));
       }
 
       if (tddMode && worktreePath) {

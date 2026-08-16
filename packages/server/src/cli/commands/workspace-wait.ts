@@ -1,6 +1,7 @@
 import { getIssueIdByNumberInProject } from "../../repositories/issue.repository.js";
 import { getLatestWorkspaceForIssue, getWorkspaceById } from "../../repositories/workspace.repository.js";
 import { runMigrations, getActiveProjectId } from "../shared.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Workspace statuses that mean the agent has finished its turn successfully and
@@ -122,7 +123,7 @@ export async function runWorkspaceWait(issueNumberArg: string, options: WaitOpti
       try {
         status = await readStatus();
       } catch (err) {
-        console.error("Error reading workspace status:", err instanceof Error ? err.message : String(err));
+        console.error("Error reading workspace status:", errorMessage(err));
         finish(1);
         return;
       }

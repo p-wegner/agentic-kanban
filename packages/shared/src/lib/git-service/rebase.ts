@@ -1,5 +1,6 @@
 import { execGit } from "./internal.js";
 import { ensureOnBranch } from "./branch-attach.js";
+import { errorMessage } from "../error-message.js";
 
 /**
  * Commit any uncommitted changes in a worktree so a rebase/merge can run on a clean tree.
@@ -23,7 +24,7 @@ export async function commitLeftoverChanges(worktreePath: string): Promise<numbe
     console.log(`[git] committed ${changedFiles.length} leftover change(s) in ${worktreePath} before rebase`);
     return changedFiles.length;
   } catch (err) {
-    console.log(`[git] failed to commit leftover changes in ${worktreePath}: ${err instanceof Error ? err.message : String(err)}`);
+    console.log(`[git] failed to commit leftover changes in ${worktreePath}: ${errorMessage(err)}`);
     return 0;
   }
 }
@@ -84,7 +85,7 @@ export async function prepareForReview(
     try {
       await execGit(["rebase", "--abort"], worktreePath);
     } catch { /* best effort */ }
-    return { diffRef: rebaseSource, success: false, conflictingFiles, error: err instanceof Error ? err.message : String(err) };
+    return { diffRef: rebaseSource, success: false, conflictingFiles, error: errorMessage(err) };
   }
 
   return { diffRef: rebaseSource, success: true };
@@ -121,7 +122,7 @@ export async function rebaseOntoBase(
         success: false,
         error:
           `a previous rebase is still in progress in ${worktreePath} and could not be aborted ` +
-          `(${err instanceof Error ? err.message : String(err)}) — resolve or abort it before retrying`,
+          `(${errorMessage(err)}) — resolve or abort it before retrying`,
       };
     }
   }
@@ -155,7 +156,7 @@ export async function rebaseOntoBase(
     }
     return { success: true, ...tips };
   } catch (err) {
-    const error = err instanceof Error ? err.message : String(err);
+    const error = errorMessage(err);
     // Only attribute unmerged index entries to THIS rebase when this rebase is the one that
     // stopped. If it never started (it failed for some other reason), whatever is in the
     // index belongs to something else and naming those files would be a fabrication.

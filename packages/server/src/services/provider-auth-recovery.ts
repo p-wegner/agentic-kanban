@@ -35,6 +35,7 @@ import { emitButlerSystemEvent } from "./butler-event-feed.js";
 import { rotateClaudeSubscription } from "./claude-subscription-ring.js";
 import { rotateCodexLicense } from "./codex-license-ring.js";
 import { getAllPreferences } from "../repositories/preferences.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * How long a profile with a dead login is cooled.
@@ -117,7 +118,7 @@ export async function handleProviderAuthFailure(
       failure,
       rotated: false,
       breakerOpen,
-      remedy: `${remedy} Rotation attempt failed: ${err instanceof Error ? err.message : String(err)}.`,
+      remedy: `${remedy} Rotation attempt failed: ${errorMessage(err)}.`,
     };
   }
 }

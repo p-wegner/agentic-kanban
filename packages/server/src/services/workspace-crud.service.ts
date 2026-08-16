@@ -3,6 +3,7 @@ import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
 import * as crudRepo from "../repositories/workspace-crud.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 // Teardown/cleanup ops + their entry types now live in workspace-cleanup.service.ts.
 // Re-export the types so existing importers (workspace.service.ts) are unaffected.
@@ -179,7 +180,7 @@ export function createWorkspaceCrudService(deps: {
           // behind; recording it as a cleanup warning (mirrors the post-merge
           // cleanup pattern) keeps it discoverable via the Cleanup Queue instead of
           // silently falling out of tracking.
-          cleanupWarning = err instanceof Error ? err.message : String(err);
+          cleanupWarning = errorMessage(err);
           console.warn(`[workspaces] close: worktree removal failed/timed out for ${workspace.workingDir} — recording cleanup warning`, err);
         }
       }

@@ -6,6 +6,7 @@ import { fetchProjectRepos, invalidateProjectRepos } from "../lib/projectReposQu
 import { showToast } from "./Toast.js";
 import { CollapsibleSection } from "./SettingsPanel.shared.js";
 import { buildRepoPatch, repoFormFromResponse, type RepoEditFormState } from "./repoEditPayload.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Multi-repo project settings: manage the ADDITIONAL repos (full-peers model).
@@ -54,7 +55,7 @@ export function ProjectReposSection({ projectId }: { projectId: string }) {
       await load({ fresh: true });
       showToast("Repo added to project", "success");
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setBusy(false);
     }

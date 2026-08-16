@@ -1,3 +1,5 @@
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+
 ﻿import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { fetchProjectRepos, invalidateProjectRepos } from "../lib/projectReposQuery.js";
@@ -209,7 +211,7 @@ export function Layout({
       await loadProjectRepos(activeProjectId, { fresh: true });
       showToast(`Added repo "${r.name ?? value}" to the project`, "success");
     } catch (err) {
-      setAddRepoError(err instanceof Error ? err.message : String(err));
+      setAddRepoError(errorMessage(err));
     } finally {
       setAddingRepo(false);
     }

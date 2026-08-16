@@ -8,6 +8,7 @@ import {
   type FleetServiceStackMapData,
   type FleetStackInput,
 } from "../lib/fleetServiceStacks.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Fleet Service-Stack Map (#95). `ServiceStackStatusPanel` shows ONE workspace's
@@ -146,7 +147,7 @@ function useFleetServiceStacksData(
         setLoading(false);
       } catch (err) {
         if (seq !== requestSeqRef.current) return;
-        setError(err instanceof Error ? err.message : String(err));
+        setError(errorMessage(err));
         setLoading(false);
       }
     })();

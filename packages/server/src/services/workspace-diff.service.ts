@@ -7,6 +7,7 @@ import { parseDiffStats } from "./board-aggregation.service.js";
 import { WorkspaceError, requireBaseBranch, type GitService } from "./workspace-internals.js";
 import { listWorkspaceRepos } from "../repositories/repo.repository.js";
 import { readHandoffMeta, type HandoffMeta } from "./handoff.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** Freshness window for serving `?stats=1` from the persisted diff_stat_cache columns —
  * the same 30s SWR cadence that maintains them (workspace-diff-stats / the #399 chain). */
@@ -81,7 +82,7 @@ export function createWorkspaceDiffService(deps: {
               repoDiff = await gitService.getDiffFromRepo(repo.path, repo.branch, repo.baseBranch ?? baseBranch);
             }
           } catch (err) {
-            console.warn(`[workspace-service] sibling diff failed for ${repo.path} (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+            console.warn(`[workspace-service] sibling diff failed for ${repo.path} (non-fatal): ${errorMessage(err)}`);
           }
           repoSections.push({ name: repo.name, path: repo.path, diff: repoDiff, stats: parseDiffStats(repoDiff), conflicts: repoConflicts });
           if (repoDiff) diff += (diff && !diff.endsWith("\n") ? "\n" : "") + repoDiff;
@@ -181,7 +182,7 @@ export function createWorkspaceDiffService(deps: {
           conflictingFiles.push(...repoResult.conflictingFiles);
         }
       } catch (err) {
-        console.warn(`[workspace-service] sibling conflict check failed for ${repo.path} (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+        console.warn(`[workspace-service] sibling conflict check failed for ${repo.path} (non-fatal): ${errorMessage(err)}`);
       }
     }
     return { hasConflicts, conflictingFiles };

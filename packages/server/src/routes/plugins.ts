@@ -8,6 +8,7 @@ import { getPluginService, PluginError } from "../services/plugin.service.js";
 import { createIssueService } from "../services/issue.service.js";
 import { createWorkspaceService } from "../services/workspace.service.js";
 import { createWebhookSender } from "../services/outbound-webhook.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Plugin-system REST surface, mounted at `/plugins` (routes/index.ts):
@@ -323,7 +324,7 @@ export function createPluginsRoute(
         try {
           await service.runSkill(pluginId, skillName, projectId, { ...opts, onProgress: send });
         } catch (err) {
-          send({ stage: "error", message: err instanceof Error ? err.message : String(err) });
+          send({ stage: "error", message: errorMessage(err) });
         } finally {
           try { controller.close(); } catch { /* already closed */ }
         }

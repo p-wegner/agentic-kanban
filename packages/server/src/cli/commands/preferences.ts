@@ -4,6 +4,7 @@ import type { Database } from "../../db/index.js";
 import { PROVIDER_DIVERGENCE_KEYS, createPreferenceService, preferenceService } from "../../services/preference.service.js";
 import type { ProviderDivergenceRejection } from "../../services/preference.service.js";
 import { runMigrations } from "../shared.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 function formatDivergence(key: string, value: string, d: ProviderDivergenceRejection): string {
   const bullseye = `${d.bullseyeProvider ?? "?"}:${d.bullseyeProfile ?? ""}`;
@@ -70,7 +71,7 @@ Examples:
         console.log(`Set ${key} = ${value}`);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -85,7 +86,7 @@ Examples:
         console.log(value === null ? `(not set)` : value);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });

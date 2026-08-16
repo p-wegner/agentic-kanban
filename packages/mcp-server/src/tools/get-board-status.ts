@@ -19,6 +19,7 @@ import {
 // server's; now both build the IDENTICAL entry via these helpers.
 import { buildBoardStatusEntry } from "@agentic-kanban/shared/lib/board-status-entry";
 import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, getDiffShortstat } = deps;
@@ -191,7 +192,7 @@ export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodD
             asyncWork.push(
               getDiffShortstat(mainWs.workingDir, diffRef)
                 .then(stats => { entry.diffStats = stats; })
-                .catch((err) => { console.error(`[board-status] diff failed for ${mainWs.branch}:`, err instanceof Error ? err.message : String(err)); }),
+                .catch((err) => { console.error(`[board-status] diff failed for ${mainWs.branch}:`, errorMessage(err)); }),
             );
 
             if (latestSession) {
@@ -244,7 +245,7 @@ export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodD
 
         return { content: [{ type: "text" as const, text: JSON.stringify(response, null, 2) }] };
       } catch (err) {
-        return { content: [{ type: "text" as const, text: `Error: ${err instanceof Error ? err.message : String(err)}` }] };
+        return { content: [{ type: "text" as const, text: `Error: ${errorMessage(err)}` }] };
       }
     },
   );

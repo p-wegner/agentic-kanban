@@ -24,6 +24,7 @@ import {
   setCachedRecommendations,
   type AgentQuestion,
 } from "../services/agent-questions.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function createAgentQuestionsRoute(
   database: Database,
@@ -72,7 +73,7 @@ export function createAgentQuestionsRoute(
       if (result.type === "sent") return c.json({ ok: true, content });
       return c.json({ ok: true, sessionId: result.sessionId, resumed: true, content }, 201);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       console.error(`[agent-questions] failed to send answer: workspace=${body.workspaceId} ${message}`);
       return c.json({ error: message }, 500);
     }
@@ -120,7 +121,7 @@ export function createAgentQuestionsRoute(
       await setCachedRecommendations(toolUseId, recommendations, database, projectId);
       return c.json({ ok: true, recommendations });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       console.error(`[agent-questions] recommend failed: toolUseId=${toolUseId} ${message}`);
       return c.json({ error: message }, 500);
     }

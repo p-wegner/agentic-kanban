@@ -45,6 +45,7 @@ import {
   shouldRetryGateRecommendation,
   GATE_RECOMMENDATION_MAX_ATTEMPTS,
 } from "./gate-recommendation-retry.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Board-owned converging analysis loops (plugin manifest `loops`).
@@ -457,7 +458,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
     try {
       plan = parsePluginLoopPlan(result.stdout);
     } catch (err) {
-      const base = err instanceof Error ? err.message : String(err);
+      const base = errorMessage(err);
       // Never let a truncation masquerade as a malformed plan: that misdirects the reader to the
       // plugin's JSON when the output was clipped on the way in.
       throw new PluginLoopError(
@@ -635,7 +636,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
             await m.computeGateRecommendation(conciergeArgs, database);
             await m.notifyButlerOfGate(conciergeArgs, database);
           }).catch((err) => {
-            console.warn(`[plugins] gate concierge failed for ${args.pluginSlug}:${loop.name}:`, err instanceof Error ? err.message : String(err));
+            console.warn(`[plugins] gate concierge failed for ${args.pluginSlug}:${loop.name}:`, errorMessage(err));
           }).finally(() => endGateRecommendationAttempt(eventKey, gateId));
         }
       } else {
@@ -656,7 +657,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
           void import("./plugin-gate-butler.service.js")
             .then((m) => m.computeGateRecommendation(conciergeArgs, database))
             .catch((err) => {
-              console.warn(`[plugins] gate recommendation retry failed for ${args.pluginSlug}:${loop.name}:`, err instanceof Error ? err.message : String(err));
+              console.warn(`[plugins] gate recommendation retry failed for ${args.pluginSlug}:${loop.name}:`, errorMessage(err));
             })
             .finally(() => endGateRecommendationAttempt(eventKey, gateId));
         }
@@ -796,7 +797,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
               }, database);
             }
           } catch (err) {
-            console.warn(`[plugins] failed to record gate decision comment:`, err instanceof Error ? err.message : String(err));
+            console.warn(`[plugins] failed to record gate decision comment:`, errorMessage(err));
           }
           return { gate, action, result };
         } finally {
@@ -813,7 +814,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
       advance = await advanceLoop({ ...args });
     } catch (err) {
       // The resolve itself succeeded — a re-plan failure must not mask that.
-      console.warn(`[plugins] post-resolve advance of ${args.pluginSlug}:${loop.name} failed: ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[plugins] post-resolve advance of ${args.pluginSlug}:${loop.name} failed: ${errorMessage(err)}`);
     }
     // #357 — say something. Until now the butler produced the gate digest and the recommendation
     // BEFORE the decision and then went silent at the one moment the user is guaranteed to be
@@ -840,7 +841,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
         note: advance?.note ?? null,
         converged: advance?.converged ?? false,
       }, database)).catch((err) => {
-        console.warn(`[plugins] gate-resolution butler turn failed for ${args.pluginSlug}:${loop.name}:`, err instanceof Error ? err.message : String(err));
+        console.warn(`[plugins] gate-resolution butler turn failed for ${args.pluginSlug}:${loop.name}:`, errorMessage(err));
       });
     }
     return {

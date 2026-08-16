@@ -8,6 +8,7 @@ import {
 import type { Database } from "../db/index.js";
 import { listPluginRows } from "../repositories/plugins.repository.js";
 import { marketplaceCatalogPath, buildMarketplaceEntries, type PluginMarketplaceEntry, type InstalledPluginRow } from "./plugin-marketplace.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Read-side listing of installed plugins: the short-TTL memoized `listPlugins`, the
@@ -96,7 +97,7 @@ export function createPluginListingOps(deps: {
       try {
         manifest = parsePluginManifest(row.manifestJson);
       } catch (err) {
-        manifestError = err instanceof Error ? err.message : String(err);
+        manifestError = errorMessage(err);
       }
       // A peek only — never creates the sidecar repo (that happens on enable/run/setOutputLocation).
       const outputLocation = projectId ? await readOutputLocationPref(row.pluginId, projectId) : undefined;

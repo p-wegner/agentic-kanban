@@ -19,6 +19,7 @@ import {
   cleanupWorkerCheckout,
   type WorkerCheckout,
 } from "./worker-repo.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export type SendToBoard = (message: WorkerToBoardMessage) => void;
 
@@ -110,7 +111,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
         await pushWorkerResult(options.boardUrl ?? "", pending.repo, pending.checkout);
         console.log(`[worker] pushed session result: sessionId=${sessionId} ref=${pending.repo.incomingRef}`);
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = errorMessage(err);
         console.error(`[worker] push failed: sessionId=${sessionId}: ${message}`);
         send({ type: "event", event: { type: "stderr", sessionId, data: `Worker could not push its result: ${message}` } });
         effectiveExit = exitCode === 0 || exitCode === null ? 1 : exitCode;
@@ -160,7 +161,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
         provisioning.delete(sessionId);
       } catch (err) {
         provisioning.delete(sessionId);
-        const message = err instanceof Error ? err.message : String(err);
+        const message = errorMessage(err);
         console.error(`[worker] repo provisioning failed: sessionId=${sessionId}: ${message}`);
         send({ type: "assign_failed", sessionId, error: `repo provisioning failed: ${message}` });
       }
@@ -192,7 +193,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
         stdio: ["pipe", "pipe", "pipe"],
       });
     } catch (err) {
-      send({ type: "assign_failed", sessionId, error: err instanceof Error ? err.message : String(err) });
+      send({ type: "assign_failed", sessionId, error: errorMessage(err) });
       return;
     }
     processes.set(sessionId, proc);

@@ -12,6 +12,7 @@ import {
   writeProfileFailure,
   type AgentProfileFailureSummary,
 } from "./agent-profile-failure-record.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export {
   isProfileBreakerOpen,
@@ -273,7 +274,7 @@ export function preflightAgentProfile(
     command = sanitizeCommand(launchConfig.command) || command;
     flags = [...new Set([...flags, ...sanitizeFlags(launchConfig.args)])];
   } catch (err) {
-    errors.push(sanitizeErrorMessage(err instanceof Error ? err.message : String(err)));
+    errors.push(sanitizeErrorMessage(errorMessage(err)));
   }
 
   return {
@@ -350,7 +351,7 @@ export async function augmentPreflightWithVersion(
       raw: null,
       version: null,
       status: "unavailable",
-      message: `Version probe error: ${err instanceof Error ? err.message : String(err)}`,
+      message: `Version probe error: ${errorMessage(err)}`,
     };
   }
 

@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getServerPort } from "../server-url.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function registerButlerInterrupt(server: McpServer) {
   server.tool(
@@ -23,7 +24,7 @@ export function registerButlerInterrupt(server: McpServer) {
         return { content: [{ type: "text" as const, text: JSON.stringify(data) }] };
       } catch (err) {
         return {
-          content: [{ type: "text" as const, text: `Failed to reach the butler (is the server running on port ${getServerPort()}?): ${err instanceof Error ? err.message : String(err)}` }],
+          content: [{ type: "text" as const, text: `Failed to reach the butler (is the server running on port ${getServerPort()}?): ${errorMessage(err)}` }],
         };
       }
     },

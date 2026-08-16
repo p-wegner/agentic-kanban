@@ -5,6 +5,7 @@ import { getDbUrl, ensureDataDir, DB_LOCATION } from "./data-dir.js";
 // Single pragma implementation shared with script clients (db-repair etc., #987) —
 // a bare createClient without these runs with foreign_keys=OFF for the connection.
 import { applyPragmas } from "./pragmas.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 ensureDataDir();
 const DB_URL = getDbUrl();
@@ -32,7 +33,7 @@ try {
   // module-load crash — but it must NOT be silent: a failed `PRAGMA foreign_keys=ON`
   // leaves every ON DELETE clause inert. `assertForeignKeysEnabled` in startup-tasks
   // re-checks and fails loud; log here so the cause is visible even before that.
-  console.warn("[db] applyPragmas(read) failed:", err instanceof Error ? err.message : String(err));
+  console.warn("[db] applyPragmas(read) failed:", errorMessage(err));
 }
 
 // Write connection — dedicated to the high-volume session-message write stream and
@@ -44,7 +45,7 @@ try {
   await applyPragmas(writeClient);
 } catch (err) {
   // See the read connection above: not a crash, but never silent.
-  console.warn("[db] applyPragmas(write) failed:", err instanceof Error ? err.message : String(err));
+  console.warn("[db] applyPragmas(write) failed:", errorMessage(err));
 }
 
 export const db = drizzle({ client, schema });

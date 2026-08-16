@@ -15,6 +15,7 @@ import type { SessionContext, SessionManagerOptions, SessionState } from "./type
 import { formatToolActivity, tasksToTodoItems } from "./utils.js";
 import type { TodoItem } from "../board-events.js";
 import { detectCodexUsageLimitMessages } from "../codex-rate-limit.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Compute compact friction metrics (tool failures, repeated commands, errors)
@@ -177,7 +178,7 @@ function flushDbBuffer(state: SessionState, sessionId: string) {
   const insertResult = insertSessionMessages(sessionId, rows, provider);
   insertResult.catch((err: unknown) => {
     // FK constraint failure means the session was already deleted (race with workspace cleanup) — ignore
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errorMessage(err);
     if (!msg.includes("SQLITE_CONSTRAINT_FOREIGNKEY") && !msg.includes("FOREIGN KEY")) {
       console.error("Failed to persist session messages (batch):", err);
     }

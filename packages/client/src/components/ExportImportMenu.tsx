@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ImportIssuesModal } from "./ImportIssuesModal.js";
 import { showToast } from "./Toast.js";
 import { apiPost } from "../lib/api.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 interface ExportImportMenuProps {
   projectId: string | null;
@@ -80,7 +81,7 @@ export function ExportImportMenu({ projectId }: ExportImportMenuProps) {
         "success",
       );
     } catch (err) {
-      showToast(`Import failed: ${err instanceof Error ? err.message : String(err)}`, "error");
+      showToast(`Import failed: ${errorMessage(err)}`, "error");
     } finally {
       setImportingSnapshot(false);
     }

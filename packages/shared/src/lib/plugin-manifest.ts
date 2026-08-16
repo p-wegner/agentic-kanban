@@ -34,6 +34,8 @@
  * `plugin-keys.ts` and are re-exported here: this module is the documented import path for the
  * whole contract, and splitting them out was a cohesion fix, not an API change. Import either.
  */
+import { errorMessage } from "./error-message.js";
+
 export {
   pluginLoopUnitKey,
   parsePluginLoopUnitKey,
@@ -456,7 +458,7 @@ export function parsePluginManifest(input: string | unknown): PluginManifest {
     try {
       raw = JSON.parse(input);
     } catch (err) {
-      fail(`not valid JSON — ${err instanceof Error ? err.message : String(err)}`);
+      fail(`not valid JSON — ${errorMessage(err)}`);
     }
   }
   const obj = asRecord(raw, "manifest");

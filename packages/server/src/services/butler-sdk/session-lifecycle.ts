@@ -11,6 +11,7 @@ import { broadcast, butlerSessionKey, sessions } from "./registry.js";
 import { butlerCanUseTool, rejectPendingQuestions } from "./questions.js";
 import { buildButlerSystemPrompt } from "./system-prompt.js";
 import { runLoop } from "./claude-loop.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function ensureButlerSession(opts: {
   projectId: string;
@@ -154,7 +155,7 @@ export async function interruptButler(projectId: string, butlerId: string = "def
   try {
     await s.query.interrupt();
   } catch (err) {
-    console.warn(`[butler-sdk] interrupt failed: project=${projectId} butler=${butlerId} ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`[butler-sdk] interrupt failed: project=${projectId} butler=${butlerId} ${errorMessage(err)}`);
     return false;
   }
   s.busy = false;

@@ -1,6 +1,7 @@
 import { RepoLockUnavailableError, waitForRepoLock } from "@agentic-kanban/shared/lib/repo-lock";
 import type { RepoLockHandle, RepoLockWaitOptions } from "@agentic-kanban/shared/lib/repo-lock";
 import type { Database } from "../db/index.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * How long a queue member waits for the repo lock before failing loudly (#230).
@@ -471,7 +472,7 @@ export function createMergeQueueService(deps: {
         hasConflicts: false,
         conflictingFiles: [],
         isStale: false,
-        error: err instanceof Error ? err.message : String(err),
+        error: errorMessage(err),
       };
     }
   }
@@ -592,7 +593,7 @@ export function createMergeQueueService(deps: {
             return { passed: gate.passed, message: gate.message };
           } catch (err) {
             // Fail CLOSED: a gate we could not run is not a gate that passed.
-            return { passed: false, message: `train gate could not run: ${err instanceof Error ? err.message : String(err)}` };
+            return { passed: false, message: `train gate could not run: ${errorMessage(err)}` };
           } finally {
             if (gateWorktree) await gitService.removeWorktree(repoPath, gateWorktree).catch(() => undefined);
           }
@@ -714,7 +715,7 @@ export function createMergeQueueService(deps: {
               );
             }
           } catch (err) {
-            const error = err instanceof Error ? err.message : String(err);
+            const error = errorMessage(err);
             if (opts.skipOnConflict) {
               skipped.push(ws.id);
               yield {
@@ -793,7 +794,7 @@ export function createMergeQueueService(deps: {
                 workspaceId: ws.id,
                 issueNumber: ws.issueNumber,
                 issueTitle: ws.issueTitle,
-                error: err instanceof Error ? err.message : String(err),
+                error: errorMessage(err),
               };
               rebaseOutcome = "break";
             }
@@ -829,7 +830,7 @@ export function createMergeQueueService(deps: {
           issueTitle: ws.issueTitle,
         };
       } catch (err) {
-        const error = err instanceof Error ? err.message : String(err);
+        const error = errorMessage(err);
         // A pre-merge-gate withhold (verify_script/smoke check failed) is NOT a merge conflict —
         // it carries the same WorkspaceError "CONFLICT" code (for HTTP-status purposes) but is
         // tagged with `data.mergeReason: "pre_merge_gate_failed"`. Classify it separately so it

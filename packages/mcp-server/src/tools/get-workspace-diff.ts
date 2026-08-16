@@ -3,6 +3,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { workspaceClosedError, workspaceMissingWorkingDirError, workspaceNotFoundError } from "../db-utils.js";
 import { prodDeps, type ToolDeps } from "./deps.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 function extractChangedFiles(diff: string): string[] {
   const files = new Set<string>();
@@ -76,7 +77,7 @@ export function registerGetWorkspaceDiff(server: McpServer, deps: ToolDeps = pro
         };
       } catch (err) {
         return {
-          content: [{ type: "text" as const, text: `Failed to get diff: ${err instanceof Error ? err.message : String(err)}` }],
+          content: [{ type: "text" as const, text: `Failed to get diff: ${errorMessage(err)}` }],
         };
       }
     },

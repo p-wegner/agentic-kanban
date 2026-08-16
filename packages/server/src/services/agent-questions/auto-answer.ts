@@ -14,6 +14,7 @@ import type {
   AutoAnswerSendTurn,
   RecommendInput,
 } from "./types.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** In-flight recommendation calls, keyed by toolUseId — prevents duplicate butler turns
  *  when multiple list pollers race. */
@@ -35,7 +36,7 @@ export function scheduleBackgroundRecommendation(projectId: string, input: Recom
         await tryAutoAnswer(input.toolUseId, autoAnswerDeps.workspaceId, input.questions, recs, autoAnswerDeps.sendTurn, db, projectId);
       }
     } catch (err) {
-      console.error(`[agent-questions] background recommend failed: toolUseId=${input.toolUseId} ${err instanceof Error ? err.message : String(err)}`);
+      console.error(`[agent-questions] background recommend failed: toolUseId=${input.toolUseId} ${errorMessage(err)}`);
       // Cache nulls so we don't re-poll on every list call.
       await setCachedRecommendations(input.toolUseId, input.questions.map(() => null), db, projectId);
     } finally {
@@ -107,7 +108,7 @@ export async function tryAutoAnswer(
       `question="${firstQ.slice(0, 80)}" chosen="${chosenLabels.join(" | ")}" rationale="${rationales.slice(0, 160)}"`,
     );
   } catch (err) {
-    console.error(`[agent-questions] auto-answer send failed: toolUseId=${toolUseId} ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`[agent-questions] auto-answer send failed: toolUseId=${toolUseId} ${errorMessage(err)}`);
   }
 }
 

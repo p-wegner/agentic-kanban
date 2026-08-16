@@ -23,6 +23,7 @@ import {
 import { getPreference } from "../repositories/preferences.repository.js";
 import { workspaceServicesService, parseStoredServiceStackState } from "./workspace-services.service.js";
 import type { SiblingWorktree } from "./workspace-repos.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Admission-control dependencies for the concurrent-stack cap (#56), injectable so the
@@ -147,7 +148,7 @@ async function resolveSharedWorktreeStack(
   } catch (err) {
     // Invariant 4 (single-workspace behavior unchanged) wins on a failed check: warn
     // loudly and provision normally — a genuinely-shared worktree is the rare case.
-    console.warn(`[services] shared-worktree check failed for ${params.leadingWorktreePath} (provisioning proceeds): ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`[services] shared-worktree check failed for ${params.leadingWorktreePath} (provisioning proceeds): ${errorMessage(err)}`);
     return null;
   }
   if (sharers.length === 0) return null;
@@ -262,7 +263,7 @@ export async function provisionServicesForLaunch(
       });
       return { adopted: false, state };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       console.warn(`[services] provisioning threw (non-fatal) for branch ${params.branch}: ${message}`);
       // No stack came up, so an empty compose name is safe here: every teardown path
       // (parseStoredComposeProjectName) treats it as "nothing to down".

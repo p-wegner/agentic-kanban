@@ -30,6 +30,7 @@ import { advanceLoopAfterMergedIssue } from "../services/plugin-loop-hooks.servi
 import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.repository.js";
 import { stampWorkspaceMergedAt } from "../repositories/workspace-merge-execution.repository.js";
 import { getWorkspaceById } from "../repositories/workspace-reads.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export type MergeWorkspace = Pick<typeof workspaces.$inferSelect, "id" | "isDirect" | "branch" | "workingDir" | "baseBranch" | "issueId">;
 
@@ -179,11 +180,11 @@ export async function reconcileStrandedSiblingMerges(database: Database = db): P
             { mergeReason: "sibling_merge_failed", siblingResults, detectedAt: now });
         }
       } catch (err) {
-        console.warn(`[stranded-siblings] reconciliation failed for workspace ${ws.workspaceId} (non-fatal):`, err instanceof Error ? err.message : String(err));
+        console.warn(`[stranded-siblings] reconciliation failed for workspace ${ws.workspaceId} (non-fatal):`, errorMessage(err));
       }
     }
   } catch (err) {
-    console.warn("[stranded-siblings] reconcileStrandedSiblingMerges failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[stranded-siblings] reconcileStrandedSiblingMerges failed (non-fatal):", errorMessage(err));
   }
   return result;
 }
@@ -204,7 +205,7 @@ async function recordStrandedSiblingComment(
     payload: { eventType, workspaceId: ws.workspaceId, branch: ws.branch, ...payload },
     createdAt: new Date().toISOString(),
   }, database).catch((err) => {
-    console.warn("[stranded-siblings] failed to record issue comment:", err instanceof Error ? err.message : String(err));
+    console.warn("[stranded-siblings] failed to record issue comment:", errorMessage(err));
   });
 }
 
@@ -225,7 +226,7 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
       payload: { eventType, workspaceId: workspace.id, branch: workspace.branch, ...payload },
       createdAt,
     }, db).catch((err) => {
-      console.warn("[workflow] failed to record merge timeline event:", err instanceof Error ? err.message : String(err));
+      console.warn("[workflow] failed to record merge timeline event:", errorMessage(err));
     });
   }
 
@@ -507,7 +508,7 @@ Server: http://localhost:${serverPort}`;
     } catch (err) {
       console.error("[workflow] auto-merge failed:", err);
       boardEvents.broadcast(projectId, "workflow_error");
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMessage(err);
       await recordMergeAttempt(
         workspace,
         "conflict",

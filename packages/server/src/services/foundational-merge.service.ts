@@ -5,6 +5,7 @@ import {
   getIssueStatusIds,
   getTerminalStatusIds,
 } from "../repositories/foundational-merge.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * #797 — synchronous foundational merge.
@@ -78,7 +79,7 @@ export async function isFoundationalBlocker(database: Database, issueId: string)
   } catch (err) {
     // Detection is a best-effort optimization; on any error fall back to the timer
     // path (return false) rather than risk an exception in the exit workflow.
-    console.warn("[foundational-merge] isFoundationalBlocker check failed (treating as non-foundational):", err instanceof Error ? err.message : String(err));
+    console.warn("[foundational-merge] isFoundationalBlocker check failed (treating as non-foundational):", errorMessage(err));
     return false;
   }
 }

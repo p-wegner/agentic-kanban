@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
+import { errorMessage } from "./error-message.js";
 
 /** Root that holds every per-worktree Gradle home, so the set is sweepable as a unit. */
 export const GRADLE_HOMES_ROOT = join(tmpdir(), "kanban-gradle-homes");
@@ -83,7 +84,7 @@ export async function removeGradleUserHomeForWorktree(worktreePath: string): Pro
     await rm(target, { recursive: true, force: true });
     return true;
   } catch (err) {
-    console.warn(`[gradle-env] could not remove ${target} (non-fatal):`, err instanceof Error ? err.message : String(err));
+    console.warn(`[gradle-env] could not remove ${target} (non-fatal):`, errorMessage(err));
     return false;
   }
 }

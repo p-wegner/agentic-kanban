@@ -1,6 +1,7 @@
 import type { Command } from "commander";
 import { startWorkerDaemon, defaultWorkerStateFile } from "../../worker/worker-daemon.js";
 import { SHARES_FILESYSTEM_LABEL } from "@agentic-kanban/shared/lib/worker-protocol";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const DEFAULT_BOARD_URL = "http://127.0.0.1:3001";
 
@@ -265,7 +266,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         process.on("SIGINT", shutdown);
         process.on("SIGTERM", shutdown);
       } catch (err) {
-        console.error(err instanceof Error ? err.message : String(err));
+        console.error(errorMessage(err));
         process.exit(1);
       }
     });

@@ -1,5 +1,6 @@
 import type { Command } from "commander";
 import { getPreference } from "../../repositories/preferences.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const SERVER_PORT = Number(process.env.SERVER_PORT) || Number(process.env.KANBAN_SERVER_PORT) || 3001;
 
@@ -50,7 +51,7 @@ async function callButler(
     return data;
   } catch (err) {
     console.error(`Failed to reach the butler — is the dev server running on port ${SERVER_PORT}?`);
-    console.error(`  ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`  ${errorMessage(err)}`);
     process.exit(1);
   }
 }

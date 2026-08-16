@@ -5,6 +5,7 @@ import { claimIssueForAutoStart } from "./auto-start-claim.js";
 import { completeCreateJob, failCreateJob } from "./create-job.service.js";
 import type { StartPolicy } from "./start-policy.service.js";
 import type { CreateWorkspaceInput, CreateWorkspaceResult } from "./workspace-internals.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Start the tickets a loop advance just planned, in the ADVANCE path (#351).
@@ -99,7 +100,7 @@ export async function startPlannedLoopTickets(args: StartPlannedLoopTicketsArgs)
           console.warn(
             `[plugin-loop] direct start of issue ${ticket.issueNumber ?? ticket.issueId} failed `
             + `(the monitor's auto-start pass remains the fallback):`,
-            err instanceof Error ? err.message : String(err),
+            errorMessage(err),
           );
         },
       );
@@ -108,7 +109,7 @@ export async function startPlannedLoopTickets(args: StartPlannedLoopTicketsArgs)
       active += 1;
       outcomes.push({ ...ticket, outcome: "starting" });
     } catch (err) {
-      outcomes.push({ ...ticket, outcome: "start-failed", detail: err instanceof Error ? err.message : String(err) });
+      outcomes.push({ ...ticket, outcome: "start-failed", detail: errorMessage(err) });
     }
   }
   return outcomes;

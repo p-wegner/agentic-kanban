@@ -10,6 +10,7 @@ import type { SessionManager } from "./session.manager.js";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { PREF_LEARNING_STEP_BEFORE_MERGE } from "../constants/preference-keys.js";
 import { getSessionStatus } from "../repositories/session.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const execFileAsync = promisify(execFile);
 const moduleDir = dirname(fileURLToPath(import.meta.url));
@@ -56,7 +57,7 @@ export async function rebuildSharedIfChanged(
     });
     console.log("[merge-helpers] shared/dist rebuild complete");
   } catch (err) {
-    console.warn("[merge-helpers] shared/dist rebuild failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[merge-helpers] shared/dist rebuild failed (non-fatal):", errorMessage(err));
   }
 }
 

@@ -44,6 +44,7 @@ import {
   parseStoredServiceStackState,
 } from "../services/workspace-services.service.js";
 import { getOrCreateServiceStackInstanceId } from "../repositories/workspace-service-state.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const TERMINAL_STATUSES: string[] = [...TERMINAL_WORKSPACE_STATUSES];
 
@@ -146,7 +147,7 @@ export async function reapOrphanServiceStacksOnce(deps: ReapOnceDeps): Promise<{
       instanceId = await resolveInstanceId();
     } catch (err) {
       // Without a proven identity we must not down ANYTHING on the shared daemon.
-      console.warn(`[${label}] service-stack reaper skipped — could not resolve this instance's id: ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[${label}] service-stack reaper skipped — could not resolve this instance's id: ${errorMessage(err)}`);
       return { reaped: [] };
     }
 
@@ -158,7 +159,7 @@ export async function reapOrphanServiceStacksOnce(deps: ReapOnceDeps): Promise<{
     }
     return { reaped };
   } catch (err) {
-    console.warn(`[${label}] service-stack reaper failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`[${label}] service-stack reaper failed (non-fatal): ${errorMessage(err)}`);
     return { reaped: [] };
   }
 }
