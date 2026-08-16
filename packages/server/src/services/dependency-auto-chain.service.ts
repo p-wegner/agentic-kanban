@@ -21,6 +21,7 @@ import {
 } from "../repositories/dependency-auto-chain.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { BLOCKING_DEPENDENCY_TYPES } from "@agentic-kanban/shared/schema";
+import { findCycleNodes } from "@agentic-kanban/shared/lib/dependency-graph";
 
 const AUTO_CHAIN_TRIGGER_TYPES = ["depends_on", "blocked_by", "child_of"] as const;
 const SKIP_AUTO_START_TAG = "no-auto-start";
@@ -47,39 +48,13 @@ type DependencyRow = {
   type: string;
 };
 
+/** #523: the traversal is shared now; only the edge filter was ever local. */
 function findCycleIssueIds(issueIds: string[], deps: DependencyRow[]): Set<string> {
-  const scopedIds = new Set(issueIds);
-  const adjacency = new Map<string, string[]>();
-  for (const id of issueIds) adjacency.set(id, []);
-  for (const dep of deps) {
-    if (!AUTO_CHAIN_TRIGGER_TYPES.includes(dep.type as typeof AUTO_CHAIN_TRIGGER_TYPES[number])) continue;
-    if (!scopedIds.has(dep.issueId) || !scopedIds.has(dep.dependsOnId)) continue;
-    adjacency.get(dep.issueId)?.push(dep.dependsOnId);
-  }
-
-  const cycleIds = new Set<string>();
-  const state = new Map<string, "visiting" | "visited">();
-  const stack: string[] = [];
-
-  function visit(id: string) {
-    state.set(id, "visiting");
-    stack.push(id);
-    for (const next of adjacency.get(id) ?? []) {
-      if (state.get(next) === "visiting") {
-        const start = stack.indexOf(next);
-        for (const cycleId of stack.slice(start)) cycleIds.add(cycleId);
-      } else if (!state.has(next)) {
-        visit(next);
-      }
-    }
-    stack.pop();
-    state.set(id, "visited");
-  }
-
-  for (const id of issueIds) {
-    if (!state.has(id)) visit(id);
-  }
-  return cycleIds;
+  return findCycleNodes(
+    issueIds,
+    deps.map((dep) => ({ from: dep.issueId, to: dep.dependsOnId, type: dep.type })),
+    (edge) => AUTO_CHAIN_TRIGGER_TYPES.includes(edge.type as typeof AUTO_CHAIN_TRIGGER_TYPES[number]),
+  );
 }
 
 export async function findAutoStartableDependencyIssue(args: {

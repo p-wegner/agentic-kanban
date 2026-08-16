@@ -18,6 +18,7 @@ import {
 } from "../repositories/dependency-wave.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { BLOCKING_DEPENDENCY_TYPES } from "@agentic-kanban/shared/schema";
+import { findCycleNodes } from "@agentic-kanban/shared/lib/dependency-graph";
 
 const STARTABLE_STATUS_NAMES = new Set(["Backlog", "Todo"]);
 
@@ -67,38 +68,13 @@ function toPlanIssue(issue: IssueRow, extras: {
   };
 }
 
+/** #523: the traversal is shared now; only the edge filter was ever local. */
 function findCycleIssueIds(issueIds: string[], deps: DependencyRow[]): Set<string> {
-  const openIds = new Set(issueIds);
-  const adjacency = new Map<string, string[]>();
-  for (const id of issueIds) adjacency.set(id, []);
-  for (const dep of deps) {
-    if (!isBlockingType(dep.type) || !openIds.has(dep.issueId) || !openIds.has(dep.dependsOnId)) continue;
-    adjacency.get(dep.issueId)?.push(dep.dependsOnId);
-  }
-
-  const cycleIds = new Set<string>();
-  const state = new Map<string, "visiting" | "visited">();
-  const stack: string[] = [];
-
-  function dfs(id: string) {
-    state.set(id, "visiting");
-    stack.push(id);
-    for (const next of adjacency.get(id) ?? []) {
-      if (state.get(next) === "visiting") {
-        const start = stack.indexOf(next);
-        for (const cycleId of stack.slice(start)) cycleIds.add(cycleId);
-      } else if (!state.has(next)) {
-        dfs(next);
-      }
-    }
-    stack.pop();
-    state.set(id, "visited");
-  }
-
-  for (const id of issueIds) {
-    if (!state.has(id)) dfs(id);
-  }
-  return cycleIds;
+  return findCycleNodes(
+    issueIds,
+    deps.map((dep) => ({ from: dep.issueId, to: dep.dependsOnId, type: dep.type })),
+    (edge) => isBlockingType(edge.type),
+  );
 }
 
 function isBlockingType(type: string): type is BlockingDependencyType {
