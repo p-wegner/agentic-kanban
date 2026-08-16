@@ -3,6 +3,7 @@ import { z } from "zod";
 import { extractKeywords } from "@agentic-kanban/shared";
 import type { ToolDeps } from "./deps.js";
 import { prodDeps } from "./deps.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 function overlapScore(patternKw: string[], querySet: Set<string>): { score: number; matched: string[] } {
   const matched = patternKw.filter(k => querySet.has(k));
@@ -68,7 +69,7 @@ export function registerFindSimilarFailures(server: McpServer, deps: ToolDeps = 
 
         return { content: [{ type: "text" as const, text: lines.join("\n\n") }] };
       } catch (err) {
-        return { content: [{ type: "text" as const, text: `Error: ${err instanceof Error ? err.message : String(err)}` }] };
+        return { content: [{ type: "text" as const, text: `Error: ${errorMessage(err)}` }] };
       }
     },
   );

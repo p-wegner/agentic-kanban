@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { MarkdownView } from "./MarkdownView.js";
 import { apiFetch, apiPost, apiPut } from "../lib/api.js";
 import { showToast } from "./Toast.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * The scaffold's unresolved `TODO:` markers as a form (#291). The scaffold gate
@@ -88,7 +89,7 @@ export function PluginScaffoldPane({ pluginId, pluginName, projectId, onFilled }
       setValues({});
       setDraft(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     }
   }
 

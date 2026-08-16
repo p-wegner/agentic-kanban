@@ -6,6 +6,7 @@ import type { RecordMergeAttempt } from "./workspace-merge-prevalidation.service
 import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
 import { runMergeCore } from "./merge-executor.service.js";
 import { stampWorkspaceMergedAt } from "../repositories/workspace-merge-execution.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export type WorkspaceMergeExecutionResult = {
   response: {
@@ -76,11 +77,11 @@ export async function executeWorkspaceMerge(args: {
       await args.recordMergeAttempt(
         workspace,
         "conflict",
-        `Merge failed while merging ${workspace.branch} into ${targetBranch}: ${err instanceof Error ? err.message : String(err)}`,
+        `Merge failed while merging ${workspace.branch} into ${targetBranch}: ${errorMessage(err)}`,
         { step: "git-merge", targetBranch },
       );
       return new WorkspaceError(
-        `Merge failed (git-merge step): ${err instanceof Error ? err.message : String(err)}`,
+        `Merge failed (git-merge step): ${errorMessage(err)}`,
         "CONFLICT",
         { mergeReason: "conflict", step: "git-merge", branch: workspace.branch, targetBranch },
       );
@@ -139,6 +140,6 @@ async function stampMergedAtEarly(id: string, now: string, mergedHeadSha: string
   try {
     await stampWorkspaceMergedAt(id, now, mergedHeadSha, database);
   } catch (err) {
-    console.warn("[workspace-merge] early mergedAt stamp failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[workspace-merge] early mergedAt stamp failed (non-fatal):", errorMessage(err));
   }
 }

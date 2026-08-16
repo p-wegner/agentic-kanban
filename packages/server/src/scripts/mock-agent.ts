@@ -28,6 +28,7 @@
 
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 // --- Config resolution ---
 
@@ -446,7 +447,7 @@ async function postTransition(
       terminal: (data.terminal as boolean) ?? false,
     };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: errorMessage(err) };
   }
 }
 

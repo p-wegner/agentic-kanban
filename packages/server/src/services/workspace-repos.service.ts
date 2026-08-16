@@ -14,6 +14,7 @@ import { listProjectRepos, listWorkspaceRepos, insertWorkspaceRepo, setWorkspace
 import { getAllWorkspaceRepos, siblingRefFromRow, stampRepoMergedHeadSha, type WorkspaceRepoRef } from "./workspace-all-repos.js";
 import { WorkspaceError, acquireRepoMergeLock, type GitService } from "./workspace-internals.js";
 import { runMergeCore } from "./merge-executor.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Resolve the subset of a project's ADDITIONAL repos that a workspace should span,
@@ -128,7 +129,7 @@ export async function provisionSiblingWorktrees(params: {
             console.warn(`[workspace-repos] setup script for ${repo.name ?? repo.path} exited ${res.exitCode}: ${res.stderr.slice(0, 300)}`);
           }
         } catch (err) {
-          console.warn(`[workspace-repos] setup script for ${repo.name ?? repo.path} failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+          console.warn(`[workspace-repos] setup script for ${repo.name ?? repo.path} failed (non-fatal): ${errorMessage(err)}`);
         }
       }
       provisioned.push({ path: repo.path, name: repo.name, worktreePath, branch, baseBranch, baseCommitSha, composeFile: repo.composeFile ?? null });
@@ -174,7 +175,7 @@ export async function rollbackSiblingWorktrees(
     try {
       await gitService.removeWorktree(s.path, s.worktreePath);
     } catch (err) {
-      console.warn(`[workspaces] failed to remove sibling worktree ${s.worktreePath}: ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[workspaces] failed to remove sibling worktree ${s.worktreePath}: ${errorMessage(err)}`);
     }
   }
 }
@@ -218,7 +219,7 @@ export async function prevalidateSiblingMerges(params: {
       await gitService.revParse(repo.path, repo.branch);
       uniqueCommits = await gitService.countUniqueCommits(repo.path, repo.baseBranch, repo.branch);
     } catch (err) {
-      failures.push(`${label}: could not count commits (${err instanceof Error ? err.message : String(err)})`);
+      failures.push(`${label}: could not count commits (${errorMessage(err)})`);
       continue;
     }
     if (uniqueCommits === 0) continue;
@@ -298,7 +299,7 @@ export async function executeSiblingMerges(params: {
       results.push({ repoId: repo.id, name: repo.name, path: repo.path, merged: true, mergedHeadSha: core.mergedHeadSha });
       console.log(`[workspace-merge] sibling merge landed: ${label} ${repo.branch} → ${repo.baseBranch} (${core.mergedHeadSha})`);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       results.push({ repoId: repo.id, name: repo.name, path: repo.path, merged: false, error: message });
       console.error(`[workspace-merge] sibling merge FAILED for ${label}: ${message}`);
     }
@@ -345,7 +346,7 @@ export async function stampReconciledSiblingMerges(params: {
   try {
     rows = await listWorkspaceRepos(workspaceId, database);
   } catch (err) {
-    console.warn(`[workspace-merge] reconcile stamp: failed to list repos for ${workspaceId}: ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`[workspace-merge] reconcile stamp: failed to list repos for ${workspaceId}: ${errorMessage(err)}`);
     return 0;
   }
   const now = new Date().toISOString();
@@ -375,7 +376,7 @@ export async function stampReconciledLeadingMerge(params: {
   try {
     repos = await getAllWorkspaceRepos(workspaceId, database);
   } catch (err) {
-    console.warn(`[workspace-merge] reconcile leading stamp: failed to load workspace ${workspaceId}: ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`[workspace-merge] reconcile leading stamp: failed to load workspace ${workspaceId}: ${errorMessage(err)}`);
     return false;
   }
   const leading = repos.find((r) => r.kind === "leading");
@@ -401,7 +402,7 @@ export async function stampReconciledMerges(params: {
   try {
     repos = await getAllWorkspaceRepos(workspaceId, database);
   } catch (err) {
-    console.warn(`[workspace-merge] reconcile stamp: failed to list repos for ${workspaceId}: ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`[workspace-merge] reconcile stamp: failed to list repos for ${workspaceId}: ${errorMessage(err)}`);
     return { leading: false, siblings: 0 };
   }
   let leading = false;
@@ -506,7 +507,7 @@ export async function cleanupSiblingWorktrees(
   try {
     rows = await listWorkspaceRepos(workspaceId, database);
   } catch (err) {
-    console.warn(`[workspaces] sibling cleanup: failed to list repos for ${workspaceId}: ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`[workspaces] sibling cleanup: failed to list repos for ${workspaceId}: ${errorMessage(err)}`);
     return;
   }
   for (const repo of rows) {
@@ -521,7 +522,7 @@ export async function cleanupSiblingWorktrees(
         continue;
       }
     } catch (err) {
-      console.warn(`[workspaces] sibling cleanup: sharer check failed for ${repo.path}: ${err instanceof Error ? err.message : String(err)} — skipping removal to be safe`);
+      console.warn(`[workspaces] sibling cleanup: sharer check failed for ${repo.path}: ${errorMessage(err)} — skipping removal to be safe`);
       continue;
     }
     // Dirty-worktree guard (#153): a sibling worktree may carry UNCOMMITTED edits —
@@ -539,7 +540,7 @@ export async function cleanupSiblingWorktrees(
           continue;
         }
       } catch (err) {
-        console.warn(`[workspaces] sibling cleanup: preserving ${repo.worktreePath} in ${repo.path} — could not verify working-tree status: ${err instanceof Error ? err.message : String(err)}`);
+        console.warn(`[workspaces] sibling cleanup: preserving ${repo.worktreePath} in ${repo.path} — could not verify working-tree status: ${errorMessage(err)}`);
         continue;
       }
     }
@@ -578,14 +579,14 @@ export async function cleanupSiblingWorktrees(
       try {
         await gitService.removeWorktree(repo.path, repo.worktreePath);
       } catch (err) {
-        console.warn(`[workspaces] sibling cleanup: failed to remove worktree ${repo.worktreePath}: ${err instanceof Error ? err.message : String(err)}`);
+        console.warn(`[workspaces] sibling cleanup: failed to remove worktree ${repo.worktreePath}: ${errorMessage(err)}`);
       }
     }
     if (repo.branch) {
       try {
         await gitService.deleteBranch(repo.path, repo.branch, { force: true });
       } catch (err) {
-        console.warn(`[workspaces] sibling cleanup: failed to delete branch ${repo.branch} in ${repo.path}: ${err instanceof Error ? err.message : String(err)}`);
+        console.warn(`[workspaces] sibling cleanup: failed to delete branch ${repo.branch} in ${repo.path}: ${errorMessage(err)}`);
       }
     }
   }

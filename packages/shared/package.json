@@ -102,6 +102,12 @@
       "import": "./dist/lib/path-key.js",
       "default": "./src/lib/path-key.ts"
     },
+    "./lib/error-message": {
+      "development": "./src/lib/error-message.ts",
+      "types": "./dist/lib/error-message.d.ts",
+      "import": "./dist/lib/error-message.js",
+      "default": "./src/lib/error-message.ts"
+    },
     "./lib/operation-metrics": {
       "development": "./src/lib/operation-metrics.ts",
       "types": "./dist/lib/operation-metrics.d.ts",

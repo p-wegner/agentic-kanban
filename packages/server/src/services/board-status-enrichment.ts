@@ -7,6 +7,7 @@ import type { BoardStatusIssue } from "@agentic-kanban/shared";
 import { readSessionStdoutFile } from "../lib/session-output-reader.js";
 import { getRecentSessionMessages } from "../repositories/board-status-enrichment.repository.js";
 import { parseAgentMessageFromJsonLine, parseLastAgentMessage } from "./session-message-parser.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * The workspace fields the enrichment actually consumes — structural on purpose
@@ -59,7 +60,7 @@ export function collectBoardStatusEntryWork(
   work.push(
     getWorkspaceDiffStats(mainWs, defaultBranch)
       .then(stats => { entry.diffStats = stats; })
-      .catch((err) => { console.error(`[board-status] diff failed for ${mainWs.branch}:`, err instanceof Error ? err.message : String(err)); }),
+      .catch((err) => { console.error(`[board-status] diff failed for ${mainWs.branch}:`, errorMessage(err)); }),
   );
 
   // Conflict detection for non-direct idle workspaces (cached, non-blocking)

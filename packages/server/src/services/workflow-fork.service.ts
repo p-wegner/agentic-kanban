@@ -60,6 +60,7 @@ import {
   buildJoinConsolidateLine,
   type ForkMergeResult,
 } from "../lib/fork-artifacts.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** Default concurrency + timeout caps for parallel fork children (#82). */
 const MAX_CONCURRENT_PER_WORKSPACE = 2;
@@ -123,7 +124,7 @@ export function createWorkflowForkService(deps: {
   }) {
     const { childWorkspaceId, parent, forkNode, joinNode, entry, sharedWorktree, error } = params;
     const now = new Date().toISOString();
-    const failure = error instanceof Error ? error.message : String(error);
+    const failure = errorMessage(error);
     const insertValues = {
       id: childWorkspaceId,
       issueId: parent.issueId,
@@ -560,7 +561,7 @@ export function createWorkflowForkService(deps: {
           profile: cfg.profile,
           model: cfg.model,
         })
-        .catch((err) => console.error(`[fork] join session launch failed:`, err instanceof Error ? err.message : String(err)));
+        .catch((err) => console.error(`[fork] join session launch failed:`, errorMessage(err)));
   }
 
   /**
@@ -639,7 +640,7 @@ export function createWorkflowForkService(deps: {
       try {
         await writeFile(artifactsPath, artifacts, "utf-8");
       } catch (err) {
-        console.warn(`[fork] could not write artifacts file: ${err instanceof Error ? err.message : String(err)}`);
+        console.warn(`[fork] could not write artifacts file: ${errorMessage(err)}`);
         artifactsPath = null;
       }
     }
@@ -717,7 +718,7 @@ export function createWorkflowForkService(deps: {
         await launchSpecPhaseSession(ws.id, node);
       }
     } catch (err) {
-      console.error(`[fork] onWorkspaceEnteredNode(${workspaceId}) failed:`, err instanceof Error ? err.message : String(err));
+      console.error(`[fork] onWorkspaceEnteredNode(${workspaceId}) failed:`, errorMessage(err));
     }
   }
 

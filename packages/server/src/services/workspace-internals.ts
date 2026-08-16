@@ -17,6 +17,7 @@ import { loadProjectRuntimeConfig } from "./project-runtime-config.service.js";
 import * as realGitService from "./git.service.js";
 import { detectWorkspaceMergeConflicts } from "./workspace-merge-conflict.service.js";
 import { getDirtyMainFiles } from "./merge-executor.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export class WorkspaceError extends Error {
   constructor(
@@ -459,7 +460,7 @@ export async function listPendingSiblingMerges(
     rows = await listWorkspaceRepos(workspaceId, database);
   } catch (err) {
     console.warn(
-      `[workspace-merge] pending-sibling scan: failed to list repos for ${workspaceId}: ${err instanceof Error ? err.message : String(err)}`,
+      `[workspace-merge] pending-sibling scan: failed to list repos for ${workspaceId}: ${errorMessage(err)}`,
     );
     return [];
   }
@@ -492,7 +493,7 @@ export async function listPendingSiblingMerges(
     try {
       await gitService.revParse(repo.path, repo.baseBranch);
     } catch (err) {
-      const reason = `could not verify sibling repo '${label}' at '${repo.path}' (base branch '${repo.baseBranch}'): ${err instanceof Error ? err.message : String(err)}`;
+      const reason = `could not verify sibling repo '${label}' at '${repo.path}' (base branch '${repo.baseBranch}'): ${errorMessage(err)}`;
       console.warn(`[workspace-merge] pending-sibling scan: ${reason}`);
       pending.push({ repo, uniqueCommits: 0, unverifiable: true, unverifiableReason: reason });
       continue;
@@ -540,7 +541,7 @@ export async function listDirtySiblingWorktrees(
     rows = await listWorkspaceRepos(workspaceId, database);
   } catch (err) {
     console.warn(
-      `[workspace-merge] dirty-sibling scan: failed to list repos for ${workspaceId}: ${err instanceof Error ? err.message : String(err)}`,
+      `[workspace-merge] dirty-sibling scan: failed to list repos for ${workspaceId}: ${errorMessage(err)}`,
     );
     return [];
   }
@@ -554,7 +555,7 @@ export async function listDirtySiblingWorktrees(
         dirty.push({ repo });
       }
     } catch (err) {
-      dirty.push({ repo, detail: err instanceof Error ? err.message : String(err) });
+      dirty.push({ repo, detail: errorMessage(err) });
     }
   }
   return dirty;
@@ -663,7 +664,7 @@ export function tryRecoverStaleMergeLock(repoPath: string, lock: ActiveMergeLock
     }
   } catch (err) {
     console.warn(
-      `[merge-lock] index.lock check failed (proceeding with recovery): ${err instanceof Error ? err.message : String(err)}`,
+      `[merge-lock] index.lock check failed (proceeding with recovery): ${errorMessage(err)}`,
     );
   }
   console.warn(

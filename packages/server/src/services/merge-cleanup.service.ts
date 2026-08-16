@@ -7,6 +7,7 @@ import {
   getProjectStatusOptions,
   setIssueStatus,
 } from "../repositories/merge-cleanup.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export interface FinalizeMergeCleanupInput {
   database: Database;
@@ -195,14 +196,14 @@ export async function finalizeMergeCleanup(
     console.warn(
       `[merge-cleanup] workspace close failed after issue transitioned to Done (workspaceId=${input.workspaceId}). ` +
         "Issue will remain Done — the workspace can be reconciled on next startup.",
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
   }
 
   const sessionsStopped = await stopWorkspaceSessions(input.database, input.workspaceId, now).catch((err) => {
     console.warn(
       `[merge-cleanup] failed to stop running sessions after merge finalization (workspaceId=${input.workspaceId}).`,
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
     return false;
   });

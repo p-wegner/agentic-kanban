@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { workspaceClosedError, workspaceMissingWorkingDirError, workspaceNotFoundError } from "../db-utils.js";
 import { boardApiUrl } from "../server-url.js";
 import { prodDeps, type ToolDeps } from "./deps.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * merge_workspace delegates to the board server's safe merge path
@@ -54,7 +55,7 @@ export function registerMergeWorkspace(server: McpServer, deps: ToolDeps = prodD
         return {
           content: [{
             type: "text" as const,
-            text: `Merge failed: could not reach the board server (${err instanceof Error ? err.message : String(err)}). The board server must be running to merge safely.`,
+            text: `Merge failed: could not reach the board server (${errorMessage(err)}). The board server must be running to merge safely.`,
           }],
         };
       }

@@ -22,6 +22,7 @@ import { getIssueWithStatusById, getIssueTitleDescriptionByNumber } from "../../
 import { getAllFailurePatterns } from "../../repositories/failure-pattern.repository.js";
 import { computeReviewEffectiveness, renderReviewEffectivenessReport } from "../../services/review-effectiveness.service.js";
 import { buildReviewWorkspaces, buildReviewResult, summarizeReviewEffectiveness, reviewPct, computeDeepReviewSignals, type ReviewResult, type ReviewTranscriptSummary } from "../../lib/review-effectiveness-report.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const DEFAULT_PORT = process.env.KANBAN_SERVER_PORT ?? "3001";
 const BASE_URL = `http://127.0.0.1:${DEFAULT_PORT}`;
@@ -119,7 +120,7 @@ export function registerSessionCommand(program: Command) {
         }, null, 2));
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -148,7 +149,7 @@ export function registerSessionCommand(program: Command) {
         })), null, 2));
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -197,7 +198,7 @@ export function registerSessionCommand(program: Command) {
         console.log(JSON.stringify({ scanned, updated, skipped, empty }, null, 2));
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -239,7 +240,7 @@ export function registerSessionCommand(program: Command) {
         );
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -363,7 +364,7 @@ export function registerSessionCommand(program: Command) {
         console.log(L.join("\n"));
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -404,7 +405,7 @@ Examples:
         console.log(JSON.stringify({ ...meta, messages: msgs, _serverOutput: outputData }, null, 2));
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -483,7 +484,7 @@ Examples:
         console.log(JSON.stringify({ results, totalMatches: results.length }, null, 2));
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -547,7 +548,7 @@ Examples:
         }, null, 2));
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -667,7 +668,7 @@ Examples:
         console.log(L.join("\n"));
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -764,7 +765,7 @@ Examples:
         console.log(lines.join("\n\n"));
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });

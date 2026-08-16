@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { apiPost, apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import type { WorkspaceResponse } from "@agentic-kanban/shared";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 type ServiceState = NonNullable<WorkspaceResponse["serviceState"]>;
 
@@ -87,7 +88,7 @@ export function ServiceStackStatusPanel({
       const res = await run();
       setState(res.serviceState);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : String(err));
+      setActionError(errorMessage(err));
     } finally {
       setBusy(null);
     }
@@ -108,7 +109,7 @@ export function ServiceStackStatusPanel({
       const res = await apiFetch<{ ok: boolean; logs: string }>(`/api/workspaces/${workspaceId}/services/logs?tail=200`);
       setLogs(res.logs || "(no output)");
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : String(err));
+      setActionError(errorMessage(err));
     } finally {
       setLogsLoading(false);
     }

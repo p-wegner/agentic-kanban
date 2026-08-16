@@ -28,6 +28,7 @@ import { createSpawnControlProbe } from "../lib/monitor-spawn-control.js";
 import { createMonitorProjectScheduler } from "./monitor-project-scheduler.js";
 import { shouldStartHealthRefresh } from "./health-refresh-gate.js";
 import { getLoopLagMonitor } from "../lib/loop-lag-registry.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Per-project hands-off mode. A `board_autodrive_<projectId>` preference set to
@@ -367,7 +368,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
     // behaviour this guard exists to remove.
     lastWarningRefreshAt = Date.now();
     void refreshMonitorWarnings(prefMap)
-      .catch((err) => console.warn("[monitor] health warning refresh failed (diagnostics only):", err instanceof Error ? err.message : String(err)))
+      .catch((err) => console.warn("[monitor] health warning refresh failed (diagnostics only):", errorMessage(err)))
       .finally(() => { warningRefreshRunning = false; });
   }
 
@@ -463,7 +464,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       // process list.
       setPhase("resource-sweep");
       const resourceSnapshot = await snapshotAndCleanStaleDevProcesses(db).catch((err: unknown) => {
-        console.warn(`[monitor] resource sweep failed (continuing with the cycle): ${err instanceof Error ? err.message : String(err)}`);
+        console.warn(`[monitor] resource sweep failed (continuing with the cycle): ${errorMessage(err)}`);
         return null;
       });
       if (resourceSnapshot) {
@@ -732,7 +733,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       if (cleaned > 0) console.log(`[resource-sweep] reaped ${cleaned} stale worktree dev tree(s)`);
       return snapshot;
     } catch (err) {
-      console.warn("[resource-sweep] failed:", err instanceof Error ? err.message : String(err));
+      console.warn("[resource-sweep] failed:", errorMessage(err));
       return null;
     }
   }

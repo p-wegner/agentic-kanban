@@ -4,6 +4,7 @@ import type { Database } from "../../db/index.js";
 import type { ProviderName } from "../agent-provider.js";
 import { narrowProviderName } from "../agent-provider.js";
 import type { RotationRings } from "../agent-provider/provider-exit-behavior.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** Pure helpers for session launch that don't need the createSessionLifecycle closure. */
 
@@ -100,7 +101,7 @@ export async function resolveProviderRotation(
   } catch (err) {
     console.warn(
       `[session] ${provider} rotation-ring resolution failed (non-fatal):`,
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
     return { extraEnv, profile };
   }

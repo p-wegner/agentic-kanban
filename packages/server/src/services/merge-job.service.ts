@@ -21,6 +21,8 @@
  * too. Bounded by `MAX_FINISHED_JOBS` so a long-lived server cannot accumulate them.
  */
 
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+
 export type MergeJobState = "running" | "succeeded" | "failed";
 
 export interface MergeJob {
@@ -102,7 +104,7 @@ export function completeMergeJob(jobId: string, workspaceId: string, result: unk
 
 /** Mark a merge job failed, retaining the message/reason for later polling. */
 export function failMergeJob(jobId: string, workspaceId: string, error: unknown): void {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error);
   const reason =
     error && typeof error === "object" && "details" in error
       ? (error as { details?: { mergeReason?: string } }).details?.mergeReason

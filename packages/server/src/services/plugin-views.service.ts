@@ -25,6 +25,7 @@ import {
 import { spawnShellCommand, taskkillTree } from "./process-exec.js";
 import { tailOutput as tail } from "./plugin-exec.js";
 import { findView, probeHealth } from "./plugin-view-probe.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * How long `startView` waits for the child to answer its health probe before returning — #252.
@@ -335,7 +336,7 @@ export function createPluginViewsRuntime<P extends PluginWithManifest, Pr extend
       try {
         await persistViewProcess({ pluginRowId, viewId, projectId, pid: child.pid, port, command });
       } catch (err) {
-        console.warn(`[plugins] failed to persist view server PID for ${plugin.pluginId}:${viewId} (non-fatal):`, err instanceof Error ? err.message : String(err));
+        console.warn(`[plugins] failed to persist view server PID for ${plugin.pluginId}:${viewId} (non-fatal):`, errorMessage(err));
       }
     }
     // Wait for the server to actually LISTEN before reporting the URL as usable (#252). Bounded

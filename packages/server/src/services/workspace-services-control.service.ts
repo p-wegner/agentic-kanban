@@ -31,6 +31,7 @@ import {
 import { parseServicesConfig, provisionServicesForLaunch } from "./workspace-create-stack.service.js";
 import type { SiblingWorktree } from "./workspace-repos.service.js";
 import { WorkspaceError } from "./workspace-internals.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** Resolved context for a control op over one workspace's stack. */
 interface ResolvedStackContext {
@@ -178,7 +179,7 @@ export function createWorkspaceServicesControlService(deps: {
         { otherSharers: err.otherSharers },
       );
     }
-    return err instanceof WorkspaceError ? err : new WorkspaceError(err instanceof Error ? err.message : String(err), "CONFLICT");
+    return err instanceof WorkspaceError ? err : new WorkspaceError(errorMessage(err), "CONFLICT");
   }
 
   async function down(workspaceId: string): Promise<ServiceStackState> {

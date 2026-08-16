@@ -24,6 +24,7 @@ import {
   deriveVerifyScriptFromProfile,
   getStackProfile,
 } from "./stack-profile.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** Preference key gating the cold-clone build check for a project. */
 export function coldCloneCheckPrefKey(projectId: string): string {
@@ -100,7 +101,7 @@ export async function runColdCloneBuildCheck(
     await cleanup(dest); // remove any stale clone from a prior run
     await clone(input.repoPath, input.branch, dest);
   } catch (e) {
-    return { ok: false, reason: "clone-failed", output: e instanceof Error ? e.message : String(e) };
+    return { ok: false, reason: "clone-failed", output: errorMessage(e) };
   }
 
   try {

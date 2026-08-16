@@ -2,6 +2,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Client } from "@libsql/client";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -83,7 +84,7 @@ async function runMigrationStatement(
   try {
     await exec(stmt);
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     const code = (err as { code?: unknown } | null | undefined)?.code;
     // Ignore spurious SQLITE_OK "not an error" from libsql (client bug,
     // not a migration-state issue — always tolerated).
@@ -145,7 +146,7 @@ async function applyMigrationOutsideTransaction(
       args: [entry.tag, entry.when],
     });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     console.error(
       `[migrate] Migration ${entry.tag} FAILED (ran outside a transaction — FK-toggling migration). ` +
       `Failing statement: ${stmtSnippet(failingStmt)}. Partial statements are NOT rolled back; aborting — ` +
@@ -190,7 +191,7 @@ async function applyMigrationInTransaction(
     try {
       await tx.rollback();
     } catch { /* transaction already closed */ }
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     console.error(
       `[migrate] Migration ${entry.tag} FAILED and was rolled back. ` +
       `Failing statement: ${stmtSnippet(failingStmt)}. Aborting — later migrations were NOT attempted.`,

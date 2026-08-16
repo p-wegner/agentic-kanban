@@ -6,6 +6,7 @@ import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { reconcileMergedIssue } from "../services/merge-cleanup.service.js";
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Status names the sweep must NEVER touch:
@@ -156,7 +157,7 @@ export async function reconcileHandMergedBranches(
       try {
         commits = await getCommits(project.repoPath, project.defaultBranch, sinceIso ?? undefined);
       } catch (err) {
-        console.warn(`[hand-merge-reconciler] merge-history scan failed for ${project.repoPath}:`, err instanceof Error ? err.message : String(err));
+        console.warn(`[hand-merge-reconciler] merge-history scan failed for ${project.repoPath}:`, errorMessage(err));
         continue;
       }
       if (commits.length === 0) continue;
@@ -198,12 +199,12 @@ export async function reconcileHandMergedBranches(
             }, database);
           } catch { /* health event logging is non-fatal */ }
         } catch (err) {
-          console.warn(`[hand-merge-reconciler] failed to reconcile issue #${num}:`, err instanceof Error ? err.message : String(err));
+          console.warn(`[hand-merge-reconciler] failed to reconcile issue #${num}:`, errorMessage(err));
         }
       }
     }
   } catch (err) {
-    console.warn("[hand-merge-reconciler] reconcileHandMergedBranches failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[hand-merge-reconciler] reconcileHandMergedBranches failed (non-fatal):", errorMessage(err));
   }
 
   if (reconciled > 0) {

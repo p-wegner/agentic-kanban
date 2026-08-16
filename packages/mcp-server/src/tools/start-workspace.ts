@@ -10,6 +10,7 @@ import { writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-file
 import { resolveProviderProfileFromPrefs } from "@agentic-kanban/shared/lib/strategy-policy";
 import { requireEntity } from "../db-utils.js";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function registerStartWorkspace(server: McpServer) {
   server.tool(
@@ -87,7 +88,7 @@ export function registerStartWorkspace(server: McpServer) {
               console.warn(`[mcp] setup failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`);
             }
           } catch (err) {
-            console.warn(`[mcp] setup error: ${err instanceof Error ? err.message : String(err)}`);
+            console.warn(`[mcp] setup error: ${errorMessage(err)}`);
           }
         }
 
@@ -159,7 +160,7 @@ export function registerStartWorkspace(server: McpServer) {
         };
       } catch (err) {
         return {
-          content: [{ type: "text" as const, text: `Failed to create workspace: ${err instanceof Error ? err.message : String(err)}` }],
+          content: [{ type: "text" as const, text: `Failed to create workspace: ${errorMessage(err)}` }],
         };
       }
     },

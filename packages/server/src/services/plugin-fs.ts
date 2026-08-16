@@ -13,6 +13,7 @@ import { homedir } from "node:os";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { PLUGIN_MANIFEST_FILENAME, parsePluginManifest, type PluginManifest } from "@agentic-kanban/shared/lib/plugin-manifest";
 import { PluginError } from "./plugin-errors.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** Where cloned plugins live. Overridable so tests never touch a real plugin store. */
 export function pluginsHomeDir(): string {
@@ -51,7 +52,7 @@ export function readManifestFromDir(dir: string): { manifest: PluginManifest; ra
   try {
     return { manifest: parsePluginManifest(raw), raw };
   } catch (err) {
-    throw new PluginError(err instanceof Error ? err.message : String(err), "BAD_REQUEST");
+    throw new PluginError(errorMessage(err), "BAD_REQUEST");
   }
 }
 

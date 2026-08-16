@@ -3,6 +3,7 @@ import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 import { PaneHeading } from "./PluginActionPanes.js";
 import type { PluginSkill } from "./PluginActionPanes.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Judgment-requiring plugin work, launched as a ticket + workspace (#465: split out of
@@ -78,7 +79,7 @@ export function PluginSkillPane({ skill, projectId }: { skill: PluginSkill; proj
       // selector silently offering one option looks like the board HAS one workflow, which is a
       // different and wrong message.
       .catch((err) => {
-        if (!cancelled) setTemplatesError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setTemplatesError(errorMessage(err));
       });
     return () => { cancelled = true; };
   }, [projectId]);

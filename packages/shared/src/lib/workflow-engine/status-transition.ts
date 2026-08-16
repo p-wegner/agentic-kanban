@@ -7,6 +7,7 @@ import {
   getTransitionStrictness,
   IllegalStatusTransitionError,
 } from "../status-transitions.js";
+import { errorMessage } from "../error-message.js";
 
 export interface TransitionIssueStatusOpts {
   /** Timestamp to stamp on updatedAt/statusChangedAt (defaults to now). */
@@ -78,7 +79,7 @@ export async function transitionIssueStatus(
     if (err instanceof IllegalStatusTransitionError) throw err;
     console.warn(
       `[status-transition] transition-legality check failed for issue ${issueId} (non-fatal):`,
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
   }
 
@@ -89,7 +90,7 @@ export async function transitionIssueStatus(
   await syncCurrentNodeToStatus(db, issueId).catch((err) =>
     console.warn(
       `[status-transition] syncCurrentNodeToStatus failed for issue ${issueId} (non-fatal):`,
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     ),
   );
 }

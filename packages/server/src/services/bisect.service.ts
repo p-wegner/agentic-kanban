@@ -17,6 +17,7 @@ import {
   setSessionTerminal,
 } from "../repositories/bisect.repository.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export type BisectScope = "related" | "full";
 
@@ -397,7 +398,7 @@ export function createBisectService(deps: {
         if (projectId) boardEvents?.broadcast(projectId, "session_stopped");
         return;
       }
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       await emit(sessionId, { type: "stderr", sessionId, data: `${message}\n` });
       if (resetNeeded) {
         try {

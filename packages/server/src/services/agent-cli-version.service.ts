@@ -3,6 +3,7 @@ import { basename, delimiter, join } from "node:path";
 import { existsSync } from "node:fs";
 import { splitArgs } from "./agent-provider/helpers.js";
 import type { ProviderName } from "./agent-provider.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * CLI version detection for the agent executors (claude/codex/copilot/pi).
@@ -213,7 +214,7 @@ export async function detectCliVersion(
       raw: null,
       version: null,
       status: "unavailable",
-      message: `Could not run '${basename(executable)} ${config.versionArgs.join(" ")}': ${err instanceof Error ? err.message : String(err)}`,
+      message: `Could not run '${basename(executable)} ${config.versionArgs.join(" ")}': ${errorMessage(err)}`,
     };
   }
 
@@ -355,7 +356,7 @@ export async function warnIfCliVersionRisky(
     return result;
   } catch (err) {
     // Defensive: the guard must never escalate into a launch failure.
-    console.warn(`[agent-cli-version] probe failed for ${provider}: ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`[agent-cli-version] probe failed for ${provider}: ${errorMessage(err)}`);
     return null;
   }
 }

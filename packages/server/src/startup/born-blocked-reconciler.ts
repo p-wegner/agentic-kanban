@@ -55,6 +55,7 @@ import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** How long since the last setup attempt before this reconciler will try again. */
 export const SETUP_RETRY_INTERVAL_MS = 30 * 60 * 1000;
@@ -189,7 +190,7 @@ export async function reconcileBornBlockedWorkspaces(
       exitCode = run.exitCode;
       stderr = run.stderr;
     } catch (err) {
-      stderr = err instanceof Error ? err.message : String(err);
+      stderr = errorMessage(err);
     }
     // Restamp either way: a repeat failure dated today is a usable report, one dated five days ago
     // is what made this state look untouched.
@@ -218,7 +219,7 @@ export function startBornBlockedReconciler(opts: { intervalMs?: number } = {}): 
   if (timer) return;
   const run = () => {
     void reconcileBornBlockedWorkspaces().catch((err) => {
-      console.warn("[born-blocked] sweep failed (non-fatal):", err instanceof Error ? err.message : String(err));
+      console.warn("[born-blocked] sweep failed (non-fatal):", errorMessage(err));
     });
   };
   timer = setInterval(run, opts.intervalMs ?? SWEEP_INTERVAL_MS);

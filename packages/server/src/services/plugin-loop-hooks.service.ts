@@ -2,6 +2,7 @@ import { parsePluginLoopUnitKey, parsePluginManifest, type PluginLoopDef } from 
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { getIssueExternalKeyInfo, getPluginRowBySlug } from "../repositories/plugins.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Board-side lifecycle hooks for plugin-loop tickets (#297/#298).
@@ -44,7 +45,7 @@ export async function resolveLoopTicket(issueId: string, database: Database = db
     if (!loopDef) return null;
     return { ...parsed, pluginRowId: pluginRow.id, projectId: info.projectId, loopDef };
   } catch (err) {
-    console.warn(`[plugin-loop-hooks] failed to resolve loop ticket for issue ${issueId}:`, err instanceof Error ? err.message : String(err));
+    console.warn(`[plugin-loop-hooks] failed to resolve loop ticket for issue ${issueId}:`, errorMessage(err));
     return null;
   }
 }
@@ -78,6 +79,6 @@ export async function advanceLoopAfterMergedIssue(issueId: string, database: Dat
     );
   } catch (err) {
     // The merge already landed; a failed advance is the monitor's to retry next cycle.
-    console.warn(`[plugin-loop-hooks] post-merge advance failed for issue ${issueId}:`, err instanceof Error ? err.message : String(err));
+    console.warn(`[plugin-loop-hooks] post-merge advance failed for issue ${issueId}:`, errorMessage(err));
   }
 }

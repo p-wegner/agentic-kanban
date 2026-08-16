@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { boardApiUrl } from "../server-url.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function registerExportHandoffBundle(server: McpServer) {
   server.tool(
@@ -28,7 +29,7 @@ export function registerExportHandoffBundle(server: McpServer) {
         return { content: [{ type: "text" as const, text }] };
       } catch (err) {
         return {
-          content: [{ type: "text" as const, text: `Export failed: ${err instanceof Error ? err.message : String(err)}` }],
+          content: [{ type: "text" as const, text: `Export failed: ${errorMessage(err)}` }],
         };
       }
     },

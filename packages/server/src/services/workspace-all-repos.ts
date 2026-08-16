@@ -27,6 +27,7 @@ import {
 } from "../repositories/repo.repository.js";
 import { getWorkspaceById, resolveProjectRepo } from "../repositories/workspace.repository.js";
 import { stampWorkspaceMergedHeadSha } from "../repositories/workspace-merge-execution.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export type RepoKind = "leading" | "sibling";
 
@@ -108,7 +109,7 @@ async function leadingRef(workspaceId: string, database: Database): Promise<Work
       await repairLeadingRepoRow(workspaceId, workspace, repoPath, defaultBranch, database);
       row = await getLeadingRepoRow(workspaceId, database).catch(() => null);
     } catch (err) {
-      console.warn(`[workspace-all-repos] leading-row read-repair failed for ${workspaceId} (non-fatal):`, err instanceof Error ? err.message : String(err));
+      console.warn(`[workspace-all-repos] leading-row read-repair failed for ${workspaceId} (non-fatal):`, errorMessage(err));
     }
   } else {
     // #226 — the row is the SOURCE, so divergence is REPORTED, not overwritten. Zero extra

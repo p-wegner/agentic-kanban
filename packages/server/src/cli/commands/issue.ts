@@ -33,6 +33,7 @@ import { extractLastAgentMessageFromRows } from "../../lib/session-message-extra
 import { openWorkspaceBlockMessage } from "../../lib/terminal-move-guard.js";
 import { registerIssueDependencyCommands } from "./issue-dependency.js";
 import { normalizeBatchInput, validateBatchIssueInputs, formatBatchCreateResult } from "../../lib/batch-create-issues.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const ISSUE_NUMBER_INSERT_ATTEMPTS = 3;
 
@@ -81,7 +82,7 @@ Examples:
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -135,7 +136,7 @@ Examples:
         console.log("");
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -190,7 +191,7 @@ Examples:
         console.log(formatResolvedProjectLine(projectId, (await getProjectById(projectId))?.name));
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -244,7 +245,7 @@ Tip: to change an issue's STATUS, use 'issue move' instead.
           try {
             description = readFileSync(options.descriptionFile, "utf8");
           } catch (err) {
-            console.error(`Could not read description file '${options.descriptionFile}': ${err instanceof Error ? err.message : String(err)}`);
+            console.error(`Could not read description file '${options.descriptionFile}': ${errorMessage(err)}`);
             process.exit(1);
           }
         }
@@ -281,7 +282,7 @@ Tip: to change an issue's STATUS, use 'issue move' instead.
         console.log(`Updated issue ${num} (${changed.join(", ")}).`);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -332,7 +333,7 @@ Tip: Use 'issue list' to find the issue ID and see available status names.
         console.log(`Moved issue to '${statusName}'`);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -431,7 +432,7 @@ Examples:
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -526,7 +527,7 @@ Examples:
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -623,7 +624,7 @@ Examples:
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -684,7 +685,7 @@ Note: deletion is permanent. There is no undo. The issue number will not be reus
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -759,7 +760,7 @@ Valid types: text, link, image
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -799,7 +800,7 @@ Each dependency: issueIndex, dependsOnIndex (0-based indices), type (optional, d
         try {
           fileContent = readFileSync(jsonFile, "utf8");
         } catch (err) {
-          console.error(`Could not read file '${jsonFile}': ${err instanceof Error ? err.message : String(err)}`);
+          console.error(`Could not read file '${jsonFile}': ${errorMessage(err)}`);
           process.exit(1);
         }
 
@@ -881,7 +882,7 @@ Each dependency: issueIndex, dependsOnIndex (0-based indices), type (optional, d
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -967,7 +968,7 @@ At least 2 issue numbers are required.
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });

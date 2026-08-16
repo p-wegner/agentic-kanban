@@ -9,6 +9,7 @@ import { getProjectRow } from "../repositories/agent-questions.repository.js";
 import { insertPluginLoopEvent } from "../repositories/plugin-loop-events.repository.js";
 import { ensureButlerSession, getButlerSession, sendButlerTurn, subscribeButler } from "./butler-sdk.service.js";
 import { resolveInside } from "./plugin-fs.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Butler concierge for plugin gates (#307/#309/#310) — the agent-questions pattern
@@ -142,7 +143,7 @@ export async function notifyButlerOfGate(args: GateNotifyArgs, database: Databas
       + `assumptions, risks, your recommendation) — never a bare list of topic headlines.`,
     );
   } catch (err) {
-    console.warn(`[plugin-gate-butler] gate digest failed for ${args.pluginSlug}:${args.loopName}:`, err instanceof Error ? err.message : String(err));
+    console.warn(`[plugin-gate-butler] gate digest failed for ${args.pluginSlug}:${args.loopName}:`, errorMessage(err));
   }
 }
 
@@ -294,7 +295,7 @@ export async function computeGateRecommendation(args: GateNotifyArgs, database: 
       database,
     );
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     console.warn(`[plugin-gate-butler] recommendation failed for ${args.pluginSlug}:${args.loopName}:`, message);
     await noteRecommendationSkip(args, "threw", message, database);
   }
@@ -420,6 +421,6 @@ export async function notifyButlerOfGateResolution(args: GateResolutionNotifyArg
       + "- Do not re-summarise the artifacts you already digested; the user just decided on them.",
     );
   } catch (err) {
-    console.warn(`[plugin-gate-butler] gate-resolution turn failed for ${args.pluginName}:`, err instanceof Error ? err.message : String(err));
+    console.warn(`[plugin-gate-butler] gate-resolution turn failed for ${args.pluginName}:`, errorMessage(err));
   }
 }

@@ -3,6 +3,7 @@ import { getProjectStatusById, deleteProjectStatusById } from "../../repositorie
 import { getFirstIssueIdWithStatus } from "../../repositories/issue.repository.js";
 import { BUILTIN_SKILLS } from "../../builtin-skills.js";
 import { runMigrations, logDefaultBranch, timeSince } from "../shared.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function registerSystemCommands(program: Command) {
   program
@@ -25,7 +26,7 @@ export function registerSystemCommands(program: Command) {
         console.log(`Deleted status "${status.name}" (${statusId})`);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -73,7 +74,7 @@ Examples:
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -137,7 +138,7 @@ Examples:
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -194,7 +195,7 @@ Network access example (HTTP/2 over TLS):
           });
         }
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });

@@ -42,6 +42,7 @@ import type { ProviderId, ProviderName } from "../services/agent-provider.js";
 import type { RateLimitProvider } from "./rate-limit-exit-decision.js";
 import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.repository.js";
 import { findUncommittedWork } from "./uncommitted-work-report.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
 
@@ -307,7 +308,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
           landed = ancestry.isAncestor;
         } catch (err) {
           // Couldn't determine — assume NOT landed and keep it retryable (safe default).
-          console.warn(`[workflow] #764 landing check failed for workspace ${workspace.id} (treating as not landed):`, err instanceof Error ? err.message : String(err));
+          console.warn(`[workflow] #764 landing check failed for workspace ${workspace.id} (treating as not landed):`, errorMessage(err));
         }
       }
 
@@ -327,7 +328,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       });
       console.warn(`[workflow] #764 fix-and-merge resolver for workspace ${workspace.id} (session ${sessionId}) did NOT land branch ${fresh.branch} on ${baseBranch ?? "base"} — kept open + idle for retry`);
     } catch (err) {
-      console.warn(`[workflow] #764 stranded-resolver guard failed (non-fatal) for workspace ${workspace.id}:`, err instanceof Error ? err.message : String(err));
+      console.warn(`[workflow] #764 stranded-resolver guard failed (non-fatal) for workspace ${workspace.id}:`, errorMessage(err));
     }
   }
 
@@ -410,7 +411,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
           const inserted = await createTestRunService(db).ingestSession(sessionId);
           if (inserted > 0) console.log(`[flaky-radar] auto-ingested ${inserted} test result(s) from session ${sessionId}`);
         } catch (err) {
-          console.warn("[flaky-radar] auto-ingest failed (non-fatal):", err instanceof Error ? err.message : String(err));
+          console.warn("[flaky-radar] auto-ingest failed (non-fatal):", errorMessage(err));
         }
       })();
 
@@ -587,7 +588,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         }
       }
     } catch (fpErr) {
-      console.warn("[workflow] failure-pattern match failed (non-fatal):", fpErr instanceof Error ? fpErr.message : String(fpErr));
+      console.warn("[workflow] failure-pattern match failed (non-fatal):", errorMessage(fpErr));
     }
     return;
   }
@@ -636,7 +637,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     } catch (e) {
       // Never let a repair failure leave the worktree dirty — an uncommitted manifest change would
       // block the auto-merge (silent merge loss). Revert and continue.
-      console.warn(`[workflow] build-approval repair failed for workspace ${workspaceId}: ${e instanceof Error ? e.message : String(e)}`);
+      console.warn(`[workflow] build-approval repair failed for workspace ${workspaceId}: ${errorMessage(e)}`);
       const revertPaths = BUILD_APPROVAL_REPAIR_PATHS.filter((p) =>
         existsSync(join(workspace.workingDir!, p)),
       );
@@ -673,7 +674,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
             projectId,
             { repoPath, branch: workspace.branch },
             db,
-          ).catch((e) => ({ ok: false, reason: "build-failed" as const, output: e instanceof Error ? e.message : String(e) })),
+          ).catch((e) => ({ ok: false, reason: "build-failed" as const, output: errorMessage(e) })),
         );
         if (!coldResult.ok) {
           const detail = coldResult.failedCommand ? `${coldResult.failedCommand} (exit ${coldResult.exitCode})` : coldResult.reason;

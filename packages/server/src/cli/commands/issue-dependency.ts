@@ -18,6 +18,7 @@ import {
   applyDependencyEdgeBatch,
 } from "../../repositories/issue-service.repository.js";
 import { validateBatchEdges, formatBatchEdgeResult } from "../../lib/dependency-batch.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function registerIssueDependencyCommands(issueCmd: Command) {
   // ── dependency sub-commands ──
@@ -61,7 +62,7 @@ Example:
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -138,7 +139,7 @@ Examples:
         console.log(`  id: ${id}`);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -164,7 +165,7 @@ Example:
         console.log(`Removed dependency '${dependencyId}'.`);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -221,7 +222,7 @@ Examples:
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -252,7 +253,7 @@ Valid actions: add, remove
         try {
           fileContent = readFileSync(jsonFile, "utf8");
         } catch (err) {
-          console.error(`Could not read file '${jsonFile}': ${err instanceof Error ? err.message : String(err)}`);
+          console.error(`Could not read file '${jsonFile}': ${errorMessage(err)}`);
           process.exit(1);
         }
 
@@ -317,7 +318,7 @@ Valid actions: add, remove
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });

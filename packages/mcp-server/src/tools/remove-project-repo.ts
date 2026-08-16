@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { boardApiUrl } from "../server-url.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function registerRemoveProjectRepo(server: McpServer) {
   server.tool(
@@ -26,7 +27,7 @@ export function registerRemoveProjectRepo(server: McpServer) {
         return {
           content: [{
             type: "text" as const,
-            text: `Failed to reach the board server (is it running?): ${err instanceof Error ? err.message : String(err)}`,
+            text: `Failed to reach the board server (is it running?): ${errorMessage(err)}`,
           }],
         };
       }

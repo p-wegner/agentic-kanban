@@ -3,6 +3,7 @@ import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { getAllProjects, setProjectArchived } from "../repositories/project.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * After this many CONSECUTIVE missing-repo-path detections a project is auto-archived (#271).
@@ -82,7 +83,7 @@ export async function scanDirtyMainCheckouts(database: Database = db): Promise<D
             message: `Repo path missing for ${MISSING_REPO_ARCHIVE_THRESHOLD} consecutive scans — project auto-archived (#271). Unarchive it after fixing the path.`,
           });
         } catch (err) {
-          console.warn(`[dirty-main-checkout] failed to auto-archive project ${project.id} (non-fatal):`, err instanceof Error ? err.message : String(err));
+          console.warn(`[dirty-main-checkout] failed to auto-archive project ${project.id} (non-fatal):`, errorMessage(err));
         }
         continue;
       }
@@ -102,7 +103,7 @@ export async function scanDirtyMainCheckouts(database: Database = db): Promise<D
     try {
       files = await getDirtyTrackedSourceFiles(project.repoPath);
     } catch (err) {
-      console.warn(`[dirty-main-checkout] failed to inspect ${project.repoPath}:`, err instanceof Error ? err.message : String(err));
+      console.warn(`[dirty-main-checkout] failed to inspect ${project.repoPath}:`, errorMessage(err));
       continue;
     }
     // Hand the event loop back between repos (#349). This scan is purely diagnostic but walks

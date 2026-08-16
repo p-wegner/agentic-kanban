@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import type { WorkspaceLaunchFailure, WorkspaceLaunchFailuresResponse } from "@agentic-kanban/shared";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 interface WorkspaceLaunchFailuresPanelProps {
   projectId: string | null;
@@ -145,7 +146,7 @@ export function WorkspaceLaunchFailuresPanel({ projectId, onClose, onIssueClick 
     setError(null);
     apiFetch<WorkspaceLaunchFailuresResponse>(`/api/projects/${projectId}/workspace-launch-failures`)
       .then((d) => setData(d))
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+      .catch((err) => setError(errorMessage(err)))
       .finally(() => setLoading(false));
   }, [projectId]);
 
@@ -160,7 +161,7 @@ export function WorkspaceLaunchFailuresPanel({ projectId, onClose, onIssueClick 
       await apiPost(`/api/workspaces/${failure.workspaceId}/launch`);
       fetchFailures();
     } catch (err) {
-      setActionErrors((prev) => ({ ...prev, [failure.workspaceId]: err instanceof Error ? err.message : String(err) }));
+      setActionErrors((prev) => ({ ...prev, [failure.workspaceId]: errorMessage(err) }));
     } finally {
       setActionLoading(null);
     }
@@ -174,7 +175,7 @@ export function WorkspaceLaunchFailuresPanel({ projectId, onClose, onIssueClick 
       await apiPost(`/api/sessions/${failure.sessionId}/stop`);
       fetchFailures();
     } catch (err) {
-      setActionErrors((prev) => ({ ...prev, [failure.workspaceId]: err instanceof Error ? err.message : String(err) }));
+      setActionErrors((prev) => ({ ...prev, [failure.workspaceId]: errorMessage(err) }));
     } finally {
       setActionLoading(null);
     }
@@ -187,7 +188,7 @@ export function WorkspaceLaunchFailuresPanel({ projectId, onClose, onIssueClick 
       await apiPost(`/api/workspaces/${failure.workspaceId}/quarantine`);
       fetchFailures();
     } catch (err) {
-      setActionErrors((prev) => ({ ...prev, [failure.workspaceId]: err instanceof Error ? err.message : String(err) }));
+      setActionErrors((prev) => ({ ...prev, [failure.workspaceId]: errorMessage(err) }));
     } finally {
       setActionLoading(null);
     }

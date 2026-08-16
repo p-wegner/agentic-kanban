@@ -1,6 +1,7 @@
 import { execFile, spawn, type ChildProcess, type SpawnOptions, type StdioOptions } from "node:child_process";
 import { promisify } from "node:util";
 import { recordOperation } from "@agentic-kanban/shared/lib/operation-metrics";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const execFileAsync = promisify(execFile);
 
@@ -226,7 +227,7 @@ export async function listOsProcesses(): Promise<OsProcessRecord[]> {
       // planned work parked for tens of minutes until some cycle happened to win the race,
       // and every cycle logged only "[monitor] Cycle error: Command failed: powershell.exe".
       // Hygiene must never be able to stop the monitor from doing its actual job.
-      console.warn(`[resource-sweep] process enumeration failed, skipping stale-process hygiene this cycle: ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[resource-sweep] process enumeration failed, skipping stale-process hygiene this cycle: ${errorMessage(err)}`);
       return [];
     }
   }

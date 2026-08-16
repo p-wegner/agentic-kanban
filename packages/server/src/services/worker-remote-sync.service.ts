@@ -12,6 +12,7 @@
 
 import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { KANBAN_INCOMING_REF_PREFIX } from "./git-http.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function incomingRefFor(branch: string): string {
   return `${KANBAN_INCOMING_REF_PREFIX}${branch}`;
@@ -43,7 +44,7 @@ export async function syncIncomingBranch(repoPath: string, branch: string): Prom
       await gitExecOrThrow(["update-ref", target, sha], { cwd: repoPath });
       return { ok: true, status: "created", sha };
     } catch (err) {
-      return { ok: false, status: "error", error: err instanceof Error ? err.message : String(err) };
+      return { ok: false, status: "error", error: errorMessage(err) };
     }
   }
   const current = currentSha.stdout.trim();
@@ -77,7 +78,7 @@ export async function syncIncomingBranch(repoPath: string, branch: string): Prom
     console.log(`[worker-sync] fast-forwarded ${branch} to ${sha.slice(0, 8)} from ${incoming}`);
     return { ok: true, status: "updated", sha };
   } catch (err) {
-    return { ok: false, status: "error", error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, status: "error", error: errorMessage(err) };
   }
 }
 

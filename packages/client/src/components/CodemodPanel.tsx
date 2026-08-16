@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { apiPost } from "../lib/api.js";
 import { showToast } from "./Toast.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 interface CodemodFileDiff {
   filePath: string;
@@ -113,7 +114,7 @@ export function CodemodPanel({ onClose, activeProjectId }: CodemodPanelProps) {
       // Select all files by default
       setSelectedFiles(new Set(result.files.map((f) => f.filePath)));
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMessage(err);
       if (msg.includes("more than 100 files") || msg.includes("overrideLimit")) {
         setLimitWarning(msg);
       } else {

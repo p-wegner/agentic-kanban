@@ -18,6 +18,7 @@
  * JSON-RPC over stdout, so all diagnostics here go to stderr (`console.warn`).
  */
 import { createClient } from "@libsql/client";
+import { errorMessage } from "./error-message.js";
 
 type LibsqlClient = ReturnType<typeof createClient>;
 
@@ -69,7 +70,7 @@ export async function applyPragmas(c: LibsqlClient): Promise<void> {
     try {
       await c.execute(pragma);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMessage(err);
       if (critical) {
         throw new Error(`Critical pragma \`${pragma}\` (${rationale}) failed: ${msg}`);
       }

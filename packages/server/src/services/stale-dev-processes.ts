@@ -10,6 +10,7 @@ import {
   type OsPortListener,
   type OsProcessRecord,
 } from "./process-exec.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 const DEFAULT_BOARD_SERVER_PORT = 3001;
 const DEFAULT_BOARD_CLIENT_PORT = 5173;
 
@@ -381,8 +382,8 @@ export async function cleanStaleDevProcessSnapshot(
       auditProcessEvent({ action: "monitor-stale-dev-tree-cleaned", rootPid: decision.rootPid, pids: decision.pids, reason: decision.reason });
     } catch (err) {
       decision.action = "cleanup_failed";
-      decision.reason = `cleanup-failed:${err instanceof Error ? err.message : String(err)}`;
-      auditProcessEvent({ action: "monitor-stale-dev-tree-cleanup-failed", rootPid: decision.rootPid, pids: decision.pids, error: err instanceof Error ? err.message : String(err) });
+      decision.reason = `cleanup-failed:${errorMessage(err)}`;
+      auditProcessEvent({ action: "monitor-stale-dev-tree-cleanup-failed", rootPid: decision.rootPid, pids: decision.pids, error: errorMessage(err) });
     }
   }
 }

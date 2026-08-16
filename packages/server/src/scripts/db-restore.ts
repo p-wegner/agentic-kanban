@@ -29,6 +29,7 @@ import {
   renameSync,
 } from "node:fs";
 import { createBackup, verifyBackup, backupDir } from "../db/backup.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DB_PATH = resolve(__dirname, "../../kanban.db");
@@ -86,7 +87,7 @@ async function listMode() {
       await verifyBackup(full);
       status = "verified";
     } catch (err) {
-      status = `UNVERIFIED (${err instanceof Error ? err.message : String(err)})`;
+      status = `UNVERIFIED (${errorMessage(err)})`;
     }
     const bytes = statSync(full).size;
     log(`  ${f}  [${bytes} bytes]  ${status}`);
@@ -123,7 +124,7 @@ async function restoreMode(arg: string) {
     await verifyBackup(source);
     log("chosen backup verified (integrity_check ok).");
   } catch (err) {
-    log(`REFUSED: backup failed verification: ${err instanceof Error ? err.message : String(err)}`);
+    log(`REFUSED: backup failed verification: ${errorMessage(err)}`);
     process.exit(2);
   }
 
@@ -135,7 +136,7 @@ async function restoreMode(arg: string) {
     const pre = await createBackup("pre-restore");
     log(pre ? `current db backed up to ${pre.path}` : "no current db to back up.");
   } catch (err) {
-    log(`WARNING: pre-restore backup of current db failed: ${err instanceof Error ? err.message : String(err)}`);
+    log(`WARNING: pre-restore backup of current db failed: ${errorMessage(err)}`);
   }
 
   // 4. Atomically replace kanban.db, removing stale sidecars.

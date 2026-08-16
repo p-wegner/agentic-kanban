@@ -19,6 +19,7 @@ import { reapWorkspaceContainer } from "./devcontainer-workspace.service.js";
 import type { MergeWarning } from "./workspace-merge-prevalidation.service.js";
 import { applyDeferredWorkingTreeSync } from "@agentic-kanban/shared/lib/git-service";
 import { advanceLoopAfterMergedIssue } from "./plugin-loop-hooks.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export type WorkspacePostMergeCleanupArgs = {
   workspaceId: string;
@@ -92,7 +93,7 @@ export async function runWorkspacePostMergeCleanup(
           break;
         } catch (err) {
           syncError = err;
-          console.warn(`[workspace-merge] deferred working-tree sync attempt ${attempt + 1}/5 failed:`, err instanceof Error ? err.message : String(err));
+          console.warn(`[workspace-merge] deferred working-tree sync attempt ${attempt + 1}/5 failed:`, errorMessage(err));
         }
       }
       if (syncError) {
@@ -102,7 +103,7 @@ export async function runWorkspacePostMergeCleanup(
           new Error(
             `main checkout at ${args.repoPath} could not be synced to ${args.pendingWorkingTreeSyncSha} after 5 attempts — `
             + `it may show the merged files as staged deletions until 'git reset --hard ${args.pendingWorkingTreeSyncSha}' is run (#296): `
-            + `${syncError instanceof Error ? syncError.message : String(syncError)}`,
+            + `${errorMessage(syncError)}`,
           ),
         );
       }
@@ -237,11 +238,11 @@ async function removeWorktreeAndBranch(
     gitService: deps.gitService,
     onRemoveWorktreeError: async (err) => {
       addRecoverableWarning(warnings, "remove-worktree", err);
-      const warningMsg = err instanceof Error ? err.message : String(err);
+      const warningMsg = errorMessage(err);
       try {
         await persistWorkspaceCleanupWarning(args.workspaceId, warningMsg, args.workingDir ?? "", deps.database);
       } catch (dbErr) {
-        console.warn("[workspace-merge] failed to persist cleanup warning:", dbErr instanceof Error ? dbErr.message : String(dbErr));
+        console.warn("[workspace-merge] failed to persist cleanup warning:", errorMessage(dbErr));
       }
     },
     onBranchDeleted: () => console.log(`[workspace-service] deleted branch ${args.branch}`),
@@ -268,7 +269,7 @@ async function recordCleanupWarnings(
       createdAt: new Date().toISOString(),
     }, database);
   } catch (err) {
-    console.warn("[workspace-merge] failed to record post-merge cleanup warnings:", err instanceof Error ? err.message : String(err));
+    console.warn("[workspace-merge] failed to record post-merge cleanup warnings:", errorMessage(err));
   }
 }
 
@@ -280,7 +281,7 @@ async function getPostMergeChangedFiles(
   try {
     return await gitService.getChangedFilesBetween(args.repoPath, args.preMergeHead, "HEAD");
   } catch (err) {
-    console.warn("[workspace-merge] getChangedFilesBetween failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[workspace-merge] getChangedFilesBetween failed (non-fatal):", errorMessage(err));
     return [];
   }
 }
@@ -307,7 +308,7 @@ async function createGithubHandoffDraft(
       gitService: deps.gitService,
     });
   } catch (err) {
-    console.warn("[workspace-merge] post-merge handoff draft failed:", err instanceof Error ? err.message : String(err));
+    console.warn("[workspace-merge] post-merge handoff draft failed:", errorMessage(err));
   }
 }
 
@@ -315,7 +316,7 @@ async function rebuildSharedDist(repoPath: string, postMergeChangedFiles: string
   try {
     await rebuildSharedIfChanged(repoPath, postMergeChangedFiles);
   } catch (err) {
-    console.warn("[workspace-merge] shared dist rebuild failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[workspace-merge] shared dist rebuild failed (non-fatal):", errorMessage(err));
   }
 }
 
@@ -414,7 +415,7 @@ async function recordOpenSpecNote(
       createdAt: new Date().toISOString(),
     }, database);
   } catch (dbErr) {
-    console.warn("[workspace-merge] failed to record openspec note:", dbErr instanceof Error ? dbErr.message : String(dbErr));
+    console.warn("[workspace-merge] failed to record openspec note:", errorMessage(dbErr));
   }
 }
 
@@ -438,7 +439,7 @@ async function commitOpenSpecPaths(repoPath: string, branch: string, gitService:
 }
 
 function addRecoverableWarning(warnings: MergeWarning[], step: string, err: unknown): void {
-  const message = err instanceof Error ? err.message : String(err);
+  const message = errorMessage(err);
   warnings.push({ step, message, recoverable: true });
   console.warn(`[workspace-merge] ${step} failed after git merge landed (recoverable):`, message);
 }

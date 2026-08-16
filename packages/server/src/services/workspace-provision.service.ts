@@ -45,6 +45,7 @@ import { WorkspaceError, type CreateWorkspaceInput, type GitService } from "./wo
 import { buildContextPrimer } from "./context-packer.service.js";
 import { getStackProfile } from "./stack-profile.service.js";
 import { resolveBoardFeedbackRouting } from "./board-feedback-routing.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function createWorkspaceProvisionService(deps: {
   database: Database;
@@ -114,7 +115,7 @@ export function createWorkspaceProvisionService(deps: {
         }
       } catch (err) {
         symlinkRun = buildSymlinkErrorRun(symlinkConfig.dirs, symlinkStartedAt, err);
-        console.warn(`[workspaces] symlink bootstrap error (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+        console.warn(`[workspaces] symlink bootstrap error (non-fatal): ${errorMessage(err)}`);
       }
     }
 
@@ -175,7 +176,7 @@ export function createWorkspaceProvisionService(deps: {
           }
         } catch (err) {
           latestSetup = buildSetupRunFromError(setupScript, startedAt, err);
-          console.warn(`[workspaces] setup error: ${err instanceof Error ? err.message : String(err)}`);
+          console.warn(`[workspaces] setup error: ${errorMessage(err)}`);
         }
       } else {
         latestSetup = {
@@ -196,7 +197,7 @@ export function createWorkspaceProvisionService(deps: {
           }
           return buildSetupRunFromResult(setupScript, startedAt, result);
         }).catch(err => {
-          console.warn(`[workspaces] parallel setup error: ${err instanceof Error ? err.message : String(err)}`);
+          console.warn(`[workspaces] parallel setup error: ${errorMessage(err)}`);
           return buildSetupRunFromError(setupScript, startedAt, err);
         });
       }
@@ -266,7 +267,7 @@ export function createWorkspaceProvisionService(deps: {
         }
       }
     } catch (err) {
-      console.warn(`[workspaces] plugin-skill materialization failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[workspaces] plugin-skill materialization failed (non-fatal): ${errorMessage(err)}`);
     }
   }
 
@@ -302,7 +303,7 @@ export function createWorkspaceProvisionService(deps: {
     } catch (err) {
       // Best-effort, exactly like the materialization above: a broken manifest must not fail a
       // launch. The old project-default fallback still applies.
-      console.warn(`[workspaces] plugin-loop skill resolution failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[workspaces] plugin-loop skill resolution failed (non-fatal): ${errorMessage(err)}`);
       return null;
     }
   }
@@ -336,7 +337,7 @@ export function createWorkspaceProvisionService(deps: {
         const rows = await crudRepo.getAgentSkillById(parsed.skillId, database);
         return rows.length > 0 ? { skillId: parsed.skillId, diskSkillName: null } : none;
       } catch (err) {
-        console.warn(`[workspaces] onboarding init-skill resolution failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+        console.warn(`[workspaces] onboarding init-skill resolution failed (non-fatal): ${errorMessage(err)}`);
         return none;
       }
     }
@@ -350,7 +351,7 @@ export function createWorkspaceProvisionService(deps: {
     } catch (err) {
       // Best-effort, exactly like the loop resolution above: a broken manifest must not fail a
       // launch. The old project-default fallback still applies.
-      console.warn(`[workspaces] onboarding init-skill resolution failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[workspaces] onboarding init-skill resolution failed (non-fatal): ${errorMessage(err)}`);
       return none;
     }
   }
@@ -424,7 +425,7 @@ exit 1
       }
       console.log(`[workspaces] TDD commit-msg hook installed: ${hookPath}`);
     } catch (err) {
-      console.warn(`[workspaces] failed to install TDD hook: ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[workspaces] failed to install TDD hook: ${errorMessage(err)}`);
     }
   }
 
@@ -450,7 +451,7 @@ exit 1
       );
       if (packed.primer.trim()) return packed.primer;
     } catch (err) {
-      console.warn(`[workspaces] context-packer failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[workspaces] context-packer failed (non-fatal): ${errorMessage(err)}`);
     }
     return null;
   }
@@ -478,7 +479,7 @@ exit 1
     try {
       stackProfile = await getStackProfile(issue.projectId, database);
     } catch (err) {
-      console.warn(`[workspaces] stack-profile read failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[workspaces] stack-profile read failed (non-fatal): ${errorMessage(err)}`);
     }
     // Best-effort like the stack profile: a builder still gets its ticket even if we
     // can't tell it where to route board feedback.
@@ -486,7 +487,7 @@ exit 1
     try {
       boardFeedback = await resolveBoardFeedbackRouting(issue.projectId, database);
     } catch (err) {
-      console.warn(`[workspaces] board-feedback routing failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[workspaces] board-feedback routing failed (non-fatal): ${errorMessage(err)}`);
     }
     return writeTicketContextFile(worktreePath, {
       issueNumber: issue.issueNumber,

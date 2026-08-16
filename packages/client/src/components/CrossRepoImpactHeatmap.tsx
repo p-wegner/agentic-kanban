@@ -14,6 +14,7 @@ import {
   type WorkspaceOverlap,
   type WorkspaceRepoDiff,
 } from "../lib/crossRepoImpact.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Cross-Repo Change-Impact Heatmap (#97). File-contention detection is
@@ -174,7 +175,7 @@ function useCrossRepoImpactData(
         setLoading(false);
       } catch (err) {
         if (seq !== requestSeqRef.current) return;
-        setError(err instanceof Error ? err.message : String(err));
+        setError(errorMessage(err));
         setLoading(false);
       }
     })();

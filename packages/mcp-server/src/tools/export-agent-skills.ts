@@ -5,6 +5,7 @@ import { sql } from "drizzle-orm";
 import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { ensureCodexSkillsLink, writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function registerExportAgentSkills(server: McpServer) {
   server.tool(
@@ -65,7 +66,7 @@ export function registerExportAgentSkills(server: McpServer) {
           }],
         };
       } catch (err) {
-        return { content: [{ type: "text" as const, text: `Error exporting skills: ${err instanceof Error ? err.message : String(err)}` }] };
+        return { content: [{ type: "text" as const, text: `Error exporting skills: ${errorMessage(err)}` }] };
       }
     },
   );

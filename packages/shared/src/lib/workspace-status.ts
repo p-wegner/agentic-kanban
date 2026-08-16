@@ -7,6 +7,7 @@ import {
   getTransitionStrictness,
   IllegalStatusTransitionError,
 } from "./status-transitions.js";
+import { errorMessage } from "./error-message.js";
 
 /**
  * Both the server (`packages/server/src/db/index.ts`) and mcp-server
@@ -239,7 +240,7 @@ export async function setWorkspaceStatus(
     if (err instanceof IllegalStatusTransitionError) throw err;
     console.warn(
       `[workspace-status] failed to set workspace ${workspaceId} -> "${status}":`,
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
     return false;
   }

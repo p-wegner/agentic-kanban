@@ -10,6 +10,7 @@ import { insertIssueComment } from "../../repositories/issue-comments.repository
 import { cliProposeTransition } from "../../services/workflow.service.js";
 import { runMigrations } from "../shared.js";
 import { buildWorkspaceApiUrl, buildApiUrl } from "./workspace-api-url.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function registerWorkspaceInteractionCommands(wsCmd: Command) {
   wsCmd
@@ -86,7 +87,7 @@ Examples:
         console.log(next.length === 0 ? "  terminal: workflow complete" : `  nextStages: ${next.join(", ")}`);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -130,7 +131,7 @@ Examples:
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -183,7 +184,7 @@ Examples:
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -230,7 +231,7 @@ Examples:
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -285,7 +286,7 @@ Examples:
         console.log(`  id: ${data.id}`);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -320,7 +321,7 @@ Examples:
         console.log(text);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -375,7 +376,7 @@ Examples:
         console.log(`  Check the board UI to approve or deny.`);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });

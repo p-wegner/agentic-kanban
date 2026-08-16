@@ -39,6 +39,7 @@ import {
   buildServicesEnvFile,
   resolveServiceHost,
 } from "./workspace-services-env.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export { resolveServiceHost, buildServicesEnvFile } from "./workspace-services-env.js";
 
@@ -462,7 +463,7 @@ export function createWorkspaceServicesService(deps: {
     try {
       name = composeProjectName(workspaceId, await getInstanceId());
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       return { composeProjectName: "", ports: {}, envFilePath, status: "error", error: `failed to resolve the service-stack instance id: ${message}`.slice(0, MAX_ERROR_CHARS), ...(lintWarnings.length ? { lintWarnings } : {}), updatedAt: new Date().toISOString() };
     }
 
@@ -493,7 +494,7 @@ export function createWorkspaceServicesService(deps: {
       try {
         await allocateAndWriteEnv();
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = errorMessage(err);
         return { composeProjectName: name, ports, envFilePath, status: "error", error: message.slice(0, MAX_ERROR_CHARS), ...(lintWarnings.length ? { lintWarnings } : {}), updatedAt: new Date().toISOString() };
       }
 
@@ -518,7 +519,7 @@ export function createWorkspaceServicesService(deps: {
         try {
           await allocateAndWriteEnv();
         } catch (err) {
-          lastStderr = err instanceof Error ? err.message : String(err);
+          lastStderr = errorMessage(err);
           break;
         }
       }
@@ -550,7 +551,7 @@ export function createWorkspaceServicesService(deps: {
       return refs.filter((r) => r.id !== actingWorkspaceId).map((r) => r.id);
     } catch (err) {
       console.warn(
-        `[services] sharer check failed for ${composeProjectName} — treating as unsafe: ${err instanceof Error ? err.message : String(err)}`,
+        `[services] sharer check failed for ${composeProjectName} — treating as unsafe: ${errorMessage(err)}`,
       );
       return null;
     }
@@ -600,7 +601,7 @@ export function createWorkspaceServicesService(deps: {
         await markServiceStateDown(args.composeProjectName);
       }
     } catch (err) {
-      console.warn(`[services] teardown failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[services] teardown failed (non-fatal): ${errorMessage(err)}`);
     }
   }
 
@@ -629,21 +630,21 @@ export function createWorkspaceServicesService(deps: {
       instanceId = await getInstanceId();
     } catch (err) {
       // Without a proven identity we must not down ANYTHING on the shared daemon.
-      console.warn(`[services] reaper skipped — could not resolve this instance's id: ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[services] reaper skipped — could not resolve this instance's id: ${errorMessage(err)}`);
       return { reaped };
     }
     let containerNames: string[] = [];
     try {
       containerNames = await runner.list();
     } catch (err) {
-      console.warn(`[services] reaper list failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[services] reaper list failed (non-fatal): ${errorMessage(err)}`);
       return { reaped };
     }
     let residualNames: string[] = [];
     try {
       residualNames = await runner.listResidualProjects();
     } catch (err) {
-      console.warn(`[services] reaper residual-inventory query failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[services] reaper residual-inventory query failed (non-fatal): ${errorMessage(err)}`);
     }
     const containerSet = new Set(containerNames);
     const allNames = new Set([...containerNames, ...residualNames]);
@@ -661,7 +662,7 @@ export function createWorkspaceServicesService(deps: {
         await markServiceStateDown(name).catch(() => {});
         reaped.push(name);
       } catch (err) {
-        console.warn(`[services] reaper down failed for ${name} (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+        console.warn(`[services] reaper down failed for ${name} (non-fatal): ${errorMessage(err)}`);
       }
     }
     return { reaped };

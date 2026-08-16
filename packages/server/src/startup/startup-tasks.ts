@@ -29,6 +29,7 @@ import { listOsProcesses, taskkillTree } from "../services/process-exec.js";
 import { refreshContainerMcpConfig } from "../services/devcontainer-workspace.service.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** Kill orphaned tsx server processes from previous hot-reload cycles (Windows only). */
 export function shouldKillOrphanedServerProcess(input: {
@@ -96,7 +97,7 @@ export async function killOrphanedServers(): Promise<void> {
       await new Promise(r => setTimeout(r, 500));
     }
   } catch (err) {
-    console.warn("[startup] orphan cleanup failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] orphan cleanup failed (non-fatal):", errorMessage(err));
   }
 }
 
@@ -169,13 +170,13 @@ export async function runMigrations(): Promise<void> {
       console.log("[backup] skipping pre-migration backup — schema is up to date, nothing to insure");
     }
   } catch (err) {
-    console.warn("[backup] pre-migration backup failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[backup] pre-migration backup failed (non-fatal):", errorMessage(err));
   }
 
   try {
     await applyMigrations(rawClient);
   } catch (err: unknown) {
-    console.error("[startup] Migration failed:", err instanceof Error ? err.message : String(err));
+    console.error("[startup] Migration failed:", errorMessage(err));
     throw err;
   }
 
@@ -187,13 +188,13 @@ export async function runMigrations(): Promise<void> {
     // Built-in skills must be seeded first — workflow nodes resolve skills by name.
     await ensureBuiltinWorkflows(db);
   } catch (err) {
-    console.warn("[startup] ensureBuiltinTags/Skills/Workflows failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] ensureBuiltinTags/Skills/Workflows failed (non-fatal):", errorMessage(err));
   }
 
   try {
     await deduplicateProjects();
   } catch (err) {
-    console.warn("[startup] project deduplication failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] project deduplication failed (non-fatal):", errorMessage(err));
   }
 
   // #166: unregister leaked %TEMP% test/lab fixture projects (safe heuristic — repo path
@@ -213,7 +214,7 @@ export async function runMigrations(): Promise<void> {
       }
     }
   } catch (err) {
-    console.warn("[startup] leaked temp-project cleanup failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] leaked temp-project cleanup failed (non-fatal):", errorMessage(err));
   }
 
   // #391/#396: every registered project's cross-worktree guard is audited on boot, and repaired
@@ -228,7 +229,7 @@ export async function runMigrations(): Promise<void> {
     const sweep = sweepHookWiring(projects.map((p) => ({ id: p.id, name: p.name, repoPath: p.repoPath })), { repair: true });
     for (const line of formatHookWiringReport(sweep)) console.warn(line);
   } catch (err) {
-    console.warn("[startup] hook-wiring audit failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] hook-wiring audit failed (non-fatal):", errorMessage(err));
   }
 
   // Disable auto_monitor on every startup — prevents mass agent spawns from idle workspaces
@@ -244,7 +245,7 @@ export async function runMigrations(): Promise<void> {
   try {
     await migrateGlobalDefaultModelToProviderScope(db);
   } catch (err) {
-    console.warn("[startup] default_model provider-scope migration failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] default_model provider-scope migration failed (non-fatal):", errorMessage(err));
   }
 
   // Backfill failure patterns from docs/learnings/ in all registered projects (non-fatal)
@@ -259,7 +260,7 @@ export async function runMigrations(): Promise<void> {
       if (count > 0) console.log(`[startup] failure-pattern backfill: ingested ${count} learning(s) from ${learningsDir}`);
     }
   } catch (err) {
-    console.warn("[startup] failure-pattern backfill failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] failure-pattern backfill failed (non-fatal):", errorMessage(err));
   }
 }
 
@@ -289,7 +290,7 @@ export async function alignLiveDbForeignKeys(): Promise<void> {
   } catch (err) {
     console.warn(
       "[startup] FK-action alignment failed (non-fatal — schema shape is still up to date):",
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
   }
 
@@ -305,7 +306,7 @@ export async function alignLiveDbForeignKeys(): Promise<void> {
   } catch (err) {
     console.warn(
       "[startup] PRAGMA foreign_key_check sweep failed (non-fatal):",
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
   }
 }
@@ -443,7 +444,7 @@ export async function reapOrphanedPluginViewProcesses(database: Database = db): 
         }
         reaped++;
       } catch (err) {
-        console.warn(`[startup] failed to kill orphaned plugin view server PID ${row.pid} (non-fatal):`, err instanceof Error ? err.message : String(err));
+        console.warn(`[startup] failed to kill orphaned plugin view server PID ${row.pid} (non-fatal):`, errorMessage(err));
       }
     } else if (liveCommandLine !== undefined) {
       console.warn(`[startup] plugin view server PID ${row.pid} is now a different process (command line no longer matches) — skipping kill, dropping stale row`);
@@ -495,7 +496,7 @@ export async function reapParentlessChildServers(): Promise<number> {
   try {
     osProcs = await listOsProcesses();
   } catch (err) {
-    console.warn("[startup] could not enumerate processes for orphan sweep (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] could not enumerate processes for orphan sweep (non-fatal):", errorMessage(err));
     return 0;
   }
 
@@ -521,7 +522,7 @@ export async function reapParentlessChildServers(): Promise<number> {
       }
       killed++;
     } catch (err) {
-      console.warn(`[startup] failed to reap parentless child server PID ${orphan.pid} (non-fatal):`, err instanceof Error ? err.message : String(err));
+      console.warn(`[startup] failed to reap parentless child server PID ${orphan.pid} (non-fatal):`, errorMessage(err));
     }
   }
   console.log(`[startup] reaped ${killed}/${orphans.length} parentless child server process(es)`);
@@ -572,7 +573,7 @@ export async function pruneOrphanedWorktrees(): Promise<void> {
   try {
     projectRows = await db.select({ id: projects.id, repoPath: projects.repoPath, defaultBranch: projects.defaultBranch, name: projects.name }).from(projects);
   } catch (err) {
-    console.warn("[startup] pruneOrphanedWorktrees: could not read projects:", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] pruneOrphanedWorktrees: could not read projects:", errorMessage(err));
     return;
   }
 
@@ -595,7 +596,7 @@ export async function pruneOrphanedWorktrees(): Promise<void> {
         console.log(`[startup] orphaned worktrees for project '${project.name}': removed ${report.removed.length}, kept (unshipped work) ${report.keptWithUnshippedWork.length}`);
       }
     } catch (err) {
-      console.warn(`[startup] pruneOrphanedWorktrees failed for project '${project.name}' (non-fatal):`, err instanceof Error ? err.message : String(err));
+      console.warn(`[startup] pruneOrphanedWorktrees failed for project '${project.name}' (non-fatal):`, errorMessage(err));
     }
   }
 }
@@ -613,11 +614,11 @@ export async function abortStaleMerges(): Promise<void> {
           console.log(`[startup] merge --abort succeeded for ${repoPath}`);
         }
       } catch (err) {
-        console.warn(`[startup] abortStaleMerges: failed for ${repoPath}:`, err instanceof Error ? err.message : String(err));
+        console.warn(`[startup] abortStaleMerges: failed for ${repoPath}:`, errorMessage(err));
       }
     }
   } catch (err) {
-    console.warn("[startup] abortStaleMerges failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] abortStaleMerges failed (non-fatal):", errorMessage(err));
   }
 }
 
@@ -647,11 +648,11 @@ export async function abortStaleRebases(): Promise<void> {
           console.log(`[startup] rebase --abort succeeded for ${workingDir}`);
         }
       } catch (err) {
-        console.warn(`[startup] abortStaleRebases: failed for ${workingDir}:`, err instanceof Error ? err.message : String(err));
+        console.warn(`[startup] abortStaleRebases: failed for ${workingDir}:`, errorMessage(err));
       }
     }
   } catch (err) {
-    console.warn("[startup] abortStaleRebases failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] abortStaleRebases failed (non-fatal):", errorMessage(err));
   }
 }
 
@@ -669,11 +670,11 @@ export async function checkMainCheckoutHeads(): Promise<void> {
           console.log(`[startup] main checkout HEAD for project '${name}': OK (on '${defaultBranch}')`);
         }
       } catch (err) {
-        console.warn(`[startup] checkMainCheckoutHeads: failed for ${repoPath}:`, err instanceof Error ? err.message : String(err));
+        console.warn(`[startup] checkMainCheckoutHeads: failed for ${repoPath}:`, errorMessage(err));
       }
     }
   } catch (err) {
-    console.warn("[startup] checkMainCheckoutHeads failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] checkMainCheckoutHeads failed (non-fatal):", errorMessage(err));
   }
 }
 
@@ -726,7 +727,7 @@ export async function runGatedDeferredStartupTasks(): Promise<void> {
     const { sweepIncomingWorkerRefs } = await import("./worker-incoming-sweep.js");
     await sweepIncomingWorkerRefs();
   } catch (err) {
-    console.warn("[startup] sweepIncomingWorkerRefs failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] sweepIncomingWorkerRefs failed (non-fatal):", errorMessage(err));
   }
   await reconcileSilentlyMergedWorkspaces();
 }
@@ -741,7 +742,7 @@ export async function runStartupAuditTasks(): Promise<void> {
   try {
     await reapOrphanedPluginViewProcesses();
   } catch (err) {
-    console.warn("[startup] reapOrphanedPluginViewProcesses failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] reapOrphanedPluginViewProcesses failed (non-fatal):", errorMessage(err));
   }
   try {
     // Catch the orphans the DB does not know about (#281) — must run AFTER the
@@ -749,7 +750,7 @@ export async function runStartupAuditTasks(): Promise<void> {
     // line cross-checked) rather than being swept anonymously here.
     await reapParentlessChildServers();
   } catch (err) {
-    console.warn("[startup] reapParentlessChildServers failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] reapParentlessChildServers failed (non-fatal):", errorMessage(err));
   }
   try {
     // Multi-repo crash gap: a crash between the leading merge and the sibling merges
@@ -759,12 +760,12 @@ export async function runStartupAuditTasks(): Promise<void> {
     const { reconcileStrandedSiblingMerges } = await import("./merge-workflow.js");
     await reconcileStrandedSiblingMerges();
   } catch (err) {
-    console.warn("[startup] reconcileStrandedSiblingMerges failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] reconcileStrandedSiblingMerges failed (non-fatal):", errorMessage(err));
   }
   try {
     await reconcileAncestorBranchWorkspaces();
   } catch (err) {
-    console.warn("[startup] reconcileAncestorBranchWorkspaces failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] reconcileAncestorBranchWorkspaces failed (non-fatal):", errorMessage(err));
   }
   try {
     // #113: hand-merged `feature/ak-<N>` branches (dev fixes landed WITHOUT a board
@@ -773,17 +774,17 @@ export async function runStartupAuditTasks(): Promise<void> {
     // still-open matching issues to Done. Idempotent; skips Backlog/terminal issues.
     await reconcileHandMergedBranches();
   } catch (err) {
-    console.warn("[startup] reconcileHandMergedBranches failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] reconcileHandMergedBranches failed (non-fatal):", errorMessage(err));
   }
   try {
     await scanDoneUnmergedWorkspaces({ reopenToInReview: false });
   } catch (err) {
-    console.warn("[startup] scanDoneUnmergedWorkspaces failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] scanDoneUnmergedWorkspaces failed (non-fatal):", errorMessage(err));
   }
   try {
     await reapTerminalWorkspaces();
   } catch (err) {
-    console.warn("[startup] reapTerminalWorkspaces failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] reapTerminalWorkspaces failed (non-fatal):", errorMessage(err));
   }
   await pruneStaleWorktrees();
   // #361: pruneStaleWorktrees above is DB-driven and can only see a closed workspace that still

@@ -1,6 +1,7 @@
 import type { Command } from "commander";
 import { runMigrations, timeSince } from "../shared.js";
 import { formatDurationStr } from "@agentic-kanban/shared";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function registerStatusCommand(program: Command) {
   program
@@ -138,7 +139,7 @@ Status indicators:
           process.exit(0);
         }
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { apiFetch, apiDelete } from "../lib/api.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export interface StaleWorktreeEntry {
   id: string;
@@ -80,7 +81,7 @@ export function useStaleWorkspaceManager({ enabled, projectFilter }: UseStaleWor
         setStaleErrors((prev) => ({ ...prev, [id]: result.error ?? "Unknown error" }));
       }
     } catch (err) {
-      setStaleErrors((prev) => ({ ...prev, [id]: err instanceof Error ? err.message : String(err) }));
+      setStaleErrors((prev) => ({ ...prev, [id]: errorMessage(err) }));
     }
     setRemovingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
   }, []);

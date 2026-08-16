@@ -22,6 +22,7 @@ import {
   getShowdownWorkspaceIds,
   getIssueProjectId,
 } from "../repositories/showdown.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const LABELS = ["A", "B", "C", "D"] as const;
 
@@ -200,7 +201,7 @@ export function createShowdownService(deps: {
       try {
         await workspaceService.deleteWorkspace(loser.id);
       } catch (err) {
-        console.warn(`[showdown] Failed to delete loser workspace ${loser.id}:`, err instanceof Error ? err.message : String(err));
+        console.warn(`[showdown] Failed to delete loser workspace ${loser.id}:`, errorMessage(err));
       }
     }
 

@@ -18,6 +18,7 @@ import {
 import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
 import { cleanupSiblingWorktrees, executeSiblingMerges, type SiblingMergeResult } from "./workspace-repos.service.js";
 import { workspaceServicesService, parseStoredComposeProjectName } from "./workspace-services.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export type MergeWarning = { step: string; message: string; recoverable: true };
 
@@ -391,7 +392,7 @@ async function recordConflictAndClearReadyFlag(
   try {
     await clearWorkspaceReadyForMerge(id, new Date().toISOString(), database);
   } catch (dbErr) {
-    console.warn("[workspace-merge] failed to clear stale readyForMerge flag:", dbErr instanceof Error ? dbErr.message : String(dbErr));
+    console.warn("[workspace-merge] failed to clear stale readyForMerge flag:", errorMessage(dbErr));
   }
 
   const { conflictFiles, behindCount } = resolution;
@@ -431,7 +432,7 @@ async function autoRenumberMigrations(
   } catch (err) {
     console.warn(
       "[workspace-merge] migration auto-renumber failed (continuing to conflict check):",
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
   }
 }

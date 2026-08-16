@@ -4,6 +4,7 @@ import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { bootstrapSymlinks } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
 import type { SymlinkBootstrapResult } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export interface PreflightResult {
   ok: boolean;
@@ -204,7 +205,7 @@ export async function workspaceLaunchPreflight(
       } catch (err) {
         errors.push(
           `Workspace is not attached to branch ${expectedBranch} and could not be reattached before launch. ` +
-            `${err instanceof Error ? err.message : String(err)}`,
+            `${errorMessage(err)}`,
         );
         return { ok: false, errors, staleFiles: [], refreshed: false, dirtyFiles, repairedSymlinks };
       }
@@ -244,7 +245,7 @@ export async function workspaceLaunchPreflight(
         console.warn(`[preflight] worktree symlink repair skipped failures: ${symlinkResult.failed.map(f => `${f.dir}: ${f.error}`).join(", ")}`);
       }
     } catch (err) {
-      console.warn(`[preflight] worktree symlink repair error (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[preflight] worktree symlink repair error (non-fatal): ${errorMessage(err)}`);
     }
   }
 
@@ -264,7 +265,7 @@ export async function workspaceLaunchPreflight(
       try { await git(["rebase", "--abort"], options.worktreePath); } catch { /* best effort */ }
       errors.push(
         `Workspace update-base preflight failed before agent launch. ` +
-          `Checkpoint/commit if needed, then resolve the rebase manually. ${err instanceof Error ? err.message : String(err)}`,
+          `Checkpoint/commit if needed, then resolve the rebase manually. ${errorMessage(err)}`,
       );
       return { ok: false, errors, staleFiles: staleBefore, refreshed, dirtyFiles, repairedSymlinks };
     }

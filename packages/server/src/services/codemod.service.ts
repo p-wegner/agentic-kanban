@@ -6,6 +6,7 @@ import { invokeClaudePrompt } from "./claude-cli.service.js";
 import { getProjectRepoPath } from "../repositories/project.repository.js";
 import type { Database } from "../db/index.js";
 import { ValidationError } from "../errors/index.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export const CODEMOD_FILE_LIMIT = 100;
 
@@ -280,7 +281,7 @@ export async function previewCodemod(
   try {
     transform = new AsyncFunction("sourceFile", transformCode);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errorMessage(err);
     throw new ValidationError(`Invalid codemod script: ${msg}`);
   }
 

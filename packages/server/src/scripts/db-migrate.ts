@@ -11,6 +11,7 @@
  * working regardless of Node version. See docs and the manual-migrate header.
  */
 import { runMigrations } from "../db/manual-migrate.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 runMigrations()
   .then(() => {
@@ -18,6 +19,6 @@ runMigrations()
     process.exit(0);
   })
   .catch((err) => {
-    console.error("[db:migrate] failed:", err instanceof Error ? err.message : String(err));
+    console.error("[db:migrate] failed:", errorMessage(err));
     process.exit(1);
   });

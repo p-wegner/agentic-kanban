@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { AppError, AiOperationError } from "../errors/index.js";
 import { WorkspaceError } from "../services/workspace-internals.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 type StatusCode = 400 | 403 | 404 | 409 | 500 | 503;
 
@@ -84,5 +85,5 @@ export function domainErrorHandler(err: Error, c: Context): Response {
   }
 
   console.error("[server] unhandled error:", err);
-  return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+  return c.json({ error: errorMessage(err) }, 500);
 }

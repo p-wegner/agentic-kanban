@@ -9,6 +9,7 @@ import {
   markSessionStopped,
 } from "../repositories/workspace-merge.repository.js";
 import { updateWorkspaceStatus } from "../repositories/workspace.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Pre-merge recovery of STRANDED fix-and-merge sessions.
@@ -40,7 +41,7 @@ export async function forceStopSession(
   try {
     await deps.getSessionManager?.().stopSession(sessionId);
   } catch (err) {
-    console.warn(`[workspace-merge] failed to force-stop ${label} ${sessionId}:`, err instanceof Error ? err.message : String(err));
+    console.warn(`[workspace-merge] failed to force-stop ${label} ${sessionId}:`, errorMessage(err));
   }
   await markSessionStopped(sessionId, new Date().toISOString(), deps.database);
 }
@@ -97,7 +98,7 @@ export async function recoverZeroOutputRunningFixAndMergeSession(
   } catch (err) {
     console.warn(
       `[workspace-merge] failed to force-stop stale zero-output session ${latestSession.id}:`,
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
   }
   if (workspace.workingDir && !workspace.isDirect && workspace.branch) {

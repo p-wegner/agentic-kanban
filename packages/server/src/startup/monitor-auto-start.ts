@@ -11,6 +11,7 @@ import { narrowProviderName } from "../services/agent-provider.js";
 import { projectCanDispatch } from "../services/worker-fleet.service.js";
 import { isMonitorEligibleIssue, monitorEligibleIssueSql } from "./monitor-eligibility.js";
 import { buildFileContentionGate, shouldDeferForContention, type BuildFileContentionGate } from "./monitor-file-contention.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** Issues carrying this tag are an explicit opt-out of monitor auto-start. */
 const SKIP_AUTO_START_TAG = "no-auto-start";
@@ -252,7 +253,7 @@ async function reconcileStaleMergedIssue(
       boardEvents.broadcast(projectId, "board_changed");
     }
   } catch (err) {
-    console.warn(`[monitor] Failed to reconcile already-merged issue ${label}:`, err instanceof Error ? err.message : String(err));
+    console.warn(`[monitor] Failed to reconcile already-merged issue ${label}:`, errorMessage(err));
   }
   noteSkip(projectId, issueNumber, "already_merged");
   return { reopenedAfterMerge: false };
@@ -364,7 +365,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       // atomically and answers 409 when another starter is already provisioning it.
       const resp = await fetch(`${baseUrl}/api/workspaces?async=1&autoStart=1`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(launchBody) }).catch((err) => {
         // #775: surface a thrown launch instead of swallowing it.
-        console.warn(`[monitor] Auto-start launch threw for In Progress issue #${issue.issueNumber} (${issue.id}): ${err instanceof Error ? err.message : String(err)}`);
+        console.warn(`[monitor] Auto-start launch threw for In Progress issue #${issue.issueNumber} (${issue.id}): ${errorMessage(err)}`);
         return null;
       });
       // #366: 409 means another automatic starter holds the claim and is provisioning this very
@@ -540,7 +541,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       const resp = await fetch(`${baseUrl}/api/workspaces?async=1&autoStart=1`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(launchBody) }).catch((err) => {
         // #775: surface a thrown launch (network/connection error) instead of silently
         // dropping it — record a failure action so it shows in the monitor logs.
-        console.warn(`[monitor] Auto-start launch threw for issue "${issue.title}" (${issue.id}): ${err instanceof Error ? err.message : String(err)}`);
+        console.warn(`[monitor] Auto-start launch threw for issue "${issue.title}" (${issue.id}): ${errorMessage(err)}`);
         return null;
       });
       if (resp?.ok) {

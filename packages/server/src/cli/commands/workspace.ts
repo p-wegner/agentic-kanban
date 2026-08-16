@@ -12,6 +12,7 @@ import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { runMigrations, resolveProjectIdArg, describeIssueNumberMiss } from "../shared.js";
 import { buildWorkspaceApiUrl, buildApiUrl } from "./workspace-api-url.js";
 import { registerWorkspaceInteractionCommands } from "./workspace-interaction.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** Shape of the error envelope every workspace action endpoint returns on failure. */
 interface ErrorResponse {
@@ -114,7 +115,7 @@ Examples:
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -183,7 +184,7 @@ Tip: Use 'issue list' to find the issue ID.
         console.log(`  dir: ${worktreePath}`);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -236,7 +237,7 @@ Examples:
         console.log(`  sessionId: ${String(data.sessionId)}`);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -304,7 +305,7 @@ Examples:
         console.log(`  sessionId: ${String(data.sessionId)}`);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -325,7 +326,7 @@ Examples:
         const code = await runWorkspaceWait(issueNumberArg, options);
         process.exit(code);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -364,7 +365,7 @@ Example:
         console.log(`  sessionId: ${String(data.sessionId)}`);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -409,7 +410,7 @@ Examples:
         if (data.error) console.warn(`  warning: ${data.error}`);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -447,7 +448,7 @@ Examples:
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -487,7 +488,7 @@ Examples:
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -519,7 +520,7 @@ Example:
         if (data.mergeOutput) console.log(`  output: ${data.mergeOutput}`);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -551,7 +552,7 @@ Example:
         console.log(`  status: ${data.status ?? "closed"}`);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -583,7 +584,7 @@ Example:
         if (data.sessionsStopped !== undefined) console.log(`  sessions stopped: ${String(data.sessionsStopped)}`);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -619,7 +620,7 @@ Examples:
         console.log(`Deleted workspace '${workspaceId}'`);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -672,7 +673,7 @@ Examples:
         console.log(`  sessionId: ${String(data.sessionId)}`);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -704,7 +705,7 @@ Example:
         console.log(`  readyForMerge: ${data.readyForMerge ?? true}`);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -745,7 +746,7 @@ Examples:
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });

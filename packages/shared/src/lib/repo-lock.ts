@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
+import { errorMessage } from "./error-message.js";
 
 /**
  * On-disk, cross-process repo lock (#993).
@@ -220,7 +221,7 @@ function errnoCode(err: unknown): string | undefined {
 }
 
 function errMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  return errorMessage(err);
 }
 
 /**

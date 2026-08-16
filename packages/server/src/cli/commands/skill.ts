@@ -7,6 +7,7 @@ import {
   findSkillByName,
   createAgentSkill,
 } from "../../repositories/agent-skill.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function registerSkillCommand(program: Command) {
   const skillCmd = program.command("skill").description("Manage agent skills.\n\nSkills are prompt templates that can be injected into agent context when creating workspaces. Built-in skills (board-navigator, code-review, dependency-analyzer, ticket-enhancer) are seeded on first run and cannot be modified.\n\nSkills can be global (available to all projects) or project-scoped.\n\nSubcommands: list, get, create, export");
@@ -38,7 +39,7 @@ Examples:
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -68,7 +69,7 @@ Examples:
         console.log(`\n--- Prompt ---\n${s.prompt}`);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -111,7 +112,7 @@ Examples:
         console.log(`  id: ${created.id}`);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -172,7 +173,7 @@ Examples:
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });

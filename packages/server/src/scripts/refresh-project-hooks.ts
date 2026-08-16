@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { db } from "../db/index.js";
 import { getAllProjects } from "../repositories/project.repository.js";
 import { ensureHookScaffold } from "../services/project-scaffold.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const GUARD = "prevent-cross-worktree-writes.js";
 
@@ -57,6 +58,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error("[refresh] failed:", err instanceof Error ? err.message : String(err));
+  console.error("[refresh] failed:", errorMessage(err));
   process.exit(1);
 });

@@ -13,6 +13,7 @@
 import type { AgentOutputCallback } from "./agent.service.js";
 import type { ProviderId, ProviderName } from "./agent-provider.js";
 import type { ContainerProvision } from "./devcontainer-workspace.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Where a session's agent should execute. Carried through StartSessionOptions.
@@ -174,7 +175,7 @@ export function createAgentDispatch(implementations: AgentDispatchImplementation
         // must fail with NO_AVAILABLE_WORKER instead of quietly running here.
         if (impl === implementations.host) throw err;
         if (placement?.kind === "remote" && placement.strict) {
-          const detail = err instanceof Error ? err.message : String(err);
+          const detail = errorMessage(err);
           console.warn(
             `[agent-dispatch] remote launch failed under STRICT worker dispatch; refusing the host fallback: sessionId=${sessionId}: ${detail}`,
           );
@@ -184,7 +185,7 @@ export function createAgentDispatch(implementations: AgentDispatchImplementation
           );
         }
         console.warn(
-          `[agent-dispatch] non-host launch failed (${err instanceof Error ? err.message : String(err)}); falling back to host: sessionId=${sessionId}`,
+          `[agent-dispatch] non-host launch failed (${errorMessage(err)}); falling back to host: sessionId=${sessionId}`,
         );
         bySession.set(sessionId, implementations.host);
         return implementations.host.launch(

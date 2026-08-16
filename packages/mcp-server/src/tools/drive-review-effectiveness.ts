@@ -3,6 +3,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { boardApiUrl } from "../server-url.js";
 import { prodDeps, type ToolDeps } from "./deps.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * drive_review_effectiveness — mirror of CLI `drive review-effectiveness <drive-id>`.
@@ -97,7 +98,7 @@ export function registerDriveReviewEffectiveness(server: McpServer, deps: ToolDe
           content: [
             {
               type: "text" as const,
-              text: `Request failed: ${err instanceof Error ? err.message : String(err)}`,
+              text: `Request failed: ${errorMessage(err)}`,
             },
           ],
         };

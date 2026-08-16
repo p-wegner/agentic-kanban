@@ -6,6 +6,7 @@ import {
   showOpenSpec,
   validateOpenSpecChange,
 } from "@agentic-kanban/shared/lib/openspec";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 async function resolveRepoPath(projectId: string): Promise<string | null> {
   const project = await getProjectById(projectId);
@@ -52,7 +53,7 @@ Examples:
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -89,7 +90,7 @@ Examples:
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -141,7 +142,7 @@ Examples:
         }
         process.exit(result.valid ? 0 : 1);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });

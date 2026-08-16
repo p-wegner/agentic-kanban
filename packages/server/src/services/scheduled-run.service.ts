@@ -24,6 +24,7 @@ import { nextIssueNumber } from "../repositories/issue-number.repository.js";
 import type { CreateWorkspaceInput, CreateWorkspaceResult } from "./workspace-internals.js";
 import { getAllPreferences } from "../repositories/preferences.repository.js";
 import { resolveStartPolicy } from "./start-policy.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export class ScheduledRunError extends Error {
   constructor(
@@ -299,7 +300,7 @@ export function createScheduledRunService(deps: {
   }
 
   function classifyLaunchFailure(err: unknown): string {
-    const raw = err instanceof Error ? err.message : String(err);
+    const raw = errorMessage(err);
     const lower = raw.toLowerCase();
     if (lower.includes("wip")) return `WIP limit: ${raw}`;
     if (lower.includes("issue") && lower.includes("not found")) return `Missing issue: ${raw}`;

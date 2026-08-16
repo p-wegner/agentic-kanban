@@ -12,6 +12,7 @@ import { resolveInside, addToGitInfoExclude, isLinkPath, removeLink } from "./pl
 import { fanOutScaffold } from "./plugin-scaffold.js";
 import { stopPluginViews } from "./plugin-views.service.js";
 import { deletePluginViewProcessesForPlugin } from "../repositories/plugin-view-processes.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Per-project enable/disable of an installed plugin: skill fan-out (junction, copy
@@ -64,7 +65,7 @@ export function createPluginEnablementOps(deps: {
             report.skills.push({ name, mode: "copy" });
           } catch (copyErr) {
             report.warnings.push(
-              `failed to link or copy skill "${name}": ${copyErr instanceof Error ? copyErr.message : String(copyErr)} (junction error: ${err instanceof Error ? err.message : String(err)})`,
+              `failed to link or copy skill "${name}": ${errorMessage(copyErr)} (junction error: ${errorMessage(err)})`,
             );
             continue;
           }

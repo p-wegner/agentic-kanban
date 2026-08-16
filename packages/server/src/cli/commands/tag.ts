@@ -1,5 +1,6 @@
 import type { Command } from "commander";
 import { runMigrations } from "../shared.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const port = () => process.env.KANBAN_SERVER_PORT ?? "3001";
 const apiBase = () => `http://127.0.0.1:${port()}/api`;
@@ -49,7 +50,7 @@ Examples:
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -94,7 +95,7 @@ Examples:
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });

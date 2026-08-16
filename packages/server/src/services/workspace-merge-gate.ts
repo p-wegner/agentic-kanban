@@ -32,6 +32,7 @@ import {
   type MergeGateShas,
   type MergeGateToken,
 } from "./pre-merge-gate.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
 
@@ -70,7 +71,7 @@ export async function recordGateFailureNote(args: {
   } catch (err) {
     console.warn(
       "[workspace-merge] failed to check prior gate-failure note (non-fatal):",
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
   }
   await recordMergeAttempt(
@@ -116,7 +117,7 @@ export async function recordUnverifiedMergeNote(args: {
   } catch (err) {
     console.warn(
       "[workspace-merge] failed to record unverified-merge note (non-fatal):",
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
   }
 }

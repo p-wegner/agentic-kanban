@@ -22,6 +22,7 @@ import * as crudRepo from "../repositories/workspace-crud.repository.js";
 import type { GitService } from "./workspace-internals.js";
 import { cleanupSiblingWorktrees } from "./workspace-repos.service.js";
 import { reapWorkspaceContainer } from "./devcontainer-workspace.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export interface StaleWorktreeEntry {
   id: string;
@@ -245,7 +246,7 @@ export function createWorkspaceCleanupService(deps: {
     try {
       await gitService.removeWorktree(repoPath, workspace.workingDir);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       return { success: false, error: `Failed to remove worktree: ${message}` };
     }
 

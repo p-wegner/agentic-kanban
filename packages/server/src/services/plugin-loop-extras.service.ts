@@ -13,6 +13,7 @@ import { parseScaffoldFields, applyScaffoldValues } from "./plugin-scaffold.js";
 import { listPluginLoopSessionStats } from "../repositories/plugins.repository.js";
 import type { PluginRow } from "../repositories/plugins.repository.js";
 import type { PluginLoopEngine } from "./plugin-loop.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * The plugin service's LOOP-ADJACENT reads and writes added for #286–#295 —
@@ -362,7 +363,7 @@ export async function validatePluginSource(source: string) {
   try {
     manifest = readManifestFromDir(dir).manifest;
   } catch (err) {
-    return { ok: false, errors: [err instanceof Error ? err.message : String(err)], warnings };
+    return { ok: false, errors: [errorMessage(err)], warnings };
   }
   for (const skill of manifest.skills ?? []) {
     const skillDir = resolveInside(dir, skill.dir, `skill dir "${skill.dir}"`);

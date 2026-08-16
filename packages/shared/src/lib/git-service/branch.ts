@@ -1,5 +1,6 @@
 import { execGit } from "./internal.js";
 import { pruneWorktrees } from "./worktree.js";
+import { errorMessage } from "../error-message.js";
 
 /** List all local and remote branches, sorted by most recent committer date. */
 export async function listBranches(
@@ -51,7 +52,7 @@ export async function deleteBranch(
 }
 
 function isBranchCheckedOutElsewhereError(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err);
+  const message = errorMessage(err);
   return message.includes("Cannot delete branch") && message.includes("checked out at");
 }
 

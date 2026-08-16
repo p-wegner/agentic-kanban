@@ -5,6 +5,7 @@ import { access } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
 import { db, schema } from "../db.js";
 import { writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function registerInstallSkill(server: McpServer) {
   server.tool(
@@ -82,7 +83,7 @@ export function registerInstallSkill(server: McpServer) {
           });
           installed.push(skill.name);
         } catch (err) {
-          errors.push({ name: skill.name, error: err instanceof Error ? err.message : String(err) });
+          errors.push({ name: skill.name, error: errorMessage(err) });
         }
       }
 

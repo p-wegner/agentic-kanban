@@ -7,6 +7,7 @@ import { getProjectById } from "../repositories/project.repository.js";
 import { getProjectWorkspacesWithIssue, updateProjectFields } from "../repositories/project-service.repository.js";
 import { listProjectRepos, insertProjectRepo, deleteProjectRepo } from "../repositories/repo.repository.js";
 import { ProjectError } from "./project-error.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const INITIAL_COMMIT_MESSAGE = "chore: initialise repository";
 
@@ -74,7 +75,7 @@ export async function createSiblingRepoDir(
   try {
     mkdirSync(targetPath, { recursive: true });
   } catch (err) {
-    throw new ProjectError(`Failed to create directory: ${err instanceof Error ? err.message : String(err)}`, "BAD_REQUEST");
+    throw new ProjectError(`Failed to create directory: ${errorMessage(err)}`, "BAD_REQUEST");
   }
   try {
     gitExecSync(["init"], { cwd: targetPath, stdio: "pipe" });
@@ -90,7 +91,7 @@ export async function createSiblingRepoDir(
     createInitialCommit(targetPath);
   } catch (err) {
     try { rmSync(targetPath, { recursive: true, force: true }); } catch {}
-    throw new ProjectError(`Failed to create the initial commit: ${err instanceof Error ? err.message : String(err)}`, "BAD_REQUEST");
+    throw new ProjectError(`Failed to create the initial commit: ${errorMessage(err)}`, "BAD_REQUEST");
   }
   return targetPath;
 }

@@ -16,6 +16,7 @@ import {
   getWaveDependencyRows,
   getUpstreamWorkspaceLandingRows,
 } from "../repositories/dependency-wave.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const BLOCKING_DEPENDENCY_TYPES = ["depends_on", "blocked_by"] as const;
 const STARTABLE_STATUS_NAMES = new Set(["Backlog", "Todo"]);
@@ -272,7 +273,7 @@ export async function startNextDependencyWave(
         });
       completeCreateJob(claim.jobId, result);
     } catch (err) {
-      result = { error: err instanceof Error ? err.message : String(err) };
+      result = { error: errorMessage(err) };
       failCreateJob(claim.jobId, err);
     }
 

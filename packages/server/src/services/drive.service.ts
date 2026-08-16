@@ -23,6 +23,7 @@ import {
   buildDriveRuntimePreferencePatch,
   resolveProjectRuntimeConfig,
 } from "./project-runtime-config.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export { autodrivePrefKey, autoMergeDisabledPrefKey } from "./project-runtime-config.service.js";
 
@@ -241,7 +242,7 @@ export function createDriveService({ database }: { database: Database }) {
         const result = await generateDriveRetro(finished, database);
         if (result) console.log(`[drive] wrote retro for drive ${id} -> ${result.path}`);
       } catch (err) {
-        console.warn(`[drive] retro generation failed for drive ${id} (non-fatal):`, err instanceof Error ? err.message : String(err));
+        console.warn(`[drive] retro generation failed for drive ${id} (non-fatal):`, errorMessage(err));
       }
     }
     return finished;

@@ -1,6 +1,7 @@
 import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import type { Database } from "../db/index.js";
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Rebuild a worktree's generated build artifacts after its history moved under it (#275).
@@ -63,7 +64,7 @@ export async function refreshWorkspaceBuildArtifacts(args: {
   } catch (err) {
     console.warn(
       `[update-base] artifact rebuild failed in ${workingDir} (non-fatal):`,
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
     return "failed";
   }

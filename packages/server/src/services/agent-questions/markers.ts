@@ -12,6 +12,7 @@ import { insertIssueComment } from "../../repositories/issue-comments.repository
 import { getWorkspaceIssueId } from "../../repositories/agent-questions.repository.js";
 import { invalidateAgentQuestionsCache } from "./cache.js";
 import type { AgentQuestion, AgentQuestionRecommendation } from "./types.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** Runtime-state keys (kept out of the `preferences` config table, #975). The
  *  namespace prefixes are catalogued in `lib/runtime-state-keys.ts`. */
@@ -101,7 +102,7 @@ export async function writeAgentQuestionComment(
       db,
     );
   } catch (err) {
-    console.error(`[agent-questions] failed to write agent-question comment: toolUseId=${params.toolUseId} ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`[agent-questions] failed to write agent-question comment: toolUseId=${params.toolUseId} ${errorMessage(err)}`);
   }
 }
 

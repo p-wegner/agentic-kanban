@@ -7,6 +7,7 @@ import { DEFAULT_STATUSES } from "../../repositories/issue.repository.js";
 import { runMigrations, logDefaultBranch } from "../shared.js";
 import { getDefaultSkillId, ensureAgentGitignore, ensureStarterClaudeMd, ensureStarterAgentsMd, ensureHookScaffold } from "../../services/project-scaffold.js";
 import { detectStackProfile } from "../../services/stack-profile.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** Fall back to the repo's checked-out branch when main/master isn't detected, so the project is never left undriveable (#772). */
 async function resolveCliDefaultBranch(repoPath: string, detected: string | null): Promise<string | null> {
@@ -101,7 +102,7 @@ Setup:
           await gitExecOrThrow(["-C", repoPath, "commit", "--allow-empty", "-m", "Initial commit"], {});
         } catch (commitErr) {
           await cleanup();
-          const msg = commitErr instanceof Error ? commitErr.message : String(commitErr);
+          const msg = errorMessage(commitErr);
           if (msg.includes("Please tell me who you are") || msg.includes("user.email") || msg.includes("user.name")) {
             console.error("git commit failed: git user identity not configured.");
             console.error("  Run: git config --global user.email \"you@example.com\"");
@@ -155,7 +156,7 @@ Setup:
         process.exit(0);
       } catch (err) {
         await cleanup();
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });

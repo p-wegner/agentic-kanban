@@ -4,6 +4,7 @@ import { db, schema } from "../db.js";
 import { eq, inArray, desc } from "drizzle-orm";
 import { parseSessionSummary, formatDurationStr } from "@agentic-kanban/shared";
 import { requireEntity, readSessionStdoutFile } from "../db-utils.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Shape of the dynamic `sessions.stats` JSON blob, as read by this tool. All
@@ -160,7 +161,7 @@ export function registerGetIssueSummary(server: McpServer) {
 
         return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
       } catch (err) {
-        return { content: [{ type: "text" as const, text: `Error: ${err instanceof Error ? err.message : String(err)}` }] };
+        return { content: [{ type: "text" as const, text: `Error: ${errorMessage(err)}` }] };
       }
     },
   );

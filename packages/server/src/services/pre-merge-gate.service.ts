@@ -22,6 +22,7 @@ import {
   type GateTierInfo,
   type VerifyGateStrategy,
 } from "./pre-merge-gate-tier.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Default verify-gate timeout (#192). The verify gate runs a full build+test suite in a
@@ -544,7 +545,7 @@ export async function runPreMergeGate(
   } catch (smokeErr) {
     // NON-FATAL: a harness error (not a failed boot) must not block an otherwise-passing merge.
     // Treat as if the smoke gate passed and fall through. (Matches exit-workflow's behavior.)
-    console.warn(`[pre-merge-gate] smoke check errored (non-fatal) for workspace ${workspace.id}:`, smokeErr instanceof Error ? smokeErr.message : String(smokeErr));
+    console.warn(`[pre-merge-gate] smoke check errored (non-fatal) for workspace ${workspace.id}:`, errorMessage(smokeErr));
   }
 
   // `verifyRan` — not `verifyConfigured` — because a docs-only diff skips the verify script.

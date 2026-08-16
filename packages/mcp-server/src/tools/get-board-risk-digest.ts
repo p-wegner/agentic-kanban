@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { resolveActiveProjectId } from "../db-utils.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const SERVER_PORT = Number(process.env.SERVER_PORT) || 3001;
 
@@ -26,7 +27,7 @@ export function registerGetBoardRiskDigest(server: McpServer, deps: ToolDeps = p
         const digest = await res.json();
         return { content: [{ type: "text" as const, text: JSON.stringify(digest, null, 2) }] };
       } catch (err) {
-        return { content: [{ type: "text" as const, text: `Error: ${err instanceof Error ? err.message : String(err)}` }] };
+        return { content: [{ type: "text" as const, text: `Error: ${errorMessage(err)}` }] };
       }
     },
   );

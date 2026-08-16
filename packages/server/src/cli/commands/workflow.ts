@@ -9,6 +9,7 @@ import {
 import { runMigrations, resolveProjectIdArg } from "../shared.js";
 import { normalizeImportedTemplate, validateImportedTemplate } from "../../lib/workflow-template-import.js";
 import type { TemplateInput } from "@agentic-kanban/shared/lib/workflow-engine";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 type WorkflowTemplateGraph = NonNullable<Awaited<ReturnType<typeof cliGetWorkflowTemplateGraph>>>;
 
@@ -63,7 +64,7 @@ export function registerWorkflowCommand(program: Command) {
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -82,7 +83,7 @@ export function registerWorkflowCommand(program: Command) {
         console.log(JSON.stringify(g, null, 2));
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -102,7 +103,7 @@ export function registerWorkflowCommand(program: Command) {
         console.log(JSON.stringify(toExportJson(g), null, 2));
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -134,7 +135,7 @@ export function registerWorkflowCommand(program: Command) {
         console.log(`  id: ${res.id}`);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -172,7 +173,7 @@ export function registerWorkflowCommand(program: Command) {
         console.log(`  id: ${res.id}`);
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -191,7 +192,7 @@ export function registerWorkflowCommand(program: Command) {
         console.log("Deleted.");
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });

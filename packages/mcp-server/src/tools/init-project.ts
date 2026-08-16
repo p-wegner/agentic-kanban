@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getServerPort } from "../server-url.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * init_project mirrors CLI `init [path]`.
@@ -53,7 +54,7 @@ export function registerInitProject(server: McpServer) {
             content: [
               {
                 type: "text" as const,
-                text: `Cannot reach board server on port ${port}. Is the server running? Error: ${err instanceof Error ? err.message : String(err)}`,
+                text: `Cannot reach board server on port ${port}. Is the server running? Error: ${errorMessage(err)}`,
               },
             ],
           };
@@ -97,7 +98,7 @@ export function registerInitProject(server: McpServer) {
           content: [
             {
               type: "text" as const,
-              text: `Failed to register project (is the server running on port ${port}?): ${err instanceof Error ? err.message : String(err)}`,
+              text: `Failed to register project (is the server running on port ${port}?): ${errorMessage(err)}`,
             },
           ],
         };

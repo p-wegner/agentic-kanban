@@ -10,6 +10,7 @@ import type { MonitorWorkspaceActions } from "./monitor-workspace-actions.js";
 import type { MergeGateToken } from "../services/pre-merge-gate.service.js";
 import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.repository.js";
 import { clearMergeBackoff, recordMergeFailure, type MergeBackoffDeps } from "../services/merge-backoff.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export type LogMonitorActionFn = (action: MonitorActionName, workspaceId: string, issueId: string, extra?: Pick<MonitorAction, "endpoint" | "httpStatus" | "responseSummary" | "verificationResult">) => void;
 
@@ -85,6 +86,6 @@ export async function closeDirectWorkspaceAsDone(ws: WorkspaceCandidate, logActi
   // #226 — mirror column, cleared through the helper that also updates the leading repos row.
   await clearWorkspaceWorkingDir(ws.wsId, now, db);
   const doneStatusId = await getProjectStatusIdByName(ws.projectId, "Done");
-  if (doneStatusId) await transitionIssueStatus(db, ws.issueId, doneStatusId, { now }).catch((err) => console.warn(`[monitor] failed to move direct-workspace issue ${ws.issueId} to Done:`, err instanceof Error ? err.message : String(err)));
+  if (doneStatusId) await transitionIssueStatus(db, ws.issueId, doneStatusId, { now }).catch((err) => console.warn(`[monitor] failed to move direct-workspace issue ${ws.issueId} to Done:`, errorMessage(err)));
   logAction("merge", ws.wsId, ws.issueId, { verificationResult: "ok" });
 }

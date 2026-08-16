@@ -18,13 +18,14 @@ import {
   siblingComposeRelativePathWarning,
   extractComposeFileReferences,
 } from "@agentic-kanban/shared";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export async function ensureKanbanDirGitIgnored(worktreePath: string): Promise<void> {
   try {
     await writeFile(join(worktreePath, ".kanban", ".gitignore"), "*\n", { encoding: "utf-8", flag: "wx" });
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "EEXIST") return;
-    console.warn(`[services] failed to write .kanban/.gitignore sentinel (services.env may show up in diffs): ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`[services] failed to write .kanban/.gitignore sentinel (services.env may show up in diffs): ${errorMessage(err)}`);
   }
 }
 

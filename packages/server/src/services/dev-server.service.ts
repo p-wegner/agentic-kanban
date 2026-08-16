@@ -28,6 +28,7 @@ import { getStackProfile } from "./stack-profile.service.js";
 import { killProcessesOnPorts, killDevServerSupervisorOnPorts } from "./process-cleanup.js";
 import { spawnShellCommand } from "./process-exec.js";
 import { resolveWorktreeDevPorts } from "./worktree-ports.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** Per-project preference keys for explicit dev-server overrides. */
 export function devCommandPrefKey(projectId: string): string {
@@ -289,7 +290,7 @@ export async function healthCheckDevServer(
         clearTimeout(timer);
       }
     } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err);
+      lastError = errorMessage(err);
     }
   }
   return { ok: false, status: null, waitedMs, error: lastError };

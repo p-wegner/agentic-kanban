@@ -22,6 +22,8 @@
  * accumulate them.
  */
 
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+
 export type CreateJobState = "running" | "succeeded" | "failed";
 
 export interface CreateJob {
@@ -110,7 +112,7 @@ export function completeCreateJob(jobId: string, result: { id?: string; status?:
 
 /** Mark a create job failed from a thrown error (WorkspaceError path). */
 export function failCreateJob(jobId: string, error: unknown): void {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error);
   finish(jobId, { state: "failed", error: message });
 }
 

@@ -48,6 +48,7 @@
  */
 import { commitsAhead } from "../startup/branch-commits.js";
 import type { LoopStall } from "./plugin-loop-stall.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * How long a stall must have been held before this pass will land it.
@@ -133,7 +134,7 @@ export async function recoverStrandedAutoLand(
     await ctx.land(ws.id);
     return true;
   } catch (err) {
-    ctx.log(`autoLand recovery merge failed for workspace ${ws.id}: ${err instanceof Error ? err.message : String(err)}`);
+    ctx.log(`autoLand recovery merge failed for workspace ${ws.id}: ${errorMessage(err)}`);
     return false;
   }
 }

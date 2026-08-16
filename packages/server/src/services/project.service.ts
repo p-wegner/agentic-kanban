@@ -39,6 +39,7 @@ import {
 
 import { ProjectError } from "./project-error.js";
 import { createInitialCommit, createSiblingRepoDir, promoteRepoToLeading } from "./project-repos.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 // Re-export so existing importers (routes, tests) keep `import { ProjectError } from "./project.service.js"`.
 export { ProjectError };
@@ -163,7 +164,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     try {
       return await registerProjectTracked(body, progress);
     } catch (err) {
-      finishRegistrationProgress(progress, err instanceof Error ? err.message : String(err));
+      finishRegistrationProgress(progress, errorMessage(err));
       throw err;
     }
   }
@@ -182,7 +183,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       try {
         localPath = await cloneRepo(body.cloneUrl, { name: body.name });
       } catch (err) {
-        throw new ProjectError(`Clone failed: ${err instanceof Error ? err.message : String(err)}`, "BAD_REQUEST");
+        throw new ProjectError(`Clone failed: ${errorMessage(err)}`, "BAD_REQUEST");
       }
     }
 
@@ -191,7 +192,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     try {
       repoInfo = await detectRepoInfo(localPath!);
     } catch (err) {
-      throw new ProjectError(`Invalid repo: ${err instanceof Error ? err.message : String(err)}`, "BAD_REQUEST");
+      throw new ProjectError(`Invalid repo: ${errorMessage(err)}`, "BAD_REQUEST");
     }
 
     const name = body.name || repoInfo.repoName;
@@ -293,7 +294,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     try {
       mkdirSync(targetPath, { recursive: true });
     } catch (err) {
-      throw new ProjectError(`Failed to create directory: ${err instanceof Error ? err.message : String(err)}`, "BAD_REQUEST");
+      throw new ProjectError(`Failed to create directory: ${errorMessage(err)}`, "BAD_REQUEST");
     }
 
     try {
@@ -321,7 +322,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     } catch (err) {
       try { rmSync(targetPath, { recursive: true, force: true }); } catch {}
       throw new ProjectError(
-        `Failed to create the initial commit: ${err instanceof Error ? err.message : String(err)}`,
+        `Failed to create the initial commit: ${errorMessage(err)}`,
         "BAD_REQUEST",
       );
     }
@@ -335,7 +336,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     try {
       repoInfo = await detectRepoInfo(targetPath);
     } catch (err) {
-      throw new ProjectError(`Failed to read repo info: ${err instanceof Error ? err.message : String(err)}`, "BAD_REQUEST");
+      throw new ProjectError(`Failed to read repo info: ${errorMessage(err)}`, "BAD_REQUEST");
     }
 
     const projectName = body.name?.trim() || repoInfo.repoName;

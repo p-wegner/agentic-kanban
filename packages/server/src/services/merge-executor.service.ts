@@ -1,5 +1,6 @@
 import { applyDeferredWorkingTreeSync, extractPendingWorkingTreeSync, getDeletedPathsVsHead } from "@agentic-kanban/shared/lib/git-service";
 import type { GitService } from "./workspace-internals.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * The ONE merge executor core (#945).
@@ -84,7 +85,7 @@ export async function runMergeCore(args: RunMergeCoreArgs): Promise<MergeCoreRes
   try {
     await args.createBackup("pre-merge");
   } catch (err) {
-    console.warn("[backup] pre-merge backup failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[backup] pre-merge backup failed (non-fatal):", errorMessage(err));
   }
 
   const preMergeHead = await revParseSafe(repoPath, "HEAD", gitService);
@@ -175,7 +176,7 @@ async function assertMainCheckoutReflectsMerge(args: {
     try {
       await applyDeferredWorkingTreeSync(args.repoPath, args.mergeCommitSha);
     } catch (err) {
-      console.warn("[merge-core] #350 repair sync failed:", err instanceof Error ? err.message : String(err));
+      console.warn("[merge-core] #350 repair sync failed:", errorMessage(err));
     }
   }
   deleted = await getDeletedPathsVsHead(args.repoPath);
