@@ -3,12 +3,13 @@ import type { StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats } from "../lib/useBoardEvents.js";
 import { aggregateFleetLiveStats } from "../lib/fleetLiveStats.js";
 import type { FleetAgentInput, FleetLiveStatsAggregate } from "../lib/fleetLiveStats.js";
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-status";
 
 /**
  * A workspace is "live" while its main workspace is actively running an agent.
  * Mirrors the liveness gate in `useBoardLiveHandlers` (`active` / `fixing`).
  */
-const ACTIVE_STATUSES = new Set(["active", "fixing"]);
+// #498: "is an agent PROCESS running?" — the named question.
 
 interface UseFleetLiveStatsParams {
   /**
@@ -46,7 +47,7 @@ export function useFleetLiveStats({
       const main = issue?.workspaceSummary?.main;
       // liveStats is already pruned to active issues, but re-check against the
       // board's current status so an agent that just went idle drops out.
-      const active = !!main && ACTIVE_STATUSES.has(main.status);
+      const active = !!main && isAgentRunningStatus(main.status);
       return {
         issueId,
         issueNumber: issue?.issueNumber ?? null,
