@@ -32,7 +32,7 @@ import { getPreference } from "../repositories/preferences.repository.js";
 import { coldCloneCheckPrefKey } from "./cold-clone-build-check.service.js";
 import { verifyScriptPrefKey } from "./stack-profile.service.js";
 import { DriveError } from "./drive.service.js";
-import { isBlockingDependencyType } from "@agentic-kanban/shared/schema";
+import { isBlockingDependencyType } from "@agentic-kanban/shared/lib/dependency-type-traits";
 
 
 type ScopedIssue = {

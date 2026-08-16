@@ -20,7 +20,7 @@ import {
 } from "../repositories/issue-service.repository.js";
 import { wouldCreateCycle } from "./board-aggregation.service.js";
 import { hasPath } from "../lib/dependency-graph.js";
-import { isDirectionalDependencyType, DIRECTIONAL_DEPENDENCY_TYPES } from "@agentic-kanban/shared/schema";
+import { isDirectionalDependencyType, DIRECTIONAL_DEPENDENCY_TYPES } from "@agentic-kanban/shared/lib/dependency-type-traits";
 
 /** Edge types that can form a meaningful cycle (the symmetric peers cannot). */
 

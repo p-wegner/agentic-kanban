@@ -20,7 +20,7 @@ import {
   insertAutoChainAuditComment,
 } from "../repositories/dependency-auto-chain.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import { BLOCKING_DEPENDENCY_TYPES } from "@agentic-kanban/shared/schema";
+import { BLOCKING_DEPENDENCY_TYPES } from "@agentic-kanban/shared/lib/dependency-type-traits";
 import { findCycleNodes } from "@agentic-kanban/shared/lib/dependency-graph";
 
 const AUTO_CHAIN_TRIGGER_TYPES = ["depends_on", "blocked_by", "child_of"] as const;
