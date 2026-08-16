@@ -2,12 +2,15 @@ import React, { useState } from "react";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import { apiPost } from "../lib/api.js";
 import { showToast } from "./Toast.js";
+import { priorityLabel, priorityTraits, type IssuePriority } from "../lib/priorityTraits.js";
 
 interface ChildProposal {
   tempId: string;
   title: string;
   description: string;
-  priority: "low" | "medium" | "high" | "urgent";
+  // The server folds the legacy `urgent` alias to `critical` before it is stored
+  // (#516), so a proposal carries a real priority, never the phantom fifth value.
+  priority: IssuePriority;
   /** Repo-aware fan-out (#94): the repo this child targets, editable pre-confirm. */
   targetRepo?: string | null;
 }
@@ -269,13 +272,8 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
                           </div>
                         )}
                       </div>
-                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${
-                        child.priority === "urgent" ? "bg-red-100 text-red-700" :
-                        child.priority === "high" ? "bg-orange-100 text-orange-700" :
-                        child.priority === "low" ? "bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400" :
-                        "bg-blue-100 text-blue-700"
-                      }`}>
-                        {child.priority}
+                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${priorityTraits(child.priority).badgeClass}`}>
+                        {priorityLabel(child.priority)}
                       </span>
                       <button
                         onClick={() => handleRemoveChild(child.tempId)}

@@ -1,12 +1,6 @@
 import type { IssueWithStatus, UpdateIssueRequest, StatusWithIssues } from "@agentic-kanban/shared";
 
-const PRIORITY_OPTIONS = ["critical", "high", "medium", "low"] as const;
-const PRIORITY_LABEL: Record<(typeof PRIORITY_OPTIONS)[number], string> = {
-  critical: "Critical",
-  high: "High",
-  medium: "Medium",
-  low: "Low",
-};
+import { ISSUE_PRIORITIES, priorityLabel, type IssuePriority } from "../lib/priorityTraits.js";
 
 interface Tag {
   id: string;
@@ -77,17 +71,17 @@ export function BoardBulkActionBar({
         defaultValue=""
         disabled={boardBulkUpdating || hasArchivedSelection}
         onChange={(event) => {
-          const priority = event.target.value as (typeof PRIORITY_OPTIONS)[number] | "";
+          const priority = event.target.value as IssuePriority | "";
           event.currentTarget.value = "";
-          if (priority) onBulkUpdate({ priority }, `Set priority to "${PRIORITY_LABEL[priority]}"`);
+          if (priority) onBulkUpdate({ priority }, `Set priority to "${priorityLabel(priority)}"`);
         }}
         className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
         aria-label="Bulk set priority"
         title={hasArchivedSelection ? "Clear archived selections before bulk editing" : "Set priority on selected cards"}
       >
         <option value="">Set priority...</option>
-        {PRIORITY_OPTIONS.map((priority) => (
-          <option key={priority} value={priority}>{PRIORITY_LABEL[priority]}</option>
+        {ISSUE_PRIORITIES.map((priority) => (
+          <option key={priority} value={priority}>{priorityLabel(priority)}</option>
         ))}
       </select>
       <select

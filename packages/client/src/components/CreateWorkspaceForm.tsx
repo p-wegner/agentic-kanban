@@ -28,6 +28,7 @@ import {
 } from "../lib/agentPresets.js";
 import { buildCreateWorkspaceBody } from "../lib/createWorkspaceBody.js";
 import { defaultModelForProvider } from "../lib/settings-shared.js";
+import { isPlanModePriority } from "../lib/priorityTraits.js";
 
 interface Project {
   id: string;
@@ -85,9 +86,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
   const [requiresReview, setRequiresReview] = useState(isAutoReviewEnabled(prefs.auto_review));
   // Per-launch override for the pre-flight check; defaults to the inherited `skip_preflight` setting.
   const [runPreflight, setRunPreflight] = useState(prefs.skip_preflight !== "true");
-  const [planMode, setPlanMode] = useState(
-    issue.priority === "high" || issue.priority === "critical",
-  );
+  const [planMode, setPlanMode] = useState(isPlanModePriority(issue.priority));
   const [tddMode, setTddMode] = useState(prefs.tdd_mode === "true");
   const [includeVisualProof, setIncludeVisualProof] = useState(false);
   const [skipSetup, setSkipSetup] = useState(false);
