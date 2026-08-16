@@ -17,7 +17,7 @@ import {
   getUpstreamWorkspaceLandingRows,
 } from "../repositories/dependency-wave.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import { BLOCKING_DEPENDENCY_TYPES } from "@agentic-kanban/shared/schema";
+import { BLOCKING_DEPENDENCY_TYPES } from "@agentic-kanban/shared/lib/dependency-type-traits";
 import { findCycleNodes } from "@agentic-kanban/shared/lib/dependency-graph";
 
 const STARTABLE_STATUS_NAMES = new Set(["Backlog", "Todo"]);

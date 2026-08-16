@@ -14,13 +14,12 @@ export {
   issueDependencies, issueDependenciesRelations, DEPENDENCY_TYPES, DEPENDENCY_TYPE_LABELS,
   SYMMETRIC_DEPENDENCY_TYPES,
 } from "./issue-dependencies.js";
-// #523: the per-type SEMANTICS live in lib/ (routes and the CLI may not import
-// persistence). Re-exported through this barrel for schema-side consumers.
-export {
-  DEPENDENCY_TYPE_TRAITS, BLOCKING_DEPENDENCY_TYPES, DIRECTIONAL_DEPENDENCY_TYPES,
-  isBlockingDependencyType, isDirectionalDependencyType,
-} from "../lib/dependency-type-traits.js";
-export type { DependencyTypeTraits } from "../lib/dependency-type-traits.js";
+// #618: the per-type SEMANTICS live in `lib/dependency-type-traits.ts` and are imported
+// from there directly. This barrel deliberately does NOT re-export them: schema is the
+// innermost element, so a `shared-schema -> shared-lib` edge inverts the layering. The
+// re-export added with #523 was a convenience that created exactly that edge; consumers
+// import the deep path instead. (Re-exporting from the schema MODULE is also not an
+// option — that direction is a cycle.)
 export type { DependencyType } from "./issue-dependencies.js";
 export { agentSkills } from "./agent-skills.js";
 export { issueArtifacts, issueArtifactsRelations } from "./issue-artifacts.js";
