@@ -9,8 +9,8 @@ import {
   type MultiRepoMatrix,
 } from "../lib/multiRepoMatrix.js";
 import { diffMultiRepoMatrix, type MatrixSnapshot } from "../lib/diffMultiRepoMatrix.js";
-import { BOARD_WS_EVENT, type BoardWsEventDetail } from "../lib/useBoardEvents.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { useBoardWsRefresh } from "./useBoardWsRefresh.js";
 
 /**
  * Board-event reasons that can change a repo × workspace cell. A merge landing, a
@@ -163,29 +163,16 @@ export function useLiveMultiRepoMatrix(
     load();
   }, [load]);
 
-  // Coalesced live refresh: schedule one debounced load per burst of relevant events.
-  const scheduleRefresh = useCallback(() => {
-    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-    debounceTimerRef.current = setTimeout(() => {
-      debounceTimerRef.current = null;
-      load();
-    }, REFRESH_DEBOUNCE_MS);
-  }, [load]);
-
-  // Subscribe to the existing board-events bus (re-dispatched as a window event by
-  // useBoardEvents). No new WebSocket/endpoint — just a listener.
-  useEffect(() => {
-    if (!activeProjectId) return;
-    const onBoardEvent = (e: Event) => {
-      if (pausedRef.current) return;
-      const detail = (e as CustomEvent<BoardWsEventDetail>).detail;
-      if (!detail || detail.projectId !== activeProjectId) return;
-      if (!RELEVANT_REASONS.has(detail.reason)) return;
-      scheduleRefresh();
-    };
-    window.addEventListener(BOARD_WS_EVENT, onBoardEvent);
-    return () => window.removeEventListener(BOARD_WS_EVENT, onBoardEvent);
-  }, [activeProjectId, scheduleRefresh]);
+  // Coalesced live refresh (#514). The 1.5s window is this panel's own — the matrix is
+  // expensive to rebuild — so it is passed explicitly rather than taking the 250ms
+  // default. `paused` is part of the predicate: a paused matrix must not even schedule,
+  // and the old copy's private timer would otherwise fire after unpausing.
+  useBoardWsRefresh({
+    projectId: activeProjectId,
+    shouldRefetch: (reason) => !pausedRef.current && RELEVANT_REASONS.has(reason),
+    refresh: load,
+    debounceMs: REFRESH_DEBOUNCE_MS,
+  });
 
   useEffect(
     () => () => {
