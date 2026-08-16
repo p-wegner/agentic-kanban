@@ -1,7 +1,7 @@
 import { createClient } from "@libsql/client";
 import type { Client } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID, createHash } from "node:crypto";
@@ -131,10 +131,25 @@ function getOrBuildTemplateDb(): string {
   }
   mkdirSync(tmpdir(), { recursive: true });
   if (!existsSync(templatePath)) {
+    // PUBLISH ATOMICALLY. copyFileSync writes the destination in place, so a concurrent
+    // worker's existsSync(templatePath) can observe a PARTIALLY-written file and copy a
+    // truncated DB into its test database — a corrupt schema surfacing as unrelated,
+    // irreproducible failures across the suite. Staging under a unique name and renaming
+    // means a reader sees either no file or the complete one; rename is atomic within a
+    // volume, and the staged file is a plain copy (no libsql handle), so it has none of
+    // the EBUSY problem that rules out renaming `buildingPath` directly.
+    const stagedPath = `${templatePath}.staged-${randomUUID()}`;
     try {
-      copyFileSync(buildingPath, templatePath);
+      copyFileSync(buildingPath, stagedPath);
+      renameSync(stagedPath, templatePath);
     } catch {
-      // Another worker won the race and already produced templatePath; ignore.
+      // Another worker won the race and published templatePath first — its bytes are as
+      // good as ours (same migration hash). Drop our copy and use theirs.
+      try {
+        rmSync(stagedPath, { force: true });
+      } catch {
+        /* best-effort */
+      }
     }
   }
   for (const suffix of ["", "-wal", "-shm"]) {
