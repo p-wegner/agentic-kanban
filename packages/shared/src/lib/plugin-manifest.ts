@@ -281,6 +281,14 @@ export const PLUGIN_PROGRESS_STATES = [
   "locked",
   "failed",
   "pending",
+  // #479/#481 — the board's own reconciliation states. A planner only ever reports "generating"
+  // for a step it has ticketed; that says a UNIT EXISTS, not that an agent is live. The board
+  // overrides "generating" with one of these two once it can see the ticket's real workspace
+  // state (see `reconcileProgressStepStates` in packages/server), so a planner never needs to
+  // emit them itself — but they are accepted here too, for a planner that wants to say the same
+  // thing up front.
+  "planned",
+  "stalled",
 ] as const;
 export type PluginProgressState = (typeof PLUGIN_PROGRESS_STATES)[number];
 

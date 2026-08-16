@@ -17,6 +17,14 @@ const STEP_MARK: Record<PluginProgressStep["state"], string> = {
   "locked": "🔒",
   "failed": "✕",
   "pending": "○",
+  // #481 — ticketed, no workspace ever provisioned. Distinct from "pending" (no ticket at all
+  // yet) so the reader can tell "the loop planned this" from "the loop hasn't reached it".
+  "planned": "○",
+  // #479 — a workspace ran and exited with nothing to show for it. Never the spinner: the
+  // agent is gone, so drawing "running" here is the exact false signal this ticket was filed
+  // for. Shares the failed glyph/tone family — this IS a failure the loop cannot recover from
+  // on its own — but keeps its own label so "stalled" isn't misread as "failed".
+  "stalled": "⚠",
 };
 
 const STEP_TONE: Record<PluginProgressStep["state"], string> = {
@@ -27,6 +35,8 @@ const STEP_TONE: Record<PluginProgressStep["state"], string> = {
   "locked": "border-gray-200 border-dashed dark:border-gray-700 text-gray-400 dark:text-gray-500 bg-gray-50/60 dark:bg-gray-800/30",
   "failed": "border-red-300 dark:border-red-800 text-red-800 dark:text-red-300 bg-red-50 dark:bg-red-900/20",
   "pending": "border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 bg-transparent",
+  "planned": "border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 bg-transparent",
+  "stalled": "border-red-300 dark:border-red-800 text-red-800 dark:text-red-300 bg-red-50 dark:bg-red-900/20",
 };
 
 /** What each state means, spelled out — the glyph alone is a legend nobody has. */
@@ -38,6 +48,8 @@ const STEP_STATE_TEXT: Record<PluginProgressStep["state"], string> = {
   "locked": "locked — waiting on an earlier step",
   "failed": "failed",
   "pending": "not started",
+  "planned": "planned — not started yet",
+  "stalled": "stalled — agent exited, nothing landed",
 };
 
 export type LoopUnitCost = { unitId: string; costUsd: number; sessions: number };

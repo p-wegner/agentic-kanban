@@ -71,7 +71,11 @@ export type PluginGate = {
 export type PluginProgressStep = {
   id: string;
   label: string;
-  state: "done" | "generating" | "awaiting-approval" | "needs-revision" | "locked" | "failed" | "pending";
+  // "planned"/"stalled" (#479/#481) are the board's own reconciliation of a planner's
+  // "generating" claim against the ticket's real workspace state — see `reconcileProgressStepStates`
+  // in packages/server/src/services/plugin-loop-step-state.ts.
+  state: "done" | "generating" | "awaiting-approval" | "needs-revision" | "locked" | "failed" | "pending"
+    | "planned" | "stalled";
   version?: string;
   artifacts?: string[];
 };
