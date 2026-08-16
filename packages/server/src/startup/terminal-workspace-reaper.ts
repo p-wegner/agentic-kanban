@@ -10,6 +10,7 @@ import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.servic
 import { listWorkspaceRepos, type RepoRow } from "../repositories/repo.repository.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { startPeriodicSweep, type PeriodicSweepHandle } from "./periodic-sweep.js";
 
 const REAPABLE_WORKSPACE_STATUSES = ["idle", "reviewing", "blocked"];
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
@@ -297,36 +298,25 @@ export async function reapTerminalWorkspaces(
   return result;
 }
 
-let activeTerminalReaperTimeout: ReturnType<typeof setTimeout> | null = null;
-let activeTerminalReaperInterval: ReturnType<typeof setInterval> | null = null;
+let activeTerminalReaperSweep: PeriodicSweepHandle | null = null;
 
 export function stopTerminalWorkspaceReaper(): void {
-  if (activeTerminalReaperTimeout !== null) {
-    clearTimeout(activeTerminalReaperTimeout);
-    activeTerminalReaperTimeout = null;
-  }
-  if (activeTerminalReaperInterval !== null) {
-    clearInterval(activeTerminalReaperInterval);
-    activeTerminalReaperInterval = null;
-  }
+  activeTerminalReaperSweep?.stop();
+  activeTerminalReaperSweep = null;
 }
 
 export function startTerminalWorkspaceReaper(
   deps: Omit<TerminalWorkspaceReaperDeps, "maxReapedPerRun"> = {},
   intervalMs = DEFAULT_INTERVAL_MS,
-): { timer: NodeJS.Timeout; interval: NodeJS.Timeout } {
+): PeriodicSweepHandle {
   stopTerminalWorkspaceReaper();
-
-  const tick = deps.onTick ?? (() => {
-    reapTerminalWorkspaces(deps).catch((err) =>
-      console.warn("[terminal-workspace-reaper] periodic tick error:", err instanceof Error ? err.message : err),
-    );
+  activeTerminalReaperSweep = startPeriodicSweep({
+    tag: "terminal-workspace-reaper",
+    // `onTick` is the test seam — it replaces the sweep, not just its logging.
+    tick: deps.onTick ?? (() => reapTerminalWorkspaces(deps)),
+    bootDelayMs: 45_000,
+    intervalMs,
   });
-  const timer = setTimeout(tick, 45_000);
-  const interval = setInterval(tick, intervalMs);
-  activeTerminalReaperTimeout = timer;
-  activeTerminalReaperInterval = interval;
-  (timer).unref?.();
-  (interval).unref?.();
-  return { timer, interval };
+  return activeTerminalReaperSweep;
 }
+

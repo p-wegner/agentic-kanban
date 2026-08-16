@@ -7,6 +7,7 @@ import type { BoardEvents } from "../services/board-events.js";
 import { PREF_RECONCILER_ZOMBIE_FIX_ENABLED } from "../constants/preference-keys.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { getMergeJob } from "../services/merge-job.service.js";
+import { startPeriodicSweep, type PeriodicSweepHandle } from "./periodic-sweep.js";
 
 /** Grace window: a fix-and-merge session must be this old before it is a candidate. */
 const GRACE_WINDOW_MS = 60_000;
@@ -193,33 +194,25 @@ export async function reconcileZombieFixSessions(deps: ZombieFixSessionReconcile
 
 const DEFAULT_INTERVAL_MS = 60_000;
 
-let activeZombieFixTimeout: ReturnType<typeof setTimeout> | null = null;
-let activeZombieFixInterval: ReturnType<typeof setInterval> | null = null;
+let activeZombieFixSweep: PeriodicSweepHandle | null = null;
 
 export function stopZombieFixSessionReconciler(): void {
-  if (activeZombieFixTimeout !== null) {
-    clearTimeout(activeZombieFixTimeout);
-    activeZombieFixTimeout = null;
-  }
-  if (activeZombieFixInterval !== null) {
-    clearInterval(activeZombieFixInterval);
-    activeZombieFixInterval = null;
-  }
+  activeZombieFixSweep?.stop();
+  activeZombieFixSweep = null;
 }
 
 /** Run the zombie reconciler shortly after boot and then on an interval. */
 export function startZombieFixSessionReconciler(
   deps: ZombieFixSessionReconcilerDeps,
   intervalMs = DEFAULT_INTERVAL_MS,
-): ReturnType<typeof setInterval> {
+): PeriodicSweepHandle {
   stopZombieFixSessionReconciler();
-
-  const tick = () => {
-    reconcileZombieFixSessions(deps).catch((err) =>
-      console.warn("[zombie-fix] cycle error:", err instanceof Error ? err.message : err),
-    );
-  };
-  activeZombieFixTimeout = setTimeout(tick, 30_000);
-  activeZombieFixInterval = setInterval(tick, intervalMs);
-  return activeZombieFixInterval;
+  activeZombieFixSweep = startPeriodicSweep({
+    tag: "zombie-fix",
+    tick: () => reconcileZombieFixSessions(deps),
+    bootDelayMs: 30_000,
+    intervalMs,
+  });
+  return activeZombieFixSweep;
 }
+
