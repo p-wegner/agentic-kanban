@@ -4,6 +4,7 @@ import { NotFoundError } from "../errors/index.js";
 import { isAnalyticsNoise } from "./session-filter.js";
 import { getChangedFileNames } from "./git.service.js";
 import { readSessionStdoutFile } from "../lib/session-output-reader.js";
+import { resolveDiffRef } from "@agentic-kanban/shared/lib/git-service";
 import {
   countAskFollowupQuestions,
   computeFileOverlapCounts,
@@ -322,7 +323,7 @@ export async function getWorkspaceRisk(
         .filter((w) => w.workingDir && (w.status === "active" || w.status === "reviewing" || w.status === "fixing"))
         .map(async (w) => {
           try {
-            const diffRef = w.isDirect ? "HEAD" : (w.baseBranch || defaultBranch);
+            const diffRef = resolveDiffRef(w, defaultBranch);
             if (!diffRef || !w.workingDir) return;
             const files = await getChangedFileNames(w.workingDir, diffRef);
             changedFilesByWs.set(w.id, files);

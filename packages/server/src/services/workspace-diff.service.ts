@@ -8,6 +8,7 @@ import { WorkspaceError, requireBaseBranch, type GitService } from "./workspace-
 import { listWorkspaceRepos } from "../repositories/repo.repository.js";
 import { readHandoffMeta, type HandoffMeta } from "./handoff.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { DIRECT_WORKSPACE_DIFF_REF, resolveDiffRef } from "@agentic-kanban/shared/lib/git-service";
 
 /** Freshness window for serving `?stats=1` from the persisted diff_stat_cache columns —
  * the same 30s SWR cadence that maintains them (workspace-diff-stats / the #399 chain). */
@@ -117,7 +118,10 @@ export function createWorkspaceDiffService(deps: {
       throw new WorkspaceError("Workspace not set up", "BAD_REQUEST");
     }
     const { repoPath, defaultBranch } = await resolveProjectRepo(id, database);
-    const baseBranch = workspace.isDirect ? "HEAD" : requireBaseBranch(workspace.baseBranch || defaultBranch);
+    // #530: the ref comes from one place; the VALIDATION stays here, because only a
+    // branch workspace can have a missing base — the sentinel is always valid.
+    const diffRef = resolveDiffRef(workspace, defaultBranch);
+    const baseBranch = diffRef === DIRECT_WORKSPACE_DIFF_REF ? diffRef : requireBaseBranch(diffRef);
 
     const zero = { filesChanged: 0, insertions: 0, deletions: 0 };
     const cacheFresh =

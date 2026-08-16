@@ -70,6 +70,29 @@ export function diffRangeArgs(baseBranch: string): string[] {
   return baseBranch === "HEAD" ? ["HEAD"] : [`${baseBranch}...HEAD`];
 }
 
+/** The `"HEAD"` sentinel {@link diffRangeArgs} understands: working tree vs HEAD. */
+export const DIRECT_WORKSPACE_DIFF_REF = "HEAD";
+
+/**
+ * Which ref a workspace's diff is taken against (#530).
+ *
+ * `ws.isDirect ? "HEAD" : (ws.baseBranch || defaultBranch)` was re-derived at nine call
+ * sites. They agreed, but only by repetition — and the sentinel they all produce was
+ * then honoured in only two of the three consumers (see {@link diffRangeArgs}), so
+ * "everyone computes the same string" was never the same as "everyone means the same
+ * thing by it". Producing it in one place is what makes the sentinel a contract.
+ */
+export function resolveDiffRef(
+  workspace: { isDirect?: boolean | null; baseBranch?: string | null },
+  defaultBranch: string | null | undefined,
+): string | null {
+  if (workspace.isDirect) return DIRECT_WORKSPACE_DIFF_REF;
+  // Nullable on purpose. A branch workspace whose base is unknown has NO ref, and
+  // several callers already test for that before spawning git; substituting a plausible
+  // default here would silently diff against the wrong branch instead.
+  return workspace.baseBranch || defaultBranch || null;
+}
+
 export async function getDiff(
   worktreePath: string,
   baseBranch: string = "main",

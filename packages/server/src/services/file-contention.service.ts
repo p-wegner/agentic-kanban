@@ -4,6 +4,7 @@ import { getChangedFileNames } from "./git.service.js";
 import { getProjectDefaultBranch, getActiveContentionWorkspaces } from "../repositories/file-contention.repository.js";
 import { listWorkspaceRepos } from "../repositories/repo.repository.js";
 import { WIP_OCCUPYING_STATUSES } from "@agentic-kanban/shared/lib/workspace-status";
+import { resolveDiffRef } from "@agentic-kanban/shared/lib/git-service";
 
 export interface ContentionWorkspace {
   workspaceId: string;
@@ -52,7 +53,7 @@ export async function getFileContention(
     if (!row.workingDir) return;
 
     const baseBranch = row.baseBranch || defaultBranch;
-    const diffRef = row.isDirect ? "HEAD" : baseBranch;
+    const diffRef = resolveDiffRef(row, defaultBranch);
     if (!diffRef) return;
 
     let files: string[];

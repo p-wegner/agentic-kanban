@@ -21,6 +21,7 @@ import { join } from "node:path";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import * as gitService from "./git.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { resolveDiffRef } from "@agentic-kanban/shared/lib/git-service";
 
 /** Budget for the inlined review diff (~15k tokens). Over this, fall back to the file list. */
 export const MAX_REVIEW_DIFF_CHARS = 60_000;
@@ -93,9 +94,10 @@ export async function buildReviewContext(input: ReviewContextInput): Promise<str
   const maxDiffChars = input.maxDiffChars ?? MAX_REVIEW_DIFF_CHARS;
   if (!workingDir || !baseRef) return null;
 
-  // Direct workspaces diff the working tree against HEAD; everything else is a
-  // committed feature branch diffed three-dot against its base.
-  const diffRef = isDirect ? "HEAD" : baseRef;
+  const diffRef = resolveDiffRef({ isDirect, baseBranch: baseRef }, baseRef);
+  // Unreachable given the baseRef guard above, but resolveDiffRef is nullable by design
+  // and this file already returns null rather than guessing a ref.
+  if (!diffRef) return null;
 
   try {
     const changedFiles = await gitService.getChangedFileNames(workingDir, diffRef);
