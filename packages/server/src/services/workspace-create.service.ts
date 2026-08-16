@@ -16,6 +16,7 @@ import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { isTerminalWorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import { derivePortsFromBranch } from "./worktree-ports.js";
 import { workspaceServicesService, resolveServiceHost } from "./workspace-services.service.js";
+import { reapWorkspaceContainer } from "./devcontainer-workspace.service.js";
 import { provisionServicesForLaunch } from "./workspace-create-stack.service.js";
 import type { ServiceStackState } from "@agentic-kanban/shared";
 import type { TicketContext } from "@agentic-kanban/shared/lib/ticket-context";
@@ -419,6 +420,16 @@ export function createWorkspaceCreateService(deps: {
                   composeWorktreePath: ctx.worktreePath,
                   releasedByWorkspaceId: workspaceId,
                 });
+              }
+              // #576: the devcontainer provisioned by setupWorktree leaks for exactly the
+              // same reason the stack does — the delete/close teardown ran before this
+              // workspace had anything for it to find. The stack teardown above is gated
+              // on an ADOPTED stack (a co-resident still uses it); the container is not
+              // shared that way, so it is always ours to reap.
+              try {
+                if (ctx.worktreePath) await reapWorkspaceContainer({ worktreePath: ctx.worktreePath, workspaceId });
+              } catch (err) {
+                console.warn(`[services] container reap failed (non-fatal) for ${workspaceId}: ${errorMessage(err)}`);
               }
               return;
             }

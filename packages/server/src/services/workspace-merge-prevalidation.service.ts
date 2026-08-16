@@ -328,6 +328,14 @@ async function reconcileAncestorWorkspace(
         releasedByWorkspaceId: workspace.id,
       });
     }
+    // #576: same reasoning as the already-merged path above — workingDir is nulled by
+    // finalizeMergeCleanup below, so this is the LAST point at which the devcontainer
+    // and its dependency volumes can be found by path.
+    try {
+      await reapWorkspaceContainer({ worktreePath: workspace.workingDir, workspaceId: workspace.id });
+    } catch (err) {
+      console.warn(`[workspaces] container reap failed (non-fatal) for ${workspace.id}: ${errorMessage(err)}`);
+    }
   }
   // Multi-repo: drop the sibling worktrees + branches (no-op single-repo). The merge
   // pre-flight only resolves to 'reconcile' when no sibling has pending work, and

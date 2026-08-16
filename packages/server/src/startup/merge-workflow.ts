@@ -17,6 +17,7 @@ import {
 import { cleanupMergedWorktreeAndBranch, runMergeCore } from "../services/merge-executor.service.js";
 import { cleanupSiblingWorktrees, prevalidateSiblingMerges, executeSiblingMerges } from "../services/workspace-repos.service.js";
 import { workspaceServicesService, parseStoredComposeProjectName } from "../services/workspace-services.service.js";
+import { reapWorkspaceContainer } from "../services/devcontainer-workspace.service.js";
 import { createBackup } from "../db/backup.js";
 import { killProcessesInDir } from "../services/process-cleanup.js";
 import { runScript } from "../services/script-runner.js";
@@ -402,6 +403,15 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
                     composeWorktreePath: workspace.workingDir,
                     releasedByWorkspaceId: workspace.id,
                   });
+                }
+                // #576: the compose stack is not the only per-workspace resource — with
+                // `devcontainer_builders` on the devcontainer and its dependency volumes
+                // leak too. The worktree is removed on the next line, so this is the last
+                // point at which they can be located by path.
+                try {
+                  await reapWorkspaceContainer({ worktreePath: workspace.workingDir, workspaceId: workspace.id });
+                } catch (err) {
+                  console.warn(`[workflow] container reap failed (non-fatal) for ${workspace.id}: ${errorMessage(err)}`);
                 }
               }
 
