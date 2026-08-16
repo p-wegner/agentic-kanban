@@ -332,8 +332,13 @@ export async function cleanupStaleSessions(sessionManager: SessionManager, agent
       try {
         process.kill(s.pid, 0);
         alive.push(s);
-      } catch {
-        dead.push(s);
+      } catch (err: unknown) {
+        // #574: EPERM means the process EXISTS but we may not signal it — the live PID
+        // poll in agent.service.ts already treats it as alive. Catching it here as "dead"
+        // marked an EPERM-protected live agent "stopped" on every single restart, and its
+        // workspace was then reset out from under a running process.
+        if ((err as NodeJS.ErrnoException).code === "EPERM") alive.push(s);
+        else dead.push(s);
       }
     } else {
       dead.push(s);
