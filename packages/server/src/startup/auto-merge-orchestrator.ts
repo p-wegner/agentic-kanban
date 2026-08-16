@@ -16,6 +16,7 @@ import { setWorkspaceStatus } from "../repositories/workspace-status.repository.
 import { reconcileDriveCompletion } from "./drive-completion-reconciler.js";
 import { reconcileProjectCompletion } from "./project-completion-reconciler.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 
 const DEFAULT_INTERVAL_MS = 30_000;
 /**
@@ -46,8 +47,7 @@ export interface AutoMergeOrchestratorState {
   reconcilerAttempts: Map<string, number>;
 }
 
-let activeAutoMergeInterval: ReturnType<typeof setInterval> | null = null;
-let activeAutoMergeTimeout: ReturnType<typeof setTimeout> | null = null;
+let activeAutoMergeSweep: PeriodicSweepHandle | null = null;
 
 export function createAutoMergeOrchestrator(deps: {
   database: Database;
@@ -372,19 +372,20 @@ export function startAutoMergeOrchestrator(deps: {
     });
   };
 
-  activeAutoMergeTimeout = setTimeout(tick, Math.min(20_000, intervalMs));
-  activeAutoMergeInterval = setInterval(tick, intervalMs);
-  orchestrator.state.timer = activeAutoMergeInterval;
+  activeAutoMergeSweep = startPeriodicSweep({
+    name: "auto-merge",
+    intervalMs,
+    // Boot delay is capped by the interval so a short test interval is not out-waited.
+    bootDelayMs: Math.min(20_000, intervalMs),
+    tick,
+  });
+  // `state.timer` is part of this module's public state object, so the handle exposes the
+  // interval for exactly this.
+  orchestrator.state.timer = activeAutoMergeSweep.interval;
   return orchestrator.state;
 }
 
 export function stopAutoMergeOrchestrator(): void {
-  if (activeAutoMergeTimeout !== null) {
-    clearTimeout(activeAutoMergeTimeout);
-    activeAutoMergeTimeout = null;
-  }
-  if (activeAutoMergeInterval !== null) {
-    clearInterval(activeAutoMergeInterval);
-    activeAutoMergeInterval = null;
-  }
+  activeAutoMergeSweep?.stop();
+  activeAutoMergeSweep = null;
 }

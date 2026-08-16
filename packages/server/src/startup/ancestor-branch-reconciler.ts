@@ -19,6 +19,7 @@ import { executeSiblingMerges, cleanupSiblingWorktrees, stampReconciledLeadingMe
 import { createBackup } from "../db/backup.js";
 import { reconcileSilentlyMergedWorkspaces } from "./silently-merged-reconciler.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 
 /** Issue status names that are already terminal; skip these workspaces. */
 const TERMINAL_STATUS_NAMES = ["Done", "AI Reviewed", "Closed", "Cancelled"];
@@ -333,18 +334,11 @@ export async function reconcileAncestorBranchWorkspaces(
 
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
 
-let activeAncestorTimeout: ReturnType<typeof setTimeout> | null = null;
-let activeAncestorInterval: ReturnType<typeof setInterval> | null = null;
+let activeAncestorSweep: PeriodicSweepHandle | null = null;
 
 export function stopAncestorBranchReconciler(): void {
-  if (activeAncestorTimeout !== null) {
-    clearTimeout(activeAncestorTimeout);
-    activeAncestorTimeout = null;
-  }
-  if (activeAncestorInterval !== null) {
-    clearInterval(activeAncestorInterval);
-    activeAncestorInterval = null;
-  }
+  activeAncestorSweep?.stop();
+  activeAncestorSweep = null;
 }
 
 /**
@@ -421,27 +415,24 @@ export async function runSilentlyMergedCompensatorTick(database?: Database): Pro
 export function startAncestorBranchReconciler(
   deps: Omit<AncestorBranchReconcilerDeps, "enabled"> = {},
   intervalMs = DEFAULT_INTERVAL_MS,
-): { timer: NodeJS.Timeout; interval: NodeJS.Timeout } {
+): PeriodicSweepHandle {
   stopAncestorBranchReconciler();
-
-  const tick = deps.onTick ?? (() => {
-    reconcileAncestorBranchWorkspaces(deps).catch((err) =>
-      console.warn("[ancestor-reconciler] periodic tick error:", err instanceof Error ? err.message : err),
-    );
-    void runStrandedSiblingCompensatorTick(deps.database);
-    // #380: Path A of the interrupted-merge pair. Deliberately NOT gated on
-    // `reconciler_ancestor_branch_enabled` inside this closure — the enabled check lives in
-    // `reconcileAncestorBranchWorkspaces` (Path B, git-touching and therefore expensive).
-    // Path A is a pure DB sweep over `mergedAt IS NOT NULL AND status != 'closed'`, which is
-    // cheap and must not be disable-able by a pref about git budget, exactly as the
-    // stranded-sibling compensator above is not.
-    void runSilentlyMergedCompensatorTick(deps.database);
+  activeAncestorSweep = startPeriodicSweep({
+    name: "ancestor-reconciler",
+    intervalMs,
+    bootDelayMs: 35_000,
+    // `onTick` is the test seam — it replaces the whole tick, all three sweeps below.
+    tick: deps.onTick ?? (() => {
+      void reconcileAncestorBranchWorkspaces(deps);
+      void runStrandedSiblingCompensatorTick(deps.database);
+      // #380: Path A of the interrupted-merge pair. Deliberately NOT gated on
+      // `reconciler_ancestor_branch_enabled` — the enabled check lives in
+      // `reconcileAncestorBranchWorkspaces` (Path B, git-touching and therefore expensive).
+      // Path A is a pure DB sweep over `mergedAt IS NOT NULL AND status != 'closed'`, which
+      // is cheap and must not be disable-able by a pref about git budget, exactly as the
+      // stranded-sibling compensator above is not.
+      void runSilentlyMergedCompensatorTick(deps.database);
+    }),
   });
-  const timer = setTimeout(tick, 35_000);
-  const interval = setInterval(tick, intervalMs);
-  activeAncestorTimeout = timer;
-  activeAncestorInterval = interval;
-  (timer).unref?.();
-  (interval).unref?.();
-  return { timer, interval };
+  return activeAncestorSweep;
 }

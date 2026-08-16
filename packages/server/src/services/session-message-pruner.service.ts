@@ -1,4 +1,5 @@
 import type { Database } from "../db/index.js";
+import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 import {
   deleteSessionMessagesForSessions,
   deleteSessionMessagesUpToId,
@@ -16,8 +17,7 @@ const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000; // every 6 hours
 const MERGED_WORKSPACE_RETENTION_DAYS = 3;
 export const MAX_MESSAGES_PER_ACTIVE_SESSION = 2_000;
 
-let activePruneTimeout: ReturnType<typeof setTimeout> | null = null;
-let activePruneInterval: ReturnType<typeof setInterval> | null = null;
+let activePruneSweep: PeriodicSweepHandle | null = null;
 
 /**
  * Delete session_messages for workspaces that were merged/closed more than
@@ -109,18 +109,16 @@ export function startSessionMessagePruner(database: Database): void {
     }
   }
 
-  // First run after 30s (let server fully start)
-  activePruneTimeout = setTimeout(() => { runPruneCycle().catch(() => {}); }, 30_000);
-  activePruneInterval = setInterval(() => { runPruneCycle().catch(() => {}); }, PRUNE_INTERVAL_MS);
+  // First run after 30s (let the server fully start).
+  activePruneSweep = startPeriodicSweep({
+    name: "pruner",
+    intervalMs: PRUNE_INTERVAL_MS,
+    bootDelayMs: 30_000,
+    tick: runPruneCycle,
+  });
 }
 
 export function stopSessionMessagePruner(): void {
-  if (activePruneTimeout !== null) {
-    clearTimeout(activePruneTimeout);
-    activePruneTimeout = null;
-  }
-  if (activePruneInterval !== null) {
-    clearInterval(activePruneInterval);
-    activePruneInterval = null;
-  }
+  activePruneSweep?.stop();
+  activePruneSweep = null;
 }
