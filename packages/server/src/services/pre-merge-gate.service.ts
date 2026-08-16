@@ -433,6 +433,7 @@ export async function runPreMergeGate(
     }
     gateTierInfo = {
       strategy: gateStrategy,
+      packageScoped: Boolean(testScope),
       fileScoped: Boolean(fileScope && changedFiles.length > 0),
       changedFileCount: changedFiles.length,
       guardSuiteCount: countAlwaysRunGuardSuites(workingDir),
