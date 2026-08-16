@@ -2,6 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import type { StatusWithIssues } from "@agentic-kanban/shared";
 import { boardQueryKeys } from "./boardQueryKeys.js";
 import { reconcileBoardIssueIdentity } from "./boardDataReconcile.js";
+import { apiFetchConditional } from "./api.js";
 
 /**
  * Per-project board ETags. Kept module-level (not per-hook) so the SINGLE
@@ -37,31 +38,19 @@ export async function fetchBoardColumns(
   queryClient: QueryClient,
 ): Promise<StatusWithIssues[]> {
   const prev = queryClient.getQueryData<StatusWithIssues[]>(boardQueryKeys.board(projectId));
-  const headers: Record<string, string> = {};
-  const cachedEtag = boardEtags.get(projectId);
   // Only send If-None-Match when we have prior columns to fall back to on a 304.
   // Without prior data a 304 would leave the board empty — the exact bug the old
   // `{ force: true }` flag guarded, now handled structurally.
-  if (cachedEtag && prev && prev.length > 0) headers["If-None-Match"] = cachedEtag;
+  const hasFallback = !!prev && prev.length > 0;
+  const result = await apiFetchConditional<StatusWithIssues[]>(
+    `/api/projects/${projectId}/board`,
+    hasFallback ? boardEtags.get(projectId) : undefined,
+  );
+  if (result.kind === "not-modified") return prev ?? [];
 
-  const res = await fetch(`/api/projects/${projectId}/board`, { headers });
-  if (res.status === 304) return prev ?? [];
-  if (!res.ok) {
-    let message = `API error: ${res.status} ${res.statusText}`;
-    try {
-      const body: unknown = await res.json();
-      if (body && typeof body === "object" && "error" in body && typeof body.error === "string") {
-        message = body.error;
-      }
-    } catch {}
-    throw new Error(message);
-  }
-
-  const board = await res.json() as StatusWithIssues[];
-  const etag = res.headers.get("ETag");
-  if (etag) boardEtags.set(projectId, etag);
+  if (result.etag) boardEtags.set(projectId, result.etag);
   else boardEtags.delete(projectId);
-  return reconcileBoardIssueIdentity(prev ?? [], board);
+  return reconcileBoardIssueIdentity(prev ?? [], result.data);
 }
 
 /** react-query options for the board query — shared by `useBoardQuery` and the

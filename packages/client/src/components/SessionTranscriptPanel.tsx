@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentOutputMessage, SessionSummaryResponse, WorkspaceResponse } from "@agentic-kanban/shared";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiFetchConditional } from "../lib/api.js";
 import {
   getOutputFormatForAgent,
   getOutputFormatForProvider,
@@ -196,18 +196,18 @@ export function SessionTranscriptPanel() {
     try {
       // Conditional tail fetch: send the previous ETag so an unchanged
       // transcript costs a 304 with no body (same pattern as useAgentLiveTicker).
-      const headers: Record<string, string> = {};
-      if (outputEtagRef.current) headers["If-None-Match"] = outputEtagRef.current;
-      const [outputRes, nextSummary] = await Promise.all([
-        fetch(`/api/sessions/${resolved.sessionId}/output?tail=${TRANSCRIPT_TAIL_BYTES}`, { headers }),
+      const [output, nextSummary] = await Promise.all([
+        // Throws on a non-OK response; the outer catch turns that into the error banner.
+        // It now throws apiFetch's normalised message instead of a bare `HTTP <n>`.
+        apiFetchConditional<AgentOutputMessage[]>(
+          `/api/sessions/${resolved.sessionId}/output?tail=${TRANSCRIPT_TAIL_BYTES}`,
+          outputEtagRef.current,
+        ),
         apiFetch<SessionSummaryResponse>(`/api/sessions/${resolved.sessionId}/summary`).catch(() => null),
       ]);
-      if (outputRes.status !== 304) {
-        if (!outputRes.ok) throw new Error(`HTTP ${outputRes.status}`);
-        const newEtag = outputRes.headers.get("ETag");
-        if (newEtag) outputEtagRef.current = newEtag;
-        const messages = (await outputRes.json()) as AgentOutputMessage[];
-        setEvents(parseSessionTranscript(messages, resolved.outputFormat));
+      if (output.kind === "fresh") {
+        if (output.etag) outputEtagRef.current = output.etag;
+        setEvents(parseSessionTranscript(output.data, resolved.outputFormat));
       }
       if (nextSummary) setSummary(nextSummary);
       setError(null);
