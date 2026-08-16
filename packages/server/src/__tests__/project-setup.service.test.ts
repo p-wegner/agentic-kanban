@@ -70,9 +70,34 @@ describe("deriveVerifyScript", () => {
     expect(result).toBe("mvn test");
   });
 
-  it("returns ./gradlew test for a Gradle repo", () => {
+  // #521: this used to assert the literal "./gradlew test". On Windows the verify gate
+  // spawns through `cmd.exe /d /s /c`, which parses `./gradlew` as the command `.` and
+  // exits 1 — so the gate failed and the merge was silently withheld on every JVM
+  // project. The wrapper is resolved per platform now, so the assertion follows.
+  it("returns a gradle wrapper the host shell can actually execute", () => {
     const result = deriveVerifyScript(dir, ["build.gradle"]);
-    expect(result).toBe("./gradlew test");
+    // No wrapper file exists in this fixture dir, so both platforms fall back to `gradle`.
+    expect(result).toBe("gradle test");
+  });
+
+  it("uses the platform-correct wrapper when one exists", async () => {
+    const wrapperDir = await mkdtemp(join(tmpdir(), "kanban-verify-gradle-"));
+    try {
+      await writeFile(join(wrapperDir, "build.gradle.kts"), "plugins { }");
+      const isWin = process.platform === "win32";
+      await writeFile(join(wrapperDir, isWin ? "gradlew.bat" : "gradlew"), "");
+      const result = deriveVerifyScript(wrapperDir, ["build.gradle.kts"]);
+      expect(result.endsWith(" test")).toBe(true);
+      if (isWin) {
+        // Must be the .bat form, and must NOT be the POSIX path cmd.exe cannot run.
+        expect(result.includes("gradlew.bat")).toBe(true);
+        expect(result.startsWith("./")).toBe(false);
+      } else {
+        expect(result).toBe("./gradlew test");
+      }
+    } finally {
+      await rm(wrapperDir, { recursive: true, force: true });
+    }
   });
 
   it("returns make test for a Makefile repo with a test target", async () => {
