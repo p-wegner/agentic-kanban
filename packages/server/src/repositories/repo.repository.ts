@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { resolve as pathResolve } from "node:path";
+import { samePath as sharedSamePath } from "@agentic-kanban/shared/lib/path-key";
 import { repos, workspaces } from "@agentic-kanban/shared/schema";
 import { and, eq, isNotNull, isNull, ne } from "drizzle-orm";
 import { db } from "../db/index.js";
@@ -309,11 +310,11 @@ export async function findLiveSiblingSharers(
 }
 
 /**
- * Loose path equality (resolved + case-insensitive): worktree paths recorded by
- * different code paths (fresh join vs. git worktree-list reuse) can differ in
- * separators/case on Windows. A false positive only means cleanup is skipped —
- * the safe direction.
+ * Loose path equality: worktree paths recorded by different code paths (fresh join
+ * vs. git worktree-list reuse) can differ in separators/case on Windows. Delegates
+ * to the shared canonical key (#532) — this copy also stripped no trailing separator
+ * and case-folded on POSIX, where case is significant.
  */
 function samePath(a: string, b: string): boolean {
-  return pathResolve(a).toLowerCase() === pathResolve(b).toLowerCase();
+  return sharedSamePath(a, b);
 }

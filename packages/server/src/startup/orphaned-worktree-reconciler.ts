@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { samePath as sharedSamePath } from "@agentic-kanban/shared/lib/path-key";
 
 /**
  * #361 (Observation C, second half) — a git worktree left registered after its unit merged, which
@@ -60,10 +61,9 @@ export type WorktreeVerdict =
   /** Unclaimed and carrying nothing: safe to remove. */
   | "orphaned";
 
-/** Windows paths differ in case and separator between `git worktree list` and the DB. */
+/** Windows paths differ in case and separator between `git worktree list` and the DB (#532). */
 function samePath(a: string, b: string): boolean {
-  const norm = (p: string) => resolve(p).replace(/[\\/]+$/, "").toLowerCase();
-  return norm(a) === norm(b);
+  return sharedSamePath(a, b);
 }
 
 /**

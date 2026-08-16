@@ -96,6 +96,12 @@
       "import": "./dist/lib/git-exec.js",
       "default": "./src/lib/git-exec.ts"
     },
+    "./lib/path-key": {
+      "development": "./src/lib/path-key.ts",
+      "types": "./dist/lib/path-key.d.ts",
+      "import": "./dist/lib/path-key.js",
+      "default": "./src/lib/path-key.ts"
+    },
     "./lib/operation-metrics": {
       "development": "./src/lib/operation-metrics.ts",
       "types": "./dist/lib/operation-metrics.d.ts",
