@@ -20,9 +20,9 @@ import {
 } from "../repositories/issue-service.repository.js";
 import { wouldCreateCycle } from "./board-aggregation.service.js";
 import { hasPath } from "../lib/dependency-graph.js";
+import { isDirectionalDependencyType, DIRECTIONAL_DEPENDENCY_TYPES } from "@agentic-kanban/shared/schema";
 
 /** Edge types that can form a meaningful cycle (the symmetric peers cannot). */
-const DIRECTIONAL_DEPENDENCY_TYPES = new Set<DependencyType>(["depends_on", "blocked_by", "parent_of", "child_of"]);
 
 /**
  * Validate index-based batch dependency edges and normalise each `type` (default
@@ -63,7 +63,7 @@ export function validateBatchDependencies(
       fail(`dependencies[${i}]: duplicate edge (issue ${e.issueIndex} -> ${e.dependsOnIndex}, type ${type})`, i);
     }
     seen.add(key);
-    if (DIRECTIONAL_DEPENDENCY_TYPES.has(type)) {
+    if (isDirectionalDependencyType(type)) {
       let set = adj.get(e.issueIndex);
       if (!set) { set = new Set(); adj.set(e.issueIndex, set); }
       set.add(e.dependsOnIndex);
@@ -84,7 +84,7 @@ export function validateBatchDependencies(
   };
   for (let i = 0; i < normalized.length; i++) {
     const e = normalized[i];
-    if (DIRECTIONAL_DEPENDENCY_TYPES.has(e.type) && reaches(e.dependsOnIndex, e.issueIndex)) {
+    if (isDirectionalDependencyType(e.type) && reaches(e.dependsOnIndex, e.issueIndex)) {
       fail(`dependencies[${i}]: would create a cycle (issue ${e.issueIndex} -> ${e.dependsOnIndex})`, i);
     }
   }
@@ -182,7 +182,8 @@ export function createIssueDependencyService(deps: {
     projectIds: string[];
   }> {
     const VALID_TYPES = ["depends_on", "blocked_by", "related_to", "duplicates", "parent_of", "child_of", "coupled_with"];
-    const DIRECTIONAL = new Set(["depends_on", "blocked_by", "parent_of", "child_of"]);
+    // #523: the second copy in this same file — now derived from the traits table.
+    const DIRECTIONAL = new Set<string>(DIRECTIONAL_DEPENDENCY_TYPES);
 
     for (let i = 0; i < edges.length; i++) {
       const e = edges[i];

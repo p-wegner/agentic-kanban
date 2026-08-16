@@ -20,8 +20,8 @@ import {
   insertAutoChainAuditComment,
 } from "../repositories/dependency-auto-chain.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { BLOCKING_DEPENDENCY_TYPES } from "@agentic-kanban/shared/schema";
 
-const BLOCKING_DEPENDENCY_TYPES = ["depends_on", "blocked_by"] as const;
 const AUTO_CHAIN_TRIGGER_TYPES = ["depends_on", "blocked_by", "child_of"] as const;
 const SKIP_AUTO_START_TAG = "no-auto-start";
 

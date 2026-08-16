@@ -17,8 +17,8 @@ import {
   getUpstreamWorkspaceLandingRows,
 } from "../repositories/dependency-wave.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { BLOCKING_DEPENDENCY_TYPES } from "@agentic-kanban/shared/schema";
 
-const BLOCKING_DEPENDENCY_TYPES = ["depends_on", "blocked_by"] as const;
 const STARTABLE_STATUS_NAMES = new Set(["Backlog", "Todo"]);
 
 type BlockingDependencyType = typeof BLOCKING_DEPENDENCY_TYPES[number];

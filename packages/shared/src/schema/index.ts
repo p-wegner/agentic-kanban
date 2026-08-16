@@ -10,7 +10,12 @@ export { repos } from "./repos.js";
 export { preferences } from "./preferences.js";
 export { runtimeState } from "./runtime-state.js";
 export { diffComments, diffCommentsRelations } from "./diff-comments.js";
-export { issueDependencies, issueDependenciesRelations, DEPENDENCY_TYPES, DEPENDENCY_TYPE_LABELS, SYMMETRIC_DEPENDENCY_TYPES } from "./issue-dependencies.js";
+export {
+  issueDependencies, issueDependenciesRelations, DEPENDENCY_TYPES, DEPENDENCY_TYPE_LABELS,
+  SYMMETRIC_DEPENDENCY_TYPES, DEPENDENCY_TYPE_TRAITS, BLOCKING_DEPENDENCY_TYPES,
+  DIRECTIONAL_DEPENDENCY_TYPES, isBlockingDependencyType, isDirectionalDependencyType,
+} from "./issue-dependencies.js";
+export type { DependencyTypeTraits } from "./issue-dependencies.js";
 export type { DependencyType } from "./issue-dependencies.js";
 export { agentSkills } from "./agent-skills.js";
 export { issueArtifacts, issueArtifactsRelations } from "./issue-artifacts.js";
