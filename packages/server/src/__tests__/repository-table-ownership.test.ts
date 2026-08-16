@@ -1,3 +1,4 @@
+// @gate:always-run — ratchets table-ownership across repositories/; imports nothing it checks (#538).
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";

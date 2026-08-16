@@ -1,3 +1,4 @@
+// @gate:always-run — reads/spawns .claude/hooks + settings.json outside src/; imports nothing it checks (#538).
 /**
  * Regression tests for ticket #480 — a builder exited with a full, correct, but
  * UNCOMMITTED implementation and the blocking "Uncommitted worktree changes" Stop

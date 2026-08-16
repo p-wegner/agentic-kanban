@@ -115,6 +115,38 @@ High-level git ops in `packages/shared/src/lib/git-service.ts`; `server/src/serv
 
 **Spawning git — the adapter.** The ONLY sanctioned place to spawn the `git` CLI is `packages/shared/src/lib/git-exec.ts` (the adapter/port). Use its `gitExec` (never-throws, returns `{stdout,stderr,code,error}`), `gitExecOrThrow` (normalised error), or `gitExecSync`; import via the deep path `@agentic-kanban/shared/lib/git-exec` (node-only — never the client-reachable barrel). **Do NOT write a private `execGit`/`execFile("git", …)` helper** — that drift is what made the "single source of truth" a lie across ~17 files. Enforced by `packages/shared/__tests__/git-exec-single-spawn.test.ts`, which scans all package `src/` (tests excluded) and fails on any raw git spawn outside the adapter.
 
+### Pre-merge gate — tiered, and the always-run guard set is DECLARED, not hand-listed
+`packages/server/src/services/pre-merge-gate.service.ts` runs `verify_script` (+ the boot/render
+smoke check) before a merge lands. Its test half can be scoped to the packages/files a diff
+actually touches (`scripts/test-mine.mjs`, honoring `KANBAN_TEST_PACKAGES`/`KANBAN_TEST_FILES`),
+but scoping by import graph (`vitest related`) is blind to any suite that asserts a property of
+the whole repo tree without importing what it checks (a spawned hook script, a `MIGRATIONS_DIR`
+read, a recursive `readdirSync` scan) — those are exactly the guard/ratchet/parity/scanner
+suites, and a hand-maintained "always run these" list silently drifts (#483: 7 of that failure
+set were unlisted tree-scanners).
+
+**Fix — classify by declaration.** A suite that reaches state outside its own import graph
+carries a top-of-file `// @gate:always-run` marker (see `repo-path-literal-ratchet.test.ts`).
+`scripts/test-mine.mjs` builds its always-run set (`ALWAYS_RUN_TESTS`) by scanning each
+package's `__tests__` dir for that marker — the list can't drift from what's actually forced to
+run, because it no longer exists independently. The companion
+`packages/server/src/__tests__/always-run-marker-ratchet.test.ts` is the OTHER half: it
+statically re-derives the same "reaches outside its own import graph" signature (spawns a
+script under `.claude`/`.codex`/`scripts`, reads `MIGRATIONS_DIR`, or recursively walks a
+directory tree) and fails when a matching file carries no marker — so a NEW guard suite can't be
+silently unmarked the way the #483 set was. A file that matches the signature but is genuinely
+reachable via its own imports (so scoping is safe for it) goes in that test's
+`KNOWN_SAFE_UNMARKED` with a one-line reason instead of being force-marked. This is a heuristic
+net, not a proof — a suite whose ambient read hides behind a helper won't match the regexes;
+accepted, since the marker mechanism only needs to narrow the gap, not close it.
+
+**Tier visibility.** `verify_gate_strategy_<projectId>` (`full` | `scoped` | `scoped-base-watch`,
+default `full` until a base-health backstop exists) is the ONE named pref that replaces the
+`verify_file_scope`/implicit-scoping booleans an operator could otherwise misalign. A level may
+only weaken verification VISIBLY: a passing gate's message always names what ran, e.g.
+`pre-merge gate passed (tier: file-scoped, 3 changed file(s), +14 guard suites, workers 6)` —
+never a bare "passed" that hides whether scoping applied.
+
 ### Windows / hooks
 - **Hook commands in `settings.json`**: use forward slashes (`\\` → `MODULE_NOT_FOUND`) and prefix the script with `$CLAUDE_PROJECT_DIR/` — never a hardcoded absolute path (breaks on every other clone/machine) and never a bare relative path (fails on CWD shift). `$CLAUDE_PROJECT_DIR` is set by Claude Code for hook execution (not for the Bash tool) and resolves to the session's repo root, so it works across machines, clones, and worktrees. This is the convention `project-scaffold.ts` ships to every scaffolded project. The hook scripts themselves self-locate (via `git rev-parse`/`__dirname` + the `KANBAN_MAIN_CHECKOUT` override), so they hold no machine-specific paths either.
 - **Codex hook parity**: `.codex/hooks.json` routes shell checks through `.claude/hooks/smart-hooks-runner.js`, patch/write through `prevent-cross-worktree-writes.js`. New Claude safety hooks must also handle Codex input (`tool_name`, `tool_input.command`, patch/write, `cwd`).

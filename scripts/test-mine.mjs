@@ -65,7 +65,7 @@
 // from inside the package dir to run tests that cover a specific source file.
 
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
@@ -161,7 +161,7 @@ function resolveVitestEntry(pkgDir) {
 
 /**
  * Test files that must run for EVERY diff that reaches their package, because what they
- * check is not reachable through the module graph (#278).
+ * check is not reachable through the module graph (#278, classification mechanism #538).
  *
  * `vitest related <changed files>` selects tests that IMPORT the change. These suites import
  * nothing they check — they read the filesystem and assert a property of the tree: no raw git
@@ -171,25 +171,62 @@ function resolveVitestEntry(pkgDir) {
  * so file-level scoping would silently stop enforcing exactly the rules that exist because
  * review missed them once already.
  *
+ * #538: this set used to be a hand-maintained list (9 files) — the exact failure mode it
+ * exists to prevent, since a NEW tree-scanning suite is silently never added (measured: 7 of
+ * #483's failure set were exactly this). It is now DERIVED by scanning each package's
+ * `__tests__` directory for a top-of-file `// @gate:always-run` marker, so declaring a suite
+ * always-run and actually running it always-run can't drift apart. The companion
+ * `always-run-marker-ratchet.test.ts` statically re-derives the same "reaches outside its own
+ * import graph" signal and fails when a matching file carries no marker — so a new guard suite
+ * can't be silently unmarked either.
+ *
  * Only consulted when a run is file-scoped; a full-suite run includes them anyway.
  */
-const ALWAYS_RUN_TESTS = {
-  shared: [
-    "__tests__/git-exec-single-spawn.test.ts",
-    "__tests__/max-file-size.test.ts",
-    "__tests__/barrel-client-safety.test.ts",
-    "__tests__/settings-registry.test.ts",
-  ],
-  server: [
-    "src/__tests__/migration-schema-drift.test.ts",
-    "src/__tests__/status-write-ratchet.test.ts",
-    "src/__tests__/settings-registry-keys.test.ts",
-    "src/__tests__/repo-path-literal-ratchet.test.ts",
-  ],
-  "mcp-server": [
-    "src/__tests__/mcp-catalog-parity.test.ts",
-  ],
+const ALWAYS_RUN_MARKER = "@gate:always-run";
+
+/** `{shared: "__tests__", server: "src/__tests__", "mcp-server": "src/__tests__"}` — the
+ *  __tests__ dir is relative to the package dir for each entry in PACKAGES. */
+const ALWAYS_RUN_TESTS_DIR = {
+  shared: "__tests__",
+  server: "src/__tests__",
+  "mcp-server": "src/__tests__",
 };
+
+/**
+ * Scan `<pkgDir>/<testsDir>` for `.test.ts` files carrying the marker, returning paths
+ * relative to `pkgDir` (the shape `runPackage`'s `guards` mode expects). Pure function of its
+ * arguments (a directory-listing/reading pair) so it is unit-testable without touching the
+ * real filesystem.
+ */
+export function scanAlwaysRunTests(
+  pkgDir,
+  testsDir,
+  listDir = (d) => (existsSync(d) ? readdirSync(d) : []),
+  readText = (p) => readFileSync(p, "utf8"),
+) {
+  const absDir = resolve(pkgDir, testsDir);
+  const found = [];
+  for (const name of listDir(absDir)) {
+    if (!name.endsWith(".test.ts")) continue;
+    const rel = `${testsDir}/${name}`;
+    const text = readText(resolve(pkgDir, rel));
+    if (text.includes(ALWAYS_RUN_MARKER)) found.push(rel);
+  }
+  return found;
+}
+
+function buildAlwaysRunTests() {
+  /** @type {Record<string, string[]>} */
+  const map = {};
+  for (const pkg of PACKAGES) {
+    const testsDir = ALWAYS_RUN_TESTS_DIR[pkg.label];
+    if (!testsDir) continue;
+    map[pkg.label] = scanAlwaysRunTests(resolve(ROOT, pkg.dir), testsDir);
+  }
+  return map;
+}
+
+const ALWAYS_RUN_TESTS = buildAlwaysRunTests();
 
 /**
  * File-level test scoping via `KANBAN_TEST_FILES` (comma-separated, repo-relative), the

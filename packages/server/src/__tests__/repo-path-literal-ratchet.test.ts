@@ -1,4 +1,5 @@
 // @covers platform.testing.fixtures [regression-guard]
+// @gate:always-run — scans the __tests__ tree for the /repo-lock hang pattern; imports nothing it checks (#538).
 /**
  * No NEW test suite may drive the real merge/repo-lock path against `repoPath: "/repo"` (#273).
  *

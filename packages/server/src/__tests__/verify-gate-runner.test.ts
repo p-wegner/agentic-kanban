@@ -1,3 +1,4 @@
+// @gate:always-run — spawns the scaffold/hook verify-gate-runner.js as a subprocess, never imported (#538).
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { resolve } from "node:path";
-import { ownedChangedFiles, upstreamChangedFiles, UPSTREAM_DEPENDENCIES } from "../../../../scripts/test-mine.mjs";
+import {
+  ownedChangedFiles,
+  upstreamChangedFiles,
+  UPSTREAM_DEPENDENCIES,
+  scanAlwaysRunTests,
+} from "../../../../scripts/test-mine.mjs";
 
 /**
  * #537 leak A: a `packages/shared`-only diff expanded to server/mcp-server as downstream
@@ -67,5 +72,42 @@ describe("upstreamChangedFiles", () => {
       server: ["packages/shared"],
       "mcp-server": ["packages/shared"],
     });
+  });
+});
+
+/**
+ * #538 — ALWAYS_RUN_TESTS used to be a hand-maintained list; it is now derived by scanning
+ * each package's __tests__ dir for a `// @gate:always-run` marker. These tests exercise the
+ * pure scan function directly (injected `listDir`/`readText`), never touching the real
+ * filesystem.
+ */
+describe("scanAlwaysRunTests", () => {
+  it("returns only .test.ts files whose content carries the @gate:always-run marker", () => {
+    const files = {
+      "src/__tests__/marked-guard.test.ts": "// @gate:always-run — scans the tree.\nimport {} from \"vitest\";",
+      "src/__tests__/ordinary.test.ts": "import {} from \"vitest\";",
+      "src/__tests__/helpers.ts": "// @gate:always-run — not a test file, must be ignored",
+    };
+    const listDir = () => Object.keys(files).map((p) => p.split("/").pop());
+    const readText = (p) => files[Object.keys(files).find((k) => p.endsWith(k.split("/").pop()))];
+    expect(scanAlwaysRunTests("/repo/packages/server", "src/__tests__", listDir, readText)).toEqual([
+      "src/__tests__/marked-guard.test.ts",
+    ]);
+  });
+
+  it("returns an empty list when the __tests__ dir doesn't exist (listDir returns nothing)", () => {
+    const listDir = () => [];
+    const readText = () => {
+      throw new Error("must not be called when listDir is empty");
+    };
+    expect(scanAlwaysRunTests("/repo/packages/server", "src/__tests__", listDir, readText)).toEqual([]);
+  });
+
+  it("returns paths relative to pkgDir, prefixed with the given testsDir", () => {
+    const listDir = () => ["a.test.ts"];
+    const readText = () => "// @gate:always-run";
+    expect(scanAlwaysRunTests("/repo/packages/shared", "__tests__", listDir, readText)).toEqual([
+      "__tests__/a.test.ts",
+    ]);
   });
 });

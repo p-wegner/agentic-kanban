@@ -1,3 +1,4 @@
+// @gate:always-run — statically verifies shared subpath imports resolve; imports nothing it checks (#538).
 import { describe, expect, it } from "vitest";
 import ts from "typescript";
 import { readdirSync, readFileSync, statSync } from "node:fs";

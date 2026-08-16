@@ -1,3 +1,4 @@
+// @gate:always-run — scans the tree for oversized/low-cohesion modules; imports nothing it checks (#538).
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve, relative, sep } from "node:path";

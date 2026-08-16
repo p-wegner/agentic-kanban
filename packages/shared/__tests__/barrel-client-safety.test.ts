@@ -1,3 +1,4 @@
+// @gate:always-run — scans the client-reachable barrel for node-only re-exports; imports nothing it checks (#538).
 import { describe, it, expect } from "vitest";
 import { builtinModules } from "node:module";
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";

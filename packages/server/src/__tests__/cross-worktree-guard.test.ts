@@ -1,3 +1,4 @@
+// @gate:always-run — spawns the live cross-worktree hook script outside src/; imports nothing it checks (#538).
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";

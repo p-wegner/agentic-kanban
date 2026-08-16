@@ -1,3 +1,4 @@
+// @gate:always-run — scans services/ for self-HTTP calls; imports nothing it checks (#538).
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
