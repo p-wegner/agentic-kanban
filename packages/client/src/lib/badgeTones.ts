@@ -50,3 +50,50 @@ export function badgeToneClass(tone: BadgeTone = "neutral"): string {
 export function badgeDotClass(tone: BadgeTone = "neutral"): string {
   return badgeDotClasses[tone];
 }
+
+// --- Status → tone (#517) -----------------------------------------------------------
+//
+// Workspace- and issue-status colours were re-declared as raw Tailwind in ~11 places,
+// and the copies drifted in ways only visible in dark mode:
+//   * `allWorkspacesStatus.WS_STATUS_COLORS.closed` was
+//     `bg-gray-100 text-gray-500 dark:bg-gray-400` — a LIGHT background in dark mode,
+//     with no `dark:text-*`, so it rendered grey-on-light-grey. Its sibling in
+//     `workspace-helpers.STATUS_COLORS` had the same status right.
+//   * several maps were light-only, the exact drift `badgeTones` was introduced to end.
+//
+// Routing status through a TONE rather than raw classes means each one inherits the
+// invariant this module already enforces in badgeTones.test.ts: every tone declares a
+// dark background AND a dark text colour. A status can no longer ship half a palette.
+
+/** Workspace lifecycle status → tone. */
+export const WORKSPACE_STATUS_TONE: Record<string, BadgeTone> = {
+  active: "success",
+  reviewing: "accent",
+  fixing: "warning",
+  idle: "warning",
+  "awaiting-plan-approval": "warning",
+  blocked: "danger",
+  error: "danger",
+  closed: "neutral",
+};
+
+/** Issue status-column name → tone. Unknown/custom columns fall back to neutral. */
+export const ISSUE_STATUS_TONE: Record<string, BadgeTone> = {
+  Backlog: "neutral",
+  Todo: "neutral",
+  "In Progress": "info",
+  "In Review": "accent",
+  "AI Reviewed": "accent",
+  Done: "success",
+  Cancelled: "neutral",
+};
+
+/** Badge classes for a workspace status, with a neutral fallback for unknown values. */
+export function workspaceStatusToneClass(status: string | null | undefined): string {
+  return badgeToneClasses[WORKSPACE_STATUS_TONE[status ?? ""] ?? "neutral"];
+}
+
+/** Badge classes for an issue status-column name, neutral for custom columns. */
+export function issueStatusToneClass(statusName: string | null | undefined): string {
+  return badgeToneClasses[ISSUE_STATUS_TONE[statusName ?? ""] ?? "neutral"];
+}
