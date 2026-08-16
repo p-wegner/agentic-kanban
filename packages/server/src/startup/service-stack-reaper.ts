@@ -45,7 +45,7 @@ import {
 } from "../services/workspace-services.service.js";
 import { getOrCreateServiceStackInstanceId } from "../repositories/workspace-service-state.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import { startPeriodicSweep, type PeriodicSweepHandle } from "./periodic-sweep.js";
+import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 
 const TERMINAL_STATUSES: string[] = [...TERMINAL_WORKSPACE_STATUSES];
 
@@ -186,7 +186,7 @@ export function startServiceStackReaper(
 ): void {
   stopServiceStackReaper();
   activeServiceStackSweep = startPeriodicSweep({
-    tag: "services-reaper",
+    name: "services-reaper",
     tick: () => reapOrphanServiceStacksOnce({ ...deps, shieldMidProvision: true, logLabel: "services-reaper" }),
     bootDelayMs: INITIAL_DELAY_MS,
     intervalMs,

@@ -12,7 +12,7 @@ import { getMergeJob } from "../services/merge-job.service.js";
 import { recordDriveObstacle } from "../services/drive-obstacles.service.js";
 import { PREF_RECONCILER_STRANDED_REVIEW_ENABLED } from "../constants/preference-keys.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import { startPeriodicSweep, type PeriodicSweepHandle } from "./periodic-sweep.js";
+import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 
 /**
  * How many times the reconciler may attempt a review preflight for the SAME pair of
@@ -240,7 +240,7 @@ export function stopStrandedReviewReconciler(): void {
 export function startStrandedReviewReconciler(deps: StrandedReviewReconcilerDeps, intervalMs = DEFAULT_INTERVAL_MS): PeriodicSweepHandle {
   stopStrandedReviewReconciler();
   activeStrandedReviewSweep = startPeriodicSweep({
-    tag: "reconcile",
+    name: "reconcile",
     tick: () => reconcileStrandedReviews(deps),
     bootDelayMs: 25_000,
     intervalMs,

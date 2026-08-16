@@ -15,7 +15,7 @@ import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
 import { PREF_RECONCILER_STRANDED_PLAN_ENABLED } from "../constants/preference-keys.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
-import { startPeriodicSweep, type PeriodicSweepHandle } from "./periodic-sweep.js";
+import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 
 export interface StrandedPlanReconcilerDeps {
   database?: Database;
@@ -173,7 +173,7 @@ export function stopStrandedPlanReconciler(): void {
 export function startStrandedPlanReconciler(deps: StrandedPlanReconcilerDeps, intervalMs = DEFAULT_INTERVAL_MS): PeriodicSweepHandle {
   stopStrandedPlanReconciler();
   activeStrandedPlanSweep = startPeriodicSweep({
-    tag: "reconcile",
+    name: "reconcile",
     tick: () => reconcileStrandedPlanModeWorkspaces(deps),
     bootDelayMs: 30_000,
     intervalMs,
