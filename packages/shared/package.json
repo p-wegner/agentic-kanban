@@ -114,6 +114,12 @@
       "import": "./dist/lib/json-narrow.js",
       "default": "./src/lib/json-narrow.ts"
     },
+    "./lib/issue-number": {
+      "development": "./src/lib/issue-number.ts",
+      "types": "./dist/lib/issue-number.d.ts",
+      "import": "./dist/lib/issue-number.js",
+      "default": "./src/lib/issue-number.ts"
+    },
     "./lib/operation-metrics": {
       "development": "./src/lib/operation-metrics.ts",
       "types": "./dist/lib/operation-metrics.d.ts",
