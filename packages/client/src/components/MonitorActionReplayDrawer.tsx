@@ -29,7 +29,7 @@ interface ActionDetails {
   totals?: Record<string, number>;
 }
 
-const ACTION_LABELS: Record<MonitorAction["action"] | "generate_tickets", { label: string; colorClass: string; icon: string }> = {
+const ACTION_LABELS: Record<MonitorAction["action"], { label: string; colorClass: string; icon: string }> = {
   relaunch:         { label: "Relaunched agent",   colorClass: "text-blue-600 dark:text-blue-400",   icon: "↺" },
   merge:            { label: "Triggered merge",    colorClass: "text-brand-600 dark:text-brand-400", icon: "⇒" },
   nudge:            { label: "Nudged agent",       colorClass: "text-amber-600 dark:text-amber-400", icon: "⚡" },
@@ -37,6 +37,10 @@ const ACTION_LABELS: Record<MonitorAction["action"] | "generate_tickets", { labe
   mark_dead:        { label: "Marked dead",        colorClass: "text-red-500 dark:text-red-400",     icon: "✕" },
   auto_start:       { label: "Auto-started issue", colorClass: "text-green-600 dark:text-green-400", icon: "▶" },
   generate_tickets: { label: "Generated tickets",  colorClass: "text-violet-600 dark:text-violet-400", icon: "✦" },
+  // #578: found by the shared union — this map was incomplete too. Its lookup already
+  // had a `?? {…}` fallback, so it degraded silently instead of crashing.
+  auto_contract:         { label: "Auto-contracted",    colorClass: "text-teal-600 dark:text-teal-400", icon: "⇲" },
+  auto_contract_suggest: { label: "Suggested contract", colorClass: "text-teal-600 dark:text-teal-400", icon: "⇲" },
 };
 
 function VerificationBadge({ result }: { result?: string }) {

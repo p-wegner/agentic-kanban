@@ -1,4 +1,5 @@
 import type { Command } from "commander";
+import type { ScorecardResult } from "../../services/workspace-scorecard.service.js";
 import { getIssueIdByNumberInProject } from "../../repositories/issue.repository.js";
 import { getIssueById } from "../../repositories/followup-workspace.repository.js";
 import { getProjectById } from "../../repositories/project.repository.js";
@@ -38,12 +39,15 @@ interface DiffResponse extends ErrorResponse {
   diff?: string;
 }
 
-/** GET .../scorecard — PR quality scorecard. */
-interface ScorecardResponse extends ErrorResponse {
-  score?: number | null;
-  computedAt?: string;
-  dimensions?: Array<{ name: string; score: number; maxScore: number; signal: string }>;
-}
+/**
+ * GET .../scorecard — PR quality scorecard.
+ *
+ * #579: this declared `score`, but the route returns `ScorecardResult` whose field is
+ * `total` — so `data.score` was always undefined and the `Score:` line NEVER printed.
+ * The shape is now derived from the service's own type, so the two cannot drift again;
+ * the response is an error-or-result union, hence the Partial.
+ */
+type ScorecardResponse = ErrorResponse & Partial<ScorecardResult>;
 
 /** POST .../merge — merge result. */
 interface MergeResponse extends ErrorResponse {
@@ -477,7 +481,7 @@ Examples:
         if (options.json) {
           console.log(JSON.stringify(data, null, 2));
         } else {
-          if (data.score !== undefined) console.log(`Score: ${String(data.score)}/100`);
+          if (data.total !== undefined) console.log(`Score: ${String(data.total)}/100`);
           if (data.computedAt) console.log(`Computed: ${data.computedAt}`);
           if (Array.isArray(data.dimensions)) {
             console.log("Dimensions:");

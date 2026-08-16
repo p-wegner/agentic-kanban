@@ -13,6 +13,11 @@ const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: str
   mark_dead:        { label: "Marked dead",        color: "text-red-500" },
   auto_start:       { label: "Auto-started issue", color: "text-green-600" },
   generate_tickets: { label: "Generated tickets",  color: "text-violet-600 dark:text-violet-400" },
+  // #578: these two existed server-side but not here, and this Record is indexed
+  // unguarded below — so once auto-contract ran, `meta.color` read off undefined and the
+  // popover crashed. The union is shared now, so omitting a new action fails typecheck.
+  auto_contract:         { label: "Auto-contracted",      color: "text-teal-600 dark:text-teal-400" },
+  auto_contract_suggest: { label: "Suggested contract",   color: "text-teal-600 dark:text-teal-400" },
 };
 
 export function SubToggle({ label, checked, disabled, onChange }: { label: string; checked: boolean; disabled?: boolean; onChange: (v: boolean) => void }) {
@@ -709,7 +714,7 @@ export function RecentActionsSection({
       <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1.5">Recent actions</div>
       <div className="space-y-0.5">
         {recentActions.map((a, i) => {
-          const meta = ACTION_LABELS[a.action];
+          const meta = ACTION_LABELS[a.action] ?? { label: a.action, color: "text-gray-500 dark:text-gray-400" };
           const issue = columns.flatMap(c => c.issues).find(iss => iss.id === a.issueId);
           return (
             <div
