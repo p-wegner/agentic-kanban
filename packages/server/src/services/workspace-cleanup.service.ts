@@ -23,6 +23,7 @@ import type { GitService } from "./workspace-internals.js";
 import { cleanupSiblingWorktrees } from "./workspace-repos.service.js";
 import { reapWorkspaceContainer } from "./devcontainer-workspace.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { isInsideManagedWorktreesRoot } from "@agentic-kanban/shared/lib/git-service";
 
 export interface StaleWorktreeEntry {
   id: string;
@@ -141,7 +142,7 @@ export function createWorkspaceCleanupService(deps: {
     // Fall back to (or follow up with) a retrying directory removal. Windows releases
     // file handles asynchronously after a process dies, so a transient lock right
     // after the kill should not be treated as a permanent failure.
-    const dirRemoved = await removeDirWithRetry(workingDir);
+    const dirRemoved = await removeDirWithRetry(repoPath, workingDir);
 
     // Final fallback: prune dangling registrations whose directory is now gone.
     await gitService.pruneWorktrees(repoPath).catch(() => {});
@@ -222,17 +223,8 @@ export function createWorkspaceCleanupService(deps: {
     }
     const repoPath = resolved.repoPath;
 
-    // Validate the workingDir is inside the managed .worktrees/ directory
-    const worktreesRoot = pathResolve(dirname(repoPath), ".worktrees");
-    const targetResolved = pathResolve(workspace.workingDir);
-    const relativeToWorktreesRoot = relative(worktreesRoot, targetResolved);
-    const root = pathParse(targetResolved).root;
-    const isInsideWorktreesRoot = relativeToWorktreesRoot !== ""
-      && relativeToWorktreesRoot !== ".."
-      && !relativeToWorktreesRoot.startsWith(`..${sep}`)
-      && pathParse(relativeToWorktreesRoot).root === "";
-
-    if (targetResolved === pathResolve(repoPath) || targetResolved === root || !isInsideWorktreesRoot) {
+    // Validate the workingDir is inside THIS repo's managed .worktrees/ directory (#525).
+    if (!isInsideManagedWorktreesRoot(repoPath, workspace.workingDir)) {
       return { success: false, error: "Refusing to remove path outside managed worktrees directory" };
     }
 
