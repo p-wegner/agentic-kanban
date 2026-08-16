@@ -13,10 +13,11 @@
 // for tests.
 
 import { resolve } from "node:path";
+import { pathKey } from "@agentic-kanban/shared/lib/path-key";
 
-/** Normalise a path for case/slash/trailing-slash-insensitive comparison. */
+/** Canonical comparison key for a repo path (#532 — one definition, win32-only case-fold). */
 function normalizeRepoPath(p: string): string {
-  return resolve(p).replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  return pathKey(p);
 }
 
 /**

@@ -22,6 +22,7 @@
  */
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
+import { samePath as sharedSamePath } from "@agentic-kanban/shared/lib/path-key";
 import { existsSync } from "node:fs";
 import type { BoardFeedbackRouting } from "@agentic-kanban/shared/lib/ticket-context";
 import { getAllProjects } from "../repositories/project.repository.js";
@@ -45,8 +46,7 @@ export type BoardDeployment = "source-checkout" | "packaged" | "container";
  */
 export function isSameRepoPath(a: string | null | undefined, b: string | null | undefined): boolean {
   if (!a || !b) return false;
-  const norm = (p: string) => resolve(p).replace(/[\\/]+$/, "").replace(/\\/g, "/").toLowerCase();
-  return norm(a) === norm(b);
+  return sharedSamePath(a, b);
 }
 
 /**
