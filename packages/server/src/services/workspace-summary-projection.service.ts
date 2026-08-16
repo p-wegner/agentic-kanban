@@ -12,6 +12,7 @@ import { updateWorkspaceDiffStatCache } from "../repositories/workspace-summary.
 import { notifySummaryWriteThrough } from "./summary-write-through-notifier.js";
 import type { Database } from "../db/index.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { resolveDiffRef } from "@agentic-kanban/shared/lib/git-service";
 
 /**
  * #399 (decision 014) — the workspace-summary GIT PROJECTION.
@@ -117,7 +118,7 @@ export async function refreshWorkspaceGitProjection(
     // HEAD advanced past the diff-stat cache → chain a diff-stat refresh (write-through,
     // same columns the applyDiffStats SWR path maintains).
     if (latest?.sha && latest.sha !== ws.diffStatCacheHeadSha) {
-      const diffRef = ws.isDirect ? "HEAD" : base;
+      const diffRef = resolveDiffRef(ws, base);
       if (diffRef) {
         const stats = await getDiffShortstat(ws.workingDir, diffRef).catch(() => null);
         if (stats) {

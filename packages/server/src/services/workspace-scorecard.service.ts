@@ -1,7 +1,8 @@
 import type { Database } from "../db/index.js";
-import { detectConflicts, getDiff, getWorkingTreeDiff } from "./git.service.js";
+import { detectConflicts, getDiff } from "./git.service.js";
 import { getWorkspaceById, resolveProjectRepo } from "../repositories/workspace.repository.js";
 import { getSessionMessageRows } from "../repositories/session.repository.js";
+import { resolveDiffRef } from "@agentic-kanban/shared/lib/git-service";
 import {
   getScorecardIssue,
   getScorecardReviewSessions,
@@ -32,11 +33,18 @@ export async function computeScorecard(workspaceId: string, database: Database):
   const { defaultBranch } = await resolveProjectRepo(workspaceId, database);
   const baseBranch = ws.baseBranch || defaultBranch;
   if (!ws.isDirect && !baseBranch) return null;
+  const diffRef = resolveDiffRef(ws, defaultBranch);
+  if (!diffRef) return null;
 
   let diff = "";
   let conflictResult = { hasConflicts: false, conflictingFiles: [] as string[] };
   try {
-    diff = ws.isDirect ? await getWorkingTreeDiff(ws.workingDir) : await getDiff(ws.workingDir, baseBranch!);
+    // #530: one call. getDiff honours the "HEAD" sentinel now (it did not when this
+    // branch was written — that was the bug behind the sentinel being ignored), and for
+    // that ref it does exactly what getWorkingTreeDiff does: `git diff HEAD` plus the
+    // untracked entries. Conflict detection stays gated: a direct workspace has no base
+    // to conflict against.
+    diff = await getDiff(ws.workingDir, diffRef);
     if (!ws.isDirect) {
       conflictResult = await detectConflicts(ws.workingDir, baseBranch!);
     }

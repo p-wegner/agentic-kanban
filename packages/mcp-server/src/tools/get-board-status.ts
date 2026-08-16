@@ -21,6 +21,7 @@ import { buildBoardStatusEntry } from "@agentic-kanban/shared/lib/board-status-e
 import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { occupiesWipSlot } from "@agentic-kanban/shared/lib/workspace-status";
+import { resolveDiffRef } from "@agentic-kanban/shared/lib/git-service";
 
 export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, getDiffShortstat } = deps;
@@ -186,8 +187,7 @@ export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodD
 
           // For non-closed workspaces with a workingDir: compute diff stats + last output
           if (mainWs && mainWs.workingDir && mainWs.status !== "closed") {
-            const baseBranch = mainWs.baseBranch || project.defaultBranch;
-            const diffRef = mainWs.isDirect ? "HEAD" : baseBranch;
+            const diffRef = resolveDiffRef(mainWs, project.defaultBranch);
             if (!diffRef) continue;
 
             asyncWork.push(

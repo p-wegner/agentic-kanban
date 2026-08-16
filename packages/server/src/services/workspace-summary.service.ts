@@ -25,6 +25,7 @@ import {
   getSessionMessagesForSessions,
 } from "../repositories/workspace-summary.repository.js";
 import { notifySummaryWriteThrough } from "./summary-write-through-notifier.js";
+import { resolveDiffRef } from "@agentic-kanban/shared/lib/git-service";
 
 // Bounded fan-out for background git-backed refresh tasks. The REAL git concurrency
 // control is the process-wide semaphore inside the git-exec adapter (#398) — this
@@ -152,7 +153,7 @@ export async function buildWorkspaceSummaryMap(
     // workingDir would otherwise schedule diff-stat + conflict-detection git spawns
     // that can only fail, on every board build (#277).
     if (!isArchivedIssue && mainWs.workingDir && mainWs.status !== "closed" && dirExists(mainWs.workingDir)) {
-      const diffRef = mainWs.isDirect ? "HEAD" : (mainWs.baseBranch || defaultBranch);
+      const diffRef = resolveDiffRef(mainWs, defaultBranch);
       if (!diffRef) continue;
       const mainRef = summary.main;
       const currentHeadSha = latestCommitByIssue.get(issueId)?.sha ?? null;
