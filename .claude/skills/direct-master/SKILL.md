@@ -1,6 +1,6 @@
 ---
 name: direct-master
-description: Change master in the main checkout without the board's workspace machinery — from a quick doc fix to implementing full tickets in-session. Covers choosing between four execution modes (main agent direct, subagents on shared master, subagents in worktrees, board workspace) by time criticality, traceability, and context budget, plus the commit discipline (aggressive pathspec commits, tree never left dirty) that keeps auto-merge unblocked.
+description: Change master in the main checkout without the board's workspace machinery — from a quick doc fix to implementing full tickets in-session. Covers choosing between four execution modes (main agent direct, subagents on shared master, subagents in worktrees, board workspace) by time criticality, traceability, and context budget; grouping adjacent tickets (including ones pulled forward from Backlog) so the expensive gates run once per group instead of once per ticket; plus the commit discipline (aggressive pathspec commits, tree never left dirty) that keeps auto-merge unblocked.
 argument-hint: "[short description of the change]"
 ---
 
@@ -30,6 +30,53 @@ Rules of thumb: board = slow but safe and best traceable; worktree subagents nex
 
 **Mode 3 landing rule:** a scratch worktree's branch is landed by the orchestrator with a rebase onto master + `git merge --ff-only` (or by re-applying the diff on master). This does NOT contradict the "never land a feature branch by hand" rule below — that rule protects **board-owned `feature/ak-<N>` branches**, whose merging the app owns. An orchestrator scratch branch was never the board's to merge. Prefer mode 4 outright if you find yourself wanting review gates on the landing.
 
+## Group tickets so the gates run once per GROUP
+
+The dominant cost of landing tickets this way is not writing the code — it is re-running
+the same expensive gates for each ticket. Measured in this repo: `pnpm check:arch` ~1 min,
+the full client suite ~35–95 s, a full `pnpm typecheck` ~30–60 s, and `pnpm test:mine`
+26–42 min. Eight tickets landed one-at-a-time pay all of that eight times over, and the
+runs are near-identical because the tickets touch the same packages.
+
+So when you have several tickets in hand — including ones still sitting in **Backlog** —
+**batch them into groups that share a gate surface, and run the full gates once per group.**
+Pulling an adjacent backlog ticket forward into a group you are already paying for is close
+to free; leaving it for its own pass costs a whole gate cycle later.
+
+**Commit granularity and gate granularity are different decisions.** Keep commits per
+ticket (traceability, clean revert, honest messages) and run the expensive gates per group.
+Grouping the gates NEVER means holding uncommitted work — see the dirty-tree rule below.
+
+**Build a group from tickets that share a blast radius:**
+
+| Group by | Because |
+|---|---|
+| Same package (`client`-only, `server`-only, docs/skills-only) | One suite covers the group; a client-only group never needs the server suite. |
+| Same gate needs | A `shared/` change forces a `shared/dist` rebuild + full typecheck across packages; don't hide one inside a client-only group. |
+| Overlapping files | Two tickets touching one file MUST be in the same group and done sequentially — split across groups, the second group re-validates the first anyway. |
+
+Keep a group to what you can still debug as a unit — roughly 3–6 tickets, or fewer if any
+is behaviour-changing rather than mechanical.
+
+**Per-ticket you still get a safety net for free:** the PostToolUse hook typechecks on every
+edit, so a broken ticket surfaces immediately, not at group end. That is exactly what makes
+deferring the *expensive* gates safe.
+
+**Sequence for a group:**
+1. Implement ticket A → commit A (pathspec) → implement ticket B → commit B → …
+2. Run the full gates ONCE for the group: `pnpm check:arch`, the relevant suite(s), `pnpm typecheck`.
+3. Green → close all the group's tickets with evidence, naming the shared gate run.
+4. Red → the per-ticket commits are what make this cheap: the failure is attributable by
+   inspection, and you fix FORWARD with another commit. Never uncommit to isolate.
+
+**Don't group when** a ticket changes behaviour in a way you want isolated evidence for, when
+it touches a migration or the DB, or when it's the first use of a new pattern. Land those
+alone and say so — an isolated gate run is the evidence.
+
+**Report honestly.** A group's evidence line must name the group: "gates run once for
+#514/#515/#516 (client-only)" — never imply each ticket got its own verification when it
+did not.
+
 ## Why aggressive commits matter here
 
 The board's auto-merge **refuses to land an approved workspace if the main checkout has ANY uncommitted tracked change** (see `pitfall_automerge_blocked_dirty_main.md`). A dirty working tree on master is not just your problem — it silently blocks every other workspace from merging. So on master the rule is inverted from a feature branch: **don't batch up a big WIP. Commit and push each logical, working unit the moment it's done, and leave the tree clean between units.**
@@ -48,6 +95,10 @@ If the tree is **already dirty** before you start, that pre-existing churn is it
 ## Step 2 — Make the change in small, self-contained units
 
 Break the work so each unit leaves the repo in a working, committable state. Prefer several small commits over one large one. After each unit, immediately go to Step 3 — do not move on to the next unit while the previous one sits uncommitted.
+
+This holds unchanged when you are batching tickets: grouping defers the **gates**, never the
+**commits**. Each ticket in a group is committed as it lands, so the tree is clean between
+tickets and the group's shared gate run happens on top of committed work.
 
 ## Step 3 — Commit each unit the moment it works
 
