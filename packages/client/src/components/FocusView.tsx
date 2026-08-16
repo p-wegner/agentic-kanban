@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { BRAND, ACCENT } from "../lib/chartColors";
+import { ISSUE_PRIORITIES, PRIORITY_TRAITS } from "../lib/priorityTraits.js";
 
 interface FocusIssue {
   issueId: string;
@@ -34,13 +35,11 @@ interface FocusViewProps {
   onIssueClick: (issueId: string) => void;
 }
 
-const PRIORITY_COLOR: Record<string, string> = {
-  critical: "#ef4444",
-  urgent: "#ef4444",
-  high: "#f97316",
-  medium: "#eab308",
-  low: "#94a3b8",
-};
+// #516: derived from PRIORITY_TRAITS (was an identical hand-copied hex map here and in
+// the sibling view).
+const PRIORITY_COLOR: Record<string, string> = Object.fromEntries(
+  ISSUE_PRIORITIES.map((p) => [p, PRIORITY_TRAITS[p].hex]),
+);
 
 /** Score → bar colour. High-impact work glows warmer. */
 function scoreColor(score: number): string {

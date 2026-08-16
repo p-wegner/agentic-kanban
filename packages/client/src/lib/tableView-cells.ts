@@ -1,4 +1,5 @@
 import type { IssueWithStatus } from "@agentic-kanban/shared";
+import { ISSUE_PRIORITIES, PRIORITY_TRAITS } from "./priorityTraits.js";
 
 // Pure cell view-model for TableView rows: the badge label/class lookups, date
 // formatting, and the overdue rule. Extracted from TableView.tsx so the row
@@ -28,15 +29,15 @@ export const STATUS_CLASS: Record<string, string> = {
   "Cancelled": "text-gray-500 bg-gray-100",
 };
 
-export const PRIORITY_LABEL: Record<string, string> = { critical: "Critical", urgent: "Urgent", high: "High", medium: "Medium", low: "Low" };
+// #516: derived from PRIORITY_TRAITS. These maps carried an `urgent` row; that is an
+// input ALIAS now folded by normalizeIssuePriority, not a fifth priority.
+export const PRIORITY_LABEL: Record<string, string> = Object.fromEntries(
+  ISSUE_PRIORITIES.map((p) => [p, PRIORITY_TRAITS[p].label]),
+);
 
-export const PRIORITY_CLASS: Record<string, string> = {
-  critical: "text-red-700 bg-red-50",
-  urgent: "text-red-700 bg-red-50",
-  high: "text-orange-700 bg-orange-50",
-  medium: "text-yellow-700 bg-yellow-50",
-  low: "text-gray-500 bg-gray-100",
-};
+export const PRIORITY_CLASS: Record<string, string> = Object.fromEntries(
+  ISSUE_PRIORITIES.map((p) => [p, PRIORITY_TRAITS[p].badgeClassLight]),
+);
 
 export const TAG_COLORS: Record<string, string> = {
   blue: "bg-blue-100 text-blue-700",
