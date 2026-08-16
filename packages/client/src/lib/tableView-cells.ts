@@ -1,5 +1,6 @@
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import { ISSUE_PRIORITIES, PRIORITY_TRAITS } from "./priorityTraits.js";
+import { ISSUE_STATUS_TONE, issueStatusToneClass } from "./badgeTones.js";
 
 // Pure cell view-model for TableView rows: the badge label/class lookups, date
 // formatting, and the overdue rule. Extracted from TableView.tsx so the row
@@ -20,14 +21,12 @@ export const ISSUE_TYPE_CLASS: Record<string, string> = {
   chore: "text-amber-700 bg-amber-50",
 };
 
-export const STATUS_CLASS: Record<string, string> = {
-  "Todo": "text-gray-600 bg-gray-100",
-  "In Progress": "text-blue-700 bg-blue-50",
-  "In Review": "text-accent-700 bg-accent-50 dark:text-accent-300 dark:bg-accent-900/40",
-  "AI Reviewed": "text-accent-700 bg-accent-50 dark:text-accent-300 dark:bg-accent-900/40",
-  "Done": "text-green-700 bg-green-50",
-  "Cancelled": "text-gray-500 bg-gray-100",
-};
+// #517: derived from the issue-status tones. Four of these rows were light-only, so the
+// table view's status pills burned bright on the dark board — the exact drift badgeTones
+// exists to prevent.
+export const STATUS_CLASS: Record<string, string> = Object.fromEntries(
+  Object.keys(ISSUE_STATUS_TONE).map((name) => [name, issueStatusToneClass(name)]),
+);
 
 // #516: derived from PRIORITY_TRAITS. These maps carried an `urgent` row; that is an
 // input ALIAS now folded by normalizeIssuePriority, not a fifth priority.
@@ -51,7 +50,8 @@ export const TAG_COLORS: Record<string, string> = {
   gray: "bg-gray-100 text-gray-600",
 };
 
-const STATUS_FALLBACK = "text-gray-600 bg-gray-100";
+/** Custom status columns have no tone of their own; neutral is the tone table's own fallback. */
+const STATUS_FALLBACK = issueStatusToneClass(null);
 
 export function tagClass(color: string | null | undefined): string {
   return TAG_COLORS[color ?? ""] ?? "bg-gray-100 text-gray-600";

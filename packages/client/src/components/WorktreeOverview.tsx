@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
 import { showToast } from "./Toast.js";
+import { workspaceStatusToneClass } from "../lib/badgeTones.js";
 
 interface WorktreeInfo {
   path: string;
@@ -27,13 +28,6 @@ interface WorktreeOverviewProps {
   onIssueClick: (issueId: string) => void;
   onWorkspaceChange?: () => void;
 }
-
-const STATUS_COLORS: Record<string, string> = {
-  active: "bg-green-100 text-green-700",
-  idle: "bg-yellow-100 text-yellow-700",
-  error: "bg-red-100 text-red-700",
-  closed: "bg-gray-100 text-gray-500",
-};
 
 function truncatePath(path: string, maxLen = 50): string {
   if (path.length <= maxLen) return path;
@@ -256,7 +250,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
                       <span className="text-xs bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 px-1.5 py-0.5 rounded">direct</span>
                     )}
                     {mainWorktree.workspace && (
-                      <span className={`text-xs px-1.5 py-0.5 rounded ${STATUS_COLORS[mainWorktree.workspace.status] ?? "bg-gray-100 text-gray-600"}`}>
+                      <span className={`text-xs px-1.5 py-0.5 rounded ${workspaceStatusToneClass(mainWorktree.workspace.status)}`}>
                         {mainWorktree.workspace.status}
                       </span>
                     )}
@@ -316,7 +310,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
                           <span className="text-xs bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 px-1.5 py-0.5 rounded">direct</span>
                         )}
                         {wt.workspace && (
-                          <span className={`text-xs px-1.5 py-0.5 rounded ${STATUS_COLORS[wt.workspace.status] ?? "bg-gray-100 text-gray-600"}`}>
+                          <span className={`text-xs px-1.5 py-0.5 rounded ${workspaceStatusToneClass(wt.workspace.status)}`}>
                             {wt.workspace.status}
                           </span>
                         )}

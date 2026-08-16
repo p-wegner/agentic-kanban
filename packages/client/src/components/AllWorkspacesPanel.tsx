@@ -9,6 +9,7 @@ import { openSessionTranscript } from "../lib/sessionTranscriptEvents.js";
 import { AgentStallIndicator, useAgentStallThreshold } from "./AgentStallBadge.js";
 import { useStaleWorkspaceManager } from "../hooks/useStaleWorkspaceManager.js";
 import { useProjectsQuery } from "../hooks/useBoardDataQueries.js";
+import { issueStatusToneClass } from "../lib/badgeTones.js";
 import {
   type CrossProjectGroup,
   type WsStatusFilter,
@@ -47,15 +48,6 @@ const FILTER_CHIPS: { label: string; value: WsStatusFilter }[] = [
   { label: "Closed", value: "closed" },
   { label: "Stale", value: "stale" },
 ];
-
-const ISSUE_STATUS_COLORS: Record<string, string> = {
-  "Todo": "bg-gray-100 text-gray-600",
-  "In Progress": "bg-blue-100 text-blue-700",
-  "In Review": "bg-orange-100 text-orange-700",
-  "AI Reviewed": "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300",
-  "Done": "bg-green-100 text-green-700",
-  "Cancelled": "bg-red-100 text-red-500",
-};
 
 export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueClick, onProjectSwitch, onRefresh }: AllWorkspacesPanelProps) {
   const stallThresholdSec = useAgentStallThreshold();
@@ -391,7 +383,7 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
                           {issue.title}
                         </span>
                         <span
-                          className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${ISSUE_STATUS_COLORS[issue.statusName] ?? "bg-gray-100 text-gray-600"}`}
+                          className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${issueStatusToneClass(issue.statusName)}`}
                         >
                           {issue.statusName}
                         </span>

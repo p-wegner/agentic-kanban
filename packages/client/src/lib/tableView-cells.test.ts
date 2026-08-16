@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import { tagClass, formatTableDate, isOverdue, resolveRowCells } from "./tableView-cells.js";
+import { issueStatusToneClass } from "./badgeTones.js";
 
 function issue(over: Partial<IssueWithStatus> = {}): IssueWithStatus {
   return {
@@ -45,7 +46,10 @@ describe("resolveRowCells", () => {
   const now = new Date("2026-06-20T12:00:00Z");
   it("resolves badge classes/labels with fallbacks", () => {
     const cells = resolveRowCells(issue({ statusName: "Weird", priority: undefined, issueType: undefined }), now);
-    expect(cells.statusClass).toBe("text-gray-600 bg-gray-100");
+    // Asserted against the tone table rather than a copied class string (#517): the old
+    // literal was light-only, so pinning it re-froze the very drift the tones removed.
+    expect(cells.statusClass).toBe(issueStatusToneClass(null));
+    expect(cells.statusClass, "a custom column must still get a dark variant").toContain("dark:");
     expect(cells.priority).toBe("medium");
     expect(cells.priorityLabel).toBe("Medium");
     expect(cells.type).toBe("task");
