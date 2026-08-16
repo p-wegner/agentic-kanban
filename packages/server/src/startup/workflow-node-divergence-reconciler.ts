@@ -54,6 +54,7 @@ import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { reconcileMergedIssue } from "../services/merge-cleanup.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 
 const SWEEP_INTERVAL_MS = 15 * 60 * 1000;
 const TERMINAL_ISSUE_STATUSES = ["Done", "Cancelled"];
@@ -171,19 +172,20 @@ export async function reconcileWorkflowNodeDivergence(
   return result;
 }
 
-let timer: NodeJS.Timeout | null = null;
+let sweep: PeriodicSweepHandle | null = null;
 
 export function startWorkflowNodeDivergenceReconciler(opts: { intervalMs?: number } = {}): void {
-  if (timer) return;
-  timer = setInterval(() => {
-    void reconcileWorkflowNodeDivergence().catch((err) => {
-      console.warn("[node-divergence] sweep failed (non-fatal):", errorMessage(err));
-    });
-  }, opts.intervalMs ?? SWEEP_INTERVAL_MS);
-  timer.unref?.();
+  // #529: same two defects as born-blocked — `if (timer) return` never re-armed after
+  // a hot reload, and there was no boot-delay crash-recovery run.
+  stopWorkflowNodeDivergenceReconciler();
+  sweep = startPeriodicSweep({
+    name: "node-divergence",
+    intervalMs: opts.intervalMs ?? SWEEP_INTERVAL_MS,
+    tick: () => reconcileWorkflowNodeDivergence(),
+  });
 }
 
 export function stopWorkflowNodeDivergenceReconciler(): void {
-  if (timer) clearInterval(timer);
-  timer = null;
+  sweep?.stop();
+  sweep = null;
 }
