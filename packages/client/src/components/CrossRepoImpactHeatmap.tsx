@@ -4,7 +4,6 @@ import type { DiffStatsResponse, StatusWithIssues } from "@agentic-kanban/shared
 import { apiFetch } from "../lib/api.js";
 import { fetchWorkspaceRepoStatus } from "../lib/workspaceRepoStatusQuery.js";
 import { fetchProjectRepos } from "../lib/projectReposQuery.js";
-import { BOARD_WS_EVENT, type BoardWsEventDetail } from "../lib/useBoardEvents.js";
 import {
   buildCrossRepoImpact,
   type CrossRepoImpact,
@@ -15,6 +14,7 @@ import {
   type WorkspaceRepoDiff,
 } from "../lib/crossRepoImpact.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { useBoardWsRefresh } from "../hooks/useBoardWsRefresh.js";
 
 /**
  * Cross-Repo Change-Impact Heatmap (#97). File-contention detection is
@@ -131,7 +131,6 @@ function useCrossRepoImpactData(
   const columnsRef = useRef(columns);
   columnsRef.current = columns;
   const requestSeqRef = useRef(0);
-  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(() => {
     if (!projectId) return;
@@ -186,25 +185,13 @@ function useCrossRepoImpactData(
     load();
   }, [load]);
 
-  // Coalesced live refresh on relevant board events (no new WebSocket).
-  useEffect(() => {
-    if (!projectId) return;
-    const onBoardEvent = (e: Event) => {
-      const detail = (e as CustomEvent<BoardWsEventDetail>).detail;
-      if (!detail || detail.projectId !== projectId) return;
-      if (!RELEVANT_REASONS.has(detail.reason)) return;
-      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-      debounceTimerRef.current = setTimeout(() => {
-        debounceTimerRef.current = null;
-        load();
-      }, REFRESH_DEBOUNCE_MS);
-    };
-    window.addEventListener(BOARD_WS_EVENT, onBoardEvent);
-    return () => {
-      window.removeEventListener(BOARD_WS_EVENT, onBoardEvent);
-      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-    };
-  }, [projectId, load]);
+  // Coalesced live refresh on relevant board events (no new WebSocket) — #514.
+  useBoardWsRefresh({
+    projectId,
+    shouldRefetch: (reason) => RELEVANT_REASONS.has(reason),
+    refresh: load,
+    debounceMs: REFRESH_DEBOUNCE_MS,
+  });
 
   return { data, loading, error, refresh: load };
 }

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ProjectResponse, ServiceStackState, StatusWithIssues } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
-import { BOARD_WS_EVENT, type BoardWsEventDetail } from "../lib/useBoardEvents.js";
 import {
   buildFleetServiceStacks,
   type FleetServiceState,
@@ -9,6 +8,7 @@ import {
   type FleetStackInput,
 } from "../lib/fleetServiceStacks.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { useBoardWsRefresh } from "../hooks/useBoardWsRefresh.js";
 
 /**
  * Fleet Service-Stack Map (#95). `ServiceStackStatusPanel` shows ONE workspace's
@@ -96,7 +96,6 @@ function useFleetServiceStacksData(
   const columnsRef = useRef(columns);
   columnsRef.current = columns;
   const requestSeqRef = useRef(0);
-  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(() => {
     if (!projectId) return;
@@ -158,25 +157,13 @@ function useFleetServiceStacksData(
     load();
   }, [load]);
 
-  // Coalesced live refresh on relevant board events (no new WebSocket).
-  useEffect(() => {
-    if (!projectId) return;
-    const onBoardEvent = (e: Event) => {
-      const detail = (e as CustomEvent<BoardWsEventDetail>).detail;
-      if (!detail || detail.projectId !== projectId) return;
-      if (!RELEVANT_REASONS.has(detail.reason)) return;
-      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-      debounceTimerRef.current = setTimeout(() => {
-        debounceTimerRef.current = null;
-        load();
-      }, REFRESH_DEBOUNCE_MS);
-    };
-    window.addEventListener(BOARD_WS_EVENT, onBoardEvent);
-    return () => {
-      window.removeEventListener(BOARD_WS_EVENT, onBoardEvent);
-      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-    };
-  }, [projectId, load]);
+  // Coalesced live refresh on relevant board events (no new WebSocket) — #514.
+  useBoardWsRefresh({
+    projectId,
+    shouldRefetch: (reason) => RELEVANT_REASONS.has(reason),
+    refresh: load,
+    debounceMs: REFRESH_DEBOUNCE_MS,
+  });
 
   return { data, loading, error, refresh: load };
 }

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { fetchWorkspacesList, type SlimWorkspaceListItem } from "../lib/workspacesListQuery.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
-import { BOARD_WS_EVENT, type BoardWsEventDetail } from "../lib/useBoardEvents.js";
 import { getAgentQuestions } from "../lib/agentQuestionsStore.js";
 import { useAgentActivityStore } from "../stores/agentActivityStore.js";
 import { detectAgentStall } from "../lib/detectAgentStall.js";
@@ -23,6 +22,7 @@ import {
   type FlightRecorderFilter,
   type FlightRecorderFacets,
 } from "../lib/flightRecorderEvents.js";
+import { useBoardWsRefresh } from "../hooks/useBoardWsRefresh.js";
 
 /** Severity → dot colour + label for the row and the filter chips. */
 const SEVERITY_META: Record<FlightRecorderSeverity, { dot: string; label: string; text: string }> = {
@@ -163,25 +163,15 @@ function useFlightRecorderEvents(projectId: string | null, resolveIssue?: Resolv
     // Trailing debounce: a merge cascade emits bursts of qualifying events, and an
     // undebounced handler turned each into its own slow /api/workspaces request
     // (overlapping responses also raced on prevStatusRef). One fetch per burst.
-    let debounceTimer: number | null = null;
-    const onWs = (ev: Event) => {
-      const detail = (ev as CustomEvent<BoardWsEventDetail>).detail;
-      if (!detail || detail.projectId !== projectId) return;
-      if (!shouldRefetch(detail.reason)) return;
-      if (debounceTimer != null) window.clearTimeout(debounceTimer);
-      debounceTimer = window.setTimeout(() => {
-        debounceTimer = null;
-        void refresh();
-      }, 250);
-    };
-    window.addEventListener(BOARD_WS_EVENT, onWs);
+    // The WS-driven refresh moved to useBoardWsRefresh (#514); this effect keeps only
+    // the periodic re-render tick, which is unrelated to board events.
     const tick = setInterval(() => setTick((n) => n + 1), 15_000);
     return () => {
-      window.removeEventListener(BOARD_WS_EVENT, onWs);
       clearInterval(tick);
-      if (debounceTimer != null) window.clearTimeout(debounceTimer);
     };
   }, [projectId, refresh]);
+
+  useBoardWsRefresh({ projectId, shouldRefetch, refresh });
 
   // Stall/loop events derived from the live activity store + the active workspaces. Kept
   // in a memo (not fetched) so it re-computes on every store change and idle tick.
