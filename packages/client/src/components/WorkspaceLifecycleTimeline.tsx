@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { RepoMergeStatusResponse, WorkspaceResponse } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import type { SessionInfo } from "./WorkspaceCard.js";
+import { useNow } from "../hooks/usePoll.js";
 import {
   deriveWorkspaceLifecycle,
   formatPhaseDuration,
@@ -139,13 +140,8 @@ export function WorkspaceLifecycleTimeline({
 }) {
   // Re-render every second while the workspace is still in flight so the ongoing
   // phase (extended to `now`) keeps growing.
-  const [nowTick, setNowTick] = useState(() => Date.now());
   const inFlight = !workspace.mergedAt && !workspace.closedAt && workspace.status !== "closed";
-  useEffect(() => {
-    if (!inFlight) return;
-    const t = setInterval(() => setNowTick(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [inFlight]);
+  const nowTick = useNow(1000, inFlight);
 
   // Fetch per-repo merge markers for multi-repo (non-direct) workspaces. A 400
   // (direct workspace) or 404 (single-repo / older server) just leaves the

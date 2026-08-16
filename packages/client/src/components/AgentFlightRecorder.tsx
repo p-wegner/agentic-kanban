@@ -23,6 +23,7 @@ import {
   type FlightRecorderFacets,
 } from "../lib/flightRecorderEvents.js";
 import { useBoardWsRefresh } from "../hooks/useBoardWsRefresh.js";
+import { useNow } from "../hooks/usePoll.js";
 
 /** Severity → dot colour + label for the row and the filter chips. */
 const SEVERITY_META: Record<FlightRecorderSeverity, { dot: string; label: string; text: string }> = {
@@ -84,8 +85,6 @@ function useFlightRecorderEvents(projectId: string | null, resolveIssue?: Resolv
   const [workspaces, setWorkspaces] = useState<SlimWorkspaceListItem[]>([]);
   const [questionEvents, setQuestionEvents] = useState<FlightRecorderEvent[]>([]);
   const [statusEvents, setStatusEvents] = useState<FlightRecorderEvent[]>([]);
-  // Re-render on a slow tick so a growing idle gap crosses the stall threshold live.
-  const [, setTick] = useState(0);
   const prevStatusRef = useRef<Map<string, string>>(new Map());
   const resolveRef = useRef(resolveIssue);
   resolveRef.current = resolveIssue;
@@ -163,13 +162,12 @@ function useFlightRecorderEvents(projectId: string | null, resolveIssue?: Resolv
     // Trailing debounce: a merge cascade emits bursts of qualifying events, and an
     // undebounced handler turned each into its own slow /api/workspaces request
     // (overlapping responses also raced on prevStatusRef). One fetch per burst.
-    // The WS-driven refresh moved to useBoardWsRefresh (#514); this effect keeps only
-    // the periodic re-render tick, which is unrelated to board events.
-    const tick = setInterval(() => setTick((n) => n + 1), 15_000);
-    return () => {
-      clearInterval(tick);
-    };
+    // The WS-driven refresh moved to useBoardWsRefresh (#514); the periodic re-render
+    // tick moved to useNow (#518). This effect is now the per-project reset only.
   }, [projectId, refresh]);
+
+  // Re-render every 15s so relative timestamps in the recorder stay current.
+  useNow(15_000, !!projectId);
 
   useBoardWsRefresh({ projectId, shouldRefetch, refresh });
 

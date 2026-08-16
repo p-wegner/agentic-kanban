@@ -7,6 +7,7 @@ import {
   type AgentStallSignal,
 } from "../lib/detectAgentStall.js";
 import { useAgentActivityStore } from "../stores/agentActivityStore.js";
+import { useNow } from "../hooks/usePoll.js";
 
 /** How often the badge re-evaluates so idle time can cross the threshold live. */
 const STALL_TICK_MS = 5_000;
@@ -55,12 +56,7 @@ export function useAgentStallSignal(
 ): AgentStallSignal {
   const meta = useAgentActivityStore((s) => s.byIssue[issueId]);
   const isLive = status === "active" || status === "fixing";
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    if (!isLive) return;
-    const t = setInterval(() => setTick((n) => n + 1), STALL_TICK_MS);
-    return () => clearInterval(t);
-  }, [isLive]);
+  useNow(STALL_TICK_MS, isLive);
 
   const lastActivityAt = meta?.lastActivityAt ?? sessionStartMs ?? null;
   return detectAgentStall({

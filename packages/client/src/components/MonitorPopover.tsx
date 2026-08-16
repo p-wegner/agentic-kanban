@@ -14,6 +14,7 @@ import {
 } from "./MonitorSections.js";
 export { MonitorButlerSection, OrchestratorSection, RecentBoardHealthEventsSection } from "./MonitorSections.js";
 import type { StartMode, ResolvedTunables, MonitorStatus, BoardHealthEvent } from "../lib/monitor-popover.js";
+import { useNow } from "../hooks/usePoll.js";
 
 interface MonitorPopoverProps {
   status: MonitorStatus | null;
@@ -60,7 +61,7 @@ export function MonitorPopover({
   monitorButlerInterval = 15,
   onViewAllHealthEvents,
 }: MonitorPopoverProps) {
-  const [now, setNow] = useState(Date.now());
+  const now = useNow(1000);
   const [running, setRunning] = useState(false);
   const [healthEvents, setHealthEvents] = useState<BoardHealthEvent[]>([]);
   const [healthEventsLoading, setHealthEventsLoading] = useState(false);
@@ -99,10 +100,6 @@ export function MonitorPopover({
     }
   }
 
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
 
   useEffect(() => {
     void loadHealthEvents();
