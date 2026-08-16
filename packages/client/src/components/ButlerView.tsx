@@ -18,6 +18,7 @@ import { parseSlashCommand, filterCommands, applyCommandToInput, nextCycleIndex 
 import { sanitizeSpeechText } from "../lib/butler-speech.js";
 import { type ButlerDef } from "./ButlerManageModal.js";
 import { ButlerViewBody } from "./ButlerViewBody.js";
+import { useDismissable } from "../hooks/useDismissable.js";
 
 interface ButlerViewProps {
   projectId: string;
@@ -418,19 +419,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   }, [tab?.chatMessages]);
 
   // Close the add-tab dropdown on outside click / Escape (#842).
-  useEffect(() => {
-    if (!addTabOpen) return;
-    const onPointerDown = (e: MouseEvent) => {
-      if (addTabRef.current && !addTabRef.current.contains(e.target as Node)) setAddTabOpen(false);
-    };
-    const onKeyDown = (e: KeyboardEvent) => { if (e.key === "Escape") setAddTabOpen(false); };
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [addTabOpen]);
+  useDismissable(addTabRef, addTabOpen, () => setAddTabOpen(false));
 
   // Prefill the active tab with an external prompt (e.g. "Chat about this ticket",
   // #838). Apply each distinct prompt once: start the butler if it's cold, drop the

@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { ImportIssuesModal } from "./ImportIssuesModal.js";
 import { showToast } from "./Toast.js";
 import { apiPost } from "../lib/api.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { useDismissable } from "../hooks/useDismissable.js";
 
 interface ExportImportMenuProps {
   projectId: string | null;
@@ -15,21 +16,7 @@ export function ExportImportMenu({ projectId }: ExportImportMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const snapshotInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    function handleClick(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpen(false);
-    }
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [open]);
+  useDismissable(menuRef, open, () => setOpen(false));
 
   function handleExport(format: "json" | "csv") {
     if (!projectId) return;

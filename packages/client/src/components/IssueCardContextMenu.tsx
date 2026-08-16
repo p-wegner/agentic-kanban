@@ -55,28 +55,23 @@ export function IssueCardContextMenu({
   const [prioritySubmenuOpen, setPrioritySubmenuOpen] = useState(false);
   const [statusSubmenuOpen, setStatusSubmenuOpen] = useState(false);
 
+  // Focus the first item on open. Kept separate from dismissal: it is a mount effect
+  // with no listeners, and folding it into the dismiss hook would re-run it on every
+  // onClose identity change.
   useEffect(() => {
-    const firstItem = menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]');
-    firstItem?.focus();
-
-    function handlePointerDown(event: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) onClose();
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose();
-        cardRef.current?.focus();
-      }
-    }
-
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
+    menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
   }, []);
+
+  // The menu is only rendered while open, hence `true`. Escape does MORE than dismiss
+  // here — it hands focus back to the card the menu belongs to, so a keyboard user is
+  // not stranded at the top of the document. An outside click must not do that: the
+  // click has already put focus where the user chose.
+  useDismissable(menuRef, true, onClose, {
+    onEscape: () => {
+      onClose();
+      cardRef.current?.focus();
+    },
+  });
 
   function handleMenuKeyDown(e: React.KeyboardEvent) {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;

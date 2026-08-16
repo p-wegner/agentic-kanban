@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { usePluginViewStore } from "../stores/pluginViewStore.js";
 import type { ViewDescriptor, ViewMode } from "../lib/viewRegistry.js";
+import { useDismissable } from "../hooks/useDismissable.js";
 
 // Mirrors BoardToolbar's tab styling constants (kept local — BoardToolbar imports us).
 const ACTIVE_DEFAULT = "bg-brand-600 text-white hover:bg-brand-700";
@@ -58,21 +59,7 @@ export function PluginViewsTab({ view, viewMode, onViewModeChange, projectId, me
     return () => { cancelled = true; };
   }, [open, projectId]);
 
-  useEffect(() => {
-    if (!open) return;
-    function handleClick(e: MouseEvent) {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
-    }
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [open]);
+  useDismissable(wrapRef, open, () => setOpen(false));
 
   const tabButton = (
     <button

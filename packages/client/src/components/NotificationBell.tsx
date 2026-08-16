@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { NotificationEvent, NotificationEventType } from "../hooks/useActivityNotifications.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { INBOX_KIND_MARK, openInboxItem, refreshInbox, useInbox, type InboxItem } from "../hooks/useInbox.js";
+import { useDismissable } from "../hooks/useDismissable.js";
 
 function eventLabel(type: NotificationEventType): string {
   switch (type) {
@@ -163,23 +164,7 @@ export function NotificationBell({
   }, [isOpen]);
   const badgeCount = unreadCount + inboxCount;
 
-  useEffect(() => {
-    if (!isOpen) return;
-    function handleClick(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        onClose();
-      }
-    }
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [isOpen, onClose]);
+  useDismissable(containerRef, isOpen, onClose);
 
   function handleBellClick() {
     if (isOpen) {
