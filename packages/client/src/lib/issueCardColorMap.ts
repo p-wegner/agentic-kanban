@@ -1,11 +1,10 @@
 import type { IssueWithStatus } from "@agentic-kanban/shared";
+import { ISSUE_PRIORITIES, PRIORITY_TRAITS } from "./priorityTraits.js";
 
-export const priorityColors: Record<string, string> = {
-  critical: "bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300",
-  high: "bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300",
-  medium: "bg-yellow-100 dark:bg-yellow-900/50 text-yellow-700 dark:text-yellow-300",
-  low: "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400",
-};
+/** Derived from PRIORITY_TRAITS (#516) — kept as a map for existing call sites. */
+export const priorityColors: Record<string, string> = Object.fromEntries(
+  ISSUE_PRIORITIES.map((p) => [p, PRIORITY_TRAITS[p].badgeClass]),
+);
 
 export function coverageClass(pct: number): string {
   if (pct >= 80) return "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300";
