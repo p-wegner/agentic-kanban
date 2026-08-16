@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import type { MilestoneResponse } from "@agentic-kanban/shared";
 import { PRIORITY_META } from "../lib/chartColors.js";
 import { useBoardFilterStore } from "../stores/boardFilterStore.js";
+import { useDismissable } from "../hooks/useDismissable.js";
 
 interface BoardFilterMenuProps {
   statuses: { id: string; name: string }[];
@@ -42,21 +43,7 @@ export function BoardFilterMenu({
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [open]);
+  useDismissable(ref, open, useCallback(() => setOpen(false), []));
 
   const activeCount =
     (statusFilterId ? 1 : 0) +
