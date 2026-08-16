@@ -351,18 +351,6 @@ export function mapCopilotProfile(profileName: string): { flag: "--model" | "--a
   return { flag: "--model", value: profileName };
 }
 
-export function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-export function numberValue(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-export function objectValue(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}
-
 // --- Windows resolvers ---
 
 export function resolveCodexDirect(command: string, fs: FileSystem = nodeFileSystem): string | undefined {
