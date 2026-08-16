@@ -3,8 +3,7 @@ import { z } from "zod";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { resolveActiveProjectId } from "../db-utils.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-
-const SERVER_PORT = Number(process.env.SERVER_PORT) || 3001;
+import { boardApiUrl } from "../server-url.js";
 
 export function registerGetBoardRiskDigest(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema } = deps;
@@ -20,7 +19,7 @@ export function registerGetBoardRiskDigest(server: McpServer, deps: ToolDeps = p
         if (!rpid.ok) return rpid.error;
         const pid = rpid.projectId;
 
-        const res = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/projects/${pid}/board-risk-digest`);
+        const res = await fetch(boardApiUrl(`/api/projects/${pid}/board-risk-digest`));
         if (!res.ok) {
           return { content: [{ type: "text" as const, text: `Failed to get board risk digest: ${res.statusText}` }] };
         }

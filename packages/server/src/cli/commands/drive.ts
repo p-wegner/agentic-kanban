@@ -7,10 +7,10 @@ import {
   renderReviewEffectivenessReport,
   resolveDriveIssueIds,
 } from "../../services/review-effectiveness.service.js";
+import { buildApiUrl } from "./workspace-api-url.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
-const port = () => process.env.KANBAN_SERVER_PORT ?? "3001";
-const apiBase = () => `http://127.0.0.1:${port()}/api`;
+const apiBase = () => buildApiUrl("", "/api");
 
 export function registerDriveCommand(program: Command) {
   const driveCmd = program.command("drive").description("Inspect and manage autonomous-drive records.\n\nSubcommands: start, list, get, finish, review-effectiveness");

@@ -3,10 +3,10 @@ import { getProjectById, getProjectStatuses } from "../../repositories/project.r
 import { getIssueStatusNameRowsForProject } from "../../repositories/issue.repository.js";
 import { getActiveWorkspaceCount } from "../../repositories/workspace.repository.js";
 import { runMigrations, getActiveProjectId } from "../shared.js";
+import { buildApiUrl } from "./workspace-api-url.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
-const port = () => process.env.KANBAN_SERVER_PORT ?? "3001";
-const apiBase = () => `http://127.0.0.1:${port()}/api`;
+const apiBase = () => buildApiUrl("", "/api");
 
 export function registerBoardCommand(program: Command) {
   const boardCmd = program.command("board").description("Board-level diagnostics and context.\n\nSubcommands: risk-digest, context");

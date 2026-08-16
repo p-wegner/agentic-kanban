@@ -1,8 +1,9 @@
 import type { Command } from "commander";
 import { getPreference } from "../../repositories/preferences.repository.js";
+import { resolveCliPort } from "./workspace-api-url.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
-const SERVER_PORT = Number(process.env.SERVER_PORT) || Number(process.env.KANBAN_SERVER_PORT) || 3001;
+const SERVER_PORT = resolveCliPort();
 
 async function resolveProjectId(explicit?: string): Promise<string | null> {
   if (explicit) return explicit;

@@ -18,6 +18,7 @@ import {
   applyDependencyEdgeBatch,
 } from "../../repositories/issue-service.repository.js";
 import { validateBatchEdges, formatBatchEdgeResult } from "../../lib/dependency-batch.js";
+import { buildApiUrl } from "./workspace-api-url.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function registerIssueDependencyCommands(issueCmd: Command) {
@@ -198,8 +199,7 @@ Examples:
           process.exit(1);
         }
 
-        const port = process.env.KANBAN_SERVER_PORT ?? "3001";
-        const res = await fetch(`http://127.0.0.1:${port}/api/issues/analyze-dependencies`, {
+        const res = await fetch(buildApiUrl("", "/api/issues/analyze-dependencies"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ issueId, projectId }),

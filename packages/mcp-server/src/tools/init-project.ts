@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { boardApiUrl, getServerPort } from "../server-url.js";
 import { getServerPort } from "../server-url.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -30,7 +31,7 @@ export function registerInitProject(server: McpServer) {
       if (!repoPath) {
         // Just confirm the server is reachable
         try {
-          const res = await fetch(`http://127.0.0.1:${port}/api/projects`);
+          const res = await fetch(boardApiUrl("/api/projects", port));
           if (!res.ok) {
             return {
               content: [{ type: "text" as const, text: `Server reachable but returned ${res.status}: ${res.statusText}` }],
@@ -66,7 +67,7 @@ export function registerInitProject(server: McpServer) {
         const body: Record<string, string> = { repoPath };
         if (name) body.name = name;
 
-        const res = await fetch(`http://127.0.0.1:${port}/api/projects`, {
+        const res = await fetch(boardApiUrl("/api/projects", port), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
