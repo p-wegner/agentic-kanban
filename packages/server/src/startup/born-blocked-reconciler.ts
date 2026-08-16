@@ -56,6 +56,7 @@ import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 
 /** How long since the last setup attempt before this reconciler will try again. */
 export const SETUP_RETRY_INTERVAL_MS = 30 * 60 * 1000;
@@ -213,20 +214,21 @@ export async function reconcileBornBlockedWorkspaces(
   return result;
 }
 
-let timer: NodeJS.Timeout | null = null;
+let sweep: PeriodicSweepHandle | null = null;
 
 export function startBornBlockedReconciler(opts: { intervalMs?: number } = {}): void {
-  if (timer) return;
-  const run = () => {
-    void reconcileBornBlockedWorkspaces().catch((err) => {
-      console.warn("[born-blocked] sweep failed (non-fatal):", errorMessage(err));
-    });
-  };
-  timer = setInterval(run, opts.intervalMs ?? SWEEP_INTERVAL_MS);
-  timer.unref?.();
+  // #529: was `if (timer) return`, so a tsx-watch reload left the OLD interval live
+  // and never armed the new code; and with no boot run, crash recovery waited a full
+  // interval. startPeriodicSweep stops-then-restarts and runs once after a boot delay.
+  stopBornBlockedReconciler();
+  sweep = startPeriodicSweep({
+    name: "born-blocked",
+    intervalMs: opts.intervalMs ?? SWEEP_INTERVAL_MS,
+    tick: () => reconcileBornBlockedWorkspaces(),
+  });
 }
 
 export function stopBornBlockedReconciler(): void {
-  if (timer) clearInterval(timer);
-  timer = null;
+  sweep?.stop();
+  sweep = null;
 }
