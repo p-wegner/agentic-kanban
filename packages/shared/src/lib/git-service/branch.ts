@@ -125,3 +125,22 @@ export async function isAncestor(
     return false;
   }
 }
+
+/**
+ * The commit SHA where `branchRef` diverged from `baseRef` — the actual merge-base, not either
+ * ref's current tip. Distinct from {@link isAncestor}, which discards this and only answers a
+ * boolean. Returns `undefined` (never throws) when either ref cannot be resolved or the two
+ * refs share no history, so a base-branch-health lookup keyed on this degrades to "unknown"
+ * rather than failing the caller.
+ */
+export async function getMergeBase(
+  repoPath: string,
+  branchRef: string,
+  baseRef: string,
+): Promise<string | undefined> {
+  try {
+    return (await execGit(["merge-base", branchRef, baseRef], repoPath)).trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}

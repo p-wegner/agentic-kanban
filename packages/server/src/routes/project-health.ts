@@ -9,6 +9,7 @@ import {
   toBoardHealthEventDetail,
 } from "../lib/board-health-events-format.js";
 import { getProjectHealth } from "../services/project-health.service.js";
+import { listBaseBranchHealth, getLatestBaseBranchHealth } from "../repositories/base-branch-health.repository.js";
 
 /**
  * Project health / board-health-event feature endpoints. Extracted from the
@@ -41,6 +42,18 @@ export function createProjectHealthRoute(database: Database) {
   router.get("/health", async (c) => {
     const result = await getProjectHealth(database);
     return c.json(result);
+  });
+
+  // GET /api/projects/:id/base-branch-health — latest + recent history of base-branch verify runs (#491)
+  router.get("/:id/base-branch-health", async (c) => {
+    const projectId = c.req.param("id");
+    const limitRaw = Number.parseInt(c.req.query("limit") ?? "", 10);
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 100) : 20;
+    const [latest, history] = await Promise.all([
+      getLatestBaseBranchHealth(projectId, database),
+      listBaseBranchHealth(projectId, limit, database),
+    ]);
+    return c.json({ latest, history });
   });
 
   return router;

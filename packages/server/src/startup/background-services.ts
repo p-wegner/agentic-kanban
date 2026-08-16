@@ -18,6 +18,7 @@ import { startMonitorButler, stopMonitorButler } from "../services/monitor-butle
 import { startProjectConductorSupervisor } from "../services/project-conductor.service.js";
 import { startBackupScheduler, stopBackupScheduler } from "./backup-scheduler.js";
 import { startSessionMessagePruner, stopSessionMessagePruner } from "../services/session-message-pruner.service.js";
+import { startBaseBranchHealthReconciler, stopBaseBranchHealthReconciler } from "./base-branch-health-reconciler.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 
 /**
@@ -200,6 +201,16 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
     start({ db }) {
       startSessionMessagePruner(db);
       return stopSessionMessagePruner;
+    },
+  },
+  {
+    // Periodic base-branch verify (#491): runs verify_script against each project's CURRENT
+    // base-branch tip so "is the base green right now" has an answer independent of any
+    // branch's own pre-merge gate.
+    name: "base-branch-health-reconciler",
+    start({ db }) {
+      startBaseBranchHealthReconciler(db);
+      return stopBaseBranchHealthReconciler;
     },
   },
 ];

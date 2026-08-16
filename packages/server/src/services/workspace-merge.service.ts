@@ -57,6 +57,7 @@ import { getRepoMergeStatus } from "./repo-merge-status.service.js";
 import { checkAlreadyMerged as checkAlreadyMergedImpl, reconcileAlreadyMerged as reconcileAlreadyMergedImpl } from "./workspace-already-merged.service.js";
 import { resolveMergeGate, RUN_GATE, type MergeGateToken } from "./pre-merge-gate.service.js";
 import { recordGateFailureNote as recordGateFailureNoteImpl, runPreLockGate } from "./workspace-merge-gate.js";
+import { getBaseBranchHealthAtMergeBase, describeRedBaseAttribution, verifyBaseBranchHealth } from "./base-branch-health.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function createWorkspaceMergeService(deps: {
@@ -320,9 +321,19 @@ export function createWorkspaceMergeService(deps: {
         database,
       });
       if (!gate.passed) {
-        await recordGateFailureNote(workspace, gate.stage, gate.message, baseBranch);
+        let gateMessage = gate.message;
+        if (workspace.workingDir) {
+          try {
+            const baseHealth = await getBaseBranchHealthAtMergeBase(project.id, workspace.workingDir, "HEAD", baseBranch, database);
+            const attribution = describeRedBaseAttribution(baseHealth);
+            if (attribution) gateMessage = `${attribution}\n\n${gate.message}`;
+          } catch (err) {
+            console.warn("[workspace-merge] failed to resolve base-branch health attribution (non-fatal):", err instanceof Error ? err.message : String(err));
+          }
+        }
+        await recordGateFailureNote(workspace, gate.stage, gateMessage, baseBranch);
         throw new WorkspaceError(
-          `Pre-merge gate failed (${gate.stage}) — merge withheld. ${gate.message}`,
+          `Pre-merge gate failed (${gate.stage}) — merge withheld. ${gateMessage}`,
           "CONFLICT",
           { mergeReason: "pre_merge_gate_failed", gateStage: gate.stage },
         );
@@ -445,6 +456,18 @@ export function createWorkspaceMergeService(deps: {
       extendHold(new Promise<void>((releaseLockHold) => scheduleDeferredCleanup(releaseLockHold)));
     } else {
       scheduleDeferredCleanup();
+    }
+
+    // #491 — re-check base-branch health right after a merge lands, so a base that just went
+    // red is recorded before it silently gets charged to the next branch's gate. Fire-and-forget:
+    // never blocks the merge response, and a failure here is non-fatal to the merge itself.
+    if (postMergeContext.projectId) {
+      const projectIdForHealth = postMergeContext.projectId;
+      setImmediate(() => {
+        verifyBaseBranchHealth(projectIdForHealth, database).catch((err) => {
+          console.warn("[workspace-merge] post-merge base-branch health check failed (non-fatal):", err instanceof Error ? err.message : String(err));
+        });
+      });
     }
 
     console.log(`[workspace-merge] doMerge phase=done workspaceId=${id}`);
