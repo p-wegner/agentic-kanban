@@ -1,0 +1,48 @@
+{
+  "$comment": "Pattern-language spec for agentic-kanban (Lilienthal Musterelemente + rules) — round 1 (2026-08-16). Consumed by code-metrics-skill/pattern-language/tools/pattern_edges.py. FIRST matching element wins — specific before general. Rules are allow-lists (runtime imports only; type-only imports are erased). Elements without a rule entry (server-root, server-script, server-cli, server-worker, server-scaffold, client-route) are unconstrained. Seeded from .dependency-cruiser.cjs (routes/cli-not-down-to-persistence, services-bypass-repositories, repositories-are-infra-pure, services-not-up-to-routes, client-hooks-not-up-to-components-or-routes, client-lib-is-leaf, shared-is-a-leaf, mcp-no-server-internals) — this spec ADDS what depcruise doesn't cover: startup/monitor, lib, scripts, worker.",
+  "roots": ["packages/server/src", "packages/client/src", "packages/shared/src", "packages/mcp-server/src"],
+  "aliases": {
+    "@agentic-kanban/shared": "packages/shared/src",
+    "@/": "packages/client/src"
+  },
+  "elements": [
+    { "name": "server-root",        "match": ["packages/server/src/index\\.ts$", "packages/server/src/server-start\\.ts$", "packages/server/src/uv-threadpool\\.ts$", "packages/server/src/startup/(route-setup|process-handlers|background-services|startup-tasks|readiness|session-restore|scheduled-tasks|fk-alignment|service-stack-preflight|monitor-setup)\\.ts$"] },
+    { "name": "server-monitor",     "match": ["packages/server/src/startup/"] },
+    { "name": "server-script",      "match": ["packages/server/src/scripts/"] },
+    { "name": "server-route",       "match": ["packages/server/src/routes/"] },
+    { "name": "server-middleware",  "match": ["packages/server/src/middleware/"] },
+    { "name": "server-repository",  "match": ["\\.repository\\.ts$", "packages/server/src/repositories/"] },
+    { "name": "server-service",     "match": ["\\.service\\.ts$", "packages/server/src/services/", "packages/server/src/butler/"] },
+    { "name": "server-worker",      "match": ["packages/server/src/worker/"] },
+    { "name": "server-cli",         "match": ["packages/server/src/cli/"] },
+    { "name": "server-scaffold",    "match": ["packages/server/src/scaffold/", "packages/server/src/builtin-skills"] },
+    { "name": "server-db",          "match": ["packages/server/src/db/"] },
+    { "name": "server-lib",         "match": ["packages/server/src/lib/", "packages/server/src/constants/", "packages/server/src/errors/", "packages/server/src/runtime-port\\.ts$"] },
+    { "name": "shared-schema",      "match": ["packages/shared/src/schema/"] },
+    { "name": "shared-types",       "match": ["packages/shared/src/types/"] },
+    { "name": "shared-lib",         "match": ["packages/shared/src/lib/", "packages/shared/src/index\\.ts$"] },
+    { "name": "mcp-tool",           "match": ["packages/mcp-server/src/"] },
+    { "name": "client-route",       "match": ["packages/client/src/routes/", "packages/client/src/App\\.tsx$", "packages/client/src/main\\.tsx$"] },
+    { "name": "client-component",   "match": ["packages/client/src/components/"] },
+    { "name": "client-hook",        "match": ["packages/client/src/hooks/", "packages/client/src/lib/use[A-Z][A-Za-z]*\\.tsx?$"] },
+    { "name": "client-store",       "match": ["packages/client/src/stores/"] },
+    { "name": "client-lib",         "match": ["packages/client/src/lib/", "packages/client/src/[^/]+\\.(ts|css)$"] }
+  ],
+  "rules": {
+    "server-route":      ["server-service", "server-repository", "server-middleware", "server-lib", "server-db", "shared-schema", "shared-types", "shared-lib"],
+    "server-middleware": ["server-lib", "server-service", "shared-lib", "shared-types"],
+    "server-service":    ["server-service", "server-repository", "server-lib", "server-db", "server-worker", "shared-schema", "shared-types", "shared-lib"],
+    "server-monitor":    ["server-monitor", "server-service", "server-repository", "server-lib", "server-db", "server-worker", "shared-schema", "shared-types", "shared-lib"],
+    "server-repository": ["server-db", "server-lib", "shared-schema", "shared-types", "shared-lib"],
+    "server-lib":        ["server-lib", "server-db", "shared-schema", "shared-types", "shared-lib"],
+    "server-db":         ["shared-schema", "shared-lib", "server-lib", "server-scaffold"],
+    "shared-lib":        ["shared-lib", "shared-schema", "shared-types"],
+    "shared-types":      ["shared-schema"],
+    "shared-schema":     [],
+    "mcp-tool":          ["mcp-tool", "shared-lib", "shared-schema", "shared-types"],
+    "client-component":  ["client-component", "client-hook", "client-store", "client-lib", "shared-types", "shared-lib"],
+    "client-hook":       ["client-hook", "client-store", "client-lib", "shared-types", "shared-lib"],
+    "client-store":      ["client-store", "client-lib", "shared-types", "shared-lib"],
+    "client-lib":        ["client-lib", "shared-types", "shared-lib"]
+  }
+}
