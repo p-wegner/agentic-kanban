@@ -56,3 +56,49 @@ describe("summarizeVerifyFailure (#221)", () => {
     expect(summary).not.toContain("full verify log");
   });
 });
+
+// #490: a crashed vitest worker fork reports ZERO failing tests and a passing-looking summary
+// at the very end of the log — the tail-only summary above reads this as success. The crash
+// verdict (and which file never reported) must be classified distinctly and LEAD the message.
+const CRASH_LOG = [
+  "Unhandled Rejection",
+  "Error: Worker exited unexpectedly (SIGSEGV)",
+  '  at ChildProcess.<anonymous> (file:///repo/node_modules/vitest/dist/worker.js:88:11)',
+  'This error originated in "src/services/foo.test.ts" test file. It doesn\'t mean the error was thrown inside the file itself, but while it was running.',
+  "panicked at 'index out of bounds'",
+  "",
+  "Test Files  565 passed (566)",
+  "     Tests  5132 passed | 4 skipped (5146)",
+  "    Errors  1 error",
+].join("\n");
+
+describe("summarizeVerifyFailure — worker crash with zero failures (#490)", () => {
+  it("leads with the crash and names the missing file instead of the passing summary", () => {
+    const summary = summarizeVerifyFailure(CRASH_LOG, "", "ws-490", () => null);
+    expect(summary.startsWith("CRASH:")).toBe(true);
+    expect(summary).toContain("src/services/foo.test.ts");
+    expect(summary.indexOf("CRASH:")).toBeLessThan(summary.indexOf("565 passed"));
+  });
+
+  it("surfaces the Errors line and the crash marker line", () => {
+    const summary = summarizeVerifyFailure(CRASH_LOG, "", "ws-490", () => null);
+    expect(summary).toContain("Errors  1 error");
+    expect(summary).toMatch(/worker exited unexpectedly/i);
+  });
+
+  it("does not classify a real test failure (nonzero 'failed' count) as a crash", () => {
+    const summary = summarizeVerifyFailure(VITEST_TAIL, "", "ws-221", () => null);
+    expect(summary.startsWith("CRASH:")).toBe(false);
+  });
+
+  it("reports an unnamed missing-file count when no per-file attribution is in the log", () => {
+    const noAttribution = [
+      "Test Files  565 passed (566)",
+      "     Tests  5132 passed | 4 skipped (5146)",
+      "    Errors  1 error",
+    ].join("\n");
+    const summary = summarizeVerifyFailure(noAttribution, "", "ws-490b", () => null);
+    expect(summary.startsWith("CRASH:")).toBe(true);
+    expect(summary).toContain("1 of 566 test file(s) never reported a result");
+  });
+});
