@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { Database } from "../db/index.js";
 import { invokeClaudePrompt } from "./claude-cli.service.js";
 import { getProjectById } from "../repositories/project.repository.js";
+import { gradleWrapper } from "./gradle-detect.service.js";
 
 const PROJECT_MARKER_FILES = [
   "package.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock",
@@ -135,7 +136,14 @@ export function deriveVerifyScript(repoPath: string, detected: string[]): string
   if (detectedSet.has("Cargo.toml")) return "cargo test";
   if (detectedSet.has("go.mod")) return "go test ./...";
   if (detectedSet.has("pom.xml")) return "mvn test";
-  if (detectedSet.has("build.gradle") || detectedSet.has("build.gradle.kts")) return "./gradlew test";
+  if (detectedSet.has("build.gradle") || detectedSet.has("build.gradle.kts")) {
+    // #521: NOT the hardcoded "./gradlew" this used to emit. `runSetupScript`/the verify
+    // gate spawn through `cmd.exe /d /s /c` on Windows, which parses `./gradlew` as the
+    // command `.` and exits 1 — so the verify gate failed and the merge was silently
+    // withheld (`pre_merge_gate_failed`) on every JVM project on this platform. The
+    // detector already resolves the right wrapper per platform; use it.
+    return `${gradleWrapper(repoPath)} test`;
+  }
   if (detectedSet.has("Makefile")) {
     try {
       const makefile = readFileSync(join(repoPath, "Makefile"), "utf8");
