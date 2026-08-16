@@ -39,6 +39,7 @@ export {
 export type { WorkflowNodeType, WorkflowEdgeCondition } from "./workflows.js";
 export { testRuns, flakyTestPins } from "./test-runs.js";
 export { boardHealthEvents, boardHealthEventsRelations } from "./board-health-events.js";
+export { baseBranchHealth, baseBranchHealthRelations } from "./base-branch-health.js";
 export { qualityMetrics } from "./quality-metrics.js";
 export { workers } from "./workers.js";
 export { plugins, pluginViewProcesses } from "./plugins.js";

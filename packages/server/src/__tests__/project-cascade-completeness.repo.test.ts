@@ -277,6 +277,12 @@ const SUBTREE_SEEDERS: Record<string, (c: SeedCtx) => Promise<void>> = {
       eventType: "observation", summary: "all quiet", createdAt: c.now,
     });
   },
+  base_branch_health: async (c) => {
+    await c.db.insert(schema.baseBranchHealth).values({
+      id: randomUUID(), projectId: c.projectId, sha: "deadbeef", branch: "master",
+      outcome: "green", createdAt: c.now,
+    });
+  },
   workflow_templates: async (c) => {
     await c.db.insert(schema.workflowTemplates).values({
       id: c.templateId, projectId: c.projectId, name: "Custom Flow", createdAt: c.now, updatedAt: c.now,

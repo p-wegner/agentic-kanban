@@ -848,6 +848,13 @@
       "when": 1787385600000,
       "tag": "0120_plugin_project_fk",
       "breakpoints": true
+    },
+    {
+      "idx": 121,
+      "version": "6",
+      "when": 1787472000000,
+      "tag": "0121_base_branch_health",
+      "breakpoints": true
     }
   ]
 }

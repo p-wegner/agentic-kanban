@@ -295,7 +295,7 @@ describe("deduplicateProjects — lossless across the FULL project-child FK grap
       runHistoryId: randomUUID(), milestoneId: randomUUID(), driveId: randomUUID(),
       obstacleId: randomUUID(), templateId: randomUUID(), healthId: randomUUID(),
       flakyId: randomUUID(), shortcutId: randomUUID(), metricId: randomUUID(),
-      viewProcessId: randomUUID(),
+      viewProcessId: randomUUID(), baseBranchHealthId: randomUUID(),
     };
     const earlier = new Date(Date.now() - 60_000).toISOString();
     const later = new Date().toISOString();
@@ -333,6 +333,8 @@ describe("deduplicateProjects — lossless across the FULL project-child FK grap
     // reassignProjectChildren derives its edges from the schema, so this needs no product
     // change; seeding it here is what proves that derivation actually covered the new table.
     await d.insert(schema.pluginViewProcesses).values({ id: ids.viewProcessId, pluginRowId: randomUUID(), viewId: "dashboard", projectId: ids.dupId, pid: 4242, port: 51234, command: "npm run serve", createdAt: earlier });
+    // #491 — base_branch_health joined the project-child FK graph.
+    await d.insert(schema.baseBranchHealth).values({ id: ids.baseBranchHealthId, projectId: ids.dupId, sha: "deadbeef", branch: "master", outcome: "green", createdAt: earlier });
     await d.insert(schema.preferences).values({ key: "activeProjectId", value: ids.dupId, updatedAt: later });
     return ids;
   }
@@ -350,6 +352,8 @@ describe("deduplicateProjects — lossless across the FULL project-child FK grap
       "board_health_events", "flaky_tests", "project_script_shortcuts", "quality_metrics",
       // #485 — joined the FK graph with migration 0120's cascading project_id.
       "plugin_view_processes",
+      // #491 — base branch health results, cascading on project_id (migration 0121).
+      "base_branch_health",
     ]);
     expect(exercised).toEqual(schemaChildren);
   });

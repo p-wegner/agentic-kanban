@@ -32,6 +32,7 @@ import {
   type MergeGateShas,
   type MergeGateToken,
 } from "./pre-merge-gate.service.js";
+import { getBaseBranchHealthAtMergeBase, describeRedBaseAttribution } from "./base-branch-health.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
@@ -179,16 +180,38 @@ export async function runPreLockGate(args: {
   });
 
   if (!preGate.passed) {
+    // #491 — before blaming this branch, check whether the base was ALREADY red at the
+    // branch's merge-base. Best-effort: a failure here must never mask the real gate failure,
+    // it can only ADD attribution to it.
+    let gateMessage = preGate.message;
+    if (workspace.workingDir) {
+      try {
+        const baseHealth = await getBaseBranchHealthAtMergeBase(
+          projectId,
+          workspace.workingDir,
+          "HEAD",
+          baseBranch,
+          database,
+        );
+        const attribution = describeRedBaseAttribution(baseHealth);
+        if (attribution) gateMessage = `${attribution}\n\n${preGate.message}`;
+      } catch (err) {
+        console.warn(
+          "[workspace-merge] failed to resolve base-branch health attribution (non-fatal):",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
     await recordGateFailureNote({
       workspace,
       stage: preGate.stage,
-      gateMessage: preGate.message,
+      gateMessage,
       targetBranch: baseBranch,
       database,
       recordMergeAttempt,
     });
     throw new WorkspaceError(
-      `Pre-merge gate failed (${preGate.stage}) — merge withheld. ${preGate.message}`,
+      `Pre-merge gate failed (${preGate.stage}) — merge withheld. ${gateMessage}`,
       "CONFLICT",
       { mergeReason: "pre_merge_gate_failed", gateStage: preGate.stage },
     );

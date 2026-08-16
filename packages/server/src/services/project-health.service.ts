@@ -7,6 +7,7 @@ import {
   getIssueCountsByStatus,
 } from "../repositories/project-health.repository.js";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
+import { getLatestBaseBranchHealth } from "../repositories/base-branch-health.repository.js";
 
 interface ProjectHealthEntry {
   id: string;
@@ -68,6 +69,19 @@ export async function getProjectHealth(database: Database = db): Promise<Project
         } catch {
           // non-fatal — dirty check best-effort only
         }
+      }
+
+      // #491 — surface an already-red base branch loudly, without opening a log: a cheap
+      // read of the last recorded verify result, never a live check on this request path.
+      try {
+        const baseHealth = await getLatestBaseBranchHealth(project.id, database);
+        if (baseHealth && baseHealth.outcome !== "green") {
+          warnings.push(
+            `Base branch '${baseHealth.branch}' is ${baseHealth.outcome.toUpperCase()} (verify failed at ${baseHealth.sha.slice(0, 8)}) — merges into it may fail through no fault of the branch.`,
+          );
+        }
+      } catch {
+        // non-fatal — base-branch health is a best-effort signal
       }
 
       const issueCounts = countsByProject.get(project.id) ?? {};
