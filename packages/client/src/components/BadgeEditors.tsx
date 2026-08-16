@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { priorityColors } from "../lib/issueCardColorMap.js";
 import type { ProjectTag, TagBadge } from "./IssueCard.js";
+import { useDismissable } from "../hooks/useDismissable.js";
 
 const PRIORITIES = ["critical", "high", "medium", "low"] as const;
 
@@ -11,14 +12,8 @@ export function PriorityDropdown({ priority, onChange }: { priority: string; onC
   const current = priority ?? "medium";
   const color = priorityColors[current] ?? "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400";
 
-  useEffect(() => {
-    if (!open) return;
-    function handlePointerDown(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", handlePointerDown);
-    return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, [open]);
+  // #515: this also GAINS Escape-to-dismiss, which this copy never had.
+  useDismissable(ref, open, useCallback(() => setOpen(false), []));
 
   function select(p: string) {
     setOpen(false);
@@ -86,14 +81,8 @@ export function InlineTagEditor({
   const assignedIds = new Set(tags.map((t) => t.id));
   const available = allProjectTags.filter((t) => !assignedIds.has(t.id));
 
-  useEffect(() => {
-    if (!addOpen) return;
-    function handlePointerDown(e: MouseEvent) {
-      if (addRef.current && !addRef.current.contains(e.target as Node)) setAddOpen(false);
-    }
-    document.addEventListener("mousedown", handlePointerDown);
-    return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, [addOpen]);
+  // #515: also gains Escape-to-dismiss.
+  useDismissable(addRef, addOpen, useCallback(() => setAddOpen(false), []));
 
   async function handleRemove(tagId: string) {
     if (savingTag) return;
