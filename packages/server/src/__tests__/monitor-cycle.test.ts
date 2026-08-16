@@ -510,6 +510,29 @@ describe("processWorkspaceCandidates — auto_merge gating", () => {
     // The reviewing+stopped path must never fall back to fix-and-merge.
     expect(vi.mocked(deps.workspaceActions.fixAndMerge)).not.toHaveBeenCalled();
   });
+
+  it("pins the gated SHAs into the evidence it mints (#573)", async () => {
+    // Sha-less evidence falls back to `evidenceIsValid`'s 15-minute AGE check, and `ranAt`
+    // is stamped at gate END — so a builder commit landing during a 20-40 minute monitor
+    // gate produced evidence that looked fresh, and the moved tip merged having never been
+    // tested. The merge-gate and review-exit paths already pinned; these two monitor paths
+    // were the only ones that did not.
+    vi.mocked(db.select).mockReset();
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "sess-1", status: "stopped", startedAt: new Date().toISOString() }]) as ReturnType<typeof db.select>)
+      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]) as ReturnType<typeof db.select>);
+
+    const deps = { ...makeDeps(), autoMergeEnabled: true };
+    const candidate: WorkspaceCandidate = { ...baseCandidate, wsStatus: "reviewing", readyForMerge: false };
+    await processWorkspaceCandidates([candidate], deps);
+
+    const [, token] = vi.mocked(deps.workspaceActions.merge).mock.calls[0] as [string, { kind: string; evidence?: Record<string, unknown> }];
+    expect(token.kind).toBe("already-passed");
+    // The point of the fix: the evidence carries the tips the gate ran against, so a moved
+    // tip invalidates it by CONTENT rather than surviving on age.
+    expect(token.evidence).toHaveProperty("branchSha");
+    expect(token.evidence).toHaveProperty("baseSha");
+  });
 });
 
 describe("processWorkspaceCandidates — per-project auto_merge_disabled", () => {
