@@ -92,7 +92,19 @@ and merge preparation still detect dirty worktrees before landing.
 ## Workspace setup scripts
 Projects have `setup_script` (nullable text) and `setup_blocking` (boolean, default true) columns. `runSetupScript()` in `@agentic-kanban/shared/lib/setup-script.ts`. Blocking: await script then launch. Parallel: fire-and-forget. Non-fatal. PATCH `/api/projects/:id` updates setup script config.
 
-**Windows shell gotcha — `setup_script` AND `verify_script` are POSIX-hostile.** `runSetupScript` spawns the script via `cmd.exe /d /s /c "<script>"` on Windows (`setup-script.ts:74`; the scaffold verify hook `scaffold/verify-gate-runner.js:334` does the same). A POSIX `./gradlew build` / `./mvnw verify` fails there — `cmd.exe` parses `./gradlew` as command `.` → `"Der Befehl ." ... nicht gefunden` (exit 1) → the pre-merge verify gate fails and the merge is silently withheld (`pre_merge_gate_failed`). Use the cmd-valid wrapper: **`gradlew.bat build`**, `mvnw.cmd verify`. `deriveVerifyCommand` (`@agentic-kanban/shared/lib/verify-command.ts`) is NOT yet win32-aware and emits `./gradlew` — tracked as a board bug; until fixed, set `verify_script_<projectId>` to the `.bat`/`.cmd` form by hand for JVM-wrapper projects on Windows.
+**Windows shell gotcha — `setup_script` AND `verify_script` are POSIX-hostile.** `runSetupScript` spawns the script via `cmd.exe /d /s /c "<script>"` on Windows (`setup-script.ts:74`; the scaffold verify hook `scaffold/verify-gate-runner.js:334` does the same). A POSIX `./gradlew build` / `./mvnw verify` fails there — `cmd.exe` parses `./gradlew` as command `.` → `"Der Befehl ." ... nicht gefunden` (exit 1) → the pre-merge verify gate fails and the merge is silently withheld (`pre_merge_gate_failed`). Use the cmd-valid wrapper: **`gradlew.bat build`**, `mvnw.cmd verify`.
+
+> **Fixed in #521 (`d718f44c66`), and the old note here named the wrong culprit.** It blamed
+> `deriveVerifyCommand` (`shared/lib/verify-command.ts`). That function was never the
+> problem — it derives from the persisted stack profile, whose commands already come from
+> `gradleWrapper()`, which has always been win32-aware (`.\gradlew.bat`, or plain `gradle`
+> when no wrapper file exists). The broken emitter was the marker-rule FALLBACK
+> `deriveVerifyScript` (`services/project-setup.service.ts`), used when a project has no
+> profile yet — i.e. a freshly-registered project, exactly when the gate is first derived.
+> It hardcoded `./gradlew test`. It now calls `gradleWrapper()` like everything else, so
+> the hand-set `verify_script_<projectId>` workaround is no longer needed for new JVM
+> projects. Pinned by `project-setup.service.test.ts`, whose old assertion had frozen the
+> literal `"./gradlew test"` and so pinned the bug on Windows.
 
 ## Issue numbers
 Auto-incrementing per project via `MAX(issue_number) + 1` in `POST /api/issues`. `issue_number` added in migration 0006. The `MIGRATION_FILES` export in `packages/server/src/__tests__/helpers/migrations.ts` is now computed dynamically from the drizzle journal — no manual maintenance needed when adding new migrations.
