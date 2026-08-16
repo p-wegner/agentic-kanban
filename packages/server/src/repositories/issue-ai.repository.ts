@@ -5,6 +5,7 @@ import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
 import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { getStatusIdsByName } from "./project-status.repository.js";
 
 export async function getIssueBasics(
   issueId: string,
@@ -18,19 +19,13 @@ export async function getIssueBasics(
   return rows[0] ?? null;
 }
 
+/** #502: one query, in project-status.repository. Kept as a named re-export so callers are unchanged. */
 export async function getTerminalStatusIds(
   projectId: string,
   statusNames: string[],
   database: Database = db,
-) {
-  const rows = await database
-    .select({ id: projectStatuses.id })
-    .from(projectStatuses)
-    .where(and(
-      eq(projectStatuses.projectId, projectId),
-      inArray(projectStatuses.name, statusNames),
-    ));
-  return rows.map(s => s.id);
+): Promise<string[]> {
+  return getStatusIdsByName(projectId, statusNames, database);
 }
 
 export async function getOpenIssuesWithNode(

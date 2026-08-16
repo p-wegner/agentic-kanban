@@ -13,7 +13,7 @@
  * a guard read that belongs with the delete it protects.
  */
 import { projectStatuses, issues } from "@agentic-kanban/shared/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -107,4 +107,29 @@ export async function getProjectStatusById(statusId: string, database: Database 
 /** Delete a project status by id alone (caller has already validated). */
 export async function deleteProjectStatusById(statusId: string, database: Database = db): Promise<void> {
   await database.delete(projectStatuses).where(eq(projectStatuses.id, statusId));
+}
+
+/**
+ * Status ids for the given column NAMES within one project (#502).
+ *
+ * `getTerminalStatusIds` was declared three times. Two of those — `issue-ai.repository`
+ * and `ticket-preflight.repository` — were the same query with the same signature and
+ * different parameter names; they call this now.
+ *
+ * The third, in `foundational-merge.repository`, is deliberately NOT folded in: it takes
+ * no projectId and hardcodes ('Done','Cancelled'), i.e. it collects terminal status ids
+ * across EVERY project. That is correct for its caller, which only tests membership of a
+ * status id (ids are unique rows, so a wider set cannot produce a false positive), and
+ * narrowing it to one project would need a projectId its caller does not have.
+ */
+export async function getStatusIdsByName(
+  projectId: string,
+  statusNames: string[],
+  database: Database = db,
+): Promise<string[]> {
+  const rows = await database
+    .select({ id: projectStatuses.id })
+    .from(projectStatuses)
+    .where(and(eq(projectStatuses.projectId, projectId), inArray(projectStatuses.name, statusNames)));
+  return rows.map((r) => r.id);
 }
