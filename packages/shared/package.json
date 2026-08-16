@@ -120,6 +120,12 @@
       "import": "./dist/lib/issue-number.js",
       "default": "./src/lib/issue-number.ts"
     },
+    "./lib/issue-priority": {
+      "development": "./src/lib/issue-priority.ts",
+      "types": "./dist/lib/issue-priority.d.ts",
+      "import": "./dist/lib/issue-priority.js",
+      "default": "./src/lib/issue-priority.ts"
+    },
     "./lib/operation-metrics": {
       "development": "./src/lib/operation-metrics.ts",
       "types": "./dist/lib/operation-metrics.d.ts",
