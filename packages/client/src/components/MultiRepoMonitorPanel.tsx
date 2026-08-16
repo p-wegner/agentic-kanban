@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import type { StatusWithIssues } from "@agentic-kanban/shared";
 import { type MatrixCell } from "../lib/multiRepoMatrix.js";
 import { cellKey } from "../lib/diffMultiRepoMatrix.js";
@@ -6,6 +6,7 @@ import { useLiveMultiRepoMatrix } from "../hooks/useLiveMultiRepoMatrix.js";
 import { MergeReadinessBoard } from "./MergeReadinessBoard.js";
 import { FleetServiceStackMap } from "./FleetServiceStackMap.js";
 import { CrossRepoImpactHeatmap } from "./CrossRepoImpactHeatmap.js";
+import { useNow } from "../hooks/usePoll.js";
 
 interface MultiRepoMonitorPanelProps {
   activeProjectId: string | null;
@@ -117,11 +118,7 @@ export function MultiRepoMonitorPanel({
   const [view, setView] = useState<MonitorView>("matrix");
 
   // Tick once a second so the "updated Ns ago" label stays current between refreshes.
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => setTick((n) => n + 1), 1000);
-    return () => clearInterval(t);
-  }, []);
+  useNow(1000);
 
   const summary = data?.matrix.summary ?? null;
   const isMultiRepo = (data?.additionalRepos.length ?? 0) > 0;

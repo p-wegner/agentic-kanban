@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentOutputMessage, StatusWithIssues } from "@agentic-kanban/shared";
 import { apiFetchConditional } from "../lib/api.js";
+import { usePoll } from "./usePoll.js";
 
 const POLL_INTERVAL_MS = 5000;
 const MAX_TAIL = 60;
@@ -175,12 +176,11 @@ export function useAgentLiveTicker(
       setEntries([]);
       return;
     }
-    const id = setInterval(
-      () => refresh(columnsRef.current, liveActivityRef.current),
-      POLL_INTERVAL_MS,
-    );
-    return () => clearInterval(id);
   }, [enabled, refresh]);
+
+  // #518: through the shared scheduler — a raw setInterval phase-aligns with the other
+  // pollers at mount and keeps ticking in a hidden tab.
+  usePoll(() => void refresh(columnsRef.current, liveActivityRef.current), POLL_INTERVAL_MS, enabled);
 
   // Clear session ID cache for no-longer-active workspaces
   useEffect(() => {

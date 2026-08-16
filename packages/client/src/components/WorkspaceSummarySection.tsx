@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import type { LiveSessionStats } from "../lib/useBoardEvents.js";
 import { formatRelativeTime, formatAbsoluteTime } from "../lib/formatRelativeTime.js";
@@ -6,13 +5,10 @@ import { getLastSessionBadge } from "../lib/sessionBadgeHelpers.js";
 import { CodeMetricsBadges, WorkflowMiniIndicator } from "./IssueBadges.js";
 import { groupConflictsByRepo, formatConflictSummary } from "../lib/groupConflictsByRepo.js";
 import { MultirepoHealthPill } from "./MultirepoHealthPill.js";
+import { useNow } from "../hooks/usePoll.js";
 
 function RelativeTime({ timestamp, prefix = "" }: { timestamp: string; prefix?: string }) {
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => setTick(n => n + 1), 30_000);
-    return () => clearInterval(t);
-  }, []);
+  useNow(30_000);
   return <span title={formatAbsoluteTime(timestamp)}>{prefix}{formatRelativeTime(timestamp)}</span>;
 }
 

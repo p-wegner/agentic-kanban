@@ -4,6 +4,7 @@ import { showToast } from "./Toast.js";
 import { PaneHeading } from "./PluginActionPanes.js";
 import type { PluginSkill } from "./PluginActionPanes.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { useNow } from "../hooks/usePoll.js";
 
 /**
  * Judgment-requiring plugin work, launched as a ticket + workspace (#465: split out of
@@ -30,12 +31,7 @@ type SkillRunProgress =
 
 /** Seconds since a start timestamp, ticking once a second while a launch is in flight. */
 function useElapsed(since: number | null): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (since === null) return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [since]);
+  const now = useNow(1000, since !== null);
   return since === null ? 0 : Math.max(0, Math.round((now - since) / 1000));
 }
 

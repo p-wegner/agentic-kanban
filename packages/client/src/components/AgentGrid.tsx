@@ -4,6 +4,7 @@ import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { getBoardDragData } from "../lib/dragData.js";
 import { openSessionTranscript } from "../lib/sessionTranscriptEvents.js";
 import { AgentStallIndicator, useAgentStallThreshold } from "./AgentStallBadge.js";
+import { useNow } from "../hooks/usePoll.js";
 import {
   STARTABLE_STATUS_NAMES,
   MAX_HISTORY,
@@ -23,11 +24,7 @@ import {
 } from "../lib/agentGridView.js";
 
 function ElapsedTimer({ since }: { since: string }) {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
+  const now = useNow(1000);
   return <span>{formatDuration(now - new Date(since).getTime())}</span>;
 }
 

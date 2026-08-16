@@ -14,6 +14,7 @@ import {
   type SessionTranscriptTarget,
 } from "../lib/sessionTranscriptEvents.js";
 import type { SessionInfo } from "./WorkspaceCard.js";
+import { usePoll } from "../hooks/usePoll.js";
 
 /** Tool output longer than this (chars) collapses behind an expand toggle. */
 const COLLAPSE_THRESHOLD = 400;
@@ -234,12 +235,13 @@ export function SessionTranscriptPanel() {
       if (detail.sessionId === resolved.sessionId) void refetch();
     };
     window.addEventListener(SESSION_ACTIVITY_WS_EVENT, onActivity);
-    const timer = setInterval(() => void refetch(), LIVE_POLL_MS);
-    return () => {
-      window.removeEventListener(SESSION_ACTIVITY_WS_EVENT, onActivity);
-      clearInterval(timer);
-    };
+    // #518: the recurring poll moved to usePoll below. A raw setInterval here got
+    // neither the phase stagger nor the hidden-tab gating, so a transcript left open in
+    // a background tab kept refetching forever.
+    return () => window.removeEventListener(SESSION_ACTIVITY_WS_EVENT, onActivity);
   }, [resolved, summary, refetch]);
+
+  usePoll(() => void refetch(), LIVE_POLL_MS, !!resolved && isRunning(summary));
 
   // Auto-scroll to the newest event when the user is already near the bottom.
   useEffect(() => {
