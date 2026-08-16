@@ -22,6 +22,7 @@ import { logBoardHealthEvent } from "../repositories/board-health-events.reposit
 import { recordDriveObstacle } from "../services/drive-obstacles.service.js";
 import { PREF_DONE_UNMERGED_SCANNER_ENABLED } from "../constants/preference-keys.js";
 import { resolveMergeGate, gateSkipExplicit } from "../services/pre-merge-gate.service.js";
+import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 
 /** Issue status names that count as "terminal Done" — these are the ones we scan. */
 const DONE_STATUS_NAMES = ["Done", "AI Reviewed"];
@@ -492,18 +493,11 @@ const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
 
 // Module-level singleton handles — cleared on each startDoneUnmergedScanner call so
 // tsx hot-reload never accumulates duplicate intervals (cycle-39 reaper incident).
-let _activeTimer: NodeJS.Timeout | null = null;
-let _activeInterval: NodeJS.Timeout | null = null;
+let _activeSweep: PeriodicSweepHandle | null = null;
 
 export function stopDoneUnmergedScanner(): void {
-  if (_activeTimer !== null) {
-    clearTimeout(_activeTimer);
-    _activeTimer = null;
-  }
-  if (_activeInterval !== null) {
-    clearInterval(_activeInterval);
-    _activeInterval = null;
-  }
+  _activeSweep?.stop();
+  _activeSweep = null;
 }
 
 /**
@@ -516,22 +510,16 @@ export function stopDoneUnmergedScanner(): void {
 export function startDoneUnmergedScanner(
   deps: Omit<DoneUnmergedScannerDeps, "enabled"> = {},
   intervalMs = DEFAULT_INTERVAL_MS,
-): { timer: NodeJS.Timeout; interval: NodeJS.Timeout } {
-  // Clear any prior handles from a previous hot-reload cycle.
+): PeriodicSweepHandle {
   stopDoneUnmergedScanner();
-
-  const tick = deps.onTick ?? (() => {
-    scanDoneUnmergedWorkspaces(deps).catch((err) =>
-      console.warn("[done-unmerged-scanner] periodic tick error:", err instanceof Error ? err.message : err),
-    );
+  _activeSweep = startPeriodicSweep({
+    name: "done-unmerged-scanner",
+    intervalMs,
+    bootDelayMs: 40_000,
+    // `onTick` is the test seam — it replaces the sweep, not just its logging.
+    tick: deps.onTick ?? (() => scanDoneUnmergedWorkspaces(deps)),
   });
-  const timer = setTimeout(tick, 40_000);
-  const interval = setInterval(tick, intervalMs);
-  (timer).unref?.();
-  (interval).unref?.();
-  _activeTimer = timer;
-  _activeInterval = interval;
-  return { timer, interval };
+  return _activeSweep;
 }
 
 /**

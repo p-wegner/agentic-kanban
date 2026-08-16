@@ -27,6 +27,14 @@ export function stopBackupScheduler(): void {
  *   (a single post-boot backup is still taken).
  * @returns the interval handle (or null if periodic backups are disabled).
  */
+/**
+ * #529: deliberately NOT on startPeriodicSweep. The helper runs ONE `tick` for both the
+ * boot run and the interval, and this scheduler's two runs differ: the boot run passes
+ * `skipIfNewerThanMs` so a restart does not re-backup when a recent backup already
+ * exists, while the interval run always backs up. Collapsing them would either lose that
+ * skip (a spurious backup on every restart) or apply it to every tick (backups silently
+ * stop). A `bootTick` option would be the shared fix; not worth it for one caller.
+ */
 export function startBackupScheduler(intervalMin = 30): NodeJS.Timeout | null {
   stopBackupScheduler();
 

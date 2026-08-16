@@ -93,9 +93,12 @@ describe("startup timers are restart-safe for HMR-style reloads", () => {
     const first = startAncestorBranchReconciler({}, 10_000);
     const second = startAncestorBranchReconciler({}, 10_000);
 
+    // #529: these now return a PeriodicSweepHandle. The assertion is unchanged in
+    // INTENT — a restart clears the previous pair and installs a new one — but the
+    // handle no longer exposes the boot `timer`, which was an implementation detail.
     expect(clearTimeoutSpy).toHaveBeenCalledOnce();
     expect(clearIntervalSpy).toHaveBeenCalledOnce();
-    expect(first.timer).not.toBe(second.timer);
+    expect(first).not.toBe(second);
     expect(first.interval).not.toBe(second.interval);
   });
 
@@ -103,27 +106,38 @@ describe("startup timers are restart-safe for HMR-style reloads", () => {
     const first = startDoneUnmergedScanner({}, 10_000);
     const second = startDoneUnmergedScanner({}, 10_000);
 
+    // #529: these now return a PeriodicSweepHandle. The assertion is unchanged in
+    // INTENT — a restart clears the previous pair and installs a new one — but the
+    // handle no longer exposes the boot `timer`, which was an implementation detail.
     expect(clearTimeoutSpy).toHaveBeenCalledOnce();
     expect(clearIntervalSpy).toHaveBeenCalledOnce();
-    expect(first.timer).not.toBe(second.timer);
+    expect(first).not.toBe(second);
     expect(first.interval).not.toBe(second.interval);
   });
 
   it("clears ancestor-branch reconciler interval handles on stop", () => {
-    const { timer, interval } = startAncestorBranchReconciler({}, 10_000);
+    const { interval } = startAncestorBranchReconciler({}, 10_000);
 
     stopAncestorBranchReconciler();
 
-    expect(clearTimeoutSpy).toHaveBeenCalledWith(timer);
+    // The boot timeout is cleared too; its handle is private to the sweep now, so this
+    // asserts it happened rather than which object it was called with. NOT a count
+    // assertion: the previous test leaves a live sweep, which this test's own start()
+    // clears first — the original `toHaveBeenCalledWith(timer)` was count-agnostic too.
+    expect(clearTimeoutSpy).toHaveBeenCalled();
     expect(clearIntervalSpy).toHaveBeenCalledWith(interval);
   });
 
   it("clears done-unmerged scanner interval handles on stop", () => {
-    const { timer, interval } = startDoneUnmergedScanner({}, 10_000);
+    const { interval } = startDoneUnmergedScanner({}, 10_000);
 
     stopDoneUnmergedScanner();
 
-    expect(clearTimeoutSpy).toHaveBeenCalledWith(timer);
+    // The boot timeout is cleared too; its handle is private to the sweep now, so this
+    // asserts it happened rather than which object it was called with. NOT a count
+    // assertion: the previous test leaves a live sweep, which this test's own start()
+    // clears first — the original `toHaveBeenCalledWith(timer)` was count-agnostic too.
+    expect(clearTimeoutSpy).toHaveBeenCalled();
     expect(clearIntervalSpy).toHaveBeenCalledWith(interval);
   });
 
