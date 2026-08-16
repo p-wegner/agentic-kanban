@@ -18,6 +18,7 @@ import {
   type GitService,
 } from "./workspace-internals.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { reapWorkspaceContainer } from "./devcontainer-workspace.service.js";
 
 export type AlreadyMergedCheck = {
   isAlreadyMerged: boolean;
@@ -280,6 +281,15 @@ export async function reconcileAlreadyMerged(
         composeWorktreePath: workspace.workingDir,
         releasedByWorkspaceId: id,
       });
+    }
+    // #576: the compose stack is not the only per-workspace resource. With
+    // `devcontainer_builders` on, the devcontainer and its dependency volumes leak
+    // until `findStaleProfileContainers` or a manual `docker` sweep. Only three of
+    // the eight terminal paths reaped; this was one of the five that did not.
+    try {
+      await reapWorkspaceContainer({ worktreePath: workspace.workingDir, workspaceId: id });
+    } catch (err) {
+      console.warn(`[workspaces] container reap failed (non-fatal) for ${id}: ${errorMessage(err)}`);
     }
     try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch { /* non-fatal */ }
   }

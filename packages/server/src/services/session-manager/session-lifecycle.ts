@@ -1,6 +1,5 @@
-import { db as realDb } from "../../db/index.js";
+import { db as realDb, type Database } from "../../db/index.js";
 import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
-import type { Database } from "../../db/index.js";
 import { randomUUID } from "node:crypto";
 import * as lifecycleRepo from "../../repositories/session-lifecycle.repository.js";
 import * as agentSkillRepo from "../../repositories/agent-skill.repository.js";
@@ -16,8 +15,7 @@ import { applyAuthFailureRecovery } from "../provider-auth-recovery.js";
 import { emitButlerSystemEvent } from "../butler-event-feed.js";
 import { narrowProviderName, type ProviderName } from "../agent-provider.js";
 import { getProviderExitBehavior } from "../agent-provider/provider-exit-behavior.js";
-import type { AgentOutputMessage } from "@agentic-kanban/shared";
-import { modelBelongsToProvider } from "@agentic-kanban/shared";
+import { type AgentOutputMessage, modelBelongsToProvider } from "@agentic-kanban/shared";
 import type { SessionManagerOptions, SessionState, StartSessionOptions } from "./types.js";
 import { workspaceLaunchPreflight } from "../preflight-check.js";
 import { resolveContainerProvision, surfaceIsolationDowngrade } from "./devcontainer-launch.js";
@@ -26,30 +24,9 @@ import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../../const
 import { parseSymlinkDirs } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
 import { loadCodexLicenseRing } from "../codex-license-ring.js";
 import { loadClaudeSubscriptionRing } from "../claude-subscription-ring.js";
-import {
-  classifySessionExit as classifySessionExitRoute,
-  extractCapturedStderr,
-  ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS as EXIT_WINDOW_MS,
-} from "./session-exit-state-machine.js";
-import {
-  buildZeroOutputLaunchFailureStats,
-  buildModelErrorLaunchFailureStats,
-  buildStaleResumeLaunchFailureStats,
-  buildCodexUsageLimitStats,
-  buildClaudeUsageLimitStats,
-  buildIndeterminateExitStats,
-  launchFailureButlerText,
-} from "./session-exit-stats.js";
-import {
-  CODEX_SPARK_MODEL,
-  CODEX_SAFE_DEFAULT_MODEL,
-  isBuilderSession,
-  buildStaleResumeHandoffPrompt,
-  instructionFingerprint,
-  mergeExistingSessionStats,
-  lifecycleProviderName,
-  resolveProviderRotation,
-} from "./session-launch-helpers.js";
+import { classifySessionExit as classifySessionExitRoute, extractCapturedStderr, ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS as EXIT_WINDOW_MS } from "./session-exit-state-machine.js";
+import { buildZeroOutputLaunchFailureStats, buildModelErrorLaunchFailureStats, buildStaleResumeLaunchFailureStats, buildCodexUsageLimitStats, buildClaudeUsageLimitStats, buildIndeterminateExitStats, launchFailureButlerText } from "./session-exit-stats.js";
+import { CODEX_SPARK_MODEL, CODEX_SAFE_DEFAULT_MODEL, isBuilderSession, buildStaleResumeHandoffPrompt, instructionFingerprint, mergeExistingSessionStats, lifecycleProviderName, resolveProviderRotation } from "./session-launch-helpers.js";
 import { finalizePlanModeExit } from "./plan-mode-exit.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -666,12 +643,8 @@ export function createSessionLifecycle(
         }
 
         const message: AgentOutputMessage = event;
-        // #580: broadcast() clears `sessionExitPlanModeDenied` as part of its exit
-        // teardown, so the flag MUST be read before broadcasting — otherwise the
-        // ExitPlanMode auto-resume can never fire.
-        const hadExitPlanModeDenied = event.type === "exit"
-          ? state.sessionExitPlanModeDenied.delete(sessionId)
-          : false;
+        // #580: broadcast()'s exit teardown clears this flag, so read it FIRST.
+        const hadExitPlanModeDenied = event.type === "exit" && state.sessionExitPlanModeDenied.delete(sessionId);
         broadcast(sessionId, message);
 
         if (event.type === "exit") {

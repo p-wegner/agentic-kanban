@@ -12,10 +12,15 @@ export { runtimeState } from "./runtime-state.js";
 export { diffComments, diffCommentsRelations } from "./diff-comments.js";
 export {
   issueDependencies, issueDependenciesRelations, DEPENDENCY_TYPES, DEPENDENCY_TYPE_LABELS,
-  SYMMETRIC_DEPENDENCY_TYPES, DEPENDENCY_TYPE_TRAITS, BLOCKING_DEPENDENCY_TYPES,
-  DIRECTIONAL_DEPENDENCY_TYPES, isBlockingDependencyType, isDirectionalDependencyType,
+  SYMMETRIC_DEPENDENCY_TYPES,
 } from "./issue-dependencies.js";
-export type { DependencyTypeTraits } from "./issue-dependencies.js";
+// #523: the per-type SEMANTICS live in lib/ (routes and the CLI may not import
+// persistence). Re-exported through this barrel for schema-side consumers.
+export {
+  DEPENDENCY_TYPE_TRAITS, BLOCKING_DEPENDENCY_TYPES, DIRECTIONAL_DEPENDENCY_TYPES,
+  isBlockingDependencyType, isDirectionalDependencyType,
+} from "../lib/dependency-type-traits.js";
+export type { DependencyTypeTraits } from "../lib/dependency-type-traits.js";
 export type { DependencyType } from "./issue-dependencies.js";
 export { agentSkills } from "./agent-skills.js";
 export { issueArtifacts, issueArtifactsRelations } from "./issue-artifacts.js";

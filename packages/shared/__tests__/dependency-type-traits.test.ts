@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
+import { DEPENDENCY_TYPES } from "../src/schema/issue-dependencies.js";
 import {
-  DEPENDENCY_TYPES,
   DEPENDENCY_TYPE_TRAITS,
   BLOCKING_DEPENDENCY_TYPES,
   DIRECTIONAL_DEPENDENCY_TYPES,
   isBlockingDependencyType,
   isDirectionalDependencyType,
-} from "../src/schema/issue-dependencies.js";
+} from "../src/lib/dependency-type-traits.js";
 
 describe("DEPENDENCY_TYPE_TRAITS (#523)", () => {
   it("covers EVERY dependency type — a new type cannot be added without deciding its traits", () => {

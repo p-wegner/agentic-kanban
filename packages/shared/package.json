@@ -132,6 +132,12 @@
       "import": "./dist/lib/monitor-action.js",
       "default": "./src/lib/monitor-action.ts"
     },
+    "./lib/dependency-type-traits": {
+      "development": "./src/lib/dependency-type-traits.ts",
+      "types": "./dist/lib/dependency-type-traits.d.ts",
+      "import": "./dist/lib/dependency-type-traits.js",
+      "default": "./src/lib/dependency-type-traits.ts"
+    },
     "./lib/operation-metrics": {
       "development": "./src/lib/operation-metrics.ts",
       "types": "./dist/lib/operation-metrics.d.ts",

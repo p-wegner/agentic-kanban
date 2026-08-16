@@ -14,7 +14,7 @@ import { scaffoldAndPopulateProject } from "./project-registration.js";
 import { isSkillsDirAbsentOrEmpty, writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { isBuilderRelevantSkill } from "@agentic-kanban/shared/lib/builder-skill-policy";
 import { listAgentSkills } from "../repositories/agent-skill.repository.js";
-import { getPreference } from "../repositories/preferences.repository.js";
+import { getPreference, getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import type { Database } from "../db/index.js";
 import { branchExists, detectRepoInfo, getProjectGitStatsAsync } from "./git-info.service.js";
 import { gitExecSync } from "@agentic-kanban/shared/lib/git-exec";
@@ -22,7 +22,6 @@ import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from ".
 import { buildWorkspaceSummaryMap, buildBlockedMap, buildTagMap, buildGraphEdges } from "./board-aggregation.service.js";
 import { getProjectById, getProjectByRepoPath, getAllProjects, insertProject, deleteProjectCascade, setProjectArchived, getProjectStats, getProjectStatuses, createProjectStatus, deleteProjectStatus, updateProjectStatusSortOrder } from "../repositories/project.repository.js";
 import { getProjectsBasePath, updateProjectFields, clearActiveProjectPreference, getProjectWorkspacesWithIssue, getWorkspaceWorkingDirById, getProjectStatusIdsAndNames, getBoardIssueRows, getProjectStatusesOrdered, getBoardIssues, getGraphIssues, getCrossProjectIssues, getActiveWorkspaceCounts, getBoardSummaryRows } from "../repositories/project-service.repository.js";
-import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { generateSetupScript as generateSetupScriptAI, generateTeardownScript as generateTeardownScriptAI, generateVerifyScript as generateVerifyScriptAI } from "./project-setup.service.js";
 import { cloneRepo } from "./repo-clone.service.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
@@ -40,6 +39,7 @@ import {
 import { ProjectError } from "./project-error.js";
 import { createInitialCommit, createSiblingRepoDir, promoteRepoToLeading } from "./project-repos.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { reapWorkspaceContainer } from "./devcontainer-workspace.service.js";
 
 // Re-export so existing importers (routes, tests) keep `import { ProjectError } from "./project.service.js"`.
 export { ProjectError };
@@ -565,6 +565,12 @@ export function createProjectService(deps: { database: Database; workspaceSummar
             composeWorktreePath: ws.workingDir,
             releasedByWorkspaceId: ws.id,
           });
+        }
+        // #576: the devcontainer + dep volumes leak too, not just the compose stack.
+        try {
+          await reapWorkspaceContainer({ worktreePath: ws.workingDir, workspaceId: ws.id });
+        } catch (err) {
+          console.warn(`[projects] container reap failed (non-fatal) for ${ws.id}: ${errorMessage(err)}`);
         }
       }
 

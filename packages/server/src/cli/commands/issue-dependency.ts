@@ -20,7 +20,7 @@ import {
 import { validateBatchEdges, formatBatchEdgeResult } from "../../lib/dependency-batch.js";
 import { buildApiUrl } from "./workspace-api-url.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import { isDirectionalDependencyType, DIRECTIONAL_DEPENDENCY_TYPES } from "@agentic-kanban/shared/schema";
+import { isDirectionalDependencyType, DIRECTIONAL_DEPENDENCY_TYPES } from "@agentic-kanban/shared/lib/dependency-type-traits";
 
 export function registerIssueDependencyCommands(issueCmd: Command) {
   // ── dependency sub-commands ──
