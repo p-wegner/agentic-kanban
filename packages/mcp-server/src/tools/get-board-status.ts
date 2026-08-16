@@ -20,6 +20,7 @@ import {
 import { buildBoardStatusEntry } from "@agentic-kanban/shared/lib/board-status-entry";
 import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { occupiesWipSlot } from "@agentic-kanban/shared/lib/workspace-status";
 
 export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, getDiffShortstat } = deps;
@@ -237,7 +238,7 @@ export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodD
           totals: {
             totalIssues: projectIssues.length,
             inProgress: projectIssues.filter(i => i.statusName === "In Progress" || i.statusName === "In Review").length,
-            activeWorkspaces: wsRows.filter(w => w.status === "active" || w.status === "reviewing").length,
+            activeWorkspaces: wsRows.filter(w => occupiesWipSlot(w.status)).length,
             runningSessions: sessionRows.filter(s => s.status === "running").length,
           },
           issues: result,

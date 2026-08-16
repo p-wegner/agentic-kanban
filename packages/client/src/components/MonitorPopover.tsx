@@ -15,6 +15,7 @@ import {
 export { MonitorButlerSection, OrchestratorSection, RecentBoardHealthEventsSection } from "./MonitorSections.js";
 import type { StartMode, ResolvedTunables, MonitorStatus, BoardHealthEvent } from "../lib/monitor-popover.js";
 import { useNow } from "../hooks/usePoll.js";
+import { occupiesWipSlot } from "@agentic-kanban/shared/lib/workspace-status";
 
 interface MonitorPopoverProps {
   status: MonitorStatus | null;
@@ -169,7 +170,7 @@ export function MonitorPopover({
 
   const activeWs = columns.flatMap(c => c.issues).filter(iss =>
     iss.workspaceSummary?.main &&
-    (iss.workspaceSummary.main.status === "active" || iss.workspaceSummary.main.status === "reviewing" || iss.workspaceSummary.main.status === "fixing") &&
+    occupiesWipSlot(iss.workspaceSummary.main.status) &&
     iss.workspaceSummary.main.lastAssistantMessage
   );
   const warnings = status?.warnings ?? [];

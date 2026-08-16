@@ -6,6 +6,7 @@ import { CodeMetricsBadges, WorkflowMiniIndicator } from "./IssueBadges.js";
 import { groupConflictsByRepo, formatConflictSummary } from "../lib/groupConflictsByRepo.js";
 import { MultirepoHealthPill } from "./MultirepoHealthPill.js";
 import { useNow } from "../hooks/usePoll.js";
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-status";
 
 function RelativeTime({ timestamp, prefix = "" }: { timestamp: string; prefix?: string }) {
   useNow(30_000);
@@ -178,13 +179,13 @@ export function WorkspaceSummarySection(props: {
           </svg>
         </div>
       )}
-      {!compact && (ws?.main?.status === "active" || ws?.main?.status === "fixing") && liveActivity && liveActivity !== "Delegating to agent" && (
+      {!compact && isAgentRunningStatus(ws?.main?.status) && liveActivity && liveActivity !== "Delegating to agent" && (
         <div className="flex items-center gap-1.5 mt-1 text-xs text-gray-400 dark:text-gray-500 px-1">
           <span className={`inline-block w-1.5 h-1.5 rounded-full animate-pulse shrink-0 ${ws.main.status === "fixing" ? "bg-orange-400" : "bg-green-400"}`} />
           <span className="truncate">{liveActivity}</span>
         </div>
       )}
-      {!compact && (ws?.main?.status === "active" || ws?.main?.status === "fixing") && liveActivity && liveStats && (
+      {!compact && isAgentRunningStatus(ws?.main?.status) && liveActivity && liveStats && (
         <div className="flex items-center gap-2 mt-0.5 text-[10px] text-gray-400 dark:text-gray-500 px-1">
           {liveStats.model && <span className="font-mono">{liveStats.model}</span>}
           {liveStats.contextTokens > 0 && (
@@ -203,7 +204,7 @@ export function WorkspaceSummarySection(props: {
           )}
         </div>
       )}
-      {!compact && !(ws?.main?.status === "active" || ws?.main?.status === "fixing") && ws?.main && (ws.main.contextTokens || ws.main.lastTool) && (
+      {!compact && !isAgentRunningStatus(ws?.main?.status) && ws?.main && (ws.main.contextTokens || ws.main.lastTool) && (
         <div className="flex items-center gap-2 mt-0.5 text-[10px] text-gray-400 dark:text-gray-500 px-1">
           {ws.main.contextTokens != null && ws.main.contextTokens > 0 && (
             <span>{Math.round(ws.main.contextTokens / 1000)}k ctx</span>

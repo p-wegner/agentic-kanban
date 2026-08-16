@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats } from "../lib/useBoardEvents.js";
+import { isAgentRunningStatus, occupiesWipSlot } from "@agentic-kanban/shared/lib/workspace-status";
 
 interface ActivityStripProps {
   columns: StatusWithIssues[];
@@ -16,7 +17,7 @@ export function ActivityStrip({ columns, liveActivity, liveStats, onIssueClick }
     for (const col of columns) {
       for (const issue of col.issues) {
         const ws = issue.workspaceSummary?.main;
-        if (ws && (ws.status === "active" || ws.status === "fixing" || ws.status === "reviewing")) {
+        if (ws && occupiesWipSlot(ws.status)) {
           result.push(issue);
         }
       }
@@ -33,7 +34,7 @@ export function ActivityStrip({ columns, liveActivity, liveStats, onIssueClick }
         const ws = issue.workspaceSummary!.main!;
         const activity = liveActivity[issue.id];
         const stats = liveStats[issue.id];
-        const statusDot = ws.status === "active" || ws.status === "fixing"
+        const statusDot = isAgentRunningStatus(ws.status)
           ? "bg-green-500 animate-pulse"
           : "bg-accent-500";
         return (

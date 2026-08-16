@@ -82,8 +82,10 @@ export function isTerminalWorkspaceStatus(status: string | null | undefined): bo
  * deciding whether to show a live-output affordance or detect a stall. Including
  * `reviewing` would make a reviewing workspace look stalled once its own agent exits.
  */
+export const AGENT_RUNNING_STATUSES = ["active", "fixing"] as const satisfies readonly WorkspaceStatus[];
+
 export function isAgentRunningStatus(status: string | null | undefined): boolean {
-  return status === "active" || status === "fixing";
+  return status != null && (AGENT_RUNNING_STATUSES as readonly string[]).includes(status);
 }
 
 /**
@@ -93,8 +95,10 @@ export function isAgentRunningStatus(status: string | null | undefined): boolean
  * lane, so starting another ticket against it would exceed the configured WIP. Under-
  * counting here is what lets the monitor over-start.
  */
+export const WIP_OCCUPYING_STATUSES = ["active", "fixing", "reviewing"] as const satisfies readonly WorkspaceStatus[];
+
 export function occupiesWipSlot(status: string | null | undefined): boolean {
-  return status === "active" || status === "fixing" || status === "reviewing";
+  return status != null && (WIP_OCCUPYING_STATUSES as readonly string[]).includes(status);
 }
 
 /**

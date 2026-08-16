@@ -1,5 +1,6 @@
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import { ACCENT } from "./chartColors.js";
+import { occupiesWipSlot } from "@agentic-kanban/shared/lib/workspace-status";
 
 export type DependencyType = "depends_on" | "blocked_by" | "related_to" | "duplicates" | "parent_of" | "child_of" | "coupled_with";
 
@@ -30,8 +31,7 @@ export interface Node {
   issue: IssueWithStatus;
 }
 
-/** Workspace statuses that count as "an agent is actively working this issue". */
-const ACTIVE_WORKSPACE_STATUSES = new Set(["active", "reviewing", "fixing"]);
+
 
 /**
  * True when an issue is currently being worked on — it has at least one active
@@ -42,7 +42,7 @@ export function isActivelyWorked(issue: IssueWithStatus): boolean {
   const ws = issue.workspaceSummary;
   if (!ws) return false;
   if (ws.active > 0) return true;
-  return ws.main ? ACTIVE_WORKSPACE_STATUSES.has(ws.main.status) : false;
+  return ws.main ? occupiesWipSlot(ws.main.status) : false;
 }
 
 /** Brand terracotta glow used for the active-progress halo. */

@@ -3,6 +3,7 @@ import { NotFoundError } from "../errors/index.js";
 import { getChangedFileNames } from "./git.service.js";
 import { getProjectDefaultBranch, getActiveContentionWorkspaces } from "../repositories/file-contention.repository.js";
 import { listWorkspaceRepos } from "../repositories/repo.repository.js";
+import { WIP_OCCUPYING_STATUSES } from "@agentic-kanban/shared/lib/workspace-status";
 
 export interface ContentionWorkspace {
   workspaceId: string;
@@ -26,7 +27,9 @@ export interface FileContentionResult {
   checkedAt: string;
 }
 
-const ACTIVE_STATUSES = ["active", "reviewing", "fixing"] as const;
+// #498: the WIP-occupying set, as an array because it feeds a SQL `inArray`. Named
+// via the shared constant so it cannot drift from occupiesWipSlot().
+const ACTIVE_STATUSES = WIP_OCCUPYING_STATUSES;
 
 export async function getFileContention(
   projectId: string,

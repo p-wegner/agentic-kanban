@@ -14,6 +14,7 @@ import { resolveWorkspaceLaunchDefaults } from "../lib/workspaceLaunchDefaults.j
 import { boardSelectionActions } from "../stores/boardSelectionStore.js";
 import { boardBulkSelectionActions } from "../stores/boardBulkSelectionStore.js";
 import { isPlanModePriority } from "../lib/priorityTraits.js";
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-status";
 
 type Setter<T> = Dispatch<SetStateAction<T>>;
 
@@ -98,7 +99,7 @@ export function createBoardIssueActions(deps: BoardIssueActionsDeps) {
       .flatMap((col) => col.issues)
       .filter((i) => {
         const s = i.workspaceSummary?.main?.status;
-        return s === "active" || s === "fixing";
+        return isAgentRunningStatus(s);
       }).length;
     if (activeAgentsTarget !== undefined && activeCount >= activeAgentsTarget) {
       showToast(`Agent capacity reached (${activeAgentsTarget} active). Stop a running workspace first.`, "error");

@@ -5,6 +5,7 @@ import type { IssueWithStatus } from "@agentic-kanban/shared";
 import { WorkflowProgress } from "./WorkflowProgress.js";
 import { isSpecPlanningPhase, SpecPhasePanel } from "./SpecPhasePanel.js";
 import { groupConflictsByRepo, formatConflictSummary } from "../lib/groupConflictsByRepo.js";
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-status";
 
 /** The non-null main workspace summary carried on an issue. */
 type MainWorkspace = NonNullable<NonNullable<IssueWithStatus["workspaceSummary"]>["main"]>;
@@ -109,7 +110,7 @@ export function IssueWorkspacesSection({
                 </button>
               )}
             </div>
-            {(main.status === "active" || main.status === "fixing") && (main.contextTokens || main.lastTool) && (
+            {isAgentRunningStatus(main.status) && (main.contextTokens || main.lastTool) && (
               <div className="flex items-center gap-2 pl-4">
                 {main.contextTokens ? (
                   <span className="text-[10px] text-gray-400 dark:text-gray-500">
