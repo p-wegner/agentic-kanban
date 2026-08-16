@@ -1,5 +1,6 @@
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "./useBoardEvents.js";
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-status";
 
 // Pure view-model for AgentGrid: status/attention config, per-card derivations, and
 // the grid-level agent partition / sort / sizing. No JSX, no hooks — so the logic
@@ -171,7 +172,7 @@ export function computeEmptySlotCount(
 ): number {
   const activeAgentCount = agents.filter((i) => {
     const s = i.workspaceSummary?.main?.status;
-    return s === "active" || s === "fixing";
+    return isAgentRunningStatus(s);
   }).length;
   if (!hasDropHandler || !activeAgentsTarget || activeAgentsTarget <= activeAgentCount) return 0;
   return Math.min(activeAgentsTarget - activeAgentCount, 3);

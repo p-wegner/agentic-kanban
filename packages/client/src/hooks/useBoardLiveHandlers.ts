@@ -4,6 +4,7 @@ import { useBoardEvents, type LiveSessionStats, type TodoItem, type ApprovalRequ
 import { sendDesktopNotification } from "../lib/desktop.js";
 import { showToast } from "../lib/toast.js";
 import { agentActivityActions } from "../stores/agentActivityStore.js";
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-status";
 
 type NotificationIssue = { id: string; issueNumber?: number; title?: string; workspaceId?: string };
 
@@ -121,7 +122,7 @@ export function useBoardLiveHandlers(deps: UseBoardLiveHandlersDeps) {
 
   const handleSessionActivity = useCallback((issueId: string, sessionId: string, activity: string) => {
     const isActive = columnsRef.current.some(col =>
-      col.issues.some(iss => iss.id === issueId && (iss.workspaceSummary?.main?.status === "active" || iss.workspaceSummary?.main?.status === "fixing"))
+      col.issues.some(iss => iss.id === issueId && isAgentRunningStatus(iss.workspaceSummary?.main?.status))
     );
     if (!isActive) {
       setSessionActivityRaw((prev) => {
@@ -168,7 +169,7 @@ export function useBoardLiveHandlers(deps: UseBoardLiveHandlersDeps) {
 
   const handleSessionStats = useCallback((issueId: string, stats: LiveSessionStats) => {
     const isActive = columnsRef.current.some(col =>
-      col.issues.some(iss => iss.id === issueId && (iss.workspaceSummary?.main?.status === "active" || iss.workspaceSummary?.main?.status === "fixing"))
+      col.issues.some(iss => iss.id === issueId && isAgentRunningStatus(iss.workspaceSummary?.main?.status))
     );
     if (!isActive) return;
     // A stats delta (token/tool-use update) also counts as "not idle" (#86).

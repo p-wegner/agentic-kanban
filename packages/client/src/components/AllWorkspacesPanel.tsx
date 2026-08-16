@@ -10,6 +10,7 @@ import { AgentStallIndicator, useAgentStallThreshold } from "./AgentStallBadge.j
 import { useStaleWorkspaceManager } from "../hooks/useStaleWorkspaceManager.js";
 import { useProjectsQuery } from "../hooks/useBoardDataQueries.js";
 import { issueStatusToneClass } from "../lib/badgeTones.js";
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import {
   type CrossProjectGroup,
   type WsStatusFilter,
@@ -499,14 +500,14 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
                           )}
 
                           {/* Context usage */}
-                          {(main.status === "active" || main.status === "fixing") && main.contextTokens ? (
+                          {isAgentRunningStatus(main.status) && main.contextTokens ? (
                             <span className="text-xs text-gray-400 dark:text-gray-500" title={`${main.contextTokens.toLocaleString('en-US')} context tokens`}>
                               {formatContextTokens(main.contextTokens)}
                             </span>
                           ) : null}
 
                           {/* Last tool */}
-                          {(main.status === "active" || main.status === "fixing") && main.lastTool ? (
+                          {isAgentRunningStatus(main.status) && main.lastTool ? (
                             <span className="text-xs text-gray-400 dark:text-gray-500 truncate max-w-[160px]" title={`Last tool: ${main.lastTool}`}>
                               <span className="font-medium text-gray-500 dark:text-gray-400">tool:</span> {main.lastTool}
                             </span>

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { STATUS_COLORS } from "../lib/chartColors";
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-status";
 
 const COMPLETED_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 const HIDDEN_STATUS_NAMES = new Set(["Backlog"]);
@@ -102,7 +103,7 @@ function SwimlaneCard({ issue, onClick }: SwimlaneCardProps) {
           {ws && ws.status !== "closed" && (
             <div className="mt-1.5 flex items-center gap-1">
               <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${
-                ws.status === "active" || ws.status === "fixing" ? "bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400" :
+                isAgentRunningStatus(ws.status) ? "bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400" :
                 ws.status === "reviewing" ? "bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-400" :
                 ws.status === "idle" ? "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400" :
                 "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"

@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { TickerEntry } from "../hooks/useAgentLiveTicker.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { openSessionTranscript } from "../lib/sessionTranscriptEvents.js";
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-status";
 
 interface AgentLiveTickerPanelProps {
   entries: TickerEntry[];
@@ -32,7 +33,7 @@ export function AgentLiveTickerPanel({
   }
 
   const activeEntries = entries.filter(
-    (e) => e.workspaceStatus === "active" || e.workspaceStatus === "fixing"
+    (e) => isAgentRunningStatus(e.workspaceStatus)
   );
 
   return (

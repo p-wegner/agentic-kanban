@@ -8,6 +8,7 @@ import {
 } from "../lib/detectAgentStall.js";
 import { useAgentActivityStore } from "../stores/agentActivityStore.js";
 import { useNow } from "../hooks/usePoll.js";
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-status";
 
 /** How often the badge re-evaluates so idle time can cross the threshold live. */
 const STALL_TICK_MS = 5_000;
@@ -55,7 +56,7 @@ export function useAgentStallSignal(
   thresholdSec: number,
 ): AgentStallSignal {
   const meta = useAgentActivityStore((s) => s.byIssue[issueId]);
-  const isLive = status === "active" || status === "fixing";
+  const isLive = isAgentRunningStatus(status);
   useNow(STALL_TICK_MS, isLive);
 
   const lastActivityAt = meta?.lastActivityAt ?? sessionStartMs ?? null;
