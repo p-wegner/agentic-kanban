@@ -164,6 +164,10 @@ export async function getLiveStackHostPorts(database: Database = db): Promise<nu
   for (const row of rows) {
     if (!row.serviceState) continue;
     try {
+      // #531: deliberately a raw parse, not `parseServiceStackState`. This scan collects
+      // ALLOCATED host ports so the next stack does not reuse one. A blob the strict
+      // codec rejects still holds ports that are really bound; dropping it would hand
+      // those ports out again and collide with a live stack. Lenient on purpose.
       const parsed = JSON.parse(row.serviceState) as { ports?: Record<string, unknown> };
       for (const value of Object.values(parsed.ports ?? {})) {
         const port = typeof value === "number" ? value : Number(value);
