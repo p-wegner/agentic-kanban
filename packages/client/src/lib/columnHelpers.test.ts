@@ -34,14 +34,31 @@ describe("groupByPriority", () => {
     expect(groups[1].issues).toEqual([low]);
   });
 
-  it("puts unknown and missing priorities into the ungrouped lane", () => {
+  it("puts a missing priority into the ungrouped lane", () => {
     // priority is typed string but can be null at runtime (DB) — the helper guards it
     const none = issue({ priority: null as unknown as string });
-    const weird = issue({ priority: "urgent" });
-    const groups = groupByPriority([none, weird]);
+    const groups = groupByPriority([none]);
     expect(groups).toHaveLength(1);
     expect(groups[0].key).toBe("ungrouped");
-    expect(groups[0].issues).toEqual([none, weird]);
+    expect(groups[0].issues).toEqual([none]);
+  });
+
+  it("folds the legacy `urgent` value into the critical lane, not ungrouped (#516)", () => {
+    // This assertion is INVERTED from what it pinned before. `urgent` is a legacy input
+    // alias the server now folds to `critical`; treating it as an unknown value dropped
+    // a genuinely critical issue into an unstyled lane at the bottom of the board.
+    const legacy = issue({ priority: "urgent" });
+    const groups = groupByPriority([legacy]);
+    expect(groups.map((g) => g.key)).toEqual(["critical"]);
+  });
+
+  it("folds an unrecognised value to the normaliser's default lane, NOT ungrouped", () => {
+    // `ungrouped` means "no priority set" — a real, distinct state. An unrecognised
+    // string is a priority the client cannot read, and normalizeIssuePriority's default
+    // (`medium`) is the one place that decides what it means. Re-deciding that here is
+    // exactly the two-rules drift #516 removes.
+    const nonsense = issue({ priority: "banana" });
+    expect(groupByPriority([nonsense]).map((g) => g.key)).toEqual(["medium"]);
   });
 
   it("returns no groups for an empty column", () => {

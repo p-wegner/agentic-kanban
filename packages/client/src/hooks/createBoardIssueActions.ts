@@ -13,6 +13,7 @@ import type { IssueWithStatus, UpdateIssueRequest, StatusWithIssues } from "@age
 import { resolveWorkspaceLaunchDefaults } from "../lib/workspaceLaunchDefaults.js";
 import { boardSelectionActions } from "../stores/boardSelectionStore.js";
 import { boardBulkSelectionActions } from "../stores/boardBulkSelectionStore.js";
+import { isPlanModePriority } from "../lib/priorityTraits.js";
 
 type Setter<T> = Dispatch<SetStateAction<T>>;
 
@@ -114,7 +115,7 @@ export function createBoardIssueActions(deps: BoardIssueActionsDeps) {
         issueId: issue.id,
         branch,
         requiresReview: isAutoReviewEnabled(s.auto_review),
-        planMode: issue.priority === "high" || issue.priority === "critical",
+        planMode: isPlanModePriority(issue.priority),
         isDirect: false,
         profile: { provider, name: profileName },
       };
