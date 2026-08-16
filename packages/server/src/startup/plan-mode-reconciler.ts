@@ -15,6 +15,7 @@ import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
 import { PREF_RECONCILER_STRANDED_PLAN_ENABLED } from "../constants/preference-keys.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
+import { startPeriodicSweep, type PeriodicSweepHandle } from "./periodic-sweep.js";
 
 export interface StrandedPlanReconcilerDeps {
   database?: Database;
@@ -161,28 +162,22 @@ export async function reconcileStrandedPlanModeWorkspaces(deps: StrandedPlanReco
 
 const DEFAULT_INTERVAL_MS = 60_000;
 
-let activeStrandedPlanTimeout: ReturnType<typeof setTimeout> | null = null;
-let activeStrandedPlanInterval: ReturnType<typeof setInterval> | null = null;
+let activeStrandedPlanSweep: PeriodicSweepHandle | null = null;
 
 export function stopStrandedPlanReconciler(): void {
-  if (activeStrandedPlanTimeout !== null) {
-    clearTimeout(activeStrandedPlanTimeout);
-    activeStrandedPlanTimeout = null;
-  }
-  if (activeStrandedPlanInterval !== null) {
-    clearInterval(activeStrandedPlanInterval);
-    activeStrandedPlanInterval = null;
-  }
+  activeStrandedPlanSweep?.stop();
+  activeStrandedPlanSweep = null;
 }
 
 /** Run the reconciler shortly after boot (crash recovery) and then on an interval. */
-export function startStrandedPlanReconciler(deps: StrandedPlanReconcilerDeps, intervalMs = DEFAULT_INTERVAL_MS): ReturnType<typeof setInterval> {
+export function startStrandedPlanReconciler(deps: StrandedPlanReconcilerDeps, intervalMs = DEFAULT_INTERVAL_MS): PeriodicSweepHandle {
   stopStrandedPlanReconciler();
-
-  const tick = () => {
-    reconcileStrandedPlanModeWorkspaces(deps).catch((err) => console.warn("[reconcile] plan cycle error:", err instanceof Error ? err.message : err));
-  };
-  activeStrandedPlanTimeout = setTimeout(tick, 30_000);
-  activeStrandedPlanInterval = setInterval(tick, intervalMs);
-  return activeStrandedPlanInterval;
+  activeStrandedPlanSweep = startPeriodicSweep({
+    tag: "reconcile",
+    tick: () => reconcileStrandedPlanModeWorkspaces(deps),
+    bootDelayMs: 30_000,
+    intervalMs,
+  });
+  return activeStrandedPlanSweep;
 }
+

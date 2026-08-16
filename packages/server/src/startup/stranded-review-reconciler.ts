@@ -12,6 +12,7 @@ import { getMergeJob } from "../services/merge-job.service.js";
 import { recordDriveObstacle } from "../services/drive-obstacles.service.js";
 import { PREF_RECONCILER_STRANDED_REVIEW_ENABLED } from "../constants/preference-keys.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { startPeriodicSweep, type PeriodicSweepHandle } from "./periodic-sweep.js";
 
 /**
  * How many times the reconciler may attempt a review preflight for the SAME pair of
@@ -228,28 +229,22 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
 
 const DEFAULT_INTERVAL_MS = 60_000;
 
-let activeStrandedReviewTimeout: ReturnType<typeof setTimeout> | null = null;
-let activeStrandedReviewInterval: ReturnType<typeof setInterval> | null = null;
+let activeStrandedReviewSweep: PeriodicSweepHandle | null = null;
 
 export function stopStrandedReviewReconciler(): void {
-  if (activeStrandedReviewTimeout !== null) {
-    clearTimeout(activeStrandedReviewTimeout);
-    activeStrandedReviewTimeout = null;
-  }
-  if (activeStrandedReviewInterval !== null) {
-    clearInterval(activeStrandedReviewInterval);
-    activeStrandedReviewInterval = null;
-  }
+  activeStrandedReviewSweep?.stop();
+  activeStrandedReviewSweep = null;
 }
 
 /** Run the reconciler shortly after boot (crash recovery) and then on an interval. */
-export function startStrandedReviewReconciler(deps: StrandedReviewReconcilerDeps, intervalMs = DEFAULT_INTERVAL_MS): ReturnType<typeof setInterval> {
+export function startStrandedReviewReconciler(deps: StrandedReviewReconcilerDeps, intervalMs = DEFAULT_INTERVAL_MS): PeriodicSweepHandle {
   stopStrandedReviewReconciler();
-
-  const tick = () => {
-    reconcileStrandedReviews(deps).catch((err) => console.warn("[reconcile] cycle error:", err instanceof Error ? err.message : err));
-  };
-  activeStrandedReviewTimeout = setTimeout(tick, 25_000);
-  activeStrandedReviewInterval = setInterval(tick, intervalMs);
-  return activeStrandedReviewInterval;
+  activeStrandedReviewSweep = startPeriodicSweep({
+    tag: "reconcile",
+    tick: () => reconcileStrandedReviews(deps),
+    bootDelayMs: 25_000,
+    intervalMs,
+  });
+  return activeStrandedReviewSweep;
 }
+

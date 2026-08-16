@@ -45,6 +45,7 @@ import {
 } from "../services/workspace-services.service.js";
 import { getOrCreateServiceStackInstanceId } from "../repositories/workspace-service-state.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { startPeriodicSweep, type PeriodicSweepHandle } from "./periodic-sweep.js";
 
 const TERMINAL_STATUSES: string[] = [...TERMINAL_WORKSPACE_STATUSES];
 
@@ -167,18 +168,11 @@ export async function reapOrphanServiceStacksOnce(deps: ReapOnceDeps): Promise<{
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
 const INITIAL_DELAY_MS = 60 * 1000;
 
-let activeReaperTimeout: ReturnType<typeof setTimeout> | null = null;
-let activeReaperInterval: ReturnType<typeof setInterval> | null = null;
+let activeServiceStackSweep: PeriodicSweepHandle | null = null;
 
 export function stopServiceStackReaper(): void {
-  if (activeReaperTimeout !== null) {
-    clearTimeout(activeReaperTimeout);
-    activeReaperTimeout = null;
-  }
-  if (activeReaperInterval !== null) {
-    clearInterval(activeReaperInterval);
-    activeReaperInterval = null;
-  }
+  activeServiceStackSweep?.stop();
+  activeServiceStackSweep = null;
 }
 
 /**
@@ -191,15 +185,11 @@ export function startServiceStackReaper(
   intervalMs = DEFAULT_INTERVAL_MS,
 ): void {
   stopServiceStackReaper();
-  const tick = () => {
-    reapOrphanServiceStacksOnce({ ...deps, shieldMidProvision: true, logLabel: "services-reaper" }).catch((err) =>
-      console.warn("[services-reaper] periodic tick error:", err instanceof Error ? err.message : err),
-    );
-  };
-  const timer = setTimeout(tick, INITIAL_DELAY_MS);
-  const interval = setInterval(tick, intervalMs);
-  activeReaperTimeout = timer;
-  activeReaperInterval = interval;
-  timer.unref?.();
-  interval.unref?.();
+  activeServiceStackSweep = startPeriodicSweep({
+    tag: "services-reaper",
+    tick: () => reapOrphanServiceStacksOnce({ ...deps, shieldMidProvision: true, logLabel: "services-reaper" }),
+    bootDelayMs: INITIAL_DELAY_MS,
+    intervalMs,
+  });
 }
+
