@@ -1,7 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { boardApiUrl, getServerPort } from "../server-url.js";
-import { getServerPort } from "../server-url.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function registerButlerEnsure(server: McpServer) {
