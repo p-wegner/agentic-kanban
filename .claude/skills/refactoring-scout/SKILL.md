@@ -45,7 +45,7 @@ Before planning a run, for each candidate lane run the gate:
    yields — see below), but it removes the strongest reason to rescan.
 2. **Reopen triggers** — rescan a lane only if at least one holds: (a) ≥ ~10 changed files or
    ≥ ~5% of the lane since `lane.sha`; (b) a different model (family or generation) than the one
-   recorded; (c) a harvest signal not yet used on that lane (the ledger records which of 1–15
+   recorded; (c) a harvest signal not yet used on that lane (the ledger records which of 1–18
    ran); (d) the lane's last yield was still ≥3 filed findings (falling yield with fresh signals
    left is normal; falling yield with the signal pool exhausted means stop); (e) a filed ticket
    from that lane has since been merged (its neighbourhood moved).
@@ -54,8 +54,11 @@ Before planning a run, for each candidate lane run the gate:
    clean".
 Empirical anchor from this repo (2026-08-16): whole-repo lane, same model, two identical sweeps
 overlapped ~40% (7 + 8 findings → 12 tickets); four focused lanes with the exclusion list yielded
-31 findings and 1 in-round duplicate. Expect the second focused pass over an unchanged lane to
-drop to a third of that or worse.
+31 findings and 1 in-round duplicate; a third round of four NEW lanes (startup/session-manager,
+extension subsystems, test seams, types/contracts) on the same sha yielded 33 findings + 8
+user-visible bugs with 0 duplicates — new LANES/SIGNALS on unchanged code still pay; a REPEAT lane
+with the same signals is what saturates. Expect a second focused pass over an unchanged lane with
+unchanged signals to drop to a third of that or worse.
 
 After a run, append the round (date, model, HEAD sha, lanes, signals used, tickets filed with
 titles, rejected list with reasons) and update each lane's row. Commit the ledger with the run.
@@ -69,7 +72,7 @@ deletes copies and can invalidate a sibling finding's evidence). Consequences:
   expiry, record it with the sha it was measured against.
 - **Default cadence is drift-scoped, not sweep-scoped.** When drift since `lane.sha` is small
   (< the reopen threshold) but non-zero, don't rescan the lane — run a **diff-scoped scout**: the
-  changed files + their direct importers/importees, all 15 signals, exclusion list applied. New
+  changed files + their direct importers/importees, all 18 signals, exclusion list applied. New
   code is where new workarounds appear (a fresh feature usually copies the nearest existing
   pattern, drift and all). Full-lane rescans are for large drift, a new model, or an unused signal.
 - **Ticket-freshness pass before each run** (cheap, do it first): for every OPEN scout ticket in
@@ -95,17 +98,33 @@ dedupes across lanes (merge same-idea findings, keep both evidence lists) and fi
 lanes with an exclusion list produced ~0 cross-round duplicates and ~1 in-round duplicate per
 4 scouts. Ask each scout to also return **skill feedback** (which steps helped, which were
 wasted, what signal it wished it had) — fold it back into this file after each round.
+- Scouts check open tickets by REST too when MCP is absent: `GET /api/issues?projectId=<id>` +
+  keyword filter on titles.
+- Ledger **Rejected** entries must name their reason-SCOPE ("review-helpers.ts prompt builders —
+  wrappers, NOT the 11-positional relay") or they swallow valid siblings; scouts should file
+  extra evidence for an existing ticket under **Sibling evidence** in the ledger (ticket → new
+  file:line) instead of restating it in Rejected.
+- Which signals pay per lane (from this repo's rounds): services/startup lanes → 11, 16, 17, 7;
+  client lane → 14, 12, 5; types/contracts lane → 18, 2 (scoped), 11; test-seam lane → 9's
+  sub-signals; extension-subsystem lanes → 11, 17, 6 (bag variant). Signals 1, 13, 15 are
+  low-yield after the first pass over a lane; 10 (layer copies) is exhausted once the
+  REST/MCP/CLI tickets exist. Don't force every signal on every lane — say which you skipped.
+- Record the mock histogram (top 10 modules × count) in the ledger per test-seam pass so the next
+  pass can diff counts instead of re-deriving.
 
 ## Step 1 — Harvest signals (cheap, mechanical, do all of them)
-Run these over `packages/*/src` (exclude `__tests__`, `dist`, generated `drizzle/`), noting
+Run these over `packages/*/src` (exclude `__tests__` except for signal 9, `dist`, generated `drizzle/`), noting
 file:line for each hit. Don't read whole files yet — collect a candidate list.
 
 1. **Marker comments**: `workaround|hack|kludge|band-?aid|for now|temporar|FIXME|XXX|legacy|
    back-?compat|backwards|special.?case|edge.?case|until we|because .* (windows|vitest|drizzle|sqlite)`.
    Cluster hits by directory — 5 hits in one module = one finding, not five.
-2. **Type-sniffing / string-sniffing**: `typeof x === 'string'`, `'x' in obj`, `startsWith(`,
-   `includes('` on identifiers, `as any`, `as unknown as`, `// @ts-` — each is often a missing
-   discriminated union or a missing narrow helper.
+2. **Type-sniffing / string-sniffing**: `'x' in obj`, `startsWith(`/`includes('` on
+   `reason`/`kind`/`verdict`/`type`/`status` fields, `as any`, `as unknown as`, `// @ts-` — each is
+   often a missing discriminated union or a missing narrow helper. Scope it to those FIELD names;
+   an unscoped `typeof x === "string"` grep is hundreds of local narrowings (noise). For a
+   stream/WS lane also grep the client for `JSON.parse(...) as X` and diff `X` against the
+   emitter's type — one grep, and it finds every hand-mirrored frame union.
 3. **Repeated guard chains**: the same 2–4-clause `if (a && !b && c !== 'x')` in ≥3 files
    (grep a distinctive clause, then look for siblings). Candidate for one predicate function.
 4. **Copy-drifted helpers**: functions with the same/similar name in ≥2 packages or ≥2 dirs
@@ -114,27 +133,43 @@ file:line for each hit. Don't read whole files yet — collect a candidate list.
 5. **Enum-by-if**: `switch`/`if-else` over the same string literal set in ≥3 places (providers,
    placements, statuses, columns, view names, stack kinds). Candidate for a traits table /
    registry so the next member is one entry.
-6. **Flag soup**: functions with ≥3 boolean params or an options bag where callers pass
-   mutually exclusive combos — usually a missing mode enum or a missing strategy object.
+6. **Flag soup / grew-field-by-field bags**: functions with ≥3 boolean params, or an options bag
+   whose fields each carry a doc-comment citing a DIFFERENT ticket number (the tell that it grew
+   one feature at a time) — usually a missing mode enum, a missing strategy object, or a missing
+   single builder for the bag (see 17). The literal "≥3 booleans" reading alone rarely pays.
 7. **Re-derivation**: the same value computed from raw inputs at multiple layers (paths from
    repoPath+branch, ports from issue numbers, keys from slug+id, pref names from
    `<prefix>_<projectId>`). Candidate for one keyed constructor function.
 8. **Ad-hoc persistence**: JSON blobs in string columns, sentinel files, prefs used as tables
    (`pref_<thing>_<id>` families). Note when a family has grown past ~4 members.
-9. **Test smells that point at production shape**: tests that mock 5+ modules, `vi.mock` of the
-   same module in ≥10 test files, or helper factories duplicated across test dirs → the
-   production seam is missing, not the test.
+9. **Test smells that point at production shape**: run the mock histogram first —
+   `grep -rhoE 'vi\.mock\("[^"]+"' packages/*/src/__tests__ | sort | uniq -c | sort -rn` —
+   then open ONE test per top module and ask why each mock is needed. Sub-signals, all cheap:
+   casts in tests (`as never`, `as unknown as ReturnType<typeof create…>`) → an over-wide
+   dependency type, the fix is a narrow `Pick<>` port; `__reset…ForTests`/`_forTest` exports in
+   PRODUCTION → module-global state that should be instance-owned; a test helper that
+   re-implements a production PARSER/APPLIER (migration splitter, config parser) → export it;
+   an injectable dep (`database`, `gitService`) advertised in a signature but bypassed inside via
+   a global import → the seam is a lie. Rule for the borderline: a seam counts if production
+   returns LESS than its callers — including tests — need to proceed (e.g. status ids never
+   returned → 137 tests hand-seed them). Ratchet/allowlist BASELINES are a 5-minute skim, not a
+   step (their entries are usually already tickets or documented constraints). The e2e package
+   has no unit seams to reveal — skip it.
 10. **Layer copies**: the same logic in REST route + MCP tool + CLI command (this repo has three
     entry surfaces). Sample 5 operations and check whether they share a service function.
 11. **SSOT declared but bypassed** (the highest-yield signal so far — ~30% of all findings):
     grep for self-declared authorities — `single source of truth|the one parser|all callers must|
-    canonical|SSOT|so .* can never .* drift|previously open-coded` — and for each, count
+    canonical|SSOT|so .* can never .* drift|previously open-coded|must never diverge|the same .*
+    feeds both|ONE derivation|the ONLY correct|mirrors|backward-compat wrapper` — and for each, count
     IMPORTERS of the helper vs. RAW re-implementations of what it does. A helper with 1–3
     importers next to 10+ hand-rolled copies is a finished abstraction nobody adopted; the
     finding is "route the copies through it", which is the cheapest kind.
 12. **Existing helper, low adoption**: same idea without a comment — for each exported
     `resolve*/parse*/is*/build*` in `shared/lib`, compare importer count with the grep count of
     the pattern it encapsulates (e.g. `strategyPrefKey` had 3 importers vs 11 inline templates).
+    The helper may be UNEXPORTED — a private function in one module whose copy exists in the
+    next module precisely because the original was private (`launchLearningStep`,
+    `waitForLearningSession`); grep function names across modules, not just exports.
 13. **Positional-param relays**: functions with ≥8 params whose signature is re-typed at ≥2
     layers and forwarded positionally — a missing request object; usually accompanied by
     duplicated "prep" pipelines in each implementation.
@@ -143,7 +178,25 @@ file:line for each hit. Don't read whole files yet — collect a candidate list.
     subscriptions; `let cancelled=false` fetch ladders. Count copies; a hook/helper of ~20
     lines usually deletes 100+.
 15. **Sentinel values decoded unevenly**: a magic value (`"HEAD"`, `""`, `"none"`, `null`-as-
-    tristate) that SOME callees special-case and others don't — grep the literal, list callees.
+    tristate, a status like `ready_for_merge`) that SOME callees/consumers handle and others
+    don't — grep the literal, list every consumer, mark the ones that fall through.
+16. **Live path vs recovery path**: for every reconciler/startup sweep/reaper, find the LIVE
+    handler that makes the same decision (exit finalize live vs `notifyExternalExit`, plan-mode
+    exit vs its reconciler, orphan recovery at startup vs runtime, gate-with-evidence in
+    exit-workflow vs monitor-cycle) and DIFF them. Copies drift silently because only one path
+    runs in normal operation; this signal found 3 latent bugs in one lane.
+17. **Same inputs, two builders**: for every service function with ≥4 callers, diff the callers'
+    preludes / argument assembly (`teardownWorkspaceServices`, `provisionContainerForWorkspace`,
+    `parsePluginManifest`, `startSession`). Guard drift, missing fields, and N-query loops live
+    in the callers, not the callee; a single `resolveXOptions()`/`listX()` fixes all of them.
+18. **Cross-package vocab & DTO drift** (types/contracts lane): mechanically intersect declared
+    type names per package (`grep -ohE "^export (interface|type) \w+"` per package, then
+    `comm`) — names in client∩server∖shared are hand-mirrored DTOs; for every string-literal set
+    that appears in ≥2 packages, COUNT members per copy — a cardinality mismatch (issue types
+    3/4/5, monitor actions 7/9, comment kinds 4/6) is a `Carries latent bug:` candidate. Check
+    WHY an SSOT is type-only before proposing runtime consts in it (`export type *` barrels can't
+    hold arrays — put them in `shared/lib`/`schema`, where `DEPENDENCY_TYPES`/`START_MODE_VALUES`
+    already live).
 
 ## Step 2 — Qualify each candidate (read the actual code)
 For each cluster from Step 1 read the real files. Keep only findings that pass ALL of:
@@ -159,8 +212,17 @@ For each cluster from Step 1 read the real files. Keep only findings that pass A
 - **Verified**: at least one claim per finding was checked by reading code, not inferred from
   a grep. Say what you verified.
 
+Two checks that prevent false positives: (a) **read the subsystem's own guide** (`docs/*.md`,
+the module header) before calling an omission "drift" — `plugin-scaffold`'s narrower placeholder
+set looked like drift until `docs/plugin-development.md` said it was deliberate; (b) for a
+suspected latent bug, `git log -S '<distinctive token>'` tells you whether it predates the last
+refactor (always-dead vs regression) — say which.
+
 Drop findings that are really *bugs* (file them as bugs separately if severe) or really
-*rewrites*. Prefer 5 sharp findings over 15 vague ones.
+*rewrites*. A "guard test + one migration batch" (e.g. a single-declaration test plus moving the
+6 worst DTOs) counts as ONE ticket; the follow-up batches are the guard's job to track. Cross-lane
+findings are welcome — mark them `(cross-lane)` so the caller can route them. Prefer 5 sharp
+findings over 15 vague ones.
 
 ## Step 3 — Rank
 Score each 1–5 on **Payoff** (lines deleted, drift removed, extension unblocked) and 1–5 on
@@ -168,9 +230,12 @@ Score each 1–5 on **Payoff** (lines deleted, drift removed, extension unblocke
 favor of findings that align with an invariant already stated in `CLAUDE.md`, then in favor
 of findings whose evidence includes a VERIFIED behavioural drift (two copies that disagree).
 If a finding carries a **latent bug** (a copy that is simply wrong today — e.g. a ternary that
-routes copilot to claude), say `Carries latent bug:` explicitly so the caller can split a bug
-ticket; don't let it silently ride inside a refactor. If two findings touch the same signatures,
-state the order (`Do AFTER <other>`).
+routes copilot to claude), say `Carries latent bug:` explicitly. Split rule for the caller: if the
+bug is USER-VISIBLE or changes behaviour today (a crash, a merge that shouldn't happen, a workspace
+parked forever, a wrong command shown to a builder) → file a separate `bug` ticket that references
+the refactor and can be fixed first; if it is only latent (wrong on a path nobody takes yet, a
+dead branch) → let it ride inside the refactor with the flag. Never let it silently ride. If two
+findings touch the same signatures, state the order (`Do AFTER <other>`).
 
 ## Step 4 — Report + file tickets
 Produce this table first (it is what a reviewer scans):
