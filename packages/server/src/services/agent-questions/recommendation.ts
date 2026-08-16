@@ -3,10 +3,9 @@
  * and coerce the JSON reply into per-question {@link AgentQuestionRecommendation}s.
  */
 import type { Database } from "../../db/index.js";
-import { getPreference } from "../../repositories/preferences.repository.js";
-import { getRuntimeState } from "../../repositories/runtime-state.repository.js";
 import { getProjectRow } from "../../repositories/agent-questions.repository.js";
 import { ensureButlerSession, sendButlerTurn, subscribeButler, getButlerSession } from "../butler-sdk.service.js";
+import { resolveButlerLaunchConfig } from "../butler-definitions.service.js";
 import type { AgentQuestionRecommendation, RecommendInput } from "./types.js";
 
 function buildRecommendationPrompt(input: RecommendInput): string {
@@ -89,18 +88,19 @@ export async function recommendQuestionsForSet(
   if (!getButlerSession(projectId).active) {
     const project = await getProjectRow(projectId, db);
     if (!project) throw new Error(`project not found: ${projectId}`);
-    const claudeProfile = (await getPreference(`butler_profile_${projectId}`, db))
-      || (await getPreference("claude_profile", db))
-      || undefined;
-    const model = (await getPreference(`butler_model_${projectId}`, db)) || undefined;
-    const resumeSessionId = (await getRuntimeState(`butler_session_${projectId}`, db)) || undefined;
+    const launch = await resolveButlerLaunchConfig(projectId, "default", db);
     ensureButlerSession({
       projectId,
       repoPath: project.repoPath,
       projectName: project.name,
-      claudeProfile,
-      model,
-      resumeSessionId,
+      backend: launch.backend,
+      claudeProfile: launch.claudeProfile,
+      profile: launch.profile,
+      agentCommand: launch.agentCommand,
+      agentArgs: launch.agentArgs,
+      codexHome: launch.codexHome,
+      model: launch.model,
+      resumeSessionId: launch.resumeSessionId,
     });
   }
 

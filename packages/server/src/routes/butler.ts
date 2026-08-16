@@ -8,7 +8,7 @@ import { homedir } from "node:os";
 import { streamSSE } from "hono/streaming";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
-import { getPreference, setPreference } from "../repositories/preferences.repository.js";
+import { setPreference } from "../repositories/preferences.repository.js";
 import { deleteRuntimeState, getRuntimeState, setRuntimeState } from "../repositories/runtime-state.repository.js";
 import { getProjectById } from "../repositories/project.repository.js";
 import { getProjectsBasePath } from "../repositories/project-service.repository.js";
@@ -41,18 +41,11 @@ import {
   listButlerDefinitions,
   getButlerDefinition,
   updateButlerDefinition,
+  resolveButlerLaunchConfig,
+  butlerProfilePrefKey,
 } from "../services/butler-definitions.service.js";
 import { listButlerSessions, getButlerSessionMessages } from "../services/butler-transcripts.service.js";
-import { loadAgentSettings, isMockProfile } from "../services/agent-settings.service.js";
 import type { ProviderName } from "../services/agent-provider.js";
-import {
-  parseStrategyBullseyeConfig,
-  selectProviderFromStrategy,
-  applyProviderSelectionToPrefMap,
-} from "../services/strategy-objective.service.js";
-import { resolveEffectiveProviderProfile } from "../services/effective-config.service.js";
-import { getAllPreferences } from "../repositories/preferences.repository.js";
-import { loadCodexLicenseRing, resolveCodexHomeForProfile } from "../services/codex-license-ring.js";
 
 /** Suffix per-butler pref keys for named butlers; the "default" butler keeps the
  *  legacy unsuffixed keys so existing resume ids / history carry over unchanged. */
@@ -90,12 +83,6 @@ async function appendToSessionHistory(projectId: string, butlerId: string, sessi
   } catch (err) {
     console.warn(`[butler] failed to append session history: project=${projectId} butler=${butlerId}`, err);
   }
-}
-
-/** Per-project Claude profile override for the butler (empty = global claude_profile).
- *  Profile is auth/endpoint, shared by ALL of a project's butlers — not per-butler. */
-function butlerProfilePrefKey(projectId: string): string {
-  return `butler_profile_${projectId}`;
 }
 
 /** The butler runs via the Claude Agent SDK (claude) or a CLI-spawn codex session.
@@ -305,166 +292,36 @@ export function createButlerRoute(
     return resolved;
   }
 
-  /** Resolve the Butler's backend/profile.
-   *
-   * Provider resolution funnels through the SHARED resolver
-   * (`resolveEffectiveProviderProfile`) — the single source of truth used by the
-   * workspace builder too. This route no longer hand-rolls its own
-   * butler>Bullseye>settings cascade or hard-narrows to claude|codex, so copilot/pi
-   * are first-class here as well. We layer the butler-specific overrides onto a
-   * prefMap *copy* and let the resolver read a consistent view:
-   *
-   *  1. Per-butler provider override from the butler definition (`butlerProvider`) —
-   *     written onto prefMap as `provider`.
-   *  2. Project's Strategy Bullseye (`board_strategy_<projectId>`) — same source the
-   *     workspace builder uses, mirrored onto prefMap via
-   *     `applyProviderSelectionToPrefMap` (so the butler matches the builder).
-   *  3. Global settings prefs (`provider` / `*_profile`) — the prefMap's own values,
-   *     used by the resolver when neither override above is present.
-   *
-   * The per-project butler profile override (`butler_profile_<projectId>`) always wins
-   * over the profile the resolver derives (it's an explicit user override for the
-   * butler's auth endpoint, independent of which provider is primary).
-   */
-  async function resolveButlerBackend(projectId: string, butlerProvider?: ProviderName): Promise<{
-    provider: ProviderName;
-    selectedProfile: string | undefined;
-    globalProfile: string;
-    claudeProfile?: string;
-    profile?: { provider: ProviderName; name: string };
-    agentCommand?: string;
-    agentArgs?: string;
-    /** When a codex OAuth-license profile resolves to a separate CODEX_HOME dir,
-     *  the launcher must set CODEX_HOME and drop `--profile` (mirrors the builder). */
-    codexHome?: string;
-  }> {
-    const prefRows = await getAllPreferences(database);
-    const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
-
-    const settings = await loadAgentSettings(database);
-    const perProject = await getPreference(butlerProfilePrefKey(projectId), database);
-
-    // Layer the butler-def override / Strategy Bullseye selection onto the prefMap so
-    // the shared resolver reads a consistent view. Precedence: butler-def provider >
-    // Bullseye selection > prefMap's own `provider`/`*_profile` (global settings).
-    if (butlerProvider) {
-      prefMap.set("provider", butlerProvider);
-    } else {
-      const strategyRaw = prefMap.get(`board_strategy_${projectId}`);
-      if (strategyRaw) {
-        try {
-          // Single parser (arch-review §3.3): `parseStrategyBullseyeConfig` now
-          // normalizes the blob through the SAME shared `normalizeProviderPolicies`
-          // + `selectPolicyByPriority` the MCP `start_workspace` door
-          // (`resolveProviderProfileFromPrefs`) uses, so the butler and MCP agree on
-          // the provider for a given blob. Live-quota gating is deliberately NOT
-          // applied here: this selects the provider for the ONE warm butler assistant
-          // session (not a throughput of builder launches), so quota-headroom gating —
-          // whose purpose is keeping fill/throttle BUILDER launches within a rate-limit
-          // window — does not apply. The quota-aware door is the builder launch
-          // (`resolveStrategyProviderSelection`).
-          const strategyConfig = parseStrategyBullseyeConfig(strategyRaw);
-          const selected = selectProviderFromStrategy(strategyConfig);
-          if (selected) {
-            applyProviderSelectionToPrefMap(prefMap, selected);
-          }
-        } catch {
-          // non-fatal: fall through to global default already on prefMap
-        }
-      }
-    }
-
-    const { provider, profileName: resolverProfile } = resolveEffectiveProviderProfile(prefMap);
-
-    const availableProfiles = await preferenceService.listProfilesForProvider(provider);
-    const profileOverride = perProject && availableProfiles.includes(perProject) ? perProject : undefined;
-
-    const globalProfile = settings.profile?.provider === provider ? settings.profile.name : "";
-    // Per-project butler override > resolver-derived profile (Bullseye/global) > global profile.
-    const selectedProfile = profileOverride || resolverProfile || globalProfile || undefined;
-
-    // `settings.agentCommand`/`agentArgs` are derived under the GLOBAL provider
-    // (e.g. Claude's `--dangerously-skip-permissions`). Forwarding them to a butler
-    // whose per-butler provider differs from the global one injects the wrong
-    // provider's command/flags — codex rejects `--dangerously-skip-permissions` and
-    // exits with code 2. Only forward when the providers match; otherwise let the
-    // butler's provider use its own defaults.
-    const matchesGlobalProvider = provider === settings.provider;
-
-    // Codex OAuth licenses: a ChatGPT-plan license is a separate CODEX_HOME directory
-    // with its own auth.json (an auto-discovered `~/.codex-<name>` dir or a ring entry).
-    // Point CODEX_HOME at it and DROP the profile name from the launch — a separate home
-    // has no `[profiles.<name>]`, so `--profile` makes codex exit code 2. This mirrors the
-    // builder path in session-lifecycle.ts so the butler authenticates under the right
-    // account and its rollouts land in the right home (fixes 'no rollout found' resumes).
-    let codexHome: string | undefined;
-    let launchProfileName = selectedProfile;
-    if (provider === "codex" && selectedProfile && selectedProfile !== "default") {
-      try {
-        const ring = await loadCodexLicenseRing(database);
-        const resolved = resolveCodexHomeForProfile(selectedProfile, ring);
-        if (resolved) {
-          codexHome = resolved;
-          launchProfileName = "default";
-        }
-      } catch {
-        // non-fatal: fall back to passing --profile under the default home
-      }
-    }
-
-    return {
-      provider,
-      // selectedProfile drives the UI dropdown — keep the real license name there.
-      selectedProfile,
-      globalProfile,
-      claudeProfile: provider === "claude" ? selectedProfile : undefined,
-      // profile drives the spawn args — "default" suppresses `--profile` when CODEX_HOME is set.
-      profile: launchProfileName ? { provider, name: launchProfileName } : undefined,
-      agentCommand: matchesGlobalProvider ? settings.agentCommand : undefined,
-      agentArgs: matchesGlobalProvider ? settings.agentArgs : undefined,
-      codexHome,
-    };
+  /** Resolve the Butler's backend/profile/model/resume — delegates to the shared
+   *  `resolveButlerLaunchConfig` (butler-definitions.service.ts), the single source of
+   *  truth for this route AND the headless warm-up paths (recommendation.ts,
+   *  plugin-gate-butler.service.ts). */
+  async function resolveButlerBackend(projectId: string, butlerId: string = "default") {
+    return resolveButlerLaunchConfig(projectId, butlerId, database);
   }
 
   async function startSession(projectId: string, butlerId: string = "default") {
     const project = await resolveProject(projectId);
     if (!project) return null;
-    const def = await getButlerDefinition(database, butlerId);
-    const backend = await resolveButlerBackend(projectId, def?.provider);
-    const sdkBackend = butlerSdkBackend(backend.provider);
-    // Model is a property of the (global) butler definition, not a per-project pref.
-    const model = normalizeModelForBackend(def?.model, sdkBackend) || undefined;
-    const resumeSessionId = (await getRuntimeState(butlerSessionStateKey(projectId, butlerId), database)) || undefined;
+    const launch = await resolveButlerLaunchConfig(projectId, butlerId, database);
     const pluginNote = projectId === GLOBAL_BUTLER_PROJECT_ID ? await describeInstalledPlugins() : "";
     const systemPromptAppend = projectId === GLOBAL_BUTLER_PROJECT_ID
       ? [buildGlobalButlerPrompt(project.repoPath), pluginNote].filter(Boolean).join("\n\n")
       : await resolveButlerPrompt(projectId, project.name, project.repoPath);
     const wasActive = getButlerSession(projectId, butlerId).active;
-    // When the resolved profile is "mock", use the in-process mock backend instead
-    // of the Claude SDK (which would fail without real API credentials).
-    // NOTE: loadAgentSettings (used inside resolveButlerBackend) strips "mock" from
-    // claudeProfile so it is never forwarded to spawn args. We must check the raw pref
-    // directly — per-project butler override wins, then the global claude_profile.
-    const rawProfile =
-      (await getPreference(butlerProfilePrefKey(projectId), database)) ||
-      (await getPreference("claude_profile", database)) ||
-      undefined;
-    const effectiveBackend: "claude" | "codex" | "mock" = isMockProfile(rawProfile)
-      ? "mock"
-      : sdkBackend;
     const session = ensureButlerSession({
       projectId,
       butlerId,
       repoPath: project.repoPath,
       projectName: project.name,
-      backend: effectiveBackend,
-      claudeProfile: backend.claudeProfile,
-      profile: backend.profile,
-      agentCommand: backend.agentCommand,
-      agentArgs: backend.agentArgs,
-      codexHome: backend.codexHome,
-      model,
-      resumeSessionId,
+      backend: launch.backend,
+      claudeProfile: launch.claudeProfile,
+      profile: launch.profile,
+      agentCommand: launch.agentCommand,
+      agentArgs: launch.agentArgs,
+      codexHome: launch.codexHome,
+      model: launch.model,
+      resumeSessionId: launch.resumeSessionId,
       systemPromptAppend,
     });
     // Persist the SDK session id (for resume across restarts) once, on first creation.
@@ -514,7 +371,7 @@ export function createButlerRoute(
     const state = getButlerSession(projectId, butlerId);
     const persisted = (await getRuntimeState(butlerSessionStateKey(projectId, butlerId), database)) || null;
     const def = await getButlerDefinition(database, butlerId);
-    const backend = await resolveButlerBackend(projectId, def?.provider);
+    const backend = await resolveButlerBackend(projectId, butlerId);
     const effectiveBackend = state.active ? state.backend : butlerSdkBackend(backend.provider);
     // Model is sourced from the butler definition (global), profile from the project pref.
     const selectedModel = normalizeModelForBackend(def?.model, effectiveBackend);
@@ -563,8 +420,7 @@ export function createButlerRoute(
   router.get("/:id/butler/profiles", async (c) => {
     const projectId = c.req.param("id");
     const butlerId = resolveButlerId(c);
-    const def = await getButlerDefinition(database, butlerId);
-    const backend = await resolveButlerBackend(projectId, def?.provider);
+    const backend = await resolveButlerBackend(projectId, butlerId);
     const profiles = await preferenceService.listProfilesForProvider(backend.provider);
     return c.json({ provider: backend.provider, profiles, selected: backend.selectedProfile ?? "", globalDefault: backend.globalProfile });
   });
@@ -577,8 +433,7 @@ export function createButlerRoute(
     const projectId = c.req.param("id");
     const butlerId = resolveButlerId(c);
     const body = await parseJsonBody<{ model?: string }>(c);
-    const def = await getButlerDefinition(database, butlerId);
-    const backend = await resolveButlerBackend(projectId, def?.provider);
+    const backend = await resolveButlerBackend(projectId, butlerId);
     const state = getButlerSession(projectId, butlerId);
     const model = normalizeModelForBackend(body.model, state.active ? state.backend : butlerSdkBackend(backend.provider));
     try {

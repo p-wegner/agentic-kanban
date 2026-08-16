@@ -3,11 +3,11 @@ import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import type { PluginLoopCheck, PluginLoopGate } from "@agentic-kanban/shared/lib/plugin-manifest";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
-import { getAllPreferences, getPreference } from "../repositories/preferences.repository.js";
-import { getRuntimeState } from "../repositories/runtime-state.repository.js";
+import { getAllPreferences } from "../repositories/preferences.repository.js";
 import { getProjectRow } from "../repositories/agent-questions.repository.js";
 import { insertPluginLoopEvent } from "../repositories/plugin-loop-events.repository.js";
 import { ensureButlerSession, getButlerSession, sendButlerTurn, subscribeButler } from "./butler-sdk.service.js";
+import { resolveButlerLaunchConfig } from "./butler-definitions.service.js";
 import { resolveInside } from "./plugin-fs.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -52,18 +52,19 @@ async function ensureWarmButler(projectId: string, database: Database): Promise<
   if (getButlerSession(projectId).active) return true;
   const project = await getProjectRow(projectId, database);
   if (!project) return false;
-  const claudeProfile = (await getPreference(`butler_profile_${projectId}`, database))
-    || (await getPreference("claude_profile", database))
-    || undefined;
-  const model = (await getPreference(`butler_model_${projectId}`, database)) || undefined;
-  const resumeSessionId = (await getRuntimeState(`butler_session_${projectId}`, database)) || undefined;
+  const launch = await resolveButlerLaunchConfig(projectId, "default", database);
   ensureButlerSession({
     projectId,
     repoPath: project.repoPath,
     projectName: project.name,
-    claudeProfile,
-    model,
-    resumeSessionId,
+    backend: launch.backend,
+    claudeProfile: launch.claudeProfile,
+    profile: launch.profile,
+    agentCommand: launch.agentCommand,
+    agentArgs: launch.agentArgs,
+    codexHome: launch.codexHome,
+    model: launch.model,
+    resumeSessionId: launch.resumeSessionId,
   });
   return true;
 }
