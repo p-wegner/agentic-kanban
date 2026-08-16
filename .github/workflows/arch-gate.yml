@@ -5,6 +5,12 @@ name: arch-gate
 #   - scripts/check-god-modules.mjs — god-module ceiling/cohesion (arch-review #875, #888)
 #   - pnpm lint:arch — dependency-cruiser layering rules (was only in the manual
 #     `pnpm check` and sat red on master for 5 days unnoticed; fixed in #981)
+#   - mcp-catalog-parity.test.ts — MCP tool registration ↔ MCP_TOOL_DEFINITIONS parity
+#     (#371, #390, #476). Registering an MCP tool and cataloguing it are two separate
+#     edits in two different packages; nothing else links them, so this test failed
+#     TWICE without being caught at the commit that broke it. Running it here means a
+#     branch that adds a tool without a catalog entry fails its OWN PR check instead of
+#     leaving the gate red for every later branch to inherit.
 # Runs on every PR into master and on direct pushes to master. Enable branch
 # protection on `master` requiring this check so a breach cannot land — which is
 # exactly the failure #888 documented (a 1042-line file merged past a red gate).
@@ -29,5 +35,5 @@ jobs:
       # (regex fallback if absent), and lint:arch needs the `dependency-cruiser`
       # devDep — the full frozen install covers both.
       - run: pnpm install --frozen-lockfile
-      - name: arch gates (god-module + depcruise layering)
+      - name: arch gates (god-module + depcruise layering + mcp-catalog parity)
         run: pnpm check:arch
