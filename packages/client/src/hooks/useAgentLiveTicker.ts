@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentOutputMessage, StatusWithIssues } from "@agentic-kanban/shared";
+import { apiFetchConditional } from "../lib/api.js";
 
 const POLL_INTERVAL_MS = 5000;
 const MAX_TAIL = 60;
@@ -91,16 +92,20 @@ export function useAgentLiveTicker(
   const pollOutputForWorkspace = useCallback(async (
     sessionId: string,
   ): Promise<string[] | null> => {
-    const headers: Record<string, string> = {};
-    const etag = etagsRef.current[sessionId];
-    if (etag) headers["If-None-Match"] = etag;
-    const res = await fetch(`/api/sessions/${sessionId}/output?tail=${OUTPUT_TAIL_BYTES}`, { headers });
-    if (res.status === 304) return null;
-    if (!res.ok) return null;
-    const newEtag = res.headers.get("ETag");
-    if (newEtag) etagsRef.current[sessionId] = newEtag;
-    const msgs = await res.json() as AgentOutputMessage[];
-    return extractLines(msgs.slice(-MAX_TAIL));
+    try {
+      const result = await apiFetchConditional<AgentOutputMessage[]>(
+        `/api/sessions/${sessionId}/output?tail=${OUTPUT_TAIL_BYTES}`,
+        etagsRef.current[sessionId],
+      );
+      if (result.kind === "not-modified") return null;
+      if (result.etag) etagsRef.current[sessionId] = result.etag;
+      return extractLines(result.data.slice(-MAX_TAIL));
+    } catch {
+      // A ticker poll is decoration — a failed fetch must not surface as an error.
+      // This swallow was previously implicit (`if (!res.ok) return null`), which made a
+      // server error indistinguishable from a 304; it is now explicit and deliberate.
+      return null;
+    }
   }, []);
 
   const refresh = useCallback(async (cols: StatusWithIssues[], activity: Record<string, string>) => {
