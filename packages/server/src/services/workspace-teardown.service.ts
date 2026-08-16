@@ -29,6 +29,7 @@ import { resolveWorktreeDevPorts } from "./worktree-ports.js";
 import { auditProcessEvent, guardProcessKill } from "./process-guard.js";
 import { removeGradleUserHomeForWorktree } from "@agentic-kanban/shared/lib/gradle-env";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { isInsideManagedWorktreesRoot } from "@agentic-kanban/shared/lib/git-service";
 
 /**
  * Best-effort kill of a process and its descendants by PID. Windows uses
@@ -66,18 +67,23 @@ export async function killProcessTree(pid: number): Promise<void> {
  * this is the ONLY containment check standing between a corrupt/legacy workspace
  * row (e.g. `workingDir` equal to the project's `repoPath`) and a recursive delete
  * of a real repo; callers gating on `!isDirect` are not sufficient on their own
- * (mirrors the guard in `removeLeftoverWorktreeDirectory`/`removeStaleWorktree`).
+ * Shares ONE guard with `removeLeftoverWorktreeDirectory` / the cleanup service (#525).
  */
-export async function removeDirWithRetry(dir: string, attempts = 5, backoffMs = 300): Promise<boolean> {
+export async function removeDirWithRetry(
+  repoPath: string,
+  dir: string,
+  attempts = 5,
+  backoffMs = 300,
+): Promise<boolean> {
   const { rm } = await import("node:fs/promises");
   const { existsSync } = await import("node:fs");
-  const { resolve, sep } = await import("node:path");
 
-  const resolved = resolve(dir);
-  const segments = resolved.split(sep);
-  const worktreesIndex = segments.lastIndexOf(".worktrees");
-  if (worktreesIndex === -1 || worktreesIndex === segments.length - 1) {
-    console.warn(`[workspaces] refusing to remove path outside a managed .worktrees directory: ${dir}`);
+  // #525: this used to ask only whether the resolved path contained a `.worktrees`
+  // SEGMENT anywhere — which accepts a worktree belonging to a DIFFERENT repository,
+  // and is not bound to `repoPath` at all. Now it shares the strict `relative()`
+  // guard with removeLeftoverWorktreeDirectory / the cleanup service.
+  if (!isInsideManagedWorktreesRoot(repoPath, dir)) {
+    console.warn(`[workspaces] refusing to remove path outside ${repoPath}'s managed .worktrees directory: ${dir}`);
     return false;
   }
 

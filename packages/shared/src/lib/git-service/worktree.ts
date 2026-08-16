@@ -412,20 +412,37 @@ async function isForeignCheckout(repoPath: string, dirPath: string): Promise<boo
   return !isInsideOwnGit;
 }
 
+/**
+ * The single containment guard for recursive worktree deletion (#525).
+ *
+ * This predicate is the ONLY thing standing between a corrupt `workingDir` and a
+ * recursive delete of a real repository, and it was written three ways — two
+ * equivalent `relative()` implementations plus a much weaker one in the teardown
+ * path that only asked whether the resolved path contained a `.worktrees` SEGMENT
+ * anywhere, with no binding to the repo at all. That weaker form accepts e.g.
+ * `/anything/.worktrees/../../home`-shaped input once resolved, and accepts a
+ * worktree belonging to a DIFFERENT repository.
+ *
+ * `dir` must be strictly inside `<dirname(repoPath)>/.worktrees/`, must not be that
+ * root itself, must not be the repo, and must not be a filesystem root.
+ */
+export function isInsideManagedWorktreesRoot(repoPath: string, dir: string): boolean {
+  const repoResolved = resolve(repoPath);
+  const targetResolved = resolve(dir);
+  const worktreesRoot = resolve(dirname(repoPath), ".worktrees");
+  const rel = relative(worktreesRoot, targetResolved);
+  const strictlyInside = rel !== ""
+    && rel !== ".."
+    && !rel.startsWith(`..${sep}`)
+    && parse(rel).root === "";
+  if (!strictlyInside) return false;
+  return targetResolved !== repoResolved && targetResolved !== parse(targetResolved).root;
+}
+
 async function removeLeftoverWorktreeDirectory(repoPath: string, worktreePath: string): Promise<boolean> {
   if (!existsSync(worktreePath)) return false;
 
-  const repoResolved = resolve(repoPath);
-  const targetResolved = resolve(worktreePath);
-  const worktreesRoot = resolve(dirname(repoPath), ".worktrees");
-  const relativeToWorktreesRoot = relative(worktreesRoot, targetResolved);
-  const root = parse(targetResolved).root;
-  const isInsideWorktreesRoot = relativeToWorktreesRoot !== ""
-    && relativeToWorktreesRoot !== ".."
-    && !relativeToWorktreesRoot.startsWith(`..${sep}`)
-    && parse(relativeToWorktreesRoot).root === "";
-
-  if (targetResolved === repoResolved || targetResolved === root || !isInsideWorktreesRoot) {
+  if (!isInsideManagedWorktreesRoot(repoPath, worktreePath)) {
     throw new Error(`Refusing to recursively remove unsafe worktree path: ${worktreePath}`);
   }
 
