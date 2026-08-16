@@ -19,7 +19,8 @@ import { detectRepoInfo } from "../services/git-info.service.js";
 import { parseIncludeParam, serveWorkspaceRepoStatusBatch } from "../services/workspace-repo-status-batch.service.js";
 import { cloneRepo } from "../services/repo-clone.service.js";
 import type { ProjectRepoResponse, ServiceStackConfig } from "@agentic-kanban/shared";
-import { DEFAULT_SERVICE_STACK_CONFIG } from "@agentic-kanban/shared";
+import { DEFAULT_SERVICE_STACK_CONFIG,
+  parseServiceStackConfig } from "@agentic-kanban/shared";
 import { createOnboardingService } from "../services/onboarding.service.js";
 import { createIssueService } from "../services/issue.service.js";
 import { getPluginService } from "../services/plugin.service.js";
@@ -162,16 +163,14 @@ function validateServicesConfig(
   return { ok: true, json: JSON.stringify(normalized) };
 }
 
-/** Parse a stored servicesConfig JSON string into a ServiceStackConfig for the wire DTO. */
+/**
+ * Parse a stored servicesConfig for the wire DTO (#531). The DISPLAY codec: a disabled
+ * stack is still shown as declared config. This used to return the raw parsed object
+ * with no defaults, so the board could show a half-populated stack the runtime would
+ * have normalised differently.
+ */
 function parseServicesConfig(raw: unknown): ServiceStackConfig | null {
-  if (typeof raw !== "string" || raw.trim() === "") return null;
-  try {
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as ServiceStackConfig;
-  } catch {
-    // stored value is corrupt — treat as none rather than crashing the board list
-  }
-  return null;
+  return parseServiceStackConfig(typeof raw === "string" ? raw : null);
 }
 
 export function createProjectsRoute(database: Database, options?: { boardEvents?: BoardEvents; getSessionManager?: () => SessionManager }) {

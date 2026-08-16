@@ -47,9 +47,10 @@ const SELECT_PROVIDER_ALLOWLIST = new Set<string>([
   "services/project-runtime-config.service.ts",
   // preflight: reports the would-be provider before a drive starts
   "services/drive-preflight.service.ts",
-  // butler route: mirrors the Bullseye onto the prefMap, THEN calls the shared
-  // resolver — it does not narrow or decide provider itself.
-  "routes/butler.ts",
+  // butler backend resolution: mirrors the Bullseye onto the prefMap, THEN calls the
+  // shared resolver — it does not narrow or decide provider itself. #500 moved this
+  // out of routes/butler.ts into the service, so the allow-list follows it there.
+  "services/butler-definitions.service.ts",
 ]);
 
 /** Recursively collect non-test .ts source files under a directory. */

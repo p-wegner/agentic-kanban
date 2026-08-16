@@ -14,7 +14,7 @@ import {
   DEFAULT_SERVICE_STACK_CONFIG,
   type ServiceStackConfig,
   type ServiceStackState,
-} from "@agentic-kanban/shared";
+  parseEnabledServiceStackConfig } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
 import {
   findLiveWorkspacesSharingWorkingDir,
@@ -86,19 +86,9 @@ export interface ProvisionForLaunchResult {
  * partial configs get sane defaults.
  */
 export function parseServicesConfig(raw: string | null): ServiceStackConfig | null {
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as Partial<ServiceStackConfig> | null;
-    if (!parsed || typeof parsed !== "object" || parsed.enabled !== true) return null;
-    return {
-      ...DEFAULT_SERVICE_STACK_CONFIG,
-      ...parsed,
-      enabled: true,
-      composeFile: parsed.composeFile?.trim() || DEFAULT_SERVICE_STACK_CONFIG.composeFile,
-    };
-  } catch {
-    return null;
-  }
+  // The RUNTIME codec (#531): a disabled stack is null — never bring up one the
+  // operator switched off. Shares its parse/normalisation with the display codec.
+  return parseEnabledServiceStackConfig(raw);
 }
 
 function errorState(message: string): ServiceStackState {
