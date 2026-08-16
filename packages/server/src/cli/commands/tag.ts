@@ -1,9 +1,9 @@
 import type { Command } from "commander";
 import { runMigrations } from "../shared.js";
+import { buildApiUrl } from "./workspace-api-url.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
-const port = () => process.env.KANBAN_SERVER_PORT ?? "3001";
-const apiBase = () => `http://127.0.0.1:${port()}/api`;
+const apiBase = () => buildApiUrl("", "/api");
 
 interface TagRow {
   id: string;

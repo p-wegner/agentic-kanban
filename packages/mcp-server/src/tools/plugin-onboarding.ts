@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { getServerPort } from "../server-url.js";
+import { boardApi } from "@agentic-kanban/shared/lib/board-server-url";
 
 /**
  * First-class plugin ONBOARDING tools (#390), so the butler stops hand-rolling `curl` against a
@@ -17,14 +17,8 @@ import { getServerPort } from "../server-url.js";
  * and applies it first, and the descriptions say so where the model will actually read them.
  */
 
-async function api(path: string, init?: RequestInit): Promise<{ ok: boolean; status: number; data: unknown }> {
-  const res = await fetch(`http://127.0.0.1:${getServerPort()}/api${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...init,
-  });
-  let data: unknown = null;
-  try { data = await res.json(); } catch { /* non-JSON error body */ }
-  return { ok: res.ok, status: res.status, data };
+function api(path: string, init?: RequestInit) {
+  return boardApi(`/api${path}`, init);
 }
 
 function text(value: unknown) {

@@ -220,7 +220,7 @@ Examples:
           }
         }
 
-        const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
+        const port = options.port ?? "";
         const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "launch"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -287,7 +287,7 @@ Examples:
           }
         }
 
-        const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
+        const port = options.port ?? "";
         const res = await fetch(buildWorkspaceApiUrl(port, ws.id, "launch"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -348,7 +348,7 @@ Example:
           process.exit(1);
         }
 
-        const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
+        const port = options.port ?? "";
         const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "review"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -386,7 +386,7 @@ Examples:
 `)
     .action(async (issueId: string, options: { project?: string; base?: string; profile?: string; port?: string }) => {
       try {
-        const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
+        const port = options.port ?? "";
         const body: Record<string, unknown> = { issueId };
         if (options.base) body.baseBranch = options.base;
         if (options.profile) body.claudeProfile = options.profile;
@@ -427,7 +427,7 @@ Examples:
 `)
     .action(async (workspaceId: string, options: { project?: string; json?: boolean; port?: string }) => {
       try {
-        const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
+        const port = options.port ?? "";
         const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "diff"));
         const data = await res.json() as DiffResponse;
 
@@ -465,7 +465,7 @@ Examples:
 `)
     .action(async (workspaceId: string, options: { project?: string; json?: boolean; port?: string }) => {
       try {
-        const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
+        const port = options.port ?? "";
         const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "scorecard"));
         const data = await res.json() as ScorecardResponse;
 
@@ -503,7 +503,7 @@ Example:
 `)
     .action(async (workspaceId: string, options: { project?: string; port?: string }) => {
       try {
-        const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
+        const port = options.port ?? "";
         const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "merge"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -535,7 +535,7 @@ Example:
 `)
     .action(async (workspaceId: string, options: { project?: string; port?: string }) => {
       try {
-        const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
+        const port = options.port ?? "";
         const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "close"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -567,7 +567,7 @@ Example:
 `)
     .action(async (workspaceId: string, options: { project?: string; port?: string }) => {
       try {
-        const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
+        const port = options.port ?? "";
         const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "stop"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -601,7 +601,7 @@ Examples:
 `)
     .action(async (workspaceId: string, options: { project?: string; force?: boolean; port?: string }) => {
       try {
-        const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
+        const port = options.port ?? "";
         const res = await fetch(buildApiUrl(port, `/api/workspaces/${encodeURIComponent(workspaceId)}`), {
           method: "DELETE",
         });
@@ -656,7 +656,7 @@ Examples:
           }
         }
 
-        const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
+        const port = options.port ?? "";
         const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "launch"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -688,7 +688,7 @@ Example:
 `)
     .action(async (workspaceId: string, options: { project?: string; port?: string }) => {
       try {
-        const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
+        const port = options.port ?? "";
         const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "ready-for-merge"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -722,7 +722,7 @@ Examples:
 `)
     .action(async (workspaceId: string, targetStatus: string, options: { project?: string; summary?: string; port?: string }) => {
       try {
-        const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
+        const port = options.port ?? "";
         const body: Record<string, unknown> = { toNodeName: targetStatus };
         if (options.summary) body.summary = options.summary;
 

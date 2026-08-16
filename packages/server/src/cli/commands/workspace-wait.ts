@@ -1,6 +1,7 @@
 import { getIssueIdByNumberInProject } from "../../repositories/issue.repository.js";
 import { getLatestWorkspaceForIssue, getWorkspaceById } from "../../repositories/workspace.repository.js";
 import { runMigrations, getActiveProjectId } from "../shared.js";
+import { resolveCliPort } from "./workspace-api-url.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
@@ -90,7 +91,7 @@ export async function runWorkspaceWait(issueNumberArg: string, options: WaitOpti
     return ws?.status ?? null;
   };
 
-  const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
+  const port = resolveCliPort(options.port);
   const url = `ws://127.0.0.1:${port}/ws/board/${projectId}`;
 
   const timeoutSec = options.timeout !== undefined ? Number(options.timeout) : undefined;

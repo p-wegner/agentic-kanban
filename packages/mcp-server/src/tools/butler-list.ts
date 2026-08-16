@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { boardApiUrl, getServerPort } from "../server-url.js";
 import { getServerPort } from "../server-url.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -21,7 +22,7 @@ export function registerButlerList(server: McpServer) {
     },
     async ({ projectId }) => {
       try {
-        const res = await fetch(`http://127.0.0.1:${getServerPort()}/api/projects/${projectId}/butlers`);
+        const res = await fetch(boardApiUrl(`/api/projects/${projectId}/butlers`));
         const data = (await res.json()) as ButlerEntry[] | { error?: string };
         if (!res.ok) {
           const err = Array.isArray(data) ? res.statusText : ((data).error ?? res.statusText);

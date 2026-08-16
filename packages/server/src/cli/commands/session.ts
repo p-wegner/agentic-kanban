@@ -22,10 +22,10 @@ import { getIssueWithStatusById, getIssueTitleDescriptionByNumber } from "../../
 import { getAllFailurePatterns } from "../../repositories/failure-pattern.repository.js";
 import { computeReviewEffectiveness, renderReviewEffectivenessReport } from "../../services/review-effectiveness.service.js";
 import { buildReviewWorkspaces, buildReviewResult, summarizeReviewEffectiveness, reviewPct, computeDeepReviewSignals, type ReviewResult, type ReviewTranscriptSummary } from "../../lib/review-effectiveness-report.js";
+import { resolveCliPort } from "./workspace-api-url.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
-const DEFAULT_PORT = process.env.KANBAN_SERVER_PORT ?? "3001";
-const BASE_URL = `http://127.0.0.1:${DEFAULT_PORT}`;
+const BASE_URL = `http://127.0.0.1:${resolveCliPort()}`;
 
 /**
  * Shape of the persisted, JSON-parsed `session.stats` blob this command reads.

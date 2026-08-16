@@ -413,6 +413,12 @@
       "types": "./dist/lib/onboarding-plan.d.ts",
       "import": "./dist/lib/onboarding-plan.js",
       "default": "./src/lib/onboarding-plan.ts"
+    },
+    "./lib/board-server-url": {
+      "development": "./src/lib/board-server-url.ts",
+      "types": "./dist/lib/board-server-url.d.ts",
+      "import": "./dist/lib/board-server-url.js",
+      "default": "./src/lib/board-server-url.ts"
     }
   },
   "scripts": {

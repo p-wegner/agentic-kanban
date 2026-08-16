@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { boardApi } from "@agentic-kanban/shared/lib/board-server-url";
 import { getServerPort } from "../server-url.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -10,14 +11,8 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
  * only call resolve_plugin_gate after the user explicitly stated that decision.
  */
 
-async function api(path: string, init?: RequestInit): Promise<{ ok: boolean; status: number; data: unknown }> {
-  const res = await fetch(`http://127.0.0.1:${getServerPort()}/api${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...init,
-  });
-  let data: unknown = null;
-  try { data = await res.json(); } catch { /* non-JSON error body */ }
-  return { ok: res.ok, status: res.status, data };
+function api(path: string, init?: RequestInit) {
+  return boardApi(`/api${path}`, init);
 }
 
 function text(value: unknown) {

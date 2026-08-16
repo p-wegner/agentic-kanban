@@ -106,7 +106,7 @@ Examples:
 `)
     .action(async (issueId: string, options: { refresh?: boolean; json?: boolean; port?: string }) => {
       try {
-        const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
+        const port = options.port ?? "";
         const res = await fetch(buildApiUrl(port, `/api/issues/${encodeURIComponent(issueId)}/analyze-touched-files`), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -150,7 +150,7 @@ Examples:
 `)
     .action(async (workspaceId: string, options: { limit?: string; json?: boolean; port?: string }) => {
       try {
-        const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
+        const port = options.port ?? "";
         const limit = options.limit ?? "200";
         const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "terminal"), {
           method: "POST",
@@ -203,7 +203,7 @@ Examples:
 `)
     .action(async (workspaceId: string, options: { file?: string; json?: boolean; port?: string }) => {
       try {
-        const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
+        const port = options.port ?? "";
         const url = options.file
           ? buildApiUrl(port, `/api/workspaces/${encodeURIComponent(workspaceId)}/comments?filePath=${encodeURIComponent(options.file)}`)
           : buildApiUrl(port, `/api/workspaces/${encodeURIComponent(workspaceId)}/comments`);
@@ -261,7 +261,7 @@ Examples:
           process.exit(1);
         }
 
-        const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
+        const port = options.port ?? "";
         const payload: Record<string, unknown> = {
           filePath: options.file,
           body: options.body,
@@ -303,7 +303,7 @@ Examples:
 `)
     .action(async (workspaceId: string, options: { format?: string; port?: string }) => {
       try {
-        const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
+        const port = options.port ?? "";
         const fmt = options.format === "markdown" ? "?format=markdown" : "";
         const res = await fetch(buildApiUrl(port, `/api/workspaces/${encodeURIComponent(workspaceId)}/handoff-bundle${fmt}`));
 
@@ -353,7 +353,7 @@ Examples:
           process.exit(1);
         }
 
-        const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
+        const port = options.port ?? "";
         const res = await fetch(buildApiUrl(port, "/api/approvals"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
