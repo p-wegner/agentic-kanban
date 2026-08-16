@@ -545,12 +545,18 @@ export function createSessionLifecycle(
      * handler. The provider exit behavior supplies the usage-limit detection so
      * this stays free of `executor === ...` provider branches.
      */
-    function handleExitEvent(exitCode: number | null): void {
+    /**
+     * @param hadExitPlanModeDenied captured by the CALLER before `broadcast()` runs.
+     *   #580: broadcast's exit teardown deletes `sessionExitPlanModeDenied`, and it runs
+     *   first — so reading the flag here always returned false and the auto-resume below
+     *   was dead from the day it was written.
+     */
+    function handleExitEvent(exitCode: number | null, hadExitPlanModeDenied: boolean): void {
       // teardown: always clean up in-memory state regardless of DB result
       state.sessionContexts.delete(sessionId);
       state.turnStates.delete(sessionId);
       state.sessionProviders.delete(sessionId);
-      const hadExitPlanModeDenied = state.sessionExitPlanModeDenied.delete(sessionId);
+      state.sessionExitPlanModeDenied.delete(sessionId);
 
       const stoppedByUser = state.stoppedByUser.has(sessionId);
       const messages = state.messageBuffer.get(sessionId) ?? [];
@@ -660,10 +666,16 @@ export function createSessionLifecycle(
         }
 
         const message: AgentOutputMessage = event;
+        // #580: broadcast() clears `sessionExitPlanModeDenied` as part of its exit
+        // teardown, so the flag MUST be read before broadcasting — otherwise the
+        // ExitPlanMode auto-resume can never fire.
+        const hadExitPlanModeDenied = event.type === "exit"
+          ? state.sessionExitPlanModeDenied.delete(sessionId)
+          : false;
         broadcast(sessionId, message);
 
         if (event.type === "exit") {
-          handleExitEvent(event.exitCode ?? null);
+          handleExitEvent(event.exitCode ?? null, hadExitPlanModeDenied);
         }
       // When resumeWithNewModel is true, omit --resume so the new profile/provider is used instead
       }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider, launchProfile, effectiveExtraEnv, skipPermissions, effectiveModel, contextFiles, (effectiveSystemInstructions ?? "").trim() || undefined, containerProvision, effectivePlacement);
