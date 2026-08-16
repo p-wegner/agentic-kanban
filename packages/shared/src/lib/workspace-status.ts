@@ -56,6 +56,58 @@ export function isTerminalWorkspaceStatus(status: string | null | undefined): bo
   return status != null && (TERMINAL_WORKSPACE_STATUSES as readonly string[]).includes(status);
 }
 
+// --- Named liveness questions (#498) ------------------------------------------------
+//
+// TERMINAL_WORKSPACE_STATUSES made the terminal side single-source. The NON-terminal
+// side was then hand-rolled ~22 times in at least FOUR different sets:
+//
+//   {active, fixing}                    9 sites
+//   {active, reviewing, fixing}         5 sites
+//   {active, reviewing}                 2 sites
+//   {active, idle, fixing} and
+//   {active, reviewing, fixing, idle}   server-side
+//
+// Those sets are not four attempts at one answer — they answer DIFFERENT questions, and
+// collapsing them into a single "live" predicate would be wrong. The problem is that
+// the QUESTION is never named at the call site, so a reader cannot tell whether a given
+// set is deliberate or a typo, and a new status has no obvious home.
+//
+// So: name the questions. Each predicate below answers exactly one, and its doc says
+// what a wrong answer costs.
+
+/**
+ * Is an agent PROCESS running right now?
+ *
+ * `reviewing` is excluded: review runs as its own session, and callers asking this are
+ * deciding whether to show a live-output affordance or detect a stall. Including
+ * `reviewing` would make a reviewing workspace look stalled once its own agent exits.
+ */
+export function isAgentRunningStatus(status: string | null | undefined): boolean {
+  return status === "active" || status === "fixing";
+}
+
+/**
+ * Does this workspace consume a WIP slot?
+ *
+ * Broader than `isAgentRunningStatus`: a workspace awaiting review still occupies the
+ * lane, so starting another ticket against it would exceed the configured WIP. Under-
+ * counting here is what lets the monitor over-start.
+ */
+export function occupiesWipSlot(status: string | null | undefined): boolean {
+  return status === "active" || status === "fixing" || status === "reviewing";
+}
+
+/**
+ * Does the row still own live RESOURCES (worktree, ports, service stack)?
+ *
+ * The complement of terminal, and deliberately the widest set — `idle` and `blocked`
+ * workspaces still hold a worktree. Anything narrower risks reclaiming a directory out
+ * from under a paused workspace.
+ */
+export function holdsLiveResources(status: string | null | undefined): boolean {
+  return !isTerminalWorkspaceStatus(status);
+}
+
 /**
  * Columns `setWorkspaceStatus` refuses to write through `opts.set`.
  *

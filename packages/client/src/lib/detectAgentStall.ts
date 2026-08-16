@@ -1,3 +1,4 @@
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-status";
 // Pure, client-side derivation of a per-workspace "stall signal" (#86).
 //
 // A running agent that produces no output/token delta for minutes, or repeats the
@@ -39,7 +40,7 @@ export const DEFAULT_STALL_THRESHOLD_SEC = 240;
 export const DEFAULT_LOOP_WINDOW = 4;
 
 /** Statuses of a live, in-flight agent that can plausibly stall or loop. */
-const LIVE_STATUSES = new Set(["active", "fixing"]);
+// #498: this asks "is an agent PROCESS running?" — the named question.
 
 /**
  * Trailing run of identical entries. Returns null unless the ring holds at least
@@ -71,7 +72,7 @@ export function detectAgentStall(input: DetectAgentStallInput): AgentStallSignal
     lastActivityAt != null ? Math.max(0, Math.floor((now - lastActivityAt) / 1000)) : 0;
 
   // Only running/fixing agents can be stalled or looping; everything else is "ok".
-  if (!status || !LIVE_STATUSES.has(status)) {
+  if (!status || !isAgentRunningStatus(status)) {
     return { state: "ok", idleSec };
   }
 
