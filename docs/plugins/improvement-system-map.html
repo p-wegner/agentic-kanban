@@ -1,0 +1,195 @@
+<!doctype html><html><head><meta charset="utf-8">
+<title>Improvement Loop Map</title>
+<style>
+:root{
+  --bg:#f3f4f2;--surface:#ffffff;--surface-2:#e9ebe7;--line:#d3d7d0;--ink:#1c2321;--ink-2:#4a5450;--muted:#7a847f;
+  --accent:#1f5f8b;--accent-ink:#ffffff;
+  --board:#3b4a55;--net:#a8641b;--metrics:#1f7a6b;--tool:#6b3f8a;
+  --good:#2f7d3a;--warn:#b5771a;--open:#8a3535;
+  --mono:ui-monospace,"Cascadia Code","JetBrains Mono",Consolas,monospace;
+  --sans:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,sans-serif;
+  --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#171a19;--surface:#1f2423;--surface-2:#272d2b;--line:#36403c;--ink:#e6e9e6;--ink-2:#b7bfba;--muted:#7f8a84;
+  --accent:#6fb0dc;--accent-ink:#0f1a22;--board:#a3b3bf;--net:#e0a45a;--metrics:#5cc0ad;--tool:#b58ad6;
+  --good:#6cc27a;--warn:#e0aa4a;--open:#e07a7a;}}
+:root[data-theme="dark"]{
+  --bg:#171a19;--surface:#1f2423;--surface-2:#272d2b;--line:#36403c;--ink:#e6e9e6;--ink-2:#b7bfba;--muted:#7f8a84;
+  --accent:#6fb0dc;--accent-ink:#0f1a22;--board:#a3b3bf;--net:#e0a45a;--metrics:#5cc0ad;--tool:#b58ad6;
+  --good:#6cc27a;--warn:#e0aa4a;--open:#e07a7a;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 var(--sans);-webkit-font-smoothing:antialiased}
+a{color:var(--accent)}
+.wrap{max-width:1180px;margin:0 auto;padding:32px 24px 72px}
+header{display:grid;grid-template-columns:1fr auto;gap:24px;align-items:end;border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:28px}
+h1{font:600 30px/1.15 var(--serif);margin:0 0 6px;letter-spacing:-.01em;text-wrap:balance}
+.sub{color:var(--ink-2);max-width:66ch;margin:0}
+.eyebrow{font:600 11px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:0 0 8px}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font:12px var(--mono);color:var(--ink-2)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.dot{width:10px;height:10px;border-radius:2px;display:inline-block}
+h2{font:600 20px/1.2 var(--serif);margin:40px 0 6px;text-wrap:balance}
+h2+p.lead{margin:0 0 16px;color:var(--ink-2);max-width:72ch}
+/* loop */
+.loop{display:grid;grid-template-columns:repeat(5,1fr);gap:0;border:1px solid var(--line);background:var(--surface);border-radius:6px;overflow:hidden}
+.stage{padding:16px 16px 14px;border-right:1px solid var(--line);position:relative}
+.stage:last-child{border-right:0}
+.stage .n{font:600 11px var(--mono);letter-spacing:.1em;color:var(--muted)}
+.stage h3{font:600 16px/1.2 var(--sans);margin:4px 0 6px}
+.stage p{margin:0;color:var(--ink-2);font-size:13.5px}
+.stage .who{margin-top:10px;display:flex;gap:6px;flex-wrap:wrap}
+.chip{font:600 11px var(--mono);padding:3px 7px;border-radius:3px;color:var(--accent-ink);letter-spacing:.02em}
+.chip.board{background:var(--board)}.chip.net{background:var(--net)}.chip.metrics{background:var(--metrics)}.chip.tool{background:var(--tool)}
+.stage:after{content:"→";position:absolute;right:-9px;top:14px;color:var(--muted);font-size:14px;background:var(--surface);z-index:1}
+.stage:last-child:after{content:"↺";right:12px}
+.back{margin-top:6px;font:12px var(--mono);color:var(--muted);text-align:right}
+/* parts */
+.parts{display:grid;grid-template-columns:repeat(auto-fit,minmax(440px,1fr));gap:14px}
+.part{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:0;overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.part .head{padding:12px 14px 10px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.part .head b{font:600 15px var(--sans)}
+.part .head small{font:11px var(--mono);color:var(--muted)}
+.part .body{padding:12px 14px 14px;display:grid;gap:10px;font-size:13.5px}
+.part[data-k="board"] .head{border-top:3px solid var(--board)}
+.part[data-k="net"] .head{border-top:3px solid var(--net)}
+.part[data-k="metrics"] .head{border-top:3px solid var(--metrics)}
+.part[data-k="tool"] .head{border-top:3px solid var(--tool)}
+.kv{display:grid;grid-template-columns:76px minmax(0,1fr);gap:4px 10px}
+.kv dt{font:600 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding-top:2px}
+.kv dd{margin:0;color:var(--ink);min-width:0;overflow-wrap:anywhere}
+.kv dd code,.flow code,td code,li code{font:12.5px var(--mono);background:var(--surface-2);padding:1px 4px;border-radius:3px}
+.caps{margin:0;padding-left:16px;color:var(--ink-2)}
+.caps li{margin:2px 0}
+.state{display:inline-flex;align-items:center;gap:6px;font:12px var(--mono)}
+.state:before{content:"";width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.state.good:before{background:var(--good)}.state.warn:before{background:var(--warn)}.state.open:before{background:var(--open)}
+/* flow table */
+table{border-collapse:collapse;width:100%;font-size:13.5px;background:var(--surface);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+th,td{padding:9px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{font:600 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);background:var(--surface-2)}
+tr:last-child td{border-bottom:0}
+.tw{overflow-x:auto}
+/* finding journey */
+.journey{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+.j{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:12px 14px;font-size:13.5px}
+.j .k{font:600 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+.j b{display:block;margin-bottom:4px}
+.j p{margin:0;color:var(--ink-2)}
+/* honest */
+.honest{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+.honest ul{margin:6px 0 0;padding-left:16px;color:var(--ink-2);font-size:13.5px}
+.honest h4{margin:0;font:600 14px var(--sans)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:14px}
+footer{margin-top:40px;color:var(--muted);font:12px var(--mono);border-top:1px solid var(--line);padding-top:12px}
+.j,.card{min-width:0;overflow-wrap:anywhere}
+@media (max-width:900px){.loop{grid-template-columns:1fr}.stage{border-right:0;border-bottom:1px solid var(--line)}.stage:after{content:"↓";right:12px;top:auto;bottom:-10px}.stage:last-child{border-bottom:0}.stage:last-child:after{content:"↺";bottom:12px}header{grid-template-columns:1fr}}
+</style>
+
+<div class="wrap">
+<header>
+  <div>
+    <p class="eyebrow">System map · agentic-kanban + three plugins · 2026-08-16</p>
+    <h1>How the parts improve existing software — and how they feed each other</h1>
+    <p class="sub">One board is the host. Three plugins split the work into <em>protect</em>, <em>find potential</em> and <em>change safely</em>; every plugin's findings become tickets the board can drive, and the board's own metrics view keeps the trend. Read the loop first, then each part's role, then how a single finding travels.</p>
+  </div>
+  <div class="legend">
+    <span><i class="dot" style="background:var(--board)"></i>board (host)</span>
+    <span><i class="dot" style="background:var(--net)"></i>refactor-safety-net</span>
+    <span><i class="dot" style="background:var(--metrics)"></i>code-metrics suite</span>
+    <span><i class="dot" style="background:var(--tool)"></i>refactor toolset</span>
+  </div>
+</header>
+
+<h2>The loop</h2>
+<p class="lead">Five stages, each owned by one part; the arrows are real data hand-offs (tickets, JSON, metrics rows), not aspiration. The last stage feeds the first — friction from refactoring hardens the toolset, and re-measurement re-plans the work.</p>
+<div class="loop">
+  <div class="stage"><div class="n">1 · UNDERSTAND &amp; PROTECT</div><h3>What does it do, and is that pinned?</h3><p>Bounded contexts → per-module requirements register → tests bound to requirements → functional-coverage dashboard, observed UI graph, page-object SDK.</p><div class="who"><span class="chip net">safety-net</span></div></div>
+  <div class="stage"><div class="n">2 · MEASURE</div><h3>Where is the debt, structurally?</h3><p>Hotspots, coupling, god objects, module clustering, dependency graph — and the shared <b>import graph</b> the safety net's module cut now runs on.</p><div class="who"><span class="chip metrics">code-metrics</span></div></div>
+  <div class="stage"><div class="n">3 · FIND POTENTIAL</div><h3>What should change, and why?</h3><p>Module decomposition plan · the pattern language the code uses (elements, rules, rings) · refactoring scout (workarounds a minimal abstraction replaces) · one <b>architecture index</b> to move.</p><div class="who"><span class="chip metrics">code-metrics</span></div></div>
+  <div class="stage"><div class="n">4 · CHANGE SAFELY</div><h3>Do it without breaking consumers</h3><p>Deterministic verbs — rename, move-method, extract-service, change-sig, safe-delete, impact, check — across TS/Ruby/PHP/Python/JVM/Go, applied by builders in worktrees, gated by review and the safety net's tests.</p><div class="who"><span class="chip tool">refactor</span><span class="chip board">board</span></div></div>
+  <div class="stage"><div class="n">5 · TRACK &amp; LEARN</div><h3>Did it help — and what did the tools lack?</h3><p>Re-measure (arch-index, patterns <code>--diff</code>, scorecard) → Quality Metrics trend per commit; verb gaps → <code>refactor-tool:</code> tickets → lab rounds.</p><div class="who"><span class="chip board">board</span><span class="chip metrics">code-metrics</span><span class="chip tool">refactor-lab</span></div></div>
+</div>
+<div class="back">↺ stage 5 re-plans stage 3 (loops re-plan from what is left) and hardens stage 4 (friction → lab)</div>
+
+<h2>The parts — role, capabilities, what goes in and out</h2>
+<p class="lead">Each is usable on its own (CLI / skill); the plugin manifest is what makes it a board citizen — skills into worktrees, views, one-shot scripts, and a board-owned <em>loop</em> whose plan command lists outstanding work as units the board tickets.</p>
+<div class="parts">
+
+<div class="part" data-k="board"><div class="head"><b>agentic-kanban</b><small>host</small></div><div class="body">
+<dl class="kv"><dt>Role</dt><dd>The workbench everything else plugs into: tickets, worktrees, builders, review, merge gate, loops, plugin views, Quality Metrics.</dd>
+<dt>Owns</dt><dd>Ticket lifecycle · WIP/Start Mode · pre-merge gate · plugin loop engine (unit ids → tickets, converged persisted) · <code>quality_metrics</code> table + <code>/quality-metrics</code> view (latest, delta, sparkline per key)</dd>
+<dt>Gives</dt><dd><code>{{leadingRepoPath}}</code>, <code>{{boardUrl}}</code>, <code>{{projectId}}</code> to every plugin command; ticket-context into every worktree</dd></dl>
+<ul class="caps"><li>Everything below files INTO it: findings become tickets, always with an explicit <code>projectId</code></li><li>Board-feedback routing: a flaw in the board itself goes to the board's project, never the one you work in</li></ul>
+<span class="state good">live — dev board</span></div></div>
+
+<div class="part" data-k="net"><div class="head"><b>refactor-safety-net</b><small>plugin · reqextract family</small></div><div class="body">
+<dl class="kv"><dt>Role</dt><dd>Protect behaviour before anyone changes it: reverse-engineer what the code does, pin it, show what is covered.</dd>
+<dt>Skills</dt><dd>module-identification · requirement-extraction / refinement / grounding · functional-coverage · api-inventory · prd-consolidation · ui-sdk · safety-net-operate</dd>
+<dt>Loop</dt><dd><code>requirement-extraction</code> — one ticket per module per round until every module saturates</dd>
+<dt>Views</dt><dd>Coverage · PO Review · UI Graph · Mining Progress</dd>
+<dt>Reads</dt><dd>the target repo; since today its module cut takes the import graph from <code>code-metrics import-graph</code> (auto when reachable; the old <code>--engine code-metrics</code> flag was a stub)</dd>
+<dt>Writes</dt><dd>requirements register, coverage join, UI map — in the output repo/sidecar</dd></dl>
+<span class="state good">engine switch verified on demo + taskflow</span></div></div>
+
+<div class="part" data-k="metrics"><div class="head"><b>code-metrics suite</b><small>plugin · Architecture Improvement</small></div><div class="body">
+<dl class="kv"><dt>Role</dt><dd>Measure, then say what should change — at three levels: file/module metrics, module structure, the pattern language.</dd>
+<dt>Engine</dt><dd><code>analyze</code> / <code>query</code> / <code>structure</code> / <code>refactor</code> / <code>scorecard</code> / <code>stakeholder-page</code> · new: <code>import-graph</code>, <code>patterns measure|vocab</code>, <code>arch-index</code>, <code>arch-page</code>/<code>serve</code>, <code>arch-plan</code></dd>
+<dt>Skills</dt><dd>code-metrics · module-decomposition · pattern-language · refactoring-scout (moved in)</dd>
+<dt>Loop</dt><dd><code>arch-improvement</code> — a ticket per violated pattern-rule pair, unallocated residue, module cycle; count-keyed ids; converged only when clean</dd>
+<dt>View</dt><dd>Architecture: index + legs, module matrix + cycles, pattern heatmap + violating edges, trend, ledger, open <code>pattern:/refactor:/arch:</code> tickets</dd>
+<dt>Index</dt><dd>Lilienthal's shape 45 / 30 / 25 — modularity · hierarchy · pattern consistency; an unmeasured leg never scores; posted per commit into Quality Metrics on request</dd></dl>
+<span class="state good">live on dev board · agentic-kanban index 95.8 (July analysis)</span></div></div>
+
+<div class="part" data-k="tool"><div class="head"><b>refactor toolset</b><small>plugin · refactor-skill + refactor-lab</small></div><div class="body">
+<dl class="kv"><dt>Role</dt><dd>Change contracts without breaking consumers — and turn every gap the verbs show into a fixable unit.</dd>
+<dt>Verbs</dt><dd>rename · move-file/symbol/method · change-sig · params-to-object · extract-fn/method/hook/concern/service/component · inline · safe-delete · find-refs · impact · check · navigation (definition, hierarchy, symbols)</dd>
+<dt>Skills</dt><dd><code>refactor</code> (globally junctioned) · <code>refactor-lab</code> (bundled in-repo today) · <code>refactor-friction</code> (file a gap from ANY project) · <code>refactor-lab-round</code></dd>
+<dt>Loop</dt><dd><code>refactor-lab</code> — groups open <code>refactor-tool:</code> tickets by verb × language into hardening rounds; never "converged" by design</dd>
+<dt>Backlog</dt><dd>board project <code>refactor-skill</code>: 21 seeded from FRICTION-BACKLOG.md; the register stays as narrative + pin index</dd></dl>
+<span class="state warn">plugin live · loop not yet advanced</span></div></div>
+</div>
+
+<h2>Hand-offs — who consumes whose output</h2>
+<p class="lead">The concrete interfaces, so the map is checkable rather than a picture.</p>
+<div class="tw"><table>
+<tr><th>From</th><th>To</th><th>What crosses</th><th>Mechanism</th><th>State</th></tr>
+<tr><td><span class="chip metrics">code-metrics</span></td><td><span class="chip net">safety-net</span></td><td>the static import graph (all languages, TS <code>import type</code> erased)</td><td><code>code-metrics import-graph --json</code>, called by <code>npm run modules</code> when the CLI is reachable (<code>CODE_METRICS_BIN</code>)</td><td><span class="state good">verified</span></td></tr>
+<tr><td><span class="chip metrics">code-metrics</span></td><td><span class="chip board">board</span></td><td>arch tickets (violations, residue, cycles) · <code>arch.*/patterns.*/modules.*</code> metric rows</td><td><code>arch-plan</code> via the plugin loop · <code>arch-index --post-board</code> / script <code>record-quality-metrics</code></td><td><span class="state good">verified live</span></td></tr>
+<tr><td><span class="chip metrics">pattern-language / scout</span></td><td><span class="chip board">board</span></td><td>proposal tickets (<code>pattern: name/enforce/unify/fold/relocate</code>, <code>refactor: …</code>) + a drift-aware ledger in the repo</td><td>MCP <code>create_issue</code> / REST, explicit projectId</td><td><span class="state good">#493–#618 on the dev board</span></td></tr>
+<tr><td><span class="chip board">board tickets</span></td><td><span class="chip tool">refactor verbs</span></td><td>the implementation of a proposal, done in a worktree with the verbs</td><td>builder + <code>refactor</code> skill; safety-net tests + review as the gate</td><td><span class="state warn">works; adoption not yet measured</span></td></tr>
+<tr><td><span class="chip tool">any builder</span></td><td><span class="chip tool">refactor-skill project</span></td><td>a verb that refused / lied / is missing</td><td><code>refactor-friction</code> skill → <code>refactor-tool: &lt;verb&gt; &lt;lang&gt; — &lt;gap&gt;</code> ticket</td><td><span class="state good">convention shipped, 21 seeded</span></td></tr>
+<tr><td><span class="chip tool">refactor-skill project</span></td><td><span class="chip tool">refactor-lab</span></td><td>hardening rounds (≤4 tickets, same verb × language)</td><td>plugin loop <code>refactor-lab</code> → <code>lab:</code> tickets → <code>refactor-lab-round</code></td><td><span class="state warn">planner verified; first advance pending</span></td></tr>
+<tr><td><span class="chip net">safety-net</span></td><td><span class="chip board">board</span></td><td>extraction rounds as tickets, coverage as a view</td><td>loop <code>requirement-extraction</code>, iframe views</td><td><span class="state good">reference plugin</span></td></tr>
+</table></div>
+
+<h2>How one finding travels</h2>
+<p class="lead">Take the pattern-language finding the tool surfaced today, to show the loop end to end.</p>
+<div class="journey">
+  <div class="j"><div class="k">measure</div><b><code>arch-plan</code> reports 6 violating edges</b><p>5 × <code>server-service→server-monitor</code>, 1 × <code>shared-schema→shared-lib</code> — the second is new since the round-1 baseline (a #523 re-export).</p></div>
+  <div class="j"><div class="k">ticket</div><b>#618 filed against agentic-kanban</b><p>Verdict candidates spelled out (real / rule wrong / boundary wrong), the ledger to update, the re-measure command.</p></div>
+  <div class="j"><div class="k">change</div><b>Builder fixes it with the verbs</b><p>e.g. <code>move-symbol</code> / import repoint in a worktree; if a verb refuses the shape → <code>refactor-friction</code> files a <code>refactor-tool:</code> ticket and the builder carries on.</p></div>
+  <div class="j"><div class="k">gate</div><b>Review + safety-net tests + pre-merge gate</b><p>Behaviour pinned by the register's tests is what makes the structural change safe to merge.</p></div>
+  <div class="j"><div class="k">track</div><b>Re-measure → Quality Metrics</b><p><code>patterns.violations</code> 6 → 5, <code>arch.pattern_consistency</code> up; the loop's next advance re-plans from what is left; the friction ticket waits for a lab round.</p></div>
+</div>
+
+<h2>What is measured — and what is still a claim</h2>
+<div class="honest">
+  <div class="card"><h4><span class="state good">Verified today</span></h4><ul>
+    <li>code-metrics: 758 tests green; <code>import-graph</code> on 1305 files in 2.4 s; arch-index / page / serve / plan run live and inside the board; metrics rows land in <code>/quality-metrics</code></li>
+    <li>safety-net module identification runs on the shared import graph (identical partition on the demo)</li>
+    <li>refactor plugin validated by the board's parser, installed, enabled on two projects; friction status reads 21 open in 15 verb×lang groups</li>
+    <li>refactor-lab bundled into refactor-skill (subtree, junctions repointed, old repo frozen)</li>
+  </ul></div>
+  <div class="card"><h4><span class="state warn">Unverified / next</span></h4><ul>
+    <li>arch-index component calibration outside agentic-kanban (declared as a first guess in every output)</li>
+    <li>a full <code>arch-improvement</code> or <code>refactor-lab</code> round driven end to end by the board</li>
+    <li>a plugin enable on a <em>fresh</em> project (the known onboarding blind spot)</li>
+    <li>a non-JS target through the safety net's profile path; <code>analyze</code> inside the 5-min script budget on big repos</li>
+    <li>verb adoption/refusal telemetry from transcripts, a capability manifest, an ops journal — the data a refactor-toolset dashboard would need</li>
+  </ul></div>
+</div>
+
+<footer>Sources: code-metrics-skill <code>e9832c6</code> · refactor-safety-net <code>f7d79f1</code> · refactor-skill <code>19f0dbc</code> · agentic-kanban <code>1759977ddc</code>. Board ids: agentic-kanban <code>d1c5d9c1…</code>, refactor-skill <code>d8935982…</code>. Not ported to shift_app/pulse by request.</footer>
+</div>
+</html>
