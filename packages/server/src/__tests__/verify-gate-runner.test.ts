@@ -270,6 +270,15 @@ describe("verify-gate-runner — zombie process sweep (#172)", () => {
         `const child = spawn(process.execPath, [${JSON.stringify(listenerWorker)}], { detached: true, stdio: 'ignore' });`,
         `fs.writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));`,
         "child.unref();",
+        // Block until the child has ACTUALLY bound its socket before this process exits.
+        // The sweep snapshots immediately after the gate command completes, so without this
+        // the detached listener is racing it: on a loaded box it has not listened yet, the
+        // sweep correctly sees an orphan owning no socket, kills it, and the assertion below
+        // fails — a fixture race that looks exactly like a sweep regression. (Cost two merge
+        // gate runs on #537 before it was pinned; see #581.)
+        "const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);",
+        "const deadline = Date.now() + 15000;",
+        `while (!fs.existsSync(${JSON.stringify(join(projectDir, "listener.port"))}) && Date.now() < deadline) sleepSync(25);`,
       ].join("\n"),
     );
 
