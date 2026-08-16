@@ -1,10 +1,10 @@
 import { createClient } from "@libsql/client";
 import type { Client } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
-import { readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { tmpdir } from "node:os";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import * as schema from "@agentic-kanban/shared/schema";
 import { MIGRATION_FILES, MIGRATIONS_DIR } from "./migrations.js";
 
@@ -81,6 +81,74 @@ function registerExitCleanup(): void {
 }
 
 /**
+ * Content hash of every migration .sql file plus the journal, in journal apply-order.
+ * Any change to a migration's content, its order, or the addition/removal of a
+ * migration changes this hash — which is what keys the template DB below and makes
+ * a stale template impossible (#535).
+ */
+function migrationsContentHash(): string {
+  const hash = createHash("sha256");
+  hash.update(readFileSync(resolve(MIGRATIONS_DIR, "meta/_journal.json"), "utf-8"));
+  for (const file of MIGRATION_FILES) {
+    hash.update(file);
+    hash.update(readFileSync(resolve(MIGRATIONS_DIR, file), "utf-8"));
+  }
+  return hash.digest("hex").slice(0, 16);
+}
+
+let cachedTemplatePath: string | null = null;
+
+/**
+ * Path to a fully-migrated template DB, built once per process (lazily, on first
+ * call) and reused by every subsequent `createTestDb()` call via `copyFileSync`
+ * (#535). Keyed by `migrationsContentHash()` so a template built for an older
+ * migration set is never reused across a schema change — the filename itself
+ * encodes the content it was built from.
+ *
+ * Building the template still runs the same `applyMigrationsToClient` used by
+ * callers that need a genuine fresh apply (e.g. `migration-schema-drift.test.ts`),
+ * so this is pure waste removal: every test still gets an independently-migrated
+ * schema, just copied instead of DDL-replayed 121 times over.
+ */
+function getOrBuildTemplateDb(): string {
+  if (cachedTemplatePath && existsSync(cachedTemplatePath)) return cachedTemplatePath;
+  const hash = migrationsContentHash();
+  const templatePath = join(tmpdir(), `test-db-template-${hash}.db`);
+  if (existsSync(templatePath)) {
+    cachedTemplatePath = templatePath;
+    return templatePath;
+  }
+  // Build under a unique temp name, then COPY (not rename) into place: libsql's native
+  // handle keeps the file briefly locked on Windows even after client.close() (the same
+  // quirk #471 works around elsewhere), so a rename right after close intermittently
+  // fails with EBUSY. copyFileSync only reads the source, which the OS allows immediately.
+  const buildingPath = join(tmpdir(), `test-db-template-building-${randomUUID()}.db`);
+  const buildClient = createClient({ url: `file:${buildingPath}` });
+  try {
+    applyMigrationsToClient(buildClient);
+  } finally {
+    buildClient.close();
+  }
+  mkdirSync(tmpdir(), { recursive: true });
+  if (!existsSync(templatePath)) {
+    try {
+      copyFileSync(buildingPath, templatePath);
+    } catch {
+      // Another worker won the race and already produced templatePath; ignore.
+    }
+  }
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try {
+      rmSync(`${buildingPath}${suffix}`, { force: true });
+    } catch {
+      /* best-effort — a lingering native lock is not worth failing the run over */
+    }
+  }
+  cachedTemplatePath = templatePath;
+  return templatePath;
+}
+
+/**
  * Creates a file-backed libsql client (temp file) with all migrations applied.
  * Returns the drizzle `db` instance and the raw `client`.
  *
@@ -91,15 +159,22 @@ function registerExitCleanup(): void {
  * cascade test baseline-red. A file-backed DB is connection-stable, so the
  * behaviour under test is exercised honestly and deterministically. Temp files
  * are swept on process exit; callers that want eager cleanup can call `dispose()`.
+ *
+ * The schema is produced by copying a pre-migrated template DB (built once per
+ * process, keyed by a hash of the migration contents) instead of replaying all
+ * 121 migration files on every call — see #535. Callers that need a genuine
+ * fresh `applyMigrationsToClient` apply (e.g. to assert migrations themselves
+ * don't throw) should call it directly instead of going through this helper.
  */
 export function createTestDb() {
   registerExitCleanup();
+  const templatePath = getOrBuildTemplateDb();
   const file = join(tmpdir(), `test-db-${randomUUID()}.db`);
   createdTempDbFiles.push(file);
+  copyFileSync(templatePath, file);
   const client = createClient({ url: `file:${file}` });
   // Tracked so the fork closes it at exit even when the caller never disposes (#471).
   createdClients.push(client);
-  applyMigrationsToClient(client);
   client.execute("PRAGMA foreign_keys=ON");
   const db = drizzle(client, { schema });
   const dispose = (): void => {
