@@ -32,8 +32,8 @@ import { getPreference } from "../repositories/preferences.repository.js";
 import { coldCloneCheckPrefKey } from "./cold-clone-build-check.service.js";
 import { verifyScriptPrefKey } from "./stack-profile.service.js";
 import { DriveError } from "./drive.service.js";
+import { isBlockingDependencyType } from "@agentic-kanban/shared/schema";
 
-const BLOCKING_DEPENDENCY_TYPES = new Set(["depends_on", "blocked_by"]);
 
 type ScopedIssue = {
   id: string;
@@ -129,7 +129,7 @@ export async function buildDriveDashboard(
   if (scoped.length > 0) {
     const deps = await getScopedDependencyEdges(scoped.map((i) => i.id), database);
     for (const dep of deps) {
-      if (!BLOCKING_DEPENDENCY_TYPES.has(dep.type)) continue;
+      if (!isBlockingDependencyType(dep.type)) continue;
       const list = blockingDepsByIssue.get(dep.issueId) ?? [];
       list.push(dep.dependsOnId);
       blockingDepsByIssue.set(dep.issueId, list);

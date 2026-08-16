@@ -3,6 +3,7 @@ import type { Database } from "../db/index.js";
 import { createRouter } from "../middleware/create-router.js";
 import { getFocusIssueRows, getDependenciesForIssues } from "../repositories/issue.repository.js";
 import { getProjectStatuses } from "../repositories/project.repository.js";
+import { isBlockingDependencyType } from "@agentic-kanban/shared/schema";
 
 /**
  * Focus — "What should I work on next?".
@@ -45,7 +46,6 @@ const ESTIMATE_WEIGHT: Record<string, number> = {
   xl: 1,
 };
 
-const DEP_TYPES_THAT_BLOCK = new Set(["depends_on", "blocked_by"]);
 
 interface FocusIssue {
   issueId: string;
@@ -113,7 +113,7 @@ export function createFocusRoute(database: Database) {
       const deps = await getDependenciesForIssues(issueIds, database);
 
       for (const dep of deps) {
-        if (!DEP_TYPES_THAT_BLOCK.has(dep.type)) continue;
+        if (!isBlockingDependencyType(dep.type)) continue;
         if (!issueMeta.has(dep.issueId) || !issueMeta.has(dep.dependsOnId)) continue;
         if (!blockersOf.has(dep.issueId)) blockersOf.set(dep.issueId, new Set());
         blockersOf.get(dep.issueId)!.add(dep.dependsOnId);

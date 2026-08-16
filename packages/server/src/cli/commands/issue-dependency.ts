@@ -20,6 +20,7 @@ import {
 import { validateBatchEdges, formatBatchEdgeResult } from "../../lib/dependency-batch.js";
 import { buildApiUrl } from "./workspace-api-url.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { isDirectionalDependencyType, DIRECTIONAL_DEPENDENCY_TYPES } from "@agentic-kanban/shared/schema";
 
 export function registerIssueDependencyCommands(issueCmd: Command) {
   // ── dependency sub-commands ──
@@ -271,7 +272,6 @@ Valid actions: add, remove
         }
 
         const VALID_TYPES = ["depends_on", "blocked_by", "related_to", "duplicates", "parent_of", "child_of", "coupled_with"] as const;
-        const DIRECTIONAL = new Set<string>(["depends_on", "blocked_by", "parent_of", "child_of"]);
 
         const validationError = validateBatchEdges(edges, VALID_TYPES);
         if (validationError) {
@@ -289,7 +289,7 @@ Valid actions: add, remove
         const adjByProject = new Map<string, Map<string, Set<string>>>();
         const edgeKeyToRow = new Map<string, { id: string; projectId: string }>();
         for (const dep of allDepRows) {
-          if (DIRECTIONAL.has(dep.type)) {
+          if (isDirectionalDependencyType(dep.type)) {
             let adj = adjByProject.get(dep.projectId);
             if (!adj) { adj = new Map(); adjByProject.set(dep.projectId, adj); }
             let set = adj.get(dep.issueId);
@@ -304,7 +304,7 @@ Valid actions: add, remove
           projectByIssue,
           adjByProject,
           edgeKeyToRow,
-          directional: DIRECTIONAL,
+          directional: new Set<string>(DIRECTIONAL_DEPENDENCY_TYPES),
         });
 
         if (cycleError) {
