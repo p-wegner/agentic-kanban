@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { VIEW_IDS, type ViewMode } from "../lib/viewRegistry.js";
+import { VIEW_IDS, VIEW_REGISTRY, type ViewMode } from "../lib/viewRegistry.js";
 import { buildAppPath, getAppRouteTab, parseAppPath, type IssuePanel } from "../lib/appRoutes.js";
 import { buildProjectSlugMap, resolveProjectIdFromSlug, type SlugProject } from "../lib/projectSlug.js";
 import { NAVIGATE_VIEW_EVENT, type NavigateViewDetail } from "../lib/navigateView.js";
+import { showToast } from "../lib/toast.js";
 import { useViewTabStore, viewTabActions } from "../stores/viewTabStore.js";
 import {
   createPendingDeepLink,
@@ -232,6 +233,10 @@ export function useBoardPageRoute(options?: Partial<BoardPageRouteOptions>): Boa
       preferReplace: pending.unresolved || navigationBurst.isCoalescing(now),
     });
     if (plan.action === "none") return;
+    if (plan.unknownViewSegment) {
+      const label = VIEW_REGISTRY.find((v) => v.id === viewMode)?.toolbarLabel ?? viewMode;
+      showToast(`Unknown view "${plan.unknownViewSegment}" in the URL — showing ${label} instead.`, "warning");
+    }
     pending.unresolved = false;
     const nextUrl = `${plan.path}${window.location.search}${window.location.hash}`;
     if (plan.action === "replace") {

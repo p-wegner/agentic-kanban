@@ -134,6 +134,7 @@ describe("planUrlSync", () => {
     expect(planUrlSync({ ...base, currentPath: "/p/agentic-kanban/board" })).toEqual({
       path: "/p/agentic-kanban/board",
       action: "none",
+      unknownViewSegment: null,
     });
     // Trailing slash is not a difference.
     expect(planUrlSync({ ...base, currentPath: "/p/agentic-kanban/board/" }).action).toBe("none");
@@ -143,6 +144,7 @@ describe("planUrlSync", () => {
     expect(planUrlSync({ ...base, currentPath: "/board" })).toEqual({
       path: "/p/agentic-kanban/board",
       action: "replace",
+      unknownViewSegment: null,
     });
     expect(planUrlSync({ ...base, currentPath: "/" }).action).toBe("replace");
   });
@@ -151,6 +153,7 @@ describe("planUrlSync", () => {
     expect(planUrlSync({ ...base, currentPath: `/p/${AK}/board` })).toEqual({
       path: "/p/agentic-kanban/board",
       action: "replace",
+      unknownViewSegment: null,
     });
   });
 
@@ -158,23 +161,26 @@ describe("planUrlSync", () => {
     expect(planUrlSync({ ...base, view: "graph", currentPath: "/p/agentic-kanban/board" })).toEqual({
       path: "/p/agentic-kanban/graph",
       action: "push",
+      unknownViewSegment: null,
     });
   });
 
   it("pushes a project change", () => {
     expect(
       planUrlSync({ ...base, activeProjectId: PANTRY, currentPath: "/p/agentic-kanban/board" }),
-    ).toEqual({ path: "/p/pantry/board", action: "push" });
+    ).toEqual({ path: "/p/pantry/board", action: "push", unknownViewSegment: null });
   });
 
   it("pushes opening and closing an issue panel", () => {
     expect(planUrlSync({ ...base, issueNumber: 446, currentPath: "/p/agentic-kanban/board" })).toEqual({
       path: "/p/agentic-kanban/board/issue/446",
       action: "push",
+      unknownViewSegment: null,
     });
     expect(planUrlSync({ ...base, currentPath: "/p/agentic-kanban/board/issue/446" })).toEqual({
       path: "/p/agentic-kanban/board",
       action: "push",
+      unknownViewSegment: null,
     });
   });
 
@@ -183,7 +189,7 @@ describe("planUrlSync", () => {
     // panel on screen that the URL denied and a reload could not restore.
     expect(
       planUrlSync({ ...base, issueNumber: 28, panel: "workspace", currentPath: "/p/agentic-kanban/board" }),
-    ).toEqual({ path: "/p/agentic-kanban/board/issue/28/workspace", action: "push" });
+    ).toEqual({ path: "/p/agentic-kanban/board/issue/28/workspace", action: "push", unknownViewSegment: null });
     // Detail -> workspace on the SAME issue is a different panel, so a real
     // history entry (back returns to the detail panel).
     expect(
@@ -206,26 +212,26 @@ describe("planUrlSync", () => {
     // A scoped upgrade of the workspace URL is still an in-place replace.
     expect(
       planUrlSync({ ...base, issueNumber: 28, panel: "workspace", currentPath: "/board/issue/28/workspace" }),
-    ).toEqual({ path: "/p/agentic-kanban/board/issue/28/workspace", action: "replace" });
+    ).toEqual({ path: "/p/agentic-kanban/board/issue/28/workspace", action: "replace", unknownViewSegment: null });
   });
 
   it("omits the panel segment when no issue panel is open", () => {
     expect(
       planUrlSync({ ...base, issueNumber: null, panel: "workspace", currentPath: "/p/agentic-kanban/graph" }),
-    ).toEqual({ path: "/p/agentic-kanban/board", action: "push" });
+    ).toEqual({ path: "/p/agentic-kanban/board", action: "push", unknownViewSegment: null });
   });
 
   it("replaces instead of pushing when told to coalesce", () => {
     expect(
       planUrlSync({ ...base, view: "graph", currentPath: "/p/agentic-kanban/board", preferReplace: true }),
-    ).toEqual({ path: "/p/agentic-kanban/graph", action: "replace" });
+    ).toEqual({ path: "/p/agentic-kanban/graph", action: "replace", unknownViewSegment: null });
   });
 
   it("replaces an unresolvable slug with where the user actually is", () => {
     // The unresolved fallback keeps the active project and corrects the bar.
     expect(
       planUrlSync({ ...base, currentPath: "/p/does-not-exist/board", preferReplace: true }),
-    ).toEqual({ path: "/p/agentic-kanban/board", action: "replace" });
+    ).toEqual({ path: "/p/agentic-kanban/board", action: "replace", unknownViewSegment: null });
   });
 
   it("falls back to the flat path when the active project has no slug", () => {
@@ -233,6 +239,7 @@ describe("planUrlSync", () => {
     expect(planUrlSync({ ...base, activeProjectId: "gone", view: "graph", currentPath: "/board" })).toEqual({
       path: "/graph",
       action: "push",
+      unknownViewSegment: null,
     });
   });
 
@@ -247,7 +254,27 @@ describe("planUrlSync", () => {
     expect(planUrlSync({ ...base, view: "analytics", currentPath: "/p/agentic-kanban/burndown" })).toEqual({
       path: "/p/agentic-kanban/analytics/burndown",
       action: "replace",
+      unknownViewSegment: null,
     });
+  });
+
+  it("surfaces the raw segment when the URL named an unknown view (#478)", () => {
+    // /p/agentic-kanban/monitor names no known view — the caller must be able to
+    // tell this happened instead of the address bar silently becoming /board.
+    expect(
+      planUrlSync({ ...base, currentPath: "/p/agentic-kanban/monitor" }),
+    ).toEqual({ path: "/p/agentic-kanban/board", action: "push", unknownViewSegment: "monitor" });
+  });
+
+  it("resolves the Plugins tab's URL alias in place (#478)", () => {
+    // The toolbar label reads "Plugins" but the ViewMode id is "plugin-views" —
+    // /plugins is accepted as an inbound alias and canonicalised in place.
+    const parsed = parseAppPath("/p/agentic-kanban/plugins");
+    expect(parsed.view).toBe("plugin-views");
+    expect(parsed.unknownViewSegment).toBeNull();
+    expect(
+      planUrlSync({ ...base, view: "plugin-views", currentPath: "/p/agentic-kanban/plugins" }),
+    ).toEqual({ path: "/p/agentic-kanban/plugin-views", action: "replace", unknownViewSegment: null });
   });
 });
 
@@ -304,6 +331,7 @@ describe("planUrlSync — the tab dimension", () => {
     expect(planUrlSync({ ...base, tab: "burndown", currentPath: `${SLUG}/analytics/throughput` })).toEqual({
       path: `${SLUG}/analytics/burndown`,
       action: "push",
+      unknownViewSegment: null,
     });
   });
 
@@ -327,10 +355,12 @@ describe("planUrlSync — the tab dimension", () => {
     expect(planUrlSync({ ...base, tab: null, currentPath: "/burndown" })).toEqual({
       path: `${SLUG}/analytics/burndown`,
       action: "replace",
+      unknownViewSegment: null,
     });
     expect(planUrlSync({ ...base, tab: null, currentPath: `${SLUG}/burndown` })).toEqual({
       path: `${SLUG}/analytics/burndown`,
       action: "replace",
+      unknownViewSegment: null,
     });
   });
 
@@ -343,6 +373,7 @@ describe("planUrlSync — the tab dimension", () => {
     expect(planUrlSync({ ...base, tab: null, currentPath: `${SLUG}/analytics` })).toEqual({
       path: `${SLUG}/analytics/throughput`,
       action: "replace",
+      unknownViewSegment: null,
     });
   });
 
@@ -360,6 +391,7 @@ describe("planUrlSync — the tab dimension", () => {
     expect(planUrlSync({ ...base, view: "kanban", tab: "burndown", currentPath: `${SLUG}/board` })).toEqual({
       path: `${SLUG}/board`,
       action: "none",
+      unknownViewSegment: null,
     });
   });
 
@@ -372,7 +404,11 @@ describe("planUrlSync — the tab dimension", () => {
         panel: "workspace",
         currentPath: `${SLUG}/analytics/burndown`,
       }),
-    ).toEqual({ path: `${SLUG}/analytics/burndown/issue/12/workspace`, action: "push" });
+    ).toEqual({
+      path: `${SLUG}/analytics/burndown/issue/12/workspace`,
+      action: "push",
+      unknownViewSegment: null,
+    });
   });
 
   it("resolveSyncTab is the single decision the sync makes about tabs", () => {
