@@ -84,3 +84,18 @@ describe("isClaudeUsageLimitStats", () => {
     expect(isClaudeUsageLimitStats(null)).toBe(false);
   });
 });
+
+describe("#488 defence 4: an unparseable reset hint is rejected, not persisted", () => {
+  it("stores null rather than prose when the capture is not a time", () => {
+    // The exact shape seen live: the greedy capture grabbed doc-comment prose and it was
+    // written into the session's retryAfter field.
+    const info = detectClaudeUsageLimitText('5-hour limit reached. resets at X" hint persisted on the stats');
+    expect(info).not.toBeNull();
+    expect(info?.resetsAt).toBeNull();
+  });
+
+  it("still accepts genuine clock-ish and parseable hints", () => {
+    expect(detectClaudeUsageLimitText("Claude usage limit reached. reset at 3pm.")?.resetsAt).toBe("3pm");
+    expect(detectClaudeUsageLimitText("Claude usage limit reached. reset at 15:00.")?.resetsAt).toBe("15:00");
+  });
+});

@@ -34,9 +34,27 @@ function resetsAtToIso(resetsAt: unknown): string | null {
   return new Date(ms).toISOString();
 }
 
+/**
+ * Keep a "resets at X" capture only when it actually reads as a time (#488).
+ *
+ * The capture group is greedy to the end of the sentence, so on a false-positive match it
+ * happily grabs prose. That prose was then persisted into the session's `retryAfter`, failed
+ * `Date.parse` in `cooldownUntilIso`, and silently became a blanket 3h cooldown against a reset
+ * time that never existed - so the monitor reasoned about a deadline that was never reported.
+ * Storing null is honest; storing prose is not.
+ */
+function sanitizeResetHint(raw: string | null | undefined): string | null {
+  const hint = raw?.trim();
+  if (!hint || hint.length > 40) return null;
+  if (Number.isFinite(Date.parse(hint))) return hint;
+  // Clock-ish forms Date.parse rejects on their own: "3pm", "15:00", "3:30pm (UTC)".
+  if (/^\d{1,2}(:\d{2})?\s*(am|pm)?(\s*\([^)]{1,20}\))?$/i.test(hint)) return hint;
+  return null;
+}
+
 export function detectClaudeUsageLimitText(text: string | null | undefined): ClaudeUsageLimitInfo | null {
   if (!text || !CLAUDE_USAGE_LIMIT_PATTERN.test(text)) return null;
-  const resetsAt = RESET_AT_PATTERN.exec(text)?.[1]?.trim() || null;
+  const resetsAt = sanitizeResetHint(RESET_AT_PATTERN.exec(text)?.[1]);
   return { message: text.trim(), resetsAt };
 }
 
