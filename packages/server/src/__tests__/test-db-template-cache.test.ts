@@ -1,3 +1,5 @@
+// @gate:always-run — reads MIGRATIONS_DIR to key the template hash, so its
+// correctness does not depend on this package's import graph (#538).
 import { describe, it, expect } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";

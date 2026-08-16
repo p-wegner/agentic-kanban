@@ -72,3 +72,46 @@ export const DEFAULT_SERVICE_STACK_CONFIG: ServiceStackConfig = {
   ports: [],
   readyTimeoutMs: 120000,
 };
+
+// --- Codecs for the two JSON text columns (#531) ----------------------------------
+//
+// `projects.services_config` and `workspaces.service_state` are plain `text`, so every
+// reader hand-parsed them — nine parsers between them, and the two `parseServicesConfig`
+// DISAGREED: the wire-DTO one in routes/projects.ts returned whatever parsed, while the
+// runtime one required `enabled === true` and merged defaults. A project whose config
+// says `enabled: false` therefore appeared on the board as a configured stack that the
+// runtime would never start.
+//
+// Both intents are legitimate, so they are two NAMED functions rather than one function
+// with a flag nobody remembers to pass.
+
+/**
+ * Normalise a stored `servicesConfig` string, whatever its `enabled` value.
+ * Use for DISPLAY — the board shows a project's declared stack even when disabled.
+ * Returns null only when the column is empty or corrupt.
+ */
+export function parseServiceStackConfig(raw: string | null | undefined): ServiceStackConfig | null {
+  if (typeof raw !== "string" || raw.trim() === "") return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<ServiceStackConfig> | null;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return {
+      ...DEFAULT_SERVICE_STACK_CONFIG,
+      ...parsed,
+      enabled: parsed.enabled === true,
+      composeFile: parsed.composeFile?.trim() || DEFAULT_SERVICE_STACK_CONFIG.composeFile,
+    };
+  } catch {
+    // Corrupt stored value: treat as "no stack" rather than crashing a board list.
+    return null;
+  }
+}
+
+/**
+ * The stack to actually BRING UP, or null. Same parse, but a disabled stack is null —
+ * the runtime must never start one the operator switched off.
+ */
+export function parseEnabledServiceStackConfig(raw: string | null | undefined): ServiceStackConfig | null {
+  const config = parseServiceStackConfig(raw);
+  return config?.enabled === true ? config : null;
+}
