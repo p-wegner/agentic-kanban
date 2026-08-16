@@ -2,6 +2,7 @@ import { issues, plugins, preferences, projectStatuses, sessions, workspaces } f
 import { and, eq, like, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { ACTIVE_WORKSPACE_STATUSES } from "@agentic-kanban/shared/lib/workspace-activity-state";
 
 export type PluginRow = typeof plugins.$inferSelect;
 
@@ -84,6 +85,23 @@ export async function listPluginLoopIssues(
   database: Database = db,
 ): Promise<LoopIssueRow[]> {
   const pattern = `${escapeLikeLiteral(keyPrefix)}%`;
+  // #479 — "not closed" is NOT the same claim as "live". A workspace whose agent exited with
+  // no commits sits at `idle` (or `error`/`blocked`) forever — neither is "closed", so the old
+  // `status != 'closed'` test called it live and `stranded` came back false on the exact ticket
+  // it exists to catch. `ACTIVE_WORKSPACE_STATUSES` is the shared definition of "an agent is
+  // actually working this" (workspace-activity-state.ts).
+  //
+  // `ready_for_merge` is added back on top of it deliberately: that status means the builder
+  // FINISHED and its commits are sitting on the branch awaiting the routine merge step — the
+  // healthy, expected "builder-finished-unmerged" shape `plugin-loop-stall.ts` already classifies
+  // with `mergeSafe: true`. Treating it as not-live would flag every ordinary finished-and-
+  // awaiting-merge ticket as `stranded`/"stalled — agent exited, nothing landed", which is false:
+  // something WAS landed, it just hasn't been merged yet. Only a truly idle/errored/blocked
+  // workspace with nothing driving it should read as stranded.
+  const liveStatusList = sql.join(
+    [...ACTIVE_WORKSPACE_STATUSES, "ready_for_merge"].map((s) => sql`${s}`),
+    sql`, `,
+  );
   const rows = await database
     .select({
       id: issues.id,
@@ -96,7 +114,7 @@ export async function listPluginLoopIssues(
       // Correlated EXISTS rather than two more round trips; these rows already load per loop.
       hasLiveWorkspace: sql<boolean>`EXISTS (
         SELECT 1 FROM ${workspaces} AS live
-        WHERE live.issue_id = ${issues.id} AND live.status != 'closed'
+        WHERE live.issue_id = ${issues.id} AND live.status IN (${liveStatusList})
       )`,
       hasAnyWorkspace: sql<boolean>`EXISTS (
         SELECT 1 FROM ${workspaces} AS any_ws WHERE any_ws.issue_id = ${issues.id}
