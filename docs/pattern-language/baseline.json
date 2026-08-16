@@ -1,0 +1,222 @@
+{
+  "files": 1303,
+  "coverage": 1.0,
+  "unassigned": 0,
+  "ambiguous": 12,
+  "elements": {
+    "server-service": 290,
+    "client-component": 244,
+    "client-lib": 123,
+    "shared-lib": 118,
+    "server-repository": 113,
+    "mcp-tool": 95,
+    "client-hook": 58,
+    "server-route": 45,
+    "server-monitor": 42,
+    "server-lib": 41,
+    "shared-schema": 33,
+    "server-cli": 26,
+    "shared-types": 14,
+    "server-root": 13,
+    "server-db": 11,
+    "client-store": 8,
+    "server-scaffold": 7,
+    "server-script": 7,
+    "server-middleware": 6,
+    "client-route": 5,
+    "server-worker": 4
+  },
+  "violations": 5,
+  "violationsByPair": {
+    "server-service→server-monitor": 5
+  },
+  "matrix": {
+    "client-component": {
+      "client-lib": 363,
+      "client-component": 354,
+      "external": 206,
+      "client-hook": 58,
+      "shared-lib": 45,
+      "client-store": 29
+    },
+    "client-hook": {
+      "client-lib": 95,
+      "external": 55,
+      "client-store": 23,
+      "client-hook": 12,
+      "shared-lib": 10
+    },
+    "client-lib": {
+      "client-lib": 49,
+      "shared-lib": 16,
+      "external": 6
+    },
+    "client-route": {
+      "client-lib": 21,
+      "client-hook": 17,
+      "client-component": 8,
+      "client-route": 5,
+      "external": 5,
+      "client-store": 5,
+      "shared-lib": 1
+    },
+    "client-store": {
+      "external": 8
+    },
+    "mcp-tool": {
+      "mcp-tool": 238,
+      "external": 176,
+      "shared-lib": 86,
+      "shared-schema": 2
+    },
+    "server-cli": {
+      "server-cli": 52,
+      "server-repository": 49,
+      "shared-lib": 36,
+      "external": 26,
+      "server-service": 20,
+      "server-lib": 8,
+      "server-db": 5,
+      "server-root": 2,
+      "shared-schema": 1,
+      "server-scaffold": 1,
+      "server-worker": 1
+    },
+    "server-db": {
+      "external": 25,
+      "server-db": 8,
+      "shared-lib": 4,
+      "shared-schema": 3,
+      "server-scaffold": 1
+    },
+    "server-lib": {
+      "shared-lib": 14,
+      "external": 8,
+      "server-lib": 4,
+      "server-db": 1
+    },
+    "server-middleware": {
+      "external": 5,
+      "server-lib": 2,
+      "server-middleware": 1,
+      "shared-lib": 1,
+      "server-service": 1
+    },
+    "server-monitor": {
+      "server-service": 92,
+      "shared-lib": 55,
+      "external": 37,
+      "server-repository": 34,
+      "shared-schema": 28,
+      "server-db": 27,
+      "server-monitor": 19,
+      "server-lib": 10
+    },
+    "server-repository": {
+      "external": 132,
+      "shared-schema": 109,
+      "server-db": 107,
+      "server-repository": 49,
+      "shared-lib": 34,
+      "server-lib": 6
+    },
+    "server-root": {
+      "server-service": 40,
+      "server-monitor": 37,
+      "external": 20,
+      "shared-lib": 13,
+      "server-db": 13,
+      "server-root": 12,
+      "server-repository": 11,
+      "server-lib": 8,
+      "server-route": 4,
+      "shared-schema": 4,
+      "server-middleware": 3
+    },
+    "server-route": {
+      "server-service": 110,
+      "server-middleware": 79,
+      "server-route": 42,
+      "server-repository": 34,
+      "shared-lib": 14,
+      "external": 11,
+      "server-lib": 7,
+      "shared-schema": 1
+    },
+    "server-scaffold": {
+      "external": 19,
+      "server-service": 2,
+      "server-scaffold": 2
+    },
+    "server-script": {
+      "external": 18,
+      "server-db": 9,
+      "shared-lib": 7,
+      "server-service": 1,
+      "server-repository": 1
+    },
+    "server-service": {
+      "server-service": 536,
+      "shared-lib": 283,
+      "server-repository": 278,
+      "external": 257,
+      "server-lib": 56,
+      "server-db": 46,
+      "shared-schema": 15,
+      "server-monitor": 5
+    },
+    "server-worker": {
+      "external": 9,
+      "shared-lib": 5,
+      "server-worker": 2,
+      "server-lib": 1,
+      "server-cli": 1
+    },
+    "shared-lib": {
+      "shared-lib": 144,
+      "external": 82,
+      "shared-schema": 15,
+      "shared-types": 1
+    },
+    "shared-schema": {
+      "shared-schema": 80,
+      "external": 52
+    },
+    "shared-types": {
+      "shared-types": 2
+    }
+  },
+  "violationList": [
+    {
+      "from": "packages/server/src/services/autodrive-stall-warning.service.ts",
+      "to": "packages/server/src/startup/monitor-cycle-rules.ts",
+      "fromEl": "server-service",
+      "toEl": "server-monitor"
+    },
+    {
+      "from": "packages/server/src/services/monitor-butler.ts",
+      "to": "packages/server/src/startup/transient-errors.ts",
+      "fromEl": "server-service",
+      "toEl": "server-monitor"
+    },
+    {
+      "from": "packages/server/src/services/plugin-loop-autoland-recovery.ts",
+      "to": "packages/server/src/startup/branch-commits.ts",
+      "fromEl": "server-service",
+      "toEl": "server-monitor"
+    },
+    {
+      "from": "packages/server/src/services/plugin-loop-start.service.ts",
+      "to": "packages/server/src/startup/monitor-auto-start.ts",
+      "fromEl": "server-service",
+      "toEl": "server-monitor"
+    },
+    {
+      "from": "packages/server/src/services/butler-sdk/claude-loop.ts",
+      "to": "packages/server/src/startup/transient-errors.ts",
+      "fromEl": "server-service",
+      "toEl": "server-monitor"
+    }
+  ],
+  "unassignedFiles": []
+}
