@@ -295,9 +295,14 @@ function detectOtherProfile(repoPath: string, markers: Set<string>): Partial<Sta
     const uv = isUvProject(repoPath, markers);
     const poetry = !uv && markers.has("pyproject.toml") && /\[tool\.poetry\]/.test(readFileSafe(join(repoPath, "pyproject.toml")));
     const pm = uv ? "uv" : poetry ? "poetry" : markers.has("Pipfile") ? "pipenv" : "pip";
+    // The bare-pip case splits on which file actually exists (#521). A PEP-621
+    // pyproject-only project has no requirements.txt, so `pip install -r requirements.txt`
+    // fails outright — install the project itself instead. requirements.txt wins when both
+    // are present: it is the explicit pinned set.
+    const pipInstall = markers.has("requirements.txt") ? "pip install -r requirements.txt" : "pip install -e .";
     const install = uv
       ? "uv sync"
-      : poetry ? "poetry install" : markers.has("Pipfile") ? "pipenv install --dev" : "pip install -r requirements.txt";
+      : poetry ? "poetry install" : markers.has("Pipfile") ? "pipenv install --dev" : pipInstall;
     // uv's runner invokes the tool directly (`uv run pytest`), not via `python -m`.
     const run = (cmd: string) => (poetry ? `poetry run ${cmd}` : markers.has("Pipfile") ? `pipenv run ${cmd}` : cmd);
     const runTool = (tool: string) => (uv ? `uv run ${tool}` : run(tool));
