@@ -1,7 +1,7 @@
 import { parseAgentProviderStreamLine, parseAgentProviderStreamLineObserved } from "@agentic-kanban/shared/lib/agent-stream-parser";
 import type { AgentLaunchConfig, AgentProvider, FileSystem, ParsedStreamEvent, ProviderLaunchOptions } from "./types.js";
 import { PLAN_BEGIN_MARKER, PLAN_END_MARKER } from "./types.js";
-import { resolveCodexDirect, spliceAgentArgs, nodeFileSystem } from "./helpers.js";
+import { resolveCodexDirect, spliceAgentArgs, nodeFileSystem, resolveMockLaunch } from "./helpers.js";
 
 export class CodexProvider implements AgentProvider {
   readonly name = "codex";
@@ -16,8 +16,11 @@ export class CodexProvider implements AgentProvider {
     const { agentArgs, providerSessionId, agentCommand, keepAlive, profile, model, planMode, systemInstructions, oneShotText } = options;
     const isWindows = process.platform === "win32";
 
-    const isMockAgent = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
-    let command = process.env.AGENT_COMMAND || agentCommand || "codex";
+    const { isMockAgent, command: resolvedCommand, mockArgs } = resolveMockLaunch(
+      { agentCommand, providerSessionId, keepAlive },
+      "codex",
+    );
+    let command = resolvedCommand;
     let useShell = isWindows;
 
     const args: string[] = [];
@@ -55,12 +58,7 @@ export class CodexProvider implements AgentProvider {
     }
 
     if (isMockAgent) {
-      if (providerSessionId) {
-        args.push("--resume", providerSessionId);
-      }
-      if (keepAlive) {
-        args.push("--profile", "multi-turn");
-      }
+      args.push(...mockArgs);
     } else {
       const entry = resolveCodexDirect(command, this.fs);
       if (entry) {

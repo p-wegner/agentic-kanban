@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseAgentProviderStreamLine, parseAgentProviderStreamLineObserved } from "@agentic-kanban/shared/lib/agent-stream-parser";
 import type { AgentLaunchConfig, AgentProvider, FileSystem, ParsedStreamEvent, ProviderLaunchOptions } from "./types.js";
-import { getMcpConfigPath, buildSpawnEnv, spliceAgentArgs, nodeFileSystem, profileDefinesCustomEndpoint } from "./helpers.js";
+import { getMcpConfigPath, buildSpawnEnv, spliceAgentArgs, nodeFileSystem, profileDefinesCustomEndpoint, resolveMockLaunch } from "./helpers.js";
 
 export class ClaudeProvider implements AgentProvider {
   readonly name = "claude";
@@ -31,8 +31,11 @@ export class ClaudeProvider implements AgentProvider {
 
     const effectiveProfileName = profile?.name ?? claudeProfile;
 
-    const isMockAgent = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
-    let command = process.env.AGENT_COMMAND || agentCommand || "claude";
+    const { isMockAgent, command: resolvedCommand, mockArgs } = resolveMockLaunch(
+      { agentCommand, providerSessionId, keepAlive },
+      "claude",
+    );
+    let command = resolvedCommand;
     const isWindows = process.platform === "win32";
 
     if (isWindows && !isMockAgent && !agentCommand) {
@@ -72,14 +75,9 @@ export class ClaudeProvider implements AgentProvider {
     let keepStdinOpen = false;
 
     if (isMockAgent) {
-      args = [];
-      if (providerSessionId) {
-        args.push("--resume", providerSessionId);
-      }
-      if (keepAlive) {
-        args.push("--profile", "multi-turn");
-        keepStdinOpen = true;
-      }
+      args = [...mockArgs];
+      // The mock's multi-turn profile expects stdin to stay open, same as the real CLI.
+      if (keepAlive) keepStdinOpen = true;
     } else {
       args = ["--output-format", "stream-json", "--verbose"];
       try {

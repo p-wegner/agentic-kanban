@@ -27,6 +27,7 @@ import { resolvePiExecutable, splitArgs } from "./agent-provider/helpers.js";
 import { parseCodexLicenseRing, codexHomeHasAuth, resolveCodexHomeForProfile } from "./codex-license-ring.js";
 import { parseClaudeSubscriptionRing, claudeConfigDirHasAuth, resolveClaudeConfigDirForProfile } from "./claude-subscription-ring.js";
 import { detectCliVersion, type CliVersionResult, type VersionRunner } from "./agent-cli-version.service.js";
+import { isMockAgentCommand } from "./agent-provider/helpers.js";
 
 export type ProfileHealthStatus = "ok" | "warning" | "error" | "unknown";
 
@@ -116,7 +117,7 @@ function sanitizeCommand(command: string | undefined): string {
   if (!command) return "";
   const trimmed = command.trim();
   if (!trimmed) return "";
-  if (trimmed.includes("mock-agent")) return "mock-agent";
+  if (isMockAgentCommand(trimmed)) return "mock-agent";
   if (/[\\/]/.test(trimmed)) return basename(trimmed.replace(/^"|"$/g, ""));
   return trimmed.split(/\s+/)[0];
 }
