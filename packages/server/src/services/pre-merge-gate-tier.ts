@@ -69,6 +69,11 @@ export function countAlwaysRunGuardSuites(repoRoot: string): number {
 
 export interface GateTierInfo {
   strategy: VerifyGateStrategy;
+  /** Whether `KANBAN_TEST_PACKAGES` was set at all — false for an unreadable diff, a
+   *  global-config change, or a path owned by no package, in which case EVERY package's full
+   *  suite ran regardless of `strategy`. Distinct from `fileScoped`: package-scoping without
+   *  file-scoping is a real, narrower tier that must not be reported as "full". */
+  packageScoped: boolean;
   fileScoped: boolean;
   changedFileCount: number;
   guardSuiteCount: number;
@@ -82,10 +87,15 @@ export interface GateTierInfo {
  * `tierInfo` is null whenever the verify_script branch never ran at all (smoke-only gate, or
  * docs-only skip handled by the caller before this is reached) — the message then names that
  * plainly instead of inventing tier details for a run that never happened.
+ *
+ * The tier label reflects what ACTUALLY ran, not the operator's `strategy` setting — a
+ * `scoped` strategy with `verify_file_scope=false`, or an unreadable/unmodeled diff, performs
+ * no narrowing at all and must say "full", never "package-scoped" (#538: a mislabeled tier is
+ * exactly the "level weakens invisibly" failure this feature exists to prevent).
  */
 export function buildGateTierMessage(tierInfo: GateTierInfo | null): string {
   if (!tierInfo) return "pre-merge gate passed (smoke check only — no verify_script tier)";
-  const tier = tierInfo.fileScoped ? "file-scoped" : tierInfo.strategy === "full" ? "full" : "package-scoped";
+  const tier = tierInfo.fileScoped ? "file-scoped" : tierInfo.packageScoped ? "package-scoped" : "full";
   const parts = [
     `tier: ${tier}`,
     `${tierInfo.changedFileCount} changed file(s)`,
