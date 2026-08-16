@@ -1,5 +1,5 @@
 import { isTerminalStatusName, isTerminalStatusView } from "@agentic-kanban/shared";
-import type { ServiceStackState } from "@agentic-kanban/shared";
+
 import type { WebhookIssueStatusPayload } from "@agentic-kanban/shared/lib";
 import { buildIssueStatusPayload } from "@agentic-kanban/shared/lib";
 import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
@@ -66,6 +66,7 @@ import type { BoardEvents } from "./board-events.js";
 import { createIssueDependencyService, validateBatchDependencies } from "./issue-dependency.service.js";
 import { IssueError } from "./issue-error.js";
 import { materializePhaseArtifactToWorktree } from "./phase-artifacts.service.js";
+import { parseServiceStackState } from "@agentic-kanban/shared";
 
 // IssueError lives in its own module to avoid an import cycle with the dependency
 // sub-service; re-exported here so existing consumers' imports are unchanged.
@@ -82,15 +83,7 @@ const ISSUE_NUMBER_INSERT_ATTEMPTS = 3;
  * exactly — the issue-workspaces LIST rows must match the details DTO so the client's
  * per-workspace serviceState hydration can self-retire.
  */
-function parseServiceStateJson(raw: string | null | undefined): ServiceStackState | null {
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as ServiceStackState;
-    return parsed && typeof parsed === "object" && typeof parsed.composeProjectName === "string" ? parsed : null;
-  } catch {
-    return null;
-  }
-}
+const parseServiceStateJson = parseServiceStackState;
 
 type ContractIssueRow = {
   id: string;

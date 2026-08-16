@@ -40,6 +40,7 @@ import {
   resolveServiceHost,
 } from "./workspace-services-env.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { parseServiceStackState } from "@agentic-kanban/shared";
 
 export { resolveServiceHost, buildServicesEnvFile } from "./workspace-services-env.js";
 
@@ -156,6 +157,12 @@ const ENV_FILE_REL = join(".kanban", "services.env");
  * (`workspaces.service_state`). Teardown + the reaper MUST use this stored name, never a
  * recomputed one, so the name can never drift from what provisioning actually created
  * (F1). Returns null when there is no state or it can't be parsed.
+ *
+ * #531: deliberately NOT routed through `parseServiceStackState`, even though it parses
+ * the same column. That codec rejects an unknown `status` — and this reader's whole job
+ * is to find a stack to TEAR DOWN. A blob the strict codec calls invalid still names a
+ * real running compose project; returning null for it would leak those containers
+ * forever, because nothing else knows the name. Lenient on purpose.
  */
 export function parseStoredComposeProjectName(serviceStateJson: string | null | undefined): string | null {
   if (!serviceStateJson) return null;
@@ -176,29 +183,7 @@ export function parseStoredComposeProjectName(serviceStateJson: string | null | 
  * provisioning a second one), which needs the FULL state (name, ports, env file), not
  * just the compose name.
  */
-export function parseStoredServiceStackState(serviceStateJson: string | null | undefined): ServiceStackState | null {
-  if (!serviceStateJson) return null;
-  try {
-    const parsed = JSON.parse(serviceStateJson) as Partial<ServiceStackState> | null;
-    if (!parsed || typeof parsed !== "object") return null;
-    if (typeof parsed.composeProjectName !== "string") return null;
-    if (parsed.status !== "up" && parsed.status !== "error" && parsed.status !== "down") return null;
-    return {
-      composeProjectName: parsed.composeProjectName,
-      ports: parsed.ports && typeof parsed.ports === "object" ? (parsed.ports as Record<string, number>) : {},
-      envFilePath: typeof parsed.envFilePath === "string" ? parsed.envFilePath : "",
-      status: parsed.status,
-      ...(typeof parsed.error === "string" ? { error: parsed.error } : {}),
-      ...(parsed.deferred === true ? { deferred: true } : {}),
-      ...(Array.isArray(parsed.lintWarnings) && parsed.lintWarnings.every((w) => typeof w === "string")
-        ? { lintWarnings: parsed.lintWarnings as string[] }
-        : {}),
-      updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date().toISOString(),
-    };
-  } catch {
-    return null;
-  }
-}
+export const parseStoredServiceStackState = parseServiceStackState;
 
 /**
  * Thrown by the user-initiated Stop/Restart controls (#92) when the last-reference

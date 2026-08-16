@@ -1,4 +1,5 @@
 import type { WorkspaceSetupRun, WorkspaceSymlinkRun, ServiceStackState } from "@agentic-kanban/shared";
+import { parseServiceStackState } from "@agentic-kanban/shared";
 
 // Pure row -> DTO projection for getWorkspaceDetails. The repository owns the two
 // queries; this module owns turning the joined row + latest session into the
@@ -171,15 +172,9 @@ function mapCachedDiffStats(row: WorkspaceDetailsRow): WorkspaceDetails["diffSta
   return { filesChanged: row.diffStatCacheFilesChanged, insertions: row.diffStatCacheInsertions ?? 0, deletions: row.diffStatCacheDeletions ?? 0 };
 }
 
-/** Parse the persisted ServiceStackState JSON, tolerating null/garbage. */
+/** Parse the persisted ServiceStackState JSON, tolerating null/garbage (#531). */
 function mapServiceState(row: WorkspaceDetailsRow): ServiceStackState | null {
-  if (!row.serviceState) return null;
-  try {
-    const parsed = JSON.parse(row.serviceState) as ServiceStackState;
-    return parsed && typeof parsed === "object" && typeof parsed.composeProjectName === "string" ? parsed : null;
-  } catch {
-    return null;
-  }
+  return parseServiceStackState(row.serviceState);
 }
 
 function mapLatestSetup(row: WorkspaceDetailsRow): WorkspaceSetupRun | null {
