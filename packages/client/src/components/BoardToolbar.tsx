@@ -23,6 +23,7 @@ export { formatBoardActivitySummary };
 // with the many components that import `ViewMode` from BoardToolbar.
 export type { ViewMode } from "../lib/viewRegistry.js";
 import type { ViewMode } from "../lib/viewRegistry.js";
+import { useDismissable } from "../hooks/useDismissable.js";
 
 const ACTIVE_DEFAULT = "bg-brand-600 text-white hover:bg-brand-700";
 const INACTIVE = "text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-700";
@@ -256,78 +257,14 @@ export function BoardToolbar({
   }, []);
 
   // Close the "More" views dropdown on outside click or Escape.
-  useEffect(() => {
-    if (!showMoreViews) return;
-    function handleClick(e: MouseEvent) {
-      if (moreViewsRef.current && !moreViewsRef.current.contains(e.target as Node)) {
-        setShowMoreViews(false);
-      }
-    }
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setShowMoreViews(false);
-    }
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [showMoreViews]);
+  useDismissable(moreViewsRef, showMoreViews, () => setShowMoreViews(false));
 
   // Same outside-click/Escape handling for the mobile all-views dropdown.
-  useEffect(() => {
-    if (!showAllViews) return;
-    function handleClick(e: MouseEvent) {
-      if (allViewsRef.current && !allViewsRef.current.contains(e.target as Node)) {
-        setShowAllViews(false);
-      }
-    }
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setShowAllViews(false);
-    }
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [showAllViews]);
+  useDismissable(allViewsRef, showAllViews, () => setShowAllViews(false));
 
-  useEffect(() => {
-    if (!showViewMenu) return;
-    function handleClick(e: MouseEvent) {
-      if (viewMenuRef.current && !viewMenuRef.current.contains(e.target as Node)) {
-        setShowViewMenu(false);
-      }
-    }
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setShowViewMenu(false);
-    }
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [showViewMenu]);
+  useDismissable(viewMenuRef, showViewMenu, () => setShowViewMenu(false));
 
-  useEffect(() => {
-    if (!showActivityMenu) return;
-    function handleClick(e: MouseEvent) {
-      if (activityMenuRef.current && !activityMenuRef.current.contains(e.target as Node)) {
-        setShowActivityMenu(false);
-      }
-    }
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setShowActivityMenu(false);
-    }
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [showActivityMenu]);
+  useDismissable(activityMenuRef, showActivityMenu, () => setShowActivityMenu(false));
 
   // Measure intrinsic tab widths vs. available row width and recompute how many
   // primary tabs fit. Driven by a ResizeObserver on the wrapper plus the inputs

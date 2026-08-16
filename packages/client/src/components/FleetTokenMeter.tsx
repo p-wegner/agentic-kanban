@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats } from "../lib/useBoardEvents.js";
 import { useFleetLiveStats } from "../hooks/useFleetLiveStats.js";
 import type { FleetProvider } from "../lib/fleetLiveStats.js";
+import { useDismissable } from "../hooks/useDismissable.js";
 
 interface FleetTokenMeterProps {
   liveStats: Record<string, LiveSessionStats>;
@@ -38,21 +39,7 @@ export function FleetTokenMeter({ liveStats, columns, sessionActivity }: FleetTo
   const [expanded, setExpanded] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!expanded) return;
-    function handleClick(e: MouseEvent) {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setExpanded(false);
-    }
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setExpanded(false);
-    }
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [expanded]);
+  useDismissable(rootRef, expanded, () => setExpanded(false));
 
   const idle = fleet.activeAgentCount === 0;
 

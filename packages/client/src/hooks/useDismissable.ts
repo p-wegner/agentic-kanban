@@ -46,11 +46,23 @@ export function shouldDismissOnKey(
  * `click` listener fires after the target has already acted, so a dropdown item that
  * re-renders the tree can swallow its own dismissal.
  */
+export interface DismissableOptions {
+  /**
+   * Runs INSTEAD of `onClose` on Escape. Only for a popover whose keyboard dismissal
+   * legitimately does more than close — e.g. a context menu that must hand focus back
+   * to the card it opened from, which an outside CLICK must not do (the click has
+   * already moved focus somewhere the user chose).
+   */
+  onEscape?: () => void;
+}
+
 export function useDismissable(
   ref: RefObject<HTMLElement | null>,
   open: boolean,
   onClose: () => void,
+  options: DismissableOptions = {},
 ): void {
+  const { onEscape } = options;
   useEffect(() => {
     if (!open) return;
 
@@ -59,7 +71,7 @@ export function useDismissable(
       if (shouldDismissOnPointerDown({ open: true, insideContainer })) onClose();
     };
     const onKeyDown = (e: KeyboardEvent) => {
-      if (shouldDismissOnKey(true, e.key, e)) onClose();
+      if (shouldDismissOnKey(true, e.key, e)) (onEscape ?? onClose)();
     };
 
     document.addEventListener("mousedown", onPointerDown);
@@ -68,5 +80,5 @@ export function useDismissable(
       document.removeEventListener("mousedown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [ref, open, onClose]);
+  }, [ref, open, onClose, onEscape]);
 }

@@ -17,6 +17,7 @@ import { AddProjectModal } from "./AddProjectModal.js";
 import { OnboardingWizard } from "./OnboardingWizard.js";
 import { onboardingActions, useOnboardingStore } from "../stores/onboardingStore.js";
 import { useOnboardingStatus } from "../hooks/useOnboardingStatus.js";
+import { useDismissable } from "../hooks/useDismissable.js";
 
 export interface Project {
   id: string;
@@ -124,21 +125,7 @@ export function Layout({
   /** Mobile search is an icon until tapped (#435) â€” see the header. */
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const utilMenuRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!showUtilMenu) return;
-    function handleClick(e: MouseEvent) {
-      if (utilMenuRef.current && !utilMenuRef.current.contains(e.target as Node)) setShowUtilMenu(false);
-    }
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setShowUtilMenu(false);
-    }
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [showUtilMenu]);
+  useDismissable(utilMenuRef, showUtilMenu, () => setShowUtilMenu(false));
 
   // Served from the shared repos cache (#403); `fresh: true` (after a mutation)
   // invalidates first so every cached consumer sees the change too.

@@ -3,6 +3,7 @@ import type { StatusWithIssues } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { computeBoardStats } from "../lib/boardStats.js";
 import { useBoardFilterStore } from "../stores/boardFilterStore.js";
+import { useDismissable } from "../hooks/useDismissable.js";
 
 interface BoardStatsProps {
   activeColumns: StatusWithIssues[];
@@ -113,21 +114,7 @@ export function BoardStats({
       });
   }, [showBreakdown, projectId]);
 
-  useEffect(() => {
-    if (!showBreakdown) return;
-    function handleClick(e: MouseEvent) {
-      if (breakdownRef.current && !breakdownRef.current.contains(e.target as Node)) setShowBreakdown(false);
-    }
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setShowBreakdown(false);
-    }
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [showBreakdown]);
+  useDismissable(breakdownRef, showBreakdown, () => setShowBreakdown(false));
 
   return (
     <div data-testid="board-stats-bar" className="flex items-center gap-2 select-none flex-wrap">
