@@ -13,6 +13,7 @@ import {
   attachVoiceCaptureTag,
 } from "../repositories/voice-capture.repository.js";
 import { isIssueNumberUniqueConstraintError, nextIssueNumber } from "../repositories/issue-number.repository.js";
+import { normalizeIssuePriority } from "@agentic-kanban/shared/lib/issue-priority";
 
 const ISSUE_NUMBER_INSERT_ATTEMPTS = 3;
 
@@ -247,12 +248,9 @@ Respond ONLY with valid JSON (no markdown, no explanation):
     return fallbackStructuredTranscript(transcript);
   }
 
-  const parsedPriority = parsed.priority?.trim().toLowerCase();
-  const priority = parsedPriority === "urgent"
-    ? "critical"
-    : ["low", "medium", "high", "critical"].includes(parsedPriority ?? "")
-    ? parsedPriority!
-    : "medium";
+  // #516: this was the ONLY place that folded "urgent" -> "critical"; the shared helper
+  // now owns that alias so the decompose path gets it too.
+  const priority = normalizeIssuePriority(parsed.priority);
 
   return {
     title: parsed.title?.trim() || transcript.slice(0, 80),

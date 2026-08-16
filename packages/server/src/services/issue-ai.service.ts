@@ -27,6 +27,7 @@ import * as repo from "../repositories/issue-ai.repository.js";
 import { getProjectRepoNames } from "../repositories/repo.repository.js";
 import { getProjectRepoPath } from "../repositories/project.repository.js";
 import { nextIssueNumber } from "../repositories/issue-number.repository.js";
+import { normalizeIssuePriority } from "@agentic-kanban/shared/lib/issue-priority";
 
 export interface EnhanceIssueResult {
   title: string;
@@ -579,7 +580,10 @@ Respond ONLY with valid JSON, no markdown, no explanation:
     dependencies?: Array<{ fromTempId: string; toTempId: string; type: string }>;
   };
 
-  const validPriorities = ["low", "medium", "high", "urgent"];
+  // #516: the model is asked for "urgent", which is NOT a canonical priority. It used
+  // to be stored verbatim, producing issues that sort at rank 0 but have no colour and
+  // no lane. normalizeIssuePriority folds it to "critical" (matching what
+  // voice-capture.service.ts already did) and anything unrecognised to "medium".
   const validTypes: DependencyType[] = ["depends_on", "blocked_by", "related_to", "parent_of", "child_of", "coupled_with"];
   const tempIds = new Set((parsed.children ?? []).map(c => c.tempId));
 
@@ -597,7 +601,7 @@ Respond ONLY with valid JSON, no markdown, no explanation:
       tempId: c.tempId,
       title: c.title.trim(),
       description: c.description?.trim() ?? "",
-      priority: (validPriorities.includes(c.priority) ? c.priority : "medium") as DecomposeChildProposal["priority"],
+      priority: normalizeIssuePriority(c.priority) as DecomposeChildProposal["priority"],
       targetRepo: repoAssignment.get(c.tempId) ?? null,
     }));
 
