@@ -3,7 +3,7 @@ import type { Database } from "../db/index.js";
 import { createRouter } from "../middleware/create-router.js";
 import { getFocusIssueRows, getDependenciesForIssues } from "../repositories/issue.repository.js";
 import { getProjectStatuses } from "../repositories/project.repository.js";
-import { isBlockingDependencyType } from "@agentic-kanban/shared/schema";
+import { isBlockingDependencyType } from "@agentic-kanban/shared/lib/dependency-type-traits";
 
 /**
  * Focus — "What should I work on next?".

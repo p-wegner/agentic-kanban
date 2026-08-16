@@ -19,6 +19,7 @@ import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
 import { cleanupSiblingWorktrees, executeSiblingMerges, type SiblingMergeResult } from "./workspace-repos.service.js";
 import { workspaceServicesService, parseStoredComposeProjectName } from "./workspace-services.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { reapWorkspaceContainer } from "./devcontainer-workspace.service.js";
 
 export type MergeWarning = { step: string; message: string; recoverable: true };
 
@@ -191,6 +192,17 @@ async function reconcileAlreadyMergedRetry(args: {
         composeWorktreePath: workspace.workingDir,
         releasedByWorkspaceId: workspace.id,
       });
+    }
+    // #576: the compose stack is not the only per-workspace resource. With
+    // `devcontainer_builders` on, the devcontainer and its dependency volumes leak
+    // until `findStaleProfileContainers` or a manual `docker` sweep. Only three of
+    // the eight terminal paths reaped; this was one of the five that did not.
+    try {
+      await reapWorkspaceContainer({ worktreePath: workspace.workingDir, workspaceId: workspace.id });
+    } catch (err) {
+      // Best-effort, like the stack teardown above: a docker hiccup must not fail the
+      // merge path. The startup reaper is the backstop.
+      console.warn(`[workspaces] container reap failed (non-fatal) for ${workspace.id}: ${errorMessage(err)}`);
     }
     await teardownWorktree(
       {

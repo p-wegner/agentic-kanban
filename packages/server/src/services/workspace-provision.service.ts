@@ -145,9 +145,21 @@ export function createWorkspaceProvisionService(deps: {
           ),
           worktreePath,
           workspaceId,
-          symlinkDirs: symlinkConfig.dirs,
+          // #577: gate on `enabled`, exactly as the launch-time builder does
+          // (devcontainer-launch.ts). Line 105 above already refuses to bootstrap
+          // symlinks when the feature is off — passing the dirs here anyway mounted
+          // dependency volumes the project had switched OFF, and because
+          // `devcontainer up` reuses an existing container whose CREATION-TIME mounts
+          // win, that mismatch then outlived the launch-time request that got it right.
+          symlinkDirs: symlinkConfig.enabled ? symlinkConfig.dirs : null,
           claudeProfile: agentProfile.claudeProfile,
           settingsProfile: agentProfile.settingsProfile,
+          // #577: `strict` was not read here at all, so a strict project's SETUP silently
+          // ran on the host — the precise thing #135 moved into the container to avoid.
+          strict: parseBoolSetting(
+            "devcontainer_strict",
+            await getPreference("devcontainer_strict", database),
+          ),
         });
         setupContainer = provision?.handle;
       } catch (err) {
