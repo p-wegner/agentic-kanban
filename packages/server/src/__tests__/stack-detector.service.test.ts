@@ -95,6 +95,29 @@ describe("stack-detector.service detectStackProfile", () => {
     expect(p.testCommand).toBe("uv run pytest");
   });
 
+  // #521: a PEP-621 pyproject-only project (no uv, no poetry, no requirements.txt) used to
+  // get `pip install -r requirements.txt` from the detector - a command that cannot
+  // succeed, because that file does not exist. The setup-script ladder got this RIGHT
+  // (`pip install -e .`), which is how the divergence surfaced when the two were merged.
+  it("installs a PEP-621 pyproject-only project with `pip install -e .`, not a missing requirements.txt", async () => {
+    await writeFile(join(dir, "pyproject.toml"), `[project]
+name = "x"
+version = "0.1.0"
+`);
+    const p = detectStackProfile(dir);
+    expect(p.packageManager).toBe("pip");
+    expect(p.installCommand).toBe("pip install -e .");
+  });
+
+  it("prefers an explicit requirements.txt over the pyproject when both exist", async () => {
+    await writeFile(join(dir, "pyproject.toml"), `[project]
+name = "x"
+`);
+    await writeFile(join(dir, "requirements.txt"), `flask
+`);
+    expect(detectStackProfile(dir).installCommand).toBe("pip install -r requirements.txt");
+  });
+
   it("still detects poetry when there is no uv marker", async () => {
     await writeFile(join(dir, "pyproject.toml"), '[tool.poetry]\nname = "x"\n');
     const p = detectStackProfile(dir);
