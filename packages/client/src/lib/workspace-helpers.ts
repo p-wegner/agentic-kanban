@@ -1,4 +1,5 @@
 import type { ProfileSelection } from "@agentic-kanban/shared";
+import { WORKSPACE_STATUS_TONE, workspaceStatusToneClass } from "./badgeTones.js";
 
 export type AgentProvider = ProfileSelection["provider"];
 
@@ -21,15 +22,10 @@ export interface SessionStats {
   success: boolean;
 }
 
-export const STATUS_COLORS: Record<string, string> = {
-  active: "bg-green-100 text-green-700",
-  reviewing: "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300",
-  fixing: "bg-orange-100 text-orange-700",
-  idle: "bg-yellow-100 text-yellow-700",
-  "awaiting-plan-approval": "bg-amber-100 text-amber-700",
-  error: "bg-red-100 text-red-700",
-  closed: "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400",
-};
+// #517: derived from the status tones — four of these rows were light-only.
+export const STATUS_COLORS: Record<string, string> = Object.fromEntries(
+  Object.keys(WORKSPACE_STATUS_TONE).map((status) => [status, workspaceStatusToneClass(status)]),
+);
 
 export const SESSION_STATUS_COLORS: Record<string, string> = {
   running: "bg-blue-100 text-blue-700",
