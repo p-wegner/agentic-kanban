@@ -126,6 +126,12 @@
       "import": "./dist/lib/issue-priority.js",
       "default": "./src/lib/issue-priority.ts"
     },
+    "./lib/monitor-action": {
+      "development": "./src/lib/monitor-action.ts",
+      "types": "./dist/lib/monitor-action.d.ts",
+      "import": "./dist/lib/monitor-action.js",
+      "default": "./src/lib/monitor-action.ts"
+    },
     "./lib/operation-metrics": {
       "development": "./src/lib/operation-metrics.ts",
       "types": "./dist/lib/operation-metrics.d.ts",

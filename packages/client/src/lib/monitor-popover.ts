@@ -1,3 +1,4 @@
+import type { MonitorActionName } from "@agentic-kanban/shared/lib/monitor-action";
 export type MonitorTunables = {
   activeAgentsTarget: number;
   backlogFloor: number;
@@ -73,7 +74,7 @@ export const START_MODE_HINT: Record<StartMode, string> = {
 
 export type MonitorAction = {
   at: string;
-  action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead" | "auto_start" | "generate_tickets";
+  action: MonitorActionName;
   workspaceId: string;
   issueId: string;
   /** HTTP endpoint called for this action, e.g. /api/workspaces/:id/merge */
