@@ -277,7 +277,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       const baseDirRows = await getProjectsBasePath(database);
       const baseDir = baseDirRows[0]?.value?.trim();
       if (!baseDir) {
-        throw new ProjectError("No base directory configured. Set 'Projects base directory' in Settings â€º Project, or provide an explicit path.", "BAD_REQUEST");
+        throw new ProjectError("No base directory configured. Set 'Projects base directory' in Settings › Project, or provide an explicit path.", "BAD_REQUEST");
       }
       targetPath = resolve(join(baseDir, name));
 
