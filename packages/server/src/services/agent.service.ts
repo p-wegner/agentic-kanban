@@ -1,3 +1,4 @@
+import { resolveEffectivePrompt } from "./agent-provider/context-files-prompt.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { openSync, closeSync, readSync, statSync, unlinkSync, existsSync, writeFileSync, readFileSync, appendFileSync, readdirSync, type Dirent } from "node:fs";
 import { join } from "node:path";
@@ -77,25 +78,6 @@ export class AgentState {
 
 /** Module-level singleton used by all exported functions. */
 export const agentState = new AgentState();
-
-function appendContextFilesToPrompt(prompt: string, contextFiles: string[] | undefined): string {
-  if (!contextFiles?.length) return prompt;
-
-  const sections: string[] = [];
-  for (const file of contextFiles) {
-    try {
-      const content = readFileSync(file, "utf-8").trim();
-      if (content) {
-        sections.push(`### ${file}\n\n${content}`);
-      }
-    } catch (err) {
-      console.warn(`[agent] failed to read context file for prompt injection: file=${file}`, err);
-    }
-  }
-
-  if (sections.length === 0) return prompt;
-  return `${prompt}\n\n[Attached context files]\n\n${sections.join("\n\n---\n\n")}`;
-}
 
 function materializedSkillFiles(worktreePath: string): string[] {
   const skillsDir = join(worktreePath, ".claude", "skills");
@@ -436,9 +418,8 @@ export function launch(
    */
   containerProvision?: ContainerProvision,
 ): ChildProcess {
-  const effectivePrompt = provider === "codex"
-    ? appendContextFilesToPrompt(prompt, contextFiles)
-    : prompt;
+  // #524: shared with the remote path, which used to skip this entirely.
+  const effectivePrompt = resolveEffectivePrompt(prompt, provider, contextFiles);
   const hostLaunchConfig = buildAgentLaunchConfig({
     agentArgs,
     providerSessionId,
