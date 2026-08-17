@@ -118,6 +118,21 @@ export interface GitExecOptions {
   /** Queue lane when all spawn slots are busy. Defaults to `normal`. See `GitExecPriority`. */
   priority?: GitExecPriority;
   /**
+   * Force a real spawn, never a memoized result (#621).
+   *
+   * The dedupe memo below is invalidated by adapter-driven mutations, so a read after a
+   * mutation THIS process made is always fresh. Mutations by ANOTHER process — an agent
+   * running `git commit` in its worktree — are bounded only by the ~1.5s TTL, as that
+   * comment states.
+   *
+   * For most reads that is a fine trade. For the detached-HEAD guards it is not: the whole
+   * PURPOSE of `syncBranchToHead`/`ensureOnBranch` is to notice commits made out-of-band by
+   * the agent, so serving them a memoized `rev-parse HEAD` can tell them the branch is
+   * already in sync and return without capturing the dangling commit. Those call sites set
+   * this flag; nothing else should need it.
+   */
+  fresh?: boolean;
+  /**
    * INSTRUMENTATION ONLY — override the metric label for this call and exclude it from
    * duplicate-spawn accounting. Changes nothing about how git is spawned or what it is asked to do.
    *
@@ -281,6 +296,8 @@ function dedupeKeyFor(args: string[], opts: GitExecOptions): string | null {
   // not part of the key; a probe must really spawn (see `probeLabel`). All three
   // disqualify the call from dedupe rather than complicating the key.
   if (opts.env !== undefined || opts.input !== undefined || opts.probeLabel !== undefined) return null;
+  // #621: an explicit fresh read must really spawn — same disqualification as a probe.
+  if (opts.fresh) return null;
   const sub = effectiveSubcommand(args);
   if (sub === null || !DEDUPE_SAFE_SUBCOMMANDS.has(sub)) return null;
   return JSON.stringify([opts.cwd ?? "", args, opts.timeout ?? DEFAULT_GIT_TIMEOUT_MS, opts.maxBuffer ?? DEFAULT_MAX_BUFFER]);
