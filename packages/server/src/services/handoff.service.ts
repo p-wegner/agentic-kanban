@@ -1,3 +1,4 @@
+import { readSessionStats } from "@agentic-kanban/shared/lib/session-stats-blob";
 import { existsSync } from "node:fs";
 import { readFile, appendFile, writeFile, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -92,7 +93,7 @@ export async function generateHandoff(
   const statsJson = statsRaw;
   let parsedStats: Record<string, unknown> = {};
   if (statsJson) {
-    try { parsedStats = JSON.parse(statsJson) as Record<string, unknown>; } catch { /* ignore */ }
+    try { parsedStats = readSessionStats(statsJson); } catch { /* ignore */ }
   }
 
   const data: HandoffData = {

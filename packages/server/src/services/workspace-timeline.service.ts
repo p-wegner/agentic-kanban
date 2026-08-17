@@ -1,3 +1,4 @@
+import { readSessionStats } from "@agentic-kanban/shared/lib/session-stats-blob";
 import type { Database } from "../db/index.js";
 import { NotFoundError } from "../errors/index.js";
 import type { WorkspaceTimelineEvent, WorkspaceTimelineResponse, WorkspaceTimelineEventType } from "@agentic-kanban/shared";
@@ -14,7 +15,7 @@ function isZeroOutputSession(session: { startedAt: string; endedAt: string | nul
   if (durationMs <= 1000) return true;
   if (session.stats) {
     try {
-      const s = JSON.parse(session.stats) as Record<string, unknown>;
+      const s = readSessionStats(session.stats);
       if ((s.inputTokens === 0 || s.inputTokens == null) && (s.outputTokens === 0 || s.outputTokens == null)) return true;
       if (s.launchFailure === true) return true;
     } catch { /* ignore */ }
@@ -34,7 +35,7 @@ function parseStats(stats: string | null): { inputTokens?: number; outputTokens?
 function extractMessageText(data: string | null): string | null {
   if (!data) return null;
   try {
-    const parsed = JSON.parse(data) as Record<string, unknown>;
+    const parsed = readSessionStats(data);
     if (typeof parsed.text === "string") return parsed.text.slice(0, 500).trim() || null;
     if (typeof parsed.message === "string") return parsed.message.slice(0, 500).trim() || null;
     if (Array.isArray(parsed.content)) {
@@ -51,7 +52,7 @@ function extractLastAssistantFromStdout(content: string): string | null {
     const trimmed = line.trim();
     if (!trimmed) continue;
     try {
-      const obj = JSON.parse(trimmed) as Record<string, unknown>;
+      const obj = readSessionStats(trimmed);
       if (obj.type === "assistant") last = extractMessageText(trimmed);
     } catch { /* ignore */ }
   }

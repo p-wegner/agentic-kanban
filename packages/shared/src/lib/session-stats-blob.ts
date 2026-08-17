@@ -27,3 +27,56 @@ export function parseSessionStatsBlob(
     return null;
   }
 }
+
+/**
+ * The keys this codebase actually reads out of the blob (#522).
+ *
+ * It stays a partial, open shape on purpose: the column is untyped JSON written by
+ * several code paths across four agent providers, so an exhaustive interface would be a
+ * lie the first time a provider adds a field. What this buys is that the ~15 sites which
+ * did `JSON.parse(x.stats) as Record<string, unknown>` and then reached for
+ * `s.launchFailure` / `s.rateLimitKind` now get a typo caught at compile time instead of
+ * silently reading `undefined` — which, for a boolean failure flag, reads as "no failure".
+ */
+export interface SessionStatsBlob {
+  /** The agent never produced substantive output — a launch failure, not a run. */
+  launchFailure?: boolean;
+  success?: boolean;
+  failureReason?: string;
+  rateLimited?: boolean;
+  rateLimitKind?: "claude-usage-limit" | "codex-usage-limit";
+  retryAfter?: string | null;
+  durationMs?: number;
+  totalCostUsd?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  numTurns?: number;
+  model?: string;
+  agentSummary?: string;
+  friction?: unknown;
+  /** Anything a provider writes that this list has not caught up with yet. */
+  [key: string]: unknown;
+}
+
+/** `parseSessionStatsBlob(raw) ?? {}` — for the many callers that want an always-object. */
+export function readSessionStats(raw: string | null | undefined): SessionStatsBlob {
+  return parseSessionStatsBlob(raw) ?? {};
+}
+
+/**
+ * Read-modify-write of the blob: existing keys survive, the patch wins, and malformed
+ * existing JSON is discarded rather than throwing.
+ *
+ * Pure — it takes the RAW existing value rather than a session id, because the two
+ * helpers this replaces (`mergeExistingStats` in session-manager/broadcast.ts and
+ * `mergeExistingSessionStats` in session-launch-helpers.ts) had identical bodies but
+ * fetched through different data-access paths. Sharing the parse+merge without forcing
+ * one of those paths on the other caller is the part that was genuinely duplicated.
+ */
+export function mergeSessionStats(
+  existingRaw: string | null | undefined,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const existing = parseSessionStatsBlob(existingRaw);
+  return existing ? { ...existing, ...patch } : patch;
+}
