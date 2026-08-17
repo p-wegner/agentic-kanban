@@ -3,6 +3,7 @@ import { z } from "zod";
 import { and, eq, ne } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { notifyWorkflowAdvanced } from "../notify.js";
+import { mcpText } from "../db-utils.js";
 import {
   proposeTransition,
   getOutgoingTransitions,
@@ -30,7 +31,6 @@ export function registerProposeTransition(server: McpServer, deps: ToolDeps = pr
       testsPassed: z.boolean().optional().describe("Whether the tests you ran for this stage passed — used to auto-route tests_pass/tests_fail edges"),
     },
     async ({ workspaceId, issueId, toNodeName, toNodeId, summary, testsPassed }) => {
-      const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
 
       // Resolve the workspace: explicit id, else the active workspace for the issue.
       let resolvedWorkspaceId = workspaceId;
@@ -43,7 +43,7 @@ export function registerProposeTransition(server: McpServer, deps: ToolDeps = pr
         if (rows.length > 0) resolvedWorkspaceId = rows[rows.length - 1].id;
       }
       if (!resolvedWorkspaceId) {
-        return text("Provide a workspaceId (from your workflow instructions) or an issueId with an active workspace.");
+        return mcpText("Provide a workspaceId (from your workflow instructions) or an issueId with an active workspace.");
       }
 
       const signals = await computeWorkspaceSignals(db, resolvedWorkspaceId, { testsPassed });
@@ -58,7 +58,7 @@ export function registerProposeTransition(server: McpServer, deps: ToolDeps = pr
       });
 
       if (!result.ok) {
-        return text(result.error ?? "Transition failed.");
+        return mcpText(result.error ?? "Transition failed.");
       }
 
       // Notify the board so the UI reflects the new stage/status.
@@ -75,7 +75,7 @@ export function registerProposeTransition(server: McpServer, deps: ToolDeps = pr
       notifyWorkflowAdvanced(resolvedWorkspaceId);
 
       const next = (result.nextTransitions ?? []).map((t) => t.toNodeName);
-      return text(
+      return mcpText(
         JSON.stringify(
           {
             ok: true,

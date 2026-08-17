@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { boardApi } from "@agentic-kanban/shared/lib/board-server-url";
+import { mcpContent } from "../db-utils.js";
 
 /**
  * First-class plugin ONBOARDING tools (#390), so the butler stops hand-rolling `curl` against a
@@ -19,10 +20,6 @@ import { boardApi } from "@agentic-kanban/shared/lib/board-server-url";
 
 function api(path: string, init?: RequestInit) {
   return boardApi(`/api${path}`, init);
-}
-
-function text(value: unknown) {
-  return { content: [{ type: "text" as const, text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }] };
 }
 
 function failure(what: string, res: { status: number; data: unknown }): string {
@@ -48,8 +45,8 @@ export function registerEnablePlugin(server: McpServer) {
         method: "POST",
         body: JSON.stringify({ projectId, ...(location ? { location } : {}) }),
       });
-      if (!res.ok) return text(failure("enable_plugin", res));
-      return text(res.data ?? "Enabled.");
+      if (!res.ok) return mcpContent(failure("enable_plugin", res));
+      return mcpContent(res.data ?? "Enabled.");
     },
   );
 }
@@ -70,8 +67,8 @@ export function registerSetPluginOutputLocation(server: McpServer) {
         method: "POST",
         body: JSON.stringify({ projectId, location }),
       });
-      if (!res.ok) return text(failure("set_plugin_output_location", res));
-      return text(res.data ?? "Set.");
+      if (!res.ok) return mcpContent(failure("set_plugin_output_location", res));
+      return mcpContent(res.data ?? "Set.");
     },
   );
 }
@@ -88,8 +85,8 @@ export function registerGetPluginScaffold(server: McpServer) {
     },
     async ({ pluginId, projectId }) => {
       const res = await api(`/plugins/${pluginId}/scaffold?projectId=${encodeURIComponent(projectId)}`);
-      if (!res.ok) return text(failure("get_plugin_scaffold", res));
-      return text(res.data);
+      if (!res.ok) return mcpContent(failure("get_plugin_scaffold", res));
+      return mcpContent(res.data);
     },
   );
 }
@@ -113,8 +110,8 @@ export function registerFillPluginScaffold(server: McpServer) {
         method: "POST",
         body: JSON.stringify({ projectId, values }),
       });
-      if (!res.ok) return text(failure("fill_plugin_scaffold", res));
-      return text(res.data ?? "Saved.");
+      if (!res.ok) return mcpContent(failure("fill_plugin_scaffold", res));
+      return mcpContent(res.data ?? "Saved.");
     },
   );
 }

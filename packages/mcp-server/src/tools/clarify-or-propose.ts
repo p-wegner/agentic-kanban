@@ -4,6 +4,7 @@ import { and, eq, ne } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { notifyWorkflowAdvanced } from "../notify.js";
+import { mcpText } from "../db-utils.js";
 import {
   computeWorkspaceSignals,
   proposeTransition,
@@ -36,7 +37,6 @@ export function registerClarifyOrPropose(server: McpServer, deps: ToolDeps = pro
       testsPassed: z.boolean().optional().describe("Whether tests passed; used by action=propose for conditional routing"),
     },
     async ({ action, workspaceId, issueId, questions, toNodeName, toNodeId, summary, testsPassed }) => {
-      const text = (value: string) => ({ content: [{ type: "text" as const, text: value }] });
 
       let resolvedWorkspaceId = workspaceId;
       if (!resolvedWorkspaceId && issueId) {
@@ -48,7 +48,7 @@ export function registerClarifyOrPropose(server: McpServer, deps: ToolDeps = pro
         if (rows.length > 0) resolvedWorkspaceId = rows[rows.length - 1].id;
       }
       if (!resolvedWorkspaceId) {
-        return text("Provide a workspaceId (from workflow instructions) or an issueId with an active workspace.");
+        return mcpText("Provide a workspaceId (from workflow instructions) or an issueId with an active workspace.");
       }
 
       const wsRows = await db
@@ -63,7 +63,7 @@ export function registerClarifyOrPropose(server: McpServer, deps: ToolDeps = pro
         .where(eq(schema.workspaces.id, resolvedWorkspaceId))
         .limit(1);
       const ws = wsRows[0];
-      if (!ws) return text(`Workspace not found: ${resolvedWorkspaceId}`);
+      if (!ws) return mcpText(`Workspace not found: ${resolvedWorkspaceId}`);
 
       if (action === "clarify") {
         const normalized = (questions ?? []).map((question) => ({
@@ -73,7 +73,7 @@ export function registerClarifyOrPropose(server: McpServer, deps: ToolDeps = pro
             ? question.options
             : [{ label: "Answer in free text" }],
         })).filter((question) => question.question.length > 0);
-        if (normalized.length === 0) return text("questions[] is required for action=clarify");
+        if (normalized.length === 0) return mcpText("questions[] is required for action=clarify");
 
         const toolUseId = `mcp-clarify-${randomUUID()}`;
         const body = [
@@ -92,7 +92,7 @@ export function registerClarifyOrPropose(server: McpServer, deps: ToolDeps = pro
           createdAt: new Date().toISOString(),
         });
         notifyBoard(ws.projectId, "mcp_clarifying_question");
-        return text(JSON.stringify({
+        return mcpText(JSON.stringify({
           ok: true,
           action: "clarify",
           toolUseId,
@@ -113,13 +113,13 @@ export function registerClarifyOrPropose(server: McpServer, deps: ToolDeps = pro
         triggeredBy: "agent",
         signals,
       });
-      if (!result.ok) return text(result.error ?? "Transition failed.");
+      if (!result.ok) return mcpText(result.error ?? "Transition failed.");
 
       notifyBoard(ws.projectId, "mcp_clarify_or_propose_transition");
       notifyWorkflowAdvanced(resolvedWorkspaceId);
 
       const next = (result.nextTransitions ?? []).map((t) => t.toNodeName);
-      return text(JSON.stringify({
+      return mcpText(JSON.stringify({
         ok: true,
         action: "propose",
         movedTo: result.toNode?.name,

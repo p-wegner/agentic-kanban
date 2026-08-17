@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { resolveProjectName } from "../db-utils.js";
+import { resolveProjectName, mcpText, mcpJson } from "../db-utils.js";
 import {
   listWorkflowTemplates,
   getTemplateGraph,
@@ -10,9 +10,6 @@ import {
   updateWorkflowTemplate,
   deleteWorkflowTemplate,
 } from "@agentic-kanban/shared/lib/workflow-engine";
-
-const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
-const json = (o: unknown) => text(JSON.stringify(o, null, 2));
 
 async function resolveProjectId(deps: ToolDeps, projectId?: string): Promise<string | null> {
   if (projectId) return projectId;
@@ -50,7 +47,7 @@ export function registerListWorkflowTemplates(server: McpServer, deps: ToolDeps 
     { projectId: z.string().optional().describe("Project ID (defaults to active project)") },
     async ({ projectId }) => {
       const pid = await resolveProjectId(deps, projectId);
-      if (!pid) return text("No active project.");
+      if (!pid) return mcpText("No active project.");
       const tpls = await listWorkflowTemplates(deps.db, pid);
       const out = await Promise.all(
         tpls.map(async (t) => {
@@ -58,7 +55,7 @@ export function registerListWorkflowTemplates(server: McpServer, deps: ToolDeps 
           return { id: t.id, name: t.name, ticketType: t.ticketType, isDefault: t.isDefault, isBuiltin: t.isBuiltin, stages: g?.nodes.length ?? 0, transitions: g?.edges.length ?? 0 };
         }),
       );
-      return json(out);
+      return mcpJson(out);
     },
   );
 }
@@ -70,8 +67,8 @@ export function registerGetWorkflowTemplate(server: McpServer, deps: ToolDeps = 
     { templateId: z.string() },
     async ({ templateId }) => {
       const g = await getTemplateGraph(deps.db, templateId);
-      if (!g) return text(`Template ${templateId} not found`);
-      return json(g);
+      if (!g) return mcpText(`Template ${templateId} not found`);
+      return mcpJson(g);
     },
   );
 }
@@ -91,17 +88,17 @@ export function registerCreateWorkflowTemplate(server: McpServer, deps: ToolDeps
     },
     async ({ projectId, name, description, ticketType, isDefault, nodes, edges }) => {
       const pid = await resolveProjectId(deps, projectId);
-      if (!pid) return text("No active project.");
+      if (!pid) return mcpText("No active project.");
       const res = await createWorkflowTemplate(deps.db, {
         projectId: pid, name, description, ticketType: ticketType ?? null, isDefault, nodes: nodes, edges: edges,
       });
-      if (!res.ok) return json({ error: "Invalid workflow graph", errors: res.errors });
+      if (!res.ok) return mcpJson({ error: "Invalid workflow graph", errors: res.errors });
       deps.notifyBoard(pid, "mcp_create_workflow_template");
       // Echo the RESOLVED project (#335): `projectId` is optional here and falls back
       // to the global mutable activeProjectId, so name the project the durable
       // template is scoped to rather than leaving the caller to guess.
       const projectName = await resolveProjectName(deps.db, deps.schema, pid);
-      return json({ id: res.id, name, projectId: pid, projectName });
+      return mcpJson({ id: res.id, name, projectId: pid, projectName });
     },
   );
 }
@@ -123,10 +120,10 @@ export function registerUpdateWorkflowTemplate(server: McpServer, deps: ToolDeps
       const res = await updateWorkflowTemplate(deps.db, templateId, {
         name, description, ticketType, isDefault, nodes: nodes, edges: edges,
       });
-      if (!res.ok) return json({ error: res.error, errors: res.errors });
+      if (!res.ok) return mcpJson({ error: res.error, errors: res.errors });
       const t = await getTemplateGraph(deps.db, templateId);
       if (t?.projectId) deps.notifyBoard(t.projectId, "mcp_update_workflow_template");
-      return json({ ok: true, id: templateId });
+      return mcpJson({ ok: true, id: templateId });
     },
   );
 }
@@ -139,9 +136,9 @@ export function registerDeleteWorkflowTemplate(server: McpServer, deps: ToolDeps
     async ({ templateId }) => {
       const t = await getTemplateGraph(deps.db, templateId);
       const res = await deleteWorkflowTemplate(deps.db, templateId);
-      if (!res.ok) return text(res.error);
+      if (!res.ok) return mcpText(res.error);
       if (t?.projectId) deps.notifyBoard(t.projectId, "mcp_delete_workflow_template");
-      return json({ ok: true });
+      return mcpJson({ ok: true });
     },
   );
 }

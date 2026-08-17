@@ -14,8 +14,37 @@ export type McpResponse = { content: Array<{ type: "text"; text: string }> };
 export { isIssueNumberUniqueConstraintError } from "@agentic-kanban/shared/lib/issue-number";
 
 /** Standardized MCP error response factory. */
+/**
+ * The MCP content envelope. Every tool response is this shape (#617).
+ *
+ * Eight tools had a private `const text = (v) => ({content:[{type:"text",text:v}]})`
+ * clone. They could not simply use `mcpError`, because they use the same wrapper for
+ * SUCCESS payloads too (`text(JSON.stringify(result))`) — routing those through a
+ * function named `mcpError` would have misnamed every success path. So the general
+ * wrapper is named for what it is, and `mcpError` is a thin alias that documents intent
+ * at the call site.
+ */
+export function mcpText(value: string): McpResponse {
+  return { content: [{ type: "text" as const, text: value }] };
+}
+
+/** A JSON payload as MCP text content — the `text(JSON.stringify(x, null, 2))` idiom. */
+export function mcpJson(value: unknown): McpResponse {
+  return mcpText(JSON.stringify(value, null, 2));
+}
+
 export function mcpError(message: string): McpResponse {
-  return { content: [{ type: "text" as const, text: message }] };
+  return mcpText(message);
+}
+
+/**
+ * Content for a value that may be either a ready string or a structure to serialise.
+ * `plugin-gates` and `plugin-onboarding` each had this dispatch privately (#617) — the
+ * only clones that were not a plain wrapper, which is why they needed their own helper
+ * rather than `mcpText`.
+ */
+export function mcpContent(value: unknown): McpResponse {
+  return typeof value === "string" ? mcpText(value) : mcpJson(value);
 }
 
 /** Machine-readable MCP error response for tools that agents branch on. */
