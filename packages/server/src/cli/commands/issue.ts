@@ -1,7 +1,7 @@
 import type { Command } from "commander";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { parseSessionSummary, isTerminalStatusName } from "@agentic-kanban/shared";
+import { parseSessionSummary, isTerminalStatusName, type SessionSummary } from "@agentic-kanban/shared";
 import { runMigrations, resolveProjectIdArg, describeIssueNumberMiss } from "../shared.js";
 import { isAnalyticsNoise } from "../../services/session-filter.js";
 import { getWorkspaceDiffStats, type WorkspaceDiffStats } from "../../services/workspace-diff-stats.js";
@@ -14,6 +14,7 @@ import {
   moveIssueToStatus,
   createSubIssueWithParentLink,
   getIssuesTouchedFilesByNumbers,
+  getIssueSummary,
 } from "../../repositories/issue.repository.js";
 import {
   updateIssueById,
@@ -25,10 +26,9 @@ import { isIssueNumberUniqueConstraintError, nextIssueNumber } from "../../repos
 import { getProjectStatuses, getProjectById } from "../../repositories/project.repository.js";
 import { getWorkspacesByIssueId, findOpenUnmergedWorkspace } from "../../repositories/workspace.repository.js";
 import { getSessionsForWorkspacesDesc } from "../../repositories/workspace-launch-failures.repository.js";
-import { getSessionMessagesByIdDesc, getSessionMessagesByIdAsc } from "../../repositories/session.repository.js";
+import { getSessionMessagesByIdDesc } from "../../repositories/session.repository.js";
 import { getWorkspaceArtifactTarget } from "../../repositories/phase-artifacts.repository.js";
-import { buildIssueSummaryLines, buildIssueStatusLines, validateAttachArtifactOptions, formatAttachArtifactOutput, selectSummarySession, buildIssueSummaryJson, buildIssueStatusJson, formatResolvedProjectLine } from "../../lib/issue-cli-format.js";
-import { computeSessionDuration } from "../../lib/issue-summary-projection.js";
+import { buildIssueSummaryLines, buildIssueStatusLines, validateAttachArtifactOptions, formatAttachArtifactOutput, buildIssueSummaryJson, buildIssueStatusJson, formatResolvedProjectLine } from "../../lib/issue-cli-format.js";
 import { extractLastAgentMessageFromRows } from "../../lib/session-message-extraction.js";
 import { openWorkspaceBlockMessage } from "../../lib/terminal-move-guard.js";
 import { registerIssueDependencyCommands } from "./issue-dependency.js";
@@ -458,56 +458,40 @@ Examples:
           process.exit(1);
         }
 
-        const issue = await getIssueByNumberOrId(String(num), projectId);
+        // The six-step chain (issue -> workspaces -> representative session -> parsed
+        // summary) lives in the shared `loadIssueSummary` now (#506); the CLI keeps only
+        // its own rendering, and reaches the loader through the repository seam rather
+        // than the db handle (the `cli-not-down-to-persistence` depcruise rule). It
+        // returns null ONLY when the issue does not exist -- "no workspace" / "no session"
+        // come back as a result carrying `status`.
+        const result = await getIssueSummary(String(num), undefined, projectId);
 
-        if (!issue) {
+        if (!result) {
           console.error(await describeIssueNumberMiss(num, projectId));
           process.exit(1);
         }
 
-        const wsRows = await getWorkspacesByIssueId(issue.id);
-
-        if (wsRows.length === 0) {
-          console.log(`#${num} ${issue.title}`);
-          console.log("  No workspace found for this issue.");
+        if (result.status === "no workspace" || result.status === "no session") {
+          console.log(`#${num} ${result.title}`);
+          console.log(result.status === "no workspace"
+            ? "  No workspace found for this issue."
+            : "  No session found for this issue.");
           process.exit(0);
         }
 
-        const wsIds = wsRows.map(w => w.id);
-        const sessionRows = await getSessionsForWorkspacesDesc(wsIds);
-
-        const completedSession = selectSummarySession(sessionRows, isAnalyticsNoise);
-
-        if (!completedSession) {
-          console.log(`#${num} ${issue.title}`);
-          console.log("  No session found for this issue.");
-          process.exit(0);
-        }
-
-        const msgRows = await getSessionMessagesByIdAsc(completedSession.id);
-
-        let stats: Record<string, unknown> | null = null;
-        if (completedSession.stats) {
-          try { stats = JSON.parse(completedSession.stats) as Record<string, unknown>; } catch { /* ignore */ }
-        }
-
-        const duration = computeSessionDuration(completedSession.startedAt, completedSession.endedAt);
-
-        const summary = parseSessionSummary(msgRows);
-        if (!summary.agentSummary && stats && typeof stats.agentSummary === "string") {
-          summary.agentSummary = stats.agentSummary;
-        }
-
-        const matchingWorkspace = wsRows.find(w => w.id === completedSession.workspaceId);
+        // Non-degenerate results always carry a session; narrow for the renderers.
+        const session = result.session!;
+        const stats = result.stats as unknown as Record<string, unknown> | null;
+        const summary = result as unknown as SessionSummary;
 
         if (options.json) {
           console.log(JSON.stringify(buildIssueSummaryJson({
-            issueId: issue.id,
-            issueNumber: issue.issueNumber,
-            title: issue.title,
-            workspace: matchingWorkspace ?? null,
-            session: completedSession,
-            duration,
+            issueId: result.issueId,
+            issueNumber: result.issueNumber,
+            title: result.title,
+            workspace: result.workspace,
+            session: { ...session, startedAt: session.startedAt ?? "" },
+            duration: session.duration,
             stats,
             summary,
           }), null, 2));
@@ -516,10 +500,10 @@ Examples:
 
         for (const line of buildIssueSummaryLines({
           num,
-          title: issue.title,
-          workspace: matchingWorkspace ?? null,
-          sessionStatus: completedSession.status,
-          duration,
+          title: result.title,
+          workspace: result.workspace,
+          sessionStatus: session.status,
+          duration: session.duration,
           stats,
           summary,
         })) {

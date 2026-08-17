@@ -212,19 +212,10 @@ export function formatAttachArtifactOutput(result: AttachArtifactResult, num: nu
   return lines;
 }
 
-/**
- * Pick the session to summarize: prefer non-noise sessions, then the first
- * completed/stopped one, falling back to the most recent (input is desc by
- * startedAt). Pure given the noise predicate.
- */
-export function selectSummarySession<T extends { status: string }>(
-  sessionRows: T[],
-  isNoise: (s: T) => boolean,
-): T | null {
-  const nonNoise = sessionRows.filter((s) => !isNoise(s));
-  const relevant = nonNoise.length > 0 ? nonNoise : sessionRows;
-  return relevant.find((s) => s.status === "completed" || s.status === "stopped") ?? relevant[0] ?? null;
-}
+// The session-selection policy moved to `shared/lib/session-selection.ts` with #506, so
+// REST and MCP apply it too instead of their own `find(completed|stopped) ?? rows[0]`.
+// Re-exported for the existing importers (cli/commands/issue.ts, issue-cli-format.test.ts).
+export { selectSummarySession } from "@agentic-kanban/shared/lib/session-selection";
 
 export interface IssueSummaryJsonInput {
   issueId: string;

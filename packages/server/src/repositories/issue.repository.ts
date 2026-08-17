@@ -1,13 +1,11 @@
-import { issues, workspaces, sessions, projectStatuses, workflowNodes, tags, issueTags, issueDependencies, issueArtifacts, agentSkills } from "@agentic-kanban/shared/schema";
-import { parseSessionSummary } from "@agentic-kanban/shared";
-import { eq, inArray, desc, and, gte, count } from "drizzle-orm";
+import { issues, workspaces, projectStatuses, workflowNodes, tags, issueTags, issueDependencies, issueArtifacts, agentSkills } from "@agentic-kanban/shared/schema";
+import { loadIssueSummary, type IssueSummaryResult } from "@agentic-kanban/shared/lib/issue-summary";
+import { eq, inArray, and, gte, count } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { ValidationError } from "../errors/index.js";
-import { getSessionMessageRows } from "./session.repository.js";
 import { nextIssueNumber } from "./issue-number.repository.js";
-import { parseStatsBlob, projectSessionStats, computeSessionDuration } from "../lib/issue-summary-projection.js";
 
 // --- CLI-command-specific queries/mutations (#465 decomposition — the blanket
 // /repositories/ cohesion exemption was removed by #957, so this facade ships its
@@ -24,30 +22,9 @@ export {
   createSubIssueWithParentLink,
 } from "./issue/cli-commands.repository.js";
 
-export interface IssueSummaryResult {
-  issueId: string;
-  issueNumber: number | null;
-  title: string;
-  workspace: { id: string; branch: string | null; status: string } | null;
-  session: { id: string; status: string; startedAt: string | null; endedAt: string | null; duration: string | null } | null;
-  stats: {
-    durationMs: number;
-    totalCostUsd: number;
-    inputTokens: number;
-    outputTokens: number;
-    numTurns: number;
-    model: string | null;
-    success: boolean;
-  } | null;
-  agentSummary: string | null;
-  filesEdited: string[];
-  filesRead: string[];
-  commandsRun: string[];
-  errors: string[];
-  model: string | null;
-  status?: string;
-  summary?: null;
-}
+// The wire shape moved to `shared/lib/issue-summary.ts` with the loader (#506); re-exported
+// here so the existing importers (issue.service, routes, tests) are unchanged.
+export type { IssueSummaryResult };
 
 export const DEFAULT_STATUSES = [
   { name: "Backlog", sortOrder: -1, isDefault: false },
@@ -107,6 +84,11 @@ export async function resolveNewIssueDefaults(
   return { issueNumber, statusId: statusRows[0].id };
 }
 
+/**
+ * REST's entry into the shared loader (#506). The six-step chain, the session-selection
+ * policy, and the project scoping all live in `shared/lib/issue-summary.ts` now — this
+ * only decides how the caller's `idParam` string maps onto a `IssueSummaryRef`.
+ */
 export async function getIssueSummary(
   idParam: string,
   database: Database = db,
@@ -119,60 +101,10 @@ export async function getIssueSummary(
    */
   projectId?: string,
 ): Promise<IssueSummaryResult | null> {
-  const isNumeric = /^\d+$/.test(idParam);
-  const numericWhere = projectId
-    ? and(eq(issues.issueNumber, Number(idParam)), eq(issues.projectId, projectId))
-    : eq(issues.issueNumber, Number(idParam));
-  const issueRows = isNumeric
-    ? await database.select().from(issues).where(numericWhere).limit(1)
-    : await database.select().from(issues).where(eq(issues.id, idParam)).limit(1);
-
-  if (issueRows.length === 0) return null;
-
-  const issue = issueRows[0];
-
-  const wsRows = await database.select().from(workspaces).where(eq(workspaces.issueId, issue.id));
-
-  if (wsRows.length === 0) {
-    return { issueId: issue.id, issueNumber: issue.issueNumber, title: issue.title, status: "no workspace", summary: null, workspace: null, session: null, stats: null, agentSummary: null, filesEdited: [], filesRead: [], commandsRun: [], errors: [], model: null };
-  }
-
-  const wsIds = wsRows.map(w => w.id);
-  const sessionRows = await database
-    .select()
-    .from(sessions)
-    .where(inArray(sessions.workspaceId, wsIds))
-    .orderBy(desc(sessions.startedAt));
-
-  const completedSession = sessionRows.find(s => s.status === "completed" || s.status === "stopped")
-    ?? sessionRows[0]
-    ?? null;
-
-  if (!completedSession) {
-    return { issueId: issue.id, issueNumber: issue.issueNumber, title: issue.title, status: "no session", summary: null, workspace: null, session: null, stats: null, agentSummary: null, filesEdited: [], filesRead: [], commandsRun: [], errors: [], model: null };
-  }
-
-  const msgRows = await getSessionMessageRows(completedSession.id, database);
-
-  const parsedStats = parseStatsBlob(completedSession.stats);
-  const duration = computeSessionDuration(completedSession.startedAt, completedSession.endedAt);
-
-  const summary = parseSessionSummary(msgRows);
-  if (!summary.agentSummary && parsedStats && typeof parsedStats.agentSummary === "string") {
-    summary.agentSummary = parsedStats.agentSummary;
-  }
-
-  const matchingWorkspace = wsRows.find(w => w.id === completedSession.workspaceId);
-
-  return {
-    issueId: issue.id,
-    issueNumber: issue.issueNumber,
-    title: issue.title,
-    workspace: matchingWorkspace ? { id: matchingWorkspace.id, branch: matchingWorkspace.branch, status: matchingWorkspace.status } : null,
-    session: { id: completedSession.id, status: completedSession.status, startedAt: completedSession.startedAt, endedAt: completedSession.endedAt, duration },
-    stats: projectSessionStats(parsedStats, summary.model),
-    ...summary,
-  };
+  const ref = /^\d+$/.test(idParam)
+    ? { issueNumber: Number(idParam), projectId }
+    : { issueId: idParam };
+  return loadIssueSummary(database, ref);
 }
 
 export async function getIssuesByProject(
