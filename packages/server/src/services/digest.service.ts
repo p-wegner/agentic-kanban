@@ -108,9 +108,13 @@ export async function computeDigest(
   projectId: string,
   range: DigestRange,
   database: Database,
-  now: Date,
+  now: string,
 ): Promise<DigestData> {
-    const since = new Date(now.getTime() - RANGE_HOURS[range] * 60 * 60 * 1000);
+    // `now?: string` (ISO) is the sanctioned spelling for a service that RETURNS the value
+    // — it goes straight into the payload below (#614). Was `now: Date`, which tripped the
+    // spelling ratchet the same day the convention was written.
+    const nowDate = new Date(now);
+    const since = new Date(nowDate.getTime() - RANGE_HOURS[range] * 60 * 60 * 1000);
     const sinceIso = since.toISOString();
 
     // Status id -> name map for the project (small table, single query).
@@ -242,7 +246,7 @@ export async function computeDigest(
     const response: DigestData = {
       range,
       since: sinceIso,
-      now: now.toISOString(),
+      now: nowDate.toISOString(),
       created,
       completed,
       moved,

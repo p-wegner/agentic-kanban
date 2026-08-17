@@ -94,8 +94,10 @@ export interface FocusData {
 export async function computeFocus(
   projectId: string,
   database: Database,
-  now: Date,
+  now: string,
 ): Promise<FocusData> {
+    // ISO string, not a Date — the sanctioned spelling for a value that is returned in the
+    // payload rather than only computed with (#614).
     const statusRows = await getProjectStatuses(projectId, database);
     const statusName = new Map(statusRows.map((s) => [s.id, s.name]));
 
@@ -212,7 +214,7 @@ export async function computeFocus(
     blocked.sort((a, b) => b.unblocks - a.unblocks || b.focusScore - a.focusScore);
 
     const response: FocusData = {
-      now: now.toISOString(),
+      now: new Date(now).toISOString(),
       ready,
       blocked,
       headline: {

@@ -15,7 +15,7 @@ export function createFocusRoute(database: Database) {
     if (!projectId) return c.json({ error: "projectId query parameter required" }, 400);
 
     const nowParam = c.req.query("now");
-    return c.json(await computeFocus(projectId, database, nowParam ? new Date(nowParam) : new Date()));
+    return c.json(await computeFocus(projectId, database, nowParam || new Date().toISOString()));
   });
 
   return router;
