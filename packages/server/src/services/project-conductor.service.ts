@@ -1,3 +1,4 @@
+import { strategyPrefKey } from "@agentic-kanban/shared/lib/strategy-policy";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
@@ -56,7 +57,7 @@ async function enabledProjectConductors(database: Database): Promise<Map<string,
 
 async function ensureObjective(database: Database, project: typeof projects.$inferSelect): Promise<void> {
   const rows = await database.select().from(preferences);
-  const strategyRaw = rows.find((row) => row.key === `board_strategy_${project.id}`)?.value ?? "{}";
+  const strategyRaw = rows.find((row) => row.key === strategyPrefKey(project.id))?.value ?? "{}";
   writeStrategyObjective(project.repoPath, strategyRaw, {
     objectiveRelativePath: PROJECT_CONDUCTOR_OBJECTIVE_RELATIVE_PATH,
     createIfMissing: true,

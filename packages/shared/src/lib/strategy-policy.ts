@@ -135,9 +135,18 @@ export function selectPolicyByPriority(
   return null;
 }
 
+/**
+ * Prefix of the Strategy Bullseye preference key (#496).
+ *
+ * Exported because `auth-rotation-ring` SCANS for these keys rather than building one,
+ * and had its own `"board_strategy_"` literal to do it — a second spelling of the same
+ * format, free to drift from the builder below.
+ */
+export const STRATEGY_PREF_PREFIX = "board_strategy_";
+
 /** Preference key holding the Strategy Bullseye config JSON for a project. */
 export function strategyPrefKey(projectId: string): string {
-  return `board_strategy_${projectId}`;
+  return `${STRATEGY_PREF_PREFIX}${projectId}`;
 }
 
 /**
