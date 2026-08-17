@@ -2,16 +2,11 @@ import { workspaces, issues, projectStatuses } from "@agentic-kanban/shared/sche
 import { eq, and, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
-import { getProjectById } from "./project.repository.js";
 
 /** A project's id + default branch, or undefined when the project doesn't exist. */
-export async function getProjectDefaultBranch(
-  projectId: string,
-  database: Database = db,
-): Promise<{ id: string; defaultBranch: string | null } | undefined> {
-  const project = await getProjectById(projectId, database);
-  return project ? { id: project.id, defaultBranch: project.defaultBranch } : undefined;
-}
+// #502: one definition, in project.repository. This copy returned `| undefined` where
+// the others returned `| null`; both are falsy, and the only caller tests truthiness.
+export { getProjectDefaultBranch } from "./project.repository.js";
 
 export interface ActiveContentionWorkspaceRow {
   workspaceId: string;

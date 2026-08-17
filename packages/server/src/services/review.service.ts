@@ -397,9 +397,8 @@ export async function startManualReview(
   workspaceId: string,
   thoroughReview: boolean,
 ): Promise<{ sessionId: string }> {
-  const wsRows = await getWorkspaceById(workspaceId, database);
-  if (wsRows.length === 0) throw new ReviewError("Workspace not found", "NOT_FOUND");
-  const workspace = wsRows[0];
+  const workspace = await getWorkspaceById(workspaceId, database);
+  if (!workspace) throw new ReviewError("Workspace not found", "NOT_FOUND");
   let recoverBlockedReview = false;
   if (workspace.status !== "idle") {
     if (workspace.status === "blocked") {
@@ -461,8 +460,7 @@ export async function startManualReview(
     const reviewArgs = runtime?.provider.agentArgs ?? buildReviewArgs(prefMap, provider);
     const autoFix = getBool(prefMap, "review_auto_fix");
 
-    const projectRows = await getProjectDefaultBranch(projectId, database);
-    const defaultBranch = projectRows.length > 0 ? projectRows[0].defaultBranch : null;
+    const defaultBranch = (await getProjectDefaultBranch(projectId, database))?.defaultBranch ?? null;
     let diffRef = workspace.baseBranch || defaultBranch;
 
     if (!workspace.isDirect && workspace.workingDir) {

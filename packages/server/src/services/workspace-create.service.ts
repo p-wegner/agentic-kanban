@@ -300,9 +300,9 @@ export function createWorkspaceCreateService(deps: {
     console.error(`[workspaces] create failed: ${errorMsg}`);
 
     try {
-      const issueRows = await crudRepo.getIssueProjectId(params.issueId, database);
-      if (issueRows.length > 0) {
-        emitButlerSystemEvent({ projectId: issueRows[0].projectId, kind: "workspace_error", workspaceId: params.id, text: `Workspace creation failed for issue ${params.issueId} (branch ${params.branch}): ${errorMsg.slice(0, 200)}` });
+      const projectId = await crudRepo.getIssueProjectId(params.issueId, database);
+      if (projectId) {
+        emitButlerSystemEvent({ projectId, kind: "workspace_error", workspaceId: params.id, text: `Workspace creation failed for issue ${params.issueId} (branch ${params.branch}): ${errorMsg.slice(0, 200)}` });
       }
     } catch { /* best-effort */ }
 

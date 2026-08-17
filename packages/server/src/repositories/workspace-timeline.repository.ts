@@ -1,19 +1,10 @@
-import { sessions, workspaces, sessionMessages } from "@agentic-kanban/shared/schema";
+import { sessions, sessionMessages } from "@agentic-kanban/shared/schema";
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
-export async function getWorkspaceById(
-  workspaceId: string,
-  database: Database = db,
-) {
-  const rows = await database
-    .select()
-    .from(workspaces)
-    .where(eq(workspaces.id, workspaceId))
-    .limit(1);
-  return rows[0] ?? null;
-}
+// #502: one definition, in workspace-reads (this copy already had its shape, untyped).
+export { getWorkspaceById } from "./workspace-reads.repository.js";
 
 export async function getWorkspaceSessions(
   workspaceId: string,

@@ -236,3 +236,23 @@ export async function getProjectRepoFields(
     .limit(1);
   return project;
 }
+
+/**
+ * A project's default branch, or null when the project does not exist (#502).
+ *
+ * Declared three times with three shapes — `{id, defaultBranch} | undefined`
+ * (file-contention), `[{defaultBranch}]` (review), `{defaultBranch} | null` (showdown) —
+ * each a thin adapter over `getProjectById`.
+ *
+ * The wrapper OBJECT is deliberate rather than returning `string | null` directly: two
+ * callers throw NotFoundError when the project is missing but tolerate a project whose
+ * `defaultBranch` is unset. Flattening to `string | null` would merge those two states
+ * and silently turn "no such project" into "no branch configured".
+ */
+export async function getProjectDefaultBranch(
+  projectId: string,
+  database: Database = db,
+): Promise<{ defaultBranch: string | null } | null> {
+  const project = await getProjectById(projectId, database);
+  return project ? { defaultBranch: project.defaultBranch } : null;
+}

@@ -1,8 +1,7 @@
-import { agentSkills, issues, preferences, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { agentSkills, issues, preferences, sessions } from "@agentic-kanban/shared/schema";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
-import { getProjectById } from "./project.repository.js";
 
 export async function getProjectScopedReviewSkill(
   skillName: string,
@@ -42,12 +41,9 @@ export async function getMonitorNudgeSkill(
   return rows[0] ?? null;
 }
 
-export async function getWorkspaceById(
-  workspaceId: string,
-  database: Database = db,
-) {
-  return database.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
-}
+// #502: one definition, in workspace-reads. This copy returned the raw ROW ARRAY, so
+// its caller checked `.length === 0` to mean "not found".
+export { getWorkspaceById } from "./workspace-reads.repository.js";
 
 export async function getRunningReviewSession(
   workspaceId: string,
@@ -102,10 +98,6 @@ export async function getAllPreferenceRows(
   return database.select().from(preferences);
 }
 
-export async function getProjectDefaultBranch(
-  projectId: string,
-  database: Database = db,
-) {
-  const project = await getProjectById(projectId, database);
-  return project ? [{ defaultBranch: project.defaultBranch }] : [];
-}
+// #502: one definition, in project.repository. This copy wrapped the row in an ARRAY,
+// so its caller had to unpack a list that never had more than one element.
+export { getProjectDefaultBranch } from "./project.repository.js";
