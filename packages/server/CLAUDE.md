@@ -34,6 +34,22 @@ A key NOT in `SETTINGS_KEYS` (and not matching `isAllowedDynamicKey`) is still R
 
 **Write-time provider divergence guard (#903):** `PUT /api/preferences/settings` now REJECTS (422, nothing persisted, `divergence` field on the body) a `provider`/`*_profile` write that would put the global prefs out of sync with the ACTIVE project's Strategy Bullseye. `updateSettings` returns `{ applied, dropped, divergence }`; `checkProviderDivergenceGuard` projects the write onto current prefs and runs `resolveProviderDivergence`. This makes the old passive divergence banner an enforced invariant and retires the `set-provider-default` skill's reason to exist. The guard now fires on **ALL** pref write paths — HTTP/CLI/MCP/internal all route through the shared `setPreferenceChecked` (`@agentic-kanban/shared/lib/checked-preference-write`), which also regenerates `objective.md` for `board_strategy` writes — so the #903 MCP side door is closed (arch-review §3.3, fixed b847bb84); prefs no longer drift from the Bullseye on any WRITE path. Residual caveat (structural, not a write bug): the guard resolves the provider **quota-free** while real launches are quota-aware, so a static pref can't perfectly mirror a time-varying selection (Ticket 12 / quota boundary). The guard only fires when the write touches a provider/profile key, so unrelated toggle saves are never blocked by a pre-existing untouched drift. The config import route (`config-export-import.ts`) calls `updateSettings` directly and surfaces `droppedKeys` as NON-fatal; it sets the Bullseye and provider in the same call so the projected map is self-consistent.
 
+## Logging — `console.<level>("[<tag>] …")`, one tag per file (#616)
+There is no logger module and no plan for one; the convention IS the interface. Measured in
+`services/` + `startup/`: **732 tagged lines vs 22 untagged**, across 98 distinct tags
+(`[monitor]` 75, `[startup]` 66, `[workflow]` 59, `[workspaces]` 54, `[workspace-merge]` 48).
+That prefix is what makes a 1600-line server log greppable per subsystem, so an untagged
+line is not a style nit — it is a line nobody will find later.
+
+- **Tag = the file's noun**, one per file. Reuse the existing tag for the subsystem rather
+  than minting a variant (`[workspace-merge]`, not `[merge-workspace]`).
+- **`[fatal]` is reserved** for `uncaughtException`/`unhandledRejection` (see root CLAUDE.md).
+- A **background sweep takes an injected `log`** (born-blocked / workflow-node-divergence /
+  plugin-loop / worker-daemon already do) so its output is testable and can be silenced.
+- `console-tag-ratchet.test.ts` grandfathers today's 22 untagged calls and fails on a 23rd.
+  Most survivors are `console.warn(variable)` forwarding a pre-tagged string — legitimate,
+  hence a ratchet rather than a ban.
+
 ## Board API data enrichment
 Workspace summaries computed server-side in board endpoint via single grouped query, attached to each issue as `workspaceSummary`. Prefer server-side aggregation over client-side joins.
 
