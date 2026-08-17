@@ -4,6 +4,7 @@ import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { ACTIVE_WORKSPACE_STATUSES } from "@agentic-kanban/shared";
 
+import { strategyPrefKey } from "@agentic-kanban/shared/lib/strategy-policy";
 /** Raw value of the `board_strategy_<projectId>` preference, if any. */
 export async function getStrategyBullseyePref(
   projectId: string,
@@ -12,7 +13,7 @@ export async function getStrategyBullseyePref(
   const rows = await database
     .select({ value: preferences.value })
     .from(preferences)
-    .where(eq(preferences.key, `board_strategy_${projectId}`))
+    .where(eq(preferences.key, strategyPrefKey(projectId)))
     .limit(1);
   return rows[0]?.value ?? null;
 }
