@@ -1,3 +1,4 @@
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { issues, preferences, projectStatuses, projects, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { eq, inArray, sql } from "drizzle-orm";
@@ -39,13 +40,16 @@ import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
  * projects, so a durable per-project flag is enough. The flag is a separate pref key,
  * so the boot-time reset of the GLOBAL `auto_monitor` (startup-tasks.ts) never clobbers it.
  */
-const AUTODRIVE_KEY_RE = /^board_autodrive_([0-9a-f-]+)$/;
-const START_MODE_KEY_RE = /^start_mode_([0-9a-f-]+)$/;
+// #496: built and parsed from the registry, so a prefix that is not registered is a
+// COMPILE error rather than a regex that quietly matches nothing.
+const autodrivePref = projectPref("board_autodrive");
+const startModePref = projectPref("start_mode");
+const autoMergeDisabledPref = projectPref("auto_merge_disabled");
 export function autoDriveProjectIds(prefMap: Map<string, string>): Set<string> {
   const ids = new Set<string>();
   for (const [key, value] of prefMap) {
-    const m = AUTODRIVE_KEY_RE.exec(key);
-    if (m && value === "true") ids.add(m[1]);
+    const projectId = autodrivePref.projectIdOf(key);
+    if (projectId && value === "true") ids.add(projectId);
   }
   return ids;
 }
@@ -66,10 +70,10 @@ export function autoDriveProjectIds(prefMap: Map<string, string>): Set<string> {
 export function monitorDrivenProjectIds(prefMap: Map<string, string>): Set<string> {
   const candidates = new Set<string>();
   for (const key of prefMap.keys()) {
-    const sm = START_MODE_KEY_RE.exec(key);
-    if (sm) candidates.add(sm[1]);
-    const ad = AUTODRIVE_KEY_RE.exec(key);
-    if (ad) candidates.add(ad[1]);
+    const sm = startModePref.projectIdOf(key);
+    if (sm) candidates.add(sm);
+    const ad = autodrivePref.projectIdOf(key);
+    if (ad) candidates.add(ad);
   }
   const ids = new Set<string>();
   for (const projectId of candidates) {
@@ -538,7 +542,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
         : Math.round((Number.isFinite(intervalMinForBudget) && intervalMinForBudget > 0 ? intervalMinForBudget : 4) * 60_000 * CYCLE_BUDGET_INTERVAL_FRACTION);
       const autoMergeDisabledProjectIds = new Set(
         [...prefMap]
-          .filter(([key, value]) => /^auto_merge_disabled_[0-9a-f-]+$/.test(key) && value === "true")
+          .filter(([key, value]) => autoMergeDisabledPref.projectIdOf(key) !== null && value === "true")
           .map(([key]) => key.replace("auto_merge_disabled_", "")),
       );
       setPhase("processing-candidates");

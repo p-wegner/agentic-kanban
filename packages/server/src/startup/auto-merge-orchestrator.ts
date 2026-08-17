@@ -1,3 +1,4 @@
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { isTerminalStatusView } from "@agentic-kanban/shared";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { issues, projectStatuses, workspaces, workflowNodes, sessions, sessionMessages } from "@agentic-kanban/shared/schema";
@@ -34,6 +35,10 @@ const MERGEABLE_STATUS_NAMES = ["In Review", "AI Reviewed"] as const;
 const MAX_RECONCILER_ATTEMPTS = 2;
 /** A reconciler session with 0 output messages after this many ms is treated as a zombie and reaped. */
 const ZOMBIE_TIMEOUT_MS = 5 * 60_000;
+
+const autoMergeDisabledPref = projectPref("auto_merge_disabled");
+const verifyScriptPref = projectPref("verify_script");
+const stackProfilePref = projectPref("project_stack_profile");
 
 export interface AutoMergeOrchestratorState {
   running: boolean;
@@ -97,10 +102,12 @@ export function createAutoMergeOrchestrator(deps: {
     // still auto-merge. Used for the agentic-kanban dev board itself — its tickets merge
     // deliberately (Conductor / human), not via the in-process queue that's meant for
     // other projects developed with the board.
+    // #496: one parse instead of an anchored regex to TEST and an unanchored
+    // `String.replace` to EXTRACT — two spellings of the same rule that could disagree.
     const autoMergeDisabledProjectIds = new Set(
       [...prefMap]
-        .filter(([key, value]) => /^auto_merge_disabled_[0-9a-f-]+$/.test(key) && value === "true")
-        .map(([key]) => key.replace("auto_merge_disabled_", "")),
+        .map(([key, value]) => (value === "true" ? autoMergeDisabledPref.projectIdOf(key) : null))
+        .filter((id): id is string => id !== null),
     );
 
     // Projects with an automatic pre-merge gate — a verify_script (build/test) and/or a web smoke
@@ -109,11 +116,11 @@ export function createAutoMergeOrchestrator(deps: {
     // here would race/skip the gate (#821). Both signals already live in prefMap.
     const gatedProjectIds = new Set<string>();
     for (const [key, value] of prefMap) {
-      const verifyMatch = key.match(/^verify_script_([0-9a-f-]+)$/);
-      if (verifyMatch && value && value.trim()) { gatedProjectIds.add(verifyMatch[1]); continue; }
-      const profileMatch = key.match(/^project_stack_profile_([0-9a-f-]+)$/);
-      if (profileMatch && value) {
-        try { if ((JSON.parse(value) as { isWeb?: boolean } | null)?.isWeb === true) gatedProjectIds.add(profileMatch[1]); } catch { /* not JSON */ }
+      const verifyProjectId = verifyScriptPref.projectIdOf(key);
+      if (verifyProjectId && value && value.trim()) { gatedProjectIds.add(verifyProjectId); continue; }
+      const profileProjectId = stackProfilePref.projectIdOf(key);
+      if (profileProjectId && value) {
+        try { if ((JSON.parse(value) as { isWeb?: boolean } | null)?.isWeb === true) gatedProjectIds.add(profileProjectId); } catch { /* not JSON */ }
       }
     }
 

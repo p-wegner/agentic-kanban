@@ -1,3 +1,4 @@
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { isSpecPlanningStageName, transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
@@ -125,6 +126,8 @@ const USAGE_LIMIT_PROVIDERS: UsageLimitProviderConfig[] = [
     rotate: rotateClaudeSubscription,
   },
 ];
+
+const autoMergeDisabledPref = projectPref("auto_merge_disabled");
 
 export interface WorkflowDeps {
   sessionManager: ReturnType<typeof createSessionManager>;
@@ -507,7 +510,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
 
       const autoMergeDisabledProjectIds = new Set(
         [...prefMap]
-          .filter(([key, value]) => /^auto_merge_disabled_[0-9a-f-]+$/.test(key) && value === "true")
+          .filter(([key, value]) => autoMergeDisabledPref.projectIdOf(key) !== null && value === "true")
           .map(([key]) => key.replace("auto_merge_disabled_", "")),
       );
 

@@ -1,3 +1,4 @@
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import type { Database } from "../db/index.js";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { db } from "../db/index.js";
@@ -19,6 +20,9 @@ const ACTIVE_AUTODRIVE_STATUS_NAMES = ["In Progress", "In Review"] as const;
 const ACTIVE_WORKSPACE_STATUSES = ["active", "reviewing", "fixing", "idle", "blocked"] as const;
 const DEFAULT_STALL_WARNING_MIN = 20;
 const FIX_AND_MERGE_ZOMBIE_SESSION_COUNT = 2;
+
+const autodrivePref = projectPref("board_autodrive");
+const startModePref = projectPref("start_mode");
 
 export type AutodriveStallCause =
   | "hung_zero_token_builder"
@@ -82,11 +86,11 @@ export function parseStallWarningThresholdMin(prefMap: Map<string, string>): num
 function explicitAutoDrivenProjectIds(prefMap: Map<string, string>): Set<string> {
   const ids = new Set<string>();
   for (const [key, value] of prefMap) {
-    const legacy = /^board_autodrive_([0-9a-f-]+)$/.exec(key);
-    if (legacy && value === "true") ids.add(legacy[1]);
+    const legacyProjectId = autodrivePref.projectIdOf(key);
+    if (legacyProjectId && value === "true") ids.add(legacyProjectId);
 
-    const startMode = /^start_mode_([0-9a-f-]+)$/.exec(key);
-    if (startMode && (value === "monitor" || value === "conductor")) ids.add(startMode[1]);
+    const startModeProjectId = startModePref.projectIdOf(key);
+    if (startModeProjectId && (value === "monitor" || value === "conductor")) ids.add(startModeProjectId);
   }
   return ids;
 }
