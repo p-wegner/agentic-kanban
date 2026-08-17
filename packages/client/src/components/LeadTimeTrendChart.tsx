@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { apiFetch } from "../lib/api.js";
+import { useMemo, useState } from "react";
 import { ACCENT, STATUS_COLORS } from "../lib/chartColors.js";
+import { useApiResource } from "../hooks/useApiResource.js";
 
 interface LeadTimeBucket {
   date: string;
@@ -33,21 +33,13 @@ const MEDIAN_COLOR = STATUS_COLORS["Done"];
 const P90_COLOR = ACCENT;
 
 export function LeadTimeTrendChart({ projectId }: { projectId: string }) {
-  const [data, setData] = useState<LeadTimeData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [days, setDays] = useState<7 | 30 | 90>(30);
-  const [retryKey, setRetryKey] = useState(0);
+  // #513: cancelled guard, error ternary and retryKey now live in the hook.
+  const { data, loading, error, reload } = useApiResource<LeadTimeData>(
+    `/api/issues/lead-time?projectId=${encodeURIComponent(projectId)}&days=${days}`,
+    { fallbackError: "Failed to load lead time data" },
+  );
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    apiFetch<LeadTimeData>(`/api/issues/lead-time?projectId=${encodeURIComponent(projectId)}&days=${days}`)
-      .then((d) => { if (!cancelled) { setData(d); setLoading(false); } })
-      .catch((err) => { if (!cancelled) { setError(err instanceof Error ? err.message : "Failed to load lead time data"); setLoading(false); } });
-    return () => { cancelled = true; };
-  }, [projectId, days, retryKey]);
 
   const stats = useMemo(() => {
     if (!data) return null;
@@ -112,7 +104,7 @@ export function LeadTimeTrendChart({ projectId }: { projectId: string }) {
           <div className="flex h-64 flex-col items-center justify-center gap-2 text-sm text-red-600 dark:text-red-400">
             <span>{error}</span>
             <button
-              onClick={() => { setError(null); setRetryKey((k) => k + 1); }}
+              onClick={() => reload()}
               className="rounded bg-red-100 px-3 py-1 text-xs text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300 dark:hover:bg-red-900/50"
             >
               Retry

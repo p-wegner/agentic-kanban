@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { apiFetch } from "../lib/api.js";
+import { useMemo, useState } from "react";
 import { BRAND, ACCENT, SEMANTIC } from "../lib/chartColors.js";
+import { useApiResource } from "../hooks/useApiResource.js";
 
 interface ProviderEntry {
   provider: string;
@@ -37,23 +37,13 @@ function fmtDuration(ms: number | null): string {
 }
 
 export function AgentThroughputLeaderboard({ projectId }: { projectId: string }) {
-  const [data, setData] = useState<ThroughputData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [days, setDays] = useState<7 | 14 | 30>(14);
-  const [retryKey, setRetryKey] = useState(0);
+  // #513: cancelled guard, error ternary and retryKey now live in the hook.
+  const { data, loading, error, reload } = useApiResource<ThroughputData>(
+    `/api/projects/${encodeURIComponent(projectId)}/dashboard/throughput-by-provider?days=${days}`,
+    { fallbackError: "Failed to load throughput data" },
+  );
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    apiFetch<ThroughputData>(
-      `/api/projects/${encodeURIComponent(projectId)}/dashboard/throughput-by-provider?days=${days}`
-    )
-      .then((d) => { if (!cancelled) { setData(d); setLoading(false); } })
-      .catch((err) => { if (!cancelled) { setError(err instanceof Error ? err.message : "Failed to load throughput data"); setLoading(false); } });
-    return () => { cancelled = true; };
-  }, [projectId, days, retryKey]);
 
   const stats = useMemo(() => {
     if (!data || data.providers.length === 0) return null;
@@ -101,7 +91,7 @@ export function AgentThroughputLeaderboard({ projectId }: { projectId: string })
           <div className="flex h-64 flex-col items-center justify-center gap-2 text-sm text-red-600 dark:text-red-400">
             <span>{error}</span>
             <button
-              onClick={() => { setError(null); setRetryKey((k) => k + 1); }}
+              onClick={() => reload()}
               className="rounded bg-red-100 px-3 py-1 text-xs text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300 dark:hover:bg-red-900/50"
             >
               Retry

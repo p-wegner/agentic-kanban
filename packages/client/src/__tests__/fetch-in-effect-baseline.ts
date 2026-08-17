@@ -3,15 +3,19 @@
  *
  * Separate file so the 89 grandfathered entries do not bury the rule they support.
  * Only ever LOWER a number or delete a line — the ratchet fails on a stale entry.
+ *
+ * #513 landed `hooks/useApiResource.ts`, so entries are now removed by MIGRATING a panel
+ * onto that hook rather than by rewriting its ladder in place.
  */
 export const FETCH_IN_EFFECT_BASELINE: Record<string, number> = {
+  // #513: THE sanctioned ladder. Every entry below is a hand-rolled copy waiting to be
+  // migrated onto this hook; this one line is the destination, not another offender.
+  "hooks/useApiResource.ts": 1,
   "components/ActivityFeedView.tsx": 1,
-  "components/AgentThroughputLeaderboard.tsx": 1,
   "components/AllWorkspacesPanel.tsx": 1,
   "components/ArtifactViewer.tsx": 1,
   "components/BacklogView.tsx": 1,
   "components/BoardHealthNotificationCenter.tsx": 1,
-  "components/BurndownChart.tsx": 1,
   "components/ButlerManageModal.tsx": 1,
   "components/ButlerView.tsx": 3,
   "components/CleanupQueuePanel.tsx": 1,
@@ -30,7 +34,6 @@ export const FETCH_IN_EFFECT_BASELINE: Record<string, number> = {
   "components/FocusView.tsx": 1,
   "components/InsightsPanel.tsx": 2,
   "components/LaunchPreviewPanel.tsx": 1,
-  "components/LeadTimeTrendChart.tsx": 1,
   "components/LoopTimeline.tsx": 1,
   "components/MetricsView.tsx": 1,
   "components/MilestonesOverview.tsx": 1,
@@ -64,7 +67,6 @@ export const FETCH_IN_EFFECT_BASELINE: Record<string, number> = {
   "components/SpecPhasePanel.tsx": 2,
   "components/SprintCapacityPlanner.tsx": 1,
   "components/StackProfileSettingsSection.tsx": 1,
-  "components/StaleWorkDashboard.tsx": 1,
   "components/StrategyTargetsView.tsx": 1,
   "components/TableView.tsx": 1,
   "components/ThroughputChart.tsx": 1,
