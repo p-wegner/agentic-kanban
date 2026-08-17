@@ -5,6 +5,7 @@ import type { ProviderName } from "../agent-provider.js";
 import { narrowProviderName } from "../agent-provider.js";
 import type { RotationRings } from "../agent-provider/provider-exit-behavior.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { mergeSessionStats } from "@agentic-kanban/shared/lib/session-stats-blob";
 
 /** Pure helpers for session launch that don't need the createSessionLifecycle closure. */
 
@@ -35,14 +36,8 @@ export function instructionFingerprint(value: string | undefined): string | null
 }
 
 export async function mergeExistingSessionStats(database: Database, sessionId: string, statsToSave: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const stats = await lifecycleRepo.getSessionStats(sessionId, database);
-  if (!stats) return statsToSave;
-  try {
-    const existing = JSON.parse(stats) as Record<string, unknown>;
-    return { ...existing, ...statsToSave };
-  } catch {
-    return statsToSave;
-  }
+  // #522: see the twin in session-manager/broadcast.ts — same merge, different fetch.
+  return mergeSessionStats(await lifecycleRepo.getSessionStats(sessionId, database), statsToSave);
 }
 
 export function lifecycleProviderName(provider: string | undefined, profile?: { provider?: string; name?: string }): ProviderName {

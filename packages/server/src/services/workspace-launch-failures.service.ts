@@ -1,3 +1,4 @@
+import { readSessionStats } from "@agentic-kanban/shared/lib/session-stats-blob";
 import type { Database } from "../db/index.js";
 import { NotFoundError } from "../errors/index.js";
 import { isAnalyticsNoise } from "./session-filter.js";
@@ -81,7 +82,7 @@ export interface WorkspaceLaunchFailuresResponse {
 function isZeroOutputSession(session: { stats: string | null }): boolean {
   if (!session.stats) return false;
   try {
-    const s = JSON.parse(session.stats) as Record<string, unknown>;
+    const s = readSessionStats(session.stats);
     if (s.launchFailure === true) return true;
     if (s.success === false) return true;
   } catch { /* ignore bad JSON */ }
@@ -96,7 +97,7 @@ function extractFailureMessage(session: { stats: string | null } | null, setupSt
   if (setupStderr) return setupStderr.slice(-300).trim() || null;
   if (session?.stats) {
     try {
-      const s = JSON.parse(session.stats) as Record<string, unknown>;
+      const s = readSessionStats(session.stats);
       if (typeof s.failureReason === "string" && s.failureReason) return s.failureReason;
     } catch { /* ignore */ }
   }

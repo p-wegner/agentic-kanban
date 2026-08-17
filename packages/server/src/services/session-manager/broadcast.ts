@@ -16,6 +16,7 @@ import { formatToolActivity, tasksToTodoItems } from "./utils.js";
 import type { TodoItem } from "../board-events.js";
 import { detectCodexUsageLimitMessages } from "../codex-rate-limit.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { mergeSessionStats } from "@agentic-kanban/shared/lib/session-stats-blob";
 
 /**
  * Compute compact friction metrics (tool failures, repeated commands, errors)
@@ -69,14 +70,10 @@ async function persistFrictionFallback(sessionId: string, messages: AgentOutputM
 }
 
 async function mergeExistingStats(sessionId: string, statsToSave: Record<string, unknown>): Promise<Record<string, unknown>> {
+  // #522: the parse+merge is shared (`mergeSessionStats`); only the fetch differs from
+  // the twin in session-launch-helpers, which reads through a passed `database`.
   const rows = await selectSessionStats(sessionId);
-  if (rows.length === 0 || !rows[0].stats) return statsToSave;
-  try {
-    const existing = JSON.parse(rows[0].stats) as Record<string, unknown>;
-    return { ...existing, ...statsToSave };
-  } catch {
-    return statsToSave;
-  }
+  return mergeSessionStats(rows[0]?.stats, statsToSave);
 }
 
 const DB_FLUSH_INTERVAL_MS = 250;

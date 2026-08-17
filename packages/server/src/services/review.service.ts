@@ -1,3 +1,4 @@
+import { readSessionStats } from "@agentic-kanban/shared/lib/session-stats-blob";
 import type { Database } from "../db/index.js";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import {
@@ -317,7 +318,7 @@ export function isReviewLaunchPending(workspaceId: string): boolean {
 function isUsageLimitLaunchFailureStats(stats: string | null): boolean {
   if (!stats) return false;
   try {
-    const parsed = JSON.parse(stats) as Record<string, unknown>;
+    const parsed = readSessionStats(stats);
     if (parsed.rateLimited === true && (parsed.rateLimitKind === "codex-usage-limit" || parsed.rateLimitKind === "claude-usage-limit")) {
       return true;
     }
