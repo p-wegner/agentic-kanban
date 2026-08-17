@@ -11,6 +11,7 @@ import {
 } from "@agentic-kanban/shared/lib/strategy-objective-file";
 import type { StrategyBullseyeConfig } from "@agentic-kanban/shared/lib/strategy-objective-file";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 // Policy shape + priority-order selection live in the shared package so the
 // client's Strategy Targets round-trip codec and this service can never diverge
 // again (the client copy silently dropped `model` on save — #983). Docs for the
@@ -151,7 +152,7 @@ export async function resolveStrategyProviderSelection(
 ): Promise<{ provider: "claude" | "codex" | "copilot" | "pi"; profileName: string; model?: string } | null> {
   if (!projectId) return null;
   const prefRows = await database.select().from(preferences);
-  const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
+  const prefMap = toPrefMap(prefRows);
   const strategyRaw = prefMap.get(`board_strategy_${projectId}`);
   if (!strategyRaw) return null;
   try {

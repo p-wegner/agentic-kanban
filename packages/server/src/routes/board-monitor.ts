@@ -15,6 +15,7 @@ import {
 } from "../services/conductor-schedule.service.js";
 import { validateCronExpression } from "@agentic-kanban/shared/lib/cron-utils";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 /**
  * Read-only observability for the detached board-monitor orchestrator loop
  * (scripts/board-monitor/). Mounted under /projects.
@@ -46,7 +47,7 @@ export function createBoardMonitorRoute(database: Database) {
       return c.json({ error: "project not found" }, 404);
     }
     const rows = await getAllPreferences(database);
-    const prefMap = new Map(rows.map((r) => [r.key, r.value]));
+    const prefMap = toPrefMap(rows);
     const { tunables, source } = resolveMonitorTunables(prefMap, projectId);
     const runtime = resolveProjectRuntimeConfig({ projectId, prefMap });
     return c.json({ tunables, source, startPolicy: runtime.startPolicy });

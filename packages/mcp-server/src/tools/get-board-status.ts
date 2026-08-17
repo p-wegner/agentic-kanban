@@ -23,6 +23,7 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { occupiesWipSlot } from "@agentic-kanban/shared/lib/workspace-status";
 import { resolveDiffRef } from "@agentic-kanban/shared/lib/git-service";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, getDiffShortstat } = deps;
   server.tool(
@@ -55,7 +56,7 @@ export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodD
           .select({ key: schema.preferences.key, value: schema.preferences.value })
           .from(schema.preferences)
           .where(inArray(schema.preferences.key, ["auto_merge", "auto_merge_in_review"]));
-        const preferenceMap = new Map(preferenceRows.map((pref) => [pref.key, pref.value]));
+        const preferenceMap = toPrefMap(preferenceRows);
         const classificationOptions = {
           autoMergeEnabled: isAutoMergeEnabled(preferenceMap),
           autoMergeInReview: getBool(preferenceMap, "auto_merge_in_review"),

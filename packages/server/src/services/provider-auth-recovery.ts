@@ -37,6 +37,7 @@ import { rotateCodexLicense } from "./codex-license-ring.js";
 import { getAllPreferences } from "../repositories/preferences.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 /**
  * How long a profile with a dead login is cooled.
  *
@@ -96,7 +97,7 @@ export async function handleProviderAuthFailure(
 
   try {
     const prefRows = await getAllPreferences(database);
-    const prefMap = new Map(prefRows.map((row) => [row.key, row.value]));
+    const prefMap = toPrefMap(prefRows);
     const result = await rotate(
       database,
       prefMap,

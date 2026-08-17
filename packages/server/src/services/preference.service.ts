@@ -24,6 +24,7 @@ import type { ProviderName } from "./agent-provider.js";
 // `preferences set`, #973) keep their `preference.service` import path unchanged.
 import { PROVIDER_DIVERGENCE_KEYS } from "@agentic-kanban/shared/lib/strategy-policy";
 import type { ProviderDivergenceRejection } from "@agentic-kanban/shared/lib/strategy-policy";
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 export { PROVIDER_DIVERGENCE_KEYS };
 export type { ProviderDivergenceRejection };
 
@@ -222,7 +223,7 @@ export function createPreferenceService({ database = db }: { database?: Database
     diverged: boolean;
   }> {
     const rows = await getAllPreferences(database);
-    const prefMap = new Map(rows.map(r => [r.key, r.value]));
+    const prefMap = toPrefMap(rows);
 
     const result = resolveProviderDivergence(prefMap, projectId);
 

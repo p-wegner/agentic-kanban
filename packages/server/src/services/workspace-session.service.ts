@@ -41,6 +41,7 @@ import * as realGitService from "./git.service.js";
 import { resolveEffectiveModel } from "./effective-config.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 export function createWorkspaceSessionService(deps: {
   database: Database;
   getSessionManager?: () => SessionManager;
@@ -100,7 +101,7 @@ export function createWorkspaceSessionService(deps: {
     }
 
     const prefRows = await database.select().from(preferences);
-    const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
+    const prefMap = toPrefMap(prefRows);
     const { agentCommand, agentArgs, claudeProfile, profile: agentProfile, provider: agentProvider, resumeWithNewModel, permissionPromptTool } =
       applyWorkspaceAgentSelection(resolveAgentSettings(prefMap, body.agentCommand as string | undefined), ws0);
 

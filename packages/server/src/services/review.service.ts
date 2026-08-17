@@ -23,6 +23,7 @@ import { loadProjectRuntimeConfig } from "./project-runtime-config.service.js";
 import { buildReviewContext } from "./phase-context.service.js";
 import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 export const DEFAULT_MONITOR_NUDGE_PROMPT =
   "Please continue with the task. If you are waiting for input or unsure how to proceed, use your best judgment and keep moving forward. Check the issue description and any open questions, then take the next logical step.";
 
@@ -444,7 +445,7 @@ export async function startManualReview(
     // Codex OAuth license), not the global default which may have rotated since.
     // Exception: a blocked usage-limit review recovery intentionally uses the current
     // board default so switching providers can recover a stale provider/profile.
-    const defaultPrefMap = new Map(prefRows.map((r) => [r.key, r.value]));
+    const defaultPrefMap = toPrefMap(prefRows);
     const prefMap = recoverBlockedReview ? defaultPrefMap : applyWorkspaceProfileToPrefs(defaultPrefMap, workspace);
     const runtime = recoverBlockedReview
       ? await loadProjectRuntimeConfig(database, { projectId })

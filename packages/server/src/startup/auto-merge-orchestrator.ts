@@ -18,6 +18,7 @@ import { reconcileProjectCompletion } from "./project-completion-reconciler.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 const DEFAULT_INTERVAL_MS = 30_000;
 /**
  * How often the three drift-healing reconcile passes run when there are NO merge
@@ -82,13 +83,13 @@ export function createAutoMergeOrchestrator(deps: {
     // Short-TTL cached full scan (#402) — shared with findCompletedWorkspaceIds in
     // the same tick, so one underlying query serves both.
     const prefRows = await getAllPreferencesCached(database);
-    const prefMap = new Map(prefRows.map((row) => [row.key, row.value]));
+    const prefMap = toPrefMap(prefRows);
     return isAutoMergeEnabled(prefMap) && resolveMergeStrategy(prefMap) === "merge_queue";
   }
 
   async function findCompletedWorkspaceIds(): Promise<string[]> {
     const prefRows = await getAllPreferencesCached(database);
-    const prefMap = new Map(prefRows.map((row) => [row.key, row.value]));
+    const prefMap = toPrefMap(prefRows);
     const autoMergeInReview = getBool(prefMap, "auto_merge_in_review");
 
     // Per-project opt-out: an `auto_merge_disabled_<projectId>` pref set to "true" keeps

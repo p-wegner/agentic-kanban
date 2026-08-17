@@ -5,6 +5,7 @@ import { getAllPreferencesCached } from "../repositories/preferences.repository.
 import { resolveStartPolicy } from "./start-policy.service.js";
 import type { PluginLoopEngine, LoopStatus } from "./plugin-loop.service.js";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 /**
  * "Everything the ENABLED plugins offer this project (or projects)" reads: the
  * combined views/loops/scripts/skills panel data and the cross-project loop-gate
@@ -90,7 +91,7 @@ export function createPluginProjectSurfaceOps(deps: {
     // indistinguishable from convergence unless the panel says so explicitly.
     // #402's short-TTL cache — this surface is polled, so the raw full-table scan added up.
     const prefs = await getAllPreferencesCached(database);
-    const policy = resolveStartPolicy(new Map(prefs.map((p) => [p.key, p.value])), projectId);
+    const policy = resolveStartPolicy(toPrefMap(prefs), projectId);
     return {
       views,
       loops: projectLoops,

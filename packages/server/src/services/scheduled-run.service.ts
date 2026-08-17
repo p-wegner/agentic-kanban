@@ -26,6 +26,7 @@ import { getAllPreferences } from "../repositories/preferences.repository.js";
 import { resolveStartPolicy } from "./start-policy.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 export class ScheduledRunError extends Error {
   constructor(
     message: string,
@@ -145,7 +146,7 @@ export function createScheduledRunService(deps: {
     // "nothing auto-starts" holds. An explicit user "run now" (triggeredBy=manual) always runs.
     if (triggeredBy !== "manual") {
       const prefRows = await getAllPreferences(database);
-      const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
+      const prefMap = toPrefMap(prefRows);
       if (!resolveStartPolicy(prefMap, run.projectId).scheduledRuns) {
         return { skipped: true as const, reason: "start-mode-manual" as const };
       }

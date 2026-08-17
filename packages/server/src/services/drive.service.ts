@@ -25,6 +25,7 @@ import {
 } from "./project-runtime-config.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 export { autodrivePrefKey, autoMergeDisabledPrefKey } from "./project-runtime-config.service.js";
 
 /**
@@ -74,7 +75,7 @@ export interface DriveEnablementStatus {
 
 async function loadPrefMap(database: Database): Promise<Map<string, string>> {
   const rows = await getAllPreferences(database);
-  return new Map(rows.map((r) => [r.key, r.value]));
+  return toPrefMap(rows);
 }
 
 /** Read the current Drive status for a project. */
