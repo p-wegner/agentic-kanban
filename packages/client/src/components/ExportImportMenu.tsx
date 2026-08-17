@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { ImportIssuesModal } from "./ImportIssuesModal.js";
+import { BacklogMarkdownModal } from "./BacklogMarkdownModal.js";
 import { showToast } from "./Toast.js";
 import { apiPost } from "../lib/api.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -12,6 +13,7 @@ interface ExportImportMenuProps {
 export function ExportImportMenu({ projectId }: ExportImportMenuProps) {
   const [open, setOpen] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [mdModal, setMdModal] = useState<"export" | "import" | null>(null);
   const [importingSnapshot, setImportingSnapshot] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const snapshotInputRef = useRef<HTMLInputElement>(null);
@@ -133,6 +135,19 @@ export function ExportImportMenu({ projectId }: ExportImportMenuProps) {
               </svg>
               Full backlog snapshot
             </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => { setOpen(false); setMdModal("export"); }}
+              title="One readable, hand-editable .md file — pick statuses/tags/filters; re-importable"
+              className="w-full text-left px-2.5 py-1.5 text-xs rounded hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-900 dark:text-gray-100 flex items-center gap-2"
+              data-testid="export-backlog-md"
+            >
+              <svg className="w-3 h-3 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h10M4 18h7" />
+              </svg>
+              Backlog as Markdown…
+            </button>
             <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
             <p className="px-2.5 pt-0.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
               Import
@@ -164,6 +179,19 @@ export function ExportImportMenu({ projectId }: ExportImportMenuProps) {
               </svg>
               {importingSnapshot ? "Importing snapshot…" : "Import backlog snapshot…"}
             </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => { setOpen(false); setMdModal("import"); }}
+              title="Import a Backlog Markdown file (the standard or a liberal BACKLOG.md-style file) with a preview"
+              className="w-full text-left px-2.5 py-1.5 text-xs rounded hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-900 dark:text-gray-100 flex items-center gap-2"
+              data-testid="import-backlog-md"
+            >
+              <svg className="w-3 h-3 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h10M4 18h7" />
+              </svg>
+              Import backlog Markdown…
+            </button>
           </div>
         )}
       </div>
@@ -176,6 +204,9 @@ export function ExportImportMenu({ projectId }: ExportImportMenuProps) {
         onChange={handleSnapshotFile}
       />
 
+      {mdModal && projectId && (
+        <BacklogMarkdownModal projectId={projectId} mode={mdModal} onClose={() => setMdModal(null)} />
+      )}
       {showImportModal && projectId && (
         <ImportIssuesModal projectId={projectId} onClose={() => setShowImportModal(false)} />
       )}

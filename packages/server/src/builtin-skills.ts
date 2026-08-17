@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { MERGE_RECONCILER_PROMPT } from "./services/merge-reconciler-prompt.js";
 import { FLEET_WORKER_PROMPT } from "./services/fleet-worker-prompt.js";
+import { BACKLOG_MARKDOWN_PROMPT } from "./builtin-skills/backlog-markdown-prompt.js";
 import { BUILTIN_INIT_SKILLS } from "./builtin-skills/init-skills.js";
 
 const SPEC_PHASE_CONSTITUTION_GATE = `## Constitution Gate
@@ -940,6 +941,12 @@ Build it with create_workflow_template, giving each node a stable client id and 
     name: "merge-reconciler",
     description: "Land a whole batch of stranded/conflicting workspaces efficiently: resolve each overlapping cluster's union ONCE, sequence migration collisions, reconcile siblings as Done. Launched automatically by the auto-merge orchestrator.",
     prompt: MERGE_RECONCILER_PROMPT,
+    model: null,
+  },
+  {
+    name: "backlog-markdown",
+    description: "Move a backlog in or out of the board as ONE markdown file. Export with filters (share/review a backlog, keep a repo's BACKLOG.md in sync); import ANY markdown backlog — the kanban-md standard or someone else's style — by normalising it to the standard first, previewing (dry run), then applying. Use for 'export the backlog as markdown', 'import this BACKLOG.md', 'turn this list into tickets', 'sync BACKLOG.md with the board'.",
+    prompt: BACKLOG_MARKDOWN_PROMPT,
     model: null,
   },
   {

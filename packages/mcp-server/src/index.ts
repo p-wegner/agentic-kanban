@@ -36,6 +36,7 @@ import { registerAddDependency } from "./tools/add-dependency.js";
 import { registerAnalyzeDependencies } from "./tools/analyze-dependencies.js";
 import { registerRemoveDependency } from "./tools/remove-dependency.js";
 import { registerCreateIssuesBatch } from "./tools/create-issues-batch.js";
+import { registerExportBacklogMarkdown, registerImportBacklogMarkdown } from "./tools/backlog-markdown.js";
 import { registerUpdateDependenciesBatch } from "./tools/update-dependencies-batch.js";
 import { registerContractCoupledIssues } from "./tools/contract-coupled-issues.js";
 import { registerGetBoardStatus } from "./tools/get-board-status.js";
@@ -181,6 +182,8 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   validate_change: registerValidateChange,
   get_board_risk_digest: registerGetBoardRiskDigest,
   export_handoff_bundle: registerExportHandoffBundle,
+  export_backlog_markdown: registerExportBacklogMarkdown,
+  import_backlog_markdown: registerImportBacklogMarkdown,
   start_drive: registerStartDrive,
   list_drives: registerListDrives,
   get_drive: registerGetDrive,

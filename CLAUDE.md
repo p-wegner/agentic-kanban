@@ -104,6 +104,7 @@ Claude Code, Codex, Copilot — selectable via Settings → Agent. Claude reads 
 Tool precedence: **MCP** (`mcp__agentic-kanban__*`) → **CLI** (`pnpm cli -- ...`) → **REST**. Use the board's own features — review (`POST /api/workspaces/:id/review`), merge (`merge_workspace`), fix-and-merge, rebase (`update-base`), enhance, dependency-analyze — don't replicate manually. For narrow questions use `list_issues`/`get_board_status`, not unbounded `list_workspaces`. Don't hand-roll `curl | python`.
 
 - Read a ticket: `pnpm cli -- issue get <N>` (`--json` for JSON).
+- Backlog as ONE markdown file, both ways: `pnpm cli -- backlog export --out BACKLOG.md [--status …]` / `pnpm cli -- backlog import FILE [--apply]` (preview first); MCP `export_backlog_markdown` / `import_backlog_markdown`; UI Settings → UI → Export menu. Format + rules: `docs/backlog-markdown.md`.
 - "resume #N" = `pnpm cli -- workspace resume <N>` (relaunch agent), not manual investigation.
 - `board-navigator` + `kanban-workflow` skills = full tool/command/workflow reference.
 - **Butler** = warm per-project assistant (press `i`, MCP `ask_butler`, or `pnpm cli -- butler ask`).
@@ -225,7 +226,7 @@ Agent subprocess callbacks wrapped in try/catch in `agent.service.ts`; `uncaught
 
 ## Agent Skills
 Prompt templates in the `agent_skills` table, written to `.claude/skills/<name>/SKILL.md` in the worktree on creation. API: `GET/POST/PUT/DELETE /api/agent-skills` (`?projectId=` = global + project); MCP: `list/get/create/export_agent_skills`.
-- **Built-in** (`packages/server/src/builtin-skills.ts`, `isBuiltin: true`, `pnpm db:seed`): `board-navigator`, `code-review`, `code-review-thorough`, `dependency-analyzer`, `ticket-enhancer`, `orchestrator`, `monitor-nudge`, `kanban-workflow`. Generic, shipped in npm.
+- **Built-in** (`packages/server/src/builtin-skills.ts`, `isBuiltin: true`, `pnpm db:seed`): `board-navigator`, `code-review`, `code-review-thorough`, `dependency-analyzer`, `ticket-enhancer`, `orchestrator`, `monitor-nudge`, `kanban-workflow`, `backlog-markdown` (agentic import/export of a backlog as one `.md`, see `docs/backlog-markdown.md`), `fleet-worker`. Generic, shipped in npm.
 - **Project-specific** live only in `.claude/skills/` (e.g. `publish`, `cleanup`, `session-inspector`, `board-monitor`, `dev-server`, `db-doctor`) — **do NOT add to `builtin-skills.ts`**.
 - The review prompt uses built-in `code-review`; override per-project with a project-scoped `code-review` skill. Placeholders: `{{branch}}`, `{{baseBranch}}`, `{{issueId}}`, `{{autoFixInstructions}}`.
 - A **plugin** skill is junctioned into `.claude/skills/<name>` on enable, so it is a *disk* skill with a whole bundle (`tools/`, `references/`), not a DB row. Both the scanners and `copySkillToWorktree` handle that now — junctions are followed (`readdir` reports them as symlinks, never directories) and the FULL directory is copied into the worktree, since a skill whose `tools/` is missing documents commands that don't exist.
@@ -279,6 +280,7 @@ Full symptom→cause→fix in `docs/install.md` (“Clean-clone / first-start go
 - `.llm/workflows.md` — clean-start, DB reset, registration, migration diagnosis
 - `docs/prd/` — `00` vision, `05` MVP scope/stages, `03` data model, `04` agent integration, `06` testability
 - `docs/decisions/` — numbered decision records (`003` Butler, `006` board-monitor, `008` Start Mode, `012` worker fleet)
+- `docs/backlog-markdown.md` — Backlog Markdown (`kanban-md 1`): the one-file backlog format, export filters, liberal import + preview, UI/REST/CLI/MCP/skill surfaces
 - `docs/state.md` — progress
 - `packages/server/CLAUDE.md` — server-package detail (incl. Butler ops)
 - `scripts/board-monitor/README.md` — run/stop/observe the loop
