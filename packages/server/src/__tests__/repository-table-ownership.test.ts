@@ -59,7 +59,6 @@ const BASELINE: Record<string, number> = {
   "github-handoff-draft.repository.ts::sessions-read": 1,
   "issue-activity.repository.ts::sessions-read": 1,
   "issue-service.repository.ts::sessions-read": 1,
-  "issue.repository.ts::sessions-read": 1,
   "project-activity.repository.ts::sessions-read": 1,
   "review.repository.ts::sessions-read": 3,
   "session-lifecycle.repository.ts::sessions-read": 2,
