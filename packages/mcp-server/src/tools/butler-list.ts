@@ -1,16 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { boardApiUrl, getServerPort } from "../server-url.js";
-import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { butlerCall } from "../butler-api.js";
 
-interface ButlerEntry {
-  id: string;
-  name: string;
-  model?: string;
-  isRunning?: boolean;
-  sessionId?: string | null;
-  [key: string]: unknown;
-}
+// #508: `ButlerEntry` existed only to type the `await res.json()` this tool no longer
+// does. It never constrained the output — the body was passed straight to
+// JSON.stringify — so it documented a shape rather than enforcing one.
 
 export function registerButlerList(server: McpServer) {
   server.tool(
@@ -20,19 +14,9 @@ export function registerButlerList(server: McpServer) {
       projectId: z.string().describe("The project ID"),
     },
     async ({ projectId }) => {
-      try {
-        const res = await fetch(boardApiUrl(`/api/projects/${projectId}/butlers`));
-        const data = (await res.json()) as ButlerEntry[] | { error?: string };
-        if (!res.ok) {
-          const err = Array.isArray(data) ? res.statusText : ((data).error ?? res.statusText);
-          return { content: [{ type: "text" as const, text: `Butler list error: ${err}` }] };
-        }
-        return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
-      } catch (err) {
-        return {
-          content: [{ type: "text" as const, text: `Failed to reach the butler (is the server running on port ${getServerPort()}?): ${errorMessage(err)}` }],
-        };
-      }
+      // The array guard this tool needed (a successful body is a JSON ARRAY, so reading
+      // `.error` off it is wrong) now lives in the shared helper, so every tool has it.
+      return await butlerCall("Butler list", `/api/projects/${projectId}/butlers`, undefined, { pretty: true });
     },
   );
 }
