@@ -14,7 +14,7 @@ import { computeBodyEtag, conditionalJsonResponse, createBoardEtagCache } from "
 import { setSummaryWriteThroughListener } from "../services/summary-write-through-notifier.js";
 import { getProjectIdsForWorkspaces } from "../repositories/workspace-summary.repository.js";
 import { listProjectRepos, insertProjectRepo, updateProjectRepo, deleteProjectRepo, type RepoRow } from "../repositories/repo.repository.js";
-import { getProjectById, updateProjectServicesConfig } from "../repositories/project.repository.js";
+import { updateProjectServicesConfig } from "../repositories/project.repository.js";
 import { detectRepoInfo } from "../services/git-info.service.js";
 import { parseIncludeParam, serveWorkspaceRepoStatusBatch } from "../services/workspace-repo-status-batch.service.js";
 import { cloneRepo } from "../services/repo-clone.service.js";
@@ -28,6 +28,7 @@ import { createWebhookSender } from "../services/outbound-webhook.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 import { queryFlag, queryInt } from "../middleware/query-params.js";
+import { requireProject } from "../services/require-project.js";
 function toProjectRepoResponse(row: RepoRow): ProjectRepoResponse {
   return {
     id: row.id,
@@ -420,8 +421,7 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
     if (body.path && !isAbsolute(body.path)) {
       return c.json({ error: "repo path must be an absolute path" }, 400);
     }
-    const project = await getProjectById(projectId, database);
-    if (!project) return c.json({ error: "Project not found" }, 404);
+    const project = await requireProject(projectId, database);
 
     let localPath = body.path;
     if (body.cloneUrl) {
