@@ -319,6 +319,7 @@ Examples:
     .description("Block until a workspace leaves its active state, then exit.\n\nResolves the latest workspace for an issue number (same lookup as 'resume'), subscribes to the board WebSocket, and waits for the workspace to reach a terminal status. Prints each status transition as it arrives. Replaces sleep-loop polling of GET /api/workspaces/:id. Requires the kanban server to be running (pnpm dev).\n\nExit code 0: status reached idle, ready_for_merge, closed, or merged.\nExit code 1: status reached an error state, a workflow error was broadcast, the WS closed unexpectedly, or the timeout elapsed.")
     .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
     .option("--timeout <seconds>", "Give up after N seconds (default: no timeout)")
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
     .addHelpText("after", `
 Examples:
   $ agentic-kanban workspace wait 118                # block until #118 finishes

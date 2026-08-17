@@ -88,3 +88,39 @@ export function timeSince(date: Date): string {
   if (hours < 24) return `${hours}h ${minutes % 60}m`;
   return `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
+
+/**
+ * Resolve a CLI issue-number argument to `{ projectId, issueNumber, issueId }` (#509).
+ *
+ * Twelve handlers repeated the same prelude — resolve the project, `Number()` the argument,
+ * check it is a positive integer, look the issue up, and on a miss print the #467
+ * cross-project explanation. Two of them had DRIFTED: `workspace wait` and
+ * `session find-similar` used the active project only (no `--project`) and printed a bare
+ * "Issue #N not found.", which is the exact wrong conclusion #467 exists to prevent —
+ * numbers are per-project, so the ticket usually does exist, elsewhere.
+ *
+ * It RETURNS a result rather than exiting, because the callers do not agree on how to fail:
+ * most `process.exit(1)`, but `runWorkspaceWait` returns its exit code to a caller that
+ * still has cleanup to do. A helper that exited would have silently changed that contract.
+ */
+export type IssueNumberResolution =
+  | { ok: true; projectId: string; issueNumber: number; issueId: string }
+  | { ok: false; message: string };
+
+export async function resolveIssueNumberArg(
+  issueNumberArg: string,
+  options: { project?: string } = {},
+): Promise<IssueNumberResolution> {
+  const issueNumber = Number(issueNumberArg);
+  if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
+    return { ok: false, message: `Invalid issue number: ${issueNumberArg}` };
+  }
+
+  const projectId = await resolveProjectIdArg(options.project);
+  const { getIssueIdByNumberInProject } = await import("../repositories/issue.repository.js");
+  const issueId = await getIssueIdByNumberInProject(issueNumber, projectId);
+  if (issueId === null) {
+    return { ok: false, message: await describeIssueNumberMiss(issueNumber, projectId) };
+  }
+  return { ok: true, projectId, issueNumber, issueId };
+}
