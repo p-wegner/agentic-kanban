@@ -3,6 +3,7 @@ import { z } from "zod";
 import { boardApi } from "@agentic-kanban/shared/lib/board-server-url";
 import { getServerPort } from "../server-url.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { mcpContent } from "../db-utils.js";
 
 /**
  * First-class plugin-gate tools (#308) — so the butler (and any MCP consumer) can list,
@@ -13,10 +14,6 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 function api(path: string, init?: RequestInit) {
   return boardApi(`/api${path}`, init);
-}
-
-function text(value: unknown) {
-  return { content: [{ type: "text" as const, text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }] };
 }
 
 interface SurfaceLoop {
@@ -73,9 +70,9 @@ export function registerListPluginGates(server: McpServer) {
             awaitingMerge: l.awaitingMerge,
             note: l.note,
           }));
-        return text(gates.length ? gates : "No plugin gates are waiting.");
+        return mcpContent(gates.length ? gates : "No plugin gates are waiting.");
       } catch (err) {
-        return text(`Failed: ${errorMessage(err)}`);
+        return mcpContent(`Failed: ${errorMessage(err)}`);
       }
     },
   );
@@ -93,13 +90,13 @@ export function registerGetPluginGate(server: McpServer) {
     async ({ projectId, pluginId, loopName }) => {
       try {
         const loop = (await surfaceLoops(projectId)).find((l) => l.pluginId === pluginId && l.name === loopName);
-        if (!loop) return text(`Loop "${loopName}" of plugin ${pluginId} not found or not enabled for this project.`);
-        return text({
+        if (!loop) return mcpContent(`Loop "${loopName}" of plugin ${pluginId} not found or not enabled for this project.`);
+        return mcpContent({
           gate: loop.gate, checks: loop.checks, recommendation: loop.gateRecommendation,
           awaitingMerge: loop.awaitingMerge, openTickets: loop.openTickets, note: loop.note,
         });
       } catch (err) {
-        return text(`Failed: ${errorMessage(err)}`);
+        return mcpContent(`Failed: ${errorMessage(err)}`);
       }
     },
   );
@@ -123,9 +120,9 @@ export function registerListInbox(server: McpServer) {
     {},
     async () => {
       const res = await api("/inbox");
-      if (!res.ok) return text(`Inbox failed (${res.status}): ${JSON.stringify(res.data)}`);
+      if (!res.ok) return mcpContent(`Inbox failed (${res.status}): ${JSON.stringify(res.data)}`);
       const items = (res.data as { items?: unknown[] }).items ?? [];
-      return text(items.length ? items : "Nothing is waiting on you on any project.");
+      return mcpContent(items.length ? items : "Nothing is waiting on you on any project.");
     },
   );
 }
@@ -147,8 +144,8 @@ export function registerResolvePluginGate(server: McpServer) {
         method: "POST",
         body: JSON.stringify({ projectId, gateId, actionId, input }),
       });
-      if (!res.ok) return text(`Gate resolve failed (${res.status}): ${JSON.stringify(res.data)}`);
-      return text(res.data);
+      if (!res.ok) return mcpContent(`Gate resolve failed (${res.status}): ${JSON.stringify(res.data)}`);
+      return mcpContent(res.data);
     },
   );
 }
@@ -167,8 +164,8 @@ export function registerAdvancePluginLoop(server: McpServer) {
         method: "POST",
         body: JSON.stringify({ projectId }),
       });
-      if (!res.ok) return text(`Advance failed (${res.status}): ${JSON.stringify(res.data)}`);
-      return text(res.data);
+      if (!res.ok) return mcpContent(`Advance failed (${res.status}): ${JSON.stringify(res.data)}`);
+      return mcpContent(res.data);
     },
   );
 }
