@@ -11,18 +11,13 @@
 // This is invisible on a single-project board, which is why it survived — so every test
 // here seeds TWO projects that both own the same issue number.
 import { describe, it, expect } from "vitest";
+import { randomUUID } from "node:crypto";
 import * as schema from "@agentic-kanban/shared/schema";
 import { registerGetIssue } from "../../tools/get-issue.js";
 import { registerGetIssueSummary } from "../../tools/get-issue-summary.js";
 import { setupTool } from "../helpers/tool-harness.js";
-import { seedProject, seedIssue } from "../helpers/seed.js";
+import { seedProject, seedIssue, setActiveProject } from "../helpers/seed.js";
 import type { TestDb } from "../helpers/test-db.js";
-
-/** Point the `activeProjectId` preference at a project. */
-async function setActiveProject(db: TestDb, projectId: string) {
-  await db.insert(schema.preferences).values({ key: "activeProjectId", value: projectId })
-    .onConflictDoUpdate({ target: schema.preferences.key, set: { value: projectId } });
-}
 
 /** Two projects, each owning an issue numbered `n`. Returns both issue ids. */
 async function seedTwoProjectsSharingNumber(db: TestDb, n: number) {
@@ -58,7 +53,7 @@ describe("get_issue resolves a numeric ref within one project (#506)", () => {
 
   it("a UUID ref is unaffected by project scoping", async () => {
     const { invoke, db } = setupTool(registerGetIssue);
-    const { a, b, issueA } = await seedTwoProjectsSharingNumber(db, 7);
+    const { b, issueA } = await seedTwoProjectsSharingNumber(db, 7);
     await setActiveProject(db, b.projectId); // deliberately the OTHER project
 
     const parsed = JSON.parse((await invoke({ issueId: issueA.id })).content[0].text);
@@ -78,5 +73,63 @@ describe("get_issue_summary resolves a numeric ref within one project (#506)", (
     // have resolved project B's issue #7 specifically.
     expect(parsed.title).toBe("PROJECT B ticket");
     expect(JSON.stringify(parsed)).not.toContain("PROJECT A ticket");
+  });
+});
+
+/**
+ * The second half of #506: which session represents the issue. The CLI has always
+ * skipped analytics noise (`selectSummarySession`), while this tool took
+ * `find(completed|stopped) ?? rows[0]` and would report a board-monitor pass as the
+ * agent's work on the ticket. Both now go through the shared `loadIssueSummary`.
+ */
+describe("get_issue_summary skips analytics-noise sessions (#506)", () => {
+  /** One workspace with two completed sessions: a noise one, and the real agent run. */
+  async function seedNoiseAndRealSession(db: TestDb, issueId: string) {
+    const workspaceId = randomUUID();
+    await db.insert(schema.workspaces).values({
+      id: workspaceId, issueId, branch: "feature/ak-7", status: "idle",
+      workingDir: "/tmp/ws", createdAt: new Date().toISOString(),
+    });
+    const insert = async (triggerType: string, agentSummary: string, startedAt: string) => {
+      await db.insert(schema.sessions).values({
+        id: randomUUID(), workspaceId, status: "completed", startedAt, triggerType,
+        stats: JSON.stringify({ agentSummary }),
+      });
+    };
+    // The noise session is the MOST RECENT, so an unfiltered `rows[0]` picks it.
+    await insert("agent", "REAL agent work", "2026-01-01T10:00:00.000Z");
+    await insert("skill:board-monitor", "MONITOR sweep", "2026-01-01T12:00:00.000Z");
+  }
+
+  it("summarizes the agent run, not the more recent board-monitor session", async () => {
+    const { invoke, db } = setupTool(registerGetIssueSummary);
+    const { b, issueB } = await seedTwoProjectsSharingNumber(db, 7);
+    await setActiveProject(db, b.projectId);
+    await seedNoiseAndRealSession(db, issueB.id);
+
+    const parsed = JSON.parse((await invoke({ issueNumber: 7 })).content[0].text);
+    expect(parsed.agentSummary).toBe("REAL agent work");
+  });
+
+  it("falls back to a noise session when it is the ONLY one", async () => {
+    const { invoke, db } = setupTool(registerGetIssueSummary);
+    const { b, issueB } = await seedTwoProjectsSharingNumber(db, 7);
+    await setActiveProject(db, b.projectId);
+    const workspaceId = randomUUID();
+    await db.insert(schema.workspaces).values({
+      id: workspaceId, issueId: issueB.id, branch: "feature/ak-7", status: "idle",
+      workingDir: "/tmp/ws", createdAt: new Date().toISOString(),
+    });
+    await db.insert(schema.sessions).values({
+      id: randomUUID(), workspaceId, status: "completed",
+      startedAt: "2026-01-01T10:00:00.000Z",
+      stats: JSON.stringify({ agentSummary: "MONITOR sweep" }),
+      triggerType: "skill:board-monitor",
+    });
+
+    // Reporting "no session" here would be a regression: the issue DOES have one.
+    const parsed = JSON.parse((await invoke({ issueNumber: 7 })).content[0].text);
+    expect(parsed.status).toBeUndefined();
+    expect(parsed.agentSummary).toBe("MONITOR sweep");
   });
 });

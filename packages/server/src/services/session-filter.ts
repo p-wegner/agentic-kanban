@@ -7,22 +7,13 @@
  * - Workspace session counts used for stuck-detection in the monitor cycle
  * - The "latest session" shown in board analytics and CLI status
  * - The "last agent message" displayed per workspace
+ *
+ * The definition moved to `shared/lib/session-selection.ts` with #506, so that the shared
+ * `loadIssueSummary` — which the MCP tool calls, and which cannot import server code —
+ * applies the SAME policy the CLI has always applied. Re-exported here because seven
+ * server modules import it from this path.
  */
-
-/** Trigger types whose sessions should not count as real implementation work. */
-export const NOISE_TRIGGER_TYPES: readonly string[] = [
-  "skill:board-monitor",
-  "skill:board-navigator",
-];
-
-const NOISE_TRIGGER_SET = new Set<string>(NOISE_TRIGGER_TYPES);
-
-/**
- * Returns true if the session is analytics noise and should be excluded from
- * retry counts, success metrics, and the "latest session" display.
- */
-export function isAnalyticsNoise(session: { triggerType?: string | null }): boolean {
-  const t = session.triggerType;
-  if (!t) return false;
-  return NOISE_TRIGGER_SET.has(t);
-}
+export {
+  NOISE_TRIGGER_TYPES,
+  isAnalyticsNoise,
+} from "@agentic-kanban/shared/lib/session-selection";
