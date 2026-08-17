@@ -5,6 +5,7 @@ import { prodDeps, type ToolDeps } from "./deps.js";
 import { requireEntity, resolveStatusByName, checkOpenUnmergedWorkspace } from "../db-utils.js";
 import { fireIssueStatusWebhook } from "@agentic-kanban/shared/lib/issue-status-orchestration";
 import { isTerminalStatusName } from "@agentic-kanban/shared/lib";
+import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 
 export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, notifyBoard } = deps;
@@ -58,12 +59,19 @@ export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps
         }
         const r = await resolveStatusByName(db, schema, existing.projectId, statusName);
         if (!r.ok) return r.error;
-        updates.statusId = r.statusId;
-        updates.statusChangedAt = now;
+        // #501: statusId/statusChangedAt deliberately NOT added to `updates` — the status
+        // write goes through transitionIssueStatus below so the workflow current-node is
+        // synced with it. Writing it here as a plain column left `currentNodeId` on a
+        // non-end node and dependency resolution then silently failed (#537).
         resolvedStatusId = r.statusId;
       }
 
+      // Non-status fields first; `updates` always carries at least `updatedAt`.
       await db.update(schema.issues).set(updates).where(eq(schema.issues.id, issueId));
+
+      if (resolvedStatusId) {
+        await transitionIssueStatus(db, issueId, resolvedStatusId, { now });
+      }
 
       notifyBoard(existing.projectId, "mcp_update_issue");
 
@@ -83,7 +91,17 @@ export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps
       }
 
       return {
-        content: [{ type: "text" as const, text: JSON.stringify({ id: issueId, updated: Object.keys(updates).filter(k => k !== "updatedAt" && k !== "statusChangedAt") }, null, 2) }],
+        // #501 moved the status write out of `updates`, so "statusId" is re-added here
+        // explicitly. Deriving the response purely from the object's keys would have
+        // silently dropped it from the reported field list — a response-contract change
+        // that has nothing to do with the invariant being fixed.
+        content: [{ type: "text" as const, text: JSON.stringify({
+          id: issueId,
+          updated: [
+            ...Object.keys(updates).filter(k => k !== "updatedAt" && k !== "statusChangedAt"),
+            ...(resolvedStatusId ? ["statusId"] : []),
+          ],
+        }, null, 2) }],
       };
     },
   );
