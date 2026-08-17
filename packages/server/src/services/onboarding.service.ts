@@ -17,7 +17,8 @@ import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-prefere
 import { pluginSkillName } from "@agentic-kanban/shared/lib/plugin-manifest";
 import type { Database } from "../db/index.js";
 import { getProjectById } from "../repositories/project.repository.js";
-import { getPreference } from "../repositories/preferences.repository.js";
+import { getPreference, getAllPreferences } from "../repositories/preferences.repository.js";
+import { resolveStartPolicy } from "./start-policy.service.js";
 import { listProjectRepos } from "../repositories/repo.repository.js";
 import { listOnboardingUnitExternalKeys } from "../repositories/onboarding.repository.js";
 import { getStackProfile, verifyScriptPrefKey } from "./stack-profile.service.js";
@@ -114,8 +115,13 @@ export function createOnboardingService(deps: OnboardingServiceDeps) {
         return Boolean(project.setupScript?.trim()) && Boolean(verify?.trim());
       }
       case "start-mode": {
-        const value = await getPreference(`start_mode_${projectId}`, database);
-        return Boolean(value) && value !== "manual";
+        // #600 / decision 008: ask the RESOLVER, never the raw pref. A project driven by
+        // the legacy `board_autodrive_<id>` flag has no `start_mode_` key, so the raw read
+        // returned undefined and this step nagged "not configured" at a project that is in
+        // fact auto-driven. resolveStartPolicy derives that case.
+        const rows = await getAllPreferences(database);
+        const prefMap = new Map(rows.map((r) => [r.key, r.value]));
+        return resolveStartPolicy(prefMap, projectId).mode !== "manual";
       }
       case "wip-limit": {
         const value = await getPreference(`wip_limit_${projectId}`, database);
