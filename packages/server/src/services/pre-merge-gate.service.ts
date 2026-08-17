@@ -1,3 +1,4 @@
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,8 +35,13 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 export const DEFAULT_VERIFY_TIMEOUT_MS = 20 * 60 * 1000;
 
 /** Preference key for a per-project override of the verify-gate timeout (ms). */
+// #496: built from the registry, so an unregistered prefix is a COMPILE error.
+const verifyTimeoutPrefDef = projectPref("verify_timeout_ms");
+const verifyMaxWorkersPrefDef = projectPref("verify_max_workers");
+const verifyFileScopePrefDef = projectPref("verify_file_scope");
+
 export function verifyTimeoutPrefKey(projectId: string): string {
-  return `verify_timeout_ms_${projectId}`;
+  return verifyTimeoutPrefDef.key(projectId);
 }
 
 /** Bounds a parsed timeout override to something sane: at least 30s, at most 3 hours. */
@@ -57,7 +63,7 @@ export const DEFAULT_VERIFY_MAX_WORKERS = 2;
 
 /** Preference key for a per-project override of the verify-gate vitest worker cap. */
 export function verifyMaxWorkersPrefKey(projectId: string): string {
-  return `verify_max_workers_${projectId}`;
+  return verifyMaxWorkersPrefDef.key(projectId);
 }
 
 /**
@@ -72,7 +78,7 @@ export function verifyMaxWorkersPrefKey(projectId: string): string {
  * "false".
  */
 export function verifyFileScopePrefKey(projectId: string): string {
-  return `verify_file_scope_${projectId}`;
+  return verifyFileScopePrefDef.key(projectId);
 }
 
 async function resolveVerifyFileScope(projectId: string, database: Database): Promise<boolean> {

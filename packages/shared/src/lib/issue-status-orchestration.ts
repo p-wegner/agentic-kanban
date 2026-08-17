@@ -12,6 +12,7 @@
  * shape + URL validation stay pure in `outbound-webhook.ts`. This module is the
  * db-coupled glue that reads/queries and fires.
  */
+import { projectPref } from "./dynamic-preference-keys.js";
 import { and, eq, ne } from "drizzle-orm";
 import * as schema from "../schema/index.js";
 import type { WorkflowDb } from "./workflow-engine/types.js";
@@ -44,8 +45,11 @@ export async function findOpenUnmergedWorkspace(
 }
 
 /** The preference key that holds a project's outbound webhook URL. */
+// #496: built from the registry, so an unregistered prefix is a COMPILE error.
+const outboundWebhookPrefDef = projectPref("outbound_webhook_url");
+
 export function outboundWebhookPrefKey(projectId: string): string {
-  return `outbound_webhook_url_${projectId}`;
+  return outboundWebhookPrefDef.key(projectId);
 }
 
 /**

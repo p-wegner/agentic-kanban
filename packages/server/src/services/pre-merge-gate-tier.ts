@@ -1,3 +1,4 @@
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Database } from "../db/index.js";
@@ -26,8 +27,11 @@ export type VerifyGateStrategy = (typeof VERIFY_GATE_STRATEGY_VALUES)[number];
 export const DEFAULT_VERIFY_GATE_STRATEGY: VerifyGateStrategy = "full";
 
 /** Preference key for a per-project override of the verify-gate strategy tier. */
+// #496: built from the registry, so an unregistered prefix is a COMPILE error.
+const verifyGateStrategyPrefDef = projectPref("verify_gate_strategy");
+
 export function verifyGateStrategyPrefKey(projectId: string): string {
-  return `verify_gate_strategy_${projectId}`;
+  return verifyGateStrategyPrefDef.key(projectId);
 }
 
 export async function resolveVerifyGateStrategy(projectId: string, database: Database): Promise<VerifyGateStrategy> {
