@@ -115,6 +115,16 @@ const PACKAGES = [
     label: "mcp-server",
     exclude: ["**/mcp-tools.test.ts"],
   },
+  {
+    // #601: the client was NOT in this list, so `pnpm test:mine` — which IS what the
+    // pre-merge verify gate runs — had never executed a single one of its 142 test files.
+    // Every client-only change merged on server+shared+mcp evidence alone. The suite is
+    // ~1.3k fast unit tests (no DB, no git, no docker) and adds well under two minutes,
+    // which is a small price for the gate meaning what it claims.
+    dir: "packages/client",
+    label: "client",
+    exclude: [],
+  },
 ];
 
 // Extra args after `--` (pnpm strips the first `--`; node leaves the rest in argv).
