@@ -11,6 +11,7 @@ import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.js";
 import { completeMergeJob, failMergeJob, getMergeJob, startMergeJob } from "../services/merge-job.service.js";
 
+import { queryFlag } from "../middleware/query-params.js";
 export function createWorkspaceActionsRoute(
   getSessionManager: () => SessionManager,
   database: Database,
@@ -42,7 +43,7 @@ export function createWorkspaceActionsRoute(
   // stack; (re)provisions a deferred/errored/never-run stack (the "Retry" control).
   router.post("/:id/services/up", async (c) => {
     const id = c.req.param("id");
-    const recreate = c.req.query("recreate") === "true";
+    const recreate = queryFlag(c, "recreate");
     const serviceState = await servicesControl.up(id, { recreate });
     return c.json({ serviceState });
   });
@@ -242,7 +243,7 @@ export function createWorkspaceActionsRoute(
   // landed on the base branch out-of-band) without acting on it.
   router.get("/:id/already-merged-status", async (c) => {
     const id = c.req.param("id");
-    const adoptMainCheckout = c.req.query("adoptMainCheckout") === "true";
+    const adoptMainCheckout = queryFlag(c, "adoptMainCheckout");
     return c.json(await workspaceService.checkAlreadyMerged(id, { adoptMainCheckout }));
   });
 

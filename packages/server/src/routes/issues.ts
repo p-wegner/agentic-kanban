@@ -44,6 +44,7 @@ import { getIssueCycleTime } from "../services/cycle-time.service.js";
 import { createWebhookSender } from "../services/outbound-webhook.service.js";
 import { conditionalJsonResponse } from "../services/board-etag-cache.service.js";
 
+import { queryFlag } from "../middleware/query-params.js";
 /** Shape of the domain errors thrown by the issue service (see IssueError + the `index`-tagged batch errors). */
 interface IssueRouteError {
   code?: string;
@@ -77,7 +78,7 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     if (!projectId) return c.json({ error: "projectId query parameter required" }, 400);
     const issueNumberParam = c.req.query("issueNumber");
     const statusName = c.req.query("statusName") || undefined;
-    const slim = c.req.query("slim") === "1";
+    const slim = queryFlag(c, "slim");
     // Pagination (#424): opt-in, so the default response is byte-identical to before.
     // `limit` is clamped rather than rejected — a caller asking for 10_000 wants "all
     // of it" and should get a bounded page, not a 400 it has to special-case.

@@ -5,6 +5,7 @@ import { getProjectById } from "../repositories/project.repository.js";
 import { getStackProfile, populateStackProfile, saveManualStackProfile } from "../services/stack-profile.service.js";
 import type { StackProfile } from "@agentic-kanban/shared";
 
+import { queryFlag } from "../middleware/query-params.js";
 /**
  * Project stack-profile feature endpoints (#786). Extracted from the 400-commit
  * routes/projects.ts grab-bag (arch-review §1.5). Mounted at the SAME `/projects`
@@ -18,7 +19,7 @@ export function createProjectStackProfileRoute(database: Database) {
   // forces a recompute). The feedback harness reads this ONE descriptor.
   router.get("/:id/stack-profile", async (c) => {
     const projectId = c.req.param("id");
-    const refresh = c.req.query("refresh") === "true";
+    const refresh = queryFlag(c, "refresh");
 
     const project = await getProjectById(projectId, database);
     if (!project) return c.json({ error: "Project not found" }, 404);

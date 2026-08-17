@@ -3,6 +3,7 @@ import { createDriveService } from "../services/drive.service.js";
 import { buildDriveDashboard } from "../services/drive-dashboard.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.js";
+import { queryFlag } from "../middleware/query-params.js";
 import {
   computeReviewEffectiveness,
   resolveDriveIssueIds,
@@ -32,8 +33,8 @@ export function createDrivesRoute(database: Database) {
   router.get("/:projectId/drives/:id/review-effectiveness", async (c) => {
     const projectId = c.req.param("projectId");
     const drive = await service.get(projectId, c.req.param("id"));
-    const wholeProject = c.req.query("wholeProject") === "true";
-    const deep = c.req.query("deep") === "true";
+    const wholeProject = queryFlag(c, "wholeProject");
+    const deep = queryFlag(c, "deep");
 
     const issueIds = wholeProject
       ? null

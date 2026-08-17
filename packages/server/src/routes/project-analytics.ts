@@ -15,6 +15,7 @@ import { generateBoardRiskDigest } from "../services/board-risk-digest.service.j
 import { getWorkspaceLaunchFailures } from "../services/workspace-launch-failures.service.js";
 import { getWorkspaceRisk } from "../services/workspace-risk.service.js";
 
+import { queryInt } from "../middleware/query-params.js";
 /**
  * Project analytics / planning feature endpoints — the non-CRUD "everything is
  * project-scoped" grab-bag that used to accrete on the 400-commit routes/projects.ts
@@ -31,9 +32,7 @@ export function createProjectAnalyticsRoute(
   // GET /api/projects/:id/monitor-cycles — aggregated cycle summaries
   router.get("/:id/monitor-cycles", async (c) => {
     const projectId = c.req.param("id");
-    const rawLimit = c.req.query("limit");
-    const parsed = Number.parseInt(rawLimit ?? "", 10);
-    const limit = Number.isFinite(parsed) ? Math.min(50, Math.max(1, parsed)) : 20;
+    const limit = queryInt(c, "limit", { def: 20, min: 1, max: 50 });
     const cycles = await listMonitorCycles(projectId, { limit }, database);
     return c.json(cycles);
   });

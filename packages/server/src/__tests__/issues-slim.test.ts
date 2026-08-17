@@ -93,12 +93,30 @@ describe("GET /api/issues ?slim=1", () => {
     expect("description" in list[0]).toBe(false);
   });
 
-  it("slim with any other value than 1 keeps the full response", async () => {
-    const res = await app.request(`/api/issues?projectId=${projectId}&slim=true`);
-    expect(res.status).toBe(200);
-    const list = await res.json() as Record<string, unknown>[];
-    const withDesc = list.find(i => i.issueNumber === 1)!;
-    expect(withDesc.description).toBe("A long description that should be omitted in slim mode");
+  // CONTRACT CHANGE (#511). This used to assert that `?slim=true` keeps the FULL response,
+  // pinning the old `=== "1"` check. That was describing the implementation, not a
+  // requirement: routes were split between `=== "1"` and `=== "true"`, so a client picking
+  // the wrong spelling had its flag silently ignored — the request succeeded and the flag
+  // just did nothing. `queryFlag` now accepts both, so `?slim=true` IS slim.
+  it("accepts either wire spelling for the slim flag", async () => {
+    for (const raw of ["1", "true"]) {
+      const res = await app.request(`/api/issues?projectId=${projectId}&slim=${raw}`);
+      expect(res.status).toBe(200);
+      const list = await res.json() as Record<string, unknown>[];
+      const issue = list.find(i => i.issueNumber === 1)!;
+      expect("description" in issue, `slim=${raw} should omit description`).toBe(false);
+    }
+  });
+
+  it("keeps the full response for a non-truthy slim value", async () => {
+    for (const raw of ["0", "false", ""]) {
+      const res = await app.request(`/api/issues?projectId=${projectId}&slim=${raw}`);
+      expect(res.status).toBe(200);
+      const list = await res.json() as Record<string, unknown>[];
+      const withDesc = list.find(i => i.issueNumber === 1)!;
+      expect(withDesc.description, `slim=${raw} should keep description`)
+        .toBe("A long description that should be omitted in slim mode");
+    }
   });
 });
 
