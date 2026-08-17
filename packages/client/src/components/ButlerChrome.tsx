@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats } from "../lib/useBoardEvents.js";
-import { isAgentRunningStatus, occupiesWipSlot } from "@agentic-kanban/shared/lib/workspace-status";
+import { isAgentRunningStatus, occupiesWipSlot } from "@agentic-kanban/shared/lib/workspace-liveness";
 
 interface ActivityStripProps {
   columns: StatusWithIssues[];

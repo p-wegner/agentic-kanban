@@ -10,7 +10,7 @@ import { AgentStallIndicator, useAgentStallThreshold } from "./AgentStallBadge.j
 import { useStaleWorkspaceManager } from "../hooks/useStaleWorkspaceManager.js";
 import { useProjectsQuery } from "../hooks/useBoardDataQueries.js";
 import { issueStatusToneClass } from "../lib/badgeTones.js";
-import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-status";
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
 import {
   type CrossProjectGroup,
   type WsStatusFilter,

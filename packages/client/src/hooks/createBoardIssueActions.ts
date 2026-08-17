@@ -14,7 +14,7 @@ import { resolveWorkspaceLaunchDefaults } from "../lib/workspaceLaunchDefaults.j
 import { boardSelectionActions } from "../stores/boardSelectionStore.js";
 import { boardBulkSelectionActions } from "../stores/boardBulkSelectionStore.js";
 import { isPlanModePriority } from "../lib/priorityTraits.js";
-import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-status";
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
 
 type Setter<T> = Dispatch<SetStateAction<T>>;
 

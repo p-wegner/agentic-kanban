@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { STATUS_COLORS } from "../lib/chartColors";
-import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-status";
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
 
 const COMPLETED_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 const HIDDEN_STATUS_NAMES = new Set(["Backlog"]);
