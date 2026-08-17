@@ -1,3 +1,4 @@
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -17,7 +18,7 @@ export interface ProjectConductorConfig {
   cadenceSeconds: number;
 }
 
-const CONDUCTOR_KEY_RE = /^board_conductor_([0-9a-f-]+)$/;
+const conductorPref = projectPref("board_conductor");
 
 export function parseProjectConductorConfig(raw: string | null | undefined): ProjectConductorConfig {
   if (!raw) return { enabled: false, agent: "codex", cadenceSeconds: 1800 };
@@ -38,7 +39,7 @@ export function parseProjectConductorConfig(raw: string | null | undefined): Pro
 }
 
 function projectIdFromConductorKey(key: string): string | null {
-  return CONDUCTOR_KEY_RE.exec(key)?.[1] ?? null;
+  return conductorPref.projectIdOf(key);
 }
 
 async function enabledProjectConductors(database: Database): Promise<Map<string, ProjectConductorConfig>> {
