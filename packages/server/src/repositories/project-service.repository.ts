@@ -3,6 +3,7 @@ import { ACTIVE_WORKSPACE_STATUSES } from "@agentic-kanban/shared/lib/workspace-
 import { eq, and, inArray, notInArray, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database, TransactionClient } from "../db/index.js";
+import { getPreference as canonicalGetPreference } from "./preferences.repository.js";
 
 export async function getProjectsBasePath(database: Database = db) {
   const rows = await database
@@ -149,11 +150,13 @@ export async function getBoardIssues(
     .orderBy(issues.sortOrder);
 }
 
-export async function getPreferenceValue(
-  key: string,
-  database: Database = db,
-) {
-  return database.select({ value: preferences.value }).from(preferences).where(eq(preferences.key, key)).limit(1);
+/** #613: delegates to the canonical reader (which records the db:getPreference metric). */
+export async function getPreferenceValue(key: string, database: Database = db): Promise<string | undefined> {
+  // `?? undefined` is NOT cosmetic: this clone's callers were typed against
+  // `string | undefined` while the canonical reader returns `string | null`. Three clones
+  // had three different contracts (#613) — each is preserved exactly, so this commit
+  // removes the duplicated QUERY without changing any caller's types.
+  return (await canonicalGetPreference(key, database)) ?? undefined;
 }
 
 export async function getGraphIssues(
