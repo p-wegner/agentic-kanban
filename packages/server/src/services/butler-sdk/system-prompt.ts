@@ -1,7 +1,8 @@
 import { ensureBoardGuideFile } from "../../butler/board-guide.js";
+import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 
 export function buildButlerSystemPrompt(projectName: string, repoPath: string): string {
-  const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
+  const serverPort = resolveBoardServerPort();
   const boardGuidePath = ensureBoardGuideFile();
   return [
     `You are the project butler for "${projectName}" — a persistent, warm assistant embedded in the agentic-kanban board.`,

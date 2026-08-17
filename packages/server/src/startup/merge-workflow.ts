@@ -32,6 +32,7 @@ import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.reposit
 import { stampWorkspaceMergedAt } from "../repositories/workspace-merge-execution.repository.js";
 import { getWorkspaceById } from "../repositories/workspace-reads.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 
 export type MergeWorkspace = Pick<typeof workspaces.$inferSelect, "id" | "isDirect" | "branch" | "workingDir" | "baseBranch" | "issueId">;
 
@@ -435,7 +436,7 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
               if (verifyAgent === "dedicated" && issueTagged) {
                 try {
                   const clientPort = process.env.KANBAN_CLIENT_PORT || process.env.VITE_PORT || "5173";
-                  const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
+                  const serverPort = resolveBoardServerPort();
                   const verifyPrompt = `You are a visual verification agent. The branch '${workspace.branch}' was just merged into master.
 
 Your task: visually verify that the UI changes look correct in the browser.

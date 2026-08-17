@@ -379,6 +379,12 @@ export function preflightCheck(
   }
 
   // 3. KANBAN_SERVER_PORT is set (agent needs it to talk back to the board)
+  //
+  // #615: deliberately NOT `resolveBoardServerPort()`. This asks "did the operator SET a
+  // port?" so it can warn; the resolver always returns a number (defaulting to 3001), so
+  // routing this through it would make the check pass unconditionally and silently delete
+  // the warning below. The only site in the drained set that wants the raw env, not a
+  // resolved value.
   const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT;
   if (!serverPort) {
     errors.push("KANBAN_SERVER_PORT / PORT environment variable not set — agent won't be able to reach the board API");

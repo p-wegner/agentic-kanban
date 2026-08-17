@@ -46,6 +46,7 @@ import {
 } from "../services/butler-definitions.service.js";
 import { listButlerSessions, getButlerSessionMessages } from "../services/butler-transcripts.service.js";
 import type { ProviderName } from "../services/agent-provider.js";
+import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 
 /** Suffix per-butler pref keys for named butlers; the "default" butler keeps the
  *  legacy unsuffixed keys so existing resume ids / history carry over unchanged. */
@@ -251,7 +252,7 @@ export function createButlerRoute(
   }
 
   function buildGlobalButlerPrompt(baseDir: string): string {
-    const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
+    const serverPort = String(resolveBoardServerPort());
     const boardGuidePath = ensureBoardGuideFile();
     return [
       `You are the agentic-kanban butler, running WITHOUT an active project — no project is registered or selected yet.`,
@@ -270,7 +271,7 @@ export function createButlerRoute(
    *  substitute the {{projectName}}/{{repoPath}}/{{serverPort}} placeholders. */
   async function resolveButlerPrompt(projectId: string, projectName: string, repoPath: string): Promise<string> {
     const prompt = await getButlerPrompt(projectId, database);
-    const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
+    const serverPort = String(resolveBoardServerPort());
     const appPort = process.env.KANBAN_CLIENT_PORT || serverPort;
     const appBaseUrl = `http://localhost:${appPort}`;
     const boardGuidePath = ensureBoardGuideFile();

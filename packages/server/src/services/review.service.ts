@@ -21,6 +21,7 @@ import * as gitService from "./git.service.js";
 import { MOCK_AGENT_COMMAND, isMockProfile, toExecutorProvider } from "./agent-settings.service.js";
 import { loadProjectRuntimeConfig } from "./project-runtime-config.service.js";
 import { buildReviewContext } from "./phase-context.service.js";
+import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 
 export const DEFAULT_MONITOR_NUDGE_PROMPT =
   "Please continue with the task. If you are waiting for input or unsure how to proceed, use your best judgment and keep moving forward. Check the issue description and any open questions, then take the next logical step.";
@@ -193,7 +194,7 @@ Steps to resolve:
 `;
   }
 
-  const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
+  const serverPort = String(resolveBoardServerPort());
   const clientPort = process.env.KANBAN_CLIENT_PORT || process.env.VITE_PORT || "5173";
   const visualProofAttachTarget = workspaceId
     ? `\`workspaceId: "${workspaceId}"\``

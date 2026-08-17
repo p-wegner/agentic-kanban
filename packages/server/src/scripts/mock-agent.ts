@@ -29,6 +29,7 @@
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 
 // --- Config resolution ---
 
@@ -431,7 +432,7 @@ async function postTransition(
   workspaceId: string,
   toNodeName: string,
 ): Promise<{ ok: boolean; nodeType?: string | null; nextStages?: string[]; terminal?: boolean; error?: string }> {
-  const port = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
+  const port = resolveBoardServerPort();
   try {
     const res = await fetch(`http://127.0.0.1:${port}/api/workflows/workspaces/${workspaceId}/transition`, {
       method: "POST",
