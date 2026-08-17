@@ -549,6 +549,30 @@ Two exceptions worth knowing before you build a path out of one:
   `sidecar` before the sidecar has been created gets the leading repo. Once anything has run —
   enable, a script, a loop — the sidecar exists and the placeholder is correct.
 
+## Plugins that form an *improvement net*
+
+Several plugins are written to work **together** on one job — tool-assisted, ambitious refactoring
+of large legacy projects, done safely. The board calls that family an **improvement net**, and
+the pattern is worth knowing even if you write only one part of it, because each part has a
+place and a hand-off:
+
+| Stage | Job | What the plugin contributes |
+|---|---|---|
+| **understand & protect** | pin what the system does before touching it | requirement/coverage loops, dashboards (views), page-object skills |
+| **measure** | where is the structural debt | metrics scripts, `--post-board` into Quality Metrics (`quality_metrics` table) |
+| **find potential** | what should change, and why | analysis loops whose units become tickets (`pattern:`, `refactor:`, `arch:` prefixes) |
+| **change safely** | do it without breaking consumers | deterministic refactor verbs materialised as skills into every worktree; the board's review + pre-merge gate + the safety net's tests are the guard |
+| **track & learn** | did it help — and what did the tools lack | re-measure → Quality Metrics trend; a *friction-filing* skill that routes a verb gap as a ticket to the toolset's own board project |
+
+Two things make it a **net** rather than four tools: (1) **findings become tickets the board
+drives** — a plugin never applies a change itself, it tickets the unit and the board's builder,
+review and merge gate do the rest; (2) **it runs in both directions** — downstream, findings
+→ tickets → safe changes; upstream, what a project needs but the tools lack goes back to the tool
+as backlog (today reactively, via the friction skill; the planned next step is forecasting it from
+an imported project's tickets against the toolset's capability matrix). Ship a `docs[]` page
+(see [docs](#docs)) that says which part answers which question — the board shows it in the
+Plugins menu, and it is the single most useful thing for an operator picking a plugin.
+
 ## Design guidance from the plugins that exist
 
 **Keep per-project state out of the plugin checkout.** One install should serve any number of
