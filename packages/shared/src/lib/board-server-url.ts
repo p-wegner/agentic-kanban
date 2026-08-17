@@ -23,7 +23,7 @@ export function boardApiUrl(path: string, port?: string | number): string {
 export async function boardApi(
   path: string,
   init?: RequestInit,
-): Promise<{ ok: boolean; status: number; data: unknown }> {
+): Promise<{ ok: boolean; status: number; statusText: string; data: unknown }> {
   const res = await fetch(boardApiUrl(path), {
     headers: { "Content-Type": "application/json" },
     ...init,
@@ -34,5 +34,8 @@ export async function boardApi(
   } catch {
     /* non-JSON error body */
   }
-  return { ok: res.ok, status: res.status, data };
+  // `statusText` is carried (#508) because the hand-rolled `fetch` blocks this replaces
+  // fall back to it when the error body has no `error` field — "Not Found" rather than
+  // a bare 404. Dropping it would have quietly degraded every one of those messages.
+  return { ok: res.ok, status: res.status, statusText: res.statusText, data };
 }

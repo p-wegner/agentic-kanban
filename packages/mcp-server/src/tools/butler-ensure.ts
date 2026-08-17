@@ -1,7 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { boardApiUrl, getServerPort } from "../server-url.js";
-import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { butlerCall, butlerQuery } from "../butler-api.js";
 
 export function registerButlerEnsure(server: McpServer) {
   server.tool(
@@ -12,23 +11,10 @@ export function registerButlerEnsure(server: McpServer) {
       butler: z.string().optional().describe('Which butler to ensure (definition id, e.g. "smart"). Defaults to the project\'s default butler.'),
     },
     async ({ projectId, butler }) => {
-      try {
-        const q = butler && butler !== "default" ? `?butler=${encodeURIComponent(butler)}` : "";
-        const res = await fetch(boardApiUrl(`/api/projects/${projectId}/butler/ensure${q}`), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: "{}",
-        });
-        const data = (await res.json()) as { ok?: boolean; sessionId?: string; error?: string };
-        if (!res.ok) {
-          return { content: [{ type: "text" as const, text: `Butler ensure error: ${data.error ?? res.statusText}` }] };
-        }
-        return { content: [{ type: "text" as const, text: JSON.stringify(data) }] };
-      } catch (err) {
-        return {
-          content: [{ type: "text" as const, text: `Failed to reach the butler (is the server running on port ${getServerPort()}?): ${errorMessage(err)}` }],
-        };
-      }
+      return await butlerCall("Butler ensure", `/api/projects/${projectId}/butler/ensure${butlerQuery(butler)}`, {
+        method: "POST",
+        body: "{}",
+      });
     },
   );
 }
