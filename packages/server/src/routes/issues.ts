@@ -44,6 +44,7 @@ import { createWebhookSender } from "../services/outbound-webhook.service.js";
 import { conditionalJsonResponse } from "../services/board-etag-cache.service.js";
 
 import { queryFlag } from "../middleware/query-params.js";
+import { getActiveProjectIdPref } from "../repositories/board-status.repository.js";
 export function createIssuesRoute(database: Database, options?: { boardEvents?: BoardEvents; getSessionManager?: () => SessionManager }) {
   const router = createRouter();
 
@@ -534,7 +535,12 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   // GET /api/issues/:id/summary
   router.get("/:id/summary", async (c) => {
     const idParam = c.req.param("id");
-    const result = await issueService.getIssueSummary(idParam);
+    // #506: a bare issue NUMBER is only unique within a project, so scope it — explicit
+    // ?projectId= wins, otherwise the active project (which is what the CLI already does).
+    // Without this, `/api/issues/5/summary` returned whichever project's #5 the DB yielded
+    // first; verified live on a 25-project board.
+    const projectId = c.req.query("projectId") || (await getActiveProjectIdPref(database)) || undefined;
+    const result = await issueService.getIssueSummary(idParam, projectId);
     if (!result) return c.json({ error: "Issue not found" }, 404);
     return c.json(result);
   });

@@ -110,10 +110,21 @@ export async function resolveNewIssueDefaults(
 export async function getIssueSummary(
   idParam: string,
   database: Database = db,
+  /**
+   * Scope for a NUMERIC `idParam` (#506). Issue numbers are per-project
+   * (`MAX(issue_number) + 1`), so an unscoped `where(issueNumber = N)` matches a row in
+   * every project that has reached N and `.limit(1)` picks an arbitrary one. Verified live
+   * on a 25-project board: `GET /api/issues/5/summary` returned a fixture project's issue,
+   * not the active project's. Ignored for a UUID, which is already unambiguous.
+   */
+  projectId?: string,
 ): Promise<IssueSummaryResult | null> {
   const isNumeric = /^\d+$/.test(idParam);
+  const numericWhere = projectId
+    ? and(eq(issues.issueNumber, Number(idParam)), eq(issues.projectId, projectId))
+    : eq(issues.issueNumber, Number(idParam));
   const issueRows = isNumeric
-    ? await database.select().from(issues).where(eq(issues.issueNumber, Number(idParam))).limit(1)
+    ? await database.select().from(issues).where(numericWhere).limit(1)
     : await database.select().from(issues).where(eq(issues.id, idParam)).limit(1);
 
   if (issueRows.length === 0) return null;
