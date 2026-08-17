@@ -37,7 +37,6 @@ import { wrapAiOperation } from "../middleware/ai-operation.js";
 import { runTicketPreflight, formatClarificationsBlock, type PreflightClarification, type PreflightVerdict } from "../services/ticket-preflight.service.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
-import { WorkspaceError } from "../services/workspace-internals.js";
 import { getIssueActivity } from "../services/issue-activity.service.js";
 import { createIssueMergedCommitsService } from "../services/issue-merged-commits.service.js";
 import { getIssueCycleTime } from "../services/cycle-time.service.js";
@@ -45,18 +44,6 @@ import { createWebhookSender } from "../services/outbound-webhook.service.js";
 import { conditionalJsonResponse } from "../services/board-etag-cache.service.js";
 
 import { queryFlag } from "../middleware/query-params.js";
-/** Shape of the domain errors thrown by the issue service (see IssueError + the `index`-tagged batch errors). */
-interface IssueRouteError {
-  code?: string;
-  message?: string;
-  index?: number;
-}
-
-/** Narrow an unknown caught value to the issue-service error shape. */
-function asIssueRouteError(err: unknown): IssueRouteError {
-  return (typeof err === "object" && err !== null ? err : {}) as IssueRouteError;
-}
-
 export function createIssuesRoute(database: Database, options?: { boardEvents?: BoardEvents; getSessionManager?: () => SessionManager }) {
   const router = createRouter();
 
@@ -176,18 +163,12 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     if (!body.survivorId) return c.json({ error: "survivorId is required" }, 400);
     if (!Array.isArray(body.memberIds) || body.memberIds.length < 2) return c.json({ error: "memberIds must be an array of at least 2 ids" }, 400);
     if (!body.mergedTitle?.trim()) return c.json({ error: "mergedTitle is required" }, 400);
-    try {
-      const result = await confirmContractComponent(
-        { projectId: body.projectId, survivorId: body.survivorId, memberIds: body.memberIds, mergedTitle: body.mergedTitle, mergedDescription: body.mergedDescription ?? "" },
-        database,
-      );
-      options?.boardEvents?.broadcast(body.projectId, "board_changed");
-      return c.json(result);
-    } catch (err: unknown) {
-      const e = asIssueRouteError(err);
-      if (e.code === "NOT_FOUND") return c.json({ error: e.message }, 404);
-      return c.json({ error: err instanceof Error ? err.message : "contract failed" }, 400);
-    }
+    const result = await confirmContractComponent(
+      { projectId: body.projectId, survivorId: body.survivorId, memberIds: body.memberIds, mergedTitle: body.mergedTitle, mergedDescription: body.mergedDescription ?? "" },
+      database,
+    );
+    options?.boardEvents?.broadcast(body.projectId, "board_changed");
+    return c.json(result);
   });
 
   // POST /api/issues/batch — create N issues atomically
@@ -197,45 +178,20 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
     if (!Array.isArray(body.issues)) return c.json({ error: "issues must be an array" }, 400);
     if (body.dependencies !== undefined && !Array.isArray(body.dependencies)) return c.json({ error: "dependencies must be an array" }, 400);
-    try {
-      const result = await issueService.createIssuesBatch(body.projectId, body.issues, {
-        parentIssueId: body.parentIssueId,
-        driveTarget: body.driveTarget,
-        dependencies: body.dependencies,
-      });
-      return c.json(result, 201);
-    } catch (err: unknown) {
-      const e = asIssueRouteError(err);
-      if (e.code === "BAD_REQUEST") {
-        const payload: { error: string | undefined; index?: number } = { error: e.message };
-        if (typeof e.index === "number") payload.index = e.index;
-        return c.json(payload, 400);
-      }
-      throw err;
-    }
+    const result = await issueService.createIssuesBatch(body.projectId, body.issues, {
+      parentIssueId: body.parentIssueId,
+      driveTarget: body.driveTarget,
+      dependencies: body.dependencies,
+    });
+    return c.json(result, 201);
   });
 
   // POST /api/issues/dependencies/batch — add/remove N dependency edges atomically
   router.post("/dependencies/batch", async (c) => {
     const body = await parseJsonBody<{ edges: { issueId: string; dependsOnId: string; type?: string; action: "add" | "remove" }[] }>(c);
     if (!Array.isArray(body.edges)) return c.json({ error: "edges must be an array" }, 400);
-    try {
-      const result = await issueService.updateDependenciesBatch(body.edges);
-      return c.json({ added: result.added, removed: result.removed, skipped: result.skipped });
-    } catch (err: unknown) {
-      const e = asIssueRouteError(err);
-      if (e.code === "BAD_REQUEST") {
-        const payload: { error: string | undefined; index?: number } = { error: e.message };
-        if (typeof e.index === "number") payload.index = e.index;
-        return c.json(payload, 400);
-      }
-      if (e.code === "CONFLICT") {
-        const payload: { error: string | undefined; index?: number } = { error: e.message };
-        if (typeof e.index === "number") payload.index = e.index;
-        return c.json(payload, 400);
-      }
-      throw err;
-    }
+    const result = await issueService.updateDependenciesBatch(body.edges);
+    return c.json({ added: result.added, removed: result.removed, skipped: result.skipped });
   });
 
   // POST /api/issues/contract-coupled — contract a full coupled_with component onto one lead.
@@ -244,23 +200,15 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     if (!Array.isArray(body.issueIds) || body.issueIds.length === 0) {
       return c.json({ error: "issueIds must be a non-empty array" }, 400);
     }
-    try {
-      const result = await issueService.contractCoupledIssues(body.issueIds, body.leadIssueId);
-      return c.json({
-        leadIssueId: result.leadIssueId,
-        memberIssueIds: result.memberIssueIds,
-        mutations: result.mutations,
-        added: result.added,
-        removed: result.removed,
-        skipped: result.skipped,
-      });
-    } catch (err: unknown) {
-      const e = asIssueRouteError(err);
-      if (e.code === "BAD_REQUEST") return c.json({ error: e.message }, 400);
-      if (e.code === "NOT_FOUND") return c.json({ error: e.message }, 404);
-      if (e.code === "CONFLICT") return c.json({ error: e.message, index: e.index }, 400);
-      throw err;
-    }
+    const result = await issueService.contractCoupledIssues(body.issueIds, body.leadIssueId);
+    return c.json({
+      leadIssueId: result.leadIssueId,
+      memberIssueIds: result.memberIssueIds,
+      mutations: result.mutations,
+      added: result.added,
+      removed: result.removed,
+      skipped: result.skipped,
+    });
   });
 
   // POST /api/issues/archive-done — move Done issues older than N days to Archived
@@ -271,15 +219,8 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     if (!Number.isFinite(days) || days <= 0) {
       return c.json({ error: "olderThanDays must be a positive number" }, 400);
     }
-    try {
-      const result = await issueService.archiveDoneIssues(body.projectId, days, body.nowOverride);
-      return c.json({ archived: result.archived });
-    } catch (err: unknown) {
-      const e = asIssueRouteError(err);
-      if (e.code === "BAD_REQUEST") return c.json({ error: e.message }, 400);
-      if (e.code === "NOT_FOUND") return c.json({ error: e.message }, 404);
-      throw err;
-    }
+    const result = await issueService.archiveDoneIssues(body.projectId, days, body.nowOverride);
+    return c.json({ archived: result.archived });
   });
 
   // PATCH /api/issues/bulk - update N issues in one request
@@ -291,15 +232,8 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     if (!body.updates || typeof body.updates !== "object") {
       return c.json({ error: "updates is required" }, 400);
     }
-    try {
-      const result = await issueService.updateIssuesBulk(body.issueIds, body.updates);
-      return c.json({ updated: result.updated });
-    } catch (err: unknown) {
-      const e = asIssueRouteError(err);
-      if (e.code === "BAD_REQUEST") return c.json({ error: e.message }, 400);
-      if (e.code === "NOT_FOUND") return c.json({ error: e.message }, 404);
-      throw err;
-    }
+    const result = await issueService.updateIssuesBulk(body.issueIds, body.updates);
+    return c.json({ updated: result.updated });
   });
 
   // POST /api/issues
@@ -322,28 +256,22 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
     if (!body.title?.trim()) return c.json({ error: "title is required" }, 400);
 
-    try {
-      const result = await issueService.createIssue({
-        projectId: body.projectId,
-        title: body.title,
-        description: body.description,
-        priority: body.priority,
-        issueType: body.issueType,
-        skipAutoReview: body.skipAutoReview,
-        estimate: body.estimate,
-        sortOrder: body.sortOrder,
-        statusId: body.statusId,
-        workflowTemplateId: body.workflowTemplateId,
-        externalKey: body.externalKey,
-        externalUrl: body.externalUrl,
-        reposTouched: Array.isArray(body.reposTouched) ? body.reposTouched : undefined,
-      });
-      return c.json(result, 201);
-    } catch (err: unknown) {
-      const e = asIssueRouteError(err);
-      if (e.code === "BAD_REQUEST") return c.json({ error: e.message }, 400);
-      throw err;
-    }
+    const result = await issueService.createIssue({
+      projectId: body.projectId,
+      title: body.title,
+      description: body.description,
+      priority: body.priority,
+      issueType: body.issueType,
+      skipAutoReview: body.skipAutoReview,
+      estimate: body.estimate,
+      sortOrder: body.sortOrder,
+      statusId: body.statusId,
+      workflowTemplateId: body.workflowTemplateId,
+      externalKey: body.externalKey,
+      externalUrl: body.externalUrl,
+      reposTouched: Array.isArray(body.reposTouched) ? body.reposTouched : undefined,
+    });
+    return c.json(result, 201);
   });
 
   // Cached touched-files prediction for one issue, or null when the issue doesn't
@@ -615,28 +543,15 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   router.patch("/:id", async (c) => {
     const id = c.req.param("id");
     const body = await parseJsonBody(c);
-    try {
-      const result = await issueService.updateIssue(id, body);
-      return c.json(result);
-    } catch (err: unknown) {
-      const e = asIssueRouteError(err);
-      if (e.code === "BAD_REQUEST") return c.json({ error: e.message }, 400);
-      if (e.code === "NOT_FOUND") return c.json({ error: e.message }, 404);
-      throw err;
-    }
+    const result = await issueService.updateIssue(id, body);
+    return c.json(result);
   });
 
   // POST /api/issues/:id/duplicate
   router.post("/:id/duplicate", async (c) => {
     const id = c.req.param("id");
-    try {
-      const result = await issueService.duplicateIssue(id);
-      return c.json(result, 201);
-    } catch (err: unknown) {
-      const e = asIssueRouteError(err);
-      if (e.code === "NOT_FOUND") return c.json({ error: e.message }, 404);
-      throw err;
-    }
+    const result = await issueService.duplicateIssue(id);
+    return c.json(result, 201);
   });
 
   // DELETE /api/issues/:id
@@ -797,15 +712,8 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     if (!Array.isArray(body.contestants) || body.contestants.length < 2) {
       return c.json({ error: "contestants must be an array with at least 2 entries" }, 400);
     }
-    try {
-      const result = await showdownService.createShowdown(issueId, body.contestants);
-      return c.json(result, 201);
-    } catch (err) {
-      if (err instanceof WorkspaceError) {
-        return c.json({ error: err.message }, err.code === "NOT_FOUND" ? 404 : 400);
-      }
-      throw err;
-    }
+    const result = await showdownService.createShowdown(issueId, body.contestants);
+    return c.json(result, 201);
   });
 
   // GET /api/issues/:id/showdown — get active showdown for this issue.

@@ -76,7 +76,16 @@ export function domainErrorHandler(err: Error, c: Context): Response {
   // Any error carrying a recognized domain code — every service-local *Error class,
   // registered or not — maps here, once.
   const status = domainCodeStatus(err);
-  if (status) return c.json({ error: err.message }, status);
+  if (status) {
+    // #510: batch routes report WHICH entry failed. That field was the only reason those
+    // routes kept hand-written try/catch blocks, so it is emitted here — omitted entirely
+    // when absent, leaving every single-item response shape unchanged.
+    const index = (err as { index?: unknown }).index;
+    return c.json(
+      { error: err.message, ...(typeof index === "number" ? { index } : {}) },
+      status,
+    );
+  }
 
   // Defensive: a legacy ad-hoc throw that set only a numeric statusCode.
   const statusCode = (err as { statusCode?: unknown }).statusCode;

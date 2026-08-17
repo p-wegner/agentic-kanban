@@ -27,34 +27,22 @@ export function createButlerDefinitionsRoute(database: Database) {
   router.post("/", async (c) => {
     const body = await parseJsonBody<{ name?: string; model?: string; provider?: string }>(c);
     const provider = body.provider === "codex" ? "codex" : body.provider === "claude" ? "claude" : undefined;
-    try {
-      const butler = await createButlerDefinition(database, { name: body.name ?? "", model: body.model, provider });
-      return c.json({ butler }, 201);
-    } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : "Failed to create butler" }, 400);
-    }
+    const butler = await createButlerDefinition(database, { name: body.name ?? "", model: body.model, provider });
+    return c.json({ butler }, 201);
   });
 
   // PUT /api/butler-definitions/:bid — update name, model, and/or provider.
   router.put("/:bid", async (c) => {
     const body = await parseJsonBody<{ name?: string; model?: string; provider?: string | null }>(c);
     const provider = body.provider === "codex" ? "codex" : body.provider === "claude" ? "claude" : body.provider === null ? null : undefined;
-    try {
-      const butler = await updateButlerDefinition(database, c.req.param("bid"), { name: body.name, model: body.model, provider });
-      return c.json({ butler });
-    } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : "Failed to update butler" }, 400);
-    }
+    const butler = await updateButlerDefinition(database, c.req.param("bid"), { name: body.name, model: body.model, provider });
+    return c.json({ butler });
   });
 
   // DELETE /api/butler-definitions/:bid — remove a named butler ("default" is protected).
   router.delete("/:bid", async (c) => {
-    try {
-      await deleteButlerDefinition(database, c.req.param("bid"));
-      return c.json({ ok: true });
-    } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : "Failed to delete butler" }, 400);
-    }
+    await deleteButlerDefinition(database, c.req.param("bid"));
+    return c.json({ ok: true });
   });
 
   return router;

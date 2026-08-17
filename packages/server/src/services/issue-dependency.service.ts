@@ -39,9 +39,7 @@ export function validateBatchDependencies(
   const adj = new Map<number, Set<number>>();
   const seen = new Set<string>();
   const fail = (msg: string, index: number): never => {
-    const err = new IssueError(msg, "BAD_REQUEST") as IssueError & { index?: number };
-    err.index = index;
-    throw err;
+    throw new IssueError(msg, "BAD_REQUEST", index);
   };
   for (let i = 0; i < edges.length; i++) {
     const e = edges[i];
@@ -188,24 +186,16 @@ export function createIssueDependencyService(deps: {
     for (let i = 0; i < edges.length; i++) {
       const e = edges[i];
       if (!e.issueId || !e.dependsOnId) {
-        const err = new IssueError(`edges[${i}]: issueId and dependsOnId are required`, "BAD_REQUEST") as IssueError & { index?: number };
-        err.index = i;
-        throw err;
+        throw new IssueError(`edges[${i}]: issueId and dependsOnId are required`, "BAD_REQUEST", i);
       }
       if (e.action !== "add" && e.action !== "remove") {
-        const err = new IssueError(`edges[${i}]: action must be 'add' or 'remove'`, "BAD_REQUEST") as IssueError & { index?: number };
-        err.index = i;
-        throw err;
+        throw new IssueError(`edges[${i}]: action must be 'add' or 'remove'`, "BAD_REQUEST", i);
       }
       if (e.action === "add" && e.issueId === e.dependsOnId) {
-        const err = new IssueError(`edges[${i}]: an issue cannot depend on itself`, "BAD_REQUEST") as IssueError & { index?: number };
-        err.index = i;
-        throw err;
+        throw new IssueError(`edges[${i}]: an issue cannot depend on itself`, "BAD_REQUEST", i);
       }
       if (e.type && !VALID_TYPES.includes(e.type)) {
-        const err = new IssueError(`edges[${i}]: invalid type`, "BAD_REQUEST") as IssueError & { index?: number };
-        err.index = i;
-        throw err;
+        throw new IssueError(`edges[${i}]: invalid type`, "BAD_REQUEST", i);
       }
     }
 
@@ -256,12 +246,11 @@ export function createIssueDependencyService(deps: {
             if (!adj) { adj = new Map(); adjByProject.set(srcProj, adj); }
             // Would adding issueId -> dependsOnId create a cycle? Cycle iff path dependsOnId -> issueId already.
             if (hasPath(adj, e.dependsOnId, e.issueId)) {
-              const err = new IssueError(
+              throw new IssueError(
                 `edges[${i}]: adding dependency ${e.issueId} -> ${e.dependsOnId} would create a cycle`,
                 "CONFLICT",
-              ) as IssueError & { index?: number };
-              err.index = i;
-              throw err;
+                i,
+              );
             }
             let set = adj.get(e.issueId);
             if (!set) { set = new Set(); adj.set(e.issueId, set); }

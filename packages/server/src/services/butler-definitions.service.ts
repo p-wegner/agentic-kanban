@@ -77,6 +77,24 @@ export async function getButlerDefinition(database: Database, id: string): Promi
   return (await listButlerDefinitions(database)).find((d) => d.id === id);
 }
 
+/**
+ * Coded domain error so the central `domainErrorHandler` can map these (#510).
+ *
+ * These used to be plain `Error`s, which the handler can only treat as a 500 — so the
+ * routes each wrapped their call in a catch-all that turned ANY failure into a 400 with a
+ * generic "Failed to create butler" message. That hid real faults behind a 400 AND
+ * reported a missing butler as a bad request. With a code, the route needs no try/catch
+ * and "Butler not found" correctly becomes a 404.
+ */
+export class ButlerDefinitionError extends Error {
+  constructor(
+    message: string,
+    public readonly code: "NOT_FOUND" | "BAD_REQUEST",
+  ) {
+    super(message);
+  }
+}
+
 async function persist(database: Database, defs: ButlerDefinition[]): Promise<void> {
   await setPreference(PREF_KEY, JSON.stringify(defs), database);
 }
@@ -87,9 +105,9 @@ export async function createButlerDefinition(
   input: { name: string; model?: string; provider?: "claude" | "codex" },
 ): Promise<ButlerDefinition> {
   const name = input.name.trim();
-  if (!name) throw new Error("Butler name is required");
+  if (!name) throw new ButlerDefinitionError("Butler name is required", "BAD_REQUEST");
   const defs = await listButlerDefinitions(database);
-  if (defs.length >= MAX_BUTLERS) throw new Error(`At most ${MAX_BUTLERS} butlers are allowed`);
+  if (defs.length >= MAX_BUTLERS) throw new ButlerDefinitionError(`At most ${MAX_BUTLERS} butlers are allowed`, "BAD_REQUEST");
   const base = toSlug(name);
   let id = base;
   let n = 2;
@@ -113,7 +131,7 @@ export async function updateButlerDefinition(
 ): Promise<ButlerDefinition> {
   const defs = await listButlerDefinitions(database);
   const idx = defs.findIndex((d) => d.id === id);
-  if (idx === -1) throw new Error("Butler not found");
+  if (idx === -1) throw new ButlerDefinitionError("Butler not found", "NOT_FOUND");
   const next: ButlerDefinition = {
     ...defs[idx],
     ...(patch.name !== undefined ? { name: patch.name.trim() || defs[idx].name } : {}),
@@ -126,9 +144,9 @@ export async function updateButlerDefinition(
 }
 
 export async function deleteButlerDefinition(database: Database, id: string): Promise<void> {
-  if (id === "default") throw new Error("The default butler cannot be deleted");
+  if (id === "default") throw new ButlerDefinitionError("The default butler cannot be deleted", "BAD_REQUEST");
   const defs = await listButlerDefinitions(database);
-  if (!defs.some((d) => d.id === id)) throw new Error("Butler not found");
+  if (!defs.some((d) => d.id === id)) throw new ButlerDefinitionError("Butler not found", "NOT_FOUND");
   await persist(database, defs.filter((d) => d.id !== id));
 }
 
