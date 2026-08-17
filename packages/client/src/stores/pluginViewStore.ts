@@ -7,7 +7,9 @@ import { create } from "zustand";
 
 export type PluginViewSelection =
   | { kind: "plugin"; slug: string }
-  | { kind: "marketplace" };
+  | { kind: "marketplace" }
+  /** The in-board guide (docs/plugins/improvement-system-map.html): which plugin when. */
+  | { kind: "guide" };
 
 interface PluginViewState {
   selection: PluginViewSelection | null;

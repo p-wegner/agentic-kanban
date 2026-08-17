@@ -12,7 +12,7 @@ import {
   RunbooksView, SprintCapacityPlanner,
   StaleWorkDashboard, AnalyticsView, CalendarView,
   DriveDashboard, PluginViewsPanel,
-  PluginMarketplacePanel,
+  PluginMarketplacePanel, PluginGuidePanel,
 } from "./boardLazyViews.js";
 import { usePluginViewStore } from "../stores/pluginViewStore.js";
 
@@ -315,6 +315,8 @@ export function BoardSecondaryViews({
         <BoardErrorBoundary columnName="Plugins">
           {pluginSelection?.kind === "marketplace" ? (
             <PluginMarketplacePanel projectId={activeProjectId} />
+          ) : pluginSelection?.kind === "guide" ? (
+            <PluginGuidePanel />
           ) : (
             <PluginViewsPanel
               projectId={activeProjectId}

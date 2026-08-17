@@ -25,7 +25,8 @@
     "dist/worker.js",
     "dist/client/",
     "dist/migrations/",
-    "dist/scaffold/"
+    "dist/scaffold/",
+    "dist/docs/"
   ],
   "scripts": {
     "dev": "node ../../scripts/server-dev-proxy.mjs",

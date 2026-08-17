@@ -135,6 +135,18 @@ export function PluginViewsTab({ view, viewMode, onViewModeChange, projectId, me
             <span aria-hidden="true">🛍️</span>
             <span className="flex-1">Marketplace</span>
           </button>
+          <button
+            role="menuitem"
+            onClick={() => pick(() => setSelection({ kind: "guide" }))}
+            className={`w-full text-left px-2.5 py-1.5 text-xs rounded flex items-center gap-2 transition-colors ${
+              isActive && selection?.kind === "guide" ? activeClass : MENU_ITEM_INACTIVE
+            }`}
+            title="How the plugins fit together and which one to reach for"
+            data-testid="plugin-guide-menu-item"
+          >
+            <span aria-hidden="true">📖</span>
+            <span className="flex-1">Guide: which plugin when?</span>
+          </button>
         </div>
       )}
     </div>
