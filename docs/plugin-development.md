@@ -439,6 +439,22 @@ an assistant that must answer questions about your plugin's output and knows not
 it: what the artifacts are, where they live, what the loops do, and — most usefully — **what it
 must not decide on the user's behalf**.
 
+### docs
+
+```json
+"docs": [{ "file": "docs/overview.html", "title": "Guide: which part when?", "description": "…" }]
+```
+
+Plugin-authored pages the board shows in its **Plugins menu** and renders inside the panel
+(iframe), served straight from the plugin checkout via `GET /api/plugins/:id/docs/<file>`
+(`GET /api/plugins/docs` lists them). Use it for the thing a rail of loops and scripts cannot
+say: how the plugin's parts fit together, what to run first, which entry answers which
+question. `.html` or `.md`, path relative to the plugin root, must stay inside it. An HTML doc
+that honours `:root[data-theme="dark"|"light"]` follows the board's theme (`?theme=` is
+stamped on `<html>`). The board holds no doc and no plugin name of its own here — what is
+listed is exactly what the installed manifests declare, so a board without your plugin shows
+nothing about it.
+
 ### scaffold
 
 ```json

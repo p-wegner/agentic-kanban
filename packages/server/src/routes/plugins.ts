@@ -11,6 +11,7 @@ import { createWebhookSender } from "../services/outbound-webhook.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 import { queryFlag } from "../middleware/query-params.js";
+import { listPluginDocs, readPluginDoc } from "../services/plugin-docs.service.js";
 /**
  * Plugin-system REST surface, mounted at `/plugins` (routes/index.ts):
  *
@@ -83,6 +84,10 @@ export function createPluginsRoute(
     return c.json(await service.listPlugins(projectId));
   });
 
+  // Plugin-authored docs (manifest `docs[]`) — the Plugins menu's guide entries. Listed from
+  // installed manifests only, so a board without a plugin never learns that plugin's name.
+  router.get("/docs", async (c) => c.json(await listPluginDocs(database)));
+
   router.get("/marketplace", async (c) => {
     const projectId = c.req.query("projectId") || undefined;
     return c.json(await service.listMarketplace(projectId));
@@ -145,6 +150,14 @@ export function createPluginsRoute(
     if (!projectId) throw new PluginError("projectId is required", "BAD_REQUEST");
     const location = typeof body.location === "string" ? body.location : "";
     return c.json(await service.setOutputLocation(c.req.param("id"), projectId, location));
+  });
+
+  // GET /api/plugins/:id/docs/*?theme=dark|light — serve one declared doc from the plugin checkout.
+  router.get("/:id/docs/*", async (c) => {
+    const file = decodeURIComponent(c.req.path.split("/docs/")[1] ?? "");
+    const result = await readPluginDoc(database, c.req.param("id"), file, c.req.query("theme"));
+    if (!result.ok) return c.json({ error: "doc not found" }, 404);
+    return c.body(result.body, 200, { "Content-Type": result.contentType, "Cache-Control": "no-cache" });
   });
 
   router.get("/:id/views", async (c) => {

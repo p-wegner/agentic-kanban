@@ -10,6 +10,8 @@ const INACTIVE = "text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:
 const MENU_ITEM_INACTIVE =
   "text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800";
 
+type PluginDocItem = { pluginId: string; pluginName: string; file: string; title: string; description?: string | null };
+
 type PluginListItem = {
   id: string;
   /** Manifest slug (the plugins table's plugin_id). */
@@ -36,8 +38,8 @@ interface PluginViewsTabProps {
 export function PluginViewsTab({ view, viewMode, onViewModeChange, projectId, measuring }: PluginViewsTabProps) {
   const [open, setOpen] = useState(false);
   const [plugins, setPlugins] = useState<PluginListItem[]>([]);
-  /** Board docs relevant to the INSTALLED plugins — empty on a board without them. */
-  const [docs, setDocs] = useState<Array<{ file: string; title: string }>>([]);
+  /** Docs the INSTALLED plugins declare (manifest `docs[]`) — nothing without a plugin. */
+  const [docs, setDocs] = useState<PluginDocItem[]>([]);
   const wrapRef = useRef<HTMLDivElement>(null);
   const selection = usePluginViewStore((s) => s.selection);
   const setSelection = usePluginViewStore((s) => s.setSelection);
@@ -58,7 +60,7 @@ export function PluginViewsTab({ view, viewMode, onViewModeChange, projectId, me
       .catch(() => {
         if (!cancelled) setPlugins([]);
       });
-    apiFetch<Array<{ file: string; title: string }>>("/api/docs/plugins")
+    apiFetch<PluginDocItem[]>("/api/plugins/docs")
       .then((rows) => { if (!cancelled) setDocs(Array.isArray(rows) ? rows : []); })
       .catch(() => { if (!cancelled) setDocs([]); });
     return () => { cancelled = true; };
@@ -142,13 +144,13 @@ export function PluginViewsTab({ view, viewMode, onViewModeChange, projectId, me
           </button>
           {docs.map((doc) => (
             <button
-              key={doc.file}
+              key={`${doc.pluginId}:${doc.file}`}
               role="menuitem"
-              onClick={() => pick(() => setSelection({ kind: "guide", file: doc.file, title: doc.title }))}
+              onClick={() => pick(() => setSelection({ kind: "guide", pluginId: doc.pluginId, file: doc.file, title: doc.title }))}
               className={`w-full text-left px-2.5 py-1.5 text-xs rounded flex items-center gap-2 transition-colors ${
-                isActive && selection?.kind === "guide" && selection.file === doc.file ? activeClass : MENU_ITEM_INACTIVE
+                isActive && selection?.kind === "guide" && selection.pluginId === doc.pluginId && selection.file === doc.file ? activeClass : MENU_ITEM_INACTIVE
               }`}
-              title="How the plugins fit together and which one to reach for"
+              title={doc.description ?? `${doc.pluginName} — ${doc.title}`}
               data-testid="plugin-guide-menu-item"
             >
               <span aria-hidden="true">📖</span>
