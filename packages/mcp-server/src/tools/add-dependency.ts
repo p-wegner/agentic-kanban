@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { notifyBoard } from "../notify.js";
 import { requireEntity } from "../db-utils.js";
-import { buildAdjacency, wouldCreateCycle as graphWouldCreateCycle } from "@agentic-kanban/shared/lib/dependency-graph.js";
+import { buildAdjacency, wouldCreateCycle as graphWouldCreateCycle } from "@agentic-kanban/shared/lib/dependency-graph";
 
 const VALID_TYPES = ["depends_on", "blocked_by", "related_to", "duplicates", "parent_of", "child_of", "coupled_with"] as const;
 

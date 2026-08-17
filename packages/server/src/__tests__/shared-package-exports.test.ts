@@ -74,12 +74,39 @@ describe("shared package exports", () => {
     const sharedPackage = JSON.parse(readFileSync(sharedPackageJson, "utf8")) as {
       exports?: Record<string, unknown>;
     };
-    const exportedSubpaths = new Set(Object.keys(sharedPackage.exports ?? {}));
+    const exportKeys = Object.keys(sharedPackage.exports ?? {});
+    const exportedSubpaths = new Set(exportKeys);
+    const patterns = exportKeys.filter((k) => k.includes("*"));
     const missingExports = new Map<string, Set<string>>();
+
+    /**
+     * #607 replaced 72 hand-listed `./lib/<name>` entries with a `./lib/*` pattern, so an
+     * exact-key check reports every subpath import as missing. Resolving the pattern is
+     * not merely restoring the old check — it is STRONGER: the old one only proved a key
+     * had been added to package.json, this proves the file the key resolves to exists.
+     * A typo'd deep import (`lib/git-servce`) now fails here instead of at runtime.
+     */
+    const isCovered = (subpath: string): boolean => {
+      if (exportedSubpaths.has(subpath)) return true;
+      return patterns.some((pattern) => {
+        const [prefix, suffix] = pattern.split("*");
+        if (!subpath.startsWith(prefix) || !subpath.endsWith(suffix)) return false;
+        const star = subpath.slice(prefix.length, subpath.length - suffix.length);
+        if (!star) return false;
+        const target = (sharedPackage.exports?.[pattern] as Record<string, string> | undefined)?.development;
+        if (!target) return false;
+        const resolved = join(repoRoot, "packages/shared", target.replace("*", star));
+        try {
+          return statSync(resolved).isFile();
+        } catch {
+          return false;
+        }
+      });
+    };
 
     for (const filePath of findTypeScriptFiles(serverSrc)) {
       for (const subpath of collectSharedSubpathImports(filePath)) {
-        if (!exportedSubpaths.has(subpath)) {
+        if (!isCovered(subpath)) {
           const relativePath = relative(repoRoot, filePath).replaceAll("\\", "/");
           const files = missingExports.get(subpath) ?? new Set<string>();
           files.add(relativePath);
