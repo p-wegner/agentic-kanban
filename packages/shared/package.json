@@ -408,6 +408,12 @@
       "import": "./dist/lib/workspace-status.js",
       "default": "./src/lib/workspace-status.ts"
     },
+    "./lib/service-stack-codec": {
+      "development": "./src/lib/service-stack-codec.ts",
+      "types": "./dist/lib/service-stack-codec.d.ts",
+      "import": "./dist/lib/service-stack-codec.js",
+      "default": "./src/lib/service-stack-codec.ts"
+    },
     "./lib/workspace-liveness": {
       "development": "./src/lib/workspace-liveness.ts",
       "types": "./dist/lib/workspace-liveness.d.ts",

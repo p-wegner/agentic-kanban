@@ -1,5 +1,5 @@
 import type { WorkspaceSetupRun, WorkspaceSymlinkRun, ServiceStackState } from "@agentic-kanban/shared";
-import { parseServiceStackState } from "@agentic-kanban/shared";
+import { parseServiceStackState } from "@agentic-kanban/shared/lib/service-stack-codec";
 
 // Pure row -> DTO projection for getWorkspaceDetails. The repository owns the two
 // queries; this module owns turning the joined row + latest session into the
