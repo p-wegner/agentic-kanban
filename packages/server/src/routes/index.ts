@@ -31,6 +31,7 @@ import { createBoardMonitorRoute } from "./board-monitor.js";
 import { createRunbooksRoute } from "./runbooks.js";
 import { createIssueExportImportRoute } from "./issue-export-import.js";
 import { createBacklogSnapshotRoute } from "./backlog-snapshot.js";
+import { createBacklogMarkdownRoute } from "./backlog-markdown.js";
 import { createConfigExportImportRoute } from "./config-export-import.js";
 import { createMetricsRoute } from "./metrics.js";
 import { createWorkersRoute } from "./workers.js";
@@ -95,6 +96,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/projects", createRunbooksRoute(database));
   routes.route("/projects", createIssueExportImportRoute(database, options));
   routes.route("/projects", createBacklogSnapshotRoute(database, { boardEvents: options?.boardEvents }));
+  routes.route("/projects", createBacklogMarkdownRoute(database, { boardEvents: options?.boardEvents }));
   routes.route("/projects", createConfigExportImportRoute(database));
   routes.route("/projects", createMilestonesRoute(database));
   routes.route("/projects", createDrivesRoute(database));

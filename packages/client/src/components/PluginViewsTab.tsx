@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { usePluginDocs } from "../hooks/usePluginDocs.js";
 import { apiFetch } from "../lib/api.js";
 import { usePluginViewStore } from "../stores/pluginViewStore.js";
 import type { ViewDescriptor, ViewMode } from "../lib/viewRegistry.js";
@@ -9,8 +10,6 @@ const ACTIVE_DEFAULT = "bg-brand-600 text-white hover:bg-brand-700";
 const INACTIVE = "text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-700";
 const MENU_ITEM_INACTIVE =
   "text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800";
-
-type PluginDocItem = { pluginId: string; pluginName: string; file: string; title: string; description?: string | null };
 
 type PluginListItem = {
   id: string;
@@ -39,7 +38,7 @@ export function PluginViewsTab({ view, viewMode, onViewModeChange, projectId, me
   const [open, setOpen] = useState(false);
   const [plugins, setPlugins] = useState<PluginListItem[]>([]);
   /** Docs the INSTALLED plugins declare (manifest `docs[]`) — nothing without a plugin. */
-  const [docs, setDocs] = useState<PluginDocItem[]>([]);
+  const docs = usePluginDocs(open);
   const wrapRef = useRef<HTMLDivElement>(null);
   const selection = usePluginViewStore((s) => s.selection);
   const setSelection = usePluginViewStore((s) => s.setSelection);
@@ -60,9 +59,6 @@ export function PluginViewsTab({ view, viewMode, onViewModeChange, projectId, me
       .catch(() => {
         if (!cancelled) setPlugins([]);
       });
-    apiFetch<PluginDocItem[]>("/api/plugins/docs")
-      .then((rows) => { if (!cancelled) setDocs(Array.isArray(rows) ? rows : []); })
-      .catch(() => { if (!cancelled) setDocs([]); });
     return () => { cancelled = true; };
   }, [open, projectId]);
 
