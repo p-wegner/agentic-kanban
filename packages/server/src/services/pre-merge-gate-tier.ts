@@ -45,6 +45,9 @@ const ALWAYS_RUN_TESTS_DIRS = [
   join("packages", "shared", "__tests__"),
   join("packages", "server", "src", "__tests__"),
   join("packages", "mcp-server", "src", "__tests__"),
+  // #601: the client's suites were invisible to the always-run scan, so a
+  // `@gate:always-run` marker in a client guard would have been silently ignored.
+  join("packages", "client", "src", "__tests__"),
 ];
 
 /** How many suites currently carry the `@gate:always-run` marker, purely for the gate
