@@ -11,6 +11,7 @@ import {
 import type { DriveObstacleKind, DriveObstacleSeverity } from "../services/drive-obstacles.service.js";
 import type { BoardEvents } from "../services/board-events.js";
 
+import { queryInt } from "../middleware/query-params.js";
 const VALID_KINDS = new Set<string>(DRIVE_OBSTACLE_KINDS);
 const VALID_SEVERITIES = new Set<string>(DRIVE_OBSTACLE_SEVERITIES);
 
@@ -24,12 +25,6 @@ function parseSeverities(raw: string | undefined): DriveObstacleSeverity[] | und
   if (!raw) return undefined;
   const sevs = raw.split(",").map((s) => s.trim()).filter((s) => VALID_SEVERITIES.has(s));
   return sevs.length > 0 ? (sevs as DriveObstacleSeverity[]) : undefined;
-}
-
-function parseLimit(raw: string | undefined): number {
-  const parsed = Number.parseInt(raw ?? "", 10);
-  if (!Number.isFinite(parsed)) return 100;
-  return Math.min(500, Math.max(1, parsed));
 }
 
 interface DriveObstaclesRouteOptions {
@@ -61,7 +56,7 @@ export function createDriveObstaclesRoute(
       driveId: c.req.query("driveId") || undefined,
       kinds: parseKinds(c.req.query("kind")),
       severities: parseSeverities(c.req.query("severity")),
-      limit: parseLimit(c.req.query("limit")),
+      limit: queryInt(c, "limit", { def: 100, min: 1, max: 500 }),
     });
     return c.json(obstacles.map((o) => ({
       id: o.id,

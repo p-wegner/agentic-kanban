@@ -3,6 +3,7 @@ import { createPreferenceService } from "../services/preference.service.js";
 import { createProjectService } from "../services/project.service.js";
 import { createRouter } from "../middleware/create-router.js";
 
+import { queryFlag } from "../middleware/query-params.js";
 export const CONFIG_EXPORT_VERSION = 1;
 
 /** Workflow preferences safe to export — no secrets, no profiles, no per-ID session data. */
@@ -199,7 +200,7 @@ export function createConfigExportImportRoute(database: Database) {
       config.boardStrategy !== null &&
       JSON.stringify(config.boardStrategy) !== currentSettings[boardStrategyKey];
 
-    const dryRun = c.req.query("dryRun") === "true";
+    const dryRun = queryFlag(c, "dryRun");
     if (dryRun) {
       return c.json({
         dryRun: true,

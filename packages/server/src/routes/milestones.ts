@@ -3,6 +3,7 @@ import { createMilestoneService, MilestoneError } from "../services/milestone.se
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 
+import { queryInt } from "../middleware/query-params.js";
 export function createMilestonesRoute(database: Database) {
   const router = createRouter();
   const service = createMilestoneService({ database });
@@ -14,8 +15,10 @@ export function createMilestonesRoute(database: Database) {
 
   // GET /api/projects/:projectId/milestones/summary
   router.get("/:projectId/milestones/summary", async (c) => {
-    const daysRaw = parseInt(c.req.query("days") ?? "30", 10);
-    return c.json(await service.summary(c.req.param("projectId"), daysRaw));
+    // #511: was `parseInt(...)` with no finiteness check, so `?days=abc` passed NaN
+    // straight into the service. `min: 1` because a non-positive window is meaningless.
+    const days = queryInt(c, "days", { def: 30, min: 1 });
+    return c.json(await service.summary(c.req.param("projectId"), days));
   });
 
   // POST /api/projects/:projectId/milestones

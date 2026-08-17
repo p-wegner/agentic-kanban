@@ -4,6 +4,7 @@ import { parseJsonBody } from "../middleware/parse-body.js";
 import type { BoardEvents } from "../services/board-events.js";
 import { createWorkflowService } from "../services/workflow.service.js";
 
+import { queryFlag } from "../middleware/query-params.js";
 interface WorkflowsRouteOptions {
   boardEvents?: BoardEvents;
   /** Hook to run fork/join orchestration after a transition. */
@@ -23,7 +24,7 @@ export function createWorkflowsRoute(database: Database, options?: WorkflowsRout
     const result = await service.listTemplates({
       projectId: c.req.query("projectId"),
       ticketType: c.req.query("ticketType"),
-      withGraph: c.req.query("graph") === "1",
+      withGraph: queryFlag(c, "graph"),
     });
     return c.json(result);
   });

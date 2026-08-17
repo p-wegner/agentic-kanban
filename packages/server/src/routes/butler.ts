@@ -48,6 +48,7 @@ import { listButlerSessions, getButlerSessionMessages } from "../services/butler
 import type { ProviderName } from "../services/agent-provider.js";
 import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 
+import { queryInt } from "../middleware/query-params.js";
 /** Suffix per-butler pref keys for named butlers; the "default" butler keeps the
  *  legacy unsuffixed keys so existing resume ids / history carry over unchanged. */
 function butlerSuffix(butlerId: string): string {
@@ -631,7 +632,7 @@ export function createButlerRoute(
   router.get("/:id/butler/sessions", async (c) => {
     const projectId = c.req.param("id");
     const butlerId = resolveButlerId(c);
-    const limit = Math.min(parseInt(c.req.query("limit") ?? "5", 10) || 5, 20);
+    const limit = queryInt(c, "limit", { def: 5, min: 1, max: 20 });
     const project = await resolveProject(projectId);
     if (!project) return c.json({ error: "Project not found" }, 404);
 

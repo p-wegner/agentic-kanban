@@ -173,6 +173,10 @@ export function createWorkspacesRoute(
 
     const limitParam = c.req.query("limit");
     const offsetParam = c.req.query("offset");
+    // #511 deliberately does NOT use queryInt here: absent limit/offset must stay
+    // `undefined` (meaning "no pagination"), which is a third state queryInt cannot
+    // express — it always returns a number. Converting these would silently impose a
+    // default page size on every unpaginated caller.
     const limitParsed = limitParam ? parseInt(limitParam, 10) : NaN;
     const offsetParsed = offsetParam ? parseInt(offsetParam, 10) : NaN;
     const limit = !isNaN(limitParsed) ? Math.max(1, limitParsed) : undefined;

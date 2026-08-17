@@ -4,6 +4,7 @@ import { parseJsonBody } from "../middleware/parse-body.js";
 import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../middleware/ai-operation.js";
 
+import { queryFlag } from "../middleware/query-params.js";
 export function createAgentSkillsRoute(database: Database) {
   const router = createRouter();
   const agentSkillService = createAgentSkillService({ database });
@@ -11,8 +12,8 @@ export function createAgentSkillsRoute(database: Database) {
   // GET /api/agent-skills — list skills
   router.get("/", async (c) => {
     const projectId = c.req.query("projectId");
-    const globalOnly = c.req.query("global") === "true";
-    const initOnly = c.req.query("init") === "true";
+    const globalOnly = queryFlag(c, "global");
+    const initOnly = queryFlag(c, "init");
     return c.json(await agentSkillService.listSkills(projectId, globalOnly, initOnly));
   });
 

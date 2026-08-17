@@ -8,6 +8,7 @@ import {
 } from "../repositories/session/messages.js";
 import { createRouter } from "../middleware/create-router.js";
 
+import { queryInt } from "../middleware/query-params.js";
 export interface TranscriptSearchResult {
   messageId: number;
   sessionId: string;
@@ -68,10 +69,7 @@ export function createSessionsRoute(database: Database) {
 
     const projectId = c.req.query("projectId");
 
-    const limit = Math.min(
-      parseInt(c.req.query("limit") ?? String(DEFAULT_LIMIT), 10) || DEFAULT_LIMIT,
-      MAX_LIMIT,
-    );
+    const limit = queryInt(c, "limit", { def: DEFAULT_LIMIT, min: 1, max: MAX_LIMIT });
 
     const statusFilter = c.req.query("status"); // e.g. "In Progress", "In Review", "Done"
     const providerFilter = c.req.query("provider"); // e.g. "claude-code", "codex"
@@ -126,6 +124,9 @@ export function createSessionsRoute(database: Database) {
     const tailRaw = c.req.query("tail");
     let tailBytes: number | undefined;
     if (tailRaw !== undefined) {
+      // Same exclusion as the workspaces pagination params (#511): `tailBytes` stays
+      // undefined unless a positive integer was supplied — "no tail" is a distinct state
+      // from "tail of N bytes", so a numeric default would change what gets returned.
       const n = Number.parseInt(tailRaw, 10);
       if (Number.isFinite(n) && n > 0) tailBytes = n;
     }

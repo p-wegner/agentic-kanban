@@ -11,6 +11,7 @@ import {
 import { getProjectHealth } from "../services/project-health.service.js";
 import { listBaseBranchHealth, getLatestBaseBranchHealth } from "../repositories/base-branch-health.repository.js";
 
+import { queryInt } from "../middleware/query-params.js";
 /**
  * Project health / board-health-event feature endpoints. Extracted from the
  * 400-commit routes/projects.ts grab-bag (arch-review §1.5). Mounted at the SAME
@@ -47,8 +48,7 @@ export function createProjectHealthRoute(database: Database) {
   // GET /api/projects/:id/base-branch-health — latest + recent history of base-branch verify runs (#491)
   router.get("/:id/base-branch-health", async (c) => {
     const projectId = c.req.param("id");
-    const limitRaw = Number.parseInt(c.req.query("limit") ?? "", 10);
-    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 100) : 20;
+    const limit = queryInt(c, "limit", { def: 20, min: 1, max: 100 });
     const [latest, history] = await Promise.all([
       getLatestBaseBranchHealth(projectId, database),
       listBaseBranchHealth(projectId, limit, database),

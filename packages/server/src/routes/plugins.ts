@@ -10,6 +10,7 @@ import { createWorkspaceService } from "../services/workspace.service.js";
 import { createWebhookSender } from "../services/outbound-webhook.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
+import { queryFlag } from "../middleware/query-params.js";
 /**
  * Plugin-system REST surface, mounted at `/plugins` (routes/index.ts):
  *
@@ -202,7 +203,7 @@ export function createPluginsRoute(
   router.get("/:id/loops/:name/artifact", async (c) => {
     const projectId = c.req.query("projectId")?.trim();
     const path = c.req.query("path")?.trim();
-    const withDiff = c.req.query("withDiff") === "1";
+    const withDiff = queryFlag(c, "withDiff");
     if (!projectId) throw new PluginError("projectId query param is required", "BAD_REQUEST");
     if (!path) throw new PluginError("path query param is required", "BAD_REQUEST");
     return c.json(await service.getLoopArtifact(c.req.param("id"), projectId, path, { withDiff }));
@@ -304,7 +305,7 @@ export function createPluginsRoute(
       workflowTemplateId: body.workflowTemplateId || undefined,
     };
 
-    const wantsStream = c.req.query("stream") === "1"
+    const wantsStream = queryFlag(c, "stream")
       || (c.req.header("accept") ?? "").includes("text/event-stream");
     if (!wantsStream) {
       const result = await service.runSkill(pluginId, skillName, projectId, opts);

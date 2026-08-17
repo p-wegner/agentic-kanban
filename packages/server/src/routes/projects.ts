@@ -27,6 +27,7 @@ import { createAgentSkillService } from "../services/agent-skill.service.js";
 import { createWebhookSender } from "../services/outbound-webhook.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
+import { queryFlag, queryInt } from "../middleware/query-params.js";
 function toProjectRepoResponse(row: RepoRow): ProjectRepoResponse {
   return {
     id: row.id,
@@ -224,7 +225,7 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
 
   // GET /api/projects  (?includeArchived=true to include archived projects)
   router.get("/", async (c) => {
-    const includeArchived = c.req.query("includeArchived") === "true";
+    const includeArchived = queryFlag(c, "includeArchived");
     const result = await projectService.listProjects({ includeArchived });
     // Map the stored servicesConfig JSON string into the parsed wire shape (ProjectResponse).
     const withServices = result.map((p) => ({
@@ -575,7 +576,7 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
   // GET /api/projects/:id/board
   router.get("/:id/board", async (c) => {
     const projectId = c.req.param("id");
-    const includeArchived = c.req.query("includeArchived") === "true";
+    const includeArchived = queryFlag(c, "includeArchived");
     const ifNoneMatch = c.req.header("if-none-match");
     const memoKey = `${projectId}|archived=${includeArchived}`;
 
@@ -626,9 +627,7 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
   // GET /api/projects/:id/activity — project-wide activity feed (latest N events across all issues)
   router.get("/:id/activity", async (c) => {
     const projectId = c.req.param("id");
-    const rawLimit = c.req.query("limit");
-    const parsed = Number.parseInt(rawLimit ?? "", 10);
-    const limit = Number.isFinite(parsed) ? Math.min(200, Math.max(1, parsed)) : 100;
+    const limit = queryInt(c, "limit", { def: 100, min: 1, max: 200 });
     const result = await getProjectActivity(projectId, database, limit);
     return c.json(result);
   });
