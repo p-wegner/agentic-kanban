@@ -1,7 +1,7 @@
 import type { Command } from "commander";
 import { getPreference, setPreference } from "../../repositories/preferences.repository.js";
 import type { Database } from "../../db/index.js";
-import { PROVIDER_DIVERGENCE_KEYS, createPreferenceService, preferenceService } from "../../services/preference.service.js";
+import { PROVIDER_DIVERGENCE_KEYS, createPreferenceService } from "../../services/preference.service.js";
 import type { ProviderDivergenceRejection } from "../../services/preference.service.js";
 import { runMigrations } from "../shared.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -38,7 +38,8 @@ export async function setPreferenceGuarded(
     await setPreference(key, value, database);
     return { ok: true };
   }
-  const service = database ? createPreferenceService({ database }) : preferenceService;
+  // #604: the service defaults its own database — the CLI must not import db/index.
+  const service = createPreferenceService({ database });
   const { applied, divergence } = await service.updateSettings({ [key]: value });
   if (divergence) return { ok: false, error: formatDivergence(key, value, divergence) };
   if (!applied.includes(key)) {

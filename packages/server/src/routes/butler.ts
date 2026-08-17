@@ -19,7 +19,7 @@ import {
   upsertButlerOverride,
   deleteButlerOverride,
 } from "../repositories/agent-skill.repository.js";
-import { preferenceService } from "../services/preference.service.js";
+import { createPreferenceService } from "../services/preference.service.js";
 import { scanLocalSkills } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { ensureBoardGuideFile } from "../butler/board-guide.js";
 import { getPluginService } from "../services/plugin.service.js";
@@ -422,7 +422,10 @@ export function createButlerRoute(
     const projectId = c.req.param("id");
     const butlerId = resolveButlerId(c);
     const backend = await resolveButlerBackend(projectId, butlerId);
-    const profiles = await preferenceService.listProfilesForProvider(backend.provider);
+    // #604: build the service from the route's own `database` rather than reaching for the
+    // module singleton. This was the one service wired BOTH ways — config-export-import
+    // already did it this way, so the singleton's only consumer was here.
+    const profiles = await createPreferenceService({ database }).listProfilesForProvider(backend.provider);
     return c.json({ provider: backend.provider, profiles, selected: backend.selectedProfile ?? "", globalDefault: backend.globalProfile });
   });
 

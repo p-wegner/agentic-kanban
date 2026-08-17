@@ -52,7 +52,14 @@ function isAllowedDynamicKey(key: string): boolean {
   return isProjectScopedDynamicKey(key) || isBoardStrategyKey(key);
 }
 
-export function createPreferenceService({ database }: { database: Database }) {
+/**
+ * #604: `database` is OPTIONAL and defaults to the app db HERE, in the service layer.
+ * That is where the default belongs: the CLI may not import `db/index` (depcruise
+ * `cli-not-down-to-persistence`), and the old module singleton was hiding exactly that
+ * edge — removing it made the CLI reach for `db` directly and turned the arch gate red.
+ * Repositories already own their defaults the same way (`setPreference(key, value, db?)`).
+ */
+export function createPreferenceService({ database = db }: { database?: Database } = {}) {
   async function getActiveProjectId() {
     return getPreference("activeProjectId", database);
   }
@@ -229,4 +236,7 @@ export function createPreferenceService({ database }: { database: Database }) {
   return { getActiveProjectId, setActiveProjectId, getSettings, updateSettings, getProviderDivergence, listClaudeProfiles, listCodexProfiles, listCopilotProfiles, listPiProfiles, listProfilesForProvider };
 }
 
-export const preferenceService = createPreferenceService({ database: db });
+// #604: the module singleton is gone — both consumers now build the service from their
+// own `database`, which is what made this service the clearest case of one role wired two
+// ways. Keeping a singleton beside a factory means a test that swaps the database silently
+// misses whichever call site used the singleton.

@@ -12,7 +12,7 @@ import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/share
 import type { Database } from "../db/index.js";
 import { getAllPreferences, getPreference, setPreference } from "../repositories/preferences.repository.js";
 import { getRuntimeState } from "../repositories/runtime-state.repository.js";
-import { preferenceService } from "./preference.service.js";
+import { createPreferenceService } from "./preference.service.js";
 import { loadAgentSettings, isMockProfile } from "./agent-settings.service.js";
 import type { ProviderName } from "./agent-provider.js";
 import {
@@ -259,7 +259,8 @@ export async function resolveButlerLaunchConfig(
 
   const { provider, profileName: resolverProfile } = resolveEffectiveProviderProfile(prefMap);
 
-  const availableProfiles = await preferenceService.listProfilesForProvider(provider);
+  // #604: built from this function's own `database` rather than a module singleton.
+  const availableProfiles = await createPreferenceService({ database }).listProfilesForProvider(provider);
   const profileOverride = perProject && availableProfiles.includes(perProject) ? perProject : undefined;
 
   const globalProfile = settings.profile?.provider === provider ? settings.profile.name : "";
