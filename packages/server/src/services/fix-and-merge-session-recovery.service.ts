@@ -1,5 +1,5 @@
 import type { workspaces } from "@agentic-kanban/shared/schema";
-import { isFailedLaunchSession } from "@agentic-kanban/shared/lib/workspace-activity-state.js";
+import { isFailedLaunchSession } from "@agentic-kanban/shared/lib/workspace-activity-state";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
 import {

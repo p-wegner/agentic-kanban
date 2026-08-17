@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { and, eq, inArray, ne } from "drizzle-orm";
-import { planContraction, resolveCoupledComponent } from "@agentic-kanban/shared/lib/dependency-graph.js";
+import { planContraction, resolveCoupledComponent } from "@agentic-kanban/shared/lib/dependency-graph";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { applyUpdateDependenciesBatch } from "./update-dependencies-batch.js";
 
