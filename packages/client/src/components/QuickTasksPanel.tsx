@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { getSettings } from "../lib/settingsStore.js";
+import { providerLabel, profileSelectionFromValue, defaultSelectedProfile } from "../lib/workspace-helpers.js";
 import { showToast } from "./Toast.js";
 import TicketMentionInput from "./TicketMentionInput.js";
 
@@ -44,29 +45,8 @@ function uniqueProfileOptions(options: ProfileOption[]): ProfileOption[] {
   });
 }
 
-function providerLabel(provider?: string | null): string {
-  if (provider === "codex") return "Codex";
-  if (provider === "copilot") return "Copilot";
-  if (provider === "pi") return "Pi";
-  return "Claude";
-}
-
-function profileSelectionFromValue(value: string): { provider: "claude" | "codex" | "copilot" | "pi"; name: string } | undefined {
-  const colonIdx = value.indexOf(":");
-  if (colonIdx === -1) return undefined;
-  const provider = value.slice(0, colonIdx) as "claude" | "codex" | "copilot" | "pi";
-  const name = value.slice(colonIdx + 1);
-  if ((provider !== "claude" && provider !== "codex" && provider !== "copilot" && provider !== "pi") || !name) return undefined;
-  return { provider, name };
-}
-
-function defaultSelectedProfile(settings: Record<string, string>): string {
-  if (settings.provider === "codex") return `codex:${settings.codex_profile || CODEX_DEFAULT_PROFILE}`;
-  if (settings.provider === "copilot") return `copilot:${settings.copilot_profile || COPILOT_DEFAULT_PROFILE}`;
-  if (settings.provider === "pi") return `pi:${settings.pi_profile || PI_DEFAULT_PROFILE}`;
-  if (settings.claude_profile) return `claude:${settings.claude_profile}`;
-  return "";
-}
+// #493: these were three PRIVATE, byte-identical copies of helpers `lib/workspace-helpers.ts`
+// already exports. They are imported now, so the provider ladder lives in one place.
 
 function resolveProviderFromProfile(
   profileValue: string,

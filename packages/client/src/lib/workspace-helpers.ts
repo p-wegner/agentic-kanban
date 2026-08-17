@@ -1,4 +1,5 @@
 import type { ProfileSelection } from "@agentic-kanban/shared";
+import { AGENT_PROVIDER_NAMES, PROVIDER_TRAITS, providerLabel } from "@agentic-kanban/shared/lib/provider-traits";
 import { WORKSPACE_STATUS_TONE, workspaceStatusToneClass } from "./badgeTones.js";
 
 export type AgentProvider = ProfileSelection["provider"];
@@ -59,28 +60,37 @@ export function uniqueProfileOptions(options: ProfileOption[]): ProfileOption[] 
   });
 }
 
-export function providerLabel(provider?: string | null): string {
-  if (provider === "codex") return "Codex";
-  if (provider === "copilot") return "Copilot";
-  if (provider === "pi") return "Pi";
-  return "Claude";
-}
+// #493: one row per provider. Re-exported so this module's importers are unchanged.
+export { providerLabel };
 
 export function profileSelectionFromValue(value: string): ProfileSelection | undefined {
   const colonIdx = value.indexOf(":");
   if (colonIdx === -1) return undefined;
-  const provider = value.slice(0, colonIdx) as AgentProvider;
+  const provider = value.slice(0, colonIdx);
   const name = value.slice(colonIdx + 1);
-  if ((provider !== "claude" && provider !== "codex" && provider !== "copilot" && provider !== "pi") || !name) return undefined;
-  return { provider, name };
+  // #493: deliberately NOT `narrowProvider` — this parses UNTRUSTED input and must
+  // REJECT an unknown provider, where narrowProvider falls back to claude. Silently
+  // reinterpreting "opencode:foo" as a claude profile is exactly the wrong answer here.
+  if (!(AGENT_PROVIDER_NAMES as readonly string[]).includes(provider) || !name) return undefined;
+  return { provider: provider as AgentProvider, name };
 }
 
+/**
+ * The dropdown's selected VALUE — not a label.
+ *
+ * #493: this looks like `defaultProfileToken` and is not. Claude with no configured
+ * profile yields `""` ("no explicit selection; let the server resolve it"), where the
+ * label helper yields the display string `claude:none`. Folding the two together would
+ * start SUBMITTING `claude:none` as a profile name. Only the pref-key lookup is shared.
+ */
 export function defaultSelectedProfile(settings: Record<string, string>): string {
-  if (settings.provider === "codex") return `codex:${settings.codex_profile || CODEX_DEFAULT_PROFILE}`;
-  if (settings.provider === "copilot") return `copilot:${settings.copilot_profile || COPILOT_DEFAULT_PROFILE}`;
-  if (settings.provider === "pi") return `pi:${settings.pi_profile || PI_DEFAULT_PROFILE}`;
-  if (settings.claude_profile) return `claude:${settings.claude_profile}`;
-  return "";
+  const provider = settings.provider;
+  if (provider === "claude" || !provider) {
+    return settings.claude_profile ? `claude:${settings.claude_profile}` : "";
+  }
+  const traits = PROVIDER_TRAITS[provider as AgentProvider];
+  if (!traits) return settings.claude_profile ? `claude:${settings.claude_profile}` : "";
+  return `${provider}:${settings[traits.profilePrefKey] || traits.defaultProfile}`;
 }
 
 /**
@@ -90,9 +100,13 @@ export function defaultSelectedProfile(settings: Record<string, string>): string
  * Returns undefined when no specific default exists (pure Claude, no profile).
  */
 export function resolveQuickLaunchDefault(prefs: Record<string, string>): { provider: AgentProvider; name: string } | undefined {
-  if (prefs.provider === "codex") return { provider: "codex", name: prefs.codex_profile || CODEX_DEFAULT_PROFILE };
-  if (prefs.provider === "copilot") return { provider: "copilot", name: prefs.copilot_profile || COPILOT_DEFAULT_PROFILE };
-  if (prefs.provider === "pi") return { provider: "pi", name: prefs.pi_profile || PI_DEFAULT_PROFILE };
+  // Same claude asymmetry as defaultSelectedProfile: `undefined` means "no specific
+  // default", which is a real state and NOT `{provider:"claude", name:"none"}`.
+  const provider = prefs.provider;
+  if (provider && provider !== "claude") {
+    const traits = PROVIDER_TRAITS[provider as AgentProvider];
+    if (traits) return { provider: provider as AgentProvider, name: prefs[traits.profilePrefKey] || traits.defaultProfile };
+  }
   if (prefs.claude_profile) return { provider: "claude", name: prefs.claude_profile };
   return undefined;
 }

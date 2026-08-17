@@ -1,4 +1,6 @@
 import type { ProfileSelection } from "@agentic-kanban/shared";
+import { resolveQuickLaunchDefault } from "./workspace-helpers.js";
+import { AGENT_PROVIDER_NAMES } from "@agentic-kanban/shared/lib/provider-traits";
 
 // Pure construction of the POST /api/workspaces body from CreateWorkspaceForm
 // state, plus the profile-selection parsing/default-resolution it depends on.
@@ -8,11 +10,10 @@ import type { ProfileSelection } from "@agentic-kanban/shared";
 
 type AgentProvider = ProfileSelection["provider"];
 
-const CODEX_DEFAULT_PROFILE = "default";
-const COPILOT_DEFAULT_PROFILE = "default";
-const PI_DEFAULT_PROFILE = "default";
-
-const KNOWN_PROVIDERS: AgentProvider[] = ["claude", "codex", "copilot", "pi"];
+// #493: the per-provider default-profile constants died with the ladder above, and the
+// provider list is the shared table's. Note this one must still REJECT an unknown
+// provider (see profileSelectionFromValue) rather than narrow it to claude.
+const KNOWN_PROVIDERS: readonly string[] = AGENT_PROVIDER_NAMES;
 
 /**
  * Resolve the "Default" profile selection to an explicit {provider, name} so the
@@ -20,11 +21,9 @@ const KNOWN_PROVIDERS: AgentProvider[] = ["claude", "codex", "copilot", "pi"];
  * sync with what runs. Returns undefined when no specific default exists.
  */
 export function resolveDefaultProfile(prefs: Record<string, string>): ProfileSelection | undefined {
-  if (prefs.provider === "codex") return { provider: "codex", name: prefs.codex_profile || CODEX_DEFAULT_PROFILE };
-  if (prefs.provider === "copilot") return { provider: "copilot", name: prefs.copilot_profile || COPILOT_DEFAULT_PROFILE };
-  if (prefs.provider === "pi") return { provider: "pi", name: prefs.pi_profile || PI_DEFAULT_PROFILE };
-  if (prefs.claude_profile) return { provider: "claude", name: prefs.claude_profile };
-  return undefined; // No explicit default — let server/strategy decide
+  // #493: this was a byte-identical twin of `resolveQuickLaunchDefault`. Same rule,
+  // including `undefined` meaning "no explicit default — let server/strategy decide".
+  return resolveQuickLaunchDefault(prefs);
 }
 
 /** Parse a "provider:name" selection token into a ProfileSelection, or null if malformed. */

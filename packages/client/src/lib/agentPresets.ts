@@ -1,3 +1,5 @@
+import { PROVIDER_TRAITS, type AgentProviderName } from "@agentic-kanban/shared/lib/provider-traits";
+
 export const AGENT_PRESETS_PREFIX = "agent_presets_";
 
 export type PresetProvider = "claude" | "codex" | "copilot" | "pi";
@@ -98,8 +100,11 @@ export function deleteAgentPreset(presets: AgentPreset[], presetId: string): Age
  * an empty token (server/strategy default).
  */
 export function presetProfileToken(preset: AgentPreset): string {
-  if (preset.provider === "codex") return `codex:${preset.profile || "default"}`;
-  if (preset.provider === "copilot") return `copilot:${preset.profile || "default"}`;
-  if (preset.provider === "pi") return `pi:${preset.profile || "default"}`;
+  // #493: table lookup. Claude keeps its own rule — an unset claude profile yields the
+  // EMPTY token ("let the server decide"), not `claude:default`.
+  const traits = preset.provider && preset.provider !== "claude"
+    ? PROVIDER_TRAITS[preset.provider as AgentProviderName]
+    : undefined;
+  if (traits) return `${preset.provider}:${preset.profile || traits.defaultProfile}`;
   return preset.profile ? `claude:${preset.profile}` : "";
 }
