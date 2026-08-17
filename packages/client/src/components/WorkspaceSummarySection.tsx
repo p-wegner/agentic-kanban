@@ -181,7 +181,7 @@ export function WorkspaceSummarySection(props: {
       )}
       {!compact && isAgentRunningStatus(ws?.main?.status) && liveActivity && liveActivity !== "Delegating to agent" && (
         <div className="flex items-center gap-1.5 mt-1 text-xs text-gray-400 dark:text-gray-500 px-1">
-          <span className={`inline-block w-1.5 h-1.5 rounded-full animate-pulse shrink-0 ${ws.main.status === "fixing" ? "bg-orange-400" : "bg-green-400"}`} />
+          <span className={`inline-block w-1.5 h-1.5 rounded-full animate-pulse shrink-0 ${ws?.main?.status === "fixing" ? "bg-orange-400" : "bg-green-400"}`} />
           <span className="truncate">{liveActivity}</span>
         </div>
       )}

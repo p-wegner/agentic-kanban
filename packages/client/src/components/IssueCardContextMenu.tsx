@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import { apiPatch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
+import { useDismissable } from "../hooks/useDismissable.js";
 import type { QuickUpdateCallbacks, StatusOption } from "./IssueCard.js";
 
 export function IssueCardContextMenu({
