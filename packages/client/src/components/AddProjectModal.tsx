@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useRegistrationProgress } from "../hooks/useRegistrationProgress.js";
-import type { Project } from "./Layout.js";
+import type { ProjectListItem as Project } from "../lib/projectTypes.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**

@@ -60,21 +60,10 @@ import { resolveVisibleView } from "../lib/viewRegistry.js";
 import { useHiddenViews } from "../hooks/useHiddenViews.js";
 
 
-export interface Project {
-  id: string;
-  name: string;
-  repoPath: string;
-  repoName: string;
-  defaultBranch: string | null;
-  remoteUrl: string | null;
-  setupScript?: string | null;
-  setupEnabled?: boolean;
-  setupBlocking?: boolean;
-  symlinkEnabled?: boolean;
-  symlinkDirs?: string | null;
-  archivedAt?: string | null;
-  activeWorkspaceCount?: number;
-}
+// #610: the DTO lives in lib/projectTypes.ts; re-exported so existing importers
+// (which reached UP into this route for it) keep working.
+import type { Project } from "../lib/projectTypes.js";
+export type { Project };
 
 export interface Tag {
   id: string;

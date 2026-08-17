@@ -46,19 +46,8 @@ import type {
   SessionSummaryResponse,
 } from "@agentic-kanban/shared";
 
-export interface Project {
-  id: string;
-  name: string;
-  repoPath: string;
-  repoName: string;
-  defaultBranch: string | null;
-  remoteUrl: string | null;
-  setupScript?: string | null;
-  setupEnabled?: boolean;
-  setupBlocking?: boolean;
-  symlinkEnabled?: boolean;
-  symlinkDirs?: string | null;
-}
+import type { Project } from "../lib/projectTypes.js";
+export type { Project };
 
 export interface SessionInfo {
   id: string;
