@@ -15,7 +15,6 @@ import {
   getWorkingTreeDiff,
   isAncestor,
   mergeBranch,
-  revParse,
   syncBranchToHead,
 } from "../src/lib/git-service.js";
 
@@ -33,6 +32,23 @@ interface TempRepo {
   root: string;
   origin: string;
   repo: string;
+}
+
+/**
+ * Ground-truth `rev-parse`, run OUT-OF-BAND via the raw helper below (#621).
+ *
+ * This used to be git-service's own `revParse`, which goes through the adapter's read-dedupe
+ * memo. Every mutation in this suite is made with the raw `git()` helper — deliberately, so
+ * the fixture is independent of the code under test — and the adapter cannot see those, so a
+ * memoized read within the ~1.5s TTL returns a PRE-mutation sha.
+ *
+ * That produced a genuinely confusing failure: the suite recorded `detachedHead` as the
+ * pre-commit sha, `syncBranchToHead` then correctly moved the branch to the REAL head, and the
+ * assertion compared a correct value against a stale expectation. A test that verifies
+ * out-of-band commit recovery has to read ground truth out-of-band too.
+ */
+async function revParse(repo: string, ref: string): Promise<string> {
+  return (await git(repo, ["rev-parse", ref])).trim();
 }
 
 function git(cwd: string, args: string[]): Promise<string> {
