@@ -171,6 +171,12 @@ never a bare "passed" that hides whether scoping applied.
 ### Time-dependent tests
 Inject optional `now?: string` (`nowOverride`) into any service calling `new Date()` for staleness/expiry; seed timestamps as `new Date(Date.now() - N).toISOString()`, never hardcoded ISO strings that age out.
 
+**Two sanctioned spellings, because there are two jobs (#614)** — the same parameter was spelled nine ways across 178 declarations, so a reader could not tell whether a function was time-injectable without opening it:
+- **`now?: string`** — ISO, for code that PERSISTS the value (it lands in a column).
+- **`nowMs?: number`** — epoch ms, for pure arithmetic (`ageMs`, TTL comparisons).
+
+Everything else (`nowIso`, `nowOverride`, `now: Date`, `now: () => number`, …) is grandfathered at its current count by `time-injection-spelling-ratchet.test.ts` and may only shrink. Adding a tenth spelling fails that gate.
+
 ### In-flight workspace recovery
 Don't resume many stale workspaces at once — one, then at most two more once healthy. A transcript showing ~1 s with zero tokens = launch-failed/stale; stop it and rebuild the branch.
 
