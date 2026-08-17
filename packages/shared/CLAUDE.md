@@ -51,6 +51,40 @@ UI (Vite externalizes node builtins and throws at load; server stays fine). Re-e
 modules as `export type *` and import the runtime value via its deep path server-side. This is now
 enforced by `packages/shared/__tests__/barrel-client-safety.test.ts`, not just convention.
 
+## Where a column's VOCABULARY lives (#608) — client-reachability decides, not the table
+Enum/vocabulary constants for a column live in four places today (`as const` beside the
+`sqliteTable`; `shared/lib`; `shared/types`; or nowhere — `sessions.status` has no shared
+union at all). The obvious rule, "declare it beside its table", is **wrong as an
+unconditional rule**, and the reason is #596:
+
+- **`shared/schema/*` value-imports `drizzle-orm`.** Anything declared beside a table is
+  therefore unreachable from the client without pulling drizzle and the whole schema into
+  the browser bundle. That is not hypothetical — it is exactly the bug #596 fixed, where
+  17 client modules deep-imported `lib/workspace-status` for four pure predicates and got
+  drizzle with them.
+
+So the rule is conditional on who needs it:
+
+| Who reads the vocabulary | Where it goes |
+|---|---|
+| Client (or anything client-reachable) | `shared/lib/<domain>.ts`, **pure** — no drizzle, no schema, no node builtins. Re-export from the schema barrel if the server prefers to read it there. |
+| Server/persistence only | `as const` beside its `sqliteTable` is fine and is the newer style (`DEPENDENCY_TYPES`, `WORKFLOW_NODE_TYPES`, `DRIVE_STATUSES`). |
+
+`ISSUE_PRIORITIES` (`lib/issue-priority.ts`) and the workspace liveness sets
+(`lib/workspace-liveness.ts`) are in `lib/` for exactly this reason — the client renders
+both. `TERMINAL_STATUS_NAMES` (`lib/status-view.ts`) likewise.
+
+**Do NOT re-export a `lib/` vocabulary through the schema barrel.** `schema` is the
+innermost element, so a `shared-schema → shared-lib` edge inverts the layering — and
+`check:arch` does not catch it (#618: it stayed green for hours while exactly that edge
+existed; only the pattern-language element rules saw it). A server file that wants a
+`lib/`-declared vocabulary imports it from `lib/` directly, the same deep path that
+`routes/focus.ts` and the CLI already use.
+
+Guarded by `barrel-client-safety.test.ts`, which since #596 seeds its walk from every
+`@agentic-kanban/shared/lib/*` specifier found under `packages/client/src` and fails on
+drizzle/schema/node-builtins reachable from any of them.
+
 ## Migration journal required
 Every new `packages/shared/drizzle/NNNN_name.sql` file needs a matching entry in `packages/shared/drizzle/meta/_journal.json`. Without it, `drizzle-kit migrate` silently skips the file. See `.llm/workflows.md` for diagnosis workflow.
 
