@@ -1,3 +1,4 @@
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
@@ -16,12 +17,16 @@ import { resolveStartPolicy, startModePrefKey, type StartPolicy } from "./start-
 import { HARNESS_IDS, harnessSettingKey } from "./harness-settings.js";
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
+// #496: built from the registry, so an unregistered prefix is a COMPILE error.
+const autodrivePrefDef = projectPref("board_autodrive");
+const autoMergeDisabledPrefDef = projectPref("auto_merge_disabled");
+
 export function autodrivePrefKey(projectId: string): string {
-  return `board_autodrive_${projectId}`;
+  return autodrivePrefDef.key(projectId);
 }
 
 export function autoMergeDisabledPrefKey(projectId: string): string {
-  return `auto_merge_disabled_${projectId}`;
+  return autoMergeDisabledPrefDef.key(projectId);
 }
 
 export interface RuntimeProviderConfig extends ResolvedProviderConfig {

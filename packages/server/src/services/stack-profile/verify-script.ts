@@ -3,6 +3,7 @@
 // The verify gate is the keystone auto-merge gate (`exit-workflow.ts` withholds
 // readyForMerge on a non-zero exit). Re-exported byte-identically through
 // ../stack-profile.service.ts.
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 
 import type { StackProfile } from "@agentic-kanban/shared";
 import { deriveVerifyCommand } from "@agentic-kanban/shared/lib/verify-command";
@@ -12,8 +13,11 @@ import { detectProjectMarkers, deriveVerifyScript } from "../project-setup.servi
 import { getStackProfile } from "./persistence.js";
 
 /** Preference key holding the active verify (merge-gate) command for a project. */
+// #496: built from the registry, so an unregistered prefix is a COMPILE error.
+const verifyScriptPrefDef = projectPref("verify_script");
+
 export function verifyScriptPrefKey(projectId: string): string {
-  return `verify_script_${projectId}`;
+  return verifyScriptPrefDef.key(projectId);
 }
 
 /**

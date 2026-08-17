@@ -22,6 +22,7 @@
  * — that is the compounding part: an improvement to the setup propagates to every project,
  * not just to new ones.
  */
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 
 import { getPreference } from "../repositories/preferences.repository.js";
 import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-preference-write";
@@ -48,12 +49,16 @@ export const PASS_VERSION = 1;
 /** Default merge count at which a project is considered to have "enough code". */
 export const DEFAULT_MIN_MERGES = 5;
 
+// #496: built from the registry, so an unregistered prefix is a COMPILE error.
+const compoundingSetupPrefDef = projectPref("compounding_setup");
+const compoundingSetupStatePrefDef = projectPref("compounding_setup_state");
+
 export function compoundingSetupPrefKey(projectId: string): string {
-  return `compounding_setup_${projectId}`;
+  return compoundingSetupPrefDef.key(projectId);
 }
 
 export function compoundingSetupStatePrefKey(projectId: string): string {
-  return `compounding_setup_state_${projectId}`;
+  return compoundingSetupStatePrefDef.key(projectId);
 }
 
 /** Persisted record of the pass that already ran for a project. */

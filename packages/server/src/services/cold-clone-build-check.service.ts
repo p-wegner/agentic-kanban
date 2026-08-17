@@ -11,6 +11,7 @@
 // Opt-in per project via the `cold_clone_check_<projectId>` preference (a pure
 // no-op when unset, mirroring the `verify_script` gate), so existing projects and
 // the dev board are unaffected unless they switch it on.
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -27,8 +28,11 @@ import {
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** Preference key gating the cold-clone build check for a project. */
+// #496: built from the registry, so an unregistered prefix is a COMPILE error.
+const coldCloneCheckPrefDef = projectPref("cold_clone_check");
+
 export function coldCloneCheckPrefKey(projectId: string): string {
-  return `cold_clone_check_${projectId}`;
+  return coldCloneCheckPrefDef.key(projectId);
 }
 
 /** A cold-clone check is enabled when its preference is the literal string "true". */

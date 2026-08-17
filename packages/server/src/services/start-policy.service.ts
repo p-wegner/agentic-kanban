@@ -1,3 +1,4 @@
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { resolveMonitorTunables, type MonitorTunables } from "./strategy-objective.service.js";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { START_MODE_VALUES } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
@@ -50,8 +51,11 @@ export interface StartPolicy {
   source: "start_mode" | "derived";
 }
 
+// #496: built from the registry, so an unregistered prefix is a COMPILE error.
+const startModePrefDef = projectPref("start_mode");
+
 export function startModePrefKey(projectId: string): string {
-  return `start_mode_${projectId}`;
+  return startModePrefDef.key(projectId);
 }
 
 // Derived from the shared START_MODE_VALUES list so preference writers (settings

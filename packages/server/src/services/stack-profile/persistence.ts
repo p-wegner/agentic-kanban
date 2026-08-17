@@ -3,6 +3,7 @@
 // Owns the profile lifecycle: detect → (optionally) enrich via the LLM → persist to
 // `project_stack_profile_<projectId>`, plus the read side. Re-exported byte-identically
 // through ../stack-profile.service.ts so consumers' imports don't change.
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 
 import { readdirSync } from "node:fs";
 import type { StackProfile } from "@agentic-kanban/shared";
@@ -15,8 +16,11 @@ import { writeSmartHooksRules } from "./smart-hooks-rules.js";
 import { writeTestScaffold } from "./test-scaffold.js";
 
 /** Preference key holding the persisted JSON stack profile for a project. */
+// #496: built from the registry, so an unregistered prefix is a COMPILE error.
+const stackProfilePrefDef = projectPref("project_stack_profile");
+
 export function stackProfilePrefKey(projectId: string): string {
-  return `project_stack_profile_${projectId}`;
+  return stackProfilePrefDef.key(projectId);
 }
 
 /** Fields whose absence makes the LLM fallback worth invoking. Exported so a caller that

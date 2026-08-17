@@ -2,6 +2,7 @@
 // the registry (auth + rows), the connection manager (live sockets) and the
 // remote execution service — so the REST routes, the WS route and the session
 // lifecycle all see the SAME fleet state in one board process.
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 
 import { db as realDb } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -54,13 +55,18 @@ export function getWorkerFleet(database: Database = realDb): WorkerFleet {
   return fleet;
 }
 
+// #496: built from the registry, so an unregistered prefix is a COMPILE error.
+const workerDispatchPrefDef = projectPref("worker_dispatch");
+const workerLabelsPrefDef = projectPref("worker_labels");
+const workerStrictPrefDef = projectPref("worker_dispatch_strict");
+
 export function workerDispatchPrefKey(projectId: string): string {
-  return `worker_dispatch_${projectId}`;
+  return workerDispatchPrefDef.key(projectId);
 }
 
 /** CSV of labels a worker must carry to run this project's work (e.g. "docker,linux"). */
 export function workerLabelsPrefKey(projectId: string): string {
-  return `worker_labels_${projectId}`;
+  return workerLabelsPrefDef.key(projectId);
 }
 
 /**
@@ -69,7 +75,7 @@ export function workerLabelsPrefKey(projectId: string): string {
  * instead of running the agent locally. Mirrors devcontainer_strict.
  */
 export function workerStrictPrefKey(projectId: string): string {
-  return `worker_dispatch_strict_${projectId}`;
+  return workerStrictPrefDef.key(projectId);
 }
 
 export function parseRequiredLabels(pref: string | undefined): string[] {
