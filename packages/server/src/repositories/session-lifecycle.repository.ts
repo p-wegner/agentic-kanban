@@ -5,6 +5,8 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
+import { getAllPreferences as canonicalGetAllPreferences } from "./preferences.repository.js";
+import { getPreference as canonicalGetPreference } from "./preferences.repository.js";
 import {
   clearSessionProviderSessionId,
   getSessionStatsRaw,
@@ -65,17 +67,13 @@ export async function clearProviderSessionId(
   await clearSessionProviderSessionId(sessionId, database);
 }
 
-export async function getPreferenceValue(
-  key: string,
-  database: Database = db,
-): Promise<string | undefined> {
-  const rows = await database
-    .select({ value: preferences.value })
-    .from(preferences)
-    .where(eq(preferences.key, key))
-    .limit(1);
-  if (rows.length === 0) return undefined;
-  return rows[0].value;
+/** #613: delegates to the canonical reader (which records the db:getPreference metric). */
+export async function getPreferenceValue(key: string, database: Database = db): Promise<string | undefined> {
+  // `?? undefined` is NOT cosmetic: this clone's callers were typed against
+  // `string | undefined` while the canonical reader returns `string | null`. Three clones
+  // had three different contracts (#613) — each is preserved exactly, so this commit
+  // removes the duplicated QUERY without changing any caller's types.
+  return (await canonicalGetPreference(key, database)) ?? undefined;
 }
 
 export async function getSkipPermissionsRows(
@@ -84,10 +82,9 @@ export async function getSkipPermissionsRows(
   return database.select().from(preferences).where(eq(preferences.key, "skip_permissions")).limit(1);
 }
 
-export async function getAllPreferences(
-  database: Database = db,
-) {
-  return database.select().from(preferences);
+/** #613: delegates to the canonical reader — see preferences.repository. */
+export async function getAllPreferences(database: Database = db) {
+  return canonicalGetAllPreferences(database);
 }
 
 export async function getSessionStats(

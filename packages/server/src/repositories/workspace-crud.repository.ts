@@ -1,7 +1,4 @@
-import {
-  issues, projects, preferences, workspaces, sessions, agentSkills, projectStatuses,
-  issueDependencies, workflowNodes,
-} from "@agentic-kanban/shared/schema";
+import { issues, projects, workspaces, sessions, agentSkills, projectStatuses, issueDependencies, workflowNodes } from "@agentic-kanban/shared/schema";
 import { setWorkspaceStatus, type WorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import { eq, inArray, and, isNotNull, ne } from "drizzle-orm";
 import { db } from "../db/index.js";
@@ -9,6 +6,7 @@ import type { Database, TransactionClient } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
 import { mirrorWorkspaceColumnsToLeadingRepo } from "./repo.repository.js";
 import { setWorkspaceWorkingDir as setWorkspaceWorkingDirShared } from "@agentic-kanban/shared/lib/workspace-git-state";
+import { getAllPreferences as canonicalGetAllPreferences } from "./preferences.repository.js";
 
 export async function updateLatestSetupRunFields(
   workspaceId: string,
@@ -81,8 +79,9 @@ export async function getAgentSkillById(
   return database.select().from(agentSkills).where(eq(agentSkills.id, skillId)).limit(1);
 }
 
+/** #613: delegates to the canonical reader — see preferences.repository. */
 export async function getAllPreferences(database: Database = db) {
-  return database.select().from(preferences);
+  return canonicalGetAllPreferences(database);
 }
 
 export async function insertWorkspaceRecordRow(

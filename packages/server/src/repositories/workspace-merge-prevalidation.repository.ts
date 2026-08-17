@@ -1,10 +1,12 @@
 import { eq } from "drizzle-orm";
-import { preferences, workspaces } from "@agentic-kanban/shared/schema";
+import { workspaces } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { getAllPreferences as canonicalGetAllPreferences } from "./preferences.repository.js";
 
+/** #613: delegates to the canonical reader — see preferences.repository. */
 export async function getAllPreferences(database: Database = db) {
-  return database.select().from(preferences);
+  return canonicalGetAllPreferences(database);
 }
 
 export async function clearWorkspaceReadyForMerge(

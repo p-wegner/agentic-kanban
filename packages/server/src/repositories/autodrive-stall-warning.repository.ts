@@ -1,12 +1,12 @@
-import { issues, preferences, projectStatuses, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { getAllPreferences as canonicalGetAllPreferences } from "./preferences.repository.js";
 
-export async function getAllPreferences(
-  database: Database = db,
-): Promise<Array<{ key: string; value: string }>> {
-  return database.select().from(preferences);
+/** #613: delegates to the canonical reader — see preferences.repository. */
+export async function getAllPreferences(database: Database = db) {
+  return canonicalGetAllPreferences(database);
 }
 
 export async function getActiveAutodriveWorkspaceRows(

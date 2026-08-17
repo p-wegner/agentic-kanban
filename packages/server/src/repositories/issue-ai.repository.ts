@@ -1,11 +1,12 @@
 import { eq, and, or, inArray, sql, desc } from "drizzle-orm";
-import { issues, projectStatuses, issueDependencies, agentSkills, tags, issueTags, workflowNodes, preferences, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, issueDependencies, agentSkills, tags, issueTags, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
 import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { getStatusIdsByName } from "./project-status.repository.js";
+import { getPreference as canonicalGetPreference } from "./preferences.repository.js";
 
 export async function getIssueBasics(
   issueId: string,
@@ -105,16 +106,9 @@ export async function getDependencyEdgesBetween(
   return rows as Array<{ issueId: string; dependsOnId: string; type: DependencyType }>;
 }
 
-export async function getPreferenceValue(
-  key: string,
-  database: Database = db,
-): Promise<string | null> {
-  const rows = await database
-    .select({ value: preferences.value })
-    .from(preferences)
-    .where(eq(preferences.key, key))
-    .limit(1);
-  return rows[0]?.value ?? null;
+/** #613: delegates to the canonical reader (which records the db:getPreference metric). */
+export async function getPreferenceValue(key: string, database: Database = db): Promise<string | null> {
+  return canonicalGetPreference(key, database);
 }
 
 export async function getIssueForTouchedFiles(
