@@ -127,12 +127,19 @@ export function MultiRepoMonitorPanel({
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/20" onClick={onClose} />
-      <div className="relative w-[min(860px,100vw)] bg-surface-raised dark:bg-surface-raised-dark shadow-xl flex flex-col animate-slide-in-right">
+      {/* A multi-repo project pays for the extra width: at 16 repos the matrix has 16 rows
+          and the readiness board a repo-chip column, and at 860px the Review/Gate columns
+          were pushed off the right edge. Single-repo projects keep the original width. */}
+      <div
+        className={`relative ${isMultiRepo ? "w-[min(1200px,100vw)]" : "w-[min(860px,100vw)]"} bg-surface-raised dark:bg-surface-raised-dark shadow-xl flex flex-col animate-slide-in-right`}
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-          <div className="flex items-center gap-2">
+          {/* flex-wrap + a non-breaking title: with 16 repos the summary line grows long
+              enough to squeeze the title into a two-line wrap mid-name. */}
+          <div className="flex items-center gap-2 flex-wrap min-w-0">
             <GridIcon />
-            <h2 className="text-lg font-semibold text-ink dark:text-stone-100 heading-serif">Multi-Repo Monitor</h2>
+            <h2 className="text-lg font-semibold text-ink dark:text-stone-100 heading-serif whitespace-nowrap">Multi-Repo Monitor</h2>
             {view === "matrix" && loading && !data && <span className="text-sm text-gray-400 dark:text-gray-500">Loading…</span>}
             {view === "matrix" && summary && isMultiRepo && (
               <span className="text-sm text-gray-500 dark:text-gray-400">
@@ -284,15 +291,19 @@ export function MultiRepoMonitorPanel({
 
           {activeProjectId && data && isMultiRepo && data.workspaces.length > 0 && view === "matrix" && (
             <table className="text-sm border-collapse min-w-full" data-testid="multi-repo-matrix">
-              <thead>
+              {/* Header row sticks to the top: a project with many repos (CoMET: 16) always
+                  scrolls the body, and without this the workspace/branch/status labels scroll
+                  away, leaving unlabelled columns. The corner cell sticks in both axes and
+                  outranks the others so the repo column slides under it, not over it. */}
+              <thead className="sticky top-0 z-20">
                 <tr>
-                  <th className="sticky left-0 bg-surface-raised dark:bg-surface-raised-dark text-left text-xs font-semibold text-gray-500 dark:text-gray-400 px-4 py-2 border-b border-gray-200 dark:border-gray-700">
+                  <th className="sticky left-0 top-0 z-30 bg-surface-raised dark:bg-surface-raised-dark text-left text-xs font-semibold text-gray-500 dark:text-gray-400 px-4 py-2 border-b border-gray-200 dark:border-gray-700">
                     Repo
                   </th>
                   {data.workspaces.map((ws) => (
                     <th
                       key={ws.id}
-                      className="text-left text-xs font-medium px-3 py-2 border-b border-gray-200 dark:border-gray-700 align-bottom"
+                      className="sticky top-0 bg-surface-raised dark:bg-surface-raised-dark text-left text-xs font-medium px-3 py-2 border-b border-gray-200 dark:border-gray-700 align-bottom"
                       title={`${ws.issueTitle ?? ""}\n${ws.branch ?? ""}`}
                     >
                       <div className="text-gray-700 dark:text-gray-200 font-mono">

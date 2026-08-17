@@ -1,6 +1,6 @@
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
-﻿import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { fetchProjectRepos, invalidateProjectRepos } from "../lib/projectReposQuery.js";
 import { ProjectTabs } from "./ProjectTabs.js";
@@ -30,7 +30,7 @@ interface LayoutProps {
    * Board controls hoisted INTO the header row on phone widths (#436). The board toolbar is
    * its own 44px band under the header; on a 390px screen those two bands cost ~93px before
    * any content. The caller decides (via useIsNarrow) whether to render its toolbar in place
-   * or hand it here â€” one instance either way, so BoardToolbar's popovers never double up.
+   * or hand it here — one instance either way, so BoardToolbar's popovers never double up.
    */
   headerExtra?: ReactNode;
   projects?: Project[];
@@ -106,7 +106,7 @@ export function Layout({
   const [addRepoInput, setAddRepoInput] = useState("");
   const [addingRepo, setAddingRepo] = useState(false);
   const [addRepoError, setAddRepoError] = useState<string | null>(null);
-  // Additional (sibling) repos of the active project â€” powers the ++ button badge
+  // Additional (sibling) repos of the active project — powers the ++ button badge
   // and the manage-repositories modal (list + remove). The leading repo is not a
   // row here; it lives on the project's repoPath/repoName and is shown separately.
   const queryClient = useQueryClient();
@@ -114,9 +114,9 @@ export function Layout({
   const [removingRepoId, setRemovingRepoId] = useState<string | null>(null);
   const [promotingRepoId, setPromotingRepoId] = useState<string | null>(null);
   // Below sm the utility icons (workspaces/failures/worktrees/theme/settings)
-  // collapse into a single â‹¯ menu so the header fits on one row.
+  // collapse into a single ⋯ menu so the header fits on one row.
   const [showUtilMenu, setShowUtilMenu] = useState(false);
-  /** Mobile search is an icon until tapped (#435) â€” see the header. */
+  /** Mobile search is an icon until tapped (#435) — see the header. */
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const utilMenuRef = useRef<HTMLDivElement>(null);
   useDismissable(utilMenuRef, showUtilMenu, () => setShowUtilMenu(false));
@@ -283,7 +283,7 @@ export function Layout({
                 autoFocus
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search issuesâ€¦"
+                placeholder="Search issues…"
                 className="w-full pl-8 pr-3 py-2 min-h-11 text-base border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
               />
             </div>
@@ -363,7 +363,7 @@ export function Layout({
                   ? `Manage repositories (${projectRepos.length + 1} repos in this project)`
                   : "Add a repository to this project (multi-repo)"}
               >
-                {/* two overlapped plus glyphs â†’ "++" = add another repo to the current project */}
+                {/* two overlapped plus glyphs → "++" = add another repo to the current project */}
                 <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <path d="M8 5v9M4 9.5h8M16 10v9M12 14.5h8" />
                 </svg>
@@ -383,7 +383,7 @@ export function Layout({
           )}
           <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
             {/* Below sm the field is an ICON until tapped (#435): at w-28 it showed a truncated
-                "Search iâ€¦" while eating a quarter of the header. Tapping expands it over the
+                "Search i…" while eating a quarter of the header. Tapping expands it over the
                 header row, which is the only place a real query field fits on a phone. */}
             <button
               type="button"
@@ -499,7 +499,7 @@ export function Layout({
             </div>
             {/* The bell is the ONLY cross-project list of gates waiting on a human
                 (GET /api/inbox), and it used to live inside the `hidden sm:flex` cluster
-                above â€” so on a phone it was display:none and the â‹¯ menu's "Notifications"
+                above — so on a phone it was display:none and the ⋯ menu's "Notifications"
                 row toggled a dropdown inside that hidden subtree, i.e. tapping it did
                 nothing visible (#433). It renders at ALL widths now; only the other
                 utility icons fold. */}
@@ -512,7 +512,7 @@ export function Layout({
               onMarkRead={onNotificationMarkRead ?? (() => {})}
               onEventClick={onNotificationEventClick ?? (() => {})}
             />
-            {/* < sm : all utility actions fold into one â‹¯ menu */}
+            {/* < sm : all utility actions fold into one ⋯ menu */}
             <div className="relative sm:hidden" ref={utilMenuRef}>
               <button
                 onClick={() => setShowUtilMenu((v) => !v)}
@@ -532,7 +532,7 @@ export function Layout({
                     { label: "Launch Failures", onClick: onLaunchFailuresClick },
                     { label: "Worktrees", onClick: onWorktreeOverviewClick },
                     { label: "Project Health", onClick: onProjectHealthClick },
-                    // Folded off the mobile header (#435) â€” but folded AWAY is not the same as
+                    // Folded off the mobile header (#435) — but folded AWAY is not the same as
                     // removed, so they keep a route here. Archive/Unregister are last and still
                     // go through their existing confirm dialogs.
                     { label: "Register project", onClick: openRegister },
@@ -622,7 +622,7 @@ export function Layout({
           <div className="bg-surface-raised dark:bg-surface-raised-dark rounded-lg shadow-xl w-full max-w-sm mx-4 p-6">
             <h2 className="text-lg font-semibold text-ink dark:text-stone-100 mb-2">Archive project?</h2>
             <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">
-              Archive <span className="font-medium">{confirmArchive.name}</span>? It will be hidden from the project list and its data is kept â€” restore it any time from the Add Project dialog.
+              Archive <span className="font-medium">{confirmArchive.name}</span>? It will be hidden from the project list and its data is kept — restore it any time from the Add Project dialog.
             </p>
             <div className="flex justify-end gap-3">
               <button
@@ -659,20 +659,24 @@ export function Layout({
 
       {showAddRepo && (
         <div
-          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
+          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
           onClick={(e) => { if (e.target === e.currentTarget) setShowAddRepo(false); }}
         >
-          <div className="bg-surface-raised dark:bg-surface-raised-dark rounded-lg shadow-xl w-full max-w-md mx-4 p-6">
-            <h2 className="text-lg font-semibold text-ink dark:text-stone-100 mb-1">Repositories</h2>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+          {/* max-h + flex column: the repo list is the only part that grows with the project's
+              repo count, so it is the only part that scrolls. Without this a 16-repo project
+              (CoMET) rendered a 1160px modal in a 720px viewport — title clipped off the top,
+              the whole "Add a repository" form off the bottom, and nothing scrollable. */}
+          <div className="bg-surface-raised dark:bg-surface-raised-dark rounded-lg shadow-xl w-full max-w-md p-6 max-h-full flex flex-col">
+            <h2 className="text-lg font-semibold text-ink dark:text-stone-100 mb-1 shrink-0">Repositories</h2>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-4 shrink-0">
               Repos that{" "}
               <span className="font-medium">{projects.find((p) => p.id === activeProjectId)?.name ?? "this project"}</span>{" "}
-              spans. Every new workspace gets a worktree on the same branch in each; merge lands each repo that has commits. Edit a repo's name/setup/compose in Settings â†’ Project Settings.
+              spans. Every new workspace gets a worktree on the same branch in each; merge lands each repo that has commits. Edit a repo's name/setup/compose in Settings → Project Settings.
             </p>
             {(() => {
               const activeProject = projects.find((p) => p.id === activeProjectId);
               return (
-                <ul className="space-y-1 mb-4">
+                <ul className="space-y-1 mb-4 flex-1 min-h-0 overflow-y-auto">
                   <li className="flex items-center justify-between gap-2 text-sm border border-gray-200 dark:border-gray-700 rounded px-2.5 py-1.5">
                     <div className="min-w-0">
                       <span className="font-medium">{activeProject?.repoName || activeProject?.repoPath || "leading repo"}</span>
@@ -698,7 +702,7 @@ export function Layout({
                           className="text-xs text-brand-600 hover:text-brand-800 disabled:opacity-50 disabled:cursor-not-allowed"
                           title="Make this the project's leading repo (demotes the current leading to a sibling)"
                         >
-                          {promotingRepoId === repo.id ? "Promotingâ€¦" : "Make leading"}
+                          {promotingRepoId === repo.id ? "Promoting…" : "Make leading"}
                         </button>
                         <button
                           type="button"
@@ -706,7 +710,7 @@ export function Layout({
                           disabled={removingRepoId === repo.id || promotingRepoId === repo.id}
                           className="text-xs text-red-600 hover:text-red-800 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          {removingRepoId === repo.id ? "Removingâ€¦" : "Remove"}
+                          {removingRepoId === repo.id ? "Removing…" : "Remove"}
                         </button>
                       </div>
                     </li>
@@ -714,8 +718,8 @@ export function Layout({
                 </ul>
               );
             })()}
-            <h3 className="text-sm font-semibold text-ink dark:text-stone-100 mb-2">Add a repository</h3>
-            <form onSubmit={handleAddRepoSubmit} className="space-y-4">
+            <h3 className="text-sm font-semibold text-ink dark:text-stone-100 mb-2 shrink-0">Add a repository</h3>
+            <form onSubmit={handleAddRepoSubmit} className="space-y-4 shrink-0">
               <div>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-1">
                   <label className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
@@ -759,7 +763,7 @@ export function Layout({
                   disabled={addingRepo || !addRepoInput.trim()}
                   className="px-3 py-1.5 text-sm text-white bg-brand-600 rounded-md hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {addingRepo ? "Addingâ€¦" : "Add repository"}
+                  {addingRepo ? "Adding…" : "Add repository"}
                 </button>
               </div>
             </form>

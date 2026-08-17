@@ -136,6 +136,45 @@ describe("MergeReadinessBoard", () => {
     expect(html).toContain("2 blocked");
   });
 
+  // #comet — a 16-repo project rendered 16 chips per row (~500px tall rows). Above
+  // REPO_CHIP_LIMIT the quiet repos collapse into one roll-up chip per kind; the repos
+  // that need a decision (ahead / conflicts / unknown) are still listed individually.
+  it("collapses the quiet repos into a roll-up chip when a project has many repos", () => {
+    const manyRepos: MatrixRepoInput[] = [
+      { name: null, path: "/repo/api", isLeading: true },
+      ...Array.from({ length: 15 }, (_, i) => ({ name: `sib${i}`, path: `/repo/sib${i}`, isLeading: false })),
+    ];
+    const workspaces = [
+      ws({
+        id: "big",
+        issueNumber: 1,
+        status: "ready_for_merge",
+        repoStatus: repoStatus([
+          entry({ path: "/repo/api", isLeading: true, hasWork: true, ahead: 4 }),
+          ...Array.from({ length: 15 }, (_, i) => entry({ path: `/repo/sib${i}`, name: `sib${i}` })),
+        ]),
+      }),
+    ];
+    const html = renderToStaticMarkup(
+      <MergeReadinessBoard matrix={buildMultiRepoMatrix(manyRepos, workspaces)} workspaces={workspaces} />,
+    );
+    // The repo with unlanded work is still named…
+    expect(html).toContain("ahead 4");
+    expect(html).toContain("api");
+    // …the 15 clean ones are one chip, not 15.
+    expect(html).toContain("15 clean");
+    expect(html).not.toContain("sib7</span>");
+  });
+
+  it("lists every repo verbatim below the chip limit", () => {
+    const html = renderToStaticMarkup(
+      <MergeReadinessBoard matrix={buildMultiRepoMatrix(REPOS, WORKSPACES)} workspaces={WORKSPACES} />,
+    );
+    expect(html).toContain(">web<");
+    // No roll-up chip: every repo is still named individually.
+    expect(html).not.toContain("data-repo-rollup");
+  });
+
   it("renders an empty state with no workspaces", () => {
     const html = renderToStaticMarkup(
       <MergeReadinessBoard matrix={buildMultiRepoMatrix(REPOS, [])} workspaces={[]} />,

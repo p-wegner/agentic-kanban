@@ -102,6 +102,30 @@ function repoBadgeText(repo: RepoReadinessStatus): string {
   }
 }
 
+/**
+ * Above this many repos the Repos cell stops listing every repo: a project like CoMET
+ * (16 repos) rendered 16 chips PER workspace row, so one row was ~500px tall and the
+ * board became unreadable. Below it, every repo is still listed verbatim (unchanged
+ * behaviour for the 2–6 repo projects this view was built for).
+ */
+export const REPO_CHIP_LIMIT = 6;
+
+/** Repos that need a decision — the ones triage is actually about. */
+function needsAttention(repo: RepoReadinessStatus): boolean {
+  return repo.kind === "ahead" || repo.kind === "conflicts" || repo.kind === "unknown";
+}
+
+/** The quiet repos, collapsed into one chip per kind so the row stays one line-ish. */
+function summarizeQuietRepos(repos: RepoReadinessStatus[]): { kind: RepoReadinessStatus["kind"]; count: number; labels: string[] }[] {
+  const groups = new Map<RepoReadinessStatus["kind"], string[]>();
+  for (const repo of repos) {
+    const list = groups.get(repo.kind) ?? [];
+    list.push(repo.label);
+    groups.set(repo.kind, list);
+  }
+  return [...groups.entries()].map(([kind, labels]) => ({ kind, count: labels.length, labels }));
+}
+
 function ReviewBadge({ review }: { review: ReviewStatus }) {
   const label = review === "approved" ? "reviewed" : review === "in-progress" ? "reviewing" : "unreviewed";
   const className =
@@ -170,13 +194,15 @@ export function MergeReadinessBoard({
         {rows.length} workspace{rows.length === 1 ? "" : "s"}
       </div>
       <table className="text-sm border-collapse min-w-full" data-testid="merge-readiness-table">
-        <thead>
+        {/* Sticky header: rows are tall on a many-repo project, so the column labels
+            would otherwise scroll out of sight on the first wheel tick. */}
+        <thead className="sticky top-0 z-10 bg-surface-raised dark:bg-surface-raised-dark">
           <tr className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400">
-            <th className="px-4 py-2 border-b border-gray-200 dark:border-gray-700">Verdict</th>
-            <th className="px-3 py-2 border-b border-gray-200 dark:border-gray-700">Workspace</th>
-            <th className="px-3 py-2 border-b border-gray-200 dark:border-gray-700">Repos</th>
-            <th className="px-3 py-2 border-b border-gray-200 dark:border-gray-700">Review</th>
-            <th className="px-3 py-2 border-b border-gray-200 dark:border-gray-700">Gate</th>
+            <th className="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark">Verdict</th>
+            <th className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark">Workspace</th>
+            <th className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark">Repos</th>
+            <th className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark">Review</th>
+            <th className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark">Gate</th>
           </tr>
         </thead>
         <tbody>
@@ -211,22 +237,47 @@ export function MergeReadinessBoard({
                 </div>
               </td>
               <td className="px-3 py-2 border-b border-gray-100 dark:border-gray-800 align-top">
-                <div className="flex flex-wrap gap-1">
-                  {repos.map((repo, i) => {
-                    const style = REPO_STATUS[repo.kind];
-                    return (
-                      <span
-                        key={`${repo.label}-${i}`}
-                        className={`inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded ${style.className}`}
-                        title={`${repo.label}: ${style.title}`}
-                        data-repo-kind={repo.kind}
-                      >
-                        <span className="font-mono opacity-70">{repo.label}</span>
-                        <span className="font-medium">{repoBadgeText(repo)}</span>
-                      </span>
-                    );
-                  })}
-                </div>
+                {(() => {
+                  const collapse = repos.length > REPO_CHIP_LIMIT;
+                  const shown = collapse ? repos.filter(needsAttention) : repos;
+                  const quiet = collapse ? summarizeQuietRepos(repos.filter((r) => !needsAttention(r))) : [];
+                  return (
+                    /* Bounded width so a repo-heavy row wraps its chips instead of
+                       stretching the table and pushing Review/Gate out of the panel. */
+                    <div className="flex flex-wrap gap-1 max-w-[340px]">
+                      {shown.map((repo, i) => {
+                        const style = REPO_STATUS[repo.kind];
+                        return (
+                          <span
+                            key={`${repo.label}-${i}`}
+                            className={`inline-flex items-center gap-1 whitespace-nowrap text-[11px] px-1.5 py-0.5 rounded ${style.className}`}
+                            title={`${repo.label}: ${style.title}`}
+                            data-repo-kind={repo.kind}
+                          >
+                            <span className="font-mono opacity-70">{repo.label}</span>
+                            <span className="font-medium">{repoBadgeText(repo)}</span>
+                          </span>
+                        );
+                      })}
+                      {quiet.map(({ kind, count, labels }) => (
+                        <span
+                          key={`quiet-${kind}`}
+                          className={`inline-flex items-center gap-1 whitespace-nowrap text-[11px] px-1.5 py-0.5 rounded ${REPO_STATUS[kind].className}`}
+                          title={`${REPO_STATUS[kind].title}\n${labels.join(", ")}`}
+                          data-repo-kind={kind}
+                          data-repo-rollup={count}
+                        >
+                          <span className="font-medium">
+                            {count} {kind === "clean" ? "clean" : kind === "not-part-of" ? "not in workspace" : kind}
+                          </span>
+                        </span>
+                      ))}
+                      {collapse && shown.length === 0 && quiet.length === 0 && (
+                        <span className="text-[11px] text-gray-400 dark:text-gray-500">—</span>
+                      )}
+                    </div>
+                  );
+                })()}
               </td>
               <td className="px-3 py-2 border-b border-gray-100 dark:border-gray-800 align-top">
                 <ReviewBadge review={review} />
