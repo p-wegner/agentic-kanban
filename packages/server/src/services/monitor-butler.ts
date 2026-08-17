@@ -40,6 +40,7 @@ import { buildSpawnEnv, getMcpServersConfig } from "./agent-provider/helpers.js"
 import { getBoardStatus } from "./board-status.js";
 import { isTransientNetworkError } from "../lib/transient-errors.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 
 // Single source of truth for monitor policy, shared with the codex board-monitor
 // loop (scripts/board-monitor/loop.sh). Edit that one file to steer both.
@@ -94,7 +95,7 @@ function resolveStrategy(repoPath: string): { text: string; source: "file" | "de
 }
 
 function buildMonitorSystemPrompt(projectName: string, repoPath: string): string {
-  const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
+  const serverPort = resolveBoardServerPort();
   return [
     `You are the autonomous Monitor Butler for the project "${projectName}" — a background board-health agent in the agentic-kanban board.`,
     `Project location: ${repoPath}`,
