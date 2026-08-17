@@ -1,48 +1,277 @@
 {
   "$comment": "Pattern-language spec for agentic-kanban (Lilienthal Musterelemente + rules) — round 1 (2026-08-16). Consumed by code-metrics-skill/pattern-language/tools/pattern_edges.py. FIRST matching element wins — specific before general. Rules are allow-lists (runtime imports only; type-only imports are erased). Elements without a rule entry (server-root, server-script, server-cli, server-worker, server-scaffold, client-route) are unconstrained. Seeded from .dependency-cruiser.cjs (routes/cli-not-down-to-persistence, services-bypass-repositories, repositories-are-infra-pure, services-not-up-to-routes, client-hooks-not-up-to-components-or-routes, client-lib-is-leaf, shared-is-a-leaf, mcp-no-server-internals) — this spec ADDS what depcruise doesn't cover: startup/monitor, lib, scripts, worker.",
-  "roots": ["packages/server/src", "packages/client/src", "packages/shared/src", "packages/mcp-server/src"],
+  "roots": [
+    "packages/server/src",
+    "packages/client/src",
+    "packages/shared/src",
+    "packages/mcp-server/src"
+  ],
   "aliases": {
     "@agentic-kanban/shared": "packages/shared/src",
     "@/": "packages/client/src"
   },
   "elements": [
-    { "name": "server-root",        "match": ["packages/server/src/index\\.ts$", "packages/server/src/server-start\\.ts$", "packages/server/src/uv-threadpool\\.ts$", "packages/server/src/startup/(route-setup|process-handlers|background-services|startup-tasks|readiness|session-restore|scheduled-tasks|fk-alignment|service-stack-preflight|monitor-setup)\\.ts$"] },
-    { "name": "server-monitor",     "match": ["packages/server/src/startup/"] },
-    { "name": "server-script",      "match": ["packages/server/src/scripts/"] },
-    { "name": "server-route",       "match": ["packages/server/src/routes/"] },
-    { "name": "server-middleware",  "match": ["packages/server/src/middleware/"] },
-    { "name": "server-repository",  "match": ["\\.repository\\.ts$", "packages/server/src/repositories/"] },
-    { "name": "server-service",     "match": ["\\.service\\.ts$", "packages/server/src/services/", "packages/server/src/butler/"] },
-    { "name": "server-worker",      "match": ["packages/server/src/worker/"] },
-    { "name": "server-cli",         "match": ["packages/server/src/cli/"] },
-    { "name": "server-scaffold",    "match": ["packages/server/src/scaffold/", "packages/server/src/builtin-skills"] },
-    { "name": "server-db",          "match": ["packages/server/src/db/"] },
-    { "name": "server-lib",         "match": ["packages/server/src/lib/", "packages/server/src/constants/", "packages/server/src/errors/", "packages/server/src/runtime-port\\.ts$"] },
-    { "name": "shared-schema",      "match": ["packages/shared/src/schema/"] },
-    { "name": "shared-types",       "match": ["packages/shared/src/types/"] },
-    { "name": "shared-lib",         "match": ["packages/shared/src/lib/", "packages/shared/src/index\\.ts$"] },
-    { "name": "mcp-tool",           "match": ["packages/mcp-server/src/"] },
-    { "name": "client-route",       "match": ["packages/client/src/routes/", "packages/client/src/App\\.tsx$", "packages/client/src/main\\.tsx$"] },
-    { "name": "client-component",   "match": ["packages/client/src/components/"] },
-    { "name": "client-hook",        "match": ["packages/client/src/hooks/", "packages/client/src/lib/use[A-Z][A-Za-z]*\\.tsx?$"] },
-    { "name": "client-store",       "match": ["packages/client/src/stores/"] },
-    { "name": "client-lib",         "match": ["packages/client/src/lib/", "packages/client/src/[^/]+\\.(ts|css)$"] }
+    {
+      "name": "server-root",
+      "match": [
+        "packages/server/src/index\\.ts$",
+        "packages/server/src/server-start\\.ts$",
+        "packages/server/src/uv-threadpool\\.ts$",
+        "packages/server/src/startup/(route-setup|process-handlers|background-services|startup-tasks|readiness|session-restore|scheduled-tasks|fk-alignment|service-stack-preflight|monitor-setup)\\.ts$"
+      ],
+      "intent": "Composition root — boots the server: migrations, startup tasks, route mount, background-service registry, process handlers, readiness. The only place that wires everything together."
+    },
+    {
+      "name": "server-monitor",
+      "match": [
+        "packages/server/src/startup/"
+      ],
+      "intent": "Startup-owned engines and background sweeps: the in-process monitor (auto-start/merge/exit workflow) and crash-safe periodic reconcilers registered by name in BACKGROUND_SERVICES."
+    },
+    {
+      "name": "server-script",
+      "match": [
+        "packages/server/src/scripts/"
+      ],
+      "intent": "One-shot executables under src/scripts/ — maintenance and migration helpers; unconstrained downward, never imported by anything."
+    },
+    {
+      "name": "server-route",
+      "match": [
+        "packages/server/src/routes/"
+      ],
+      "intent": "Thin Hono adapters: parse the request, delegate to a service, shape the response. No business logic, no drizzle."
+    },
+    {
+      "name": "server-middleware",
+      "match": [
+        "packages/server/src/middleware/"
+      ],
+      "intent": "Cross-cutting request plumbing: createRouter, domainErrorHandler, parseJsonBody, gzip, slow-request sampling."
+    },
+    {
+      "name": "server-repository",
+      "match": [
+        "\\.repository\\.ts$",
+        "packages/server/src/repositories/"
+      ],
+      "intent": "Pure drizzle access per use-case slice (not per table): verbNoun(args, database = db). No decisions, no side effects beyond the DB."
+    },
+    {
+      "name": "server-service",
+      "match": [
+        "\\.service\\.ts$",
+        "packages/server/src/services/",
+        "packages/server/src/butler/"
+      ],
+      "intent": "Business logic and orchestration — factories createXService(deps) and fn-modules; gates, resolvers, reconcilers, adapters/ports, projections. Owns decisions; may use repositories, lib, db, shared."
+    },
+    {
+      "name": "server-worker",
+      "match": [
+        "packages/server/src/worker/"
+      ],
+      "intent": "The remote worker (fleet) process — dials the board, executes assignments in its own checkout, streams output back."
+    },
+    {
+      "name": "server-cli",
+      "match": [
+        "packages/server/src/cli/"
+      ],
+      "intent": "CLI command registrars (pnpm cli -- …): register a commander action that runs migrations, calls repos/services or the live REST API, and exits."
+    },
+    {
+      "name": "server-scaffold",
+      "match": [
+        "packages/server/src/scaffold/",
+        "packages/server/src/builtin-skills"
+      ],
+      "intent": "Artefacts SHIPPED into other repos: hook scripts and skill content copied into registered projects' .claude/. Must not import server internals."
+    },
+    {
+      "name": "server-db",
+      "match": [
+        "packages/server/src/db/"
+      ],
+      "intent": "DB bootstrap: connection, migrations, pragmas, backup/repair, seed."
+    },
+    {
+      "name": "server-lib",
+      "match": [
+        "packages/server/src/lib/",
+        "packages/server/src/constants/",
+        "packages/server/src/errors/",
+        "packages/server/src/runtime-port\\.ts$"
+      ],
+      "intent": "Pure server-side compute extracted to be unit-testable without a server: formatters, projections, small helpers. Imports no services, ideally no node:/db."
+    },
+    {
+      "name": "shared-schema",
+      "match": [
+        "packages/shared/src/schema/"
+      ],
+      "intent": "Drizzle table definitions and the column vocabularies (as const) that live next to them — the one source of truth for the DB shape."
+    },
+    {
+      "name": "shared-types",
+      "match": [
+        "packages/shared/src/types/"
+      ],
+      "intent": "Type-only contracts shared between packages; no runtime code."
+    },
+    {
+      "name": "shared-lib",
+      "match": [
+        "packages/shared/src/lib/",
+        "packages/shared/src/index\\.ts$"
+      ],
+      "intent": "Code used by more than one package: node adapters (git/docker/fs, deep-path only), shared drizzle ops, key derivation, contract codecs, stream parsers, pure helpers."
+    },
+    {
+      "name": "mcp-tool",
+      "match": [
+        "packages/mcp-server/src/"
+      ],
+      "intent": "MCP tool handlers — the board's agent-facing API. Reach the board via shared lib/db ops or HTTP, never via server internals."
+    },
+    {
+      "name": "client-route",
+      "match": [
+        "packages/client/src/routes/",
+        "packages/client/src/App\\.tsx$",
+        "packages/client/src/main\\.tsx$"
+      ],
+      "intent": "Client-side routing: URL ↔ view derivation and the router mount."
+    },
+    {
+      "name": "client-component",
+      "match": [
+        "packages/client/src/components/"
+      ],
+      "intent": "React UI. Renders state, dispatches actions via hooks/stores/lib; no persistence knowledge beyond the REST/WS surface."
+    },
+    {
+      "name": "client-hook",
+      "match": [
+        "packages/client/src/hooks/",
+        "packages/client/src/lib/use[A-Z][A-Za-z]*\\.tsx?$"
+      ],
+      "intent": "Reusable client behaviour and data access (useX): fetching, subscriptions, derived state."
+    },
+    {
+      "name": "client-store",
+      "match": [
+        "packages/client/src/stores/"
+      ],
+      "intent": "Zustand stores — shared client state that more than one distant component drives."
+    },
+    {
+      "name": "client-lib",
+      "match": [
+        "packages/client/src/lib/",
+        "packages/client/src/[^/]+\\.(ts|css)$"
+      ],
+      "intent": "Pure client helpers: API client, formatting, chart colours, registries; no React rendering."
+    }
   ],
   "rules": {
-    "server-route":      ["server-service", "server-repository", "server-middleware", "server-lib", "server-db", "shared-schema", "shared-types", "shared-lib"],
-    "server-middleware": ["server-lib", "server-service", "shared-lib", "shared-types"],
-    "server-service":    ["server-service", "server-repository", "server-lib", "server-db", "server-worker", "shared-schema", "shared-types", "shared-lib"],
-    "server-monitor":    ["server-monitor", "server-service", "server-repository", "server-lib", "server-db", "server-worker", "shared-schema", "shared-types", "shared-lib"],
-    "server-repository": ["server-db", "server-lib", "shared-schema", "shared-types", "shared-lib"],
-    "server-lib":        ["server-lib", "server-db", "shared-schema", "shared-types", "shared-lib"],
-    "server-db":         ["shared-schema", "shared-lib", "server-lib", "server-scaffold"],
-    "shared-lib":        ["shared-lib", "shared-schema", "shared-types"],
-    "shared-types":      ["shared-schema"],
-    "shared-schema":     [],
-    "mcp-tool":          ["mcp-tool", "shared-lib", "shared-schema", "shared-types"],
-    "client-component":  ["client-component", "client-hook", "client-store", "client-lib", "shared-types", "shared-lib"],
-    "client-hook":       ["client-hook", "client-store", "client-lib", "shared-types", "shared-lib"],
-    "client-store":      ["client-store", "client-lib", "shared-types", "shared-lib"],
-    "client-lib":        ["client-lib", "shared-types", "shared-lib"]
+    "server-route": [
+      "server-service",
+      "server-repository",
+      "server-middleware",
+      "server-lib",
+      "server-db",
+      "shared-schema",
+      "shared-types",
+      "shared-lib"
+    ],
+    "server-middleware": [
+      "server-lib",
+      "server-service",
+      "shared-lib",
+      "shared-types"
+    ],
+    "server-service": [
+      "server-service",
+      "server-repository",
+      "server-lib",
+      "server-db",
+      "server-worker",
+      "shared-schema",
+      "shared-types",
+      "shared-lib"
+    ],
+    "server-monitor": [
+      "server-monitor",
+      "server-service",
+      "server-repository",
+      "server-lib",
+      "server-db",
+      "server-worker",
+      "shared-schema",
+      "shared-types",
+      "shared-lib"
+    ],
+    "server-repository": [
+      "server-db",
+      "server-lib",
+      "shared-schema",
+      "shared-types",
+      "shared-lib"
+    ],
+    "server-lib": [
+      "server-lib",
+      "server-db",
+      "shared-schema",
+      "shared-types",
+      "shared-lib"
+    ],
+    "server-db": [
+      "shared-schema",
+      "shared-lib",
+      "server-lib",
+      "server-scaffold"
+    ],
+    "shared-lib": [
+      "shared-lib",
+      "shared-schema",
+      "shared-types"
+    ],
+    "shared-types": [
+      "shared-schema"
+    ],
+    "shared-schema": [],
+    "mcp-tool": [
+      "mcp-tool",
+      "shared-lib",
+      "shared-schema",
+      "shared-types"
+    ],
+    "client-component": [
+      "client-component",
+      "client-hook",
+      "client-store",
+      "client-lib",
+      "shared-types",
+      "shared-lib"
+    ],
+    "client-hook": [
+      "client-hook",
+      "client-store",
+      "client-lib",
+      "shared-types",
+      "shared-lib"
+    ],
+    "client-store": [
+      "client-store",
+      "client-lib",
+      "shared-types",
+      "shared-lib"
+    ],
+    "client-lib": [
+      "client-lib",
+      "shared-types",
+      "shared-lib"
+    ]
   }
 }
