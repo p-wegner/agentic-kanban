@@ -1,3 +1,4 @@
+import { resolveEffectivePrompt } from "./agent-provider/context-files-prompt.js";
 // Remote agent execution over a fleet worker's WebSocket (epic #1, phase 1c #5).
 //
 // Implements the AgentExecutionService seam (phase 0): `launch` builds the SAME
@@ -209,6 +210,10 @@ export function createRemoteAgentService(
     }
     const workerId = placement.workerId;
 
+    // #524: codex has no channel for contextFiles other than the prompt, and this path
+    // used to send the raw one — so a codex builder on a fleet worker ran with NO ticket
+    // context. Same helper the host uses, so the two cannot diverge again.
+    const effectivePrompt = resolveEffectivePrompt(prompt, provider, contextFiles);
     const config = buildAgentLaunchConfig({
       agentArgs,
       providerSessionId,
@@ -221,7 +226,7 @@ export function createRemoteAgentService(
       permissionPromptTool,
       planMode,
       provider,
-      prompt,
+      prompt: effectivePrompt,
       contextFiles,
       skipPermissions,
     });
