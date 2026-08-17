@@ -6,6 +6,8 @@ import { getSettings, setSettings } from "../lib/settingsStore.js";
 import { suggestBranchName, sanitizeBranchName } from "@agentic-kanban/shared/lib/branch";
 import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import type { IssueWithStatus, ProfileSelection, ProjectRepoResponse, WorkspaceResponse } from "@agentic-kanban/shared";
+import { defaultProfileToken, profileOptionLabel } from "@agentic-kanban/shared/lib/provider-traits";
+import { uniqueProfiles } from "../lib/profileOptionLabels.js";
 import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import { PreflightModal } from "./PreflightModal.js";
 import type { PreflightResult, PreflightClarification } from "./PreflightModal.js";
@@ -56,24 +58,19 @@ const COPILOT_DEFAULT_PROFILE = "default";
 const CODEX_DEFAULT_PROFILE = "default";
 const PI_DEFAULT_PROFILE = "default";
 
-function uniqueProfiles(profiles: string[], fallback?: string): string[] {
-  const all = fallback ? [fallback, ...profiles] : profiles;
-  return [...new Set(all.filter(Boolean))];
-}
-
+/**
+ * #493: these were three PRIVATE copies of helpers this file's sibling
+ * `lib/profileOptionLabels.ts` already exported, and one had a real bug — the local
+ * `profileOptionLabel` omitted `pi` from both its default-name check and its label
+ * ladder, so a `pi` profile rendered in this very dropdown as "Claude: <name>". The
+ * launch form named the wrong agent.
+ *
+ * The displayed claude fallback moves from `claude:default` to `claude:none` to match the
+ * shared helper (display text only — the option's value is ""). Which word is right is a
+ * UX question; having two answers was the defect.
+ */
 function defaultProfileLabel(prefs: Record<string, string>): string {
-  if (prefs.provider === "codex") return `codex:${prefs.codex_profile || CODEX_DEFAULT_PROFILE}`;
-  if (prefs.provider === "copilot") return `copilot:${prefs.copilot_profile || COPILOT_DEFAULT_PROFILE}`;
-  if (prefs.provider === "pi") return `pi:${prefs.pi_profile || PI_DEFAULT_PROFILE}`;
-  return `claude:${prefs.claude_profile || "default"}`;
-}
-
-function profileOptionLabel(provider: AgentProvider, name: string): string {
-  const isDefault = (provider === "copilot" && name === COPILOT_DEFAULT_PROFILE) ||
-    (provider === "codex" && name === CODEX_DEFAULT_PROFILE);
-  const displayName = isDefault ? "Default" : name;
-  const providerLabel = provider === "codex" ? "Codex" : provider === "copilot" ? "Copilot" : "Claude";
-  return `${providerLabel}: ${displayName}`;
+  return defaultProfileToken(prefs, "none");
 }
 
 export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCreated, onCancel, onSubmitting, onSettled }: CreateWorkspaceFormProps) {
