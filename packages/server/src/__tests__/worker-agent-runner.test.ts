@@ -124,10 +124,21 @@ describe("worker hang watchdog (parity with the host spawn site)", () => {
 
   it("does NOT kill an agent that keeps producing output", async () => {
     const { runner, eventsOf, exitOf } = collector();
-    // Prints every 200ms for ~2.5s — each byte must reset a 1s watchdog.
+    // Prints every 100ms for ~5s — each byte must reset a 2.5s watchdog (#620).
+    //
+    // The two numbers are constrained from BOTH sides and neither may be tuned alone:
+    //   - output interval << timeout, or a scheduling stall under full-suite parallel load
+    //     lets a CORRECTLY-working watchdog fire and the assertion fails. This was the flake:
+    //     200ms ticks against a 1s timeout is only a 5x margin, and a >1s stall between two
+    //     child-process ticks is entirely plausible with 16 vitest workers running. 100ms
+    //     against 2.5s is 25x.
+    //   - timeout << total run duration, or the test goes VACUOUS: if reset() were broken,
+    //     the watchdog would fire at 2.5s, and it only proves anything because the process
+    //     keeps running to ~5s. The `tick50` assertion below is what pins that duration, so
+    //     raising hangTimeoutMs above ~5s would silently turn this test green-for-free.
     const chatty =
-      "let n=0;const t=setInterval(()=>{console.log('tick'+(++n));if(n>=12){clearInterval(t);process.exit(0);}},200);";
-    runner.assign("s1", nodeSpec(chatty, { keepStdinOpen: true, hangTimeoutMs: 1000 }));
+      "let n=0;const t=setInterval(()=>{console.log('tick'+(++n));if(n>=50){clearInterval(t);process.exit(0);}},100);";
+    runner.assign("s1", nodeSpec(chatty, { keepStdinOpen: true, hangTimeoutMs: 2500 }));
 
     await vi.waitFor(() => expect(exitOf("s1")).toBeTruthy(), { timeout: 25000 });
     const stderr = eventsOf("s1").filter((e) => e.type === "stderr").map((e) => e.data).join("");
@@ -135,7 +146,9 @@ describe("worker hang watchdog (parity with the host spawn site)", () => {
     // Survived to a clean, self-chosen exit rather than being killed mid-run.
     expect(exitOf("s1")!.exitCode).toBe(0);
     const stdout = eventsOf("s1").filter((e) => e.type === "stdout").map((e) => e.data).join("");
-    expect(stdout).toContain("tick12");
+    // Load-bearing for non-vacuity: reaching tick50 means the process ran ~5s, i.e. well
+    // past the 2.5s watchdog, so a broken reset() could not have escaped detection.
+    expect(stdout).toContain("tick50");
   }, 35000);
 
   it("is disabled when the board sends hangTimeoutMs=0 (mock agents)", async () => {
