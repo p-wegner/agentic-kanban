@@ -24,6 +24,10 @@ import { loadCodexLicenseRing, resolveCodexHomeForProfile } from "./codex-licens
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { readStrategyBullseye } from "@agentic-kanban/shared/lib/strategy-objective-file";
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
+
+// #496: registered prefix, checked at compile time.
+const butlerProfilePref = projectPref("butler_profile");
 export interface ButlerDefinition {
   /** Stable kebab-case id. "default" is reserved for the always-present legacy butler. */
   id: string;
@@ -153,7 +157,7 @@ export async function deleteButlerDefinition(database: Database, id: string): Pr
 /** Per-project Claude profile override for the butler (empty = global claude_profile).
  *  Profile is auth/endpoint, shared by ALL of a project's butlers — not per-butler. */
 export function butlerProfilePrefKey(projectId: string): string {
-  return `butler_profile_${projectId}`;
+  return butlerProfilePref.key(projectId);
 }
 
 /** Legacy per-project model pref key (predates per-definition model; kept only as a

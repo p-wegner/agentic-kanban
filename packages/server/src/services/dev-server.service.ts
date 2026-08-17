@@ -29,13 +29,23 @@ import { killProcessesOnPorts, killDevServerSupervisorOnPorts } from "./process-
 import { spawnShellCommand } from "./process-exec.js";
 import { resolveWorktreeDevPorts } from "./worktree-ports.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 
-/** Per-project preference keys for explicit dev-server overrides. */
+/**
+ * Per-project preference keys for explicit dev-server overrides.
+ *
+ * Built via `projectPref` (#496) so the prefix is checked against the dynamic-key registry
+ * at compile time. Both families were MISSING from that registry, which meant config
+ * export/import silently dropped them — see the note in dynamic-preference-keys.ts.
+ */
+const devCommandPref = projectPref("dev_command");
+const healthUrlPref = projectPref("health_url");
+
 export function devCommandPrefKey(projectId: string): string {
-  return `dev_command_${projectId}`;
+  return devCommandPref.key(projectId);
 }
 export function healthUrlPrefKey(projectId: string): string {
-  return `health_url_${projectId}`;
+  return healthUrlPref.key(projectId);
 }
 
 /**
