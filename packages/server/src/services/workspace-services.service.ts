@@ -40,7 +40,7 @@ import {
   resolveServiceHost,
 } from "./workspace-services-env.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import { parseServiceStackState } from "@agentic-kanban/shared";
+import { parseServiceStackState } from "@agentic-kanban/shared/lib/service-stack-codec";
 
 export { resolveServiceHost, buildServicesEnvFile } from "./workspace-services-env.js";
 

@@ -19,8 +19,7 @@ import { detectRepoInfo } from "../services/git-info.service.js";
 import { parseIncludeParam, serveWorkspaceRepoStatusBatch } from "../services/workspace-repo-status-batch.service.js";
 import { cloneRepo } from "../services/repo-clone.service.js";
 import type { ProjectRepoResponse, ServiceStackConfig } from "@agentic-kanban/shared";
-import { DEFAULT_SERVICE_STACK_CONFIG,
-  parseServiceStackConfig } from "@agentic-kanban/shared";
+import { DEFAULT_SERVICE_STACK_CONFIG, parseServiceStackConfig } from "@agentic-kanban/shared/lib/service-stack-codec";
 import { createOnboardingService } from "../services/onboarding.service.js";
 import { createIssueService } from "../services/issue.service.js";
 import { getPluginService } from "../services/plugin.service.js";

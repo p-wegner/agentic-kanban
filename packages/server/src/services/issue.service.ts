@@ -66,7 +66,7 @@ import type { BoardEvents } from "./board-events.js";
 import { createIssueDependencyService, validateBatchDependencies } from "./issue-dependency.service.js";
 import { IssueError } from "./issue-error.js";
 import { materializePhaseArtifactToWorktree } from "./phase-artifacts.service.js";
-import { parseServiceStackState } from "@agentic-kanban/shared";
+import { parseServiceStackState } from "@agentic-kanban/shared/lib/service-stack-codec";
 
 // IssueError lives in its own module to avoid an import cycle with the dependency
 // sub-service; re-exported here so existing consumers' imports are unchanged.
