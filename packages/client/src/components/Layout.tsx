@@ -19,16 +19,10 @@ import { onboardingActions, useOnboardingStore } from "../stores/onboardingStore
 import { useOnboardingStatus } from "../hooks/useOnboardingStatus.js";
 import { useDismissable } from "../hooks/useDismissable.js";
 
-export interface Project {
-  id: string;
-  name: string;
-  color?: string | null;
-  repoName?: string | null;
-  repoPath?: string | null;
-  defaultBranch?: string | null;
-  archivedAt?: string | null;
-  activeWorkspaceCount?: number;
-}
+// #610: Layout's shape is the LOOSE list-item one, not the full record — kept as a
+// distinct type rather than merged, since its callers pass partial rows.
+import type { ProjectListItem as Project } from "../lib/projectTypes.js";
+export type { Project };
 
 interface LayoutProps {
   children: ReactNode;
