@@ -23,7 +23,7 @@ vi.mock("../repositories/workspace-status.repository.js", () => ({
 import { db } from "../db/index.js";
 import { createMonitorProjectScheduler } from "../startup/monitor-project-scheduler.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
-import { QUOTA_BLOCK_PROBE_FALLBACK_MS, orderCandidatesForWalk } from "../startup/monitor-cycle-rules.js";
+import { QUOTA_BLOCK_PROBE_FALLBACK_MS, orderCandidatesForWalk } from "../services/monitor-cycle-rules.js";
 import {
   MAX_MONITOR_MERGES_PER_CYCLE,
   MAX_MONITOR_RELAUNCHES_PER_CYCLE,

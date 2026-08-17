@@ -24,7 +24,7 @@ import {
   orderCandidatesForWalk,
   parseStuckBuilderTimeoutMs,
   type LatestSession,
-} from "./monitor-cycle-rules.js";
+} from "../services/monitor-cycle-rules.js";
 import {
   closeDirectWorkspaceAsDone,
   getProjectStatusIdByName,
@@ -36,7 +36,7 @@ import { setWorkspaceStatus } from "../repositories/workspace-status.repository.
 import { shouldSkipMergeForBackoff, type MergeBackoffDeps } from "../services/merge-backoff.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
-export { DEFAULT_STUCK_BUILDER_TIMEOUT_MS } from "./monitor-cycle-rules.js";
+export { DEFAULT_STUCK_BUILDER_TIMEOUT_MS } from "../services/monitor-cycle-rules.js";
 
 export const MAX_MONITOR_RELAUNCHES_PER_CYCLE = 2;
 export const MAX_MONITOR_MERGES_PER_CYCLE = 2;

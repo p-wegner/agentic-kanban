@@ -38,7 +38,7 @@ import { logBoardHealthEvent } from "../repositories/board-health-events.reposit
 import { getProjectById } from "../repositories/project.repository.js";
 import { buildSpawnEnv, getMcpServersConfig } from "./agent-provider/helpers.js";
 import { getBoardStatus } from "./board-status.js";
-import { isTransientNetworkError } from "../startup/transient-errors.js";
+import { isTransientNetworkError } from "../lib/transient-errors.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 // Single source of truth for monitor policy, shared with the codex board-monitor
