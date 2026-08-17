@@ -4,6 +4,7 @@ import { db } from "../../db/index.js";
 import type { Database } from "../../db/index.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import { readSessionStdoutFile } from "../../lib/session-output-reader.js";
+import { readSessionMessages } from "@agentic-kanban/shared/lib/session-messages";
 import {
   readSessionStdoutFileAsync,
   readSessionStdoutFileTailAsync,
@@ -52,24 +53,10 @@ export async function getSessionMessageRows(
   sessionId: string,
   database: Database = db,
 ): Promise<Array<{ type: string; data: string | null }>> {
-  const fileContent = readSessionStdoutFile(sessionId);
-  if (fileContent !== null) {
-    // File present: stdout from file, non-stdout from DB
-    const dbRows = await database
-      .select({ type: sessionMessages.type, data: sessionMessages.data })
-      .from(sessionMessages)
-      .where(eq(sessionMessages.sessionId, sessionId))
-      .orderBy(sessionMessages.id);
-    const nonStdout = dbRows.filter((r) => r.type !== "stdout");
-    return [{ type: "stdout", data: fileContent }, ...nonStdout];
-  }
-  // No file: historical session, read all from DB
-  const dbRows = await database
-    .select({ type: sessionMessages.type, data: sessionMessages.data })
-    .from(sessionMessages)
-    .where(eq(sessionMessages.sessionId, sessionId))
-    .orderBy(sessionMessages.id);
-  return dbRows;
+  // The two-source rule itself lives in `shared/lib/session-messages.ts` (#507); this
+  // stays as the server's named entry point so its ~6 importers are unchanged.
+  const { messages } = await readSessionMessages(database, sessionId);
+  return messages;
 }
 
 /**

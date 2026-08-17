@@ -1,8 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { eq, desc } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { requireEntity, readSessionStdoutFile } from "../db-utils.js";
+import { requireEntity } from "../db-utils.js";
+import { readSessionMessages } from "@agentic-kanban/shared/lib/session-messages";
 
 export function registerGetSessionTranscript(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema } = deps;
@@ -50,26 +51,9 @@ export function registerGetSessionTranscript(server: McpServer, deps: ToolDeps =
       // Prefer .out file for stdout; non-stdout rows from DB; fall back to DB-only for historical sessions
       // exitCode is stored as TEXT in the DB (schema: text("exit_code")), so the Drizzle
       // row type is string | null — match it here rather than number | null.
-      let messages: Array<{ id?: number; type: string; data?: string | null; exitCode?: string | null; createdAt?: string | null }>;
-      const fileContent = readSessionStdoutFile(sessionId);
-      if (fileContent !== null) {
-        const stdoutMsg = { type: "stdout", data: fileContent };
-        const nonStdoutRows = await db
-          .select({ id: schema.sessionMessages.id, type: schema.sessionMessages.type, data: schema.sessionMessages.data, exitCode: schema.sessionMessages.exitCode, createdAt: schema.sessionMessages.createdAt })
-          .from(schema.sessionMessages)
-          .where(eq(schema.sessionMessages.sessionId, sessionId))
-          .orderBy(desc(schema.sessionMessages.id));
-        const nonStdout = nonStdoutRows.filter(r => r.type !== "stdout").reverse();
-        messages = [stdoutMsg, ...nonStdout].slice(-messageLimit);
-      } else {
-        const newestMessages = await db
-          .select({ id: schema.sessionMessages.id, type: schema.sessionMessages.type, data: schema.sessionMessages.data, exitCode: schema.sessionMessages.exitCode, createdAt: schema.sessionMessages.createdAt })
-          .from(schema.sessionMessages)
-          .where(eq(schema.sessionMessages.sessionId, sessionId))
-          .orderBy(desc(schema.sessionMessages.id))
-          .limit(messageLimit);
-        messages = newestMessages.reverse();
-      }
+      // The .out-file-else-DB rule lives in shared (#507), including the DB-path SQL
+      // paging this tool relies on for long transcripts.
+      const { messages } = await readSessionMessages(db, sessionId, { limit: messageLimit });
 
       return {
         content: [{
