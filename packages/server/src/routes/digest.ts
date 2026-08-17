@@ -15,7 +15,7 @@ export function createDigestRoute(database: Database) {
 
     const range = parseRange(c.req.query("range"));
     const nowParam = c.req.query("now");
-    return c.json(await computeDigest(projectId, range, database, nowParam ? new Date(nowParam) : new Date()));
+    return c.json(await computeDigest(projectId, range, database, nowParam || new Date().toISOString()));
   });
 
   return router;
