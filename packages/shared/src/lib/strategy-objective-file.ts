@@ -16,7 +16,7 @@
 import { gitExecSync } from "./git-exec.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { normalizeProviderPolicies } from "./strategy-policy.js";
+import { normalizeProviderPolicies, strategyPrefKey } from "./strategy-policy.js";
 import type { ProviderPolicyMode, ProviderProfilePolicy } from "./strategy-policy.js";
 import { isBoardStrategyPreferenceKey } from "./dynamic-preference-keys.js";
 
@@ -319,18 +319,40 @@ export function commitObjectiveFile(repoPath: string): boolean {
  *
  * `source` lets callers log/telemetry which control surface actually drove a cycle.
  */
+/**
+ * Read + parse the Strategy Bullseye config for a project from a preference map (#497).
+ *
+ * "get the `board_strategy_<id>` key, parse it, swallow malformed JSON" was copy-pasted at
+ * eight sites around `strategyPrefKey`, which itself had exactly one importer while the raw
+ * `board_strategy_${projectId}` template had thirteen. CLAUDE.md calls this pref the single
+ * source of truth for provider/WIP, so the read path is worth having in one place — if the
+ * key is ever renamed or versioned, this is the only thing that has to know.
+ *
+ * Returns null for BOTH absent and malformed, which is what every copy already did: each
+ * one caught the parse error and fell through to its own default. Callers that need to tell
+ * "unset" from "corrupt" apart must read the raw pref themselves — none currently do.
+ */
+export function readStrategyBullseye(
+  prefMap: ReadonlyMap<string, string>,
+  projectId: string,
+): StrategyBullseyeConfig | null {
+  const raw = prefMap.get(strategyPrefKey(projectId));
+  if (!raw) return null;
+  try {
+    return parseStrategyBullseyeConfig(raw);
+  } catch {
+    return null;
+  }
+}
+
 export function resolveMonitorTunables(
   prefMap: Map<string, string>,
   projectId: string,
 ): { tunables: MonitorTunables; source: "strategy" | "prefs" } {
-  const raw = prefMap.get(`board_strategy_${projectId}`);
-  if (raw) {
-    try {
-      return { tunables: deriveMonitorTunables(parseStrategyBullseyeConfig(raw)), source: "strategy" };
-    } catch {
-      /* malformed strategy JSON — fall through to legacy prefs */
-    }
-  }
+  // Absent OR malformed both fall through to the legacy prefs below, exactly as the
+  // hand-written try/catch did.
+  const config = readStrategyBullseye(prefMap, projectId);
+  if (config) return { tunables: deriveMonitorTunables(config), source: "strategy" };
   const wipLimit = parseInt(prefMap.get("nudge_wip_limit") || "5", 10);
   return {
     tunables: {

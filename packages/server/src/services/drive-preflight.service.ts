@@ -4,7 +4,6 @@ import type { Database } from "../db/index.js";
 import { getProjectById, getProjectStatuses } from "../repositories/project.repository.js";
 import { getAllPreferences } from "../repositories/preferences.repository.js";
 import { getStackProfile, verifyScriptPrefKey } from "./stack-profile.service.js";
-import { parseStrategyBullseyeConfig } from "./strategy-objective.service.js";
 import { cooldownKey as claudeCooldownKey } from "./claude-subscription-ring.js";
 import { cooldownKey as codexCooldownKey } from "./codex-license-ring.js";
 import { getDriveStatus, setDriveEnabled } from "./drive.service.js";
@@ -12,6 +11,7 @@ import type { DriveEnablementStatus } from "./drive.service.js";
 import { resolveProjectRuntimeConfig } from "./project-runtime-config.service.js";
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
+import { readStrategyBullseye } from "@agentic-kanban/shared/lib/strategy-objective-file";
 /**
  * Drive preflight (#807): assert the hands-off prerequisites BEFORE a drive starts.
  *
@@ -258,15 +258,13 @@ export async function runDrivePreflight(
     }
 
     // --- WIP target: 1 means no real parallelism (degraded, not blocking). ---
-    const strategyRaw = prefMap.get(`board_strategy_${projectId}`);
-    let wipTarget: number | null = null;
-    if (strategyRaw) {
-      try {
-        wipTarget = parseStrategyBullseyeConfig(strategyRaw).activeAgentsTarget ?? null;
-      } catch {
-        /* malformed — leave null, falls back to legacy below */
-      }
-    }
+    // #497: read+parse via the shared helper (null for absent OR malformed, same as the
+    // hand-written try/catch). The legacy `nudge_wip_limit` fallback below is deliberately
+    // NOT replaced by resolveMonitorTunables: this check needs `null` to mean "no WIP target
+    // configured" so it can stay silent, whereas resolveMonitorTunables substitutes its
+    // default of 5 and would erase that distinction.
+    const wipConfig = readStrategyBullseye(prefMap, projectId);
+    let wipTarget: number | null = wipConfig?.activeAgentsTarget ?? null;
     if (wipTarget === null) {
       const legacy = Number.parseInt(prefMap.get("nudge_wip_limit") ?? "", 10);
       wipTarget = Number.isFinite(legacy) ? legacy : null;

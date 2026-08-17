@@ -28,6 +28,7 @@ import type { createAgentSkillService } from "./agent-skill.service.js";
 import type { CreateIssueInput, CreateIssueResult } from "./issue.service.js";
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
+import { strategyPrefKey } from "@agentic-kanban/shared/lib/strategy-policy";
 export class OnboardingError extends Error {
   constructor(
     message: string,
@@ -129,7 +130,7 @@ export function createOnboardingService(deps: OnboardingServiceDeps) {
         return Boolean(value?.trim());
       }
       case "strategy-bullseye": {
-        const value = await getPreference(`board_strategy_${projectId}`, database);
+        const value = await getPreference(strategyPrefKey(projectId), database);
         return Boolean(value?.trim());
       }
       case "extra-repos": {
@@ -343,7 +344,7 @@ export function createOnboardingService(deps: OnboardingServiceDeps) {
           throw new OnboardingError("value must be a non-empty JSON string", "BAD_REQUEST");
         }
         await setPreferenceChecked(database, [
-          { key: `board_strategy_${projectId}`, value },
+          { key: strategyPrefKey(projectId), value },
         ]);
         return;
       }

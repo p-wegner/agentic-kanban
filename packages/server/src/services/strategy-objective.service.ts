@@ -6,9 +6,7 @@ import type { QuotaUsageResult } from "./quota-usage.service.js";
 import { resolveEffectiveModel } from "./effective-config.service.js";
 import { selectPolicyByPriority } from "@agentic-kanban/shared/lib/strategy-policy";
 import type { ProviderPolicyMode, ProviderProfilePolicy } from "@agentic-kanban/shared/lib/strategy-policy";
-import {
-  parseStrategyBullseyeConfig,
-} from "@agentic-kanban/shared/lib/strategy-objective-file";
+import { readStrategyBullseye } from "@agentic-kanban/shared/lib/strategy-objective-file";
 import type { StrategyBullseyeConfig } from "@agentic-kanban/shared/lib/strategy-objective-file";
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
@@ -153,10 +151,11 @@ export async function resolveStrategyProviderSelection(
   if (!projectId) return null;
   const prefRows = await database.select().from(preferences);
   const prefMap = toPrefMap(prefRows);
-  const strategyRaw = prefMap.get(`board_strategy_${projectId}`);
-  if (!strategyRaw) return null;
+  // #497: read+parse via the shared helper. It returns null for absent OR malformed, which
+  // the outer catch below already collapsed to the same `return null`.
+  const strategyConfig = readStrategyBullseye(prefMap, projectId);
+  if (!strategyConfig) return null;
   try {
-    const strategyConfig = parseStrategyBullseyeConfig(strategyRaw);
     // Fetch live quota data to enable usage-aware selection; non-fatal if unavailable.
     let quota: QuotaUsageResult | null = null;
     if (strategyConfig.providerPolicies?.some((p) => p.quotaProviderId)) {

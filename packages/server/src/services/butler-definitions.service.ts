@@ -16,7 +16,6 @@ import { createPreferenceService } from "./preference.service.js";
 import { loadAgentSettings, isMockProfile } from "./agent-settings.service.js";
 import type { ProviderName } from "./agent-provider.js";
 import {
-  parseStrategyBullseyeConfig,
   selectProviderFromStrategy,
   applyProviderSelectionToPrefMap,
 } from "./strategy-objective.service.js";
@@ -24,6 +23,7 @@ import { resolveEffectiveProviderProfile } from "./effective-config.service.js";
 import { loadCodexLicenseRing, resolveCodexHomeForProfile } from "./codex-license-ring.js";
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
+import { readStrategyBullseye } from "@agentic-kanban/shared/lib/strategy-objective-file";
 export interface ButlerDefinition {
   /** Stable kebab-case id. "default" is reserved for the always-present legacy butler. */
   id: string;
@@ -252,8 +252,8 @@ export async function resolveButlerLaunchConfig(
   if (butlerProvider) {
     prefMap.set("provider", butlerProvider);
   } else {
-    const strategyRaw = prefMap.get(`board_strategy_${projectId}`);
-    if (strategyRaw) {
+    const strategyConfig = readStrategyBullseye(prefMap, projectId);
+    if (strategyConfig) {
       try {
         // Single parser (arch-review §3.3): `parseStrategyBullseyeConfig` now
         // normalizes the blob through the SAME shared `normalizeProviderPolicies`
@@ -265,7 +265,6 @@ export async function resolveButlerLaunchConfig(
         // whose purpose is keeping fill/throttle BUILDER launches within a rate-limit
         // window — does not apply. The quota-aware door is the builder launch
         // (`resolveStrategyProviderSelection`).
-        const strategyConfig = parseStrategyBullseyeConfig(strategyRaw);
         const selected = selectProviderFromStrategy(strategyConfig);
         if (selected) {
           applyProviderSelectionToPrefMap(prefMap, selected);
