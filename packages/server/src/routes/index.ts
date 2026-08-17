@@ -111,7 +111,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/plugins", createPluginsRoute(database, { ...options, getSessionManager }));
   routes.route("/projects", createPluginProjectViewsRoute(database));
   routes.route("/health", createHealthRoute());
-  routes.route("/docs", createDocsRoute());
+  routes.route("/docs", createDocsRoute(database));
   routes.route("/inbox", createInboxRoute(database));
   if (options?.boardEvents) {
     routes.route("/approvals", createApprovalsRoute(options.boardEvents));

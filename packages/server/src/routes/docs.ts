@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRouter } from "../middleware/create-router.js";
+import type { Database } from "../db/index.js";
+import { listPluginRows } from "../repositories/plugins.repository.js";
 
 /**
  * Docs route — serves the board's own operator-facing docs (`docs/plugins/*.html`) so
@@ -14,11 +16,25 @@ import { createRouter } from "../middleware/create-router.js";
  * board's theme instead of the OS one (the docs are written theme-aware, see
  * improvement-system-map.html's `:root[data-theme]` blocks).
  *
- * Location: packaged installs read `dist/docs/plugins/` (copied by scripts/copy-assets.mjs,
- * shipped via package.json "files"); a dev checkout falls back to the repo's `docs/plugins/`.
- * Two packaged candidates because the bundles sit at different depths (dist/server.js vs
- * dist/cli/index.js) — same pattern as resolveHookSource in project-scaffold.ts.
+ * NOT public by default. The docs describe plugins (refactor-safety-net, code-metrics,
+ * refactor-toolset) that are not themselves public, while this repo is — so a doc is only
+ * served when at least one plugin it is `about` is INSTALLED on this board (`PLUGIN_DOCS`),
+ * and nothing under docs/plugins/ ships in the npm tarball (no copy-assets step, no "files"
+ * entry). A consumer without those plugins gets 404 and never sees the menu entry
+ * (GET /api/docs/plugins lists only the docs that qualify).
+ *
+ * Location: the repo's `docs/plugins/` (dev checkout walk-up from the module dir; a packaged
+ * install has no such dir and serves nothing).
  */
+
+/** Which docs exist and which installed plugin(s) make each one relevant. */
+export const PLUGIN_DOCS: ReadonlyArray<{ file: string; title: string; about: readonly string[] }> = [
+  {
+    file: "improvement-system-map.html",
+    title: "Guide: which plugin when?",
+    about: ["refactor-safety-net", "code-metrics", "refactor-toolset"],
+  },
+];
 const _moduleDir = dirname(fileURLToPath(import.meta.url));
 
 /** Only bare filenames from a fixed allowlist of extensions — no traversal, no dotfiles. */
@@ -45,12 +61,24 @@ export function resolvePluginDocsDir(moduleDir: string = _moduleDir): string | n
   return null;
 }
 
+/** Docs whose subject plugins are installed (by manifest slug) — the only ones ever served. */
+export function availablePluginDocs(installedSlugs: Iterable<string>, docsDir: string | null = resolvePluginDocsDir()) {
+  if (!docsDir) return [];
+  const installed = new Set(installedSlugs);
+  return PLUGIN_DOCS.filter((d) => d.about.some((slug) => installed.has(slug)))
+    .filter((d) => { try { readFileSync(join(docsDir, d.file)); return true; } catch { return false; } })
+    .map(({ file, title }) => ({ file, title }));
+}
+
 export function readPluginDoc(
   file: string,
-  opts: { theme?: string | null; docsDir?: string | null } = {},
+  opts: { theme?: string | null; docsDir?: string | null; installedSlugs?: Iterable<string> } = {},
 ): { ok: true; body: string; contentType: string } | { ok: false; status: 400 | 404 } {
   if (!SAFE_NAME.test(file)) return { ok: false, status: 400 };
   const dir = opts.docsDir ?? resolvePluginDocsDir();
+  if (opts.installedSlugs && !availablePluginDocs(opts.installedSlugs, dir).some((d) => d.file === file)) {
+    return { ok: false, status: 404 };
+  }
   if (!dir) return { ok: false, status: 404 };
   let body: string;
   try {
@@ -66,10 +94,16 @@ export function readPluginDoc(
   return { ok: true, body, contentType: isHtml ? "text/html; charset=utf-8" : "text/markdown; charset=utf-8" };
 }
 
-export function createDocsRoute() {
+export function createDocsRoute(database: Database) {
   const router = createRouter();
-  router.get("/plugins/:file", (c) => {
-    const result = readPluginDoc(c.req.param("file"), { theme: c.req.query("theme") });
+  const installedSlugs = async () => (await listPluginRows(database)).map((p) => p.pluginId);
+  // GET /api/docs/plugins — the docs this board may show (drives the Plugins-tab menu entry).
+  router.get("/plugins", async (c) => c.json(availablePluginDocs(await installedSlugs())));
+  router.get("/plugins/:file", async (c) => {
+    const result = readPluginDoc(c.req.param("file"), {
+      theme: c.req.query("theme"),
+      installedSlugs: await installedSlugs(),
+    });
     if (!result.ok) {
       return c.json({ error: result.status === 400 ? "invalid file name" : "doc not found" }, result.status);
     }

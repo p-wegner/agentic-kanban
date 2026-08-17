@@ -1,8 +1,5 @@
 import { useEffect, useState } from "react";
 
-/** The board's own doc on how its improvement plugins fit together — served by the server. */
-export const PLUGIN_GUIDE_DOC = "improvement-system-map.html";
-
 /**
  * Follow the board's theme, which lives as a `dark` class on <html> (useTheme). Read at
  * mount and watched, so toggling the theme re-renders the framed doc without a reload.
@@ -19,7 +16,7 @@ function useBoardIsDark(): boolean {
   return isDark;
 }
 
-export function pluginGuideUrl(isDark: boolean, doc: string = PLUGIN_GUIDE_DOC): string {
+export function pluginGuideUrl(isDark: boolean, doc: string): string {
   return `/api/docs/plugins/${encodeURIComponent(doc)}?theme=${isDark ? "dark" : "light"}`;
 }
 
@@ -28,15 +25,19 @@ export function pluginGuideUrl(isDark: boolean, doc: string = PLUGIN_GUIDE_DOC):
  * (docs/plugins/improvement-system-map.html) rendered INSIDE the board, so "when do I
  * reach for the safety net vs code-metrics vs the refactor toolset" is answerable from the
  * place where those plugins are started, not from a file in the repo nobody opens.
+ *
+ * Only reachable via a doc listed by GET /api/docs/plugins — the server lists a doc only when
+ * a plugin it is about is installed, so a board without those (non-public) plugins has no
+ * entry and gets 404 on the URL.
  */
-export function PluginGuidePanel() {
+export function PluginGuidePanel({ file, title }: { file: string; title: string }) {
   const isDark = useBoardIsDark();
-  const url = pluginGuideUrl(isDark);
+  const url = pluginGuideUrl(isDark, file);
   return (
     <div className="flex-1 min-w-0 min-h-0 flex flex-col" data-testid="plugin-guide-panel">
       <div className="flex items-center justify-between gap-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-3 py-1.5">
         <div className="text-xs text-gray-600 dark:text-gray-300 truncate">
-          📖 Guide — how the improvement plugins fit together, and which one to reach for
+          📖 {title}
         </div>
         <button
           type="button"

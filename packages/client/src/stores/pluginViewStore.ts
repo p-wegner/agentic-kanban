@@ -8,8 +8,11 @@ import { create } from "zustand";
 export type PluginViewSelection =
   | { kind: "plugin"; slug: string }
   | { kind: "marketplace" }
-  /** The in-board guide (docs/plugins/improvement-system-map.html): which plugin when. */
-  | { kind: "guide" };
+  /**
+   * An in-board doc from GET /api/docs/plugins — served only when a plugin it is about is
+   * installed here, so a public board without those plugins never lists one.
+   */
+  | { kind: "guide"; file: string; title: string };
 
 interface PluginViewState {
   selection: PluginViewSelection | null;

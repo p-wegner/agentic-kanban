@@ -51,11 +51,3 @@ for (const src of scaffoldHookSources) {
 }
 console.log(`Copied: ${scaffoldHookSources.length} scaffold hook sources → server/dist/scaffold/hooks/`);
 
-// Copy the board's operator docs (docs/plugins/*.html) to server/dist/docs/plugins/ so the
-// in-board guide (GET /api/docs/plugins/:file, Plugins tab -> Guide) works on npm/npx installs.
-try {
-  cpSync(resolve(root, "docs/plugins"), resolve(serverDist, "docs/plugins"), { recursive: true });
-  console.log("Copied: docs/plugins -> server/dist/docs/plugins/");
-} catch (err) {
-  console.warn("Warning: Could not copy docs/plugins:", err.message);
-}
