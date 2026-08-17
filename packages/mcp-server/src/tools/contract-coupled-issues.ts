@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { and, eq, inArray, ne } from "drizzle-orm";
 import { planContraction, resolveCoupledComponent } from "@agentic-kanban/shared/lib/dependency-graph";
+import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { applyUpdateDependenciesBatch } from "./update-dependencies-batch.js";
 
@@ -161,9 +162,14 @@ export function registerContractCoupledIssues(server: McpServer, deps: ToolDeps 
           absorbed?.description?.trim() || "",
           contractPointer(leadIssue.issueNumber),
         ].filter(Boolean).join("\n\n");
+        // #501: the description is a plain column write, but the terminal status must go
+        // through the transition authority so the workflow current-node is synced with it
+        // — absorbing an issue is exactly the case where a stale currentNodeId would make
+        // dependency resolution treat a closed issue as still open (#537).
         await db.update(schema.issues)
-          .set({ statusId: terminalStatusId, description: nextDescription, updatedAt: now })
+          .set({ description: nextDescription, updatedAt: now })
           .where(eq(schema.issues.id, id));
+        await transitionIssueStatus(db, id, terminalStatusId, { now });
       }
       deps.notifyBoard(projectId, "mcp_issue_updated");
 

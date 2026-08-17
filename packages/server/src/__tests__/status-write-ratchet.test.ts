@@ -53,7 +53,15 @@ const AUTHORITY_FILES = new Set([
  * Only SHRINK this list.
  */
 const BASELINE: Record<string, number> = {
-  "mcp-server/src/tools/contract-coupled-issues.ts::issues-statusId": 1,
+  // #501: `contract-coupled-issues.ts::issues-statusId` is GONE — the absorbed-issue
+  // terminal status now goes through `transitionIssueStatus`, so mcp-server has no literal
+  // raw issue-status write left.
+  //
+  // `update_issue` still does `.set(updates)` with an opaque variable, so the heuristic
+  // still sees it and the entry has to stay — but it is now a PROVABLE non-status write:
+  // #501 removed `statusId`/`statusChangedAt` from that object and routed the status
+  // through `transitionIssueStatus`. Same category of false positive as the
+  // workspace-crud/scorecard entries below, kept for the same reason.
   "mcp-server/src/tools/update-issue.ts::issues-opaque-set": 1,
   "server/src/repositories/issue-service.repository.ts::issues-opaque-set": 2,
   "server/src/repositories/issue-service.repository.ts::issues-statusId": 1,
