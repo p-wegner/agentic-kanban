@@ -1,6 +1,6 @@
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import { ACCENT } from "./chartColors.js";
-import { occupiesWipSlot } from "@agentic-kanban/shared/lib/workspace-status";
+import { occupiesWipSlot } from "@agentic-kanban/shared/lib/workspace-liveness";
 
 export type DependencyType = "depends_on" | "blocked_by" | "related_to" | "duplicates" | "parent_of" | "child_of" | "coupled_with";
 

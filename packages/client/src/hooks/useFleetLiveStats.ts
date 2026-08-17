@@ -3,7 +3,7 @@ import type { StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats } from "../lib/useBoardEvents.js";
 import { aggregateFleetLiveStats } from "../lib/fleetLiveStats.js";
 import type { FleetAgentInput, FleetLiveStatsAggregate } from "../lib/fleetLiveStats.js";
-import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-status";
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
 
 /**
  * A workspace is "live" while its main workspace is actively running an agent.

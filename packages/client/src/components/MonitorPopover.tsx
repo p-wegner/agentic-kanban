@@ -15,7 +15,7 @@ import {
 export { MonitorButlerSection, OrchestratorSection, RecentBoardHealthEventsSection } from "./MonitorSections.js";
 import type { StartMode, ResolvedTunables, MonitorStatus, BoardHealthEvent } from "../lib/monitor-popover.js";
 import { useNow } from "../hooks/usePoll.js";
-import { occupiesWipSlot } from "@agentic-kanban/shared/lib/workspace-status";
+import { occupiesWipSlot } from "@agentic-kanban/shared/lib/workspace-liveness";
 
 interface MonitorPopoverProps {
   status: MonitorStatus | null;

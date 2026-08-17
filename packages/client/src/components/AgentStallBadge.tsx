@@ -8,7 +8,7 @@ import {
 } from "../lib/detectAgentStall.js";
 import { useAgentActivityStore } from "../stores/agentActivityStore.js";
 import { useNow } from "../hooks/usePoll.js";
-import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-status";
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
 
 /** How often the badge re-evaluates so idle time can cross the threshold live. */
 const STALL_TICK_MS = 5_000;

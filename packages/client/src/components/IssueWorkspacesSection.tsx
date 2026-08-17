@@ -5,7 +5,7 @@ import type { IssueWithStatus } from "@agentic-kanban/shared";
 import { WorkflowProgress } from "./WorkflowProgress.js";
 import { isSpecPlanningPhase, SpecPhasePanel } from "./SpecPhasePanel.js";
 import { groupConflictsByRepo, formatConflictSummary } from "../lib/groupConflictsByRepo.js";
-import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-status";
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
 
 /** The non-null main workspace summary carried on an issue. */
 type MainWorkspace = NonNullable<NonNullable<IssueWithStatus["workspaceSummary"]>["main"]>;

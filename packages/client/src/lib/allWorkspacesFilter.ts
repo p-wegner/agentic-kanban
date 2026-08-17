@@ -4,7 +4,7 @@
 
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { StaleWorktreeEntry } from "../hooks/useStaleWorkspaceManager.js";
-import { occupiesWipSlot } from "@agentic-kanban/shared/lib/workspace-status";
+import { occupiesWipSlot } from "@agentic-kanban/shared/lib/workspace-liveness";
 
 export interface CrossProjectIssue {
   id: string;

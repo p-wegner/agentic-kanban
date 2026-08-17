@@ -1,5 +1,5 @@
 import type { IssueWithStatus, MainWorkspaceInfo, StatusWithIssues } from "@agentic-kanban/shared";
-import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-status";
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
 
 export interface RunQueueForecastStart {
   issue: IssueWithStatus;

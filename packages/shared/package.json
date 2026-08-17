@@ -408,6 +408,12 @@
       "import": "./dist/lib/workspace-status.js",
       "default": "./src/lib/workspace-status.ts"
     },
+    "./lib/workspace-liveness": {
+      "development": "./src/lib/workspace-liveness.ts",
+      "types": "./dist/lib/workspace-liveness.d.ts",
+      "import": "./dist/lib/workspace-liveness.js",
+      "default": "./src/lib/workspace-liveness.ts"
+    },
     "./lib/workspace-git-state": {
       "development": "./src/lib/workspace-git-state.ts",
       "types": "./dist/lib/workspace-git-state.d.ts",

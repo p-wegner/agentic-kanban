@@ -4,7 +4,7 @@ import { useBoardEvents, type LiveSessionStats, type TodoItem, type ApprovalRequ
 import { sendDesktopNotification } from "../lib/desktop.js";
 import { showToast } from "../lib/toast.js";
 import { agentActivityActions } from "../stores/agentActivityStore.js";
-import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-status";
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
 
 type NotificationIssue = { id: string; issueNumber?: number; title?: string; workspaceId?: string };
 

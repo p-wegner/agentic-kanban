@@ -1,5 +1,5 @@
 import type { StatusWithIssues } from "@agentic-kanban/shared";
-import { occupiesWipSlot } from "@agentic-kanban/shared/lib/workspace-status";
+import { occupiesWipSlot } from "@agentic-kanban/shared/lib/workspace-liveness";
 
 /**
  * Pure board-summary aggregates derived from the active/archive columns.

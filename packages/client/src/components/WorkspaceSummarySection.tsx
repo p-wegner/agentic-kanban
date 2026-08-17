@@ -6,7 +6,7 @@ import { CodeMetricsBadges, WorkflowMiniIndicator } from "./IssueBadges.js";
 import { groupConflictsByRepo, formatConflictSummary } from "../lib/groupConflictsByRepo.js";
 import { MultirepoHealthPill } from "./MultirepoHealthPill.js";
 import { useNow } from "../hooks/usePoll.js";
-import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-status";
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
 
 function RelativeTime({ timestamp, prefix = "" }: { timestamp: string; prefix?: string }) {
   useNow(30_000);

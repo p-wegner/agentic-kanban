@@ -20,97 +20,23 @@ type WorkspaceStatusDb = LibSQLDatabase<typeof schema> | Parameters<Parameters<L
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
 
-/** The stringly workspace lifecycle statuses observed across the codebase. */
-export type WorkspaceStatus =
-  | "active"
-  | "idle"
-  | "blocked"
-  | "reviewing"
-  | "fixing"
-  | "closed"
-  | "ready_for_merge"
-  | "awaiting-plan-approval"
-  | "error";
+// #596: the status VOCABULARY and the pure liveness predicates moved to
+// `workspace-liveness.ts`. This module value-imports drizzle + the schema, and the client
+// needs those predicates — ten-plus client modules deep-importing this file put drizzle
+// and every table definition into the browser bundle. Re-exported here so server-side
+// callers are unchanged and there is still exactly one definition.
+export {
+  TERMINAL_WORKSPACE_STATUSES,
+  AGENT_RUNNING_STATUSES,
+  WIP_OCCUPYING_STATUSES,
+  isTerminalWorkspaceStatus,
+  isAgentRunningStatus,
+  occupiesWipSlot,
+  holdsLiveResources,
+} from "./workspace-liveness.js";
+export type { WorkspaceStatus } from "./workspace-liveness.js";
 
-/**
- * Workspace statuses that are TERMINAL — the row no longer owns live resources
- * (its teardown has run), so "still live?" filters must EXCLUDE it. This is the
- * SINGLE source of truth shared by every such filter (the service-stack reaper's
- * open-row query, the service-state repository, the deferred-launch lifecycle
- * recheck) so two liveness definitions can never silently drift apart (#57).
- *
- * "merged" is NOT a member of WorkspaceStatus today — a merged workspace is
- * `status: "closed"` with `mergedAt` set — so the entry is currently DEAD. It is
- * retained deliberately: the previous divergence (the reaper filtered on
- * `status != "closed"` while the repository filtered on `["closed","merged"]`)
- * agreed only by accident, and would have split the instant someone added a real
- * "merged" enum member — the reaper would then treat merged workspaces as live and
- * shield their stacks from reclamation forever. Routing every consumer through this
- * one constant means that if "merged" ever becomes real, they all treat it as
- * terminal in lockstep.
- */
-export const TERMINAL_WORKSPACE_STATUSES = ["closed", "merged"] as const;
-
-/** True if a workspace status is terminal (see {@link TERMINAL_WORKSPACE_STATUSES}). */
-export function isTerminalWorkspaceStatus(status: string | null | undefined): boolean {
-  return status != null && (TERMINAL_WORKSPACE_STATUSES as readonly string[]).includes(status);
-}
-
-// --- Named liveness questions (#498) ------------------------------------------------
-//
-// TERMINAL_WORKSPACE_STATUSES made the terminal side single-source. The NON-terminal
-// side was then hand-rolled ~22 times in at least FOUR different sets:
-//
-//   {active, fixing}                    9 sites
-//   {active, reviewing, fixing}         5 sites
-//   {active, reviewing}                 2 sites
-//   {active, idle, fixing} and
-//   {active, reviewing, fixing, idle}   server-side
-//
-// Those sets are not four attempts at one answer — they answer DIFFERENT questions, and
-// collapsing them into a single "live" predicate would be wrong. The problem is that
-// the QUESTION is never named at the call site, so a reader cannot tell whether a given
-// set is deliberate or a typo, and a new status has no obvious home.
-//
-// So: name the questions. Each predicate below answers exactly one, and its doc says
-// what a wrong answer costs.
-
-/**
- * Is an agent PROCESS running right now?
- *
- * `reviewing` is excluded: review runs as its own session, and callers asking this are
- * deciding whether to show a live-output affordance or detect a stall. Including
- * `reviewing` would make a reviewing workspace look stalled once its own agent exits.
- */
-export const AGENT_RUNNING_STATUSES = ["active", "fixing"] as const satisfies readonly WorkspaceStatus[];
-
-export function isAgentRunningStatus(status: string | null | undefined): boolean {
-  return status != null && (AGENT_RUNNING_STATUSES as readonly string[]).includes(status);
-}
-
-/**
- * Does this workspace consume a WIP slot?
- *
- * Broader than `isAgentRunningStatus`: a workspace awaiting review still occupies the
- * lane, so starting another ticket against it would exceed the configured WIP. Under-
- * counting here is what lets the monitor over-start.
- */
-export const WIP_OCCUPYING_STATUSES = ["active", "fixing", "reviewing"] as const satisfies readonly WorkspaceStatus[];
-
-export function occupiesWipSlot(status: string | null | undefined): boolean {
-  return status != null && (WIP_OCCUPYING_STATUSES as readonly string[]).includes(status);
-}
-
-/**
- * Does the row still own live RESOURCES (worktree, ports, service stack)?
- *
- * The complement of terminal, and deliberately the widest set — `idle` and `blocked`
- * workspaces still hold a worktree. Anything narrower risks reclaiming a directory out
- * from under a paused workspace.
- */
-export function holdsLiveResources(status: string | null | undefined): boolean {
-  return !isTerminalWorkspaceStatus(status);
-}
+import type { WorkspaceStatus } from "./workspace-liveness.js";
 
 /**
  * Columns `setWorkspaceStatus` refuses to write through `opts.set`.

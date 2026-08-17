@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { TickerEntry } from "../hooks/useAgentLiveTicker.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { openSessionTranscript } from "../lib/sessionTranscriptEvents.js";
-import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-status";
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
 
 interface AgentLiveTickerPanelProps {
   entries: TickerEntry[];

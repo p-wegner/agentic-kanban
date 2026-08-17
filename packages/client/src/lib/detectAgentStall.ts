@@ -1,4 +1,4 @@
-import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-status";
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
 // Pure, client-side derivation of a per-workspace "stall signal" (#86).
 //
 // A running agent that produces no output/token delta for minutes, or repeats the

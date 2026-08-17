@@ -1,6 +1,6 @@
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "./useBoardEvents.js";
-import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-status";
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
 
 // Pure view-model for AgentGrid: status/attention config, per-card derivations, and
 // the grid-level agent partition / sort / sizing. No JSX, no hooks — so the logic
