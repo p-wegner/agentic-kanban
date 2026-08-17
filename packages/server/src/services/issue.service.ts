@@ -343,9 +343,7 @@ export function createIssueService(deps: {
 
     for (let i = 0; i < inputs.length; i++) {
       if (!inputs[i].title || !inputs[i].title.trim()) {
-        const err = new IssueError(`issues[${i}].title is required`, "BAD_REQUEST") as IssueError & { index?: number };
-        err.index = i;
-        throw err;
+        throw new IssueError(`issues[${i}].title is required`, "BAD_REQUEST", i);
       }
     }
 

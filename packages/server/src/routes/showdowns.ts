@@ -4,7 +4,6 @@ import type { BoardEvents } from "../services/board-events.js";
 import { createShowdownService } from "../services/showdown.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
-import { WorkspaceError } from "../services/workspace-internals.js";
 
 export function createShowdownsRoute(
   database: Database,
@@ -31,15 +30,8 @@ export function createShowdownsRoute(
     const id = c.req.param("id");
     const body = await parseJsonBody<{ winnerWorkspaceId: string }>(c);
     if (!body.winnerWorkspaceId) return c.json({ error: "winnerWorkspaceId is required" }, 400);
-    try {
-      const result = await showdownService.pickWinner(id, body.winnerWorkspaceId);
-      return c.json(result);
-    } catch (err) {
-      if (err instanceof WorkspaceError) {
-        return c.json({ error: err.message }, err.code === "NOT_FOUND" ? 404 : 400);
-      }
-      throw err;
-    }
+    const result = await showdownService.pickWinner(id, body.winnerWorkspaceId);
+    return c.json(result);
   });
 
   return router;
