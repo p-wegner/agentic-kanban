@@ -1,7 +1,7 @@
 import type * as agentService from "../services/agent.service.js";
 import { rawClient, rawWriteClient } from "../db/index.js";
 import { createBackup } from "../db/backup.js";
-import { isTransientNetworkError } from "./transient-errors.js";
+import { isTransientNetworkError } from "../lib/transient-errors.js";
 import { activeMerges } from "../services/workspace-internals.js";
 import { stopMcpHttpBridge } from "../services/mcp-http-bridge.service.js";
 import { stopAllPluginViewsAsync } from "../services/plugin.service.js";

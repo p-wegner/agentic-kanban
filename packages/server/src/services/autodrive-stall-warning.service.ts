@@ -4,7 +4,7 @@ import { db } from "../db/index.js";
 import { isClaudeUsageLimitStats } from "./claude-rate-limit.js";
 import { isCodexUsageLimitStats } from "./codex-rate-limit.js";
 import { resolveStartPolicy } from "./start-policy.service.js";
-import { classifyQuotaBlock, parseSessionStats } from "../startup/monitor-cycle-rules.js";
+import { classifyQuotaBlock, parseSessionStats } from "./monitor-cycle-rules.js";
 import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
 import {
   getAllPreferences,

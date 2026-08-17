@@ -4,7 +4,7 @@
  * context-window occupancy via the SDK's own accounting.
  */
 import { query, type Options, type Query, type SDKUserMessage, type SlashCommand } from "@anthropic-ai/claude-agent-sdk";
-import { isTransientNetworkError } from "../../startup/transient-errors.js";
+import { isTransientNetworkError } from "../../lib/transient-errors.js";
 import { classifyButlerLoopError } from "../../lib/butler-loop-classify.js";
 import type { ButlerSession } from "./types.js";
 import type { Pushable } from "./pushable.js";

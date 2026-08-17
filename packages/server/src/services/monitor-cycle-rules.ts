@@ -1,7 +1,7 @@
 import { parseSessionStatsBlob } from "@agentic-kanban/shared";
-import { isClaudeUsageLimitStats } from "../services/claude-rate-limit.js";
-import { isCodexUsageLimitStats } from "../services/codex-rate-limit.js";
-import type { WorkspaceCandidate } from "./monitor-cycle.js";
+import { isClaudeUsageLimitStats } from "./claude-rate-limit.js";
+import { isCodexUsageLimitStats } from "./codex-rate-limit.js";
+import type { WorkspaceCandidate } from "../startup/monitor-cycle.js";
 
 export const MAX_SESSIONS = 10;
 export const DEFAULT_STUCK_BUILDER_TIMEOUT_MS = 9 * 60 * 1000;
