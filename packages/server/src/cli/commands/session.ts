@@ -2,7 +2,7 @@ import type { Command } from "commander";
 import { parseSessionSummary, computeFrictionStats, extractKeywords } from "@agentic-kanban/shared";
 import type { SessionFrictionStats } from "@agentic-kanban/shared";
 import { getCommitsForBranch } from "@agentic-kanban/shared/lib/git-service";
-import { runMigrations, getActiveProjectId } from "../shared.js";
+import { runMigrations, getActiveProjectId, resolveIssueNumberArg } from "../shared.js";
 import {
   getSessionMessageRows,
   getSessionById,
@@ -680,11 +680,12 @@ Examples:
     .option("--error <text>", "Error text or description to match (overrides issue description lookup)")
     .option("--limit <n>", "Maximum matches to return", "3")
     .option("--json", "Emit raw JSON instead of a formatted report")
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
     .addHelpText("after", `
 Examples:
   pnpm cli -- session find-similar 42
   pnpm cli -- session find-similar 42 --error "ReferenceError: X is not defined" --limit 5`)
-    .action(async (issueNumberStr: string, options: { error?: string; limit?: string; json?: boolean }) => {
+    .action(async (issueNumberStr: string, options: { error?: string; limit?: string; json?: boolean; project?: string }) => {
       try {
         await runMigrations();
 
@@ -692,15 +693,18 @@ Examples:
 
         let errorText = options.error ?? "";
         if (!errorText) {
-          // Look up the issue description/title to use as query text
-          const issueNum = parseInt(issueNumberStr, 10);
-          if (isNaN(issueNum)) {
-            console.error("Invalid issue number.");
+          // #509: this prelude was drifted — no `--project`, and a bare "Issue #N not
+          // found." instead of the #467 cross-project explanation. The lookup underneath
+          // was also unscoped, so on a multi-project board it could feed ANOTHER
+          // project's ticket text to the failure-pattern search.
+          const ref = await resolveIssueNumberArg(issueNumberStr, { project: options.project });
+          if (!ref.ok) {
+            console.error(ref.message);
             process.exit(1);
           }
-          const issueRow = await getIssueTitleDescriptionByNumber(issueNum);
+          const issueRow = await getIssueTitleDescriptionByNumber(ref.issueNumber, ref.projectId);
           if (!issueRow) {
-            console.error(`Issue #${issueNum} not found.`);
+            console.error(`Issue #${ref.issueNumber} not found.`);
             process.exit(1);
           }
           errorText = [issueRow.title, issueRow.description ?? ""].join(" ");

@@ -95,8 +95,15 @@ export async function getIssueByNumberOrId(
   database: Database = db,
 ): Promise<Issue | null> {
   const isNumeric = /^\d+$/.test(issueArg);
+  if (isNumeric && projectId === undefined) {
+    // #509: this was `eq(issues.projectId, projectId!)`. The non-null assertion was a
+    // claim, not a check — with no project the comparison became `project_id = undefined`,
+    // whose result is a driver detail rather than a decision anyone made. A numeric ref
+    // is meaningless without a project (numbers are per-project), so say so.
+    return null;
+  }
   const whereClause = isNumeric
-    ? and(eq(issues.issueNumber, Number(issueArg)), eq(issues.projectId, projectId!))
+    ? and(eq(issues.issueNumber, Number(issueArg)), eq(issues.projectId, projectId as string))
     : eq(issues.id, issueArg);
   const rows = await database.select().from(issues).where(whereClause).limit(1);
   return rows[0] ?? null;
@@ -124,11 +131,24 @@ export async function getIssueWithStatusById(issueId: string, database: Database
  * Title + description for the first issue with this issue number (NOT project-
  * scoped — matches the CLI `session find-similar` global lookup), or null.
  */
-export async function getIssueTitleDescriptionByNumber(issueNumber: number, database: Database = db) {
+export async function getIssueTitleDescriptionByNumber(
+  issueNumber: number,
+  /**
+   * #509: this was an unscoped `where(issueNumber = N)` — the same defect #506 fixed at
+   * three other surfaces. Numbers are per-project, so on a multi-project board it could
+   * pull ANOTHER project's issue text and feed it to the failure-pattern search as if it
+   * were this ticket's. Optional so the signature stays back-compatible; every caller in
+   * tree now passes it.
+   */
+  projectId?: string,
+  database: Database = db,
+) {
   const rows = await database
     .select({ title: issues.title, description: issues.description })
     .from(issues)
-    .where(eq(issues.issueNumber, issueNumber))
+    .where(projectId
+      ? and(eq(issues.issueNumber, issueNumber), eq(issues.projectId, projectId))
+      : eq(issues.issueNumber, issueNumber))
     .limit(1);
   return rows[0] ?? null;
 }

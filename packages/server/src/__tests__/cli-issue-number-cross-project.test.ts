@@ -11,7 +11,12 @@ import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as schema from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
-import { findProjectsWithIssueNumber } from "../repositories/issue/cli-commands.repository.js";
+import { eq } from "drizzle-orm";
+import {
+  findProjectsWithIssueNumber,
+  getIssueTitleDescriptionByNumber,
+  getIssueByNumberOrId,
+} from "../repositories/issue/cli-commands.repository.js";
 
 let db: TestDb;
 let dispose: () => void;
@@ -75,5 +80,38 @@ describe("findProjectsWithIssueNumber (#467)", () => {
   it("returns nothing for a number that exists in no project", async () => {
     // This is the only case where a plain "not found" is the honest answer.
     expect(await findProjectsWithIssueNumber(999, db)).toEqual([]);
+  });
+});
+
+describe("getIssueTitleDescriptionByNumber is project-scoped (#509)", () => {
+  it("returns the ACTIVE project's issue, not another project's same number", async () => {
+    // Unscoped, this returned whichever row the driver happened to hand back first —
+    // and `session find-similar` then fed that text to the failure-pattern search as if
+    // it were this ticket's. Same defect class as #506, in a fourth place.
+    const alphaRow = await getIssueTitleDescriptionByNumber(7, alphaId, db);
+    expect(alphaRow?.title).toBe("alpha seven");
+
+    const betaRow = await getIssueTitleDescriptionByNumber(7, betaId, db);
+    expect(betaRow?.title).toBe("beta seven");
+  });
+
+  it("misses a number that belongs to another project", async () => {
+    // #42 is beta's. From alpha, the honest answer is null — which is what lets the
+    // caller reach describeIssueNumberMiss and name beta.
+    expect(await getIssueTitleDescriptionByNumber(42, alphaId, db)).toBeNull();
+    expect((await getIssueTitleDescriptionByNumber(42, betaId, db))?.title).toBe("beta forty-two");
+  });
+});
+
+describe("getIssueByNumberOrId refuses a numeric ref with no project (#509)", () => {
+  it("returns null instead of comparing project_id against undefined", async () => {
+    // Was `eq(issues.projectId, projectId!)` — an assertion, not a check. A numeric ref
+    // is meaningless without a project, so the miss is the answer.
+    expect(await getIssueByNumberOrId("7", undefined, db)).toBeNull();
+  });
+
+  it("still resolves a UUID ref with no project, which is unambiguous on its own", async () => {
+    const [row] = await db.select().from(schema.issues).where(eq(schema.issues.projectId, betaId)).limit(1);
+    expect(await getIssueByNumberOrId(row.id, undefined, db)).toMatchObject({ id: row.id });
   });
 });
