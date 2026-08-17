@@ -7,6 +7,7 @@ import type { ProviderName } from "../agent-provider.js";
 import type { ProviderId } from "../agent-provider.js";
 import type { StartSessionOptions } from "./types.js";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 export interface PlanModeExitRelaunch {
   agentCommand: string | undefined;
   agentArgs: string | undefined;
@@ -69,7 +70,7 @@ export async function finalizePlanModeExit(
 
     const harness = relaunch.provider === "codex" ? "codex" : relaunch.provider === "copilot" ? "copilot" : "claude";
     const prefRows = await lifecycleRepo.getAllPreferences(db);
-    const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
+    const prefMap = toPrefMap(prefRows);
     const autoContinue = getHarnessBoolSetting(prefMap, harness, "plan_auto_continue");
 
     if (autoContinue) {

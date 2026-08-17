@@ -12,6 +12,7 @@ import {
   type BoardStatusClassificationOptions,
 } from "./board-status-classifiers.js";
 import { collectBoardStatusEntryWork, type ConflictCacheEntry } from "./board-status-enrichment.js";
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import {
   getActiveProjectIdPref,
   getBoardStatusProject,
@@ -81,7 +82,7 @@ export async function getBoardStatus(
   if (!project) throw new NotFoundError(`Project ${projectId} not found`);
 
   const preferenceRows = await getAutoMergePreferences(database);
-  const preferenceMap = new Map(preferenceRows.map((pref) => [pref.key, pref.value]));
+  const preferenceMap = toPrefMap(preferenceRows);
   const classificationOptions: BoardStatusClassificationOptions = {
     autoMergeEnabled: isAutoMergeEnabled(preferenceMap),
     autoMergeInReview: getBool(preferenceMap, "auto_merge_in_review"),

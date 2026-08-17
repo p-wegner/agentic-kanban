@@ -29,6 +29,7 @@ import { parseClaudeSubscriptionRing, claudeConfigDirHasAuth, resolveClaudeConfi
 import { detectCliVersion, type CliVersionResult, type VersionRunner } from "./agent-cli-version.service.js";
 import { isMockAgentCommand } from "./agent-provider/helpers.js";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 export type ProfileHealthStatus = "ok" | "warning" | "error" | "unknown";
 
 export interface AgentProfilePreflightResult {
@@ -369,7 +370,7 @@ export async function listAgentProfileHealth(
   },
 ): Promise<AgentProfileHealthRow[]> {
   const prefRows = await getAllPreferences(database);
-  const prefMap = new Map(prefRows.map((row) => [row.key, row.value]));
+  const prefMap = toPrefMap(prefRows);
   // Launch-failure payloads are RUNTIME STATE (in `runtime_state`, #975), not config.
   const failureRows = new Map(
     (await getRuntimeStateByPrefix(FAILURE_PREFIX, database)).map((row) => [row.key, row.value]),

@@ -4,6 +4,7 @@ import { isTerminalStatusView } from "@agentic-kanban/shared/lib/status-view";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 /** Pref key holding the marker for a project's last-announced completion state. */
 export function projectCompletionMarkerKey(projectId: string): string {
   return `project_completed_announced_${projectId}`;
@@ -65,7 +66,7 @@ export async function reconcileProjectCompletion(
   const markerRows = await database
     .select({ key: preferences.key, value: preferences.value })
     .from(preferences);
-  const markerMap = new Map(markerRows.map((r) => [r.key, r.value]));
+  const markerMap = toPrefMap(markerRows);
 
   let changed = 0;
 

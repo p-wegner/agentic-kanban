@@ -62,6 +62,7 @@ import {
 } from "../lib/fork-artifacts.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 /** Default concurrency + timeout caps for parallel fork children (#82). */
 const MAX_CONCURRENT_PER_WORKSPACE = 2;
 const MAX_CONCURRENT_PER_PROJECT = 4;
@@ -83,7 +84,7 @@ export function createWorkflowForkService(deps: {
 
   async function resolveAgentConfig() {
     const prefRows = await selectAllPreferences(database);
-    const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
+    const prefMap = toPrefMap(prefRows);
     const s = resolveAgentSettings(prefMap);
     const model = resolveEffectiveModel({ prefMap, provider: s.provider }).model;
     return { ...s, model };

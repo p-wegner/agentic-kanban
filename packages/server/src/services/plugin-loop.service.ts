@@ -213,6 +213,7 @@ export interface GateResolveResult {
 export { isLoopUnitAccountedForByPlanner } from "./plugin-loop-accounting.js";
 import { gateBlockingTickets } from "./plugin-loop-accounting.js";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 export function createPluginLoopEngine(deps: PluginLoopDeps) {
   const { database, createIssue, createWorkspace, boardUrl, boardEvents } = deps;
 
@@ -516,7 +517,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
     }
 
     const prefs = await getAllPreferences(database);
-    const policy = resolveStartPolicy(new Map(prefs.map((p) => [p.key, p.value])), args.projectId);
+    const policy = resolveStartPolicy(toPrefMap(prefs), args.projectId);
     if (created.length > 0 && !policy.autoStartUnblocked) {
       warnings.push(
         `Start Mode is "${policy.mode}" — the board will NOT auto-start these tickets. `

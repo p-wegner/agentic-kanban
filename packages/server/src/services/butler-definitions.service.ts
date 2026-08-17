@@ -23,6 +23,7 @@ import {
 import { resolveEffectiveProviderProfile } from "./effective-config.service.js";
 import { loadCodexLicenseRing, resolveCodexHomeForProfile } from "./codex-license-ring.js";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 export interface ButlerDefinition {
   /** Stable kebab-case id. "default" is reserved for the always-present legacy butler. */
   id: string;
@@ -222,7 +223,7 @@ export async function resolveButlerLaunchConfig(
   const butlerProvider = def?.provider;
 
   const prefRows = await getAllPreferences(database);
-  const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
+  const prefMap = toPrefMap(prefRows);
 
   const settings = await loadAgentSettings(database);
   const perProject = await getPreference(butlerProfilePrefKey(projectId), database);

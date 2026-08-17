@@ -30,6 +30,7 @@ import { shouldStartHealthRefresh } from "./health-refresh-gate.js";
 import { getLoopLagMonitor } from "../lib/loop-lag-registry.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 /**
  * Per-project hands-off mode. A `board_autodrive_<projectId>` preference set to
  * "true" opts that project into autonomous driving (auto-start / relaunch / refill)
@@ -191,7 +192,7 @@ export function setupMonitorRoutes(app: Hono, monitorState: MonitorState, runMon
     // #402's short-TTL cache instead of a raw full-table scan — this endpoint is
     // polled every 30s by EVERY open tab, so the scans stacked up fast.
     const prefRows = await getAllPreferencesCached(db);
-    const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
+    const prefMap = toPrefMap(prefRows);
     const maintenanceEnabled = getBool(prefMap, "monitor_maintenance_window_enabled");
     const maintenanceEnd = prefMap.get("monitor_maintenance_window_end") || null;
     const maintenanceActive = maintenanceEnabled && (!maintenanceEnd || new Date(maintenanceEnd).getTime() > Date.now());
@@ -414,7 +415,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
     try {
       setPhase("loading-preferences");
       const prefRows = await db.select().from(preferences);
-      const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
+      const prefMap = toPrefMap(prefRows);
       if (!force && !monitorShouldRun(prefMap)) return;
       cycleDidWork = true;
       // Deliberately NOT awaited. Instrumentation must not sit on the cycle's critical path: awaiting

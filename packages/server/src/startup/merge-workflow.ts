@@ -34,6 +34,7 @@ import { getWorkspaceById } from "../repositories/workspace-reads.repository.js"
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 export type MergeWorkspace = Pick<typeof workspaces.$inferSelect, "id" | "isDirect" | "branch" | "workingDir" | "baseBranch" | "issueId">;
 
 export interface MergeDeps {
@@ -63,7 +64,7 @@ export function hasVisuallyVerifiableChanges(changedFiles: string[], isWebProjec
 export async function tagIfNeedsVisualVerification(repoPath: string, branch: string, baseBranch: string | null, issueId: string, now: string, projectId?: string): Promise<void> {
   try {
     const prefRows = await db.select({ key: preferences.key, value: preferences.value }).from(preferences);
-    const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
+    const prefMap = toPrefMap(prefRows);
     if (prefMap.get("visual_verification_mode") !== "after_merge") return;
 
     // Is this a web/service project? Read it from the persisted stack profile (already in prefMap).
@@ -248,7 +249,7 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
     const merge: { landed: { mergedAt: string; mergedHeadSha: string | null } | null } = { landed: null };
     try {
       const prefRowsLearning = await db.select().from(preferences);
-      const prefMapLearning = new Map(prefRowsLearning.map((r) => [r.key, r.value]));
+      const prefMapLearning = toPrefMap(prefRowsLearning);
       if (getBool(prefMapLearning, "learning_step_before_merge") && workspace.workingDir) {
         try {
           const learningPrompt = buildLearningStepPrompt(true);

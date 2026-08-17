@@ -12,6 +12,7 @@ import { requireEntity } from "../db-utils.js";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 export function registerStartWorkspace(server: McpServer) {
   server.tool(
     "start_workspace",
@@ -120,7 +121,7 @@ export function registerStartWorkspace(server: McpServer) {
         // time. Quota state lives in the server-only `quota-usage.service` (network
         // fetch) which the MCP package does not import.
         const prefRows = await db.select().from(schema.preferences);
-        const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
+        const prefMap = toPrefMap(prefRows);
         const { provider, profileName } = resolveProviderProfileFromPrefs(prefMap, issue.projectId);
         const agentCommand = prefMap.get("agent_command") || null;
 

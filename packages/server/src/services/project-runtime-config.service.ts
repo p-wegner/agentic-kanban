@@ -15,6 +15,7 @@ import { providerProfilePrefKey, readSettingsProviderSelection, resolveProviderD
 import { resolveStartPolicy, startModePrefKey, type StartPolicy } from "./start-policy.service.js";
 import { HARNESS_IDS, harnessSettingKey } from "./harness-settings.js";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 export function autodrivePrefKey(projectId: string): string {
   return `board_autodrive_${projectId}`;
 }
@@ -141,7 +142,7 @@ export async function loadProjectRuntimeConfig(
   input: Omit<ProjectRuntimeConfigInput, "prefMap" | "strategySelection">,
 ): Promise<ProjectRuntimeConfig> {
   const rows = await getAllPreferences(database);
-  const prefMap = new Map(rows.map((r) => [r.key, r.value]));
+  const prefMap = toPrefMap(rows);
   const hasOverride = Boolean(input.profileOverride?.name) || Boolean(input.legacyProfileOverride);
   const strategySelection = !hasOverride
     ? await resolveStrategyProviderSelection(database, input.projectId)

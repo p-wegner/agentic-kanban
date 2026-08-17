@@ -11,6 +11,7 @@ import { getDriveStatus, setDriveEnabled } from "./drive.service.js";
 import type { DriveEnablementStatus } from "./drive.service.js";
 import { resolveProjectRuntimeConfig } from "./project-runtime-config.service.js";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 /**
  * Drive preflight (#807): assert the hands-off prerequisites BEFORE a drive starts.
  *
@@ -149,7 +150,7 @@ export async function runDrivePreflight(
 
   const evaluate = async (): Promise<{ checks: PreflightCheck[]; drive: DriveEnablementStatus }> => {
     const prefRows = await getAllPreferences(database);
-    const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
+    const prefMap = toPrefMap(prefRows);
     const checks: PreflightCheck[] = [];
 
     // --- Project record: registered, defaultBranch set, repoPath resolvable ---

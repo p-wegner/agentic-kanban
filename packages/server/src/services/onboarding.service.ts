@@ -27,6 +27,7 @@ import type { PluginService } from "./plugin.service.js";
 import type { createAgentSkillService } from "./agent-skill.service.js";
 import type { CreateIssueInput, CreateIssueResult } from "./issue.service.js";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 export class OnboardingError extends Error {
   constructor(
     message: string,
@@ -120,7 +121,7 @@ export function createOnboardingService(deps: OnboardingServiceDeps) {
         // returned undefined and this step nagged "not configured" at a project that is in
         // fact auto-driven. resolveStartPolicy derives that case.
         const rows = await getAllPreferences(database);
-        const prefMap = new Map(rows.map((r) => [r.key, r.value]));
+        const prefMap = toPrefMap(rows);
         return resolveStartPolicy(prefMap, projectId).mode !== "manual";
       }
       case "wip-limit": {

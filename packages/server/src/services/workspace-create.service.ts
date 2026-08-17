@@ -63,6 +63,7 @@ import { listProjectRepos } from "../repositories/repo.repository.js";
 import { basename } from "node:path";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 export function createWorkspaceCreateService(deps: {
   database: Database;
   getSessionManager?: () => SessionManager;
@@ -875,7 +876,7 @@ export function createWorkspaceCreateService(deps: {
     if (agentConfig.resolvedProfileSelection) {
       const { provider, name } = agentConfig.resolvedProfileSelection;
       const prefRows = await crudRepo.getAllPreferences(database);
-      const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
+      const prefMap = toPrefMap(prefRows);
       const profileCheck = preflightAgentProfile(prefMap, provider, name);
       if (!profileCheck.ok) {
         for (const err of profileCheck.errors) {

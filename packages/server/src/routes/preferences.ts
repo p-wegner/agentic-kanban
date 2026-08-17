@@ -22,6 +22,7 @@ import { parseJsonBody } from "../middleware/parse-body.js";
 import type { ProviderName } from "../services/agent-provider.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 export function createPreferencesRoute(database: Database) {
   const router = createRouter();
   const preferenceService = createPreferenceService({ database });
@@ -206,7 +207,7 @@ export function createPreferencesRoute(database: Database) {
     }
     const profileName = body.profileName?.trim() || "default";
     const prefRows = await getAllPreferences(database);
-    const prefMap = new Map(prefRows.map((row) => [row.key, row.value]));
+    const prefMap = toPrefMap(prefRows);
     const result: AgentProfilePreflightResult = preflightAgentProfile(prefMap, provider, profileName);
     return c.json(result);
   });

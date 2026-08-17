@@ -18,6 +18,7 @@ import type { ProviderName } from "./agent-provider.js";
 import type { ProviderId } from "./agent-provider.js";
 import { narrowProviderName, getProfilePrefKey } from "./agent-provider.js";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MOCK_AGENT_PATH = resolve(__dirname, "../scripts/mock-agent.ts");
 const TSX_LOADER = resolve(__dirname, "../../node_modules/tsx/dist/loader.mjs");
@@ -43,7 +44,7 @@ export async function loadAgentSettings(
   commandOverride?: string,
 ): Promise<AgentSettings> {
   const prefRows = await database.select().from(preferences);
-  const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
+  const prefMap = toPrefMap(prefRows);
   return resolveAgentSettings(prefMap, commandOverride);
 }
 
