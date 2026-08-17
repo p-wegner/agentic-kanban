@@ -21,7 +21,7 @@ import * as schema from "../schema/index.js";
 import type { WorkflowDb } from "./workflow-engine/types.js";
 import { parseSessionSummary, formatDurationStr } from "./session-summary.js";
 import { parseSessionStatsBlob } from "./session-stats-blob.js";
-import { readSessionStdoutFile } from "./session-files.js";
+import { readSessionMessages } from "./session-messages.js";
 import { isAnalyticsNoise, selectSummarySession } from "./session-selection.js";
 
 export interface IssueSummaryStats {
@@ -136,28 +136,6 @@ function degenerate(
 }
 
 /**
- * Load a session's output rows, preferring the on-disk .out file (where detached agents
- * stream stdout) and falling back to persisted `session_messages` for historical
- * sessions. Mirrors the server repository's `getSessionMessageRows`; kept local so this
- * module stays free of server imports.
- */
-async function loadSessionMessageRows(
-  db: WorkflowDb,
-  sessionId: string,
-): Promise<Array<{ type: string; data: string | null }>> {
-  const dbRows = await db
-    .select({ type: schema.sessionMessages.type, data: schema.sessionMessages.data })
-    .from(schema.sessionMessages)
-    .where(eq(schema.sessionMessages.sessionId, sessionId))
-    .orderBy(schema.sessionMessages.id);
-
-  const fileContent = readSessionStdoutFile(sessionId);
-  if (fileContent === null) return dbRows;
-  // File present: stdout from the file, everything else from the DB.
-  return [{ type: "stdout", data: fileContent }, ...dbRows.filter((r) => r.type !== "stdout")];
-}
-
-/**
  * Resolve an issue to its representative agent session and parse that session's summary.
  * Returns null only when the issue itself does not exist; an issue with no workspace or
  * no session comes back as a result carrying `status: "no workspace" | "no session"`.
@@ -188,7 +166,7 @@ export async function loadIssueSummary(
   const session = selectSummarySession(sessionRows, isAnalyticsNoise);
   if (!session) return degenerate(issue, "no session");
 
-  const msgRows = await loadSessionMessageRows(db, session.id);
+  const { messages: msgRows } = await readSessionMessages(db, session.id);
   const parsedStats = parseSessionStatsBlob(session.stats);
   const summary = parseSessionSummary(msgRows);
   if (!summary.agentSummary && parsedStats && typeof parsedStats.agentSummary === "string") {
