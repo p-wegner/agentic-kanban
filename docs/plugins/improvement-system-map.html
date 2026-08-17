@@ -112,6 +112,21 @@ footer{margin-top:40px;color:var(--muted);font:12px var(--mono);border-top:1px s
 </div>
 <div class="back">↺ stage 5 re-plans stage 3 (loops re-plan from what is left) and hardens stage 4 (friction → lab)</div>
 
+<h2 id="pick">Which part do I reach for?</h2>
+<p class="lead">Start from the question you actually have. Each row names the plugin (and the entry in its Plugins-tab rail) that answers it — and the stage it belongs to, so you know what comes before and after.</p>
+<table>
+<thead><tr><th>You want to…</th><th>Reach for</th><th>How it appears on the board</th><th>Stage</th></tr></thead>
+<tbody>
+<tr><td>Know what the system does before touching it, and pin that with tests</td><td><span class="chip net">refactor-safety-net</span> — <code>requirement-extraction</code>, <code>functional-coverage</code>, <code>api-inventory</code></td><td>Loops (requirements per module) + views (coverage dashboard, UI graph)</td><td>1</td></tr>
+<tr><td>Find where the structural debt is (hotspots, coupling, god classes)</td><td><span class="chip metrics">code-metrics</span> — <code>code-metrics</code> skill / <code>import-graph</code></td><td>Scripts (scorecard, arch-page) + Quality Metrics view</td><td>2</td></tr>
+<tr><td>Decide <em>what</em> to change and in which order</td><td><span class="chip metrics">code-metrics</span> — <code>module-decomposition</code>, <code>pattern-language</code>, <code>refactoring-scout</code>, <code>arch-index</code></td><td><code>arch-plan</code> loop → one ticket per finding</td><td>3</td></tr>
+<tr><td>Apply a rename / move / extract without breaking callers</td><td><span class="chip tool">refactor</span> verbs, run by a builder in a worktree</td><td>Skill materialised into every worktree; gated by review + pre-merge gate</td><td>4</td></tr>
+<tr><td>Prove the refactor helped (or didn't)</td><td><span class="chip metrics">code-metrics</span> <code>--post-board</code> + <span class="chip board">board</span> Quality Metrics trend</td><td>Quality Metrics view (latest, delta, sparkline per key)</td><td>5</td></tr>
+<tr><td>A refactor verb was missing or wrong</td><td><span class="chip tool">refactor-lab</span> — file a <code>refactor-tool:</code> ticket on the refactor-skill project</td><td><code>refactor-lab</code> loop picks it up in the next round</td><td>5 → 4</td></tr>
+<tr><td>Just get a ticket built, reviewed and merged</td><td><span class="chip board">board</span> alone — no plugin needed</td><td>New Workspace / Start Mode <code>monitor</code></td><td>—</td></tr>
+</tbody></table>
+<p class="lead">Rule of thumb: <b>measure before you plan, protect before you change, re-measure after.</b> Skipping stage 1 on a codebase you don't know is how a "safe" rename becomes a production incident; skipping stage 5 is how nobody can tell whether the effort paid.</p>
+
 <h2>The parts — role, capabilities, what goes in and out</h2>
 <p class="lead">Each is usable on its own (CLI / skill); the plugin manifest is what makes it a board citizen — skills into worktrees, views, one-shot scripts, and a board-owned <em>loop</em> whose plan command lists outstanding work as units the board tickets.</p>
 <div class="parts">
