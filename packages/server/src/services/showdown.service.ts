@@ -206,9 +206,9 @@ export function createShowdownService(deps: {
     }
 
     // Broadcast update
-    const issueRow = await getIssueProjectId(showdown.issueId, database);
-    if (issueRow) {
-      boardEvents?.broadcast(issueRow.projectId, "board_changed");
+    const projectId = await getIssueProjectId(showdown.issueId, database);
+    if (projectId) {
+      boardEvents?.broadcast(projectId, "board_changed");
     }
 
     return (await getShowdown(showdownId))!;

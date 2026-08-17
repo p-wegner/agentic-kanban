@@ -1,4 +1,4 @@
-import { sessions, sessionMessages, workspaces, issues, preferences } from "@agentic-kanban/shared/schema";
+import { sessions, sessionMessages, workspaces, preferences } from "@agentic-kanban/shared/schema";
 import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
 import { setWorkspaceStatus, type WorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import { eq } from "drizzle-orm";
@@ -14,25 +14,12 @@ import {
   getSessionWorkspaceId as getSessionWorkspaceIdCanonical,
 } from "./session.repository.js";
 
-export async function getWorkspaceById(
-  workspaceId: string,
-  database: Database = db,
-) {
-  const rows = await database.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
-  return rows[0] ?? null;
-}
+// #502: one definition, in workspace-reads (this copy already had its shape, untyped).
+export { getWorkspaceById } from "./workspace-reads.repository.js";
 
-export async function getIssueProjectId(
-  issueId: string,
-  database: Database = db,
-): Promise<string | null> {
-  const rows = await database
-    .select({ projectId: issues.projectId })
-    .from(issues)
-    .where(eq(issues.id, issueId))
-    .limit(1);
-  return rows.length > 0 ? rows[0].projectId : null;
-}
+// #502: one definition, in issue.repository (this copy was the same query with
+// `rows.length > 0 ? ... : null` instead of `?? null`).
+export { getIssueProjectId } from "./issue.repository.js";
 
 export async function getProjectPreflightInfo(
   projectId: string,

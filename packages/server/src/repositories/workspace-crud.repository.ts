@@ -111,12 +111,9 @@ export async function findOpenDirectWorkspacesForIssue(
     .limit(3);
 }
 
-export async function getIssueProjectId(
-  issueId: string,
-  database: Database = db,
-) {
-  return database.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, issueId)).limit(1);
-}
+// #502: one definition, in issue.repository. This copy returned the raw ROW ARRAY,
+// so its caller unpacked a list that never had more than one element.
+export { getIssueProjectId } from "./issue.repository.js";
 
 export async function updateWorkspaceLaunchFailure(
   workspaceId: string,

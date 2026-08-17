@@ -18,9 +18,6 @@ export async function persistWorkspaceCleanupWarning(
 }
 
 /** Fetch a single workspace row by id, or null if not found. */
-export async function getWorkspaceById(
-  workspaceId: string,
-  database: Database = db,
-) {
-  return database.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1).then((r) => r[0]);
-}
+// #502: one definition, in workspace-reads. This copy resolved to `undefined` rather
+// than `null` for a miss; its only caller tests truthiness, so both read the same.
+export { getWorkspaceById } from "./workspace-reads.repository.js";

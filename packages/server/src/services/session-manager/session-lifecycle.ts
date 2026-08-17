@@ -89,6 +89,11 @@ export function createSessionLifecycle(
     // Look up workspace to get workingDir
     const workspace = await lifecycleRepo.getWorkspaceById(workspaceId, db);
     if (!workspace) throw new Error("Workspace not found");
+    // #502: bind the narrowed row for the async exit closures below. The canonical
+    // `getWorkspaceById` is typed `Workspace | null` (this file's old repository copy was
+    // untyped), and TS does not carry the guard's narrowing into a deferred closure — so
+    // two long-standing unguarded reads only became visible once the type was honest.
+    const workspaceRow = workspace;
     // Per-call model wins; otherwise inherit the model stored on the workspace so resume/
     // review/follow-up sessions stay on the same model the workspace was created with.
     // Guard: if workspace.model is a cross-provider id (e.g. gpt-5.5 baked into a claude
@@ -447,7 +452,7 @@ export function createSessionLifecycle(
         if (effectiveWorkingDir) {
           try {
             const { writeHandoffFile } = await import("../handoff.service.js");
-            await writeHandoffFile(effectiveWorkingDir, sessionId, db, workspace.baseBranch, workspaceId);
+            await writeHandoffFile(effectiveWorkingDir, sessionId, db, workspaceRow.baseBranch, workspaceId);
             console.log(`[session] HANDOFF.md written: workspaceId=${workspaceId} sessionId=${sessionId}`);
           } catch (err) {
             console.warn(`[session] HANDOFF.md write failed: sessionId=${sessionId}`, err);
@@ -510,7 +515,7 @@ export function createSessionLifecycle(
               provider,
               profile,
             },
-            { db, workspaceWorkingDir: workspace.workingDir, projectId, startSession },
+            { db, workspaceWorkingDir: workspaceRow.workingDir, projectId, startSession },
           ),
         );
       }

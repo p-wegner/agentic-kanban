@@ -2,7 +2,6 @@ import { eq, inArray } from "drizzle-orm";
 import { showdowns, workspaces, issues, agentSkills } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
-import { getProjectById } from "./project.repository.js";
 
 export async function getIssueForShowdown(
   issueId: string,
@@ -16,13 +15,8 @@ export async function getIssueForShowdown(
   return rows[0] ?? null;
 }
 
-export async function getProjectDefaultBranch(
-  projectId: string,
-  database: Database = db,
-) {
-  const project = await getProjectById(projectId, database);
-  return project ? { defaultBranch: project.defaultBranch } : null;
-}
+// #502: one definition, in project.repository (this copy already had its shape).
+export { getProjectDefaultBranch } from "./project.repository.js";
 
 export async function insertShowdown(
   values: {
@@ -159,14 +153,6 @@ export async function getShowdownWorkspaceIds(
     .where(eq(workspaces.showdownId, showdownId));
 }
 
-export async function getIssueProjectId(
-  issueId: string,
-  database: Database = db,
-) {
-  const rows = await database
-    .select({ projectId: issues.projectId })
-    .from(issues)
-    .where(eq(issues.id, issueId))
-    .limit(1);
-  return rows[0] ?? null;
-}
+// #502: one definition, in issue.repository. This copy returned the ROW object, so its
+// caller reached through `.projectId` for a query that only ever selects that column.
+export { getIssueProjectId } from "./issue.repository.js";
