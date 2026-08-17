@@ -38,7 +38,10 @@ export const TABS: { id: Tab; label: string }[] = [
   { id: "advanced", label: "Advanced" },
 ];
 
-export type AgentProvider = "claude" | "codex" | "copilot" | "pi";
+import { providerLabel, profileOptionLabel, defaultProfileToken, type AgentProviderName } from "@agentic-kanban/shared/lib/provider-traits";
+
+// #493: was declared three times across the client; the table owns it now.
+export type AgentProvider = AgentProviderName;
 
 export const COPILOT_DEFAULT_PROFILE = "default";
 export const CODEX_DEFAULT_PROFILE = "default";
@@ -117,36 +120,25 @@ export function uniqueProfiles(profiles: string[], fallback?: string): string[] 
   return [...new Set(all.filter(Boolean))];
 }
 
+/**
+ * #493: this surface's claude fallback is the EMPTY name (`claude:`), a third spelling
+ * next to `"none"` and `"default"` elsewhere. Passed explicitly rather than unified —
+ * see the note on `defaultProfileToken` about not folding a UX decision into a refactor.
+ */
 export function settingsProfileValue(settings: Settings): string {
-  const provider = (settings.provider || "claude") as AgentProvider;
-  if (provider === "codex") return `codex:${settings.codex_profile || CODEX_DEFAULT_PROFILE}`;
-  if (provider === "copilot") return `copilot:${settings.copilot_profile || COPILOT_DEFAULT_PROFILE}`;
-  if (provider === "pi") return `pi:${settings.pi_profile || PI_DEFAULT_PROFILE}`;
-  return `claude:${settings.claude_profile || ""}`;
+  return defaultProfileToken(settings, "");
 }
 
-export function profileOptionLabel(provider: AgentProvider, name: string): string {
-  const isDefault = (provider === "copilot" && name === COPILOT_DEFAULT_PROFILE) ||
-    (provider === "codex" && name === CODEX_DEFAULT_PROFILE) ||
-    (provider === "pi" && name === PI_DEFAULT_PROFILE);
-  const displayName = isDefault ? "Default" : name;
-  const providerLabel = providerDisplayName(provider);
-  return `${providerLabel}: ${displayName}`;
-}
+export { profileOptionLabel };
 
 export function defaultHarnessLabel(settings: Settings): string {
-  const provider = (settings.provider || "claude") as AgentProvider;
-  if (provider === "codex") return "Codex";
-  if (provider === "copilot") return "Copilot";
-  if (provider === "pi") return "Pi";
-  return "Claude";
+  return providerLabel(settings.provider);
 }
 
+// #493: `defaultHarnessLabel` and `providerDisplayName` were the SAME ladder twice in
+// this one file, and a third copy lived in workspace-helpers. All three are the table now.
 export function providerDisplayName(provider: AgentProvider): string {
-  if (provider === "codex") return "Codex";
-  if (provider === "copilot") return "Copilot";
-  if (provider === "pi") return "Pi";
-  return "Claude";
+  return providerLabel(provider);
 }
 
 export type CapabilityKey = "planMode" | "resume" | "mcpTools" | "visualVerify" | "permissionPrompts";
@@ -172,13 +164,11 @@ export function getProviderCapabilities(provider: AgentProvider, profileName: st
   if (isMock) {
     return { planMode: true, resume: true, mcpTools: true, visualVerify: true, permissionPrompts: false };
   }
-  if (provider === "codex") {
-    return { planMode: true, resume: true, mcpTools: true, visualVerify: true, permissionPrompts: false };
-  }
-  if (provider === "copilot") {
-    return { planMode: true, resume: true, mcpTools: true, visualVerify: true, permissionPrompts: false };
-  }
-  if (provider === "pi") {
+  // #493: codex/copilot/pi returned three byte-identical matrices. Collapsed to one
+  // branch — NOT moved into PROVIDER_TRAITS, because claude's row below is dynamic
+  // (it reads the profile's flags), so a static table cannot express it. The ticket
+  // says to make this a table read; it cannot be one without losing that.
+  if (provider === "codex" || provider === "copilot" || provider === "pi") {
     return { planMode: true, resume: true, mcpTools: true, visualVerify: true, permissionPrompts: false };
   }
   // claude
