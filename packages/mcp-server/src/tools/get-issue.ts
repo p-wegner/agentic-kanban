@@ -3,7 +3,7 @@ import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { isResolvedDependencyStatusView } from "@agentic-kanban/shared";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { requireEntity } from "../db-utils.js";
+import { resolveActiveProjectId, requireEntity } from "../db-utils.js";
 
 export function registerGetIssue(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema } = deps;
@@ -16,9 +16,22 @@ export function registerGetIssue(server: McpServer, deps: ToolDeps = prodDeps) {
     },
     async ({ issueId, projectId }) => {
       const isNumeric = /^\d+$/.test(issueId);
+      // #506: a numeric ref with no explicit projectId used to fall back to an UNSCOPED
+      // lookup, despite this parameter's own description calling it "required ... to avoid
+      // cross-project ambiguity". Issue numbers are per-project, so that returned an
+      // arbitrary project's issue. Default to the active project, matching the CLI.
+      // Resolve the scope for a numeric ref: explicit projectId > active project. When
+      // NEITHER exists we fall back to the historical unscoped lookup rather than erroring
+      // — a board with no active project is a degenerate state, and turning a previously
+      // working call into an error would be a contract change this fix does not need.
+      let scopeProjectId = projectId;
+      if (isNumeric && !scopeProjectId) {
+        const resolved = await resolveActiveProjectId(db, schema);
+        if (resolved.ok) scopeProjectId = resolved.projectId;
+      }
       const whereClause = isNumeric
-        ? (projectId
-            ? and(eq(schema.issues.issueNumber, Number(issueId)), eq(schema.issues.projectId, projectId))
+        ? (scopeProjectId
+            ? and(eq(schema.issues.issueNumber, Number(issueId)), eq(schema.issues.projectId, scopeProjectId))
             : eq(schema.issues.issueNumber, Number(issueId)))
         : eq(schema.issues.id, issueId);
 

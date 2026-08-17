@@ -859,8 +859,9 @@ export function createIssueService(deps: {
     return countIssuesByProject(projectId, database, statusName);
   }
 
-  async function getIssueSummary(idParam: string) {
-    return getIssueSummaryRepo(idParam, database);
+  async function getIssueSummary(idParam: string, projectId?: string) {
+    // #506: projectId scopes a NUMERIC ref; issue numbers are per-project.
+    return getIssueSummaryRepo(idParam, database, projectId);
   }
 
   async function getTags(issueId: string) {
