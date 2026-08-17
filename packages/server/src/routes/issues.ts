@@ -32,6 +32,11 @@ import { createIssueTimeEntriesService } from "../services/issue-time-entries.se
 import type { IssueCommentKind, IssueCommentAuthor } from "../repositories/issue-comments.repository.js";
 import { createShowdownService } from "../services/showdown.service.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
+import {
+  enhanceIssueBody, analyzeDependenciesBody, aiEstimateBody, projectIdBody,
+  decomposeConfirmBody, contractConfirmBody, batchIssuesBody, dependenciesBatchBody,
+  contractCoupledBody, bulkUpdateBody,
+} from "./issue-body-schemas.js";
 import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../middleware/ai-operation.js";
 import { runTicketPreflight, formatClarificationsBlock, type PreflightClarification, type PreflightVerdict } from "../services/ticket-preflight.service.js";
@@ -104,15 +109,13 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
 
   // POST /api/issues/enhance — AI-enhance a ticket title and description
   router.post("/enhance", async (c) => {
-    const body = await parseJsonBody<{ title: string; description?: string; projectId?: string }>(c);
-    if (!body.title?.trim()) return c.json({ error: "title is required" }, 400);
+    const body = await parseJsonBody(c, enhanceIssueBody);
     return c.json(await wrapAiOperation("enhance", () => enhanceIssue(body.title, body.description, database)));
   });
 
   // POST /api/issues/analyze-dependencies — AI-analyze dependencies for an issue
   router.post("/analyze-dependencies", async (c) => {
-    const body = await parseJsonBody<{ issueId: string; projectId: string }>(c);
-    if (!body.issueId || !body.projectId) return c.json({ error: "issueId and projectId are required" }, 400);
+    const body = await parseJsonBody(c, analyzeDependenciesBody);
     const result = await wrapAiOperation("analyze-deps", () => analyzeDependencies(body.issueId, body.projectId, database));
     if (result.total > 0) options?.boardEvents?.broadcast(body.projectId, "dependency_added");
     return c.json(result);
@@ -120,28 +123,23 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
 
   // POST /api/issues/ai-estimate — AI-suggest a T-shirt size estimate for an issue
   router.post("/ai-estimate", async (c) => {
-    const body = await parseJsonBody<{ issueId: string }>(c);
-    if (!body.issueId) return c.json({ error: "issueId is required" }, 400);
+    const body = await parseJsonBody(c, aiEstimateBody);
     return c.json(await wrapAiOperation("ai-estimate", () => aiEstimateIssue(body.issueId, database)));
   });
 
   // POST /api/issues/:id/decompose — AI-generate epic decomposition proposal
   router.post("/:id/decompose", async (c) => {
     const issueId = c.req.param("id");
-    const body = await parseJsonBody<{ projectId: string }>(c);
-    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
+    const body = await parseJsonBody(c, projectIdBody);
     return c.json(await wrapAiOperation("decompose", () => decomposeEpic(issueId, body.projectId, database)));
   });
 
   // POST /api/issues/:id/decompose/confirm — confirm epic decomposition and create child issues
   router.post("/:id/decompose/confirm", async (c) => {
     const issueId = c.req.param("id");
-    const body = await parseJsonBody<{ projectId: string; children: DecomposeChildProposal[]; dependencies: DecomposeDependencyProposal[]; driveTarget?: string }>(c);
-    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
-    if (!Array.isArray(body.children)) return c.json({ error: "children must be an array" }, 400);
-    if (!Array.isArray(body.dependencies)) return c.json({ error: "dependencies must be an array" }, 400);
+    const body = await parseJsonBody(c, decomposeConfirmBody);
     const result = await confirmEpicDecomposition(
-      { issueId, projectId: body.projectId, children: body.children, dependencies: body.dependencies, driveTarget: body.driveTarget },
+      { issueId, projectId: body.projectId, children: body.children as DecomposeChildProposal[], dependencies: body.dependencies as DecomposeDependencyProposal[], driveTarget: body.driveTarget },
       database,
     );
     options?.boardEvents?.broadcast(body.projectId, "issue_created");
@@ -152,18 +150,13 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   // The documented INVERSE of /decompose: decompose splits one epic into many; contract
   // collapses a coupled component (coupled_with peers) back into one. Propose-only.
   router.post("/contract", async (c) => {
-    const body = await parseJsonBody<{ projectId: string }>(c);
-    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
+    const body = await parseJsonBody(c, projectIdBody);
     return c.json(await wrapAiOperation("contract", () => contractCoupledComponent(body.projectId, database)));
   });
 
   // POST /api/issues/contract/confirm — apply a contract proposal (keep survivor, absorb the rest).
   router.post("/contract/confirm", async (c) => {
-    const body = await parseJsonBody<{ projectId: string; survivorId: string; memberIds: string[]; mergedTitle: string; mergedDescription: string }>(c);
-    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
-    if (!body.survivorId) return c.json({ error: "survivorId is required" }, 400);
-    if (!Array.isArray(body.memberIds) || body.memberIds.length < 2) return c.json({ error: "memberIds must be an array of at least 2 ids" }, 400);
-    if (!body.mergedTitle?.trim()) return c.json({ error: "mergedTitle is required" }, 400);
+    const body = await parseJsonBody(c, contractConfirmBody);
     const result = await confirmContractComponent(
       { projectId: body.projectId, survivorId: body.survivorId, memberIds: body.memberIds, mergedTitle: body.mergedTitle, mergedDescription: body.mergedDescription ?? "" },
       database,
@@ -175,32 +168,25 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   // POST /api/issues/batch — create N issues atomically
   // Optional: parentIssueId wires child_of edges; driveTarget (requires parentIssueId) auto-creates a Drive record.
   router.post("/batch", async (c) => {
-    const body = await parseJsonBody<{ projectId: string; issues: Omit<CreateIssueInput, "projectId">[]; parentIssueId?: string; driveTarget?: string; dependencies?: BatchDependencyInput[] }>(c);
-    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
-    if (!Array.isArray(body.issues)) return c.json({ error: "issues must be an array" }, 400);
-    if (body.dependencies !== undefined && !Array.isArray(body.dependencies)) return c.json({ error: "dependencies must be an array" }, 400);
-    const result = await issueService.createIssuesBatch(body.projectId, body.issues, {
+    const body = await parseJsonBody(c, batchIssuesBody);
+    const result = await issueService.createIssuesBatch(body.projectId, body.issues as Omit<CreateIssueInput, "projectId">[], {
       parentIssueId: body.parentIssueId,
       driveTarget: body.driveTarget,
-      dependencies: body.dependencies,
+      dependencies: body.dependencies as BatchDependencyInput[] | undefined,
     });
     return c.json(result, 201);
   });
 
   // POST /api/issues/dependencies/batch — add/remove N dependency edges atomically
   router.post("/dependencies/batch", async (c) => {
-    const body = await parseJsonBody<{ edges: { issueId: string; dependsOnId: string; type?: string; action: "add" | "remove" }[] }>(c);
-    if (!Array.isArray(body.edges)) return c.json({ error: "edges must be an array" }, 400);
-    const result = await issueService.updateDependenciesBatch(body.edges);
+    const body = await parseJsonBody(c, dependenciesBatchBody);
+    const result = await issueService.updateDependenciesBatch(body.edges as { issueId: string; dependsOnId: string; type?: string; action: "add" | "remove" }[]);
     return c.json({ added: result.added, removed: result.removed, skipped: result.skipped });
   });
 
   // POST /api/issues/contract-coupled — contract a full coupled_with component onto one lead.
   router.post("/contract-coupled", async (c) => {
-    const body = await parseJsonBody<{ issueIds?: string[]; leadIssueId?: string }>(c);
-    if (!Array.isArray(body.issueIds) || body.issueIds.length === 0) {
-      return c.json({ error: "issueIds must be a non-empty array" }, 400);
-    }
+    const body = await parseJsonBody(c, contractCoupledBody);
     const result = await issueService.contractCoupledIssues(body.issueIds, body.leadIssueId);
     return c.json({
       leadIssueId: result.leadIssueId,
@@ -226,13 +212,7 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
 
   // PATCH /api/issues/bulk - update N issues in one request
   router.patch("/bulk", async (c) => {
-    const body = await parseJsonBody<{ issueIds?: string[]; updates?: Record<string, unknown> }>(c);
-    if (!Array.isArray(body.issueIds) || body.issueIds.length === 0) {
-      return c.json({ error: "issueIds must be a non-empty array" }, 400);
-    }
-    if (!body.updates || typeof body.updates !== "object") {
-      return c.json({ error: "updates is required" }, 400);
-    }
+    const body = await parseJsonBody(c, bulkUpdateBody);
     const result = await issueService.updateIssuesBulk(body.issueIds, body.updates);
     return c.json({ updated: result.updated });
   });
