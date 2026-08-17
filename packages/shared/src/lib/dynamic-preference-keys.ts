@@ -77,7 +77,26 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // explicit user skips + a dismissal timestamp — the plan's steps themselves are derived from
   // the world (prefs/columns/issues), never stored, so this is the only piece that needs a key.
   "onboarding_state",
+  // #496: live per-project settings with dedicated key builders that were never registered,
+  // and the omission had teeth. `getSettings()` filters rows through this allow-list, and
+  // config export/import is built on `getSettings()` — so a project's dev command, health
+  // url and butler profile were SILENTLY OMITTED from an exported config and REJECTED (422)
+  // on the way back in. They are written today only because their own services call
+  // `setPreference` directly, bypassing the check.
+  "butler_profile",
+  "dev_command",
+  "health_url",
 ] as const;
+
+// Deliberately NOT registered, though both are per-project keys that exist on disk (#496):
+//   - `butler_model_<id>` is LEGACY (see butler-definitions.service.ts): the model moved onto
+//     the butler definition and this key survives only as a read fallback for headless
+//     callers. Registering it would make a deprecated key writable again via the settings
+//     route and MCP — the opposite of retiring it.
+//   - `project_completed_announced_<id>` is an internal idempotency marker owned by the
+//     completion reconciler, not a user setting. Registering it would surface it in the
+//     Settings payload and carry it through config export, where a stale "already announced"
+//     flag would suppress the announcement on the importing board.
 
 /**
  * Keys of the form `<prefix>_<suffix>` where the suffix is a free-form name
@@ -171,3 +190,44 @@ export function isBoardStrategyPreferenceKey(key: string): boolean {
  * making the kill-switch ineffective (#989).
  */
 export const START_MODE_VALUES = ["manual", "monitor", "conductor"] as const;
+
+/** A prefix that is actually registered in the table above. */
+export type ProjectScopedPrefix = (typeof PROJECT_SCOPED_KEY_PREFIXES)[number];
+
+/** Build + parse one per-project preference key family. */
+export interface ProjectPref {
+  readonly prefix: ProjectScopedPrefix;
+  /** `<prefix>_<projectId>` */
+  key(projectId: string): string;
+  /** The project id in `key`, or null when `key` is not of this family. */
+  projectIdOf(key: string): string | null;
+}
+
+/**
+ * A per-project preference key family, built and parsed in one place (#496).
+ *
+ * ~20 services hand-wrote an `xPrefKey(projectId)` builder and eight more hand-wrote the
+ * INVERSE as a bare `/^<prefix>_([0-9a-f-]+)$/` regex, all around a registry table that
+ * already listed the prefixes but only for allow-list matching. The two halves could drift
+ * from the table and from each other, and the table itself had fallen out of date — three
+ * live key families were missing from it entirely (see the note above).
+ *
+ * Typing `prefix` as `ProjectScopedPrefix` closes that: a family whose prefix is not in
+ * `PROJECT_SCOPED_KEY_PREFIXES` is a COMPILE error, so registering a new per-project setting
+ * and being able to build/parse its key are no longer two things that can be done separately.
+ *
+ * `projectIdOf` uses the same `PROJECT_ID_SUFFIX` shape the allow-list matcher uses, so a key
+ * this parses is by construction a key `isProjectScopedDynamicKey` accepts.
+ */
+export function projectPref(prefix: ProjectScopedPrefix): ProjectPref {
+  const head = `${prefix}_`;
+  return {
+    prefix,
+    key: (projectId: string) => `${head}${projectId}`,
+    projectIdOf: (key: string) => {
+      if (!key.startsWith(head)) return null;
+      const rest = key.slice(head.length);
+      return PROJECT_ID_SUFFIX.test(rest) ? rest : null;
+    },
+  };
+}
