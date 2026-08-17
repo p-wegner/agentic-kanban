@@ -36,6 +36,8 @@ interface PluginViewsTabProps {
 export function PluginViewsTab({ view, viewMode, onViewModeChange, projectId, measuring }: PluginViewsTabProps) {
   const [open, setOpen] = useState(false);
   const [plugins, setPlugins] = useState<PluginListItem[]>([]);
+  /** Board docs relevant to the INSTALLED plugins — empty on a board without them. */
+  const [docs, setDocs] = useState<Array<{ file: string; title: string }>>([]);
   const wrapRef = useRef<HTMLDivElement>(null);
   const selection = usePluginViewStore((s) => s.selection);
   const setSelection = usePluginViewStore((s) => s.setSelection);
@@ -56,6 +58,9 @@ export function PluginViewsTab({ view, viewMode, onViewModeChange, projectId, me
       .catch(() => {
         if (!cancelled) setPlugins([]);
       });
+    apiFetch<Array<{ file: string; title: string }>>("/api/docs/plugins")
+      .then((rows) => { if (!cancelled) setDocs(Array.isArray(rows) ? rows : []); })
+      .catch(() => { if (!cancelled) setDocs([]); });
     return () => { cancelled = true; };
   }, [open, projectId]);
 
@@ -135,18 +140,21 @@ export function PluginViewsTab({ view, viewMode, onViewModeChange, projectId, me
             <span aria-hidden="true">🛍️</span>
             <span className="flex-1">Marketplace</span>
           </button>
-          <button
-            role="menuitem"
-            onClick={() => pick(() => setSelection({ kind: "guide" }))}
-            className={`w-full text-left px-2.5 py-1.5 text-xs rounded flex items-center gap-2 transition-colors ${
-              isActive && selection?.kind === "guide" ? activeClass : MENU_ITEM_INACTIVE
-            }`}
-            title="How the plugins fit together and which one to reach for"
-            data-testid="plugin-guide-menu-item"
-          >
-            <span aria-hidden="true">📖</span>
-            <span className="flex-1">Guide: which plugin when?</span>
-          </button>
+          {docs.map((doc) => (
+            <button
+              key={doc.file}
+              role="menuitem"
+              onClick={() => pick(() => setSelection({ kind: "guide", file: doc.file, title: doc.title }))}
+              className={`w-full text-left px-2.5 py-1.5 text-xs rounded flex items-center gap-2 transition-colors ${
+                isActive && selection?.kind === "guide" && selection.file === doc.file ? activeClass : MENU_ITEM_INACTIVE
+              }`}
+              title="How the plugins fit together and which one to reach for"
+              data-testid="plugin-guide-menu-item"
+            >
+              <span aria-hidden="true">📖</span>
+              <span className="flex-1 truncate">{doc.title}</span>
+            </button>
+          ))}
         </div>
       )}
     </div>
