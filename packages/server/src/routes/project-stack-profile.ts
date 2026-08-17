@@ -1,11 +1,11 @@
 import type { Database } from "../db/index.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
-import { getProjectById } from "../repositories/project.repository.js";
 import { getStackProfile, populateStackProfile, saveManualStackProfile } from "../services/stack-profile.service.js";
 import type { StackProfile } from "@agentic-kanban/shared";
 
 import { queryFlag } from "../middleware/query-params.js";
+import { requireProject } from "../services/require-project.js";
 /**
  * Project stack-profile feature endpoints (#786). Extracted from the 400-commit
  * routes/projects.ts grab-bag (arch-review §1.5). Mounted at the SAME `/projects`
@@ -21,8 +21,7 @@ export function createProjectStackProfileRoute(database: Database) {
     const projectId = c.req.param("id");
     const refresh = queryFlag(c, "refresh");
 
-    const project = await getProjectById(projectId, database);
-    if (!project) return c.json({ error: "Project not found" }, 404);
+    const project = await requireProject(projectId, database);
 
     let profile = refresh ? null : await getStackProfile(projectId, database);
     if (!profile) {
@@ -41,8 +40,7 @@ export function createProjectStackProfileRoute(database: Database) {
   // tracked file in the user's main checkout and block auto-merge on `dirty_main`.
   router.put("/:id/stack-profile", async (c) => {
     const projectId = c.req.param("id");
-    const project = await getProjectById(projectId, database);
-    if (!project) return c.json({ error: "Project not found" }, 404);
+    const project = await requireProject(projectId, database);
 
     const body = await parseJsonBody<Partial<StackProfile>>(c);
     const merged = await saveManualStackProfile(projectId, body, database, project.repoPath);

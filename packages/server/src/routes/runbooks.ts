@@ -1,7 +1,7 @@
 import type { Database } from "../db/index.js";
 import { createRouter } from "../middleware/create-router.js";
-import { getProjectById } from "../repositories/project.repository.js";
 import { listRunbooks, readRunbook } from "../services/runbooks.service.js";
+import { requireProject } from "../services/require-project.js";
 export type { RunbookEntry } from "../services/runbooks.service.js";
 
 /**
@@ -16,8 +16,7 @@ export function createRunbooksRoute(database: Database) {
 
   // GET /api/projects/:id/runbooks — list available docs
   router.get("/:id/runbooks", async (c) => {
-    const project = await getProjectById(c.req.param("id"), database);
-    if (!project) return c.json({ error: "project not found" }, 404);
+    const project = await requireProject(c.req.param("id"), database);
     return c.json(await listRunbooks(project.repoPath));
   });
 
@@ -25,8 +24,7 @@ export function createRunbooksRoute(database: Database) {
   router.get("/:id/runbooks/content", async (c) => {
     const relPath = c.req.query("path");
     if (!relPath) return c.json({ error: "path query param is required" }, 400);
-    const project = await getProjectById(c.req.param("id"), database);
-    if (!project) return c.json({ error: "project not found" }, 404);
+    const project = await requireProject(c.req.param("id"), database);
 
     // The traversal guard lives in readRunbook now; the route keeps the status mapping
     // it always had (400 invalid path / 404 missing file).

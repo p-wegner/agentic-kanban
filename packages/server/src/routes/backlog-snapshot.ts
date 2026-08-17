@@ -1,7 +1,7 @@
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import { createRouter } from "../middleware/create-router.js";
-import { getProjectById } from "../repositories/project.repository.js";
+import { requireProject } from "../services/require-project.js";
 import {
   exportBacklogSnapshot,
   importBacklogSnapshot,
@@ -22,8 +22,7 @@ export function createBacklogSnapshotRoute(
   // GET /api/projects/:projectId/backlog/export → downloadable JSON snapshot.
   router.get("/:projectId/backlog/export", async (c) => {
     const projectId = c.req.param("projectId");
-    const project = await getProjectById(projectId, database);
-    if (!project) return c.json({ error: "Project not found" }, 404);
+    const project = await requireProject(projectId, database);
 
     const snapshot = await exportBacklogSnapshot(projectId, database);
     const safeName = project.name.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "") || "backlog";
@@ -40,8 +39,7 @@ export function createBacklogSnapshotRoute(
   // the snapshot object itself or { snapshot }. Returns the import result summary.
   router.post("/:projectId/backlog/import", async (c) => {
     const projectId = c.req.param("projectId");
-    const project = await getProjectById(projectId, database);
-    if (!project) return c.json({ error: "Project not found" }, 404);
+    await requireProject(projectId, database);
 
     const contentType = c.req.header("content-type") ?? "";
     let raw: unknown;
