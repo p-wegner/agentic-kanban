@@ -3,6 +3,7 @@ import { db } from "../db/index.js";
 import { buildAgentLaunchConfig, narrowProviderName, getProfilePrefKey } from "./agent-provider.js";
 import type { Database } from "../db/index.js";
 import { getClaudeCliPreferences } from "../repositories/claude-cli.repository.js";
+import { toExecutorProvider } from "./agent-settings.service.js";
 
 export interface ClaudeCliOptions {
   timeout?: number;
@@ -42,7 +43,7 @@ export async function invokeClaudePrompt(
   const profileName = profileByKey.get(getProfilePrefKey(providerName));
 
   const { command, args, env, useShell } = buildAgentLaunchConfig({
-    provider: providerName === "claude" ? "claude-code" : providerName,
+    provider: toExecutorProvider(providerName),
     oneShotText: true,
     agentCommand,
     model,

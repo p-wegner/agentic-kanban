@@ -3,7 +3,7 @@ import { isTerminalStatusIdView, isTerminalStatusName } from "@agentic-kanban/sh
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import type { Database } from "../db/index.js";
 import * as gitService from "./git.service.js";
-import { resolveAgentSettings } from "./agent-settings.service.js";
+import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
 import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../constants/preference-keys.js";
@@ -120,7 +120,10 @@ export async function autoStartFollowups(
         agentArgs,
         claudeProfile,
         profile,
-        provider: provider === "codex" ? "codex" : "claude-code",
+        // #503: was `provider === "codex" ? "codex" : "claude-code"`, which sent BOTH
+        // copilot and pi follow-ups to Claude. `provider` here is a ProviderName from
+        // resolveAgentSettings, so the mapping is exactly toExecutorProvider's job.
+        provider: toExecutorProvider(provider),
         triggerType: "auto-start",
         systemInstructions: prefMap.get(PREF_BUILDER_GUARDRAILS) ?? DEFAULT_BUILDER_GUARDRAILS,
       });
