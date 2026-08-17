@@ -16,23 +16,20 @@ function useBoardIsDark(): boolean {
   return isDark;
 }
 
-export function pluginGuideUrl(isDark: boolean, doc: string): string {
-  return `/api/docs/plugins/${encodeURIComponent(doc)}?theme=${isDark ? "dark" : "light"}`;
+export function pluginGuideUrl(isDark: boolean, pluginId: string, file: string): string {
+  const path = file.split("/").map(encodeURIComponent).join("/");
+  return `/api/plugins/${encodeURIComponent(pluginId)}/docs/${path}?theme=${isDark ? "dark" : "light"}`;
 }
 
 /**
- * Plugins tab → "Guide: which plugin when?" — the improvement-system map
- * (docs/plugins/improvement-system-map.html) rendered INSIDE the board, so "when do I
- * reach for the safety net vs code-metrics vs the refactor toolset" is answerable from the
- * place where those plugins are started, not from a file in the repo nobody opens.
- *
- * Only reachable via a doc listed by GET /api/docs/plugins — the server lists a doc only when
- * a plugin it is about is installed, so a board without those (non-public) plugins has no
- * entry and gets 404 on the URL.
+ * Plugins tab → a plugin-authored doc (manifest `docs[]`, e.g. an overview of how a
+ * plugin suite fits together and which part to reach for) rendered INSIDE the board, from
+ * the place where those plugins are started. Served from the plugin's own checkout via
+ * GET /api/plugins/:id/docs/:file — the board holds no doc and no plugin name of its own.
  */
-export function PluginGuidePanel({ file, title }: { file: string; title: string }) {
+export function PluginGuidePanel({ pluginId, file, title }: { pluginId: string; file: string; title: string }) {
   const isDark = useBoardIsDark();
-  const url = pluginGuideUrl(isDark, file);
+  const url = pluginGuideUrl(isDark, pluginId, file);
   return (
     <div className="flex-1 min-w-0 min-h-0 flex flex-col" data-testid="plugin-guide-panel">
       <div className="flex items-center justify-between gap-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-3 py-1.5">

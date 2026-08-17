@@ -316,7 +316,7 @@ export function BoardSecondaryViews({
           {pluginSelection?.kind === "marketplace" ? (
             <PluginMarketplacePanel projectId={activeProjectId} />
           ) : pluginSelection?.kind === "guide" ? (
-            <PluginGuidePanel file={pluginSelection.file} title={pluginSelection.title} />
+            <PluginGuidePanel pluginId={pluginSelection.pluginId} file={pluginSelection.file} title={pluginSelection.title} />
           ) : (
             <PluginViewsPanel
               projectId={activeProjectId}

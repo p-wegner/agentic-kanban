@@ -8,11 +8,8 @@ import { create } from "zustand";
 export type PluginViewSelection =
   | { kind: "plugin"; slug: string }
   | { kind: "marketplace" }
-  /**
-   * An in-board doc from GET /api/docs/plugins — served only when a plugin it is about is
-   * installed here, so a public board without those plugins never lists one.
-   */
-  | { kind: "guide"; file: string; title: string };
+  /** A plugin-authored doc (manifest `docs[]`, GET /api/plugins/docs) shown in the panel. */
+  | { kind: "guide"; pluginId: string; file: string; title: string };
 
 interface PluginViewState {
   selection: PluginViewSelection | null;

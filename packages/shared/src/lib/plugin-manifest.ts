@@ -336,6 +336,21 @@ export interface PluginLoopPlan {
 /** Cap on tickets one loop advance may create when the loop declares none. */
 export const DEFAULT_LOOP_MAX_UNITS_PER_ADVANCE = 10;
 
+/**
+ * A plugin-authored page the board shows in the Plugins menu (e.g. an overview of how the
+ * plugin's parts fit together and when to reach for which). Served from the plugin's
+ * checkout by the board (`GET /api/plugins/:id/docs/:file`) — the board itself carries no
+ * knowledge of any particular plugin, so a board without the plugin lists nothing.
+ */
+export interface PluginDocDef {
+  /** Path (relative to the plugin root) of an .html or .md file. */
+  file: string;
+  /** Menu label. */
+  title: string;
+  description?: string;
+  audience?: PluginAudience;
+}
+
 export interface PluginManifest {
   /** Unique slug ([a-z0-9-]+); doubles as the install directory name and pref-key segment. */
   id: string;
@@ -347,6 +362,7 @@ export interface PluginManifest {
   views?: PluginViewDef[];
   scripts?: PluginScriptDef[];
   loops?: PluginLoopDef[];
+  docs?: PluginDocDef[];
   butler?: {
     /** Path (relative to the plugin root) of a markdown fragment appended to the butler prompt. */
     promptFragment: string;
@@ -566,6 +582,21 @@ export function parsePluginManifest(input: string | unknown): PluginManifest {
     };
   });
 
+  const seenDocFiles = new Set<string>();
+  const docs = obj.docs == null ? undefined : requireArray(obj.docs, "docs").map((entry, i) => {
+    const rec = asRecord(entry, `docs[${i}]`);
+    const file = requireRelativePath(rec.file, `docs[${i}].file`);
+    if (!/\.(html?|md)$/i.test(file)) fail(`"docs[${i}].file" must be an .html or .md file (got "${file}")`);
+    if (seenDocFiles.has(file)) fail(`duplicate doc file "${file}"`);
+    seenDocFiles.add(file);
+    return {
+      file,
+      title: requireString(rec.title, `docs[${i}].title`),
+      description: optionalString(rec.description, `docs[${i}].description`),
+      audience: optionalAudience(rec.audience, `docs[${i}].audience`),
+    };
+  });
+
   const butler = obj.butler == null ? undefined : (() => {
     const rec = asRecord(obj.butler, "butler");
     return { promptFragment: requireRelativePath(rec.promptFragment, "butler.promptFragment") };
@@ -587,7 +618,7 @@ export function parsePluginManifest(input: string | unknown): PluginManifest {
     };
   })();
 
-  return { id, name, version, description, skills, views, scripts, loops, butler, scaffold };
+  return { id, name, version, description, skills, views, scripts, loops, docs, butler, scaffold };
 }
 
 /**
