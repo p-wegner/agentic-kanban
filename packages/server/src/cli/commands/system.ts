@@ -4,6 +4,7 @@ import { getFirstIssueIdWithStatus } from "../../repositories/issue.repository.j
 import { BUILTIN_SKILLS } from "../../builtin-skills.js";
 import { runMigrations, logDefaultBranch, timeSince } from "../shared.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { parseIssueNumberFromBranch } from "@agentic-kanban/shared/lib/branch";
 
 export function registerSystemCommands(program: Command) {
   program
@@ -238,13 +239,14 @@ Via pnpm (use -- to pass args):
         try {
           const entries = readdirSync(claudeProjects);
           for (const entry of entries) {
-            const m =
-              entry.match(/--worktrees-feature-ak-(\d+)-/i) ||
-              entry.match(/agentic-kanban-packages--worktrees-feature-ak-(\d+)-/i);
-            const issueNum = m ? parseInt(m[1], 10) : null;
-            if (m || entry.includes("worktrees")) {
-              allDirs.push({ name: entry, path: join(claudeProjects, entry), issueNum });
-            }
+            // Claude names a session dir after the working directory with separators replaced
+            // by `-`, so a worktree's dir carries the branch's `ak-<N>` verbatim. #548: the
+            // shared parser instead of two near-identical regexes — still only consulted for
+            // entries that are worktree dirs, so an unrelated project dir cannot contribute a
+            // number.
+            if (!entry.includes("worktrees")) continue;
+            const issueNum = parseIssueNumberFromBranch(entry);
+            allDirs.push({ name: entry, path: join(claudeProjects, entry), issueNum });
           }
         } catch {
           console.error(`Cannot read ${claudeProjects}`);

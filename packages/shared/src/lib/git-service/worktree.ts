@@ -3,6 +3,7 @@ import { mkdir, rm, stat, lstat, unlink, readdir, readFile } from "node:fs/promi
 import { join, dirname, basename, sep, resolve, parse, relative } from "node:path";
 import { gitExec } from "../git-exec.js";
 import { execGit } from "./internal.js";
+import { parseIssueNumberFromBranch } from "../branch.js";
 import { ensureOnBranch } from "./branch-attach.js";
 
 /**
@@ -45,11 +46,13 @@ export async function listWorktrees(
  * identifies the work uniquely and is what every other identifier already anchors on.
  */
 function shortenWorktreeLeaf(safeName: string): string {
-  // Sanitized branch names replace '/' with '_', which is itself a \w character,
-  // so a plain \b before "ak" never matches (e.g. "feature_ak-1-..." has no
-  // word-boundary between '_' and 'a'). Use an explicit non-alnum/start lookbehind.
-  const match = safeName.match(/(?:^|[^a-z0-9])ak-(\d+)(?:[^a-z0-9]|$)/i);
-  return match ? `ak-${match[1]}` : safeName;
+  // #548: this file's boundary rules ARE the shared parser's — the sanitized-name problem
+  // (`/` becomes `_`, itself a \w character, so a plain \b before "ak" never matches in
+  // "feature_ak-1-…") is exactly why the shared one uses an explicit non-alnum boundary
+  // rather than \b. A pure adoption: the leaf a given branch produces is unchanged, which
+  // matters because worktree directories already exist on disk under these names.
+  const issueNumber = parseIssueNumberFromBranch(safeName);
+  return issueNumber === null ? safeName : `ak-${issueNumber}`;
 }
 
 /**

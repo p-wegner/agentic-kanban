@@ -7,6 +7,7 @@ import { db } from "../db/index.js";
 import { reconcileMergedIssue } from "../services/merge-cleanup.service.js";
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { parseIssueNumberFromBranch } from "@agentic-kanban/shared/lib/branch";
 
 /**
  * Status names the sweep must NEVER touch:
@@ -17,9 +18,6 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
  */
 const PROTECTED_STATUS_NAMES = ["Backlog", "Done", "Cancelled", "Closed"];
 
-/** The branch-naming convention this reconciler recognizes (`suggestBranchName`). */
-const BRANCH_AK_RE = /(?:feature\/)?ak-(\d+)\b/i;
-
 /**
  * Extract the issue number of a merged `feature/ak-<N>` (or bare `ak-<N>`) branch from a
  * single MERGE-commit subject — only the FIRST `ak-<N>` occurrence in the subject, i.e. the
@@ -28,10 +26,11 @@ const BRANCH_AK_RE = /(?:feature\/)?ak-(\d+)\b/i;
  * `feature/ak-105-fix-ak-104-regression`) must not also match that second number (#146).
  */
 function firstBranchIssueNumber(subject: string): number | null {
-  const m = BRANCH_AK_RE.exec(subject);
-  if (!m) return null;
-  const n = Number.parseInt(m[1], 10);
-  return Number.isInteger(n) && n > 0 ? n : null;
+  // #548: the shared parser. Its boundary rules are STRICTER than the `\b` this used to
+  // apply — `Merge branch 'weak-105-x'` no longer reads as issue 105 — which matters here
+  // more than anywhere, since a wrong number force-Dones a live issue.
+  const n = parseIssueNumberFromBranch(subject);
+  return n != null && n > 0 ? n : null;
 }
 
 /**
