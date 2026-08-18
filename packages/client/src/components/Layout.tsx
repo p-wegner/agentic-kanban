@@ -680,8 +680,28 @@ export function Layout({
                   <li className="flex items-center justify-between gap-2 text-sm border border-gray-200 dark:border-gray-700 rounded px-2.5 py-1.5">
                     <div className="min-w-0">
                       <span className="font-medium">{activeProject?.repoName || activeProject?.repoPath || "leading repo"}</span>
+                      {/* #635: the leading row showed no branch at all, which is exactly where
+                          the interesting fact hid — on comet the leading repo is on
+                          `board/agent-onboarding` while all 16 siblings are on `master`. A
+                          project split across two base branches was invisible here. */}
                       {activeProject?.repoPath && (
-                        <span className="block text-xs text-gray-500 font-mono truncate">{activeProject.repoPath}</span>
+                        <span className="flex items-baseline gap-1.5 text-xs">
+                          <span
+                            className="text-gray-500 font-mono truncate"
+                            style={{ direction: "rtl", textAlign: "left" }}
+                            title={activeProject.repoPath}
+                          >
+                            <bdi>{activeProject.repoPath}</bdi>
+                          </span>
+                          {activeProject.defaultBranch && (
+                            <span
+                              className="shrink-0 px-1 py-0 rounded font-mono text-[10px] bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+                              title={`Base branch: ${activeProject.defaultBranch}`}
+                            >
+                              {activeProject.defaultBranch}
+                            </span>
+                          )}
+                        </span>
                       )}
                     </div>
                     <span className="shrink-0 text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 rounded px-1.5 py-0.5">
@@ -690,9 +710,35 @@ export function Layout({
                   </li>
                   {projectRepos.map((repo) => (
                     <li key={repo.id} className="flex items-center justify-between gap-2 text-sm border border-gray-200 dark:border-gray-700 rounded px-2.5 py-1.5">
+                      {/* #635: the path and branch shared one `truncate` span with no title.
+                          Truncation cuts from the RIGHT, so with 17 repos under a common
+                          prefix the column showed almost nothing but the prefix — and the
+                          branch, the part that revealed comet's leading repo was on a
+                          different base than all 16 siblings, was always the first thing cut.
+                          The branch is its own non-truncating chip now, and the path carries
+                          a title. */}
                       <div className="min-w-0">
                         <span className="font-medium">{repo.name ?? repo.path}</span>
-                        <span className="block text-xs text-gray-500 font-mono truncate">{repo.path}{repo.defaultBranch ? ` (${repo.defaultBranch})` : ""}</span>
+                        <span className="flex items-baseline gap-1.5 text-xs">
+                          <span
+                            className="text-gray-500 font-mono truncate"
+                            style={{ direction: "rtl", textAlign: "left" }}
+                            title={repo.path}
+                          >
+                            {/* rtl direction ellipsises the LEFT (the shared prefix) and keeps
+                                the distinguishing tail visible; the bidi isolate stops the
+                                path itself being reordered. */}
+                            <bdi>{repo.path}</bdi>
+                          </span>
+                          {repo.defaultBranch && (
+                            <span
+                              className="shrink-0 px-1 py-0 rounded font-mono text-[10px] bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+                              title={`Base branch: ${repo.defaultBranch}`}
+                            >
+                              {repo.defaultBranch}
+                            </span>
+                          )}
+                        </span>
                       </div>
                       <div className="flex items-center gap-2.5 shrink-0">
                         <button
