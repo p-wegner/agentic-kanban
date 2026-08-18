@@ -9,7 +9,7 @@ import { movedDuringGate } from "../services/workspace-merge-gate.js";
 import { issues, preferences, projectStatuses, projects, scheduledRunHistory, scheduledRuns, sessions, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { desc, eq } from "drizzle-orm";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
-import { getCommitCountAhead as commitsAhead, hasCommitsAhead } from "../services/git.service.js";
+import { getCommitCountAhead as commitsAhead, hasCommitsAhead } from "@agentic-kanban/shared/lib/git-service";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { db as defaultDb } from "../db/index.js";
