@@ -115,6 +115,19 @@ pinned to a client subscription the wrong account is worse than no progress. A p
 value also holds (fail closed). Logic: `packages/shared/src/lib/profile-allowlist.ts`; enforcement seam:
 `resolveProjectRuntimeConfig`.
 
+**The guarantee stops at the machine boundary, so a restricted project does not go remote
+(#651).** A fleet worker authenticates the agent with its OWN local login and the board
+deliberately sends no credentials (decision 012 — `CLAUDE_CONFIG_DIR` is not in
+`REMOTE_SPEC_ENV_ALLOWLIST`, by design), so the board can pick a permitted profile but
+cannot make the worker honour it. `resolveWorkerPlacement` therefore refuses remote
+placement for any project with a non-empty (or unreadable) allowlist: it falls back to the
+host, which CAN enforce the list, and a `worker_dispatch_strict` project HOLDS with the
+restriction as the reason rather than borrowing an unlisted account. Worker-side
+attestation — a worker declaring which profiles it can authenticate as, the way it already
+declares `--providers`/`--labels` — is what would narrow this from "never" to "only to a
+worker that can prove it qualifies"; until then, allowlist and fleet dispatch are mutually
+exclusive on the same project.
+
 ## Board Operations
 Tool precedence: **MCP** (`mcp__agentic-kanban__*`) → **CLI** (`pnpm cli -- ...`) → **REST**. Use the board's own features — review (`POST /api/workspaces/:id/review`), merge (`merge_workspace`), fix-and-merge, rebase (`update-base`), enhance, dependency-analyze — don't replicate manually. For narrow questions use `list_issues`/`get_board_status`, not unbounded `list_workspaces`. Don't hand-roll `curl | python`.
 
