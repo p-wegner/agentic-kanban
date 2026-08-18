@@ -50,6 +50,52 @@ const PYTHON = makeProfile({
   quickTestCommand: "python -m pytest -x",
 });
 
+/**
+ * #646 — the derived plan composed `<test> && <build>` and never read `typecheckCommand`,
+ * though the profile persists it. On THIS repo the gap was invisible: its build IS tsc, and
+ * its operator had hand-added `pnpm typecheck` to the verify_script. Any project whose build
+ * is vite/esbuild-only merged with no typecheck in its gate while carrying a perfectly good
+ * typecheckCommand — a gate that depended on per-operator luck rather than on the derivation.
+ */
+describe("deriveVerifyCommandPlan typecheck composition (#646)", () => {
+  it("runs typecheck FIRST, so a type error fails fast before the suite", () => {
+    const plan = deriveVerifyCommandPlan(makeProfile({ typecheckCommand: "pnpm typecheck" }));
+    expect(plan?.command).toBe("pnpm typecheck && pnpm test:mine && pnpm build");
+  });
+
+  it("composes with only a typecheck and a test (no build step)", () => {
+    const plan = deriveVerifyCommandPlan(
+      makeProfile({ typecheckCommand: "tsc --noEmit", buildCommand: null }),
+    );
+    expect(plan?.command).toBe("tsc --noEmit && pnpm test:mine");
+  });
+
+  it("is unchanged when the profile carries no typecheckCommand", () => {
+    expect(deriveVerifyCommandPlan(makeProfile())?.command).toBe("pnpm test:mine && pnpm build");
+  });
+
+  it("skips typecheck on gradle/maven, where check/verify already compiles", () => {
+    const plan = deriveVerifyCommandPlan({ ...GRADLE, typecheckCommand: "./gradlew compileJava" });
+    expect(plan?.command).not.toContain("compileJava");
+  });
+
+  it("does NOT wire in lintCommand — a style gate must not withhold a merge", () => {
+    const plan = deriveVerifyCommandPlan(
+      makeProfile({ lintCommand: "pnpm lint", typecheckCommand: "pnpm typecheck" }),
+    );
+    expect(plan?.command).toContain("pnpm typecheck");
+    expect(plan?.command).not.toContain("pnpm lint");
+  });
+
+  it("still returns null when typecheck is the only thing configured is FALSE — it counts", () => {
+    // A typecheck alone IS a verification, so a profile carrying only that is not a no-op.
+    const plan = deriveVerifyCommandPlan(
+      makeProfile({ testCommand: null, quickTestCommand: null, buildCommand: null, typecheckCommand: "tsc --noEmit" }),
+    );
+    expect(plan?.command).toBe("tsc --noEmit");
+  });
+});
+
 describe("deriveVerifyCommandPlan (#124)", () => {
   it("returns null when there is nothing to verify", () => {
     expect(deriveVerifyCommandPlan(null)).toBeNull();

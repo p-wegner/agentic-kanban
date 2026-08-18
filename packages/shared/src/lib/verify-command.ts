@@ -139,6 +139,12 @@ function chain(test: string | null, build: string | null): string | null {
   return `${test} && ${build}`;
 }
 
+/** `a && b && c`, skipping the absent ones. Null when nothing is left. */
+function chainAll(...parts: (string | null | undefined)[]): string | null {
+  const kept = parts.map((p) => p?.trim()).filter((p): p is string => Boolean(p));
+  return kept.length > 0 ? kept.join(" && ") : null;
+}
+
 /**
  * How to invoke pytest for THIS project, for the narrow-re-run failure hint.
  *
@@ -185,9 +191,25 @@ export function deriveVerifyCommandPlan(profile: StackProfile | null | undefined
   const test =
     (stackKey === "node" ? profile.quickTestCommand?.trim() : null) || profile.testCommand?.trim() || null;
   const build = profile.buildCommand?.trim() || null;
-  // Only gradle/maven can take both in one invocation; everything else must chain.
+  // #646: the plan composed `<test> && <build>` and never read `typecheckCommand`, though the
+  // profile persists it. On THIS repo that was covered by luck — its build IS tsc, and its
+  // operator had added `pnpm typecheck` to the verify_script by hand — but any project whose
+  // build is vite/esbuild-only merged with NO typecheck in its gate despite a populated
+  // typecheckCommand sitting right there. A derived default must not depend on per-operator
+  // luck. Gradle/maven skip it: `check`/`verify` already compile, so a separate typecheck step
+  // is neither meaningful nor cheap there.
+  //
+  // `lintCommand` is deliberately NOT included: lint is a style gate whose failures are not
+  // correctness failures, and on this repo it is currently RED on master (#624) — wiring it in
+  // would block every merge on a pre-existing condition. It belongs in a project's explicit
+  // verify_script override, not in the derived default.
+  const typecheck =
+    stackKey === "gradle" || stackKey === "maven" ? null : profile.typecheckCommand?.trim() || null;
+  // Only gradle/maven can take test+build in one invocation; everything else must chain.
   const base =
-    stackKey === "gradle" || stackKey === "maven" ? mergeTaskRunner(test, build) : chain(test, build);
+    stackKey === "gradle" || stackKey === "maven"
+      ? mergeTaskRunner(test, build)
+      : chainAll(typecheck, test, build);
   if (!base) return null;
 
   switch (stackKey) {
