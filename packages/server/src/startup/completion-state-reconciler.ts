@@ -2,7 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { sessions, workspaces, issues, projectStatuses } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
-import { getCommitCountAhead } from "../services/git.service.js";
+import { getCommitCountAhead } from "@agentic-kanban/shared/lib/git-service";
 
 /** How long a workspace must be in 'active' with a live PID before we reconcile it (hung agent). */
 const HUNG_AGENT_THRESHOLD_MS = 30 * 60 * 1000;
