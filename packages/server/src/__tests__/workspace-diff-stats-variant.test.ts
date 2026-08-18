@@ -8,7 +8,7 @@
  * (2) Route: the stats variant answers a matching If-None-Match from the short-lived
  *     validator memo BEFORE computing anything; the full-diff variant never does.
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { projects, workspaces, issues, projectStatuses } from "@agentic-kanban/shared/schema";

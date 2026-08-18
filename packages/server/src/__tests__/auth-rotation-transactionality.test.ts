@@ -13,7 +13,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { randomUUID } from "node:crypto";
-import * as schema from "@agentic-kanban/shared/schema";
+
 import { createTestDb } from "./helpers/test-db.js";
 import { PREF_CLAUDE_SUBSCRIPTION_RING, PREF_CLAUDE_PROFILE } from "../constants/preference-keys.js";
 

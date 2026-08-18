@@ -3,7 +3,7 @@ import ReactMarkdown from "react-markdown";
 import type { IssueWithStatus, UpdateIssueRequest } from "@agentic-kanban/shared";
 import { MarkdownToolbar } from "./MarkdownToolbar.js";
 import { IssueWorkspacesSection } from "./IssueWorkspacesSection.js";
-import { IssueDetailDialogs, type MoveToDonePending, type DependencyImpactPending } from "./IssueDetailDialogs.js";
+import { IssueDetailDialogs } from "./IssueDetailDialogs.js";
 import { usePanelLayout } from "../hooks/usePanelLayout.js";
 import { useIssueEditForm } from "../hooks/useIssueEditForm.js";
 import { useIssueDetailData } from "../hooks/useIssueDetailData.js";

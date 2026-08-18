@@ -442,7 +442,7 @@ export async function findStaleProfileContainers(
     if (inspect.code !== 0) continue;
     let mounts: Array<{ Destination?: string; Source?: string }>;
     try {
-      mounts = JSON.parse(inspect.stdout.trim());
+      mounts = JSON.parse(inspect.stdout.trim()) as Array<{ Destination?: string; Source?: string }>;
     } catch {
       continue;
     }

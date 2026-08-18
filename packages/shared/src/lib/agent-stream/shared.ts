@@ -4,7 +4,7 @@ export function createAgentStreamParseContext(): ParseContext {
   return { toolNames: new Map<string, string>() };
 }
 
-import { objectValue, stringValue } from "../json-narrow.js";
+import { objectValue } from "../json-narrow.js";
 
 // The JSON-narrowing helpers moved to ../json-narrow.ts (#534) so non-parser code
 // can import them without reaching into the agent-stream module. Re-exported here so

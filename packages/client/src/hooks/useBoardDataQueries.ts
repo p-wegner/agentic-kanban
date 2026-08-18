@@ -34,7 +34,9 @@ export function useProjectReposQuery(projectId: string | null | undefined) {
       ? projectReposQueryOptions(projectId)
       : {
           queryKey: ["projects", "none", "repos"] as const,
-          queryFn: async () => [] as ProjectRepoResponse[],
+          // Not `async`: react-query accepts a sync queryFn, and the `async` was only there to
+          // match the sibling branch's shape (require-await).
+          queryFn: () => [] as ProjectRepoResponse[],
         }),
   });
 }
@@ -83,7 +85,7 @@ export function boardQueryConfig(projectId: string | null, queryClient: QueryCli
       ? boardColumnsQueryOptions(projectId, queryClient)
       : {
           queryKey: ["projects", "none", "board"] as const,
-          queryFn: async () => [] as StatusWithIssues[],
+          queryFn: () => [] as StatusWithIssues[],
         }),
   };
 }

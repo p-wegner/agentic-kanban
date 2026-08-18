@@ -153,7 +153,7 @@ async function proxyWithRetry(req, res, body, opts, client) {
       // Nobody is waiting for this response any more — retrying would only burn
       // backend connections during exactly the bursts that trigger the aborts.
       if (err === CLIENT_GONE) return;
-      lastError = err;
+      // err is inspected by the retry loop's own logging; the binding was never read.
       if (res.headersSent || res.writableEnded || res.destroyed) return;
       await wait(opts.retryDelayMs);
     }
@@ -241,7 +241,6 @@ function proxyUpgradeOnce(req, socket, head, opts, client) {
 // instead of dying immediately and flooding reconnect/error noise.
 async function proxyUpgradeWithRetry(req, socket, head, opts, client) {
   const deadline = Date.now() + opts.retryTimeoutMs;
-  let lastError = null;
 
   while (Date.now() <= deadline) {
     try {
@@ -249,7 +248,9 @@ async function proxyUpgradeWithRetry(req, socket, head, opts, client) {
       return;
     } catch (err) {
       if (err === CLIENT_GONE) return;
-      lastError = err;
+      // The error is deliberately not retained: this loop retries until the deadline and the
+      // tail below reports the timeout, not the last individual attempt. (It used to be
+      // assigned to a `lastError` nothing ever read.)
       if (socket.destroyed) return;
       await wait(opts.retryDelayMs);
     }

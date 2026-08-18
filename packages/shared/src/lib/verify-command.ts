@@ -134,12 +134,9 @@ function mergeTaskRunner(test: string | null, build: string | null): string | nu
 }
 
 /** Safe for every stack: run test, then build, only if test passed. */
-function chain(test: string | null, build: string | null): string | null {
-  if (!test || !build) return test ?? build;
-  return `${test} && ${build}`;
-}
-
-/** `a && b && c`, skipping the absent ones. Null when nothing is left. */
+/** `a && b && c`, skipping the absent ones. Null when nothing is left.
+ *  Replaced the two-argument `chain` when #646 added the typecheck step — it was the same
+ *  function with a fixed arity, and leaving both invited them to drift. */
 function chainAll(...parts: (string | null | undefined)[]): string | null {
   const kept = parts.map((p) => p?.trim()).filter((p): p is string => Boolean(p));
   return kept.length > 0 ? kept.join(" && ") : null;

@@ -112,7 +112,6 @@ export async function getWorkspaceLaunchFailures(
   // Resolve project
   const project = await getProjectById(projectId, database);
   if (!project) throw new NotFoundError(`Project ${projectId} not found`);
-  const projectIdResolved = project.id;
 
   // Get non-terminal issue statuses
   const statusRows = await getProjectStatusRows(projectId, database);

@@ -3,6 +3,17 @@ import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
+/**
+ * A loop-event payload field rendered as text.
+ *
+ * The payload is `unknown` per field, so a bare `String(x)` produces "[object Object]" for
+ * anything structured — which is what `no-base-to-string` was pointing at. Non-strings become
+ * empty here so the surrounding `||` fallbacks can do their job instead of printing noise.
+ */
+function asText(value: unknown): string {
+  return typeof value === "string" ? value : typeof value === "number" ? String(value) : "";
+}
+
 // ── Timeline + cost (#292, #294) ─────────────────────────────────────
 //
 // Split out of PluginLoopExtras (#465) so that file stays under the god-module ceiling — the
@@ -23,10 +34,10 @@ function eventSummary(event: LoopEventsResponse["events"][number]): string {
       return created > 0 ? `Advanced: ${created} ticket(s) created${note}` : `Advanced: nothing planned${note}`;
     }
     case "gate-reached":
-      return `Reached gate: ${typeof p.question === "string" ? p.question : String(p.gateId ?? "")}`;
+      return `Reached gate: ${typeof p.question === "string" ? p.question : asText(p.gateId)}`;
     case "gate-resolved": {
       const input = typeof p.input === "string" && p.input ? ` — "${p.input.slice(0, 120)}"` : "";
-      return `Decision: ${String(p.actionLabel ?? p.actionId ?? "?")}${input}`;
+      return `Decision: ${asText(p.actionLabel) || asText(p.actionId) || "?"}${input}`;
     }
     case "gate-recommendation":
       return `Butler pre-read: ${typeof p.actionId === "string" ? p.actionId : "?"}`

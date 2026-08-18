@@ -84,7 +84,7 @@ export async function startFleetListener(opts: {
       });
       server.on("error", reject);
     } catch (err) {
-      reject(err);
+      reject(err instanceof Error ? err : new Error(String(err)));
     }
   });
   injectWebSocket(listening.server);

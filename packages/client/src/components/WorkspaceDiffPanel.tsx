@@ -20,11 +20,17 @@ function repoDisplayName(repo: RepoSection): string {
   return base ?? repo.path;
 }
 
+/**
+ * Every one of these is an async mutation. The type used to say `void`, which is what
+ * `no-misused-promises` flagged: the caller had no way to know a promise came back, so a
+ * rejection could only ever surface as an unhandled rejection. Declaring the real return type
+ * makes that visible to both the compiler and the reader.
+ */
 interface DiffHandlers {
-  onCreateComment: (data: CreateDiffCommentRequest) => void;
-  onEditComment: (commentId: string, body: string) => void;
-  onDeleteComment: (commentId: string) => void;
-  onResolveComment: (commentId: string, resolved: boolean) => void;
+  onCreateComment: (data: CreateDiffCommentRequest) => void | Promise<void>;
+  onEditComment: (commentId: string, body: string) => void | Promise<void>;
+  onDeleteComment: (commentId: string) => void | Promise<void>;
+  onResolveComment: (commentId: string, resolved: boolean) => void | Promise<void>;
 }
 
 function RepoDiffSection({

@@ -220,7 +220,10 @@ function scheduleSpawn(args: string[], opts: GitExecOptions): Promise<GitExecRes
   }
   return new Promise<GitExecResult>((resolve) => {
     const run = () => {
-      spawnBuffered(args, opts, startedMs).finally(releaseSlot).then(resolve);
+      // `void`: this deliberately does not await — it RESOLVES the enclosing promise, which
+      // is the caller's handle. `spawnBuffered` never rejects (it returns `{error}`), so there
+      // is no rejection to lose (no-floating-promises).
+      void spawnBuffered(args, opts, startedMs).finally(releaseSlot).then(resolve);
     };
     (opts.priority === "interactive" ? interactiveQueue : normalQueue).push(run);
   });

@@ -10,7 +10,7 @@
 // stack profile, so it is cheap, reproducible, and never hallucinates a module that
 // doesn't exist. It states facts and points at code; interpretation is the builder's job.
 
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { StackProfile } from "@agentic-kanban/shared";
 

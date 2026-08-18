@@ -11,7 +11,7 @@
  */
 
 import { type ServiceStackConfig, type ServiceStackState } from "@agentic-kanban/shared";
-import { DEFAULT_SERVICE_STACK_CONFIG, parseEnabledServiceStackConfig } from "@agentic-kanban/shared/lib/service-stack-codec";
+import { parseEnabledServiceStackConfig } from "@agentic-kanban/shared/lib/service-stack-codec";
 import type { Database } from "../db/index.js";
 import {
   findLiveWorkspacesSharingWorkingDir,

@@ -101,7 +101,7 @@ export function bundledPluginsDir(): string | null {
       try {
         // Both the server package and the repo root are named "agentic-kanban" (the former is
         // the published npm package) — take the FIRST match that actually has a plugins/ dir.
-        if (JSON.parse(readFileSync(pkg, "utf8")).name === "agentic-kanban") {
+        if ((JSON.parse(readFileSync(pkg, "utf8")) as { name?: string }).name === "agentic-kanban") {
           const plugins = join(dir, "plugins");
           if (existsSync(plugins)) return plugins;
         }

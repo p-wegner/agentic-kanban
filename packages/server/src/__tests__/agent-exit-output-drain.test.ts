@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { writeFileSync, appendFileSync, existsSync, unlinkSync } from "node:fs";
+import { appendFileSync, existsSync, unlinkSync } from "node:fs";
 
 // Mock ONLY child_process so we control the proc + exit timing. node:fs stays REAL
 // so the detached-agent output file path exercises the actual read-to-EOF drain

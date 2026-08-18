@@ -1,4 +1,4 @@
-import { issues, sessions, sessionMessages, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, sessions, sessionMessages } from "@agentic-kanban/shared/schema";
 import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
 import { setWorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import { eq } from "drizzle-orm";

@@ -5,7 +5,7 @@ import { fetchLiveQuotaUsage } from "./quota-usage.service.js";
 import type { QuotaUsageResult } from "./quota-usage.service.js";
 import { resolveEffectiveModel } from "./effective-config.service.js";
 import { selectPolicyByPriority } from "@agentic-kanban/shared/lib/strategy-policy";
-import type { ProviderPolicyMode, ProviderProfilePolicy } from "@agentic-kanban/shared/lib/strategy-policy";
+import type { ProviderProfilePolicy } from "@agentic-kanban/shared/lib/strategy-policy";
 import { readStrategyBullseye } from "@agentic-kanban/shared/lib/strategy-objective-file";
 import type { StrategyBullseyeConfig } from "@agentic-kanban/shared/lib/strategy-objective-file";
 

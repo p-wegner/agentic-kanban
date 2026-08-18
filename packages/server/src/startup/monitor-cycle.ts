@@ -354,7 +354,7 @@ async function mergeBlockedByBackoff(ws: WorkspaceCandidate, deps: ProcessWorksp
 }
 
 async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession | undefined, sessionCount: number, ctx: CycleContext): Promise<void> {
-  const { deps, stats, logAction, canStartRelaunch, canStartMerge } = ctx;
+  const { deps, logAction, canStartRelaunch, canStartMerge } = ctx;
   if (isCodexUsageLimitStats(sess?.stats)) {
     await setWorkspaceStatus(db, ws.wsId, "blocked");
     console.log(`[monitor] Needs attention: workspace ${ws.wsId} for issue #${ws.issueNumber ?? "?"} hit a Codex usage limit; skipping relaunch`);
@@ -524,7 +524,7 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
 }
 
 async function handleReviewingWorkspace(ws: WorkspaceCandidate, sess: LatestSession | undefined, ctx: CycleContext): Promise<void> {
-  const { deps, stats, logAction, canStartMerge } = ctx;
+  const { deps, logAction, canStartMerge } = ctx;
   if (isZeroDiffInReviewAwaiting(ws)) {
     console.log(`[monitor] Needs attention: idle-awaiting workspace ${ws.wsId} for issue #${ws.issueNumber ?? "?"} is In Review with no file changes and is not ready for merge`);
     return;

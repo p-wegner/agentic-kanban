@@ -356,6 +356,9 @@ export function createPluginLoopExtras(ctx: PluginLoopExtrasCtx) {
  * URL would mean cloning, which is what install does. Pure module function: it
  * needs no service closure.
  */
+// Stays `async` deliberately: every sibling validator here is async and callers `await` it,
+// so making this one sync would be a breaking signature change for a purely local win.
+// eslint-disable-next-line @typescript-eslint/require-await
 export async function validatePluginSource(source: string) {
   const errors: string[] = [];
   const warnings: string[] = [];

@@ -13,7 +13,7 @@
  * tests cover that wiring; the classification itself is `orphaned-worktree-reconciler.test.ts`.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -27,7 +27,6 @@ const { pruneOrphanedSiblingWorktrees } = await import("../startup/startup-tasks
 /** Real directories, because the sweep skips a repo path that does not exist on disk. */
 function realDirs(n: number): string[] {
   const base = mkdtempSync(join(tmpdir(), "kanban-sibling-sweep-"));
-  const { mkdirSync } = require("node:fs") as typeof import("node:fs");
   return Array.from({ length: n }, (_, i) => {
     const d = join(base, `repo${i}`);
     mkdirSync(d, { recursive: true });

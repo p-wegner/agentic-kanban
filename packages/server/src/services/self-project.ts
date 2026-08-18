@@ -12,7 +12,6 @@
 // (startup-tasks.ts, data-dir resolution), so we anchor to it here too, injectable
 // for tests.
 
-import { resolve } from "node:path";
 import { pathKey } from "@agentic-kanban/shared/lib/path-key";
 
 /** Canonical comparison key for a repo path (#532 — one definition, win32-only case-fold). */

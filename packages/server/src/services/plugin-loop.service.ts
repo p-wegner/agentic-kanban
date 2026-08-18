@@ -11,10 +11,7 @@ import {
   pluginLoopUnitKey,
   substitutePluginEnv,
   substitutePluginPlaceholders,
-  type PluginLoopCheck,
   type PluginLoopDef,
-  type PluginLoopGate,
-  type PluginLoopProgressStep,
   type PluginManifest,
   type PluginPlaceholderVars,
 } from "@agentic-kanban/shared/lib/plugin-manifest";
@@ -32,12 +29,9 @@ import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-prefere
 import { getAllPreferences, getPreference } from "../repositories/preferences.repository.js";
 import { resolveStartPolicy } from "./start-policy.service.js";
 import { runPluginCommand, STRUCTURED_STDOUT_CAP } from "./plugin-exec.js";
-import type { BoardEvents } from "./board-events.js";
-import type { CreateIssueInput, CreateIssueResult } from "./issue.service.js";
-import type { CreateWorkspaceInput, CreateWorkspaceResult } from "./workspace-internals.js";
 import { describeLoopStartOutcome, startPlannedLoopTickets, type LoopStartOutcome } from "./plugin-loop-start.service.js";
 import { describeExistingUnits } from "./plugin-loop-unit-state.js";
-import { selectLoopStall, type LoopStall } from "./plugin-loop-stall.js";
+import { selectLoopStall } from "./plugin-loop-stall.js";
 import { reconcileProgressStepStates } from "./plugin-loop-step-state.js";
 import {
   beginGateRecommendationAttempt,

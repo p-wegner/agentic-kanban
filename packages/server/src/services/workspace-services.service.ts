@@ -26,7 +26,7 @@
  * injected so the engine is unit-testable with a fake runner (no docker required).
  */
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ServiceStackConfig, ServiceStackState } from "@agentic-kanban/shared";
 import { composeProjectName, isInstanceManagedComposeProject } from "@agentic-kanban/shared";
@@ -37,7 +37,6 @@ import {
   discoverComposePortNames,
   lintSiblingComposeFiles,
   buildServicesEnvFile,
-  resolveServiceHost,
 } from "./workspace-services-env.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { parseServiceStackState } from "@agentic-kanban/shared/lib/service-stack-codec";

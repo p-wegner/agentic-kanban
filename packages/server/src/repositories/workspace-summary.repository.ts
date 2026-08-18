@@ -211,7 +211,10 @@ export async function getSessionMessagesForSessions(sessionIds: string[], databa
   //
   // G14c: the per-session queries run through a small worker pool instead of an
   // uncapped Promise.all — same bound as the .out tail-read sibling.
-  const results: Array<{ sessionId: string; data: string | null }[]> = new Array(sessionIds.length);
+  type MessageRow = { sessionId: string; data: string | null };
+  // `new Array(n)` is typed `any[]` — give it the element type so the slot assignments below
+  // are checked rather than silently `any`.
+  const results = new Array<MessageRow[]>(sessionIds.length);
   let nextIdx = 0;
   const worker = async (): Promise<void> => {
     while (nextIdx < sessionIds.length) {

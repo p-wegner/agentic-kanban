@@ -12,7 +12,6 @@ import * as schema from "@agentic-kanban/shared/schema";
 import { randomUUID } from "node:crypto";
 import { createTestApp as _createTestApp } from "./helpers/test-app.js";
 import { createMockSessionManager } from "./helpers/mocks.js";
-import { createPreferenceService } from "../services/preference.service.js";
 import { setPreferences, getPreference } from "../repositories/preferences.repository.js";
 
 function createTestApp() {

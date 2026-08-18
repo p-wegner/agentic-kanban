@@ -100,7 +100,10 @@ export function PluginSkillPane({ skill, projectId }: { skill: PluginSkill; proj
     setStartedAt(Date.now());
     try {
       // SSE over POST must be read with fetch + ReadableStream — EventSource is GET-only
-      // (client/CLAUDE.md). Each `data:` line is one stage of the launch.
+      // (client/CLAUDE.md). Each `data:` line is one stage of the launch. The no-raw-fetch
+      // rule exists to route READS through a data-layer hook so they are cached and
+      // cancellable; a streaming POST is neither, so the rule has nothing to offer here.
+      // eslint-disable-next-line no-restricted-syntax
       const resp = await fetch(
         `/api/plugins/${skill.pluginId}/skills/${encodeURIComponent(skill.name)}/run?stream=1`,
         {

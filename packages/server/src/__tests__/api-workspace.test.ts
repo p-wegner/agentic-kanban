@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import type { TestDb } from "./helpers/test-db.js";
+
 import {
   createTestApp,
   createTestAppWithBoardEvents,

@@ -23,7 +23,6 @@ const baseParams = {
 
 // A fake DB — never touched, because we always inject sharing/admission deps. The
 // shared-worktree query runs first; stub it to "no sharers" via a resolved empty list.
-const fakeDb = {} as Database;
 
 describe("provisionServicesForLaunch admission cap (#56)", () => {
   it("defers when live stacks are AT the cap — no compose up, deferred flag set", async () => {

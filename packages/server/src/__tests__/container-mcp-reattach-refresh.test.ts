@@ -14,7 +14,6 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
 
 // --- Route the boot routine's module-level db at a REAL in-memory test DB ---------------------
 const h = vi.hoisted(() => ({ db: undefined as unknown as import("./helpers/test-db.js").TestDb }));

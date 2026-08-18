@@ -39,7 +39,9 @@ function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf-8" }).trim();
 }
 
-function gitSetup(repoPath: string) {
+// Intentionally a no-op: the fixture below already does its own git setup, and this is kept
+// as the seam the callers name. `_repoPath` marks the parameter as deliberately unused.
+function gitSetup(_repoPath: string) {
 }
 
 /**

@@ -152,7 +152,7 @@ describe("getFileContention", () => {
 
   it("detects contention on a SIBLING-repo file across two workspaces (#77)", async () => {
     const { projectId, statusId, now } = await seedProject(db);
-    const { workspaceId: ws1 } = await seedWorkspace(db, projectId, statusId, now, { workingDir: "/tmp/ws1" });
+    await seedWorkspace(db, projectId, statusId, now, { workingDir: "/tmp/ws1" });
     const { workspaceId: ws2 } = await seedWorkspace(db, projectId, statusId, now, { workingDir: "/tmp/ws2" });
     // Each workspace has a sibling auth-svc worktree; both edit the SAME sibling file, while
     // their leading worktrees touch different files (no leading overlap).
@@ -173,7 +173,7 @@ describe("getFileContention", () => {
 
   it("does not cross-match a leading file against a sibling file of the same name (#77)", async () => {
     const { projectId, statusId, now } = await seedProject(db);
-    const { workspaceId: ws1 } = await seedWorkspace(db, projectId, statusId, now, { workingDir: "/tmp/ws1" });
+    await seedWorkspace(db, projectId, statusId, now, { workingDir: "/tmp/ws1" });
     const { workspaceId: ws2 } = await seedWorkspace(db, projectId, statusId, now, { workingDir: "/tmp/ws2" });
     await insertWorkspaceRepo({ workspaceId: ws2, projectId, path: "/auth", name: "auth-svc", worktreePath: "/auth/wt2", branch: "b2", baseBranch: "main" }, db);
     mockGetChangedFileNames.mockImplementation(async (dir: string) => {

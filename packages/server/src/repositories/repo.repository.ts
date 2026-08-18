@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { resolve as pathResolve } from "node:path";
 import { samePath as sharedSamePath } from "@agentic-kanban/shared/lib/path-key";
 import { repos, workspaces, issues } from "@agentic-kanban/shared/schema";
 import { and, eq, isNotNull, isNull, ne, or } from "drizzle-orm";

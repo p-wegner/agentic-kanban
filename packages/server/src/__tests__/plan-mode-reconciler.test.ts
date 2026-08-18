@@ -99,7 +99,7 @@ describe("reconcileStrandedPlanModeWorkspaces (#924)", () => {
   });
 
   it("clears planMode and marks blocked when no plan can be recovered from the .out file", async () => {
-    const { workspaceId, sessionId, dir } = await seedStrandedPlan(db, { writePlanOut: false });
+    const { workspaceId, dir } = await seedStrandedPlan(db, { writePlanOut: false });
     cleanupFiles.push(dir);
     // No .out file written → nothing to recover.
     const startSession = vi.fn(async () => randomUUID());
