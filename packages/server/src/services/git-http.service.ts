@@ -308,6 +308,16 @@ export function resolveConfiguredGitPort(env: NodeJS.ProcessEnv = process.env): 
   return parsed;
 }
 
+/**
+ * Which interface the git transport binds, from `KANBAN_GIT_HTTP_HOST` (#652).
+ * Same contract and same rationale as `resolveFleetHost` — absent = `0.0.0.0`.
+ */
+export function resolveConfiguredGitHost(env: NodeJS.ProcessEnv = process.env): string {
+  const raw = env.KANBAN_GIT_HTTP_HOST;
+  if (raw === undefined || raw.trim() === "") return "0.0.0.0";
+  return raw.trim();
+}
+
 export async function startGitHttpServer(opts?: {
   database?: Database;
   port?: number;
@@ -378,14 +388,17 @@ export async function startGitHttpServer(opts?: {
     })();
   });
 
+  const host = opts?.host ?? resolveConfiguredGitHost();
   const port = await new Promise<number>((resolve, rejectListen) => {
     http.once("error", rejectListen);
-    http.listen(opts?.port ?? resolveConfiguredGitPort(), opts?.host ?? "0.0.0.0", () => {
+    http.listen(opts?.port ?? resolveConfiguredGitPort(), host, () => {
       const address = http.address();
       resolve(typeof address === "object" && address ? address.port : 0);
     });
   });
-  console.log(`[git-http] serving project repos on port ${port} (per-assignment scoped tokens)`);
+  // The interface is part of the exposure, so log it: "port 3002" alone does not tell an
+  // operator whether the transport is on the tailnet only or on every interface.
+  console.log(`[git-http] serving project repos on ${host}:${port} (per-assignment scoped tokens)`);
 
   return {
     port,

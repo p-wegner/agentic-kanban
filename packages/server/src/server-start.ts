@@ -14,7 +14,7 @@ import { createWorkflowEngine } from "./startup/exit-workflow.js";
 import { createAutoMerge } from "./startup/merge-workflow.js";
 import { createMonitorSetup } from "./startup/monitor-setup.js";
 import { setupProcessHandlers } from "./startup/process-handlers.js";
-import { resolveFleetPort, startFleetListener } from "./services/fleet-listener.service.js";
+import { resolveFleetHost, resolveFleetPort, startFleetListener } from "./services/fleet-listener.service.js";
 import { createFleetWorkersRoute } from "./routes/workers.js";
 import { setupRoutes } from "./startup/route-setup.js";
 import { BACKGROUND_SERVICES } from "./startup/background-services.js";
@@ -288,6 +288,7 @@ export async function startServer(port?: number, hostname?: string) {
         database: db,
         port: fleetPort,
         createWorkersRoute: createFleetWorkersRoute,
+        host: resolveFleetHost(),
       });
       cleanupCallbacks.push(() => { void fleetListener.close(); });
     } catch (err) {

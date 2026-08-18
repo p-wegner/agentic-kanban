@@ -57,6 +57,27 @@ export function resolveFleetPort(env: NodeJS.ProcessEnv = process.env): number |
   return parsed;
 }
 
+/**
+ * Which interface the fleet listener binds, from `KANBAN_FLEET_HOST` (#652).
+ *
+ * Absent = `0.0.0.0`, i.e. exactly today's behaviour. The reason to narrow it is a
+ * VPN posture: on a tailnet the intended exposure is "the tailnet address only", and
+ * without this the operator who opens a fleet port also publishes it on the office
+ * LAN, the home LAN and hotel wifi. Both listeners bearer-authenticate every request,
+ * so this is defence in depth — but the design principle of the second listener is to
+ * expose the minimum DELIBERATELY, and the interface is part of that minimum.
+ *
+ * A blank/whitespace value falls back rather than binding to nothing. There is no
+ * syntax check beyond that: an unresolvable host surfaces as a bind error at startup,
+ * which is already handled (non-fatal, named in the log), and a hostname allowlist here
+ * would only reject valid inputs the OS accepts.
+ */
+export function resolveFleetHost(env: NodeJS.ProcessEnv = process.env): string {
+  const raw = env.KANBAN_FLEET_HOST;
+  if (raw === undefined || raw.trim() === "") return "0.0.0.0";
+  return raw.trim();
+}
+
 export async function startFleetListener(opts: {
   database: Database;
   port: number;
