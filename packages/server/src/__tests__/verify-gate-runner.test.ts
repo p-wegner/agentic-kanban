@@ -72,8 +72,8 @@ describe("verify-gate-runner", () => {
   });
 
   afterEach(async () => {
-    await rm(hookDir, { recursive: true, force: true });
-    await rm(projectDir, { recursive: true, force: true });
+    await rmTree(hookDir);
+    await rmTree(projectDir);
   });
 
   it("exits 0 (no-op) when no config file and no env var", () => {
@@ -178,6 +178,29 @@ describe("verify-gate-runner", () => {
   );
 });
 
+/**
+ * Remove a temp tree, retrying on the Windows EBUSY that this suite provokes by design (#625).
+ *
+ * Several tests here leave a process running under the temp dir on purpose — that IS the
+ * assertion (the sweep must NOT kill a listening dev server). Killing it in the test's
+ * `finally` only *requests* the teardown: on Windows the handle on the process's cwd
+ * outlives `process.kill` by a few hundred ms, so a plain `rm` racing it fails with
+ * `EBUSY: rmdir`. `force` does not cover that — it suppresses ENOENT, not a live handle —
+ * which is why this failed as a "flake" that also reproduced 2/2 in isolation. `maxRetries`
+ * makes `rm` back off and retry exactly those errors.
+ */
+async function rmTree(dir: string): Promise<void> {
+  await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+}
+
+/** Wait (bounded) for a killed pid to actually leave the process table. */
+async function waitForExit(pid: number, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline && isPidAlive(pid)) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
 function isPidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -197,8 +220,8 @@ describe("verify-gate-runner — zombie process sweep (#172)", () => {
   });
 
   afterEach(async () => {
-    await rm(hookDir, { recursive: true, force: true });
-    await rm(projectDir, { recursive: true, force: true });
+    await rmTree(hookDir);
+    await rmTree(projectDir);
   });
 
   it("kills a detached descendant left running under cwd after the gate command exits", async () => {
@@ -300,6 +323,9 @@ describe("verify-gate-runner — zombie process sweep (#172)", () => {
       } catch {
         /* already gone */
       }
+      // The listener's cwd is projectDir, so afterEach cannot remove the tree until the
+      // OS has actually reaped it — see rmTree.
+      await waitForExit(pid);
     }
   }, 20_000);
 
@@ -347,7 +373,7 @@ describe("verify-gate-runner — bounded self-repair loop (#795)", () => {
     hookDir = await mkdtemp(join(tmpdir(), "verify-gate-loop-"));
   });
   afterEach(async () => {
-    await rm(hookDir, { recursive: true, force: true });
+    await rmTree(hookDir);
   });
 
   async function writeConfig(cfg: Record<string, unknown>): Promise<void> {
