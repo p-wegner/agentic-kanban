@@ -45,7 +45,7 @@ export async function resolveVerifyGateStrategy(projectId: string, database: Dat
  *  `scripts/test-mine.mjs`'s `ALWAYS_RUN_TESTS_DIR`. Best-effort: this repo checkout's own
  *  monorepo layout, so it is inert (returns 0) for a project this gate runs FOR that isn't
  *  this repo — the count only decorates the message, it never gates behavior. */
-const ALWAYS_RUN_TESTS_DIRS = [
+export const ALWAYS_RUN_TESTS_DIRS = [
   join("packages", "shared", "__tests__"),
   join("packages", "server", "src", "__tests__"),
   join("packages", "mcp-server", "src", "__tests__"),

@@ -95,7 +95,7 @@ describe("scopedTestPackages", () => {
     expect(testPackagesEnvValue([
       "packages/shared/drizzle/0110_add_thing.sql",
       "packages/shared/drizzle/meta/_journal.json",
-    ])).toBe("shared,server,mcp-server");
+    ])).toBe("shared,server,mcp-server,client");
   });
 
   it("does NOT let the always-run `shared` entry expand a narrow diff to everything", () => {
@@ -114,8 +114,11 @@ describe("scopedTestPackages", () => {
 });
 
 describe("testPackagesEnvValue", () => {
-  it("drops `client` (test:mine does not run it) but keeps the rest", () => {
-    expect(testPackagesEnvValue(["packages/client/src/App.tsx"])).toBe("shared");
+  it("KEEPS `client` — dropping it was #639, and it nullified #601", () => {
+    // The old assertion here pinned the bug: it expected "shared", i.e. a client-only diff
+    // running zero client tests. Inverted deliberately, because the pin is what would have
+    // made an agent "fix" the test instead of the filter.
+    expect(testPackagesEnvValue(["packages/client/src/App.tsx"])).toBe("shared,client");
   });
 
   it("emits a comma-separated list for a multi-package diff", () => {

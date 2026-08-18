@@ -138,13 +138,19 @@ export function scopedTestPackages(changedFiles: readonly string[]): TestPackage
 
 /**
  * The `KANBAN_TEST_PACKAGES` value for a diff, or `null` when the gate should not scope.
- * `test:mine` only knows about shared/server/mcp-server, so `client` is dropped from the
- * env value — but its presence in the scope is what keeps the OTHER packages from being
- * dropped when a diff spans both.
+ *
+ * #639: this used to `filter((l) => l !== "client")`, on the rationale that "test:mine only
+ * knows about shared/server/mcp-server". That rationale expired when #601 added
+ * `packages/client` to `scripts/test-mine.mjs` — but the filter stayed, so a client-only diff
+ * scoped to `["shared", "client"]` and then handed the gate `"shared"`. The client's ~146 test
+ * files were skipped for precisely the diffs they exist to cover, which nullified #601 without
+ * leaving a trace: the gate still reported a clean pass.
+ *
+ * The scope is now passed through verbatim. Every label in it is a `PACKAGES[].label` in
+ * test-mine, and `test-mine-scope-labels.test.ts` holds the two lists in lockstep.
  */
 export function testPackagesEnvValue(changedFiles: readonly string[]): string | null {
   const scope = scopedTestPackages(changedFiles);
   if (!scope) return null;
-  const runnable = scope.filter((l) => l !== "client");
-  return runnable.length > 0 ? runnable.join(",") : null;
+  return scope.length > 0 ? scope.join(",") : null;
 }
