@@ -23,6 +23,7 @@ import {
   snapshotDependencyManifests,
 } from "../../../../scripts/dev-supervisor.mjs";
 import { commandLineBelongsToCheckout, planPortOwnerKill } from "../../../../scripts/dev-port-guard.mjs";
+import { sharedBuildIsStale } from "../../../../scripts/ensure-shared-fresh.mjs";
 
 function closeServer(server) {
   return new Promise((resolveClose) => server.close(resolveClose));
@@ -1024,5 +1025,27 @@ describe("bin shims preflight", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe("shared/dist freshness guard for typecheck (#582)", () => {
+  it("treats a dist older than src as stale, and a missing dist as stale", () => {
+    // The measured trap: a main checkout merges a shared change, does not rebuild, and
+    // `tsc` reads a `.d.ts` from before the merge — reporting a plausible error in the
+    // CONSUMING file, which the natural fix then damages.
+    expect(sharedBuildIsStale(2000, 1000)).toBe(true);
+    expect(sharedBuildIsStale(2000, 0)).toBe(true);
+  });
+
+  it("treats dist newer than or equal to src as fresh — the guard must not rebuild every run", () => {
+    // A build writes dist after reading src, so `dist >= src` is the healthy state. Equal
+    // must be fresh or the PostToolUse hook pays a shared rebuild on every single edit.
+    expect(sharedBuildIsStale(1000, 2000)).toBe(false);
+    expect(sharedBuildIsStale(1000, 1000)).toBe(false);
+  });
+
+  it("is wired into the root `typecheck` script, which is what the PostToolUse hook runs", () => {
+    const rootPkg = JSON.parse(readFileSync(join(repoRootDir, "package.json"), "utf8"));
+    expect(rootPkg.scripts.typecheck).toContain("ensure-shared-fresh.mjs");
   });
 });
