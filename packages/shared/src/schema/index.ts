@@ -64,3 +64,4 @@ export {
   DRIVE_OBSTACLE_SEVERITIES,
 } from "./drive-obstacles.js";
 export type { DriveObstacleKind, DriveObstacleSeverity } from "./drive-obstacles.js";
+export { workspaceProvisioning } from "./workspace-provisioning.js";

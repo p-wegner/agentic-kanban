@@ -3,6 +3,7 @@ import { db, rawClient, rawWriteClient } from "../db/index.js";
 import { workspaces, issues, projects, preferences, sessions, pluginViewProcesses, repos as reposTable } from "@agentic-kanban/shared/schema";
 import { and, eq, ne } from "drizzle-orm";
 import { applyMigrations } from "../db/manual-migrate.js";
+import { listAbandonedProvisioning, finishProvisioning } from "../repositories/workspace-provisioning.repository.js";
 import { deduplicateProjects, unregisterLeakedTempProjects, findProjectsWithMissingRepoPath } from "../services/project-registration.js";
 import { getAllProjects } from "../repositories/project.repository.js";
 import { sweepHookWiring, formatHookWiringReport } from "../services/hook-wiring-audit.service.js";
@@ -674,6 +675,56 @@ export async function pruneOrphanedSiblingWorktrees(
   }
 }
 
+/**
+ * Report and clear workspace-create markers left behind by a dead process (#630).
+ *
+ * A row in `workspace_provisioning` that belongs to another pid means a create died between
+ * "started provisioning" and "workspace row committed" — the window that used to be entirely
+ * invisible, and the reason `comet` accumulated 104 orphaned worktrees against zero workspace
+ * rows. Runs AFTER the worktree sweeps in the same startup phase, so by the time it speaks the
+ * disk half is already reconciled: an abandoned create's branch carries no commits, so
+ * `reconcileOrphanedWorktrees` classifies it as removable, while anything that DID produce work
+ * is kept and reported. What is left for this to do is say that it happened, name the issue and
+ * the phase it died in, and drop the marker.
+ *
+ * Deliberately NOT auto-resuming: a boot that re-dispatches every interrupted create would
+ * start a provisioning storm on exactly the machine that just proved it cannot finish them. The
+ * issue is still in its pre-start state, so the monitor (or a human) starts it again normally —
+ * the difference is that it is now a reported event instead of silent debris.
+ */
+export async function reconcileAbandonedProvisioning(deps: {
+  list?: typeof listAbandonedProvisioning;
+  finish?: typeof finishProvisioning;
+  log?: (msg: string) => void;
+} = {}): Promise<number> {
+  const list = deps.list ?? listAbandonedProvisioning;
+  const finish = deps.finish ?? finishProvisioning;
+  const log = deps.log ?? ((msg: string) => console.log(msg));
+  let records: Awaited<ReturnType<typeof listAbandonedProvisioning>>;
+  try {
+    records = await list();
+  } catch (err) {
+    console.warn("[startup] reconcileAbandonedProvisioning: could not read markers:", errorMessage(err));
+    return 0;
+  }
+  for (const record of records) {
+    const ageMs = Date.now() - Date.parse(record.startedAt);
+    const age = Number.isFinite(ageMs) ? `${Math.round(ageMs / 1000)}s ago` : "unknown age";
+    log(
+      `[startup] abandoned workspace create for issue ${record.issueId} (branch ${record.branch ?? "?"}, ` +
+        `died in phase '${record.phase}', started ${age}, pid ${record.serverPid}) — its worktrees are ` +
+        `handled by the orphan sweep; the ticket was never moved to In Progress, so it can simply be started again`,
+    );
+    try {
+      await finish(record.id);
+    } catch (err) {
+      console.warn(`[startup] could not clear provisioning marker ${record.id}:`, errorMessage(err));
+    }
+  }
+  if (records.length > 0) log(`[startup] cleared ${records.length} abandoned workspace-create marker(s)`);
+  return records.length;
+}
+
 /** Abort any in-progress merges in all registered project repos (self-healing after hot-reload kills a merge mid-operation). */
 export async function abortStaleMerges(): Promise<void> {
   try {
@@ -865,6 +916,8 @@ export async function runStartupAuditTasks(): Promise<void> {
   // worktree left behind by a merge (measured: kassenbuch `.worktrees/ak-6` and `ak-12`) is
   // recovered instead of blocking every later auto-merge on the project.
   await pruneOrphanedWorktrees();
+  // #630: after the disk sweeps, so the report can honestly say the debris is handled.
+  await reconcileAbandonedProvisioning();
   await checkMainCheckoutHeads();
 }
 
