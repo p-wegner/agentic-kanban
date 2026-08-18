@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { resolve as pathResolve } from "node:path";
 import { samePath as sharedSamePath } from "@agentic-kanban/shared/lib/path-key";
-import { repos, workspaces } from "@agentic-kanban/shared/schema";
-import { and, eq, isNotNull, isNull, ne } from "drizzle-orm";
+import { repos, workspaces, issues } from "@agentic-kanban/shared/schema";
+import { and, eq, isNotNull, isNull, ne, or } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database, TransactionClient } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
@@ -317,4 +317,47 @@ export async function findLiveSiblingSharers(
  */
 function samePath(a: string, b: string): boolean {
   return sharedSamePath(a, b);
+}
+
+/**
+ * Every SIBLING worktree a project's live+closed workspaces claim, with the owning
+ * workspace's issue (#631).
+ *
+ * The Worktrees panel could only ever answer "which workspace owns this?" for the LEADING
+ * repo, because that link lives on `workspaces.working_dir`. A sibling's link lives here, on
+ * the per-workspace `repos` row — so without this query every sibling worktree looked
+ * unowned, and the panel had no way to distinguish a healthy multi-repo workspace from the
+ * orphan debris it exists to surface.
+ *
+ * `isLeading` rows are excluded: they mirror the workspace's own columns and would duplicate
+ * the leading entry the panel already renders.
+ */
+export async function getWorkspaceRepoClaims(
+  projectId: string,
+  database: Database = db,
+): Promise<{
+  repoPath: string;
+  worktreePath: string | null;
+  branch: string | null;
+  workspaceId: string;
+  status: string;
+  issueId: string;
+  issueNumber: number | null;
+  issueTitle: string;
+}[]> {
+  return database
+    .select({
+      repoPath: repos.path,
+      worktreePath: repos.worktreePath,
+      branch: repos.branch,
+      workspaceId: workspaces.id,
+      status: workspaces.status,
+      issueId: workspaces.issueId,
+      issueNumber: issues.issueNumber,
+      issueTitle: issues.title,
+    })
+    .from(repos)
+    .innerJoin(workspaces, eq(repos.workspaceId, workspaces.id))
+    .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    .where(and(eq(repos.projectId, projectId), or(isNull(repos.isLeading), eq(repos.isLeading, false))));
 }

@@ -7,6 +7,13 @@ interface WorktreeInfo {
   path: string;
   branch: string;
   isMain: boolean;
+  /**
+   * #631 — the SIBLING repo this worktree belongs to, absent for the leading repo's own.
+   * Before this the endpoint listed the leading repo only, so a 17-repo project's panel read
+   * "Worktrees (1) — No additional worktrees" while 104 orphaned sibling worktrees existed
+   * across 13 repos: the panel that exists to surface exactly this debris could not see it.
+   */
+  repoName?: string;
   workspace?: {
     id: string;
     status: string;
@@ -300,11 +307,24 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
                           onChange={() => toggleSelect(wt.path)}
                           className="h-4 w-4 rounded border-gray-300 text-brand-600 shrink-0"
                         />
+                        {wt.repoName && (
+                          <span
+                            className="text-xs px-1.5 py-0.5 rounded bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300 shrink-0"
+                            title={`Sibling repo: ${wt.repoName}`}
+                          >
+                            {wt.repoName}
+                          </span>
+                        )}
                         <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
                           {wt.branch}
                         </span>
                         {isOrphan && (
-                          <span className="text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">orphaned</span>
+                          <span
+                            className="text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded"
+                            title={wt.repoName ? "No board workspace claims this sibling worktree — most likely an interrupted create (#630)" : "No board workspace claims this worktree"}
+                          >
+                            {wt.repoName ? "no board workspace" : "orphaned"}
+                          </span>
                         )}
                         {wt.workspace?.isDirect && (
                           <span className="text-xs bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 px-1.5 py-0.5 rounded">direct</span>
