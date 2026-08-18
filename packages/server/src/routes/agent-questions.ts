@@ -11,6 +11,7 @@ import type { Database } from "../db/index.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
 import { getIssueDescription } from "../repositories/issue.repository.js";
+import { getWorkspaceById } from "../repositories/workspace.repository.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { createWorkspaceService } from "../services/workspace.service.js";
@@ -59,6 +60,25 @@ export function createAgentQuestionsRoute(
     }>(c);
     if (!body.workspaceId || !Array.isArray(body.questions) || !Array.isArray(body.answers)) {
       return c.json({ error: "workspaceId, questions[], and answers[] are required" }, 400);
+    }
+    // Dead workspace (seen on issue #656): refuse early when the asking workspace can no
+    // longer take a turn. A closed workspace (or one whose worktree is gone) makes
+    // sendTurn fail deep inside the session manager with the bare
+    // "Workspace has no working directory; run setup first" — a
+    // message that reads like a setup step the user could take, when in fact the only
+    // way out is to dismiss the question. `canDismiss` lets the UI say exactly that.
+    const workspace = await getWorkspaceById(body.workspaceId, database);
+    const gone = !workspace ? "deleted" : workspace.status === "closed" ? "closed" : !workspace.workingDir ? "unbuilt" : null;
+    if (gone) {
+      return c.json({
+        error: gone === "unbuilt"
+          ? "The workspace that asked this question has no working directory, so the agent " +
+            "cannot be resumed. Run setup on the workspace, or dismiss the question."
+          : `The workspace that asked this question is ${gone} — the agent is gone and cannot ` +
+            "receive an answer. Dismiss the question instead (and re-ask on a fresh workspace " +
+            "if the decision still matters).",
+        canDismiss: true,
+      }, 409);
     }
     const content = formatAnswerMessage(body.questions, body.answers);
     try {

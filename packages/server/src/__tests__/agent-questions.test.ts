@@ -364,6 +364,58 @@ describe("listPendingQuestionsForProject — dismiss + staleness integration", (
     const afterAnswer = await listPendingQuestionsForProject(projectId, db);
     expect(afterAnswer.find((p) => p.toolUseId === "mcp-clarify-1")).toBeUndefined();
   });
+
+  // A clarify_or_propose ask outlives the session that made it. The agent exits,
+  // its direct workspace is closed seconds later with workingDir null, and the card used
+  // to stay "fresh" forever — every answer attempt dying in sendTurn with "Workspace has
+  // no working directory; run setup first", with no route back except the ✕.
+  it("drops an MCP clarifying question whose workspace has since been closed", async () => {
+    const { db } = createTestDb();
+    const { projectId, workspaceId, issueId } = await seed(db, {
+      toolUseId: "tu-closed-synthetic",
+      workspaceStatus: "closed",
+      workspaceClosedAt: ts(-60 * 1000),
+    });
+    await db.insert(issueComments).values({
+      id: "comment-mcp-closed",
+      issueId,
+      workspaceId,
+      kind: "agent-question",
+      author: "agent",
+      body: "Need clarification.",
+      payload: JSON.stringify({
+        source: "mcp_clarify_or_propose",
+        toolUseId: "mcp-clarify-closed",
+        questions: [{ question: "What should happen with it?", options: [{ label: "Close as noise" }] }],
+      }),
+      createdAt: ts(-70 * 1000),
+    });
+
+    const pending = await listPendingQuestionsForProject(projectId, db);
+    expect(pending.find((p) => p.toolUseId === "mcp-clarify-closed")).toBeUndefined();
+  });
+
+  it("keeps an MCP clarifying question while its workspace is still open", async () => {
+    const { db } = createTestDb();
+    const { projectId, workspaceId, issueId } = await seed(db, { toolUseId: "tu-open-synthetic" });
+    await db.insert(issueComments).values({
+      id: "comment-mcp-open",
+      issueId,
+      workspaceId,
+      kind: "agent-question",
+      author: "agent",
+      body: "Need clarification.",
+      payload: JSON.stringify({
+        source: "mcp_clarify_or_propose",
+        toolUseId: "mcp-clarify-open",
+        questions: [{ question: "Approve?", options: [{ label: "Yes" }] }],
+      }),
+      createdAt: ts(-60 * 1000),
+    });
+
+    const pending = await listPendingQuestionsForProject(projectId, db);
+    expect(pending.find((p) => p.toolUseId === "mcp-clarify-open")?.staleness).toBe(null);
+  });
 });
 
 describe("tryAutoAnswer", () => {
