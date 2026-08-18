@@ -14,7 +14,8 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
  */
 
 export type ScaffoldForm = {
-  targetPath: string;
+  /** `null` when the plugin declares no scaffold at all (#658) — a valid answer, not an error. */
+  targetPath: string | null;
   exists: boolean;
   content: string | null;
   fields: Array<{ index: number; label: string; line: string }>;
