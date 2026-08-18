@@ -138,7 +138,6 @@ export async function reconcileStrandedPlanModeWorkspaces(deps: StrandedPlanReco
           workspaceId: c.wsId,
           prompt: buildImplementPrompt(),
           agentCommand: c.agentCommand ?? undefined,
-          claudeProfile: c.claudeProfile ?? undefined,
           planMode: false,
           provider: toExecutorProvider(harness),
           triggerType: "plan-implement",

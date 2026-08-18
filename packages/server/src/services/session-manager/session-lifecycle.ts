@@ -68,7 +68,6 @@ export function createSessionLifecycle(
       agentCommand,
       agentArgs,
       resumeFromId,
-      claudeProfile,
       multiTurn,
       permissionPromptTool,
       planMode,
@@ -219,7 +218,7 @@ export function createSessionLifecycle(
     const launchDiagnostics = {
       launch: {
         provider: executor,
-        profile: profile?.name ?? claudeProfile ?? null,
+        profile: profile?.name ?? null,
         resolvedModel: effectiveModel ?? null,
         requestedModel: model ?? null,
         workspaceModel: workspace.model ?? null,
@@ -385,7 +384,10 @@ export function createSessionLifecycle(
         // (see `applyAuthFailureRecovery`: it rotates off a dead login and returns true when it
         // parked the workspace `blocked` instead, which is what stops the retry loop).
         const authHandled = isStaleResume ? false : await applyAuthFailureRecovery(db, {
-          provider: narrowProviderName(executor), profileName: profile?.name ?? claudeProfile,
+          // #528: was `profile?.name ?? claudeProfile`, which for a codex/copilot launch with
+          // no provider profile set would record the failure streak against the CLAUDE profile
+          // name under this session's (non-claude) provider.
+          provider: narrowProviderName(executor), profileName: profile?.name,
           errorText: errorText || capturedStderr, workspaceId, projectId, sessionId, now: endNow,
           setWorkspaceStatus: (status) => lifecycleRepo.updateWorkspaceStatus(workspaceId, status, endNow, db),
         }).catch(() => false);
@@ -413,7 +415,6 @@ export function createSessionLifecycle(
           agentCommand,
           agentArgs: effectiveAgentArgs,
           resumeFromId: sessionId,
-          claudeProfile,
           multiTurn,
           permissionPromptTool,
           planMode,
@@ -445,7 +446,7 @@ export function createSessionLifecycle(
         // #430 — a session that actually RAN clears the profile's failure streak, so the breaker
         // can never outlive the problem (a re-authenticated profile would else stay "unusable").
         await recordAgentProfileLaunchSuccess(db, {
-          provider: narrowProviderName(executor), profileName: profile?.name ?? claudeProfile,
+          provider: narrowProviderName(executor), profileName: profile?.name,
         }).catch(() => {});
 
         // Write HANDOFF.md before workflow callbacks can launch the next session.
@@ -479,7 +480,6 @@ export function createSessionLifecycle(
             agentCommand,
             agentArgs: effectiveAgentArgs,
             resumeFromId: sessionId,
-            claudeProfile,
             multiTurn: undefined,
             permissionPromptTool,
             planMode: false,
@@ -510,7 +510,6 @@ export function createSessionLifecycle(
             {
               agentCommand,
               agentArgs: effectiveAgentArgs,
-              claudeProfile,
               permissionPromptTool,
               provider,
               profile,

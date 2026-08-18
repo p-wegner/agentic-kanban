@@ -11,7 +11,6 @@ import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 export interface PlanModeExitRelaunch {
   agentCommand: string | undefined;
   agentArgs: string | undefined;
-  claudeProfile: string | undefined;
   permissionPromptTool: string | undefined;
   provider: ProviderId | undefined;
   profile: { provider: ProviderName; name: string } | undefined;
@@ -81,7 +80,6 @@ export async function finalizePlanModeExit(
         prompt: buildImplementPrompt(),
         agentCommand: relaunch.agentCommand,
         agentArgs: relaunch.agentArgs,
-        claudeProfile: relaunch.claudeProfile,
         permissionPromptTool: relaunch.permissionPromptTool,
         planMode: false,
         provider: relaunch.provider,

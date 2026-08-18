@@ -92,8 +92,6 @@ interface UsageLimitProviderConfig {
   executorProvider: ProviderId;
   /** `profile.provider` passed to `startSession` on relaunch. */
   profileSelectionProvider: ProviderName;
-  /** Claude passes the rotated profile as `claudeProfile`; Codex does not. */
-  setsClaudeProfile: boolean;
   /** Recognizes this provider's usage-limit signature on the session's persisted stats. */
   isUsageLimitStats: (stats: string | null | undefined) => boolean;
   /** Rotate the provider's profile ring, cooling the exhausted profile. */
@@ -112,7 +110,6 @@ const USAGE_LIMIT_PROVIDERS: UsageLimitProviderConfig[] = [
     profilePrefKey: "codex_profile",
     executorProvider: "codex",
     profileSelectionProvider: "codex",
-    setsClaudeProfile: false,
     isUsageLimitStats: isCodexUsageLimitStats,
     rotate: rotateCodexLicense,
   },
@@ -121,7 +118,6 @@ const USAGE_LIMIT_PROVIDERS: UsageLimitProviderConfig[] = [
     profilePrefKey: "claude_profile",
     executorProvider: "claude-code",
     profileSelectionProvider: "claude",
-    setsClaudeProfile: true,
     isUsageLimitStats: isClaudeUsageLimitStats,
     rotate: rotateClaudeSubscription,
   },
@@ -166,7 +162,7 @@ async function launchLearningStep(database: Database, sessionManager: ReturnType
     const effectiveProfile = getEffectiveProfile(learnPrefs, provider, claudeProfile);
     const profileSelection = effectiveProfile ? { provider, name: effectiveProfile } : undefined;
     const prompt = buildLearningStepPrompt(false);
-    const learnSessId = await sessionManager.startSession({ workspaceId, prompt, agentCommand, agentArgs, claudeProfile: effectiveProfile, provider: toExecutorProvider(provider), triggerType: "learning", profile: profileSelection });
+    const learnSessId = await sessionManager.startSession({ workspaceId, prompt, agentCommand, agentArgs, provider: toExecutorProvider(provider), triggerType: "learning", profile: profileSelection });
     learningSessionIds.add(learnSessId);
     console.log(`[workflow] learning step (${label}) started: session=${learnSessId}`);
     return wait ? waitForLearningSession(database, learnSessId, label, `[workflow] learning step (${label}) timed out after 3m`) : Promise.resolve();
@@ -370,7 +366,6 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
           prompt: continuation,
           agentCommand: rotationPrefMap.get("agent_command") || undefined,
           agentArgs: rotationPrefMap.get("agent_args") || undefined,
-          ...(cfg.setsClaudeProfile ? { claudeProfile: rotation.toProfile } : {}),
           provider: cfg.executorProvider,
           triggerType: "agent",
           profile: { provider: cfg.profileSelectionProvider, name: rotation.toProfile ?? "" },
@@ -976,7 +971,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     try {
       await setWorkspaceStatus(db, workspaceId, "reviewing", { now });
       boardEvents.broadcast(projectId, "issue_updated");
-      const reviewSessionId = await sessionManager.startSession({ workspaceId, prompt, agentCommand, agentArgs: reviewArgsWithModel, claudeProfile: effectiveReviewProfile, provider: toExecutorProvider(reviewProvider), triggerType: "review", profile: profileSelection, extraEnv: { KANBAN_SESSION_TYPE: "review", KANBAN_AFTER_MERGE_VERIFY: verifyAgent } });
+      const reviewSessionId = await sessionManager.startSession({ workspaceId, prompt, agentCommand, agentArgs: reviewArgsWithModel, provider: toExecutorProvider(reviewProvider), triggerType: "review", profile: profileSelection, extraEnv: { KANBAN_SESSION_TYPE: "review", KANBAN_AFTER_MERGE_VERIFY: verifyAgent } });
       reviewSessionIds.add(reviewSessionId);
       console.log(`[workflow] launched ${reviewSkillName} session ${reviewSessionId} for workspace ${workspaceId} (verifyAgent=${verifyAgent})`);
     } catch (err) {

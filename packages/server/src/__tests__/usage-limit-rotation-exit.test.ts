@@ -8,7 +8,7 @@
  * pure `rate-limit-exit-decision` unit tests do not cover:
  *   1. The right provider config is selected from the session's stats signature.
  *   2. A builder session on a freshly-rotated profile is relaunched with the
- *      provider-correct `provider` / `profile` / `claudeProfile` shape, the
+ *      provider-correct `provider` / `profile` shape, the
  *      workspace flipped back to "active", and a butler event emitted.
  *   3. When the ring cannot rotate (no fresh profile), the workspace is left
  *      "blocked" and NOT relaunched.
@@ -116,7 +116,7 @@ describe("exit-workflow: usage-limit rotation relaunch (handleUsageLimitExit)", 
     vi.mocked(emitButlerSystemEvent).mockClear();
   });
 
-  it("rotates a Codex license and relaunches the builder on the fresh profile (codex provider, no claudeProfile)", async () => {
+  it("rotates a Codex license and relaunches the builder on the fresh profile (codex provider)", async () => {
     const { projectId, workspaceId, sessionId } = await seedRateLimitedWorkspace(db, "codex-limit");
     rotateCodexLicense.mockResolvedValue({ rotated: true, fromProfile: "ki14", toProfile: "ki15", reason: "rotated to ki15" });
     const sessionManager = makeSessionManager();
@@ -141,7 +141,6 @@ describe("exit-workflow: usage-limit rotation relaunch (handleUsageLimitExit)", 
       triggerType: "agent",
       profile: { provider: "codex", name: "ki15" },
     });
-    expect(opts.claudeProfile).toBeUndefined();
     expect(String(opts.prompt)).toContain("ticket #700");
     // Workspace flipped back to active for the continuation.
     expect(await getWorkspaceStatus(db, workspaceId)).toBe("active");
@@ -150,7 +149,7 @@ describe("exit-workflow: usage-limit rotation relaunch (handleUsageLimitExit)", 
     );
   });
 
-  it("rotates a Claude subscription and relaunches with claude-code provider + claudeProfile", async () => {
+  it("rotates a Claude subscription and relaunches with claude-code provider + the rotated profile", async () => {
     const { workspaceId, sessionId } = await seedRateLimitedWorkspace(db, "claude-limit");
     rotateClaudeSubscription.mockResolvedValue({ rotated: true, fromProfile: "anth", toProfile: "anth2", reason: "rotated to anth2" });
     const sessionManager = makeSessionManager();
@@ -169,7 +168,6 @@ describe("exit-workflow: usage-limit rotation relaunch (handleUsageLimitExit)", 
     const opts = sessionManager.startSession.mock.calls[0][0];
     expect(opts).toMatchObject({
       provider: "claude-code",
-      claudeProfile: "anth2",
       profile: { provider: "claude", name: "anth2" },
     });
     expect(await getWorkspaceStatus(db, workspaceId)).toBe("active");
