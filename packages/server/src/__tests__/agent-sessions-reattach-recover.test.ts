@@ -67,6 +67,8 @@ import type * as agentServiceType from "../services/agent.service.js";
 import type { AgentOutputCallback } from "../services/agent.service.js";
 import type { workspaceLaunchPreflight } from "../services/preflight-check.js";
 import type { TestDb } from "./helpers/test-db.js";
+import { profileFailureKey } from "../services/agent-profile-failure-record.js";
+import { getRuntimeState, setRuntimeState } from "../repositories/runtime-state.repository.js";
 
 interface Seeded { projectId: string; issueId: string; workspaceId: string; }
 
@@ -281,5 +283,47 @@ describe("notifyExternalExit — routes external exits through the exit state ma
     expect(stats.providerExitCode).toBeNull();
     // The workflow callback receives null (undeterminable), never a fabricated 0.
     expect(onSessionExit).toHaveBeenCalledWith(seeded.workspaceId, sessionId, null, false);
+  });
+
+  // ── #543: drift between the live exit path and this one ──────────────────────────────
+  // `classifySessionExit` was already shared, but the FINALIZE side was copied, and the
+  // copies had lost two things. Both are asserted through the runtime-state row the
+  // profile-health breaker actually reads — no mocks, so these fail against the old code.
+
+  it("(c) a completed external exit CLEARS the profile's failure streak (was live-path only)", async () => {
+    const seeded = await seedWorkspace(h.db, 13);
+    // Pin a profile on the workspace: the external path has no StartSessionOptions, so this
+    // row is the only place it can learn which profile's health it is recording.
+    // Distinct profile name per case: `h.db` is one DB shared by every test in this file.
+    await h.db.update(workspaces).set({ claudeProfile: "anth-c" }).where(eq(workspaces.id, seeded.workspaceId));
+    const key = profileFailureKey("claude", "anth-c");
+    await setRuntimeState(key, JSON.stringify({ count: 2, summary: "earlier failures" }), h.db);
+
+    // Old startedAt: exit 0 inside the launch-failure window would classify as ZERO-OUTPUT
+    // launch failure, not `completed` — the route this case is about.
+    const oldStartedAt = new Date(Date.now() - 600_000).toISOString();
+    const sessionId = await insertRunningSession(h.db, seeded.workspaceId, process.pid, oldStartedAt);
+    const { lifecycle } = makeLifecycle(seeded, sessionId);
+    await lifecycle.notifyExternalExit(sessionId, 0);
+
+    // Without this the breaker outlives the problem: a reattached session that ran fine
+    // left the streak intact, so a healthy profile could be marked unusable.
+    expect(await getRuntimeState(key, h.db)).toBeNull();
+  });
+
+  it("(d) an auth-shaped external launch failure RECORDS against the profile (was live-path only)", async () => {
+    const seeded = await seedWorkspace(h.db, 14);
+    await h.db.update(workspaces).set({ claudeProfile: "anth-d" }).where(eq(workspaces.id, seeded.workspaceId));
+    const key = profileFailureKey("claude", "anth-d");
+    expect(await getRuntimeState(key, h.db)).toBeNull();
+
+    const sessionId = await insertRunningSession(h.db, seeded.workspaceId, process.pid, new Date().toISOString());
+    const { lifecycle } = makeLifecycle(seeded, sessionId);
+    await lifecycle.notifyExternalExit(sessionId, 1);
+
+    // The external path skipped `applyAuthFailureRecovery` entirely, so an auth failure seen
+    // after a restart parked the workspace idle and the monitor relaunched it on the same
+    // dead login — the retry loop #430 exists to stop.
+    expect(await getRuntimeState(key, h.db)).not.toBeNull();
   });
 });

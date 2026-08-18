@@ -856,12 +856,22 @@ export function createSessionLifecycle(
       exitCodeKnown: exitCode !== null,
     });
 
+    // #543: the live path gets the profile from StartSessionOptions; a reattached session
+    // has none, so read it off the workspace row. Both fixes below need it to name the
+    // profile whose health they are recording.
+    const externalWorkspace = wsId ? await lifecycleRepo.getWorkspaceById(wsId, db).catch(() => null) : null;
+    const externalProfileName = externalWorkspace?.claudeProfile ?? undefined;
+
     const fireExit = (code: number | null) => {
       if (wsId) options?.onSessionExit?.(wsId, sessionId, code, false);
     };
     const recordProfileFailure = (summary: string, code: number | null) =>
       recordAgentProfileLaunchFailure(db, {
         provider: providerName,
+        // #543: omitted, so every external failure was recorded under the profile-less
+        // `<provider>:default` key while the breaker reads `<provider>:<profile>` — meaning
+        // failures seen after a restart never counted toward the profile they came from.
+        profileName: externalProfileName,
         summary,
         exitCode: code,
         sessionId,
@@ -896,15 +906,33 @@ export function createSessionLifecycle(
         const mergedStats = await mergeExistingSessionStats(db, sessionId, stats);
         await lifecycleRepo.updateSessionStoppedWithStats(sessionId, now, String(effectiveExitCode), JSON.stringify(mergedStats), db);
         await lifecycleRepo.insertSessionMessage({ sessionId, type: "stderr", data: stats.failureReason, exitCode: null }, db);
-        if (wsId) await lifecycleRepo.updateWorkspaceStatus(wsId, "idle", now, db);
+        // #543: the live path runs this (#430) and the external path did not — so an auth
+        // failure observed after a restart parked the workspace `idle`, the monitor
+        // relaunched it on the same dead login, and the retry loop this exists to stop ran
+        // anyway. It returns true when it has ALREADY parked the workspace `blocked`, which
+        // is why the idle write below is conditional.
+        const authHandled = wsId
+          ? await applyAuthFailureRecovery(db, {
+              provider: providerName,
+              profileName: externalProfileName,
+              errorText: errorText || capturedStderr,
+              workspaceId: wsId,
+              projectId: ctx?.projectId,
+              sessionId,
+              now,
+              setWorkspaceStatus: (status) => lifecycleRepo.updateWorkspaceStatus(wsId, status, now, db),
+            }).catch(() => false)
+          : false;
+        if (wsId && !authHandled) await lifecycleRepo.updateWorkspaceStatus(wsId, "idle", now, db);
         if (ctx?.projectId && wsId) {
           emitButlerSystemEvent({
             projectId: ctx.projectId,
             kind: "session_failed",
             workspaceId: wsId,
-            text: isNonZeroExit
-              ? `Agent launch failed for workspace ${wsId}: exited with code ${effectiveExitCode}.`
-              : `Agent launch failed for workspace ${wsId}: zero output.`,
+            // #543: was an inline near-copy that dropped the duration the live text carries.
+            text: launchFailureButlerText({
+              workspaceId: wsId, isStaleResume: false, isNonZeroExit, effectiveExitCode, durationMs, errorText,
+            }),
           });
         }
         fireExit(effectiveExitCode);
@@ -932,6 +960,13 @@ export function createSessionLifecycle(
       case "completed":
         // A genuine, OBSERVED exit code (someone passed a real code, e.g. 0). Preserve it.
         await lifecycleRepo.updateSessionCompleted(sessionId, now, String(route.exitCode ?? 0), db);
+        // #543: the live path does this (#430) and the external path did not, so a
+        // REATTACHED session that ran fine never cleared its profile's failure streak —
+        // letting the breaker outlive the problem and mark a healthy profile unusable.
+        await recordAgentProfileLaunchSuccess(db, {
+          provider: providerName,
+          profileName: externalProfileName,
+        }).catch(() => {});
         fireExit(exitCode);
         return;
     }
