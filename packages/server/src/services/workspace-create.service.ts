@@ -838,10 +838,18 @@ export function createWorkspaceCreateService(deps: {
 
     // 4. Agent config resolution (provider, profile, model) — reuses same logic
     const agentConfig = await buildAgentConfig(input, issue.projectId);
-    // Preview, so this reports rather than throws — but it must be shown, or the dialog
-    // would offer a launch that the create path will refuse.
+    // Preview, so these report rather than throw — but they must be shown, or the dialog
+    // offers a launch the create path will refuse (hold), or shows the profile the user
+    // picked while the launch quietly uses a different one (clamp).
     if (agentConfig.profileHold) {
       warnings.push(`Profile allowlist blocks this launch: ${agentConfig.profileHold}.`);
+    } else if (agentConfig.profileClamped) {
+      const asked = input.profile?.name || input.claudeProfile;
+      warnings.push(
+        asked
+          ? `Profile allowlist: ${asked} is not available for this project — launching on ${agentConfig.resolvedProfile}.`
+          : `Profile allowlist: launching on ${agentConfig.resolvedProfile}.`,
+      );
     }
 
     // 5. Skill resolution (name only, no file writes)
