@@ -66,13 +66,17 @@ export function resolveScopedSiblingRepos(
  *     provisioned anyway, and which `resolveScopedSiblingRepos` expects to be present in a
  *     non-empty scope (an empty scope means "all", so the leading entry is what distinguishes
  *     "leading only" from "everything").
- *  3. Otherwise undefined — i.e. today's all-repos default, unchanged.
+ *  3. Otherwise the LEADING repo only.
  *
- * Step 3 is deliberately NOT "leading-repo only", which is what #629 proposes. A ticket that
- * genuinely spans repos but carries no tags would then get one worktree and an agent that
- * cannot see the code it was sent to change — a confusing failure, where the current default
- * is merely a slow one. Making the field editable (#633) is what makes tagging reliable
- * enough to flip this; until then the safe direction is the expensive one.
+ * Step 3 was "all repos" until #633 landed. The argument for keeping it was that an untagged
+ * ticket which genuinely spans repos would get one worktree and an agent that cannot see the
+ * code it was sent to change — a confusing failure, versus a merely slow one. That traded a
+ * rare confusing failure for a universal expensive one: on `comet` every untagged ticket
+ * provisioned 17 worktrees and 16 sequential dependency installs (209 s each, warm) before the
+ * agent read a single file. Now that "Repos touched" is editable on an existing issue (#633),
+ * the tag is the ticket's own statement of scope, and an absent tag is best read as
+ * "leading repo" rather than "everything". Widening is one field on the ticket or one
+ * `repoScope` in the request; unwinding 17 worktrees is not.
  */
 export function resolveEffectiveRepoScope(args: {
   explicit?: string[];
@@ -81,7 +85,7 @@ export function resolveEffectiveRepoScope(args: {
 }): string[] | undefined {
   if (args.explicit && args.explicit.length > 0) return args.explicit;
   const touched = args.reposTouched.map((r) => r.trim()).filter(Boolean);
-  if (touched.length === 0) return undefined;
+  if (touched.length === 0) return args.leadingRepoName ? [args.leadingRepoName] : undefined;
   // The leading repo is provisioned unconditionally; including it keeps the scope's meaning
   // explicit ("these repos") rather than accidentally reading as a sibling filter.
   const scope = [args.leadingRepoName, ...touched];
@@ -226,6 +230,12 @@ export async function provisionSiblingWorktrees(params: {
   /** #627 — per-repo setup timeout. Unset inherits DEFAULT_SETUP_SCRIPT_TIMEOUT_MS (5 min),
    *  which a Maven repo measured at 209 s WARM can exceed from cold. */
   installTimeoutMs?: number;
+  /**
+   * #629 — the create request's `skipSetup`. It suppressed the LEADING repo's setup script but
+   * was never forwarded here, so on a multi-repo project there was no way to skip the installs
+   * that actually dominate provisioning (16 sequential Maven installs, 209 s each warm).
+   */
+  skipSetup?: boolean;
 }): Promise<SiblingWorktree[]> {
   const { gitService, database, projectId, branch } = params;
   const allProjectRepos = await listProjectRepos(projectId, database);
@@ -288,7 +298,12 @@ export async function provisionSiblingWorktrees(params: {
   // in its worktree before the agent runs (`pnpm install`, `cargo fetch`, `uv sync`, …).
   // Sequential by default (#627): parallel Maven/npm against one shared local cache contends,
   // so opting into `parallel` is the operator's call per project.
-  const withSetup = succeeded.filter((o) => o.repo.setupScript && o.repo.setupScript.trim());
+  const withSetup = params.skipSetup
+    ? []
+    : succeeded.filter((o) => o.repo.setupScript && o.repo.setupScript.trim());
+  if (params.skipSetup) {
+    console.log("[workspace-repos] skipSetup — sibling dependency installs skipped by request");
+  }
   if (withSetup.length > 0) {
     const parallel = params.installMode === "parallel";
     const concurrency = parallel ? SIBLING_INSTALL_CONCURRENCY : 1;

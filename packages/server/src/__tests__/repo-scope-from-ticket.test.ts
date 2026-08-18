@@ -58,18 +58,27 @@ describe("resolveEffectiveRepoScope (#629)", () => {
     expect(resolveScopedSiblingRepos(repos("api", "web"), scope)).toEqual([]);
   });
 
-  it("falls back to today's all-repos default when the ticket declares nothing", () => {
-    // Deliberately NOT leading-only, which is what the ticket proposed: a ticket that
-    // genuinely spans repos but carries no tags would get one worktree and an agent that
-    // cannot see the code it was sent to change. Slow beats confusing until #633 makes the
-    // field editable and tagging is reliable.
-    expect(resolveEffectiveRepoScope({ reposTouched: [], leadingRepoName: LEADING })).toBeUndefined();
-    expect(resolveEffectiveRepoScope({ explicit: [], reposTouched: [], leadingRepoName: LEADING })).toBeUndefined();
-    expect(resolveScopedSiblingRepos(repos("api", "web"), undefined).map((r) => r.name)).toEqual(["api", "web"]);
+  it("falls back to the LEADING repo alone when the ticket declares nothing (#633 landed)", () => {
+    // This was "all repos" while "Repos touched" could only be set at creation time: an
+    // untagged ticket that genuinely spanned repos would otherwise get one worktree and an
+    // agent unable to see the code it was sent to change. #633 made the field editable on an
+    // existing issue, so an absent tag is now the ticket's own statement of scope rather than
+    // an artefact of when it was filed — and the universal cost (17 worktrees + 16 sequential
+    // installs per untagged ticket on `comet`) outweighs the rare confusing one. Widening is
+    // one field on the ticket; unwinding 17 worktrees is not.
+    expect(resolveEffectiveRepoScope({ reposTouched: [], leadingRepoName: LEADING })).toEqual([LEADING]);
+    expect(resolveEffectiveRepoScope({ explicit: [], reposTouched: [], leadingRepoName: LEADING })).toEqual([LEADING]);
+    expect(resolveScopedSiblingRepos(repos("api", "web"), [LEADING])).toEqual([]);
+  });
+
+  it("still means ALL repos when there is no leading repo name to scope to", () => {
+    // A scope is a list of names; with nothing to put in it the only honest answer is the
+    // unscoped default, never an empty array (which downstream reads as "all" anyway).
+    expect(resolveEffectiveRepoScope({ reposTouched: [], leadingRepoName: "" })).toBeUndefined();
   });
 
   it("ignores blank entries rather than minting an empty scope from them", () => {
-    expect(resolveEffectiveRepoScope({ reposTouched: ["  ", ""], leadingRepoName: LEADING })).toBeUndefined();
+    expect(resolveEffectiveRepoScope({ reposTouched: ["  ", ""], leadingRepoName: LEADING })).toEqual([LEADING]);
     expect(resolveEffectiveRepoScope({ reposTouched: [" api "], leadingRepoName: LEADING }))
       .toEqual([LEADING, "api"]);
   });

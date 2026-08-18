@@ -223,6 +223,33 @@ describe("dependency installs: sequential by default, parallel on request (#627)
   });
 });
 
+describe("skipSetup reaches the SIBLINGS too (#629)", () => {
+  it("provisions the worktrees but runs no sibling setup script when asked to skip", async () => {
+    // `skipSetup` on the create request suppressed only the LEADING repo's script. On a
+    // multi-repo project that left the expensive half running: the installs, not the
+    // checkouts, are what made provisioning take minutes (209 s per Maven repo, warm).
+    listProjectReposMock.mockResolvedValue(repos(4, { setup: true }));
+    const git = trackingGit({ delayMs: 1 });
+
+    const out = await provisionSiblingWorktrees({
+      gitService: git.service, database: db, projectId: "p", branch: "b", skipSetup: true,
+    });
+
+    expect(out).toHaveLength(4);
+    expect(git.state.created).toHaveLength(4);
+    expect(runSetupScriptMock).not.toHaveBeenCalled();
+  });
+
+  it("still runs them when skipSetup is absent or false — skipping is opt-in", async () => {
+    listProjectReposMock.mockResolvedValue(repos(3, { setup: true }));
+    await provisionSiblingWorktrees({
+      gitService: trackingGit({ delayMs: 1 }).service, database: db, projectId: "p", branch: "b",
+      skipSetup: false,
+    });
+    expect(runSetupScriptMock).toHaveBeenCalledTimes(3);
+  });
+});
+
 describe("resolveSiblingInstallOptions (#627)", () => {
   it("defaults to today's behaviour when nothing is set", async () => {
     getPreferenceMock.mockResolvedValue(null);

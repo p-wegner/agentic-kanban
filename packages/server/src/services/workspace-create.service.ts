@@ -628,7 +628,11 @@ export function createWorkspaceCreateService(deps: {
           leadingRepoName: basename(project.repoPath) || project.repoPath,
         });
         siblingWorktrees = await provisionSiblingWorktrees({
-          gitService, database, projectId: issue.projectId, branch, repoScope, ...installOpts,
+          gitService, database, projectId: issue.projectId, branch, repoScope,
+          // #629: `skipSetup` suppressed only the leading repo's setup script, so on a
+          // multi-repo project the installs that dominate provisioning ran anyway.
+          skipSetup: input.skipSetup === true,
+          ...installOpts,
         });
         if (siblingWorktrees.length > 0) timing("sibling-worktrees", t);
       }
