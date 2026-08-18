@@ -249,6 +249,10 @@ export function createWorkerWsRoute(
     if (!token || !(await registry.authenticateWorker(workerId, token))) {
       return c.json({ error: "unauthorized" }, 401);
     }
-    return upgrade(c, next);
+    // `upgrade` is Hono's `upgradeWebSocket` handler, typed against ITS Env generic; this
+    // middleware is a plain `(Context, Next)`. The two are structurally compatible at runtime
+    // and this cast is where that impedance is acknowledged rather than spread through the
+    // signature (no-unsafe-argument).
+    return upgrade(c as Parameters<typeof upgrade>[0], next);
   };
 }

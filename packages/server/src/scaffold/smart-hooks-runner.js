@@ -333,7 +333,9 @@ function getMainCheckout() {
 }
 
 function isWorktreePath(p) {
-  return /[\/\\]\.worktrees[\/\\]/i.test(String(p || "")) || /--\.worktrees--/i.test(String(p || ""));
+  // `/` needs no escape inside a character class; escaping it is what `no-useless-escape`
+  // flagged. Both separators still match — verified against a Windows and a POSIX path.
+  return /[/\\]\.worktrees[/\\]/i.test(String(p || "")) || /--\.worktrees--/i.test(String(p || ""));
 }
 
 function commandRunsVitest(command) {

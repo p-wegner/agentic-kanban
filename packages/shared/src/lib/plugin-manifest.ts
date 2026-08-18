@@ -468,7 +468,9 @@ function requireRelativePath(value: unknown, field: string): string {
  * already-parsed object; throws `PluginManifestError` with a field-precise
  * message on any violation. Unknown top-level fields are ignored (forward compat).
  */
-export function parsePluginManifest(input: string | unknown): PluginManifest {
+// `input: unknown` — it used to read `string | unknown`, which TypeScript collapses to
+// `unknown` anyway (no-redundant-type-constituents). The string case is handled below.
+export function parsePluginManifest(input: unknown): PluginManifest {
   let raw: unknown = input;
   if (typeof input === "string") {
     try {

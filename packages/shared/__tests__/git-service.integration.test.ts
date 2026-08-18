@@ -87,7 +87,7 @@ async function createRepo(): Promise<TempRepo> {
   return { root, origin, repo };
 }
 
-async function configureUser(repo: string): Promise<void> {
+async function configureUser(_repo: string): Promise<void> {
 }
 
 async function writeRepoFile(repo: string, relativePath: string, content: string): Promise<void> {

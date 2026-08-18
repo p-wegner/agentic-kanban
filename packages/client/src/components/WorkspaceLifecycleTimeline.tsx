@@ -36,7 +36,7 @@ const TERMINAL_LABEL: Record<WorkspaceLifecycle["terminal"], string> = {
  * {@link deriveWorkspaceLifecycle}.
  */
 export function WorkspaceLifecycleTimelineView({ lifecycle }: { lifecycle: WorkspaceLifecycle }) {
-  const { phases, totalMs, startMs, terminal, repoMarkers } = lifecycle;
+  const { phases, totalMs, terminal, repoMarkers } = lifecycle;
   if (phases.length === 0 || totalMs <= 0) {
     return (
       <div className="text-[11px] text-gray-400 dark:text-gray-500" data-testid="lifecycle-timeline-empty">

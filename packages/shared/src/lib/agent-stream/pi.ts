@@ -169,7 +169,7 @@ function handlePiTurnEnd(obj: Record<string, unknown>, result: ParsedStreamEvent
 }
 
 function handlePiAgentEnd(obj: Record<string, unknown>, context: ParseContext, result: ParsedStreamEvent): void {
-  const messages = Array.isArray(obj.messages) ? obj.messages : [];
+  const messages: unknown[] = Array.isArray(obj.messages) ? (obj.messages as unknown[]) : [];
   const lastAssistant = [...messages].reverse()
     .map((entry) => objectValue(entry))
     .find((entry) => entry.role === "assistant");

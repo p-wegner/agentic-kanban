@@ -2,7 +2,6 @@ import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engin
 import { projectStatuses } from "@agentic-kanban/shared/schema";
 import { sql } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import type { MonitorActionName } from "../services/monitor-nudge.js";
 import type { MonitorAction } from "./monitor-helpers.js";
 import type { WorkspaceCandidate } from "./monitor-cycle.js";

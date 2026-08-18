@@ -1,7 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { boardApi } from "@agentic-kanban/shared/lib/board-server-url";
-import { getServerPort } from "../server-url.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { mcpContent } from "../db-utils.js";
 

@@ -20,7 +20,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { resolve, join } from "node:path";
-import { existsSync, readdirSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { PACKAGES } from "../../../../scripts/test-mine.mjs";
 
 const REPO_ROOT = resolve(__dirname, "../../../..");

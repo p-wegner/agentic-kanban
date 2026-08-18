@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback } from "react";
 import { priorityColors } from "../lib/issueCardColorMap.js";
 import type { ProjectTag, TagBadge } from "./IssueCard.js";
 import { useDismissable } from "../hooks/useDismissable.js";

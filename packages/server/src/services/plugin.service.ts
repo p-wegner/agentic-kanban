@@ -51,14 +51,13 @@ import { createPluginProjectSurfaceOps } from "./plugin-project-surface.service.
 export { PluginError } from "./plugin-errors.js";
 import { resolveInside } from "./plugin-fs.js";
 import { PluginError } from "./plugin-errors.js";
-import { fanOutScaffold, scaffoldPlaceholderStatus, requireScaffoldReady } from "./plugin-scaffold.js";
+import { requireScaffoldReady } from "./plugin-scaffold.js";
 import { createPluginLoopExtras, validatePluginSource } from "./plugin-loop-extras.service.js";
 import type { BoardEvents } from "./board-events.js";
 import {
   createPluginViewsRuntime,
   stopAllPluginViews,
   stopAllPluginViewsAsync,
-  stopPluginViews,
   type PluginViewProcess,
 } from "./plugin-views.service.js";
 import { pluginsHomeDir } from "./plugin-fs.js";
@@ -66,7 +65,6 @@ import { marketplaceCatalogPath, type PluginMarketplaceEntry } from "./plugin-ma
 import {
   upsertPluginViewProcess,
   deletePluginViewProcess,
-  deletePluginViewProcessesForPlugin,
 } from "../repositories/plugin-view-processes.repository.js";
 
 // Re-exported so existing importers keep working after the split. `stopAllPluginViews` is the
@@ -123,7 +121,6 @@ export function createPluginService(deps: {
   // them here is safe.)
   const {
     readOutputLocationPref,
-    findSidecarRepo,
     resolveOutputRepoPath,
     peekOutputRepoPath,
     getOutputLocation,

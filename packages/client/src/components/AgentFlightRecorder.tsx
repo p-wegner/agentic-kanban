@@ -89,7 +89,9 @@ function useFlightRecorderEvents(projectId: string | null, resolveIssue?: Resolv
   const resolveRef = useRef(resolveIssue);
   resolveRef.current = resolveIssue;
 
-  const refresh = useCallback(async () => {
+  // Not `async`: the body is a fire-and-forget `.then` chain, so `await` never appeared and
+  // the keyword only made callers think they could await completion (require-await).
+  const refresh = useCallback(() => {
     if (!projectId) return;
     // Pending agent questions → question/approval events.
     getAgentQuestions(projectId)

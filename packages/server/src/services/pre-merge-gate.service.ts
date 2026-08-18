@@ -22,7 +22,6 @@ import {
   buildGateTierMessage,
   resolveGateScoping,
   type GateTierInfo,
-  type VerifyGateStrategy,
 } from "./pre-merge-gate-tier.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 

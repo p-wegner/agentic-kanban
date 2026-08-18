@@ -178,7 +178,14 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     });
 
     socket.on("message", (data) => {
-      const message = parseBoardToWorkerMessage(data.toString());
+      // `data` is ws's RawData: Buffer | ArrayBuffer | Buffer[]. A bare `.toString()` on the
+      // array case yields comma-joined garbage rather than the frame (no-base-to-string).
+      const raw = Array.isArray(data)
+        ? Buffer.concat(data as readonly Uint8Array[])
+        : Buffer.isBuffer(data)
+          ? data
+          : Buffer.from(new Uint8Array(data as ArrayBuffer));
+      const message = parseBoardToWorkerMessage(raw.toString("utf8"));
       if (!message) {
         log(`[worker] dropping malformed board message`);
         return;

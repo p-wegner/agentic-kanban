@@ -1,15 +1,9 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import * as schema from "@agentic-kanban/shared/schema";
+
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { eq } from "drizzle-orm";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { execFileSync } from "node:child_process";
-import type { TestDb } from "./helpers/test-db.js";
+
 import {
   createTestApp,
-  createTestAppWithBoardEvents,
   createProjectDirectly,
   createStatusDirectly,
 } from "./helpers/api-test-helpers.js";

@@ -12,7 +12,6 @@
  */
 
 import { existsSync } from "node:fs";
-import { resolve as pathResolve, dirname, parse as pathParse, relative, sep } from "node:path";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
 import { kill as killAgent } from "./agent.service.js";

@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { ToolDb } from "./tools/deps.js";
 import type * as schemaModule from "@agentic-kanban/shared/schema";
 import { findOpenUnmergedWorkspace } from "@agentic-kanban/shared/lib/issue-status-orchestration";

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback } from "react";
 import type { MilestoneResponse } from "@agentic-kanban/shared";
 import { PRIORITY_META } from "../lib/chartColors.js";
 import { useBoardFilterStore } from "../stores/boardFilterStore.js";

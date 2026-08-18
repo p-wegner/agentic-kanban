@@ -128,7 +128,9 @@ const defaultRunner: VersionRunner = (command, args) =>
       { timeout: DEFAULT_VERSION_TIMEOUT_MS, windowsHide: true, shell: process.platform === "win32" },
       (err, stdout, stderr) => {
         if (err) {
-          reject(err);
+          // `reject(err)` with a possibly-non-Error value loses the stack and defeats
+          // `instanceof Error` at every catch site (prefer-promise-reject-errors).
+          reject(err instanceof Error ? err : new Error(`${(err as { message?: string } | null)?.message ?? "agent version check failed"}`));
           return;
         }
         // Some CLIs print the version to stderr; fall back to it.

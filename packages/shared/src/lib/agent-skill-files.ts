@@ -80,7 +80,10 @@ export function isSafeSkillName(name: unknown): name is string {
 
 export async function writeAgentSkillFile(targetPath: string, skill: AgentSkillFile) {
   if (!isSafeSkillName(skill.name)) {
-    throw new Error(`Invalid skill name for filesystem use: "${skill.name}"`);
+    // `isSafeSkillName` is a type predicate, so inside this branch `skill.name` narrows to
+    // `never` and the template had nothing to interpolate (restrict-template-expressions).
+    // Read it off the unnarrowed value.
+    throw new Error(`Invalid skill name for filesystem use: "${String((skill as { name: unknown }).name)}"`);
   }
   const skillsDir = join(targetPath, ".claude", "skills");
   const skillDir = join(skillsDir, skill.name);

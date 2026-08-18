@@ -1,11 +1,10 @@
 import { describe, expect, it, afterEach } from "vitest";
-import { randomUUID } from "node:crypto";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import * as schema from "@agentic-kanban/shared/schema";
+
 import { pluginLoopUnitKey } from "@agentic-kanban/shared/lib/plugin-manifest";
-import { createTestDb, type TestDb } from "./helpers/test-db.js";
+import { createTestDb } from "./helpers/test-db.js";
 import { seedProject, seedIssue } from "./helpers/workflow-test-helpers.js";
 import { createPluginService } from "../services/plugin.service.js";
 import { escapeLikeLiteral } from "../repositories/plugins.repository.js";

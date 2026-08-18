@@ -14,7 +14,6 @@ import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createMockProc } from "./helpers/mocks.js";
 import { createSessionState } from "../services/session-manager/types.js";
 import { createSessionLifecycle, type AgentService } from "../services/session-manager/session-lifecycle.js";
-import type { AgentOutputCallback } from "../services/agent.service.js";
 import type { workspaceLaunchPreflight } from "../services/preflight-check.js";
 import { WorkspaceError } from "../services/workspace-internals.js";
 

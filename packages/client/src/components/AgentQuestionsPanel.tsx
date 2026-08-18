@@ -161,6 +161,10 @@ function QuestionCard({
 }) {
   const [answers, setAnswers] = useState<AnswerState[]>(() => emptyAnswers(set.questions));
   const [submitting, setSubmitting] = useState(false);
+  /** Last submit failure, shown inside the card. The panel-level banner sits above a
+   *  scrollable list, so on an expanded card it is usually off-screen — and the
+   *  one error the user must be able to act on is "this agent is gone, dismiss it". */
+  const [submitError, setSubmitError] = useState<{ message: string; canDismiss: boolean } | null>(null);
   /** Tracks whether the user has manually edited any answer for a given question — once true,
    *  we never overwrite that answer with a late-arriving butler recommendation. */
   const userEdited = useRef<boolean[]>(set.questions.map(() => false));
@@ -218,6 +222,7 @@ function QuestionCard({
   async function submit() {
     if (!canSubmit || submitting) return;
     setSubmitting(true);
+    setSubmitError(null);
     try {
       await apiPost(`/api/projects/${encodeURIComponent(projectIdFromHash())}/agent-questions/${encodeURIComponent(set.toolUseId)}/answer`, {
           workspaceId: set.workspaceId,
@@ -227,7 +232,10 @@ function QuestionCard({
       invalidateAgentQuestions(projectIdFromHash());
       onAnswered();
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Failed to submit answer");
+      const message = err instanceof Error ? err.message : "Failed to submit answer";
+      const body = (err as { body?: { canDismiss?: boolean } } | undefined)?.body;
+      setSubmitError({ message, canDismiss: body?.canDismiss === true });
+      onError(message);
       setSubmitting(false);
     }
   }
@@ -360,7 +368,27 @@ function QuestionCard({
         })}
         </div>
 
+        {submitError && (
+          <div
+            className="mt-3 rounded-lg border border-red-200 dark:border-red-800/60 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-xs text-red-700 dark:text-red-300"
+            data-testid={`agent-question-submit-error-${set.toolUseId}`}
+          >
+            {submitError.message}
+          </div>
+        )}
+
         <div className="flex items-center justify-end gap-2 mt-3">
+          {submitError?.canDismiss && (
+            <button
+              type="button"
+              onClick={onDismiss}
+              disabled={submitting}
+              className="px-3 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40"
+              data-testid={`agent-question-dismiss-inline-${set.toolUseId}`}
+            >
+              Dismiss this question
+            </button>
+          )}
           <button
             type="button"
             onClick={submit}

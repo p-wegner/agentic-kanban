@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { db, rawClient, rawWriteClient } from "../db/index.js";
 import { workspaces, issues, projects, preferences, sessions, pluginViewProcesses, repos as reposTable } from "@agentic-kanban/shared/schema";
-import { and, eq, isNotNull, ne } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { applyMigrations } from "../db/manual-migrate.js";
 import { deduplicateProjects, unregisterLeakedTempProjects, findProjectsWithMissingRepoPath } from "../services/project-registration.js";
 import { getAllProjects } from "../repositories/project.repository.js";
@@ -12,7 +12,6 @@ import { cleanupSiblingWorktrees } from "../services/workspace-repos.service.js"
 import { listProjectRepos } from "../repositories/repo.repository.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { Database } from "../db/index.js";
-import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { isPidAlive } from "../lib/pid.js";
 import { reconcileAncestorBranchWorkspaces } from "./ancestor-branch-reconciler.js";
@@ -20,7 +19,6 @@ import { reconcileHandMergedBranches } from "./hand-merged-branch-reconciler.js"
 import { scanDoneUnmergedWorkspaces } from "./done-unmerged-invariant-scanner.js";
 import { reapTerminalWorkspaces } from "./terminal-workspace-reaper.js";
 import { reconcileOrphanedWorktrees } from "./orphaned-worktree-reconciler.js";
-import { finalizeMergeCleanup, reconcileMergedIssue } from "../services/merge-cleanup.service.js";
 import { assertForeignKeysEnabled, alignForeignKeyActionsOnStartup } from "./fk-alignment.js";
 import { checkForeignKeyViolations, logForeignKeyViolations } from "../db/fk-violations.js";
 import { modelBelongsToProvider } from "@agentic-kanban/shared";

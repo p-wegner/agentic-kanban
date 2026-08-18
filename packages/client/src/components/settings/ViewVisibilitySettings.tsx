@@ -4,7 +4,6 @@ import {
   SECONDARY_VIEWS,
   UNHIDEABLE_VIEWS,
   type ViewDescriptor,
-  type ViewMode,
 } from "../../lib/viewRegistry.js";
 import { useHiddenViews } from "../../hooks/useHiddenViews.js";
 

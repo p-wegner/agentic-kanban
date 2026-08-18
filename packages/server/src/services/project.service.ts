@@ -11,35 +11,23 @@ import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { resolve, sep, join } from "node:path";
 import { getDefaultSkillId } from "./project-scaffold.js";
 import { scaffoldAndPopulateProject } from "./project-registration.js";
-import { isSkillsDirAbsentOrEmpty, writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
-import { isBuilderRelevantSkill } from "@agentic-kanban/shared/lib/builder-skill-policy";
-import { listAgentSkills } from "../repositories/agent-skill.repository.js";
 import { getPreference, getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import type { Database } from "../db/index.js";
 import { branchExists, detectRepoInfo, getProjectGitStatsAsync } from "./git-info.service.js";
 import { gitExecSync } from "@agentic-kanban/shared/lib/git-exec";
-import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from "./git.service.js";
+import { listBranches } from "./git.service.js";
 import { buildWorkspaceSummaryMap, buildBlockedMap, buildTagMap, buildGraphEdges } from "./board-aggregation.service.js";
 import { getProjectById, getProjectByRepoPath, getAllProjects, insertProject, deleteProjectCascade, setProjectArchived, getProjectStats, getProjectStatuses, createProjectStatus, deleteProjectStatus, updateProjectStatusSortOrder } from "../repositories/project.repository.js";
-import { getProjectsBasePath, updateProjectFields, clearActiveProjectPreference, getProjectWorkspacesWithIssue, getWorkspaceWorkingDirById, getProjectStatusIdsAndNames, getBoardIssueRows, getProjectStatusesOrdered, getBoardIssues, getGraphIssues, getCrossProjectIssues, getActiveWorkspaceCounts, getBoardSummaryRows } from "../repositories/project-service.repository.js";
+import { getProjectsBasePath, updateProjectFields, clearActiveProjectPreference, getProjectStatusIdsAndNames, getBoardIssueRows, getProjectStatusesOrdered, getBoardIssues, getGraphIssues, getCrossProjectIssues, getActiveWorkspaceCounts, getBoardSummaryRows } from "../repositories/project-service.repository.js";
 import { generateSetupScript as generateSetupScriptAI, generateTeardownScript as generateTeardownScriptAI, generateVerifyScript as generateVerifyScriptAI } from "./project-setup.service.js";
 import { cloneRepo } from "./repo-clone.service.js";
-import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
-import { workspaceServicesService, parseStoredComposeProjectName } from "./workspace-services.service.js";
 import type { WorkspaceSummaryCache } from "./workspace-summary-cache.service.js";
 import type { WorkspaceSummary } from "./workspace-summary.service.js";
 import { buildBoardColumns } from "../lib/board-view.js";
-import { selectCachedDiffStats } from "../lib/workspace-diff-cache.js";
-import {
-  cachedWorktreeDiffStats,
-  scheduleWorktreeDiffStatsRefresh,
-  type DiffStats,
-} from "../lib/worktree-diff-stats.js";
 
 import { ProjectError } from "./project-error.js";
 import { createInitialCommit, createSiblingRepoDir, promoteRepoToLeading } from "./project-repos.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import { reapWorkspaceContainer } from "./devcontainer-workspace.service.js";
 import { createProjectWorktreesService } from "./project-worktrees.service.js";
 
 // Re-export so existing importers (routes, tests) keep `import { ProjectError } from "./project.service.js"`.

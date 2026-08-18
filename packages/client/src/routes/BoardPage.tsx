@@ -11,7 +11,6 @@ import { BoardPageView } from "../components/BoardPageView.js";
 import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
 import { SkeletonBoard } from "../components/SkeletonBoard.js";
 import { showToast } from "../components/Toast.js";
-import { apiFetch } from "../lib/api.js";
 import { fetchProjectRepos } from "../lib/projectReposQuery.js";
 import { matchesBoardFilters } from "../lib/boardFiltering.js";
 import { reconcileSelectedIssue } from "../lib/selectedIssueSync.js";
@@ -658,19 +657,11 @@ export function BoardPage() {
   if (projects.length === 0 || !activeProjectId) {
     return (
       <Layout onRegisterProject={handleRegisterProject} onCreateProject={handleCreateProject}>
-        {false ? (
-          <div className="h-[calc(100vh-3rem)]">
-            <ButlerView
-              projectId={GLOBAL_BUTLER_PROJECT_ID}
-              columns={[]}
-              liveActivity={{}}
-              liveStats={{}}
-              onIssueClick={() => {}}
-              onExit={() => setShowGlobalButler(false)}
-            />
-          </div>
-        ) : (
-          <div className="flex items-center justify-center h-96 text-gray-500 dark:text-gray-400">
+        {/* The Butler branch that used to sit here behind a literal `false` was a stale
+            duplicate of the `showGlobalButler` block ABOVE, which already serves both this
+            empty-board case and the command palette. `no-constant-condition` was pointing at
+            genuinely dead JSX, not at a style nit. */}
+        <div className="flex items-center justify-center h-96 text-gray-500 dark:text-gray-400">
             <div className="text-center">
               <p className="text-lg font-medium text-gray-700 dark:text-gray-300 mb-2">
                 No projects registered
@@ -684,9 +675,8 @@ export function BoardPage() {
               >
                 Or ask the Butler to set one up
               </button>
-            </div>
           </div>
-        )}
+        </div>
       </Layout>
     );
   }

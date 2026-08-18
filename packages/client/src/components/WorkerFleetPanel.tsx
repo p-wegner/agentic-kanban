@@ -32,7 +32,7 @@ const STATUS_COLORS: Record<string, string> = {
 function parseList(raw: string | null): string[] {
   if (!raw) return [];
   try {
-    const parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
   } catch {
     return [];

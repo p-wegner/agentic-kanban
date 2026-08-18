@@ -106,7 +106,7 @@ export async function resolveFleetCapacity(
 function parseLabels(raw: string | null): string[] {
   if (!raw) return [];
   try {
-    const parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed.filter((l): l is string => typeof l === "string") : [];
   } catch {
     return [];

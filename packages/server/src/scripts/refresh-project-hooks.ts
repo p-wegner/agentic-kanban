@@ -13,7 +13,6 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { db } from "../db/index.js";
 import { getAllProjects } from "../repositories/project.repository.js";
 import { ensureHookScaffold } from "../services/project-scaffold.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";

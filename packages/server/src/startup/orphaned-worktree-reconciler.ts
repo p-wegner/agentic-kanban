@@ -1,5 +1,4 @@
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
 import { samePath as sharedSamePath } from "@agentic-kanban/shared/lib/path-key";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
