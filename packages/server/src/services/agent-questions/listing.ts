@@ -211,6 +211,27 @@ export async function listPendingQuestionsForProject(
   for (const { row, parsed } of parsedSynthetic) {
     if (seenToolUseIds.has(parsed.toolUseId)) continue;
     if (answeredIds.has(parsed.toolUseId)) continue;
+    // Synthetic questions used to be pushed with `staleness: null`, unconditionally.
+    // A `clarify_or_propose` ask outlives the session that made it — the agent typically
+    // exits seconds later and its (direct) workspace is closed, leaving workingDir null.
+    // The card stayed "fresh" forever and every answer attempt died in sendTurn with
+    // "Workspace has no working directory; run setup first". Same rules as the transcript
+    // branch now apply. A comment whose workspace row is gone entirely is treated as
+    // closed: there is nothing left to send a turn to either way.
+    const staleness = computeStaleness({
+      workspaceStatus: row.workspaceStatus ?? "closed",
+      workspaceClosedAt: row.workspaceClosedAt ?? null,
+      readyForMerge: row.readyForMerge ?? false,
+      issueStatusName: row.issueStatusName,
+      issueCurrentNodeId: row.issueCurrentNodeId,
+      issueCurrentNodeType: row.issueCurrentNodeType,
+      // Synthetic questions are not tied to a session, so "superseded" cannot apply.
+      questionSessionStartedAt: null,
+      latestSessionStartedAt: null,
+      askedAt: row.createdAt,
+      now,
+    });
+    if (staleness && staleness.reason !== "older-than-24h") continue;
     results.push({
       toolUseId: parsed.toolUseId,
       workspaceId: row.workspaceId as string,
@@ -220,7 +241,7 @@ export async function listPendingQuestionsForProject(
       issueTitle: row.issueTitle,
       questions: parsed.questions,
       askedAt: row.createdAt,
-      staleness: null,
+      staleness,
     });
     seenToolUseIds.add(parsed.toolUseId);
   }

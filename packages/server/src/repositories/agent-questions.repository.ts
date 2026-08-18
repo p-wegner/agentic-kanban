@@ -123,6 +123,11 @@ export const SYNTHETIC_QUESTION_COMMENT_LIMIT = 200;
  * (the listing only parses `payload`).
  *
  * `now` is injectable for deterministic tests (defaults to wall clock).
+ *
+ * The workspace/status columns ride along so the listing can compute staleness for
+ * synthetic questions too: a `clarify_or_propose` ask outlives the session
+ * that made it, and a question whose workspace has since been closed can never be
+ * answered — sendTurn resolves no working directory and the card is a dead end.
  */
 export async function getSyntheticQuestionComments(
   projectId: string,
@@ -140,9 +145,19 @@ export async function getSyntheticQuestionComments(
       createdAt: issueComments.createdAt,
       issueNumber: issues.issueNumber,
       issueTitle: issues.title,
+      // leftJoin: a comment may point at a workspace row that no longer exists.
+      workspaceStatus: workspaces.status,
+      workspaceClosedAt: workspaces.closedAt,
+      readyForMerge: workspaces.readyForMerge,
+      issueStatusName: projectStatuses.name,
+      issueCurrentNodeId: issues.currentNodeId,
+      issueCurrentNodeType: workflowNodes.nodeType,
     })
     .from(issueComments)
     .innerJoin(issues, eq(issueComments.issueId, issues.id))
+    .leftJoin(workspaces, eq(issueComments.workspaceId, workspaces.id))
+    .leftJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+    .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
     .where(and(
       eq(issues.projectId, projectId),
       eq(issueComments.kind, "agent-question"),
