@@ -10,6 +10,7 @@ import { createMockProc } from "./helpers/mocks.js";
 import { createSessionState } from "../services/session-manager/types.js";
 import { createSessionLifecycle, type AgentService } from "../services/session-manager/session-lifecycle.js";
 import type { AgentOutputCallback } from "../services/agent.service.js";
+import type { AgentLaunchRequest } from "../services/agent-dispatch.service.js";
 import type { workspaceLaunchPreflight } from "../services/preflight-check.js";
 import { WorkspaceError } from "../services/workspace-internals.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
@@ -67,8 +68,11 @@ async function seedWorkspace(
 function createFakeAgentService(): { service: AgentService; getOnOutput: () => AgentOutputCallback | undefined } {
   let captured: AgentOutputCallback | undefined;
   const service = {
-    launch: vi.fn((_dir, _sid, _prompt, _args, onOutput: AgentOutputCallback) => {
-      captured = onOutput;
+    // #524 made launch() take ONE AgentLaunchRequest. This fake is a launch
+    // IMPLEMENTATION, not a call site, so the conversion's call-site search missed it and
+    // `onOutput` silently became undefined here — 15 tests failed on the next full run.
+    launch: vi.fn((request: AgentLaunchRequest) => {
+      captured = request.onOutput;
       return createMockProc();
     }),
     kill: vi.fn(() => true),
@@ -112,8 +116,8 @@ describe("session-lifecycle", () => {
     expect(sessionId).toBeTruthy();
     expect(agentService.launch).toHaveBeenCalledOnce();
     // The agent runs in the workspace's working directory
-    const launchArgs = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(launchArgs[0]).toBe("/tmp/repo/.worktrees/ak-1");
+    const request = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(request.worktreePath).toBe("/tmp/repo/.worktrees/ak-1");
 
     const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
     expect(rows).toHaveLength(1);
@@ -159,10 +163,11 @@ describe("session-lifecycle", () => {
       systemInstructions: "Base guardrails.",
     });
 
-    const launchArgs = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(launchArgs[15]).toBe("gpt-5.5");
-    expect(launchArgs[17]).toContain("Base guardrails.");
-    expect(launchArgs[17]).toContain("MUST run relevant tests and COMMIT");
+    // Read by NAME: these were positions 15 and 17, i.e. `model` and `systemInstructions`.
+    const request = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(request.model).toBe("gpt-5.5");
+    expect(request.systemInstructions).toContain("Base guardrails.");
+    expect(request.systemInstructions).toContain("MUST run relevant tests and COMMIT");
 
     const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
     const stats = JSON.parse(rows[0].stats!);
@@ -646,9 +651,9 @@ describe("session-lifecycle", () => {
       // Default provider = claude (no provider/model passed on the call).
       const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it" });
 
-      // The launch must NOT receive the cross-provider model as any launch arg.
-      const launchArgs = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0];
-      expect(launchArgs).not.toContain("gpt-5.5");
+      // The launch must NOT receive the cross-provider model.
+      const request = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(request.model).toBeUndefined();
 
       // Launch diagnostics record the stored model but resolve it to null (dropped) — source of truth.
       const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
@@ -666,8 +671,8 @@ describe("session-lifecycle", () => {
       const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it" });
 
       // A model that belongs to the launch provider is preserved (the guard must not over-strip).
-      const launchArgs = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0];
-      expect(launchArgs).toContain("opus");
+      const request = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(request.model).toBe("opus");
 
       const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
       const stats = JSON.parse(rows[0].stats!);
@@ -684,8 +689,8 @@ describe("session-lifecycle", () => {
       // Explicit per-call (claude-valid) model wins; the stored cross-provider id is irrelevant.
       const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it", model: "sonnet" });
 
-      const launchArgs = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0];
-      expect(launchArgs).toContain("sonnet");
+      const request = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(request.model).toBe("sonnet");
 
       const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
       const stats = JSON.parse(rows[0].stats!);
@@ -704,8 +709,8 @@ describe("session-lifecycle", () => {
       const lifecycle = createSessionLifecycle(createSessionState(), undefined, vi.fn(), { db, agentService, preflight: okPreflight() });
       const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it" });
 
-      const launchArgs = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0];
-      expect(launchArgs).toContain("glm-4.6");
+      const request = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(request.model).toBe("glm-4.6");
 
       const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
       const stats = JSON.parse(rows[0].stats!);
@@ -724,8 +729,8 @@ describe("session-lifecycle", () => {
       // triggerType "review" => non-builder, so the no-model codex default (gpt-5.5) is NOT applied.
       const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it", provider: "codex", triggerType: "review" });
 
-      const launchArgs = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0];
-      expect(launchArgs).not.toContain("opus");
+      const request = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(request.model).toBeUndefined();
 
       const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
       const stats = JSON.parse(rows[0].stats!);
@@ -768,8 +773,8 @@ describe("session-lifecycle", () => {
       const sessionId = await lifecycle.startSession({ workspaceId, prompt: "continue the work", resumeFromId: prevSessionId });
       expect(agentService.launch).toHaveBeenCalledOnce();
       // The first (resumed) launch forwarded the stale token as --resume.
-      const firstArgs = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0];
-      expect(firstArgs[5]).toBe(staleToken);
+      const firstRequest = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(firstRequest.providerSessionId).toBe(staleToken);
 
       const onOutput = getOnOutput();
       expect(onOutput).toBeDefined();
@@ -790,10 +795,10 @@ describe("session-lifecycle", () => {
 
       // A fresh session was launched automatically, WITHOUT --resume, carrying a handoff note.
       expect(agentService.launch).toHaveBeenCalledTimes(2);
-      const secondArgs = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[1];
-      expect(secondArgs[5]).toBeUndefined();
-      expect(secondArgs[2]).toContain("resume recovery");
-      expect(secondArgs[2]).toContain("continue the work");
+      const secondRequest = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[1][0];
+      expect(secondRequest.providerSessionId).toBeUndefined();
+      expect(secondRequest.prompt).toContain("resume recovery");
+      expect(secondRequest.prompt).toContain("continue the work");
 
       // The workspace is NOT left idle awaiting a manual relaunch.
       const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
