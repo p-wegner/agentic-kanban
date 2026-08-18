@@ -525,6 +525,13 @@ export async function runPreMergeGate(
   // ---- #791 boot/render smoke gate ---------------------------------------------------------
   // Profile load needs no worktree, so detect "gate applies" before checking workingDir.
   let smokeApplies = false;
+  // #644: set when the smoke block errored out rather than reaching a verdict. The whole block
+  // used to sit inside ONE catch that logged a warning and fell through to `passed: true`, and
+  // the final message then reported the verify tier as if nothing had been skipped — so an
+  // infrastructure failure in the boot check was indistinguishable from a clean pass. Still
+  // non-fatal (a harness error must not withhold an otherwise-green merge), but no longer
+  // silent: the gate says "smoke inconclusive" and names why.
+  let smokeInconclusive: string | null = null;
   try {
     const profile = await getStackProfile(projectId, database);
     const smokeCheck = buildSmokeCheck(profile);
@@ -550,8 +557,9 @@ export async function runPreMergeGate(
     }
   } catch (smokeErr) {
     // NON-FATAL: a harness error (not a failed boot) must not block an otherwise-passing merge.
-    // Treat as if the smoke gate passed and fall through. (Matches exit-workflow's behavior.)
-    console.warn(`[pre-merge-gate] smoke check errored (non-fatal) for workspace ${workspace.id}:`, errorMessage(smokeErr));
+    // But it must not be invisible either (#644) — record it so the gate message says so.
+    smokeInconclusive = errorMessage(smokeErr);
+    console.warn(`[pre-merge-gate] smoke check errored (non-fatal) for workspace ${workspace.id}:`, smokeInconclusive);
   }
 
   // `verifyRan` — not `verifyConfigured` — because a docs-only diff skips the verify script.
@@ -568,10 +576,12 @@ export async function runPreMergeGate(
     skipped: !ranSomething,
     stage: ranSomething ? (verifyRan ? "verify" : "smoke") : "none",
     message: ranSomething
-      ? buildGateTierMessage(gateTierInfo)
-      : docsOnly
-        ? `pre-merge gate skipped — docs-only diff (${changedFiles.length} file(s))`
-        : "NOT VERIFIED: this project has no verify_script and no smoke check, so nothing checked this merge (#377)",
+      ? `${buildGateTierMessage(gateTierInfo)}${smokeInconclusive ? ` — WARNING: smoke check inconclusive (${smokeInconclusive})` : ""}`
+      : smokeInconclusive
+        ? `pre-merge gate ran nothing — smoke check inconclusive (${smokeInconclusive})`
+        : docsOnly
+          ? `pre-merge gate skipped — docs-only diff (${changedFiles.length} file(s))`
+          : "NOT VERIFIED: this project has no verify_script and no smoke check, so nothing checked this merge (#377)",
     ...(unverified ? { unverified: true } : {}),
   };
 }
