@@ -387,6 +387,13 @@ export function createWorkspaceProvisionService(deps: {
      * must refuse on this; a caller that merely PREVIEWS may report it and continue.
      */
     profileHold: string | null;
+    /**
+     * True when the project's profile allowlist overrode the caller's choice. The create
+     * path logs the resolver's note; a PREVIEW has to turn this into a visible warning,
+     * or the dialog shows the profile the user picked while the launch silently uses
+     * another one.
+     */
+    profileClamped: boolean;
   }> {
     const runtime = await loadProjectRuntimeConfig(database, {
       projectId: projectId ?? "",
@@ -413,6 +420,7 @@ export function createWorkspaceProvisionService(deps: {
       model: runtime.provider.model,
       systemInstructions: runtime.systemInstructions,
       profileHold: runtime.provider.profileHold,
+      profileClamped: runtime.provider.profileClamped,
     };
   }
 

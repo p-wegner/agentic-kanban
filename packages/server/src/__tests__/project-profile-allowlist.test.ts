@@ -153,6 +153,23 @@ describe("per-project profile allowlist", () => {
     expect(runtime.provider.notes.filter((n) => n.includes("allowlist"))).toEqual([]);
   });
 
+  it("reports profileClamped so a PREVIEW can warn instead of silently swapping", () => {
+    // Without this flag the create-preview showed the profile the operator picked while
+    // the launch used another one — the clamp was correct but invisible, which reads as a
+    // bug. Verified against the running board before the flag existed: warnings was [].
+    const clamped = resolve(
+      prefs({ [allowedProfilesPrefKey(PROJECT_ID)]: PINNED }),
+      { profileOverride: { provider: "claude", name: "some_other_account" } },
+    );
+    expect(clamped.provider.profileClamped).toBe(true);
+
+    const untouched = resolve(prefs({
+      claude_profile: "andrena_team_5x_2",
+      [allowedProfilesPrefKey(PROJECT_ID)]: PINNED,
+    }));
+    expect(untouched.provider.profileClamped).toBe(false);
+  });
+
   it("resolves the clamped provider's command line, not the rejected provider's", () => {
     // Patching only the profile name would leave a codex agent_command paired with a
     // claude profile. The resolver re-reads settings after clamping for this reason.
