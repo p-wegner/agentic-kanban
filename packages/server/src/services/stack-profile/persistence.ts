@@ -14,6 +14,7 @@ import { detectStackProfile } from "../stack-detector.service.js";
 import { recordScaffoldArtifactWrite } from "../project-scaffold.js";
 import { writeSmartHooksRules } from "./smart-hooks-rules.js";
 import { writeTestScaffold } from "./test-scaffold.js";
+import { extractModelJson } from "@agentic-kanban/shared/lib/model-json";
 
 /** Preference key holding the persisted JSON stack profile for a project. */
 // #496: built from the registry, so an unregistered prefix is a COMPILE error.
@@ -149,13 +150,9 @@ Rule-based guesses so far: ${JSON.stringify({ stack: profile.stack, testCommand:
 }
 
 function parseLlmJson(raw: string): LlmProfileShape | null {
-  // Strip accidental code fences, then grab the first JSON object.
-  const cleaned = raw.replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
-  const start = cleaned.indexOf("{");
-  const end = cleaned.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) return null;
+  // Null rather than throw: an unparseable profile falls back to the detected one.
   try {
-    return JSON.parse(cleaned.slice(start, end + 1)) as LlmProfileShape;
+    return extractModelJson(raw, { shape: "object" }) as LlmProfileShape;
   } catch {
     return null;
   }

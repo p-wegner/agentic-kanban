@@ -7,6 +7,7 @@ import {
   getTerminalStatusIds,
   getProjectIssuesWithNodeType,
 } from "../repositories/ticket-preflight.repository.js";
+import { extractModelJson } from "@agentic-kanban/shared/lib/model-json";
 
 export type PreflightVerdict = "ready" | "needs-clarification" | `duplicate-of-#${number}` | `blocked-by-#${number}`;
 
@@ -112,8 +113,7 @@ Other open issues on the board:
 ${issuesSummary}`;
 
   const stdout = await invokeClaudePrompt(prompt, { database, model: "claude-haiku-4-5" });
-  const cleaned = stdout.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-  const parsed = JSON.parse(cleaned) as {
+  const parsed = extractModelJson(stdout, { shape: "object" }) as {
     verdict?: string;
     questions?: unknown[];
     summary?: string;

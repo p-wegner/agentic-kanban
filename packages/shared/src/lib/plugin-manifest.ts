@@ -34,6 +34,8 @@
  * `plugin-keys.ts` and are re-exported here: this module is the documented import path for the
  * whole contract, and splitting them out was a cohesion fix, not an API change. Import either.
  */
+import { extractModelJson, ModelJsonError } from "./model-json.js";
+
 import { errorMessage } from "./error-message.js";
 
 export {
@@ -636,20 +638,16 @@ export function parsePluginLoopPlan(stdout: string): PluginLoopPlan {
   const text = stdout.trim();
   if (!text) fail("loop plan command printed no output");
 
-  // Scan back from the end for the last balanced JSON object/array.
+  // #550: the balanced scan lives in `model-json` now, shared with every other place that
+  // reads JSON out of a model's or a script's output. `prefer: "last"` keeps this call's
+  // distinguishing behaviour — the noise here comes BEFORE the value (npm notices, tsx
+  // warnings), so the last value in the stream is the planner's answer.
   let raw: unknown;
-  let parsed = false;
-  for (let start = text.length - 1; start >= 0 && !parsed; start--) {
-    const ch = text[start];
-    if (ch !== "{" && ch !== "[") continue;
-    try {
-      raw = JSON.parse(text.slice(start));
-      parsed = true;
-    } catch {
-      /* not a complete value at this offset — keep scanning left */
-    }
+  try {
+    raw = extractModelJson(text, { prefer: "last" });
+  } catch (err) {
+    fail(`loop plan output is not JSON: ${err instanceof ModelJsonError ? err.tail : text.slice(-400)}`);
   }
-  if (!parsed) fail(`loop plan output is not JSON: ${text.slice(-400)}`);
 
   const obj = Array.isArray(raw) ? { units: raw } : asRecord(raw, "loop plan");
   const seen = new Set<string>();

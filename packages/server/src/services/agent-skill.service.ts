@@ -12,6 +12,7 @@ import {
   getActiveProjectRepoPath,
 } from "../repositories/agent-skill.repository.js";
 import { getProjectRepoPath } from "../repositories/project.repository.js";
+import { extractModelJson } from "@agentic-kanban/shared/lib/model-json";
 
 export class AgentSkillError extends Error {
   constructor(
@@ -151,9 +152,7 @@ Current description: ${description?.trim() || "(none)"}
 Current prompt: ${prompt?.trim() || "(none)"}`;
 
     const stdout = await invokeClaudePrompt(aiPrompt, { database });
-    const output = stdout.trim();
-    const cleaned = output.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-    const enhanced = JSON.parse(cleaned) as { name?: string; description?: string; prompt?: string };
+    const enhanced = extractModelJson(stdout, { shape: "object" }) as { name?: string; description?: string; prompt?: string };
     return {
       name: enhanced.name?.trim() || name,
       description: enhanced.description?.trim() ?? description ?? "",
