@@ -2,8 +2,8 @@
 //
 // Runs ONLY the suites that are reliably green in this environment (main checkout
 // AND inside a git worktree). The known-flaky / pre-existing-broken suites listed
-// in CLAUDE.md's "Known Flaky Test Suites" table are skipped so agents and humans
-// stop chasing false failures. The full `pnpm test` stays for CI / pre-release.
+// in the block below are skipped so agents and humans stop chasing false failures.
+// `pnpm test:full` (#640) is the run that includes them.
 //
 // Why a wrapper instead of a single vitest invocation: the flaky suites live in
 // two different packages (server + mcp-server), each with its own vitest config.
@@ -19,10 +19,21 @@
 // and the flags arrive verbatim. (Verified: this excludes the suites; the pnpm
 // path did not.)
 //
-// Excluded suites (keep in sync with CLAUDE.md "Known Flaky Test Suites" and the
-// "Use pnpm test:mine to skip these" note):
+// Excluded suites. These used to say "keep in sync with CLAUDE.md's Known Flaky Test Suites
+// table" — that table was DELETED in 0b45b0a9b4, so it was an instruction to sync with nothing
+// (#641). This block is the doc of record now, and `test-mine-exclusions-ratchet.test.ts` keeps
+// it honest: the exclusion set is pinned, every glob must still match a real file, and growth
+// requires an explicit reviewed edit rather than a one-line commit by whoever's gate was red.
+//
+// An excluded suite runs in `pnpm test:full` (added in #640 — before it, `pnpm test` was the
+// server package alone and `packages/shared` had no `test` script at all, so several of these
+// were reachable by NO command in the repo, despite the "still runs in the full pnpm test"
+// claim that used to appear below).
+//
+// The ticket refs below said #202 ("Refactor safety net plugin improvements"), which is
+// unrelated; the flake tickets are #173 (contention timeouts) and #164 (opt-in real docker).
 //   shared:
-//     - git-service.integration.test.ts (#202) real git on temp dirs; Windows file-locking /
+//     - git-service.integration.test.ts (#173) real git on temp dirs; Windows file-locking /
 //       timing — same root cause as server's git.service.test.ts below. Measured: passes in
 //       ~36s, fails on a 30s timeout in ~43s, no code change in between — pure timing flake.
 //     - append-only-hotfile-merge.integration.test.ts, migration-renumber-conflict-guard.test.ts
@@ -46,16 +57,16 @@
 //       git-http) and does real `git clone`/`push` over the wire, so it is the heaviest
 //       file in the package. Measured: 2/2 green in isolation on three consecutive runs
 //       (~24s), but it failed the merge gate three times in a row under full-suite load
-//       with `repo provisioning failed: git clone ...`. Still runs in the full `pnpm test`.
+//       with `repo provisioning failed: git clone ...`. Runs in `pnpm test:full`.
 //     - compose-lifecycle-real-docker.test.ts (#164) — opt-in real-docker smoke test;
 //       shells out to a real daemon and pulls/builds real images, so it's excluded from
 //       the fast loop even on a machine with docker running. Run it via `pnpm test:docker`
-//       (or the full `pnpm test`, which does include it — self-skips when docker is absent).
+//       (or `pnpm test:full`, which does include it — self-skips when docker is absent).
 //   mcp-server:
 //     - mcp-tools.test.ts  spawn-based MCP integration; stale migration list FIXED (reads journal dynamically).
 //       Its catalog↔runtime parity gate has a fast NON-SPAWNING twin that DOES run here:
 //       mcp-catalog-parity.test.ts (#982) — so parity breaks surface in this loop, not
-//       only in the full `pnpm test`.
+//       only in `pnpm test:full`.
 //
 // Pass-through: any extra args are forwarded to vitest run in BOTH packages, so you can
 // still narrow the run, e.g.:
@@ -85,7 +96,7 @@ export const PACKAGES = [
       //   append-only-hotfile-merge.integration  5 passed in 316s (~63s/test) -> TIMED OUT at 240s
       //   migration-renumber-conflict-guard      2 passed in 152s (~75s/test) -> TIMED OUT at 60s
       // They were failing EVERY pre-merge gate on this repo, so the gate blocked all merges
-      // while providing no signal. Still run in the full `pnpm test`.
+      // while providing no signal. They run in `pnpm test:full`.
       "**/append-only-hotfile-merge.integration.test.ts",
       "**/migration-renumber-conflict-guard.test.ts",
     ],
