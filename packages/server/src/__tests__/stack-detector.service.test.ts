@@ -27,6 +27,49 @@ describe("stack-detector.service detectStackProfile", () => {
     expect(p.source).toBe("detected");
   });
 
+  /**
+   * #644 — `isWeb` was derived from the ROOT package.json's deps alone. In a pnpm monorepo the
+   * root is a thin orchestrator (it owns the `dev` script, not the framework), so EVERY
+   * monorepo with a client sub-package reported `isWeb: false` — including this board, whose
+   * boot/render smoke gate was therefore a permanent no-op on its own UI.
+   */
+  it("finds web markers in WORKSPACE packages, not just the root (#644)", async () => {
+    await writeFile(join(dir, "package.json"), JSON.stringify({ scripts: { dev: "node scripts/dev.mjs" } }));
+    await writeFile(join(dir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+    await writeFile(join(dir, "pnpm-workspace.yaml"), "packages:\n  - 'packages/*'\n");
+    await mkdir(join(dir, "packages", "client"), { recursive: true });
+    await writeFile(
+      join(dir, "packages", "client", "package.json"),
+      JSON.stringify({ scripts: { dev: "vite --port 5173" }, dependencies: { react: "^19" }, devDependencies: { vite: "^7" } }),
+    );
+    await mkdir(join(dir, "packages", "shared"), { recursive: true });
+    await writeFile(join(dir, "packages", "shared", "package.json"), JSON.stringify({ name: "shared" }));
+
+    const p = detectStackProfile(dir);
+    expect(p.isMonorepo).toBe(true);
+    expect(p.isWeb).toBe(true);
+    // …and the port literal in the sub-package's own dev script is what makes a health URL
+    // resolvable at all, so the smoke check can actually be built.
+    expect(p.devPort).toBe(5173);
+    expect(p.devHealthUrl).toBe("http://localhost:5173");
+  });
+
+  it("does not invent a web project from a workspace with no web markers (#644)", async () => {
+    await writeFile(join(dir, "package.json"), JSON.stringify({ scripts: { dev: "node cli.js" } }));
+    await writeFile(join(dir, "pnpm-workspace.yaml"), "packages:\n  - 'packages/*'\n");
+    await mkdir(join(dir, "packages", "core"), { recursive: true });
+    await writeFile(join(dir, "packages", "core", "package.json"), JSON.stringify({ dependencies: { lodash: "^4" } }));
+
+    expect(detectStackProfile(dir).isWeb).toBe(false);
+  });
+
+  it("survives a workspace glob pointing at nothing (a detector must never throw)", async () => {
+    await writeFile(join(dir, "package.json"), JSON.stringify({ scripts: { dev: "vite" }, dependencies: { vite: "^7" } }));
+    await writeFile(join(dir, "pnpm-workspace.yaml"), "packages:\n  - 'nope/*'\n  - '!excluded/*'\n");
+    expect(() => detectStackProfile(dir)).not.toThrow();
+    expect(detectStackProfile(dir).isWeb).toBe(true);
+  });
+
   it("detects a Gradle/Java multi-module project", async () => {
     await writeFile(join(dir, "build.gradle"), "plugins { id 'java' }\n");
     await writeFile(join(dir, "settings.gradle"), "include 'app', 'lib'\n");

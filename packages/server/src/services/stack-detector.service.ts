@@ -3,7 +3,7 @@
 // have their own home + tests; stack-profile.service re-exports detectStackProfile so its
 // ~21 importers compile unchanged. readJson / nodeInstallCommand / readFileSafe / NodePkgJson
 // are exported because the service's setup-script derivation also uses them.
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { StackProfile } from "@agentic-kanban/shared";
 import { detectProjectMarkers, isUvProject } from "./project-setup.service.js";
@@ -83,6 +83,51 @@ function readPnpmWorkspaces(repoPath: string): string[] {
   }
 }
 
+/**
+ * Read the `package.json` of every workspace package a glob list resolves to (#644).
+ *
+ * In a pnpm/npm monorepo the ROOT `package.json` is a thin orchestrator: it carries the
+ * `dev`/`build` scripts but almost none of the framework dependencies, which live in the
+ * sub-packages. Deriving anything from root deps alone therefore misreads every monorepo —
+ * concretely, `isWeb` was FALSE for this very board (react + vite sit in
+ * `packages/client/package.json`), so `buildSmokeCheck` returned null and no boot/render
+ * check ever ran on its own UI.
+ *
+ * Deliberately a one-level `*` expansion rather than a glob dependency: `packages/*` and
+ * `apps/*` are the shapes that matter, and a detector must never be the thing that throws.
+ * Anything unreadable is skipped.
+ */
+function readWorkspacePkgs(repoPath: string, workspaces: readonly string[]): NodePkgJson[] {
+  const out: NodePkgJson[] = [];
+  const seen = new Set<string>();
+  for (const glob of workspaces) {
+    const clean = glob.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
+    if (!clean || clean.startsWith("!")) continue; // pnpm negations exclude, never add
+    const star = clean.indexOf("*");
+    const dirs: string[] = [];
+    if (star === -1) {
+      dirs.push(clean);
+    } else {
+      // Only the trailing `pkgs/*` form is expanded; `**` and mid-path stars are treated as
+      // their literal parent directory, which is a safe under-approximation.
+      const parent = clean.slice(0, star).replace(/\/+$/, "");
+      const abs = join(repoPath, parent);
+      try {
+        for (const entry of readdirSync(abs, { withFileTypes: true })) {
+          if (entry.isDirectory()) dirs.push(`${parent}/${entry.name}`);
+        }
+      } catch { /* unreadable workspace root — skip */ }
+    }
+    for (const dir of dirs) {
+      if (seen.has(dir)) continue;
+      seen.add(dir);
+      const pkg = readJson<NodePkgJson>(join(repoPath, dir, "package.json"));
+      if (pkg) out.push(pkg);
+    }
+  }
+  return out;
+}
+
 function detectTestRunner(pkg: NodePkgJson | null): string | null {
   if (!pkg) return null;
   const deps = { ...(pkg.devDependencies ?? {}), ...(pkg.dependencies ?? {}) };
@@ -143,10 +188,21 @@ function detectNodeProfile(repoPath: string, markers: Set<string>): Partial<Stac
   const devScript = ["dev", "start", "serve"].find(has);
   const devCommand = devScript ? run(devScript) : null;
 
-  const deps = { ...(pkg?.devDependencies ?? {}), ...(pkg?.dependencies ?? {}) };
+  // #644: union the ROOT deps with every workspace package's. A monorepo root declares the
+  // `dev` script but not the framework, so a root-only read reported `isWeb: false` for every
+  // monorepo with a client sub-package — this board included — which made the boot/render
+  // smoke gate a permanent no-op on exactly the projects it exists for.
+  const workspacePkgs = isMonorepo ? readWorkspacePkgs(repoPath, workspaces) : [];
+  const deps = Object.assign(
+    {},
+    ...workspacePkgs.map((w) => ({ ...(w.devDependencies ?? {}), ...(w.dependencies ?? {}) })),
+    { ...(pkg?.devDependencies ?? {}), ...(pkg?.dependencies ?? {}) },
+  ) as Record<string, string>;
   const webMarkers = ["react", "vue", "svelte", "next", "vite", "@angular/core", "express", "hono", "fastify", "koa", "@nestjs/core"];
   const isWeb = Boolean(devCommand) && webMarkers.some((m) => m in deps);
-  const devPort = detectDevPort(pkg);
+  // Same reasoning for the port: `pnpm dev` at the root delegates to a sub-package whose own
+  // dev script is where a `--port` literal lives.
+  const devPort = detectDevPort(pkg) ?? workspacePkgs.reduce<number | null>((found, w) => found ?? detectDevPort(w), null);
 
   return {
     stack: "node",
