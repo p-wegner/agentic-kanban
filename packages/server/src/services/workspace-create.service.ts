@@ -50,6 +50,7 @@ import { createWorkspaceProvisionService } from "./workspace-provision.service.j
 import { createLaunchPreviewService } from "./workspace-launch-preview.service.js";
 import {
   provisionSiblingWorktrees,
+  resolveSiblingInstallOptions,
   insertSiblingWorktreeRecords,
   rollbackSiblingWorktrees,
   type SiblingWorktree,
@@ -587,7 +588,13 @@ export function createWorkspaceCreateService(deps: {
       // throws so the catch-block rollback removes leading + sibling worktrees.
       if (!isDirect) {
         t = Date.now();
-        siblingWorktrees = await provisionSiblingWorktrees({ gitService, database, projectId: issue.projectId, branch, repoScope: input.repoScope });
+        // #627: how the per-repo dependency installs run is a per-project choice — sequential
+        // (default) or bounded-parallel — plus an optional timeout, since the setup script's
+        // 5-minute default is a hard ceiling a cold Maven repo can exceed.
+        const installOpts = await resolveSiblingInstallOptions(issue.projectId, database);
+        siblingWorktrees = await provisionSiblingWorktrees({
+          gitService, database, projectId: issue.projectId, branch, repoScope: input.repoScope, ...installOpts,
+        });
         if (siblingWorktrees.length > 0) timing("sibling-worktrees", t);
       }
 
