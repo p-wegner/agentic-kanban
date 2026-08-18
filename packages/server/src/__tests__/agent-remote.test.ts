@@ -60,12 +60,12 @@ describe("agent-remote service (worker fleet phase 1c)", () => {
     onOutput: (e: AgentOutputEvent) => void = () => {},
     keepAlive = false,
   ) {
-    return service.launch(
-      "C:/some/worktree", sessionId, "do the ticket", undefined, onOutput,
-      undefined, MOCK_AGENT_COMMAND, undefined, keepAlive, undefined,
-      undefined, undefined, undefined, undefined, undefined,
-      undefined, undefined, undefined, undefined, { kind: "remote", workerId },
-    );
+    return service.launch({
+      worktreePath: "C:/some/worktree", sessionId, prompt: "do the ticket",
+      agentArgs: undefined, onOutput,
+      agentCommand: MOCK_AGENT_COMMAND, keepAlive,
+      placement: { kind: "remote", workerId },
+    });
   }
 
   it("sends an assign with a complete launch spec", () => {
@@ -91,7 +91,7 @@ describe("agent-remote service (worker fleet phase 1c)", () => {
     const fm = fakeManager(["w1"]);
     const service = createRemoteAgentService(fm.manager, db);
     expect(() =>
-      service.launch("/wt", "s1", "p", undefined, () => {}),
+      service.launch({ worktreePath: "/wt", sessionId: "s1", prompt: "p", agentArgs: undefined, onOutput: () => {} }),
     ).toThrow(/remote placement/);
     expect(() => launchOn(service, "w-gone", "s2")).toThrow(/not connected/);
   });

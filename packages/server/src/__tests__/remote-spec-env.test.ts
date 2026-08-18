@@ -122,16 +122,18 @@ describe("assign messages carry no credentials (#244)", () => {
   it("strips every ANTHROPIC_*/*_TOKEN/*_KEY value from the spec env", () => {
     const fm = fakeManager(["w1"]);
     const service = createRemoteAgentService(fm.manager, db);
-    service.launch(
-      "C:/some/worktree", "s1", "do the ticket", undefined, () => {},
-      undefined, "node fleet-mock-agent.cjs", "someprofile", false, undefined,
-      undefined, undefined, undefined,
-      // extraEnv: an auth-rotation dir is a board-local credential path and must
-      // not cross either, even though callers pass it for host launches.
-      { CLAUDE_CONFIG_DIR: "C:/Users/board-owner/.claude-rotated" },
-      undefined, undefined, undefined, undefined, undefined,
-      { kind: "remote", workerId: "w1" },
-    );
+    service.launch({
+      worktreePath: "C:/some/worktree", sessionId: "s1", prompt: "do the ticket",
+      agentArgs: undefined, onOutput: () => {},
+      agentCommand: "node fleet-mock-agent.cjs",
+      claudeProfile: "someprofile",
+      keepAlive: false,
+      // An auth-rotation dir is a board-local credential path and must not cross
+      // either, even though callers pass it for host launches. (#524: this comment
+      // used to sit above an argument identified only by its position.)
+      extraEnv: { CLAUDE_CONFIG_DIR: "C:/Users/board-owner/.claude-rotated" },
+      placement: { kind: "remote", workerId: "w1" },
+    });
     expect(fm.sent).toHaveLength(1);
     const msg = fm.sent[0]!.message;
     if (msg.type !== "assign") throw new Error("expected an assign message");

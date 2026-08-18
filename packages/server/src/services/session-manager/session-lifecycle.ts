@@ -638,25 +638,51 @@ export function createSessionLifecycle(
     }
 
     try {
-      const proc = agentService.launch(effectiveWorkingDir, sessionId, effectivePrompt, effectiveAgentArgs, (event) => {
-        if (event.type === "exit") {
-          if (state.sessionExitHandled.has(sessionId)) {
-            console.warn(`[session] duplicate exit ignored: sessionId=${sessionId}`);
-            return;
+      const proc = agentService.launch({
+        worktreePath: effectiveWorkingDir,
+        sessionId,
+        prompt: effectivePrompt,
+        agentArgs: effectiveAgentArgs,
+        // #524: these fifteen values used to TRAIL the callback below as positional
+        // arguments, so reading the call meant counting commas past a multi-line closure.
+        // Named fields, same values.
+        //
+        // When resumeWithNewModel is true, omit --resume so the new profile/provider is
+        // used instead.
+        providerSessionId: resumeWithNewModel ? undefined : providerSessionId,
+        agentCommand,
+        claudeProfile,
+        keepAlive: multiTurn,
+        permissionPromptTool,
+        planMode,
+        provider,
+        profile: launchProfile,
+        extraEnv: effectiveExtraEnv,
+        skipPermissions,
+        model: effectiveModel,
+        contextFiles,
+        systemInstructions: (effectiveSystemInstructions ?? "").trim() || undefined,
+        containerProvision,
+        placement: effectivePlacement,
+        onOutput: (event) => {
+          if (event.type === "exit") {
+            if (state.sessionExitHandled.has(sessionId)) {
+              console.warn(`[session] duplicate exit ignored: sessionId=${sessionId}`);
+              return;
+            }
+            state.sessionExitHandled.add(sessionId);
           }
-          state.sessionExitHandled.add(sessionId);
-        }
 
-        const message: AgentOutputMessage = event;
-        // #580: broadcast()'s exit teardown clears this flag, so read it FIRST.
-        const hadExitPlanModeDenied = event.type === "exit" && state.sessionExitPlanModeDenied.delete(sessionId);
-        broadcast(sessionId, message);
+          const message: AgentOutputMessage = event;
+          // #580: broadcast()'s exit teardown clears this flag, so read it FIRST.
+          const hadExitPlanModeDenied = event.type === "exit" && state.sessionExitPlanModeDenied.delete(sessionId);
+          broadcast(sessionId, message);
 
-        if (event.type === "exit") {
-          handleExitEvent(event.exitCode ?? null, hadExitPlanModeDenied);
-        }
-      // When resumeWithNewModel is true, omit --resume so the new profile/provider is used instead
-      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider, launchProfile, effectiveExtraEnv, skipPermissions, effectiveModel, contextFiles, (effectiveSystemInstructions ?? "").trim() || undefined, containerProvision, effectivePlacement);
+          if (event.type === "exit") {
+            handleExitEvent(event.exitCode ?? null, hadExitPlanModeDenied);
+          }
+        },
+      });
 
       // Persist PID so hot-reload can detect surviving processes
       if (proc.pid) {

@@ -114,20 +114,22 @@ describe("worker git transport e2e (phase 2)", () => {
   it("clones, runs, pushes back, and the board lands the branch", async () => {
     const sessionId = `sess-${randomUUID()}`;
     const events: AgentOutputEvent[] = [];
-    dispatch.launch(
+    dispatch.launch({
       // The board-side cwd is irrelevant for a git-transport session — the
       // worker replaces it with its own checkout path.
-      join(repoDir, ".worktrees", "unused"), sessionId, "do the remote ticket", undefined,
-      (e) => events.push(e),
-      undefined, `node ${agentScript}`, undefined, false, undefined,
-      undefined, undefined, undefined, undefined, undefined,
-      undefined, undefined, undefined, undefined,
-      {
+      worktreePath: join(repoDir, ".worktrees", "unused"),
+      sessionId,
+      prompt: "do the remote ticket",
+      agentArgs: undefined,
+      onOutput: (e) => events.push(e),
+      agentCommand: `node ${agentScript}`,
+      keepAlive: false,
+      placement: {
         kind: "remote",
         workerId: daemon.workerId,
         repo: { projectId: PROJECT_ID, repoPath: repoDir, branch: BRANCH, baseBranch: "master" },
       },
-    );
+    });
 
     await vi.waitFor(() => expect(events.some((e) => e.type === "exit")).toBe(true), { timeout: 60000 });
 
@@ -167,17 +169,20 @@ describe("worker git transport e2e (phase 2)", () => {
        console.log("RESUMED-SEES:" + (fs.existsSync("worker-output.txt") ? "yes" : "no"));`,
     );
     try {
-      dispatch.launch(
-        repoDir, sessionId, "second turn", undefined, (e) => events.push(e),
-        undefined, `node ${secondAgent}`, undefined, false, undefined,
-        undefined, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined, undefined,
-        {
+      dispatch.launch({
+        worktreePath: repoDir,
+        sessionId,
+        prompt: "second turn",
+        agentArgs: undefined,
+        onOutput: (e) => events.push(e),
+        agentCommand: `node ${secondAgent}`,
+        keepAlive: false,
+        placement: {
           kind: "remote",
           workerId: daemon.workerId,
           repo: { projectId: PROJECT_ID, repoPath: repoDir, branch: BRANCH, baseBranch: "master" },
         },
-      );
+      });
       await vi.waitFor(() => expect(events.some((e) => e.type === "exit")).toBe(true), { timeout: 60000 });
       const stdout = events.filter((e) => e.type === "stdout").map((e) => e.data).join("");
       expect(stdout).toContain("RESUMED-SEES:yes");

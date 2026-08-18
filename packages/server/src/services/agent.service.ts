@@ -1,8 +1,9 @@
+import type { AgentLaunchRequest } from "./agent-dispatch.service.js";
 import { resolveEffectivePrompt } from "./agent-provider/context-files-prompt.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { openSync, closeSync, readSync, statSync, unlinkSync, existsSync, writeFileSync, readFileSync, appendFileSync, readdirSync, type Dirent } from "node:fs";
 import { join } from "node:path";
-import { buildAgentLaunchConfig, narrowProviderName, type ProviderId, type ProviderName } from "./agent-provider.js";
+import { buildAgentLaunchConfig, narrowProviderName } from "./agent-provider.js";
 import { warnIfCliVersionRisky } from "./agent-cli-version.service.js";
 import { sessionOutputPath, sessionErrorPath } from "../lib/session-paths.js";
 import { guardProcessKill, auditProcessEvent } from "./process-guard.js";
@@ -17,7 +18,6 @@ import {
 } from "../lib/agent-launch-env.js";
 import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
 import { wrapLaunchConfigForContainer } from "./agent-provider/container-wrap.js";
-import type { ContainerProvision } from "./devcontainer-workspace.service.js";
 import { dockerExec } from "@agentic-kanban/shared/lib/docker-exec";
 
 function resolveWorktreeDevPorts(worktreePath: string): { serverPort: string; clientPort: string } | null {
@@ -392,32 +392,15 @@ function attachProcessHandlers(
  * Uses AGENT_COMMAND env var for test substitution.
  * Emits structured output events via the callback.
  */
-export function launch(
-  worktreePath: string,
-  sessionId: string,
-  prompt: string,
-  agentArgs: string | undefined,
-  onOutput: AgentOutputCallback,
-  providerSessionId?: string,
-  agentCommand?: string,
-  claudeProfile?: string,
-  keepAlive?: boolean,
-  permissionPromptTool?: string,
-  planMode?: boolean,
-  provider?: ProviderId,
-  profile?: { provider: ProviderName; name: string },
-  extraEnv?: Record<string, string>,
-  skipPermissions?: boolean,
-  model?: string,
-  contextFiles?: string[],
-  systemInstructions?: string,
-  /**
-   * When present the agent runs INSIDE this provisioned devcontainer instead of
-   * on the host. Provisioning is async and happens in the caller; this function
-   * stays synchronous. Absent = normal host execution.
-   */
-  containerProvision?: ContainerProvision,
-): ChildProcess {
+export function launch(request: AgentLaunchRequest): ChildProcess {
+  // #524: destructured from one object instead of twenty positional parameters. The
+  // body below is unchanged; only how the values arrive is.
+  const {
+    worktreePath, sessionId, prompt, agentArgs, onOutput,
+    providerSessionId, agentCommand, claudeProfile, keepAlive, permissionPromptTool,
+    planMode, provider, profile, extraEnv, skipPermissions,
+    model, contextFiles, systemInstructions, containerProvision,
+  } = request;
   // #524: shared with the remote path, which used to skip this entirely.
   const effectivePrompt = resolveEffectivePrompt(prompt, provider, contextFiles);
   const hostLaunchConfig = buildAgentLaunchConfig({
