@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "test": "playwright test",
-    "test:headed": "playwright test --headed"
+    "test:headed": "playwright test --headed",
+    "test:smoke": "playwright test --grep @smoke",
+    "test:system": "node ./web-server.mjs KANBAN_E2E_SYSTEM=1 -- playwright test"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",

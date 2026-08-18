@@ -22,6 +22,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../
  */
 const serverPort = E2E_SERVER_PORT;
 const clientPort = E2E_CLIENT_PORT;
+const systemLane = process.env.KANBAN_E2E_SYSTEM === "1";
 const dataDir = process.env.AGENTIC_KANBAN_DIR || path.join(repoRoot, "packages", "e2e", ".e2e-data");
 
 function commandWithEnv(env: Record<string, string>, command: string[]) {
@@ -44,6 +45,11 @@ const serverCommand = commandWithEnv(
     // Without this the E2E server's startup sweep reaps every other server booted from
     // this checkout — i.e. the developer's own `pnpm dev` — as a hot-reload orphan (#645).
     KANBAN_SKIP_ORPHAN_CLEANUP: "1",
+    // No lane spends real agent quota unless asked to: KANBAN_E2E_REAL_AGENT=1 is the ONLY
+    // way to get a real provider, including in the @system lane. Several @system specs turn
+    // out to need nothing more than a launched session, which the mock supplies — the tag
+    // marks specs that were never run, not specs that provably require a live agent.
+    ...(process.env.KANBAN_E2E_REAL_AGENT === "1" ? {} : { MOCK_AGENT: "1" }),
   },
   ["pnpm", "--filter", "agentic-kanban", "run", "dev:e2e"],
 );
@@ -56,14 +62,22 @@ export default defineConfig({
   testDir: "./tests",
   fullyParallel: false,
   retries: 0,
-  // Exclude @system tests by default — they require a real agent provider.
-  // To run only system tests: remove this line and use --grep @system
-  grepInvert: /@system/,
+  // Three lanes over ONE spec tree (#645):
+  //   default          — everything that is not @system
+  //   `test:e2e:smoke` — `--grep @smoke`, the core-flow subset, cheap enough to run often
+  //   `test:e2e:system`— KANBAN_E2E_SYSTEM=1, the specs that need a real agent provider
+  // The @system lane needed a config EDIT before ("remove this line and use --grep @system"),
+  // which is why nobody ran it and its specs rotted unnoticed. It is a command now.
+  ...(systemLane ? { grep: /@system/ } : { grepInvert: /@system/ }),
   globalSetup: "./global-setup.ts",
   globalTeardown: "./global-teardown.ts",
   use: {
     baseURL: `http://127.0.0.1:${clientPort}`,
-    channel: "chrome",
+    // Playwright's own Chromium, not the system Chrome (#645). `channel: "chrome"` made
+    // all 68 UI specs fail with "Chromium distribution 'chrome' is not found" on a machine
+    // that simply has Chrome installed elsewhere — an unrunnable suite by default. Set
+    // KANBAN_E2E_CHANNEL=chrome to test against a real branded Chrome deliberately.
+    ...(process.env.KANBAN_E2E_CHANNEL ? { channel: process.env.KANBAN_E2E_CHANNEL } : {}),
   },
   webServer: [
     {
@@ -75,8 +89,9 @@ export default defineConfig({
       reuseExistingServer: false,
       // A cold isolated stack migrates and seeds a brand-new database before it listens.
       timeout: 120_000,
-      stdout: "pipe",
-      stderr: "pipe",
+      // The server's own log is the fastest way to explain a failing spec, but it is far
+      // louder than the test output — opt in with KANBAN_E2E_SERVER_LOG=1.
+      ...(process.env.KANBAN_E2E_SERVER_LOG === "1" ? { stdout: "pipe", stderr: "pipe" } : {}),
       cwd: repoRoot,
     },
     {
