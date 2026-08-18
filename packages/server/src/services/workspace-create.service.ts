@@ -239,7 +239,6 @@ export function createWorkspaceCreateService(deps: {
       prompt: params.agentPrompt,
       agentCommand: params.agentCommand,
       agentArgs: params.agentArgs,
-      claudeProfile: params.resolvedProfile,
       permissionPromptTool: params.permissionPromptTool,
       planMode: params.planMode,
       provider: executorProvider,

@@ -148,7 +148,7 @@ export function createWorkspaceSessionService(deps: {
     const resumeFromId = typeof body.resumeFromId === "string" ? body.resumeFromId : undefined;
 
     const sessionId = await getSessionManager().startSession({
-      workspaceId: id, prompt, agentCommand, agentArgs, resumeFromId, claudeProfile,
+      workspaceId: id, prompt, agentCommand, agentArgs, resumeFromId, 
       provider: toExecutorProvider(agentProvider), multiTurn: false, permissionPromptTool,
       planMode, resumeWithNewModel, triggerType: "chat", profile: agentProfile, skipPermissions,
       model: resolvedModel,
@@ -222,7 +222,7 @@ export function createWorkspaceSessionService(deps: {
 
     const sessionId = await getSessionManager().startSession({
       workspaceId: id, prompt: content, agentCommand, agentArgs,
-      resumeFromId: resumable.session.id, claudeProfile, profile,
+      resumeFromId: resumable.session.id, profile,
       provider: toExecutorProvider(provider), multiTurn: false, planMode,
       resumeWithNewModel, permissionPromptTool, triggerType: "chat",
     });
@@ -297,7 +297,7 @@ export function createWorkspaceSessionService(deps: {
       applyWorkspaceAgentSelection(await loadAgentSettings(database, undefined), ws0);
 
     const sessionId = await getSessionManager().startSession({
-      workspaceId: id, prompt: buildImplementPrompt(), agentCommand, agentArgs, claudeProfile,
+      workspaceId: id, prompt: buildImplementPrompt(), agentCommand, agentArgs, 
       provider: toExecutorProvider(agentProvider), multiTurn: false, permissionPromptTool,
       planMode: false, triggerType: "plan-implement", profile: agentProfile,
     });
@@ -333,7 +333,7 @@ export function createWorkspaceSessionService(deps: {
       applyWorkspaceAgentSelection(await loadAgentSettings(database, undefined), ws0);
 
     const sessionId = await getSessionManager().startSession({
-      workspaceId: id, prompt: buildRejectPrompt(feedback), agentCommand, agentArgs, claudeProfile,
+      workspaceId: id, prompt: buildRejectPrompt(feedback), agentCommand, agentArgs, 
       provider: toExecutorProvider(agentProvider), multiTurn: false, permissionPromptTool,
       planMode: true, triggerType: "plan-reject", profile: agentProfile,
     });

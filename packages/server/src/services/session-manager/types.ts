@@ -27,13 +27,17 @@ export interface StartSessionOptions {
   agentCommand?: string;
   agentArgs?: string;
   resumeFromId?: string;
-  claudeProfile?: string;
   multiTurn?: boolean;
   permissionPromptTool?: string;
   planMode?: boolean;
   resumeWithNewModel?: boolean;
   provider?: import("../agent-provider.js").ProviderId;
   triggerType?: string;
+  /**
+   * The profile this session launches under. #528: the parallel `claudeProfile`
+   * string is gone -- callers set both from the same `AgentSettings` fields, where
+   * `claudeProfile` was already just `provider === "claude" ? profile.name : undefined`.
+   */
   profile?: { provider: ProviderName; name: string };
   /** Claude model tier (e.g. "opus"). When omitted, the workspace's stored model is used. */
   model?: string;

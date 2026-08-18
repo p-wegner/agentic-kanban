@@ -686,12 +686,12 @@ export function createWorkspaceMergeService(deps: {
     const prompt = buildConflictResolutionPrompt(conflictingFiles, baseBranch, conflictContext);
 
     const resolverProjectId = await resolveProjectId(id, database);
-    const { agentCommand, agentArgs, claudeProfile, profile, provider, model } =
+    const { agentCommand, agentArgs, profile, provider, model } =
       await resolveRelaunchAgentSelection(database, resolverProjectId, refreshedWorkspace);
     const executorProvider = toExecutorProvider(provider);
 
     const sessionId = await getSessionManager().startSession({
-      workspaceId: id, prompt, agentCommand, agentArgs, claudeProfile, profile, model,
+      workspaceId: id, prompt, agentCommand, agentArgs, profile, model,
       provider: executorProvider, multiTurn: executorProvider === "codex" ? false : true, triggerType: "fix-conflicts",
     });
 
@@ -722,12 +722,12 @@ export function createWorkspaceMergeService(deps: {
     const prompt = buildFixAndMergePrompt(`${errorMessage}\n\n${rebuildNote}`, baseBranch);
 
     const fixProjectId = await resolveProjectId(id, database);
-    const { agentCommand, agentArgs, claudeProfile, profile, provider, model } =
+    const { agentCommand, agentArgs, profile, provider, model } =
       await resolveRelaunchAgentSelection(database, fixProjectId, workspace);
     const executorProvider = toExecutorProvider(provider);
 
     const sessionId = await getSessionManager().startSession({
-      workspaceId: id, prompt, agentCommand, agentArgs, claudeProfile, profile, model,
+      workspaceId: id, prompt, agentCommand, agentArgs, profile, model,
       provider: executorProvider, multiTurn: executorProvider === "codex" ? false : true, triggerType: "fix-and-merge",
       skipLaunchPreflight: true,
     });
@@ -915,12 +915,12 @@ export function createWorkspaceMergeService(deps: {
       strandedBatch: opts.strandedBatchJson,
     });
 
-    const { agentCommand, agentArgs, claudeProfile, profile, provider, model } =
+    const { agentCommand, agentArgs, profile, provider, model } =
       await resolveRelaunchAgentSelection(database, projectId, workspace);
     const executorProvider = toExecutorProvider(provider);
 
     const sessionId = await getSessionManager().startSession({
-      workspaceId: integrationWorkspaceId, prompt, agentCommand, agentArgs, claudeProfile, profile, model,
+      workspaceId: integrationWorkspaceId, prompt, agentCommand, agentArgs, profile, model,
       provider: executorProvider, multiTurn: executorProvider === "codex" ? false : true, triggerType: "reconcile",
       skipLaunchPreflight: true, extraEnv: { KANBAN_SESSION_TYPE: "reconcile" },
     });

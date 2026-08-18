@@ -128,9 +128,9 @@ export async function runLearningStep(
 
   try {
     const learningPrompt = buildLearningStepPrompt(true);
-    const { agentCommand: agentCmd, agentArgs, claudeProfile, profile, provider } = resolveAgentSettings(prefMap);
+    const { agentCommand: agentCmd, agentArgs, profile, provider } = resolveAgentSettings(prefMap);
     const sm = getSessionManager();
-    const learningSessId = await sm.startSession({ workspaceId, prompt: learningPrompt, agentCommand: agentCmd, agentArgs, claudeProfile, profile, provider: toExecutorProvider(provider), triggerType: "learning" });
+    const learningSessId = await sm.startSession({ workspaceId, prompt: learningPrompt, agentCommand: agentCmd, agentArgs, profile, provider: toExecutorProvider(provider), triggerType: "learning" });
     console.log(`[merge-helpers] learning step started: session=${learningSessId}`);
 
     await new Promise<void>((resolve) => {

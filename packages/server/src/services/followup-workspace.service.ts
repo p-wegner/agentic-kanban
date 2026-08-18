@@ -110,7 +110,7 @@ export async function autoStartFollowups(
       const inProgressStatus = statuses.find(s => s.name === "In Progress") ?? todoStatus;
       await updateIssueStatus(dep.issueId, { statusId: inProgressStatus.id, updatedAt: now, statusChangedAt: now }, database);
 
-      const { agentCommand, agentArgs, claudeProfile, profile, provider } = resolveAgentSettings(prefMap);
+      const { agentCommand, agentArgs, profile, provider } = resolveAgentSettings(prefMap);
       const prompt = `${followupIssue[0].title}\n\n${followupIssue[0].description ?? ""}`.trim();
 
       await getSessionManager().startSession({
@@ -118,7 +118,6 @@ export async function autoStartFollowups(
         prompt,
         agentCommand,
         agentArgs,
-        claudeProfile,
         profile,
         // #503: was `provider === "codex" ? "codex" : "claude-code"`, which sent BOTH
         // copilot and pi follow-ups to Claude. `provider` here is a ProviderName from

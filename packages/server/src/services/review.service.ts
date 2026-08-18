@@ -508,7 +508,7 @@ export async function startManualReview(
       const reviewExtraEnv: Record<string, string> = { KANBAN_SESSION_TYPE: "review", KANBAN_AFTER_MERGE_VERIFY: verifyAgent };
       sessionId = await getSessionManager().startSession({
         workspaceId, prompt: reviewPromptText, agentCommand, agentArgs: reviewArgsWithModel,
-        claudeProfile, profile: manualProfileSelection, provider: toExecutorProvider(provider),
+        profile: manualProfileSelection, provider: toExecutorProvider(provider),
         triggerType: "review", extraEnv: reviewExtraEnv,
         permissionPromptTool: runtime?.provider.permissionPromptTool,
         resumeWithNewModel: runtime?.provider.resumeWithNewModel,
