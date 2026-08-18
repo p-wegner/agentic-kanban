@@ -10,8 +10,6 @@ import { extractPlanFromMessages } from "../plan-mode.service.js";
 import { computeScorecard } from "../workspace-scorecard.service.js";
 import { computeWorkspaceCodeMetrics } from "../workspace-code-metrics.service.js";
 import { recordAgentProfileLaunchFailure } from "../agent-profile-health.service.js";
-import { recordAgentProfileLaunchSuccess } from "../agent-profile-failure-record.js";
-import { applyAuthFailureRecovery } from "../provider-auth-recovery.js";
 import { emitButlerSystemEvent } from "../butler-event-feed.js";
 import { narrowProviderName, type ProviderName } from "../agent-provider.js";
 import { getProviderExitBehavior } from "../agent-provider/provider-exit-behavior.js";
@@ -26,9 +24,10 @@ import { parseSymlinkDirs } from "@agentic-kanban/shared/lib/worktree-symlink-bo
 import { loadCodexLicenseRing } from "../codex-license-ring.js";
 import { loadClaudeSubscriptionRing } from "../claude-subscription-ring.js";
 import { classifySessionExit as classifySessionExitRoute, extractCapturedStderr, ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS as EXIT_WINDOW_MS } from "./session-exit-state-machine.js";
-import { buildZeroOutputLaunchFailureStats, buildModelErrorLaunchFailureStats, buildStaleResumeLaunchFailureStats, buildCodexUsageLimitStats, buildClaudeUsageLimitStats, buildIndeterminateExitStats, launchFailureButlerText } from "./session-exit-stats.js";
+import { buildIndeterminateExitStats } from "./session-exit-stats.js";
 import { CODEX_SPARK_MODEL, CODEX_SAFE_DEFAULT_MODEL, isBuilderSession, buildStaleResumeHandoffPrompt, instructionFingerprint, mergeExistingSessionStats, lifecycleProviderName, resolveProviderRotation } from "./session-launch-helpers.js";
 import { finalizePlanModeExit } from "./plan-mode-exit.js";
+import { finalizeUsageLimitRoute, finalizeLaunchFailureRoute, finalizeCompletedRoute, type ExitFinalizeContext } from "./exit-finalize.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** Bounds the missing-transcript fallback (#26) to one automatic retry per workspace. */
@@ -280,6 +279,22 @@ export function createSessionLifecycle(
     // writes, HANDOFF.md, relaunch) for each route. Provider-specific knowledge
     // (which usage limit was hit) comes from the provider's exit behavior.
 
+    /**
+     * The context every terminal route shares. #543: built once here and once in
+     * `notifyExternalExit`, so the two paths finalize through the SAME code — the drift
+     * list (auth recovery, the success streak clear, the profile name on a failure record)
+     * stops being a list.
+     */
+    function exitFinalizeContext(endNow: string, durationMs: number, exitCode: number | null, capturedStderr: string): ExitFinalizeContext {
+      return {
+        db, sessionId, workspaceId, projectId, executor,
+        healthProviderName: lifecycleProviderName(provider, profile),
+        authProviderName: narrowProviderName(executor),
+        profileName: profile?.name,
+        durationMs, exitCode, capturedStderr, now: endNow,
+      };
+    }
+
     /** usage-limit route: persist rate-limit stats and block the workspace for rotation. */
     function finalizeUsageLimitExit(
       route: Extract<ReturnType<typeof classifySessionExitRoute>, { phase: "usage-limit" }>,
@@ -287,30 +302,11 @@ export function createSessionLifecycle(
       durationMs: number,
       exitCode: number | null,
     ): void {
-      const { usageLimit, effectiveExitCode } = route;
-      const stats = usageLimit.kind === "codex"
-        ? buildCodexUsageLimitStats(executor, durationMs, exitCode, usageLimit.message, usageLimit.retryAfter)
-        : buildClaudeUsageLimitStats(executor, durationMs, exitCode, usageLimit.message, usageLimit.retryAfter);
-      void (async () => {
-        await recordAgentProfileLaunchFailure(db, {
-          provider: lifecycleProviderName(provider, profile),
-          profileName: profile?.name,
-          summary: stats.failureReason,
-          exitCode: effectiveExitCode,
-          sessionId,
-          workspaceId,
-          at: endNow,
-        });
-        const mergedStats = await mergeExistingSessionStats(db, sessionId, stats);
-        await lifecycleRepo.updateSessionStoppedWithStats(sessionId, endNow, String(effectiveExitCode), JSON.stringify(mergedStats), db);
-        await lifecycleRepo.updateWorkspaceStatus(workspaceId, "blocked", endNow, db);
-        console.warn(
-          `[agent] ${usageLimit.kind}-rate-limited: sessionId=${sessionId} workspace=${workspaceId}` +
-          `${usageLimit.retryAfter ? ` retryAfter=${usageLimit.retryAfter}` : ""}`,
-        );
-      })()
-        .catch((err) => console.error(`Failed to record ${usageLimit.kind} usage-limit launch failure:`, err))
-        .finally(() => options?.onSessionExit?.(workspaceId, sessionId, effectiveExitCode, planMode));
+      void finalizeUsageLimitRoute(route, exitFinalizeContext(endNow, durationMs, exitCode, ""))
+        .catch((err) => {
+          console.error(`Failed to record ${route.usageLimit.kind} usage-limit launch failure:`, err);
+        })
+        .finally(() => options?.onSessionExit?.(workspaceId, sessionId, route.effectiveExitCode, planMode));
     }
 
     /**
@@ -333,7 +329,7 @@ export function createSessionLifecycle(
       exitCode: number | null,
       capturedStderr: string,
     ): void {
-      const { isZeroOutput, isNonZeroExit, effectiveExitCode, errorText } = route;
+      const { effectiveExitCode, errorText } = route;
       const usedProviderSessionId = resumeWithNewModel ? undefined : providerSessionId;
       const staleResumeRecoveryCount = state.workspaceStaleResumeRecoveryCount.get(workspaceId) ?? 0;
       const isStaleResume =
@@ -341,52 +337,16 @@ export function createSessionLifecycle(
         staleResumeRecoveryCount < MAX_STALE_RESUME_RECOVERIES &&
         getProviderExitBehavior(narrowProviderName(executor)).isStaleResumeError(errorText || capturedStderr);
 
-      const stats = isStaleResume
-        ? buildStaleResumeLaunchFailureStats(executor, durationMs, exitCode, errorText || capturedStderr)
-        : isZeroOutput
-          ? buildZeroOutputLaunchFailureStats(executor, durationMs, exitCode, capturedStderr)
-          : buildModelErrorLaunchFailureStats(executor, durationMs, exitCode, errorText);
-
-      const sessionFinalized = (async () => {
-        await recordAgentProfileLaunchFailure(db, {
-          provider: lifecycleProviderName(provider, profile),
-          profileName: profile?.name,
-          summary: stats.failureReason,
-          exitCode: effectiveExitCode,
-          sessionId,
-          workspaceId,
-          at: endNow,
-        });
-        const mergedStats = await mergeExistingSessionStats(db, sessionId, stats);
-        await lifecycleRepo.updateSessionStoppedWithStats(sessionId, endNow, String(effectiveExitCode), JSON.stringify(mergedStats), db);
-        await lifecycleRepo.insertSessionMessage({
-          sessionId,
-          type: "stderr",
-          data: stats.failureReason,
-          exitCode: null,
-        }, db);
-        // #430 — a TERMINAL auth failure must not be handed back to the relaunch path unchanged
-        // (see `applyAuthFailureRecovery`: it rotates off a dead login and returns true when it
-        // parked the workspace `blocked` instead, which is what stops the retry loop).
-        const authHandled = isStaleResume ? false : await applyAuthFailureRecovery(db, {
-          // #528: `?? claudeProfile` here blamed the CLAUDE profile name under a
-          // non-claude provider.
-          provider: narrowProviderName(executor), profileName: profile?.name,
-          errorText: errorText || capturedStderr, workspaceId, projectId, sessionId, now: endNow,
-          setWorkspaceStatus: (status) => lifecycleRepo.updateWorkspaceStatus(workspaceId, status, endNow, db),
-        }).catch(() => false);
-        if (isStaleResume) {
-          if (resumeFromId) await lifecycleRepo.clearProviderSessionId(resumeFromId, db);
-        } else if (!authHandled) {
-          await lifecycleRepo.updateWorkspaceStatus(workspaceId, "idle", endNow, db);
-        }
-        if (projectId) {
-          emitButlerSystemEvent({
-            projectId, kind: "session_failed", workspaceId,
-            text: launchFailureButlerText({ workspaceId, isStaleResume, isNonZeroExit, effectiveExitCode, durationMs, errorText }),
-          });
-        }
-      })()
+      const sessionFinalized = finalizeLaunchFailureRoute(
+        route,
+        exitFinalizeContext(endNow, durationMs, exitCode, capturedStderr),
+        { isStaleResume },
+      )
+        .then(async () => {
+          // Only the live path can clear the dead provider session id, because only it knows
+          // which session was resumed FROM.
+          if (isStaleResume && resumeFromId) await lifecycleRepo.clearProviderSessionId(resumeFromId, db);
+        })
         .catch((err) => console.error("Failed to record launch failure:", err));
 
       void sessionFinalized.finally(() => options?.onSessionExit?.(workspaceId, sessionId, effectiveExitCode, planMode));
@@ -426,12 +386,10 @@ export function createSessionLifecycle(
       planText: string | null,
     ): void {
       const sessionFinalized = (async () => {
-        await lifecycleRepo.updateSessionCompleted(sessionId, endNow, String(exitCode ?? 0), db);
-        // #430 — a session that actually RAN clears the profile's failure streak, so the breaker
-        // can never outlive the problem (a re-authenticated profile would else stay "unusable").
-        await recordAgentProfileLaunchSuccess(db, {
-          provider: narrowProviderName(executor), profileName: profile?.name,
-        }).catch(() => {});
+        // #543: session-completed + the #430 failure-streak clear are the shared half; the
+        // rest of this route (HANDOFF.md, the scorecard, plan mode, the auto-resume below)
+        // needs the launch options and stays here.
+        await finalizeCompletedRoute(exitFinalizeContext(endNow, 0, exitCode, ""), exitCode);
 
         // Write HANDOFF.md before workflow callbacks can launch the next session.
         if (effectiveWorkingDir) {
@@ -857,84 +815,34 @@ export function createSessionLifecycle(
     });
 
     // #543: the live path gets the profile from StartSessionOptions; a reattached session
-    // has none, so read it off the workspace row. Both fixes below need it to name the
-    // profile whose health they are recording.
+    // has none, so read it off the workspace row. The shared finalize needs it to name the
+    // profile whose health it is recording — omitting it filed every external failure under
+    // the profile-less `<provider>:default` key while the breaker reads `<provider>:<profile>`.
     const externalWorkspace = wsId ? await lifecycleRepo.getWorkspaceById(wsId, db).catch(() => null) : null;
-    const externalProfileName = externalWorkspace?.claudeProfile ?? undefined;
+    const finalizeCtx: ExitFinalizeContext = {
+      db, sessionId, workspaceId: wsId, projectId: ctx?.projectId, executor,
+      // A reattached session has no StartSessionOptions provider, so both keys narrow from
+      // the executor — unlike the live path, where they can legitimately differ.
+      healthProviderName: providerName,
+      authProviderName: providerName,
+      profileName: externalWorkspace?.claudeProfile ?? undefined,
+      durationMs, exitCode, capturedStderr, now,
+    };
 
     const fireExit = (code: number | null) => {
       if (wsId) options?.onSessionExit?.(wsId, sessionId, code, false);
     };
-    const recordProfileFailure = (summary: string, code: number | null) =>
-      recordAgentProfileLaunchFailure(db, {
-        provider: providerName,
-        // #543: omitted, so every external failure was recorded under the profile-less
-        // `<provider>:default` key while the breaker reads `<provider>:<profile>` — meaning
-        // failures seen after a restart never counted toward the profile they came from.
-        profileName: externalProfileName,
-        summary,
-        exitCode: code,
-        sessionId,
-        workspaceId: wsId ?? undefined,
-        at: now,
-      }).catch((err) => console.error("Failed to record external-exit profile failure:", err));
 
     switch (route.phase) {
       case "stopped":
         // The user stopped it; stopSession already wrote "stopped". Just fire the callback.
         fireExit(exitCode);
         return;
-      case "usage-limit": {
-        const { usageLimit: ul, effectiveExitCode } = route;
-        const stats = ul.kind === "codex"
-          ? buildCodexUsageLimitStats(executor, durationMs, exitCode, ul.message, ul.retryAfter)
-          : buildClaudeUsageLimitStats(executor, durationMs, exitCode, ul.message, ul.retryAfter);
-        await recordProfileFailure(stats.failureReason, effectiveExitCode);
-        const mergedStats = await mergeExistingSessionStats(db, sessionId, stats);
-        await lifecycleRepo.updateSessionStoppedWithStats(sessionId, now, String(effectiveExitCode), JSON.stringify(mergedStats), db);
-        if (wsId) await lifecycleRepo.updateWorkspaceStatus(wsId, "blocked", now, db);
-        console.warn(`[agent] ${ul.kind}-rate-limited on external exit: sessionId=${sessionId} workspace=${wsId ?? "?"}`);
-        fireExit(effectiveExitCode);
+      case "usage-limit":
+        fireExit(await finalizeUsageLimitRoute(route, finalizeCtx));
         return;
-      }
       case "launch-failure": {
-        const { isZeroOutput, isNonZeroExit, effectiveExitCode, errorText } = route;
-        const stats = isZeroOutput
-          ? buildZeroOutputLaunchFailureStats(executor, durationMs, exitCode, capturedStderr)
-          : buildModelErrorLaunchFailureStats(executor, durationMs, exitCode, errorText);
-        await recordProfileFailure(stats.failureReason, effectiveExitCode);
-        const mergedStats = await mergeExistingSessionStats(db, sessionId, stats);
-        await lifecycleRepo.updateSessionStoppedWithStats(sessionId, now, String(effectiveExitCode), JSON.stringify(mergedStats), db);
-        await lifecycleRepo.insertSessionMessage({ sessionId, type: "stderr", data: stats.failureReason, exitCode: null }, db);
-        // #543: the live path runs this (#430) and the external path did not — so an auth
-        // failure observed after a restart parked the workspace `idle`, the monitor
-        // relaunched it on the same dead login, and the retry loop this exists to stop ran
-        // anyway. It returns true when it has ALREADY parked the workspace `blocked`, which
-        // is why the idle write below is conditional.
-        const authHandled = wsId
-          ? await applyAuthFailureRecovery(db, {
-              provider: providerName,
-              profileName: externalProfileName,
-              errorText: errorText || capturedStderr,
-              workspaceId: wsId,
-              projectId: ctx?.projectId,
-              sessionId,
-              now,
-              setWorkspaceStatus: (status) => lifecycleRepo.updateWorkspaceStatus(wsId, status, now, db),
-            }).catch(() => false)
-          : false;
-        if (wsId && !authHandled) await lifecycleRepo.updateWorkspaceStatus(wsId, "idle", now, db);
-        if (ctx?.projectId && wsId) {
-          emitButlerSystemEvent({
-            projectId: ctx.projectId,
-            kind: "session_failed",
-            workspaceId: wsId,
-            // #543: was an inline near-copy that dropped the duration the live text carries.
-            text: launchFailureButlerText({
-              workspaceId: wsId, isStaleResume: false, isNonZeroExit, effectiveExitCode, durationMs, errorText,
-            }),
-          });
-        }
+        const { effectiveExitCode } = await finalizeLaunchFailureRoute(route, finalizeCtx);
         fireExit(effectiveExitCode);
         return;
       }
@@ -959,14 +867,7 @@ export function createSessionLifecycle(
       }
       case "completed":
         // A genuine, OBSERVED exit code (someone passed a real code, e.g. 0). Preserve it.
-        await lifecycleRepo.updateSessionCompleted(sessionId, now, String(route.exitCode ?? 0), db);
-        // #543: the live path does this (#430) and the external path did not, so a
-        // REATTACHED session that ran fine never cleared its profile's failure streak —
-        // letting the breaker outlive the problem and mark a healthy profile unusable.
-        await recordAgentProfileLaunchSuccess(db, {
-          provider: providerName,
-          profileName: externalProfileName,
-        }).catch(() => {});
+        await finalizeCompletedRoute(finalizeCtx, route.exitCode);
         fireExit(exitCode);
         return;
     }
