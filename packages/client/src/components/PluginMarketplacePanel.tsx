@@ -16,7 +16,7 @@ type MarketplaceEntry = {
   enabled: boolean;
   /** Manifest on disk differs from the cached copy the board runs (#295). */
   manifestDrift?: boolean;
-  origin: "installed" | "catalog";
+  origin: "installed" | "catalog" | "bundled";
 };
 
 type ValidateResult = {
@@ -212,17 +212,24 @@ export function PluginMarketplacePanel({ projectId }: PluginMarketplacePanelProp
               {entry.version && <span> · v{entry.version}</span>}
             </div>
           </div>
-          {entry.installed && (
-            <span
-              className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${
-                entry.enabled
-                  ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300"
-                  : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"
-              }`}
-            >
-              {entry.enabled ? "enabled" : "installed"}
-            </span>
-          )}
+          <div className="shrink-0 flex items-center gap-1">
+            {entry.origin === "bundled" && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300">
+                bundled
+              </span>
+            )}
+            {entry.installed && (
+              <span
+                className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${
+                  entry.enabled
+                    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300"
+                    : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+                }`}
+              >
+                {entry.enabled ? "enabled" : "installed"}
+              </span>
+            )}
+          </div>
         </div>
         {entry.description && (
           <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-3">{entry.description}</p>
@@ -305,8 +312,8 @@ export function PluginMarketplacePanel({ projectId }: PluginMarketplacePanelProp
             </>
           ) : (
             <button
-              onClick={() => void handleInstall(entry.gitUrl ?? "")}
-              disabled={installing || !entry.gitUrl}
+              onClick={() => void handleInstall(entry.gitUrl ?? entry.localPath ?? "")}
+              disabled={installing || (!entry.gitUrl && !entry.localPath)}
               className="text-xs px-2 py-1 rounded bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50"
             >
               {installing ? "Installing…" : "Install"}
