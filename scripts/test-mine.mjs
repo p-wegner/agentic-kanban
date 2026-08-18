@@ -205,6 +205,9 @@ function resolveVitestEntry(pkgDir) {
  */
 const ALWAYS_RUN_MARKER = "@gate:always-run";
 
+/** Test-file extensions the marker scan recognises. `.tsx` and `.mjs` were invisible (#647). */
+const ALWAYS_RUN_TEST_FILE = /\.test\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
+
 /** The `__tests__` dir, relative to the package dir, for each entry in PACKAGES.
  *
  *  #639: `client` was missing here while `pre-merge-gate-tier.ts` DID scan
@@ -227,17 +230,30 @@ export const ALWAYS_RUN_TESTS_DIR = {
 export function scanAlwaysRunTests(
   pkgDir,
   testsDir,
-  listDir = (d) => (existsSync(d) ? readdirSync(d) : []),
+  listDir = (d) => (existsSync(d) ? readdirSync(d, { withFileTypes: true }) : []),
   readText = (p) => readFileSync(p, "utf8"),
 ) {
-  const absDir = resolve(pkgDir, testsDir);
   const found = [];
-  for (const name of listDir(absDir)) {
-    if (!name.endsWith(".test.ts")) continue;
-    const rel = `${testsDir}/${name}`;
-    const text = readText(resolve(pkgDir, rel));
-    if (text.includes(ALWAYS_RUN_MARKER)) found.push(rel);
-  }
+  // #647: this scan was FLAT and `.test.ts`-only. `mcp-server/src/__tests__/tools/` alone
+  // holds 33 suites the walk never saw, and `test-mine-scope-derivation.test.mjs` carries the
+  // marker while being structurally invisible to it. A marker that silently does nothing is
+  // worse than no marker — the gate reports the guard and does not run it.
+  const walk = (relDir) => {
+    for (const entry of listDir(resolve(pkgDir, relDir))) {
+      // Tolerate a plain-string lister (older injected test doubles) as well as Dirents.
+      const name = typeof entry === "string" ? entry : entry.name;
+      const isDir = typeof entry === "string" ? false : entry.isDirectory();
+      const rel = `${relDir}/${name}`;
+      if (isDir) {
+        if (name === "node_modules" || name === "dist" || name.startsWith(".")) continue;
+        walk(rel);
+        continue;
+      }
+      if (!ALWAYS_RUN_TEST_FILE.test(name)) continue;
+      if (readText(resolve(pkgDir, rel)).includes(ALWAYS_RUN_MARKER)) found.push(rel);
+    }
+  };
+  walk(testsDir);
   return found;
 }
 

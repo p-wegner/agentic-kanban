@@ -18,8 +18,9 @@
 import { describe, it, expect } from "vitest";
 import { resolve } from "node:path";
 import { existsSync } from "node:fs";
-import { ALWAYS_RUN_TESTS_DIR, PACKAGES } from "../../../../scripts/test-mine.mjs";
+import { ALWAYS_RUN_TESTS_DIR, PACKAGES, scanAlwaysRunTests } from "../../../../scripts/test-mine.mjs";
 import { ALWAYS_RUN_TESTS_DIRS } from "../services/pre-merge-gate-tier.js";
+import { SCAN_PACKAGES } from "./always-run-marker-ratchet.test.js";
 
 const REPO_ROOT = resolve(__dirname, "../../../..");
 
@@ -50,5 +51,30 @@ describe("always-run guard-suite dirs: test-mine vs the gate's tier reporter", (
     for (const dir of testMineScanDirs()) {
       expect(existsSync(resolve(REPO_ROOT, dir)), `${dir} does not exist`).toBe(true);
     }
+  });
+
+  /**
+   * #647 item 6 — there are THREE lists describing "where the guard suites live", and nothing
+   * held them together: test-mine's (what RUNS), the gate tier's (what is REPORTED), and the
+   * marker ratchet's SCAN_PACKAGES (what is ENFORCED). Every pair had drifted at some point,
+   * and each drift is silent in the direction that matters — a guard nobody runs, counts, or
+   * demands a marker for.
+   */
+  it("the marker RATCHET scans the same packages test-mine runs (#647)", () => {
+    const ratchetDirs = SCAN_PACKAGES.map((p) => norm(p.testsDir).split("/packages/")[1]).sort();
+    const mineDirs = testMineScanDirs().map((d) => norm(d).replace(/^packages\//, "")).sort();
+    expect(ratchetDirs).toEqual(mineDirs);
+  });
+
+  /**
+   * The scan must actually REACH nested and non-.ts suites, not merely be configured to.
+   * Before #647 both scanners were flat and `.test.ts`-only, so a marker in
+   * `mcp-server/src/__tests__/tools/` or in a `.test.mjs` was inert — the worst kind of
+   * failure, because the marker LOOKS like protection.
+   */
+  it("test-mine's scan finds marked suites at depth and beyond .test.ts (#647)", () => {
+    const server = scanAlwaysRunTests(resolve(REPO_ROOT, "packages/server"), "src/__tests__") as string[];
+    expect(server.length).toBeGreaterThan(0);
+    expect(server.some((f) => f.endsWith(".test.mjs"))).toBe(true);
   });
 });
