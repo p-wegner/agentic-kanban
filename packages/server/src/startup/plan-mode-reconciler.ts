@@ -6,14 +6,14 @@ import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
-import { extractPlanFromMessages, writePlanFile, buildImplementPrompt } from "../services/plan-mode.service.js";
-import { getHarnessBoolSetting } from "../services/harness-settings.js";
+import { extractPlanFromMessages } from "../services/plan-mode.service.js";
 import { narrowProviderName } from "../services/agent-provider.js";
 import { toExecutorProvider } from "../services/agent-settings.service.js";
 import { sessionOutputPath } from "../lib/session-paths.js";
-import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
 import { PREF_RECONCILER_STRANDED_PLAN_ENABLED } from "../constants/preference-keys.js";
-import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
+import { finalizePlanModeExit } from "../services/session-manager/plan-mode-exit.js";
+import type { StartSessionOptions } from "../services/session-manager/types.js";
+import { toProfileSelection } from "@agentic-kanban/shared/lib/profile-selection";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 
@@ -109,47 +109,35 @@ export async function reconcileStrandedPlanModeWorkspaces(deps: StrandedPlanReco
       .limit(1);
     if (planSession.length === 0) continue;
 
-    const now = () => new Date().toISOString();
     try {
       const messages = readSessionOutputAsMessages(planSession[0].id);
       const plan = c.workingDir ? extractPlanFromMessages(messages) : null;
-
-      if (!plan || !c.workingDir) {
-        await setWorkspaceStatus(database, c.wsId, "blocked", { now: now(), set: { planMode: false } });
-        boardEvents.broadcast(c.projectId, "workflow_error");
-        emitButlerSystemEvent({
-          projectId: c.projectId,
-          kind: "session_failed",
-          workspaceId: c.wsId,
-          text: `Plan-mode workspace ${c.wsId} (#${c.issueNumber ?? "?"}) was stranded (planMode stuck, no recoverable plan). Cleared plan mode and marked it blocked — a normal turn will now implement.`,
-        });
-        console.warn(`[reconcile] stranded plan-mode workspace ${c.wsId} (#${c.issueNumber ?? "?"}): no recoverable plan — cleared planMode, marked blocked`);
-        recovered++;
-        continue;
-      }
-
-      const planPath = writePlanFile(c.workingDir, plan);
       const harness = narrowProviderName(c.provider ?? undefined);
-      const autoContinue = getHarnessBoolSetting(prefMap, harness, "plan_auto_continue");
 
-      if (autoContinue) {
-        await setWorkspaceStatus(database, c.wsId, "active", { now: now(), set: { planMode: false } });
-        await getSessionManager().startSession({
-          workspaceId: c.wsId,
-          prompt: buildImplementPrompt(),
+      // #544: this used to re-state the whole three-outcome table inline (no plan ->
+      // blocked; plan -> auto-continue or park), so the #924 recovery path could drift
+      // from the live exit path it exists to stand in for. One implementation now.
+      await finalizePlanModeExit(
+        c.wsId,
+        0, // a reconciled workspace has no exit code; a recovered plan is treated as clean.
+        plan,
+        {
           agentCommand: c.agentCommand ?? undefined,
-          planMode: false,
+          agentArgs: undefined,
+          permissionPromptTool: undefined,
           provider: toExecutorProvider(harness),
-          triggerType: "plan-implement",
-          ...(c.claudeProfile ? { profile: { provider: harness, name: c.claudeProfile } } : {}),
-        });
-        boardEvents.broadcast(c.projectId, "issue_updated");
-        console.log(`[reconcile] stranded plan-mode workspace ${c.wsId} (#${c.issueNumber ?? "?"}): recovered plan (${planPath}) — auto-continuing to implementation`);
-      } else {
-        await setWorkspaceStatus(database, c.wsId, "awaiting-plan-approval", { now: now(), set: { planMode: false, pendingPlanPath: planPath } });
-        boardEvents.broadcast(c.projectId, "issue_updated");
-        console.log(`[reconcile] stranded plan-mode workspace ${c.wsId} (#${c.issueNumber ?? "?"}): recovered plan (${planPath}) — parked awaiting approval`);
-      }
+          profile: toProfileSelection(c.provider, c.claudeProfile),
+        },
+        {
+          db: database,
+          workspaceWorkingDir: c.workingDir,
+          projectId: c.projectId,
+          startSession: (opts: StartSessionOptions) => getSessionManager().startSession(opts),
+          broadcast: (projectId, event) => boardEvents.broadcast(projectId, event),
+          logTag: "reconcile",
+          subject: `stranded plan-mode workspace ${c.wsId} (#${c.issueNumber ?? "?"})`,
+        },
+      );
       recovered++;
     } catch (err) {
       console.warn(`[reconcile] failed to recover stranded plan-mode workspace ${c.wsId}:`, err instanceof Error ? err.message : err);
