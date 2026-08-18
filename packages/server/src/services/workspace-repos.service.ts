@@ -15,6 +15,8 @@ import { getAllWorkspaceRepos, siblingRefFromRow, stampRepoMergedHeadSha, type W
 import { WorkspaceError, acquireRepoMergeLock, type GitService } from "./workspace-internals.js";
 import { runMergeCore } from "./merge-executor.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
+import { getPreference } from "../repositories/preferences.repository.js";
 
 /**
  * Resolve the subset of a project's ADDITIONAL repos that a workspace should span,
@@ -58,6 +60,84 @@ export interface SiblingWorktree {
   composeFile: string | null;
 }
 
+/** Bounded-concurrency `map`. Preserves input order; every task is awaited before returning. */
+async function mapBounded<T, R>(items: readonly T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker));
+  return results;
+}
+
+/**
+ * How many sibling worktrees to create at once (#626).
+ *
+ * `git worktree add` in repo A constrains nothing in repo B — they are independent
+ * checkouts — so the old sequential loop was wall-clock spent for no reason. Bounded rather
+ * than unbounded because a 17-repo project would otherwise storm one disk with 17 concurrent
+ * checkouts, which is slower than a queue, not faster.
+ */
+const SIBLING_WORKTREE_CONCURRENCY = 6;
+
+/** Bound for the PARALLEL install mode (#627). Lower than the worktree bound: an install is
+ *  CPU+network heavy and contends on a shared package cache, which a checkout does not. */
+const SIBLING_INSTALL_CONCURRENCY = 4;
+
+export type SiblingInstallMode = "sequential" | "parallel";
+
+const siblingInstallModePref = projectPref("sibling_install_mode");
+const siblingInstallTimeoutPref = projectPref("sibling_install_timeout_ms");
+
+/** Bounds a per-repo install timeout override to something sane: 30s .. 3h. */
+const MIN_INSTALL_TIMEOUT_MS = 30_000;
+const MAX_INSTALL_TIMEOUT_MS = 3 * 60 * 60 * 1000;
+
+/**
+ * Read the two sibling-install knobs for a project (#627). Never throws and never guesses:
+ * an absent, unreadable or unrecognised value falls back to today's behaviour
+ * (`sequential`, and the setup script's own default timeout), because a provisioning
+ * default that changes on a malformed preference is worse than one that ignores it.
+ */
+export async function resolveSiblingInstallOptions(
+  projectId: string,
+  database: Database,
+): Promise<{ installMode: SiblingInstallMode; installTimeoutMs: number | undefined }> {
+  const rawMode = (await getPreference(siblingInstallModePref.key(projectId), database).catch(() => null))
+    ?.trim()
+    .toLowerCase();
+  const rawTimeout = await getPreference(siblingInstallTimeoutPref.key(projectId), database).catch(() => null);
+  const parsed = rawTimeout ? Number.parseInt(rawTimeout, 10) : NaN;
+  return {
+    installMode: rawMode === "parallel" ? "parallel" : "sequential",
+    installTimeoutMs:
+      Number.isFinite(parsed) && parsed >= MIN_INSTALL_TIMEOUT_MS && parsed <= MAX_INSTALL_TIMEOUT_MS
+        ? parsed
+        : undefined,
+  };
+}
+
+/**
+ * Run one repo's setup script in its worktree. Best-effort + non-fatal, mirroring the
+ * leading-repo setup script's semantics — a failed sibling setup must not abort creation.
+ */
+async function runSiblingSetup(repo: RepoRow, worktreePath: string, timeoutMs: number | undefined): Promise<void> {
+  if (!repo.setupScript || !repo.setupScript.trim()) return;
+  try {
+    const res = await runSetupScript(worktreePath, repo.setupScript, timeoutMs ? { timeoutMs } : {});
+    if (res.exitCode !== 0) {
+      console.warn(`[workspace-repos] setup script for ${repo.name ?? repo.path} exited ${res.exitCode}: ${res.stderr.slice(0, 300)}`);
+    }
+  } catch (err) {
+    console.warn(`[workspace-repos] setup script for ${repo.name ?? repo.path} failed (non-fatal): ${errorMessage(err)}`);
+  }
+}
+
 /**
  * Create a worktree on `branch` in every additional repo of the project (same branch
  * name as the leading repo). Worktrees land at `dirname(repoPath)/.worktrees/...`,
@@ -66,9 +146,21 @@ export interface SiblingWorktree {
  * name (`.worktrees/<repoDirName>/<branch>`). That is now `createWorktree`'s DEFAULT
  * for the leading repo too (#385 — the un-namespaced single-repo scheme made a path
  * ambiguous about which project owned it), so no explicit `pathNamespace` is passed
- * here any more. Throws on the first failure: full-peers semantics require
- * every repo present. Siblings already provisioned in earlier iterations are rolled
- * back HERE before the throw — the caller never sees the partial list (the throw
+ * here any more.
+ *
+ * Two phases since #626/#627, because they have different constraints:
+ *
+ *  1. **Worktree creation — always concurrent** (bounded). The repos are independent
+ *     checkouts; the old sequential loop bought nothing. The cross-project shared-sibling
+ *     guard (#110) still runs immediately before each `createWorktree`, per repo.
+ *  2. **Dependency installs — sequential by DEFAULT**, `parallel` opt-in per project.
+ *     Parallel Maven/npm against one shared local cache contends, so the default stays
+ *     today's behaviour and the trade-off is the operator's.
+ *
+ * Still all-or-nothing: full-peers semantics require every repo present, so ANY worktree
+ * failure rolls back every worktree this call created — including the ones that succeeded
+ * concurrently alongside the failure, which is why phase 1 collects settled results instead
+ * of throwing at the first rejection. The caller never sees a partial list (the throw
  * prevents the assignment), so an internal rollback is the only way they get removed.
  */
 export async function provisionSiblingWorktrees(params: {
@@ -83,6 +175,11 @@ export async function provisionSiblingWorktrees(params: {
    * {@link resolveScopedSiblingRepos}.
    */
   repoScope?: string[];
+  /** #627 — `sequential` (default) or `parallel` per-repo dependency installs. */
+  installMode?: SiblingInstallMode;
+  /** #627 — per-repo setup timeout. Unset inherits DEFAULT_SETUP_SCRIPT_TIMEOUT_MS (5 min),
+   *  which a Maven repo measured at 209 s WARM can exceed from cold. */
+  installTimeoutMs?: number;
 }): Promise<SiblingWorktree[]> {
   const { gitService, database, projectId, branch } = params;
   const allProjectRepos = await listProjectRepos(projectId, database);
@@ -90,9 +187,13 @@ export async function provisionSiblingWorktrees(params: {
   const projectRepos = resolveScopedSiblingRepos(allProjectRepos, params.repoScope);
   if (projectRepos.length === 0) return [];
 
-  const provisioned: SiblingWorktree[] = [];
-  try {
-    for (const repo of projectRepos) {
+  // Phase 1 — worktrees, concurrently. Each task returns EITHER a provisioned sibling or the
+  // error it hit; nothing throws out of the map, because a rejection racing other in-flight
+  // creations would leave those worktrees on disk with no one holding a reference to remove
+  // them — the orphan-debris failure #630 describes, arriving via the rollback path.
+  type Outcome = { ok: true; sibling: SiblingWorktree; repo: RepoRow } | { ok: false; err: unknown };
+  const outcomes = await mapBounded(projectRepos, SIBLING_WORKTREE_CONCURRENCY, async (repo): Promise<Outcome> => {
+    try {
       const baseBranch = repo.defaultBranch;
       if (!baseBranch) {
         throw new Error(
@@ -118,27 +219,40 @@ export async function provisionSiblingWorktrees(params: {
       const baseCommitSha = await gitService.revParse(repo.path, baseBranch);
       // No pathNamespace: createWorktree already namespaces by basename(repo.path).
       const worktreePath = await gitService.createWorktree(repo.path, branch, baseBranch);
-      // Per-repo setup/install (#71): each additional repo may need its own deps ready in
-      // its worktree before the agent runs (`pnpm install`, `cargo fetch`, `uv sync`, …).
-      // Best-effort + non-fatal, mirroring the leading-repo setup script's semantics — a
-      // failed sibling setup must not abort workspace creation.
-      if (repo.setupScript && repo.setupScript.trim()) {
-        try {
-          const res = await runSetupScript(worktreePath, repo.setupScript);
-          if (res.exitCode !== 0) {
-            console.warn(`[workspace-repos] setup script for ${repo.name ?? repo.path} exited ${res.exitCode}: ${res.stderr.slice(0, 300)}`);
-          }
-        } catch (err) {
-          console.warn(`[workspace-repos] setup script for ${repo.name ?? repo.path} failed (non-fatal): ${errorMessage(err)}`);
-        }
-      }
-      provisioned.push({ path: repo.path, name: repo.name, worktreePath, branch, baseBranch, baseCommitSha, composeFile: repo.composeFile ?? null });
+      return {
+        ok: true,
+        repo,
+        sibling: { path: repo.path, name: repo.name, worktreePath, branch, baseBranch, baseCommitSha, composeFile: repo.composeFile ?? null },
+      };
+    } catch (err) {
+      return { ok: false, err };
     }
-  } catch (err) {
-    await rollbackSiblingWorktrees(gitService, provisioned);
-    throw err;
+  });
+
+  const succeeded = outcomes.filter((o): o is Extract<Outcome, { ok: true }> => o.ok);
+  const firstFailure = outcomes.find((o): o is Extract<Outcome, { ok: false }> => !o.ok);
+  if (firstFailure) {
+    // Roll back EVERYTHING this call created, including worktrees that finished successfully
+    // in parallel with the failure — full-peers semantics mean a partial set is not a result.
+    await rollbackSiblingWorktrees(gitService, succeeded.map((o) => o.sibling));
+    throw firstFailure.err;
   }
-  return provisioned;
+
+  // Phase 2 — per-repo setup/install (#71): each additional repo may need its own deps ready
+  // in its worktree before the agent runs (`pnpm install`, `cargo fetch`, `uv sync`, …).
+  // Sequential by default (#627): parallel Maven/npm against one shared local cache contends,
+  // so opting into `parallel` is the operator's call per project.
+  const withSetup = succeeded.filter((o) => o.repo.setupScript && o.repo.setupScript.trim());
+  if (withSetup.length > 0) {
+    const parallel = params.installMode === "parallel";
+    const concurrency = parallel ? SIBLING_INSTALL_CONCURRENCY : 1;
+    console.log(
+      `[workspace-repos] running ${withSetup.length} sibling setup script(s) ${parallel ? `in parallel (max ${concurrency})` : "sequentially"}`,
+    );
+    await mapBounded(withSetup, concurrency, (o) => runSiblingSetup(o.repo, o.sibling.worktreePath, params.installTimeoutMs));
+  }
+
+  return succeeded.map((o) => o.sibling);
 }
 
 /** Persist the per-workspace worktree records inside the caller's transaction. */

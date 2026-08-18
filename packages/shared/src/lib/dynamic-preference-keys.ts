@@ -94,6 +94,19 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // priority list that deliberately falls through on quota, and a per-workspace override
   // outranks it — neither can express "this project may only ever spend account X".
   "allowed_profiles",
+  // Multi-repo sibling provisioning (#626/#627). A 17-repo project spends tens of minutes in
+  // `provisionSiblingWorktrees` before anything is persisted, and the two halves need
+  // different defaults:
+  //   - `sibling_install_mode_<id>`: `sequential` (default, today's behaviour) | `parallel`.
+  //     Sequential stays the default deliberately — parallel Maven/npm against ONE shared
+  //     local cache contends, and that trade-off is the operator's to make per project.
+  //   - `sibling_install_timeout_ms_<id>`: per-repo setup timeout. Without it every install
+  //     silently inherits DEFAULT_SETUP_SCRIPT_TIMEOUT_MS (5 min); a Maven repo measured at
+  //     209 s WARM is uncomfortably close to that from cold.
+  // Worktree CREATION is always concurrent and needs no knob — `git worktree add` in repo A
+  // constrains nothing in repo B.
+  "sibling_install_mode",
+  "sibling_install_timeout_ms",
 ] as const;
 
 // Deliberately NOT registered, though both are per-project keys that exist on disk (#496):
