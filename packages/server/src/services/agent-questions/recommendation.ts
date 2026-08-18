@@ -7,6 +7,7 @@ import { getProjectRow } from "../../repositories/agent-questions.repository.js"
 import { ensureButlerSession, sendButlerTurn, subscribeButler, getButlerSession } from "../butler-sdk.service.js";
 import { resolveButlerLaunchConfig } from "../butler-definitions.service.js";
 import type { AgentQuestionRecommendation, RecommendInput } from "./types.js";
+import { extractModelJson } from "@agentic-kanban/shared/lib/model-json";
 
 function buildRecommendationPrompt(input: RecommendInput): string {
   const issueRef = input.issueNumber !== null ? `#${input.issueNumber}: ${input.issueTitle}` : input.issueTitle;
@@ -43,18 +44,9 @@ function buildRecommendationPrompt(input: RecommendInput): string {
   return lines.join("\n");
 }
 
-/** Strip code fences / leading prose and extract the first JSON array in the text. */
+/** Strip code fences / surrounding prose and extract the first JSON array in the text. */
 export function extractJsonArray(text: string): unknown {
-  if (!text) throw new Error("empty butler response");
-  let s = text.trim();
-  // Strip ```json ... ``` or ``` ... ```
-  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fence) s = fence[1].trim();
-  // Find first '[' and last ']' to tolerate leading/trailing prose.
-  const start = s.indexOf("[");
-  const end = s.lastIndexOf("]");
-  if (start === -1 || end === -1 || end <= start) throw new Error("no JSON array found in butler response");
-  return JSON.parse(s.slice(start, end + 1));
+  return extractModelJson(text, { shape: "array" });
 }
 
 export function coerceRecommendation(raw: unknown, optionCount: number, multi: boolean): AgentQuestionRecommendation | null {

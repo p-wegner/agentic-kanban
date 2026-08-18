@@ -10,6 +10,7 @@ import { ensureButlerSession, getButlerSession, sendButlerTurn, subscribeButler 
 import { resolveButlerLaunchConfig } from "./butler-definitions.service.js";
 import { resolveInside } from "./plugin-fs.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { extractModelJson } from "@agentic-kanban/shared/lib/model-json";
 
 /**
  * Butler concierge for plugin gates (#307/#309/#310) — the agent-questions pattern
@@ -264,18 +265,15 @@ export async function computeGateRecommendation(args: GateNotifyArgs, database: 
       await noteRecommendationSkip(args, "ask-failed", answer.text || "butler ask returned an error", database);
       return;
     }
-    const m = answer.text.match(/\{[\s\S]*\}/);
-    if (!m) {
-      await noteRecommendationSkip(args, classifyUnparseableButlerReply(answer.text), answer.text, database);
-      return;
-    }
-    // #355: a reply containing braces that are not valid JSON (prose with a `{`, or two objects so
-    // the greedy match spans both) used to throw out of here and be recorded as `threw` — the
-    // least actionable bucket — even though it is exactly the malformed-reply case
-    // `reply-not-json` names. Classify it the same way as the no-braces case instead.
+    // #355: a reply containing braces that are not valid JSON (prose with a `{`, or two
+    // objects so the old greedy `/\{[\s\S]*\}/` spanned both) used to throw out of here and
+    // be recorded as `threw` — the least actionable bucket — even though it is exactly the
+    // malformed-reply case `reply-not-json` names. Classify it the same way as the no-braces
+    // case instead. #550: the greedy match itself is gone; the shared extractor finds the
+    // first BALANCED object, so a two-object reply now parses rather than needing the bucket.
     let parsed: { actionId?: unknown; reason?: unknown };
     try {
-      parsed = JSON.parse(m[0]) as { actionId?: unknown; reason?: unknown };
+      parsed = extractModelJson(answer.text, { shape: "object" }) as { actionId?: unknown; reason?: unknown };
     } catch {
       await noteRecommendationSkip(args, classifyUnparseableButlerReply(answer.text), answer.text, database);
       return;

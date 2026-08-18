@@ -18,6 +18,7 @@ import {
 } from "@agentic-kanban/shared/lib/coupling-overlap";
 import { planContraction } from "@agentic-kanban/shared/lib/dependency-graph";
 import { assignChildRepos } from "@agentic-kanban/shared/lib/repo-tags";
+import { extractModelJson } from "@agentic-kanban/shared/lib/model-json";
 import { applyRepoTags } from "./repo-tags.service.js";
 import type { Database } from "../db/index.js";
 import { invokeClaudePrompt } from "./claude-cli.service.js";
@@ -53,9 +54,7 @@ Current title: ${title}
 Current description: ${description?.trim() || "(none)"}`;
 
   const stdout = await invokeClaudePrompt(prompt, { database });
-  const output = stdout.trim();
-  const cleaned = output.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-  const enhanced = JSON.parse(cleaned) as { title?: string; description?: string; openQuestions?: string[] };
+  const enhanced = extractModelJson(stdout, { shape: "object" }) as { title?: string; description?: string; openQuestions?: string[] };
 
   let enhancedDescription = enhanced.description?.trim() ?? description ?? "";
   const questions = Array.isArray(enhanced.openQuestions) ? enhanced.openQuestions.filter(q => typeof q === "string" && q.trim()) : [];
@@ -217,9 +216,7 @@ Only include genuinely useful dependencies, not just topical similarity.`;
 
   const stdout = await invokeClaudePrompt(prompt, { database });
 
-  const output = stdout.trim();
-  const cleaned = output.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-  const parsed = JSON.parse(cleaned) as { dependencies?: Array<{ issueId: string; type: string; reason: string }> };
+  const parsed = extractModelJson(stdout, { shape: "object" }) as { dependencies?: Array<{ issueId: string; type: string; reason: string }> };
   const deps = parsed.dependencies ?? [];
 
   const created: Array<{ id: string; type: string; issueId: string; reason: string }> = [];
@@ -317,18 +314,7 @@ export interface AnalyzeTouchedFilesResult {
  * leading/trailing fences is not enough — we locate the first balanced `{...}`.
  */
 export function extractJsonObject(text: string): unknown {
-  if (!text) throw new Error("empty model response");
-  let s = text.trim();
-  // Strip a ```json ... ``` or ``` ... ``` fence if the JSON lives inside one.
-  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fence) s = fence[1].trim();
-  // Tolerate leading/trailing prose by slicing from the first `{` to the last `}`.
-  const start = s.indexOf("{");
-  const end = s.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error("no JSON object found in model response");
-  }
-  return JSON.parse(s.slice(start, end + 1));
+  return extractModelJson(text, { shape: "object" });
 }
 
 function buildDirTree(rootPath: string, maxDepth = 3): string {
@@ -460,8 +446,7 @@ Issue title: ${title}
 ${description ? `Description:\n${description}` : ""}`;
 
   const stdout = await invokeClaudePrompt(prompt, { database, model: "claude-haiku-4-5" });
-  const cleaned = stdout.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-  const parsed = JSON.parse(cleaned) as { estimate?: string; reasoning?: string };
+  const parsed = extractModelJson(stdout, { shape: "object" }) as { estimate?: string; reasoning?: string };
 
   const estimate = parsed.estimate?.trim().toUpperCase() as IssueEstimate;
   if (!VALID_ESTIMATES.includes(estimate)) {
@@ -574,8 +559,7 @@ Respond ONLY with valid JSON, no markdown, no explanation:
 }`;
 
   const stdout = await invokeClaudePrompt(prompt, { database });
-  const cleaned = stdout.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-  const parsed = JSON.parse(cleaned) as {
+  const parsed = extractModelJson(stdout, { shape: "object" }) as {
     children?: Array<{ tempId: string; title: string; description: string; priority: string; targetRepo?: string }>;
     dependencies?: Array<{ fromTempId: string; toTempId: string; type: string }>;
   };

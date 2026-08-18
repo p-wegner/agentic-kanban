@@ -14,6 +14,7 @@ import {
 } from "../repositories/voice-capture.repository.js";
 import { isIssueNumberUniqueConstraintError, nextIssueNumber } from "../repositories/issue-number.repository.js";
 import { normalizeIssuePriority } from "@agentic-kanban/shared/lib/issue-priority";
+import { extractModelJson } from "@agentic-kanban/shared/lib/model-json";
 
 const ISSUE_NUMBER_INSERT_ATTEMPTS = 3;
 
@@ -238,11 +239,9 @@ Respond ONLY with valid JSON (no markdown, no explanation):
     console.warn("[voice-capture] AI structuring failed; creating issue from raw transcript:", err);
     return fallbackStructuredTranscript(transcript);
   }
-  const cleaned = stdout.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-
   let parsed: { title?: string; description?: string; priority?: string };
   try {
-    parsed = JSON.parse(cleaned) as { title?: string; description?: string; priority?: string };
+    parsed = extractModelJson(stdout, { shape: "object" }) as { title?: string; description?: string; priority?: string };
   } catch {
     // Claude returned non-JSON (e.g. explanation text). Fall back to raw transcript.
     return fallbackStructuredTranscript(transcript);
