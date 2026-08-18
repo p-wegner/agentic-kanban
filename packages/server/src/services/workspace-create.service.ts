@@ -10,6 +10,7 @@
  * passing the same injected deps so gitService stays substitutable in tests.
  */
 
+import { basename } from "node:path";
 import { randomUUID } from "node:crypto";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { isTerminalWorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
@@ -48,9 +49,11 @@ import {
 } from "./workspace-internals.js";
 import { createWorkspaceProvisionService } from "./workspace-provision.service.js";
 import { createLaunchPreviewService } from "./workspace-launch-preview.service.js";
+import { getIssueReposTouched } from "./repo-tags.service.js";
 import {
   provisionSiblingWorktrees,
   resolveSiblingInstallOptions,
+  resolveEffectiveRepoScope,
   insertSiblingWorktreeRecords,
   rollbackSiblingWorktrees,
   type SiblingWorktree,
@@ -592,8 +595,17 @@ export function createWorkspaceCreateService(deps: {
         // (default) or bounded-parallel — plus an optional timeout, since the setup script's
         // 5-minute default is a hard ceiling a cold Maven repo can exceed.
         const installOpts = await resolveSiblingInstallOptions(issue.projectId, database);
+        // #629: with no explicit scope, fall back to what the TICKET says it touches
+        // (`repo:<name>` tags) instead of provisioning every repo. The monitor's auto-starter
+        // calls createWorkspace({ issueId }) with nothing else, so this is the path that
+        // matters most — it is where "all 17 repos" came from.
+        const repoScope = resolveEffectiveRepoScope({
+          explicit: input.repoScope,
+          reposTouched: await getIssueReposTouched(input.issueId, database),
+          leadingRepoName: basename(project.repoPath) || project.repoPath,
+        });
         siblingWorktrees = await provisionSiblingWorktrees({
-          gitService, database, projectId: issue.projectId, branch, repoScope: input.repoScope, ...installOpts,
+          gitService, database, projectId: issue.projectId, branch, repoScope, ...installOpts,
         });
         if (siblingWorktrees.length > 0) timing("sibling-worktrees", t);
       }

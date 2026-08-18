@@ -4,10 +4,12 @@
 // (issue.service) and epic decomposition (issue-ai.service), so the tag color/naming
 // stays consistent and the "ensure exists then link" logic lives in one place.
 import { randomUUID } from "node:crypto";
-import { repoTagName, REPO_TAG_COLOR } from "@agentic-kanban/shared/lib/repo-tags";
+import { repoTagName, repoNameFromTag, REPO_TAG_COLOR } from "@agentic-kanban/shared/lib/repo-tags";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { getTagByName, insertTag, getIssueTagLink, insertIssueTag } from "../repositories/issue-ai.repository.js";
+import { issueTags, tags } from "@agentic-kanban/shared/schema";
+import { eq } from "drizzle-orm";
 
 /** Ensure a `repo:<name>` tag exists, returning its id. */
 async function ensureRepoTag(repoName: string, database: Database): Promise<string> {
@@ -44,5 +46,33 @@ export async function applyRepoTags(
     if (link.length === 0) {
       await insertIssueTag({ id: randomUUID(), issueId, tagId }, database);
     }
+  }
+}
+
+/**
+ * The repos an issue declares it touches, read back from its `repo:<name>` tags (#629).
+ *
+ * The write half (`applyRepoTags`) has existed since #94 and `POST /api/issues` accepts
+ * `reposTouched` — but nothing ever READ it back, so workspace creation defaulted to "all
+ * repos" for every ticket. On a 17-repo project that meant 17 worktrees and 17 dependency
+ * installs for a ticket whose work was entirely in one repo.
+ *
+ * Returns bare repo names in tag order. Never throws: this feeds a DEFAULT, and a scope
+ * decision that fails closed on an unreadable tag table would be worse than the old
+ * behaviour, not better.
+ */
+export async function getIssueReposTouched(
+  issueId: string,
+  database: Database = db,
+): Promise<string[]> {
+  try {
+    const rows = await database
+      .select({ name: tags.name })
+      .from(issueTags)
+      .innerJoin(tags, eq(issueTags.tagId, tags.id))
+      .where(eq(issueTags.issueId, issueId));
+    return rows.map((r) => repoNameFromTag(r.name)).filter((r): r is string => Boolean(r));
+  } catch {
+    return [];
   }
 }
