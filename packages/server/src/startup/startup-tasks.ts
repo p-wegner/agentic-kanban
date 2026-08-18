@@ -51,8 +51,27 @@ export function shouldKillOrphanedServerProcess(input: {
   return cmd.includes(checkoutRoot);
 }
 
+/**
+ * `KANBAN_SKIP_ORPHAN_CLEANUP=1` disables the sweep entirely (#645).
+ *
+ * The sweep's scope is the CHECKOUT, not the port: any `tsx … src/index` process whose
+ * command line names this checkout is fair game. A second server booted from the same
+ * checkout on a different port is therefore reaped as an "orphan" — which is exactly what
+ * the E2E stack is. So `pnpm test:e2e` on a dev machine killed the developer's running
+ * dev server as its very first startup act, and the same holds for any deliberate
+ * second instance. Cleanup is a convenience for hot-reload leftovers; a run that knows
+ * it is a co-tenant opts out.
+ */
+export function shouldSkipOrphanCleanup(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.KANBAN_SKIP_ORPHAN_CLEANUP === "1" || env.KANBAN_SKIP_ORPHAN_CLEANUP === "true";
+}
+
 export async function killOrphanedServers(): Promise<void> {
   if (process.platform !== "win32") return;
+  if (shouldSkipOrphanCleanup()) {
+    console.log("[startup] orphan cleanup skipped (KANBAN_SKIP_ORPHAN_CLEANUP)");
+    return;
+  }
   try {
     const { execSync: _execSync } = await import("node:child_process");
     // wmic was removed starting with Windows 11 24H2, which silently killed this whole

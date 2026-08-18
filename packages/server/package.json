@@ -30,6 +30,7 @@
   ],
   "scripts": {
     "dev": "node ../../scripts/server-dev-proxy.mjs",
+    "dev:e2e": "tsx --conditions development src/index.ts",
     "build": "tsc",
     "start": "node dist/cli/index.js dev",
     "db:migrate": "tsx src/scripts/db-migrate.ts",
