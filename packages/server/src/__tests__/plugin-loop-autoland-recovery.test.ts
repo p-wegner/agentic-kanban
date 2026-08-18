@@ -103,7 +103,7 @@ describe("recoverStrandedAutoLand — the commits-ahead gate (#444)", () => {
 
   async function run(ahead: number | null, workspace: Ws | null = ws) {
     vi.resetModules();
-    vi.doMock("../startup/branch-commits.js", () => ({ commitsAhead: async () => ahead }));
+    vi.doMock("../services/git.service.js", () => ({ getCommitCountAhead: async () => ahead }));
     const { recoverStrandedAutoLand } = await import("../services/plugin-loop-autoland-recovery.js");
     const landed: string[] = [];
     const logs: string[] = [];
@@ -142,7 +142,7 @@ describe("recoverStrandedAutoLand — the commits-ahead gate (#444)", () => {
 
   it("survives a failing merge — a refused gate is a legitimate outcome, not a cycle-killer", async () => {
     vi.resetModules();
-    vi.doMock("../startup/branch-commits.js", () => ({ commitsAhead: async () => 2 }));
+    vi.doMock("../services/git.service.js", () => ({ getCommitCountAhead: async () => 2 }));
     const { recoverStrandedAutoLand } = await import("../services/plugin-loop-autoland-recovery.js");
     const logs: string[] = [];
     const ok = await recoverStrandedAutoLand(stall(), { autoLand: true, nowMs: NOW }, {

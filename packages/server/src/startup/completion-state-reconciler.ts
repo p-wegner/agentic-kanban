@@ -2,6 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { sessions, workspaces, issues, projectStatuses } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
+import { getCommitCountAhead } from "../services/git.service.js";
 
 /** How long a workspace must be in 'active' with a live PID before we reconcile it (hung agent). */
 const HUNG_AGENT_THRESHOLD_MS = 30 * 60 * 1000;
@@ -16,15 +17,21 @@ function isPidAlive(pid: number): boolean {
   }
 }
 
-async function workspaceHasCommittedChanges(
-  workingDir: string,
-  baseBranch: string,
-): Promise<boolean> {
-  // Count commits on HEAD that are not on baseBranch — non-zero means the agent committed work.
-  const { gitExec } = await import("@agentic-kanban/shared/lib/git-exec");
-  const result = await gitExec(["rev-list", "--count", `${baseBranch}..HEAD`], { cwd: workingDir });
-  if (result.code !== 0 || result.error) return false;
-  return parseInt(result.stdout.trim(), 10) > 0;
+/**
+ * #539: was a private third implementation that spawned git raw, outside the git-service
+ * SSOT. Now the shared counter — but deliberately NOT the shared `hasCommitsAhead`.
+ *
+ * The unknown policies differ because the DOWNSTREAMS are mirror images, and that is the
+ * thing to check before unifying them. `hasCommitsAhead` answers `true` when git cannot
+ * tell, because its callers treat "no commits" as licence to close a workspace and force
+ * its issue Done — there, acting on an unknown destroys work. Both call sites HERE do the
+ * opposite: `true` makes the reconciler change status (recover a blocked workspace, or mark
+ * a dead-PID session stopped), and `false` skips. So an unknown must read as FALSE, or a
+ * transient git failure starts reconciling workspaces on no evidence at all.
+ */
+async function workspaceHasCommittedChanges(workingDir: string, baseBranch: string): Promise<boolean> {
+  const ahead = await getCommitCountAhead(workingDir, baseBranch);
+  return ahead !== null && ahead > 0;
 }
 
 /**
