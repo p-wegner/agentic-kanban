@@ -62,6 +62,10 @@ function makeDeps(db: Db, overrides: Partial<{ enabled: boolean }> = {}) {
     getSessionManager: () => sessionManager,
     boardEvents,
     reviewSessionIds: new Set<string>(),
+    // #539: the commits-ahead probe is now the leading-OR-sibling helper, which reaches the
+    // git-service SSOT in @agentic-kanban/shared — out of reach of the git.service mock
+    // above. The reconciler exposes it as a dep, so the same mock still drives it.
+    hasCommittedWork: async () => (await getCommitCountAheadMock()) > 0,
     ...overrides,
   };
 }

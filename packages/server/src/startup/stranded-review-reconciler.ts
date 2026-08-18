@@ -6,7 +6,8 @@ import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
-import { getCommitCountAhead, revParse } from "../services/git.service.js";
+import { revParse } from "../services/git.service.js";
+import { workspaceHasCommittedWork } from "../services/workspace-commits.js";
 import { startManualReview, isReviewLaunchPending } from "../services/review.service.js";
 import { getMergeJob } from "../services/merge-job.service.js";
 import { recordDriveObstacle } from "../services/drive-obstacles.service.js";
@@ -58,6 +59,14 @@ export interface StrandedReviewReconcilerDeps {
    * so a pref-level disable takes effect on the next tick with no restart.
    */
   enabled?: boolean;
+  /**
+   * Injected for testing — defaults to the real leading-OR-sibling probe. It lives behind a
+   * dep rather than a module mock because the probe reaches the git-service SSOT in
+   * `@agentic-kanban/shared`, which a `vi.mock("../services/git.service.js")` cannot see.
+   */
+  hasCommittedWork?: (
+    workspace: { id: string; workingDir: string | null; baseBranch: string | null },
+  ) => Promise<boolean>;
 }
 
 /**
@@ -115,6 +124,8 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
   }
 
   const autoReview = isAutoReviewEnabled(prefMap.get(AUTO_REVIEW_PREF_KEY));
+  const hasCommittedWork = deps.hasCommittedWork
+    ?? ((ws) => workspaceHasCommittedWork({ ...ws, isDirect: false }, null, database, { onUnknown: false }));
 
   const candidates = await database
     .select({
@@ -175,9 +186,15 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
       }
     }
 
-    // Require committed changes ahead of base (don't review an empty branch).
-    const ahead = await getCommitCountAhead(c.workingDir, c.baseBranch).catch(() => 0);
-    if (!ahead || ahead <= 0) continue;
+    // Require committed changes ahead of base (don't review an empty branch). #539: this
+    // is the leading-OR-sibling probe, because a sibling-only ticket (#69) commits nothing
+    // in the leading worktree — the old leading-only count read it as an empty branch and
+    // left it stranded, which is the exact state this pass exists to recover.
+    // `onUnknown: false`: `true` here is what makes the pass ACT (launch a review, or mark
+    // ready-for-merge), so a git failure must not start it acting on no evidence.
+    const hasWork = await hasCommittedWork({ id: c.wsId, workingDir: c.workingDir, baseBranch: c.baseBranch })
+      .catch(() => false);
+    if (!hasWork) continue;
 
     try {
       if (autoReview) {

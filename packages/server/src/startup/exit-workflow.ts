@@ -9,7 +9,7 @@ import { movedDuringGate } from "../services/workspace-merge-gate.js";
 import { issues, preferences, projectStatuses, projects, scheduledRunHistory, scheduledRuns, sessions, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { desc, eq } from "drizzle-orm";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
-import { getCommitCountAhead as commitsAhead, hasCommitsAhead } from "@agentic-kanban/shared/lib/git-service";
+import { getCommitCountAhead as commitsAhead } from "@agentic-kanban/shared/lib/git-service";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { db as defaultDb } from "../db/index.js";
@@ -32,7 +32,7 @@ import { rotateClaudeSubscription } from "../services/claude-subscription-ring.j
 import { decideRateLimitExit, formatRateLimitBlockedReason } from "./rate-limit-exit-decision.js";
 import { classifySessionExit, resolveSessionRoleFlags } from "./session-exit-classification.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
-import { listWorkspaceRepos, type RepoRow } from "../repositories/repo.repository.js";
+import { workspaceHasCommittedWork } from "../services/workspace-commits.js";
 import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
 import { tryReserveReviewLaunch, releaseReviewLaunch } from "../services/review.service.js";
 import type { SessionRoleFlags } from "./session-exit-classification.js";
@@ -168,56 +168,15 @@ async function launchLearningStep(database: Database, sessionManager: ReturnType
 }
 
 async function hasCommittedChanges(workspace: WorkspaceRow, defaultBranch: string | null, workspaceId: string, database: Database) {
-  if (!workspace.workingDir) return false;
-  try {
-    if (workspace.isDirect) {
-      const baseRef = workspace.baseCommitSha || "HEAD~1";
-      return await hasCommitsAhead(workspace.workingDir, baseRef);
-    }
-    const baseBranch = workspace.baseBranch || defaultBranch;
-    if (!baseBranch) {
-      console.warn(`[workflow] workspace ${workspaceId} has no base/default branch; treating as no committed changes`);
-      return false;
-    }
-    // #365: `git diff --quiet <base>` (one ref) diffs the WORKING TREE against the base
-    // branch TIP, so it reported "has changes" for a workspace with zero commits of its own
-    // that was merely BEHIND its base. That false positive parked empty workspaces at
-    // ready_for_merge and stalled pipeline units (#363), and it is why the #629 guard below
-    // — which re-checks with this same function — could never catch the case it was written
-    // for. Count commits instead; the base moving no longer affects the answer.
-    if (await hasCommitsAhead(workspace.workingDir, baseBranch)) return true;
-    // Multi-repo: the leading repo being clean does NOT mean the workspace did nothing —
-    // a sibling-only ticket commits entirely in a sibling repo (#69). Without this, the
-    // exit workflow reads the sibling work as "no committed changes", never routes it to
-    // review/merge, and force-closes the issue to Done with the sibling commit stranded.
-    return await hasSiblingCommittedChanges(workspaceId, defaultBranch, database);
-  } catch { return false; }
-}
-
-/**
- * True when any sibling repo of the workspace has committed changes against its base
- * branch. Mirrors the leading-repo commits-ahead probe per sibling worktree (#365), falling
- * back to a branch-vs-base commit count when the worktree is already gone — both are now
- * the same `rev-list --count` question, just from a different cwd.
- * Best-effort: a git error on one sibling reads as "no change" (safe direction).
- */
-async function hasSiblingCommittedChanges(workspaceId: string, defaultBranch: string | null, database: Database): Promise<boolean> {
-  let repos: RepoRow[];
-  try {
-    repos = await listWorkspaceRepos(workspaceId, database);
-  } catch { return false; }
-  for (const repo of repos) {
-    const base = repo.baseBranch || defaultBranch;
-    if (!base) continue;
-    try {
-      if (repo.worktreePath) {
-        if ((await commitsAhead(repo.worktreePath, base) ?? 0) > 0) return true;
-      } else if (repo.branch) {
-        if ((await commitsAhead(repo.path, base, repo.branch) ?? 0) > 0) return true;
-      }
-    } catch { /* non-fatal: treat this sibling as no-change */ }
-  }
-  return false;
+  // #539: the leading-OR-sibling probe now lives in one place (services/workspace-commits).
+  // `onUnknown: true` because "no commits" licenses CLOSING the workspace and forcing the
+  // issue Done further down this file — acting on an unknown here destroys work.
+  return workspaceHasCommittedWork(
+    { id: workspaceId, workingDir: workspace.workingDir, baseBranch: workspace.baseBranch, isDirect: workspace.isDirect, baseCommitSha: workspace.baseCommitSha },
+    defaultBranch,
+    database,
+    { onUnknown: true },
+  );
 }
 
 /** Extract the "try again / resets at X" hint persisted on the rate-limited session's stats. */

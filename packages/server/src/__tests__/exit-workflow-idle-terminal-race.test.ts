@@ -51,11 +51,28 @@ vi.mock("node:child_process", async (importOriginal) => {
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { and, eq } from "drizzle-orm";
 import { issues, projectStatuses, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createWorkflowEngine } from "../startup/exit-workflow.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
+
+/**
+ * #539: `getCommitCountAhead` guards on `existsSync(<dir>/.git)` before spawning, so a
+ * made-up path short-circuits to "unknown" — which the exit workflow reads as "assume
+ * commits" — no matter what the execFile mock below returns. Production behaviour is
+ * unchanged (a real missing worktree makes the spawn fail and yields the same "unknown"),
+ * but a fixture that only mocks execFile can no longer stand in for a worktree. So make one.
+ * Same fix as `zero-diff-inreview-exit.test.ts`, which shares this fixture shape.
+ */
+function fakeWorktree(): string {
+  const dir = mkdtempSync(join(tmpdir(), "ak966-ws-"));
+  writeFileSync(join(dir, ".git"), "gitdir: /nowhere");
+  return dir;
+}
 
 function makeBoardEvents() {
   return { broadcast: vi.fn(), broadcastActivity: vi.fn() };
@@ -93,7 +110,7 @@ async function seedActiveWorkspace(db: TestDb) {
   await db.insert(workspaces).values({
     id: workspaceId, issueId,
     branch: "feature/ak-966-test",
-    workingDir: "/repo/.worktrees/ak-966-test",
+    workingDir: fakeWorktree(),
     baseBranch: "master",
     isDirect: false,
     status: "active",
