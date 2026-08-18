@@ -30,6 +30,7 @@ import { auditProcessEvent, guardProcessKill } from "./process-guard.js";
 import { removeGradleUserHomeForWorktree } from "@agentic-kanban/shared/lib/gradle-env";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { isInsideManagedWorktreesRoot } from "@agentic-kanban/shared/lib/git-service";
+import { parseIssueNumberFromBranch } from "@agentic-kanban/shared/lib/branch";
 
 /**
  * Best-effort kill of a process and its descendants by PID. Windows uses
@@ -123,10 +124,15 @@ export interface TeardownDeps {
   runScript?: typeof runScript;
 }
 
+/**
+ * #548: this used to accept a bare leading number (`(?:ak-)?(\d+)-`), so a branch like
+ * `feature/2026-refresh` exported `KANBAN_ISSUE_NUMBER=2026` to the teardown script. The
+ * shared parser requires the `ak-` marker; a branch that merely starts with a year now
+ * exports no issue number at all, which is the honest answer.
+ */
 function issueNumberFromBranch(branch?: string | null): string | null {
-  if (!branch) return null;
-  const m = branch.match(/(?:^|[/_-])(?:ak-)?(\d+)-/i);
-  return m ? m[1] : null;
+  const n = parseIssueNumberFromBranch(branch);
+  return n === null ? null : String(n);
 }
 
 /**

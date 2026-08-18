@@ -1,3 +1,4 @@
+import { parseIssueNumberFromBranch } from "@agentic-kanban/shared/lib/branch";
 // Single source of truth for the deterministic dev-server ports the app assigns to a
 // worktree. Mirrors scripts/dev.mjs: a feature/<N> (or ak-<N>) worktree gets
 // server 3001+N / client 5173+N; any other worktree branch gets a stable hash offset.
@@ -25,8 +26,16 @@ export function branchHash(branchName: string): number {
  * number for an `ak-<N>` / `feature/<N>` branch, otherwise a stable hash of the name.
  */
 export function portOffsetFromName(name: string): number {
-  const issueMatch = name.match(/(?:^|[_/-])ak-(\d+)-/i) ?? name.match(/^feature[_/-](\d+)-/i);
-  return issueMatch ? Number(issueMatch[1]) : branchHash(name);
+  // #548: the `ak-<N>` half is the shared parser. The legacy `feature/<N>-` form (no `ak-`)
+  // stays LOCAL and deliberately out of the shared parser: it is the over-matching shape
+  // that made `feature/2026-refresh` read as issue 2026, and an issue number must never be
+  // guessed from a bare leading number. It is tolerable HERE and nowhere else, because this
+  // value only picks a port — a wrong guess costs a port collision, not a wrong issue — and
+  // because changing it would move the ports of worktrees that already exist.
+  const issueNumber = parseIssueNumberFromBranch(name);
+  if (issueNumber !== null) return issueNumber;
+  const legacyMatch = name.match(/^feature[_/-](\d+)-/i);
+  return legacyMatch ? Number(legacyMatch[1]) : branchHash(name);
 }
 
 /** The server/client dev ports for a given offset. */
