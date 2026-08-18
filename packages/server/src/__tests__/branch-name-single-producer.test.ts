@@ -1,3 +1,4 @@
+// @gate:always-run — scans the tree for branch-name producers other than the shared one; no import edge (#647).
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";

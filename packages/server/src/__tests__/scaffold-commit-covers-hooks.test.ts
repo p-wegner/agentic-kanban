@@ -1,3 +1,4 @@
+// @gate:always-run — reads project-scaffold sources to hold the hook list; the scanned half has no import edge (#647).
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";

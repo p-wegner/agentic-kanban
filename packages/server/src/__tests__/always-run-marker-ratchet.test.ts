@@ -51,23 +51,49 @@ const MARKER = "@gate:always-run";
  *  `test-mine-scope-derivation.test.mjs` carries the marker and was never even looked at. */
 const TEST_FILE = /\.test\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 
-/** A suite that spawns/requires/reads a script OUTSIDE its own package's `src` — vitest's
- *  import graph has no edge to it, so a diff that breaks the target script selects nothing. */
-const REACHES_OUTSIDE_PACKAGE =
-  /(?:join|resolve)\([^)]*(?:__dirname|import\.meta\.dirname)[^)]*\.\.[/\\]\.\.[/\\]\.\.[/\\]\.\.[/\\](?:\.claude|\.codex|scripts)[/\\]/;
+/**
+ * #647 item 1 — the detection half was far weaker than this file claimed. Its three
+ * regexes encoded three IDIOMS rather than the property, and the repo does not write
+ * them: `REACHES_OUTSIDE_PACKAGE` needed join/resolve + `__dirname` + four `../` in ONE
+ * call (a shared-package guard at depth 3 could not match it if it tried);
+ * `RECURSIVE_TREE_SCAN` needed the `function` keyword and a name containing list|walk|scan
+ * (`collectSourceFiles` and every arrow-function walker missed). Measured: 12 of 41 marked
+ * suites matched, so deleting the marker from `git-exec-single-spawn`, `settings-registry`,
+ * `time-injection-spelling-ratchet` or `repo-path-literal-ratchet` left the ratchet GREEN —
+ * the exact rot it exists to catch.
+ *
+ * Replaced by the property that actually holds: **the suite reads repo state resolved
+ * outside its own directory.** It anchors a path at its own module location, climbs OUT of
+ * that directory with a `..` segment, and then really touches disk. Nothing reached that way
+ * has an edge in vitest's import graph, so a diff that breaks the target selects nothing.
+ * Measured after the rewrite: 39 of 44 marked suites match, and it independently
+ * rediscovered 18 unmarked repo-tree readers (now marked) including the three #647 named.
+ *
+ * Still a heuristic net, not a proof — the 5 marked suites it does not match reach the tree
+ * through a helper or an unanchored literal, and a NEW suite in that shape would not be
+ * asked for a marker. Narrowing the gap is the goal; closing it would need a real import
+ * analysis.
+ */
+const ANCHORED_AT_OWN_MODULE = /__dirname|import\.meta\.dirname|import\.meta\.url/;
+
+/** A `..` path segment: `"..".."` as a whole segment, or the `../` prefix form. */
+const CLIMBS_OUT_OF_OWN_DIR = /(['"`])\.\.\1|\.\.[/\\]/;
+
+/** Actually reads the filesystem / runs a process at that resolved path — a suite that only
+ *  builds a path string (never reading it) is not reaching outside anything. */
+const TOUCHES_DISK =
+  /\b(readFileSync|readdirSync|existsSync|statSync|readFile|readdir|globSync|gitExecSync|spawnSync|execFileSync|execSync)\b/;
 
 /** A suite that reads the migrations directory/journal directly — a repo-wide resource no
  *  single changed source file imports. */
 const READS_MIGRATIONS_DIR = /\bMIGRATIONS_DIR\b/;
 
-/** A suite that recursively walks a directory tree (its own `readdirSync`-based walker, not a
- *  one-off read of a single named fixture) to assert an architectural invariant. */
-const RECURSIVE_TREE_SCAN = /function\s+\w*(?:list|walk|scan)\w*\([^)]*\)[\s\S]{0,400}?readdirSync/i;
-
-const UNSOUND_SIGNATURES: Array<{ name: string; pattern: RegExp }> = [
-  { name: "reaches-outside-package", pattern: REACHES_OUTSIDE_PACKAGE },
-  { name: "reads-migrations-dir", pattern: READS_MIGRATIONS_DIR },
-  { name: "recursive-tree-scan", pattern: RECURSIVE_TREE_SCAN },
+const UNSOUND_SIGNATURES: Array<{ name: string; test: (source: string) => boolean }> = [
+  {
+    name: "reads-outside-own-dir",
+    test: (s) => ANCHORED_AT_OWN_MODULE.test(s) && CLIMBS_OUT_OF_OWN_DIR.test(s) && TOUCHES_DISK.test(s),
+  },
+  { name: "reads-migrations-dir", test: (s) => READS_MIGRATIONS_DIR.test(s) },
 ];
 
 /**
@@ -77,15 +103,16 @@ const UNSOUND_SIGNATURES: Array<{ name: string; pattern: RegExp }> = [
  * this list; a file that stops matching its stated reason should be removed, not left stale.
  */
 const KNOWN_SAFE_UNMARKED = new Set<string>([
-  // Imports the real `stack-profile.service.ts` under test; its tree walk is a self-scoped
-  // read of its own temp fixture dir (asserting "wrote nothing"), not a repo-wide scan — a
-  // diff to the service reaches this suite via the ordinary `vitest related` import graph.
-  "stack-profile-read-is-pure.test.ts",
-  // Import the real `auto-merge-pref.ts`/`auto-review-pref.ts` accessors under test; each
-  // suite's tree scan is a secondary regression guard against hand-rolled reads elsewhere,
-  // but the primary subject is reachable via its own import.
-  "auto-merge-pref.test.ts",
-  "auto-review-pref.test.ts",
+  // #647 item 5 removed three entries rather than adding any:
+  //  - `stack-profile-read-is-pure.test.ts` no longer matches at all (its walk is over its
+  //    own temp fixture dir, which never climbs out of the test's directory), so the
+  //    exemption had nothing left to exempt;
+  //  - `auto-merge-pref.test.ts` / `auto-review-pref.test.ts` were exempted on the reasoning
+  //    that their subject is reachable by import. That is true of the ACCESSOR half and
+  //    false of the half that matters: each also scans the whole `packages/` tree for
+  //    hand-rolled reads of the pref, and no diff to the offending file imports the suite.
+  //    Both carry the marker now.
+  //
   // Spawn-based CLI integration tests, already excluded from `pnpm test:mine` entirely
   // (scripts/test-mine.mjs ALWAYS_RUN_TESTS never runs for a package whose suite is
   // excluded outright) — the MIGRATIONS_DIR read is real but moot for file-scoping.
@@ -97,6 +124,12 @@ const KNOWN_SAFE_UNMARKED = new Set<string>([
   "merge-cleanup.service.test.ts",
   "project-scripts.test.ts",
   "reconcile-merged-issue.test.ts",
+  // #647: same MIGRATIONS_DIR-shaped exemption, reached by the rewritten signature. Each
+  // resolves the monorepo root only to find `packages/shared/drizzle` and seed a TEMP DB
+  // with the real schema; the subject under test is the MCP tool, reachable by import.
+  "disabled-tools.test.ts",
+  "mcp-tools.test.ts",
+  "get-context-boundary.test.ts",
 ]);
 
 interface Offender {
@@ -130,7 +163,7 @@ function scanTestsDir(testsDir: string): Offender[] {
     if (source.includes(MARKER)) continue;
     // Matched by BASENAME, so an allowlisted file keeps its exemption wherever it moves to.
     if (KNOWN_SAFE_UNMARKED.has(name)) continue;
-    const matched = UNSOUND_SIGNATURES.filter((sig) => sig.pattern.test(source)).map((sig) => sig.name);
+    const matched = UNSOUND_SIGNATURES.filter((sig) => sig.test(source)).map((sig) => sig.name);
     if (matched.length > 0) offenders.push({ file: rel, signatures: matched });
   }
   return offenders;
@@ -166,7 +199,7 @@ describe("always-run marker ratchet (#538)", () => {
         const full = byName.get(name);
         if (!full) continue;
         const source = fs.readFileSync(full, "utf8");
-        const stillMatches = UNSOUND_SIGNATURES.some((sig) => sig.pattern.test(source));
+        const stillMatches = UNSOUND_SIGNATURES.some((sig) => sig.test(source));
         if (!stillMatches) stale.push(`${name}: no longer matches any unsound signature — remove the entry`);
       }
     }

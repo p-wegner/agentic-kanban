@@ -1,3 +1,4 @@
+// @gate:always-run — reads mcp-server + route sources across packages; imports neither (#647).
 // @covers butler.pluginOnboarding [correctness, boundary]
 //
 // #390 gap 4: MEASURED — NO test referenced the plugin-onboarding flow at all, which is how gaps

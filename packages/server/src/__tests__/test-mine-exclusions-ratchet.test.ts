@@ -48,7 +48,6 @@ const BASELINE: Record<string, string[]> = {
     "**/merge-endpoint-reconcile-noop.test.ts",
     "**/merge-service-edge-cases.test.ts",
     "**/preferences.test.ts",
-    "**/auto-review-pref.test.ts",
     "**/worker-git-transport-e2e.test.ts",
     "**/compose-lifecycle-real-docker.test.ts",
   ],
