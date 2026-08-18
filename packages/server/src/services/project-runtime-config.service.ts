@@ -14,6 +14,8 @@ import {
 } from "./strategy-objective.service.js";
 import { providerProfilePrefKey, readSettingsProviderSelection, resolveProviderDivergence as resolveProviderDivergenceShared } from "@agentic-kanban/shared/lib/strategy-policy";
 import { resolveStartPolicy, startModePrefKey, type StartPolicy } from "./start-policy.service.js";
+import type { ParsedProfileAllowlist } from "@agentic-kanban/shared/lib/profile-allowlist";
+import { allowedProfilesPrefKey, parseProfileAllowlist } from "@agentic-kanban/shared/lib/profile-allowlist";
 import { HARNESS_IDS, harnessSettingKey } from "./harness-settings.js";
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
@@ -25,6 +27,13 @@ export function autodrivePrefKey(projectId: string): string {
   return autodrivePrefDef.key(projectId);
 }
 
+/**
+ * The per-project profile-allowlist key. Absent/empty ⇒ the project is unrestricted.
+ * Re-exported from shared so the Settings editor and this resolver cannot disagree about
+ * the key they write and read — the `verify_script_<id>` family drifted exactly that way.
+ */
+export { allowedProfilesPrefKey } from "@agentic-kanban/shared/lib/profile-allowlist";
+
 export function autoMergeDisabledPrefKey(projectId: string): string {
   return autoMergeDisabledPrefDef.key(projectId);
 }
@@ -33,6 +42,12 @@ export interface RuntimeProviderConfig extends ResolvedProviderConfig {
   source: "explicit-profile" | "legacy-claude-profile" | "strategy" | "workspace" | "settings";
   strategySelection: { provider: ProviderName; profileName: string; model?: string } | null;
   settingsSelection: { provider: ProviderName; profileName: string | null };
+  /**
+   * The project's profile allowlist as parsed. `restricted: false` for the vast majority
+   * of projects. Exposed so callers can explain a hold, and so the Settings UI can render
+   * the same parse the resolver used.
+   */
+  allowlist: ParsedProfileAllowlist;
 }
 
 export interface RuntimeDriveConfig {
@@ -69,6 +84,8 @@ export interface ProjectRuntimeConfigInput {
   workspaceSelection?: { provider?: string | null; profileName?: string | null } | null;
   requestedModel?: string | null;
   commandOverride?: string;
+  /** Injected clock for the allowlist's cooldown checks (`nowMs` spelling, #614). */
+  nowMs?: number;
 }
 
 function readSettingsSelection(prefMap: Map<string, string>): { provider: ProviderName; profileName: string | null } {
@@ -103,6 +120,10 @@ export function resolveProjectRuntimeConfig(input: ProjectRuntimeConfigInput): P
     applyWorkspaceSelection(providerPrefMap, input.workspaceSelection);
   }
 
+  // Read from the ORIGINAL prefMap: the allowlist is the project's own restriction and
+  // must not be reachable by anything the selectors mirror onto `providerPrefMap`.
+  const allowlist = parseProfileAllowlist(input.prefMap.get(allowedProfilesPrefKey(input.projectId)));
+
   const provider = resolveProviderConfig({
     prefMap: providerPrefMap,
     profileOverride: input.profileOverride,
@@ -110,6 +131,8 @@ export function resolveProjectRuntimeConfig(input: ProjectRuntimeConfigInput): P
     strategySelection: input.strategySelection,
     requestedModel: input.requestedModel ?? input.strategySelection?.model,
     commandOverride: input.commandOverride,
+    allowlist,
+    nowMs: input.nowMs,
   });
   const startPolicy = resolveStartPolicy(input.prefMap, input.projectId);
   const autoMerge = isAutoMergeEnabled(input.prefMap);
@@ -122,6 +145,7 @@ export function resolveProjectRuntimeConfig(input: ProjectRuntimeConfigInput): P
       source: resolveProviderSource(input),
       strategySelection: input.strategySelection ?? null,
       settingsSelection: readSettingsSelection(input.prefMap),
+      allowlist,
     },
     startPolicy,
     drive: {

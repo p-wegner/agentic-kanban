@@ -2,6 +2,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import { CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, PI_DEFAULT_PROFILE, CapabilityMatrixTable, Field, defaultHarnessLabel, defaultModelForProvider, defaultModelKeyForProvider, formatHealthTime, profileOptionLabel, providerDisplayName, settingsProfileValue, statusClasses, type AgentProfileHealth, type AgentProvider, type Settings, type SettingsTextSetter } from "../SettingsPanel.shared.js";
 import type { ConcreteProvider } from "../../lib/strategy-targets.js";
+import { allowedProfileId, type AllowedProfile } from "@agentic-kanban/shared/lib/profile-allowlist";
 import { CodexLicenseRingEditor } from "./CodexLicenseRingEditor.js";
 import { ClaudeSubscriptionRingEditor } from "./ClaudeSubscriptionRingEditor.js";
 import { AgentPresetsEditor } from "./AgentPresetsEditor.js";
@@ -36,6 +37,14 @@ type AgentSettingsProps = {
    */
   onProjectProviderChange?: (provider: ConcreteProvider | null, profileName: string) => void;
   savingProjectProvider?: boolean;
+  /**
+   * The project's profile ALLOWLIST — a hard constraint, where the provider control above
+   * is only a default. Empty means unrestricted, which is every project until someone
+   * ticks a box here.
+   */
+  allowedProfiles?: AllowedProfile[];
+  onAllowedProfilesChange?: (entries: AllowedProfile[]) => void;
+  savingAllowedProfiles?: boolean;
 };
 
 function projectProviderSelectValue(provider: string | null, profileName: string | null): string {
@@ -43,7 +52,7 @@ function projectProviderSelectValue(provider: string | null, profileName: string
   return profileName ? `${provider}:${profileName}` : `${provider}:`;
 }
 
-export function AgentSettings({ settings, set, setSettings, profiles, codexProfiles, copilotProfiles, piProfiles, profileHealth, preflightingProfileId, onProfilePreflight: handleProfilePreflight, activeProjectId, providerDivergence, onProjectProviderChange, savingProjectProvider }: AgentSettingsProps) {
+export function AgentSettings({ settings, set, setSettings, profiles, codexProfiles, copilotProfiles, piProfiles, profileHealth, preflightingProfileId, onProfilePreflight: handleProfilePreflight, activeProjectId, providerDivergence, onProjectProviderChange, savingProjectProvider, allowedProfiles, onAllowedProfilesChange, savingAllowedProfiles }: AgentSettingsProps) {
   const selectedProvider = ((settings.provider || "claude") as AgentProvider);
   const selectedModelKey = defaultModelKeyForProvider(selectedProvider);
 
@@ -71,6 +80,27 @@ export function AgentSettings({ settings, set, setSettings, profiles, codexProfi
     const defaultProfile = provider === "codex" ? CODEX_DEFAULT_PROFILE : provider === "copilot" ? COPILOT_DEFAULT_PROFILE : provider === "pi" ? PI_DEFAULT_PROFILE : "";
     const profileName = !name || name === defaultProfile ? "" : name;
     onProjectProviderChange(provider, profileName);
+  }
+
+  // Profile allowlist. Every selectable profile across all four providers, so the operator
+  // ticks the ones this project may spend. Order matters downstream — the resolver walks
+  // the list and takes the first entry that is not cooling — and this preserves it by
+  // appending, so ticking A then B means "prefer A, fall back to B".
+  const allowedIds = new Set((allowedProfiles ?? []).map(allowedProfileId));
+  const allProfileEntries: AllowedProfile[] = [
+    ...profiles.map((p) => ({ provider: "claude" as const, name: p })),
+    ...codexProfiles.map((p) => ({ provider: "codex" as const, name: p })),
+    ...copilotProfiles.map((p) => ({ provider: "copilot" as const, name: p })),
+    ...piProfiles.map((p) => ({ provider: "pi" as const, name: p })),
+  ];
+
+  function toggleAllowedProfile(entry: AllowedProfile): void {
+    if (!onAllowedProfilesChange) return;
+    const current = allowedProfiles ?? [];
+    const id = allowedProfileId(entry);
+    onAllowedProfilesChange(
+      allowedIds.has(id) ? current.filter((e) => allowedProfileId(e) !== id) : [...current, entry],
+    );
   }
 
   return (
@@ -138,6 +168,40 @@ export function AgentSettings({ settings, set, setSettings, profiles, codexProfi
                           Currently launches <span className="font-mono">{providerDivergence.bullseyeProvider}:{providerDivergence.bullseyeProfile || "default"}</span> for this project, from its Strategy Bullseye. The Agent Profile below is the global fallback for projects with no Bullseye.
                         </p>
                       )}
+                    </Field>
+                  )}
+                  {activeProjectId && onAllowedProfilesChange && (
+                    <Field
+                      label="Profiles this project may use"
+                      hint="A hard restriction, not a default. Tick nothing to allow any profile (the normal case). Tick one or more and this project can ONLY launch on those — an explicit profile choice in the launch dialog, the Strategy Bullseye, and a global rotation after a rate limit are all clamped into this list. Order is fallback order; when every listed profile is rate-limited the project WAITS rather than borrowing another account."
+                    >
+                      <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                        {allProfileEntries.map((entry) => {
+                          const id = allowedProfileId(entry);
+                          const checked = allowedIds.has(id);
+                          const rank = checked ? (allowedProfiles ?? []).findIndex((e) => allowedProfileId(e) === id) + 1 : 0;
+                          return (
+                            <label key={id} className="flex items-center gap-2 text-sm cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                disabled={savingAllowedProfiles}
+                                onChange={() => toggleAllowedProfile(entry)}
+                                className="rounded border-gray-300 dark:border-gray-600 disabled:opacity-50"
+                              />
+                              <span className="font-mono text-xs">{profileOptionLabel(entry.provider, entry.name)}</span>
+                              {rank > 0 && (
+                                <span className="text-[10px] text-gray-500 dark:text-gray-400">#{rank}</span>
+                              )}
+                            </label>
+                          );
+                        })}
+                      </div>
+                      <p className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+                        {allowedIds.size === 0
+                          ? "Unrestricted — this project may launch on any profile."
+                          : `Restricted to ${allowedIds.size} profile${allowedIds.size === 1 ? "" : "s"}. Launches outside the list are refused.`}
+                      </p>
                     </Field>
                   )}
                   <Field label={activeProjectId ? "Agent Profile (global fallback)" : "Agent Profile"} hint="Selects agent provider and profile. Claude uses ~/.claude/settings_*.json, Codex uses ~/.codex/<name>.config.toml, Copilot uses the CLI default or configured model profile, and Pi uses PI_CODING_AGENT_DIR profile roots.">

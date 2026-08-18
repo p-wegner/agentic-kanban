@@ -381,6 +381,12 @@ export function createWorkspaceProvisionService(deps: {
     permissionPromptTool: string | undefined;
     model: string | undefined;
     systemInstructions: string;
+    /**
+     * Non-null when the project's profile allowlist permits no launch right now. The
+     * other fields still carry the unrestricted resolution, so a caller that LAUNCHES
+     * must refuse on this; a caller that merely PREVIEWS may report it and continue.
+     */
+    profileHold: string | null;
   }> {
     const runtime = await loadProjectRuntimeConfig(database, {
       projectId: projectId ?? "",
@@ -406,6 +412,7 @@ export function createWorkspaceProvisionService(deps: {
       permissionPromptTool: runtime.provider.permissionPromptTool,
       model: runtime.provider.model,
       systemInstructions: runtime.systemInstructions,
+      profileHold: runtime.provider.profileHold,
     };
   }
 

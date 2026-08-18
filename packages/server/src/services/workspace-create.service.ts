@@ -561,6 +561,17 @@ export function createWorkspaceCreateService(deps: {
       // container's whole lifetime, regardless of what the later launch resolves to.
       t = Date.now();
       const agentConfig = await buildAgentConfig(input, issue.projectId);
+      // The project's profile allowlist permits nothing right now. Refusing here — before
+      // the worktree exists — is the whole point of the restriction: launching on the
+      // next-best profile would spend the wrong subscription, which for a project pinned
+      // to a client account is worse than not running at all.
+      if (agentConfig.profileHold) {
+        throw new WorkspaceError(
+          `Profile allowlist blocks this launch: ${agentConfig.profileHold}. Wait for an allowed profile to become available, or change the project's allowed profiles.`,
+          "CONFLICT",
+          { code: "PROFILE_ALLOWLIST_HOLD", projectId: issue.projectId },
+        );
+      }
       claudeProfile = agentConfig.claudeProfile;
       agentCommand = agentConfig.agentCommand;
       resolvedProvider = agentConfig.resolvedProvider;
@@ -827,6 +838,11 @@ export function createWorkspaceCreateService(deps: {
 
     // 4. Agent config resolution (provider, profile, model) — reuses same logic
     const agentConfig = await buildAgentConfig(input, issue.projectId);
+    // Preview, so this reports rather than throws — but it must be shown, or the dialog
+    // would offer a launch that the create path will refuse.
+    if (agentConfig.profileHold) {
+      warnings.push(`Profile allowlist blocks this launch: ${agentConfig.profileHold}.`);
+    }
 
     // 5. Skill resolution (name only, no file writes)
     const skillId = input.skillId || null;
