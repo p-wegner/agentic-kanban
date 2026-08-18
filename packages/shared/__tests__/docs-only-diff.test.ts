@@ -10,8 +10,15 @@ describe("isDocsOnlyDiff", () => {
     expect(isDocsOnlyDiff(["README.md", "docs/plan.md"])).toBe(true);
   });
 
-  it("is true for files anywhere under a docs/ directory regardless of extension", () => {
-    expect(isDocsOnlyDiff(["docs/decisions/012-worker-fleet.json", "docs/state.md"])).toBe(true);
+  it("is true for documentation under a docs/ directory at any depth", () => {
+    expect(isDocsOnlyDiff(["docs/decisions/012-worker-fleet.md", "docs/state.md"])).toBe(true);
+  });
+
+  it("is FALSE once a non-documentation file rides along under docs/ (#642)", () => {
+    // This assertion used to read `.json` under docs/ as documentation and expect `true` —
+    // it pinned the over-match. `docs/verification/*.json` and `docs/domain/_plan.json` are
+    // artifacts this repo's code actually reads.
+    expect(isDocsOnlyDiff(["docs/decisions/012-worker-fleet.json", "docs/state.md"])).toBe(false);
   });
 
   it("is true for root LICENSE/CHANGELOG/NOTICE/CONTRIBUTING files", () => {
@@ -56,5 +63,37 @@ describe("isDocsOnlyDiff", () => {
 
   it("still treats a .txt under docs/ as documentation (the directory, not the extension)", () => {
     expect(isDocsOnlyDiff(["docs/notes.txt"])).toBe(true);
+  });
+
+  /**
+   * #642 — the same over-matching shape a third time, now in the DIRECTORY rule. It matched a
+   * `docs/` segment anywhere in the path with ANY extension, so an executable file merged with
+   * no build, no tests and no boot check. This repo really does ship code and live artifacts
+   * under `docs/`.
+   */
+  it.each([
+    ["packages/server/src/docs/anything.ts"],
+    ["scripts/docs/build.mjs"],
+    ["docs/tools/generate.js"],
+    ["docs/verification/report.json"],
+    ["docs/domain/_plan.json"],
+    ["docs/ci/pipeline.yaml"],
+    ["docs/migrate.sql"],
+    ["docs/setup.sh"],
+  ])("is FALSE for the executable/artifact file %s under docs/ (#642)", (file) => {
+    expect(isDocsOnlyDiff([file])).toBe(false);
+    // …and sitting beside real prose must not launder it.
+    expect(isDocsOnlyDiff(["docs/guide.md", file])).toBe(false);
+  });
+
+  it("still accepts genuine documentation living under docs/ (#642)", () => {
+    expect(isDocsOnlyDiff([
+      "docs/guide.md",
+      "docs/adr/001.adoc",
+      "docs/notes.txt",
+      "docs/images/screenshot.png",
+      "docs/diagram.svg",
+      "docs/NOTES",
+    ])).toBe(true);
   });
 });
