@@ -8,6 +8,7 @@ export * from "./failure-keywords.js";
 export * from "./status-view.js";
 export * from "./workspace-activity-state.js";
 export * from "./branch.js";
+export * from "./slugify.js";
 export * from "./butler-ticket-prompt.js";
 export * from "./outbound-webhook.js";
 export * from "./settings-registry.js";

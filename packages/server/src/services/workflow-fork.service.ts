@@ -62,6 +62,7 @@ import {
   type ForkMergeResult,
 } from "../lib/fork-artifacts.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { slugify } from "@agentic-kanban/shared/lib/slugify";
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 /** Default concurrency + timeout caps for parallel fork children (#82). */
@@ -112,7 +113,7 @@ export function createWorkflowForkService(deps: {
   function childBranchName(parentBranch: string, entryName: string, sharedWorktree: boolean) {
     return sharedWorktree
       ? parentBranch
-      : `${parentBranch}__fork-${entryName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+      : `${parentBranch}__fork-${slugify(entryName, { fallback: "fork" })}`;
   }
 
   async function markChildFailed(params: {

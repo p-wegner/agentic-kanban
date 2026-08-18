@@ -9,6 +9,7 @@
  */
 
 /** The minimum a project must expose to take part in slug resolution. */
+import { slugify } from "@agentic-kanban/shared/lib/slugify";
 export interface SlugProject {
   id: string;
   name: string;
@@ -28,17 +29,7 @@ const FALLBACK_SLUG = "project";
  * empty string — a name with no usable characters slugifies to `"project"`.
  */
 export function slugifyProjectName(name: string): string {
-  const slug = (name ?? "")
-    .replace(/ß/g, "ss")
-    .normalize("NFD")
-    // Combining diacritical marks — drop them, keeping the base letter.
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, MAX_SLUG_LENGTH)
-    .replace(/-+$/g, "");
-  return slug.length > 0 ? slug : FALLBACK_SLUG;
+  return slugify(name, { maxLength: MAX_SLUG_LENGTH, fallback: FALLBACK_SLUG });
 }
 
 /**

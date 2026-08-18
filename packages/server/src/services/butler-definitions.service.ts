@@ -25,6 +25,7 @@ import { loadCodexLicenseRing, resolveCodexHomeForProfile } from "./codex-licens
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { readStrategyBullseye } from "@agentic-kanban/shared/lib/strategy-objective-file";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
+import { slugify } from "@agentic-kanban/shared/lib/slugify";
 
 // #496: registered prefix, checked at compile time.
 const butlerProfilePref = projectPref("butler_profile");
@@ -48,7 +49,7 @@ export const MAX_BUTLERS = 4;
 export const DEFAULT_BUTLER: ButlerDefinition = { id: "default", name: "Butler", model: "" };
 
 function toSlug(name: string): string {
-  return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32) || "butler";
+  return slugify(name, { maxLength: 32, fallback: "butler" });
 }
 
 /** Read the defined butlers, always guaranteeing the "default" butler is present and first. */
