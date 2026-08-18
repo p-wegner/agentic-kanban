@@ -62,10 +62,14 @@ describe("plugin marketplace", () => {
     ({ db, dispose } = createTestDb());
     pluginsHome = makeTempDir("plugin-market-home-");
     process.env.AGENTIC_KANBAN_PLUGINS_DIR = pluginsHome;
+    // Point at a non-existent dir so the repo's REAL bundled plugins/ never leaks into
+    // assertions about entry counts; the bundled tests below override this per-test.
+    process.env.AGENTIC_KANBAN_BUNDLED_PLUGINS_DIR = join(pluginsHome, "no-bundled");
   });
 
   afterEach(() => {
     delete process.env.AGENTIC_KANBAN_PLUGINS_DIR;
+    delete process.env.AGENTIC_KANBAN_BUNDLED_PLUGINS_DIR;
     dispose();
     for (const dir of tempDirs.splice(0)) {
       rmSync(dir, { recursive: true, force: true });
@@ -214,5 +218,63 @@ describe("plugin marketplace", () => {
     expect(entries).toHaveLength(1);
     expect(entries[0].installedId).toBe(row.id);
     expect(entries[0].enabled).toBe(true);
+  });
+
+  function makeBundledDir(...plugins: Array<{ id: string; name?: string; broken?: boolean }>): string {
+    const root = makeTempDir("plugin-market-bundled-");
+    for (const p of plugins) {
+      const dir = join(root, p.id);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        join(dir, "kanban-plugin.json"),
+        p.broken
+          ? "{ not json"
+          : JSON.stringify({ id: p.id, name: p.name ?? p.id, version: "0.1.0", description: `${p.id} bundled` }),
+      );
+    }
+    return root;
+  }
+
+  it("lists bundled plugins as installable entries and skips broken bundled manifests", async () => {
+    process.env.AGENTIC_KANBAN_BUNDLED_PLUGINS_DIR = makeBundledDir(
+      { id: "app-runner", name: "App Runner" },
+      { id: "broken-one", broken: true },
+    );
+    const svc = service();
+    const { entries } = await svc.listMarketplace();
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      slug: "app-runner",
+      name: "App Runner",
+      version: "0.1.0",
+      installed: false,
+      origin: "bundled",
+      gitUrl: null,
+    });
+    expect(entries[0].localPath).toContain("app-runner");
+  });
+
+  it("absorbs a bundled entry into its installed row by slug — and installing FROM the bundled path works", async () => {
+    const bundled = makeBundledDir({ id: "app-runner", name: "App Runner" });
+    process.env.AGENTIC_KANBAN_BUNDLED_PLUGINS_DIR = bundled;
+    const svc = service();
+    const before = await svc.listMarketplace();
+    const row = await svc.installPlugin({ source: before.entries[0].localPath! });
+    const { entries } = await svc.listMarketplace();
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ slug: "app-runner", installed: true, origin: "installed", installedId: row.id });
+  });
+
+  it("the real bundled app-runner plugin ships a valid manifest the board's parser accepts", async () => {
+    // Guards the actual plugins/ payload: walk-up resolution must find it, and installPlugin
+    // (which runs the strict manifest parser) must accept it.
+    delete process.env.AGENTIC_KANBAN_BUNDLED_PLUGINS_DIR;
+    const svc = service();
+    const { entries } = await svc.listMarketplace();
+    const bundled = entries.filter((e) => e.origin === "bundled");
+    const appRunner = bundled.find((e) => e.slug === "app-runner");
+    expect(appRunner, "plugins/app-runner should be discovered via package-root walk-up").toBeTruthy();
+    const row = await svc.installPlugin({ source: appRunner!.localPath! });
+    expect(row.pluginId).toBe("app-runner");
   });
 });

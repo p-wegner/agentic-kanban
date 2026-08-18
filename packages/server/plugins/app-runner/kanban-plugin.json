@@ -1,0 +1,50 @@
+{
+  "id": "app-runner",
+  "name": "App Runner",
+  "version": "0.1.0",
+  "description": "Run the project's web app(s) from inside the board: a dashboard view to build/start/stop them, health checks, log tail, and a live preview iframe. An agent skill discovers how each project is run and documents it as .app-runner/apps.json + .app-runner/apps.md in the repo.",
+  "skills": [
+    {
+      "dir": ".claude/skills/app-runner-discover",
+      "description": "Discover how to build/run this project's app(s), verify a real start against the health endpoint, and write .app-runner/apps.json + .app-runner/apps.md.",
+      "workflow": "analysis-task"
+    }
+  ],
+  "views": [
+    {
+      "id": "dashboard",
+      "label": "App Runner",
+      "kind": "iframe",
+      "description": "Build/start/stop the project's apps, health status, log tail, and a live preview.",
+      "serve": {
+        "command": "node tools/serve.mjs",
+        "cwd": "plugin",
+        "portEnv": "PORT",
+        "healthPath": "/health",
+        "env": {
+          "APP_RUNNER_REPO": "{{leadingRepoPath}}",
+          "APP_RUNNER_PROJECT": "{{projectName}}"
+        }
+      }
+    }
+  ],
+  "scripts": [
+    {
+      "name": "status",
+      "label": "Status",
+      "description": "Read-only: is .app-runner/apps.json present and valid, and which apps does it declare.",
+      "command": "node tools/status.mjs",
+      "cwd": "plugin",
+      "env": { "APP_RUNNER_REPO": "{{leadingRepoPath}}" }
+    },
+    {
+      "name": "selftest",
+      "label": "Self-test",
+      "description": "Offline self-test: boots the dashboard against a temp fixture app, starts/stops it through the API.",
+      "command": "node tools/selftest.mjs",
+      "cwd": "plugin",
+      "audience": "developer"
+    }
+  ],
+  "butler": { "promptFragment": "butler-fragment.md" }
+}

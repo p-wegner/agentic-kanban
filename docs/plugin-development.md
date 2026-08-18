@@ -42,11 +42,15 @@ If your tool already has its own scheduler, the porting work is mostly *deleting
 shallowly into the board's plugins home. The manifest is parsed and a row is stored. Installing
 does nothing to any project.
 
-The marketplace (`GET /api/plugins/marketplace`) lists every installed plugin plus the entries of
-a per-machine catalog file, `<plugins home>/marketplace.json` — a JSON array of
-`{ name?, slug?, description?, gitUrl }` objects describing plugins that are one click from
-installed. There is no remote registry; the catalog is user-maintained, and entries matching an
-installed plugin (by slug or normalized git URL) are absorbed into the installed listing.
+The marketplace (`GET /api/plugins/marketplace`) lists every installed plugin plus two kinds of
+installable-but-not-installed entries. **Bundled plugins** ship inside the board itself —
+`packages/server/plugins/<slug>/` in a checkout, `plugins/<slug>/` in the npm package (the dir is
+in the server package's `files`) — and appear with `origin: "bundled"`; installing one is the
+normal local-directory install pointed at that path (today: `app-runner`). **Catalog entries**
+come from a per-machine file, `<plugins home>/marketplace.json` — a JSON array of
+`{ name?, slug?, description?, gitUrl }` objects. There is no remote registry; the catalog is
+user-maintained. Entries of either kind matching an installed plugin (by slug, normalized git
+URL, or resolved local path) are absorbed into the installed listing.
 
 **Enable per project** (`POST /api/plugins/:id/enable`). This is where the fan-out happens:
 
