@@ -43,9 +43,25 @@ export function ActiveAgentsBadge({ count, compact = false }: ActiveAgentsBadgeP
  * an operator scanning 19 projects could not see which ones were waiting on them. This
  * dot is that scan: amber, per row, from the same `/api/inbox` sweep the bell uses.
  */
-export function WaitingBadge({ count, compact = false }: { count: number; compact?: boolean }) {
+/**
+ * `scope` names WHOSE decisions the count covers (#653).
+ *
+ * The trigger badge deliberately counts the OTHER projects (see its call site), but the label
+ * never said so — and it sits inside a button whose visible content is `comet · 21 projects`,
+ * so the button's accessible name came out as "comet 21 projects 3 3 decisions waiting on
+ * you". A screen reader, and anyone hovering, was told comet had 3 pending decisions when all
+ * 3 belonged to other projects. The neighbouring surfaces already get this right: the
+ * notification dropdown is headed "WAITING ON YOU — ALL PROJECTS" and names each project.
+ */
+export function WaitingBadge({
+  count,
+  compact = false,
+  scope = "this project",
+}: { count: number; compact?: boolean; scope?: "this project" | "other projects" }) {
   if (count <= 0) return null;
-  const title = `${count} decision${count === 1 ? "" : "s"} waiting on you`;
+  const title = scope === "other projects"
+    ? `${count} decision${count === 1 ? "" : "s"} waiting on you in OTHER projects`
+    : `${count} decision${count === 1 ? "" : "s"} waiting on you`;
   return (
     <span
       className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium leading-none text-amber-700 dark:bg-amber-950/50 dark:text-amber-300"
@@ -163,7 +179,7 @@ export function ProjectSelector({ projects, activeProjectId, onProjectChange, wa
         {/* The ACTIVE project's own wait is already spelled out by the header chip beside
             this button, so the trigger counts the OTHER projects — that is the number an
             operator cannot otherwise get without opening the list. */}
-        <WaitingBadge count={otherProjectsWaiting} compact />
+        <WaitingBadge count={otherProjectsWaiting} compact scope="other projects" />
         <svg className="h-4 w-4 shrink-0 text-gray-400 dark:text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
         </svg>

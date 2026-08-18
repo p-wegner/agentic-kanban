@@ -164,8 +164,18 @@ export function BacklogView({
   // the always-visible compact toolbar stays a single wrapping row and the issue
   // list keeps the vertical space — critical on small screens where stacked
   // panels used to push the list off-screen.
-  const [showPresets, setShowPresets] = useState(false);
-  const [showWaves, setShowWaves] = useState(false);
+  // #655: these were independent booleans, so opening Presets and then Waves left BOTH open —
+  // the Presets popover rendered on top of the Dependency Waves panel and covered its
+  // Select/Apply/Delete controls, and neither trigger dismissed the other. One `open` slot
+  // makes them mutually exclusive by construction rather than by two coordinated setters that
+  // the next popover would have to remember to join.
+  const [openPopover, setOpenPopover] = useState<"presets" | "waves" | null>(null);
+  const showPresets = openPopover === "presets";
+  const showWaves = openPopover === "waves";
+  const setShowPresets = (next: boolean | ((v: boolean) => boolean)) =>
+    setOpenPopover((prev) => ((typeof next === "function" ? next(prev === "presets") : next) ? "presets" : prev === "presets" ? null : prev));
+  const setShowWaves = (next: boolean | ((v: boolean) => boolean)) =>
+    setOpenPopover((prev) => ((typeof next === "function" ? next(prev === "waves") : next) ? "waves" : prev === "waves" ? null : prev));
 
   const backlogIssues = backlogColumn?.issues ?? [];
   const q = searchQuery.toLowerCase();
