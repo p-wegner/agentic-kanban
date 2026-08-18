@@ -10,6 +10,7 @@ import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
 import { useConfigImportExport } from "../hooks/useConfigImportExport.js";
 import { applyPreflightResult, CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, DEFAULT_SETTINGS, PI_DEFAULT_PROFILE, TABS, uniqueProfiles, type AgentProfileHealth, type McpHealth, type ProjectSettingsState, type Settings, type SettingsPanelProps, type Tab } from "./SettingsPanel.shared.js";
 import { normalizeConfig, setProviderFillPolicy, clearProviderFillPolicy, settingsKey, type ConcreteProvider } from "../lib/strategy-targets.js";
+import { allowedProfilesPrefKey, parseProfileAllowlist, serializeProfileAllowlist, type AllowedProfile } from "@agentic-kanban/shared/lib/profile-allowlist";
 import { parseDisabledTools, withToolDisabled } from "../lib/mcp-tool-toggle.js";
 import { useTagsEditor } from "../hooks/useTagsEditor.js";
 import { useTemplateEditorState } from "../hooks/useTemplateEditorState.js";
@@ -160,6 +161,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
   };
   const [providerDivergence, setProviderDivergence] = useState<ProviderDivergence | null>(null);
   const [savingProjectProvider, setSavingProjectProvider] = useState(false);
+  const [savingAllowedProfiles, setSavingAllowedProfiles] = useState(false);
 
   async function refetchProviderDivergence() {
     if (!activeProjectId) return;
@@ -167,6 +169,37 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
       const div = await apiFetch<ProviderDivergence>(`/api/preferences/provider-divergence?projectId=${activeProjectId}`);
       setProviderDivergence(div);
     } catch { /* non-fatal */ }
+  }
+
+  /**
+   * Per-project profile allowlist — a HARD constraint, unlike the provider control
+   * below it. Written to `allowed_profiles_<projectId>` in the canonical serialization
+   * so the server's `parseProfileAllowlist` and this editor cannot drift.
+   *
+   * An empty selection stores `[]`, which the parser reads as "restriction lifted".
+   * Deleting the row would mean the same thing, but writing `[]` keeps the preference
+   * visible in an exported config, so a project that USED to be restricted doesn't look
+   * like one that never was.
+   */
+  async function handleAllowedProfilesChange(entries: AllowedProfile[]) {
+    if (!activeProjectId || savingAllowedProfiles) return;
+    setSavingAllowedProfiles(true);
+    try {
+      const key = allowedProfilesPrefKey(activeProjectId);
+      const serialized = serializeProfileAllowlist(entries);
+      await savePreferences({ [key]: serialized });
+      setSettings((s) => ({ ...s, [key]: serialized }));
+      showToast(
+        entries.length === 0
+          ? "Project may use any profile"
+          : `Project restricted to ${entries.length} profile${entries.length === 1 ? "" : "s"}`,
+        "success",
+      );
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to update allowed profiles", "error");
+    } finally {
+      setSavingAllowedProfiles(false);
+    }
   }
 
   // First-class per-project provider control (#925): persist the selection as a
@@ -451,6 +484,9 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
                   providerDivergence={providerDivergence}
                   onProjectProviderChange={handleProjectProviderChange}
                   savingProjectProvider={savingProjectProvider}
+                  allowedProfiles={parseProfileAllowlist(settings[allowedProfilesPrefKey(activeProjectId ?? "") as keyof Settings]).entries}
+                  onAllowedProfilesChange={handleAllowedProfilesChange}
+                  savingAllowedProfiles={savingAllowedProfiles}
                 />
               )}
 

@@ -100,6 +100,21 @@ Claude Code, Codex, Copilot — selectable via Settings → Agent. Claude reads 
 
 **Provider default — single source of truth = the Strategy Bullseye pref (`board_strategy_<projectId>`).** It fans out to all consumers: `selectProviderFromStrategy` → `POST /api/workspaces` default, `resolveMonitorTunables` (deterministic monitor), and a regenerated `objective.md` (the Conductor agent). Two values sit *outside* that fan-out and drift if set independently — the `provider`/`claude_profile` settings prefs (butler/review/UI) and the global `default_model` (applied to BOTH providers; a cross-provider model id breaks the other — this drift caused a multi-cycle stall). **To change the default, use the `set-provider-default` skill** — it sets the Bullseye, mirrors the settings prefs, scopes/clears `default_model`, and verifies all agree. Never hand-edit one source alone. (The code-level fix to collapse these is tracked on the board.)
 
+**Profile allowlist — a per-project CONSTRAINT, not another default.** `allowed_profiles_<projectId>`
+(Settings → Agent → "Profiles this project may use") lists the `{provider, name}` pairs a project is
+permitted to launch on. Absent/empty = unrestricted, which is every project by default. When set it is
+applied LAST, after every selector above has chosen — so it outranks an explicit per-workspace profile
+override, the Strategy Bullseye, a workspace's baked-in selection, and a global `claude_profile` that the
+auth-rotation ring rewrote after a usage limit. The Bullseye stays the single source of truth for *which*
+profile is preferred; this decides which are *permissible*, and the two are deliberately separate concerns
+(a Bullseye is a priority list that falls through on quota, which is the opposite of a restriction).
+Multiple entries are fallback order: the resolver takes the first that is not cooling. When ALL of them are
+cooling the project **holds** — `resolveProviderConfig` returns a `profileHold` and workspace creation
+refuses with `PROFILE_ALLOWLIST_HOLD` — rather than borrowing an unlisted account, since for a project
+pinned to a client subscription the wrong account is worse than no progress. A present-but-unparseable
+value also holds (fail closed). Logic: `packages/shared/src/lib/profile-allowlist.ts`; enforcement seam:
+`resolveProjectRuntimeConfig`.
+
 ## Board Operations
 Tool precedence: **MCP** (`mcp__agentic-kanban__*`) → **CLI** (`pnpm cli -- ...`) → **REST**. Use the board's own features — review (`POST /api/workspaces/:id/review`), merge (`merge_workspace`), fix-and-merge, rebase (`update-base`), enhance, dependency-analyze — don't replicate manually. For narrow questions use `list_issues`/`get_board_status`, not unbounded `list_workspaces`. Don't hand-roll `curl | python`.
 

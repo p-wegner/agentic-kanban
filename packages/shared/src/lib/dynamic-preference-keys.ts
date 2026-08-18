@@ -86,6 +86,14 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   "butler_profile",
   "dev_command",
   "health_url",
+  // Per-project profile allowlist: a HARD constraint on which provider profiles this
+  // project may launch under, applied after every selector (explicit override, Strategy
+  // Bullseye, global settings) has had its say. Absent/empty = unrestricted, so this
+  // changes nothing until an operator fills it in. See `profile-allowlist.ts` for why
+  // this is a separate constraint rather than more Bullseye policies: the Bullseye is a
+  // priority list that deliberately falls through on quota, and a per-workspace override
+  // outranks it — neither can express "this project may only ever spend account X".
+  "allowed_profiles",
 ] as const;
 
 // Deliberately NOT registered, though both are per-project keys that exist on disk (#496):
