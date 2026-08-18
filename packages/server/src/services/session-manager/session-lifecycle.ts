@@ -651,7 +651,6 @@ export function createSessionLifecycle(
         // used instead.
         providerSessionId: resumeWithNewModel ? undefined : providerSessionId,
         agentCommand,
-        claudeProfile,
         keepAlive: multiTurn,
         permissionPromptTool,
         planMode,

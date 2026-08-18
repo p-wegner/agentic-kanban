@@ -267,7 +267,11 @@ export function preflightAgentProfile(
     const launchConfig = buildAgentLaunchConfig({
       agentCommand: settings.agentCommand,
       agentArgs: settings.agentArgs,
-      claudeProfile: settings.claudeProfile,
+      // #528: the board-wide `settings.claudeProfile` used to ride along here, and for
+      // profileName === "default" (where `profile` is deliberately undefined) it was what
+      // the launch config actually used — so the probe for "default" ran under whichever
+      // profile the board had configured, not under none. Probing a profile now means
+      // probing that profile only.
       profile: profileName === DEFAULT_PROFILE ? undefined : { provider, name: profileName },
       provider: toExecutorProvider(provider),
       permissionPromptTool: settings.permissionPromptTool,

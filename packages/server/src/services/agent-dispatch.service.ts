@@ -99,7 +99,6 @@ export interface AgentLaunchRequest {
   onOutput: AgentOutputCallback;
   providerSessionId?: string;
   agentCommand?: string;
-  claudeProfile?: string;
   keepAlive?: boolean;
   permissionPromptTool?: string;
   planMode?: boolean;
