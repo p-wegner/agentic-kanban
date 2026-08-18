@@ -1,3 +1,5 @@
+import { slugify } from "@agentic-kanban/shared/lib/slugify";
+
 // ── Markdown navigation primitives (#452) ───────────────────────────
 //
 // A failing check quotes an exact identifier ("STORY-2-1 Sz.3 is recorded `auto` …") and the
@@ -20,14 +22,13 @@ export function splitLines(text: string): string[] {
   return text.split(/\r?\n/);
 }
 
+/**
+ * NOT plain `slugify` (#565): a heading anchor must match how the renderer builds its `id`,
+ * so markdown emphasis markers are DELETED (`**Done**` -> `done`, not `done-`) rather than
+ * collapsed to a separator the way every other punctuation run is. The shared rule does the rest.
+ */
 export function slugifyHeading(text: string): string {
-  return (
-    text
-      .toLowerCase()
-      .replace(/[`*_~]/g, "")
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "section"
-  );
+  return slugify(text.replace(/[`*_~]/g, ""), { fallback: "section" });
 }
 
 const FENCE_RE = /^\s{0,3}(```|~~~)/;

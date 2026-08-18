@@ -24,6 +24,7 @@ import { dirname, join } from "node:path";
 import { and, asc, eq, gte, inArray, lte } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import * as schema from "../schema/index.js";
+import { slugify } from "./slugify.js";
 
 export type DriveRetroDb = LibSQLDatabase<typeof schema>;
 
@@ -70,13 +71,7 @@ export interface DriveRetroTelemetry {
 
 /** Slugify a project name for the retro filename (`docs/board-runs/<slug>.md`). */
 export function projectSlug(name: string): string {
-  return (
-    name
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "project"
-  );
+  return slugify(name, { fallback: "project" });
 }
 
 function parseCostUsd(stats: string | null): number {

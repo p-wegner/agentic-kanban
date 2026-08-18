@@ -5,6 +5,7 @@
  * client and server agree on the wire value (a plain string — client-bundle safe).
  */
 export const LEADING_REPO_KEY = "__leading__";
+import { slugify } from "./slugify.js";
 
 export function sanitizeBranchName(input: string): string {
   return input
@@ -20,12 +21,7 @@ export function sanitizeBranchName(input: string): string {
 export function suggestBranchName(issue: { issueNumber?: number | null; title: string }): string {
   const prefix = "feature";
   const num = issue.issueNumber ? `${issue.issueNumber}-` : "";
-  const slug = issue.title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 40);
+  const slug = slugify(issue.title, { maxLength: 40 });
   return `${prefix}/ak-${num}${slug}`;
 }
 

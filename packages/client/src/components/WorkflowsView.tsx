@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
+import { slugify } from "@agentic-kanban/shared/lib/slugify";
 import { showToast } from "./Toast.js";
 import { WorkflowBuilder } from "./WorkflowBuilder.js";
 
@@ -36,8 +37,7 @@ interface StageWorkspaceDetail {
 }
 
 function safeFileName(value: string): string {
-  const cleaned = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  return cleaned || "workflow-template";
+  return slugify(value, { fallback: "workflow-template" });
 }
 
 function parseJsonText(text: string): unknown {

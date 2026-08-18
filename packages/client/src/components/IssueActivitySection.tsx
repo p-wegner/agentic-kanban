@@ -1,5 +1,6 @@
 import React from "react";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
+import { slugify } from "@agentic-kanban/shared/lib/slugify";
 import { showToast } from "./Toast.js";
 
 export type ActivityEventType =
@@ -39,12 +40,7 @@ function markdownEscape(value: string): string {
 }
 
 function safeFileSegment(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
+  return slugify(value, { maxLength: 80 });
 }
 
 export function issueActivityMarkdownFilename(issueTitle: string, issueNumber?: number | null): string {
