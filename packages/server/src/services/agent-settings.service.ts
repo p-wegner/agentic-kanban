@@ -28,8 +28,6 @@ export const MOCK_AGENT_COMMAND = `node --import ${TSX_URL} "${MOCK_AGENT_PATH}"
 export interface AgentSettings {
   agentCommand: string | undefined;
   agentArgs: string | undefined;
-  /** @deprecated Use profile instead */
-  claudeProfile: string | undefined;
   /** Provider-tagged profile selection. Derived from claude_profile + provider preferences. */
   profile: { provider: ProviderName; name: string } | undefined;
   provider: ProviderName;
@@ -118,7 +116,7 @@ export function resolveAgentSettings(
       : (prefMap.get(getProfilePrefKey(provider)) || undefined);
 
   const profile = effectiveProfileName ? { provider, name: effectiveProfileName } : undefined;
-  return { agentCommand, agentArgs, claudeProfile: resolvedProfile, profile, provider, resumeWithNewModel, permissionPromptTool };
+  return { agentCommand, agentArgs, profile, provider, resumeWithNewModel, permissionPromptTool };
 }
 
 function parseProviderName(provider: string | undefined): ProviderName {

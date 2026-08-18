@@ -105,8 +105,7 @@ describe("resolveRelaunchAgentSelection — honors current board default (#762)"
 
     expect(sel.provider).toBe("codex");
     expect(sel.profile).toEqual({ provider: "codex", name: "default" });
-    // codex must not inherit the stale claude profile
-    expect(sel.claudeProfile).toBeUndefined();
+    // codex must not inherit the stale claude profile — `profile` is now the only carrier
   });
 
   it("resolves claude profile from the current Strategy default", async () => {
@@ -117,7 +116,6 @@ describe("resolveRelaunchAgentSelection — honors current board default (#762)"
     const sel = await resolveRelaunchAgentSelection(db, projectId, ws);
 
     expect(sel.provider).toBe("claude");
-    expect(sel.claudeProfile).toBe("anth");
     expect(sel.profile).toEqual({ provider: "claude", name: "anth" });
   });
 
@@ -130,7 +128,7 @@ describe("resolveRelaunchAgentSelection — honors current board default (#762)"
     const sel = await resolveRelaunchAgentSelection(db, projectId, ws);
 
     expect(sel.provider).toBe("claude");
-    expect(sel.claudeProfile).toBe("zai");
+    expect(sel.profile).toEqual({ provider: "claude", name: "zai" });
   });
 
   it("falls back to the baked provider when the Strategy selects nothing", async () => {

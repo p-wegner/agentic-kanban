@@ -80,15 +80,17 @@ export function resolveProviderConfig(input: ProviderConfigInput): ResolvedProvi
   const {
     agentCommand,
     agentArgs,
-    claudeProfile: resolvedProfile,
     profile: profileSelection,
     provider,
     resumeWithNewModel,
     permissionPromptTool,
   } = resolveAgentSettings(prefMap, input.commandOverride);
 
+  // #528: the claude branch read a separate `claudeProfile` string here. For claude it
+  // held the same value `profileSelection.name` does, so the two remaining fallbacks are
+  // what the branch is actually for.
   const profileName = provider === "claude"
-    ? (resolvedProfile || legacyProfileOverride || prefMap.get("claude_profile") || undefined)
+    ? (profileSelection?.name || legacyProfileOverride || prefMap.get("claude_profile") || undefined)
     : profileSelection?.name;
 
   const effectiveModel = resolveEffectiveModel({
