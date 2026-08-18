@@ -40,6 +40,7 @@ import { ProjectError } from "./project-error.js";
 import { createInitialCommit, createSiblingRepoDir, promoteRepoToLeading } from "./project-repos.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { reapWorkspaceContainer } from "./devcontainer-workspace.service.js";
+import { listProjectRepos, getWorkspaceRepoClaims } from "../repositories/repo.repository.js";
 
 // Re-export so existing importers (routes, tests) keep `import { ProjectError } from "./project.service.js"`.
 export { ProjectError };
@@ -469,6 +470,22 @@ export function createProjectService(deps: { database: Database; workspaceSummar
 
     const projectWorkspaces = await getProjectWorkspacesWithIssue(projectId, database);
 
+    // #631: this endpoint listed the LEADING repo only, so on a 17-repo project the panel
+    // reported on 1 of 17 — it showed "Worktrees (1) — No additional worktrees" while 104
+    // orphaned sibling worktrees existed across 13 repos. The panel that exists to surface
+    // exactly this debris was structurally unable to see it. Siblings are appended below,
+    // each tagged with its repo, and one that no `repos` row claims is reported as having
+    // NO BOARD WORKSPACE — the orphan report the board previously had no way to produce.
+    const siblingRepos = await listProjectRepos(projectId, database).catch(() => []);
+    const siblingClaims = siblingRepos.length > 0
+      ? await getWorkspaceRepoClaims(projectId, database).catch(() => [])
+      : [];
+    const claimByPath = new Map(
+      siblingClaims
+        .filter((c) => c.worktreePath)
+        .map((c) => [c.worktreePath!.replace(/\//g, sep).toLowerCase(), c] as const),
+    );
+
     const wsByDir = new Map<string, typeof projectWorkspaces[number]>();
     for (const ws of projectWorkspaces) {
       if (ws.workingDir) {
@@ -480,7 +497,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     // nothing left to await, which is also why no per-request wall-clock budget is
     // needed here (see #342 note below) — the request is now one git spawn
     // (listWorktrees) plus one DB query, both already bounded.
-    return gitWorktrees.map((wt, index) => {
+    const leadingEntries = gitWorktrees.map((wt, index) => {
       const isMain = index === 0;
       const normalizedWtPath = wt.path.replace(/\//g, sep);
 
@@ -533,6 +550,47 @@ export function createProjectService(deps: { database: Database; workspaceSummar
         diffStats,
       };
     });
+
+    // Sibling worktrees, grouped after the leading repo's. Deliberately NOT interleaved:
+    // the leading repo's entries carry diff stats and workspace links that the sibling rows
+    // cannot, and a flat merged list would imply a parity that does not exist.
+    const siblingEntries = (
+      await Promise.all(
+        siblingRepos.map(async (repo) => {
+          const repoName = repo.name ?? repo.path.split(/[/\\]/).filter(Boolean).pop() ?? repo.path;
+          let wts: { path: string; branch: string }[];
+          try {
+            wts = await listWorktrees(repo.path);
+          } catch {
+            return []; // an unreadable sibling must not fail the whole panel
+          }
+          return wts.slice(1).map((wt) => {
+            const claim = claimByPath.get(wt.path.replace(/\//g, sep).toLowerCase());
+            return {
+              path: wt.path,
+              branch: wt.branch.replace(/^refs\/heads\//, ""),
+              isMain: false,
+              repoName,
+              // The orphan report: a sibling worktree that no `repos` row claims came from a
+              // create that never persisted (#630), and nothing else in the UI can say so.
+              orphaned: !claim,
+              workspace: claim
+                ? {
+                    id: claim.workspaceId,
+                    status: claim.status,
+                    isDirect: false,
+                    issueId: claim.issueId,
+                    issueNumber: claim.issueNumber,
+                    issueTitle: claim.issueTitle,
+                  }
+                : undefined,
+            };
+          });
+        }),
+      )
+    ).flat();
+
+    return [...leadingEntries, ...siblingEntries];
   }
 
   async function removeWorktreeById(projectId: string, body: { path?: string; workspaceId?: string }) {
@@ -578,8 +636,40 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     }
 
     if (removedPath) {
-      try { await removeWorktree(project.repoPath, removedPath); } catch { /* best effort */ }
+      // #631: the delete path assumed `project.repoPath`, so the UI's cleanup action could
+      // not reclaim a sibling worktree at all — they had to be removed by hand with
+      // `git worktree remove` per repo. Resolve the OWNING repo from the path instead.
+      const owner = await resolveOwningRepoPath(projectId, removedPath, project.repoPath, database);
+      try { await removeWorktree(owner, removedPath); } catch { /* best effort */ }
     }
+  }
+
+  /**
+   * Which repo's `git worktree remove` should be invoked for a worktree path (#631).
+   *
+   * Sibling worktrees live under `<sibling parent>/.worktrees/<repoDirName>/<branch>`, which
+   * is NOT inside the leading repo — running `git worktree remove` from the leading repo just
+   * fails ("is not a working tree"), silently, since the caller swallows it. Falls back to
+   * the leading repo, which is both the old behaviour and the right answer for its own
+   * worktrees.
+   */
+  async function resolveOwningRepoPath(
+    projectId: string,
+    worktreePath: string,
+    leadingRepoPath: string,
+    database: Database,
+  ): Promise<string> {
+    const claims = await getWorkspaceRepoClaims(projectId, database).catch(() => []);
+    const target = worktreePath.replace(/\//g, sep).toLowerCase();
+    const match = claims.find((c) => c.worktreePath?.replace(/\//g, sep).toLowerCase() === target);
+    if (match?.repoPath) return match.repoPath;
+    // No claim (an orphan): fall back to whichever registered repo the path sits under.
+    const repos = await listProjectRepos(projectId, database).catch(() => []);
+    const under = repos.find((r) => {
+      const parent = r.path.replace(/\//g, sep).toLowerCase().split(sep).slice(0, -1).join(sep);
+      return target.startsWith(parent + sep) && target.includes(`${sep}${r.path.split(/[/\\]/).filter(Boolean).pop()?.toLowerCase()}${sep}`);
+    });
+    return under?.path ?? leadingRepoPath;
   }
 
   async function getStats(projectId: string) {
