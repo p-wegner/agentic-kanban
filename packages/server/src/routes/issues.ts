@@ -50,6 +50,8 @@ import { conditionalJsonResponse } from "../services/board-etag-cache.service.js
 
 import { queryFlag } from "../middleware/query-params.js";
 import { getActiveProjectIdPref } from "../repositories/board-status.repository.js";
+import { setIssueReposTouched } from "../services/repo-tags.service.js";
+import { getIssueById } from "../repositories/followup-workspace.repository.js";
 export function createIssuesRoute(database: Database, options?: { boardEvents?: BoardEvents; getSessionManager?: () => SessionManager }) {
   const router = createRouter();
 
@@ -531,6 +533,24 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     const body = await parseJsonBody(c);
     const result = await issueService.updateIssue(id, body);
     return c.json(result);
+  });
+
+  // PUT /api/issues/:id/repos-touched — set the repos this issue declares it touches (#633).
+  //
+  // The create path could apply these and nothing could ever change them, so an issue filed
+  // by anything other than the create panel (a plugin loop, the API, an import) had no repo
+  // scope and no way to get one. Deliberately a SET, not an append: deselecting has to
+  // remove, or the field is a one-way ratchet. Unknown names are dropped and the applied set
+  // is echoed back, so a client can render what actually stuck.
+  router.put("/:id/repos-touched", async (c) => {
+    const id = c.req.param("id");
+    const body = await parseJsonBody<{ reposTouched?: string[] }>(c);
+    if (!Array.isArray(body.reposTouched)) return c.json({ error: "reposTouched (array) is required" }, 400);
+    const [issue] = await getIssueById(id, database);
+    if (!issue) return c.json({ error: "Issue not found" }, 404);
+    const applied = await setIssueReposTouched(id, issue.projectId, body.reposTouched, database);
+    options?.boardEvents?.broadcast(issue.projectId, "issue_updated");
+    return c.json({ reposTouched: applied });
   });
 
   // POST /api/issues/:id/duplicate
