@@ -316,15 +316,20 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
     if (!shownPlugin) { setScaffold(null); setScaffoldLoading(false); return; }
     setScaffoldLoading(true);
     try {
-      setScaffold(await apiFetch<ScaffoldForm>(`/api/plugins/${shownPlugin.pluginId}/scaffold?projectId=${projectId}`));
+      const res = await apiFetch<ScaffoldForm>(`/api/plugins/${shownPlugin.pluginId}/scaffold?projectId=${projectId}`);
+      // #658: the route answers 200 with `targetPath: null` for a plugin that declares no
+      // scaffold. Older servers 404 instead, which the catch below still handles.
+      setScaffold(res.targetPath === null ? null : res);
     } catch {
-      setScaffold(null); // 404 = the plugin declares no scaffold
+      setScaffold(null); // pre-#658 server: 404 = the plugin declares no scaffold
     } finally {
       setScaffoldLoading(false);
     }
   }, [shownPlugin, projectId]);
   useEffect(() => { void refetchScaffold(); }, [refetchScaffold]);
-  const scaffoldNeedsSetup = (scaffold?.exists && scaffold.fields.length > 0) ?? false;
+  // #658: `targetPath === null` means the plugin declares no scaffold, so it can never need
+  // setup — and including it here is what lets the JSX below use the path without a cast.
+  const scaffoldNeedsSetup = (scaffold?.exists && scaffold.targetPath !== null && scaffold.fields.length > 0) ?? false;
 
   // No plugin picked yet (fresh navigation) → adopt the first plugin present.
   useEffect(() => {
@@ -773,7 +778,7 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
             startPolicy={surface.startPolicy ?? null}
             setupRequired={scaffoldNeedsSetup ? {
               pendingFields: scaffold!.fields.length,
-              targetPath: scaffold!.targetPath,
+              targetPath: scaffold!.targetPath!,
               onOpenSetup: () => setSelection({ kind: "scaffold", key: "scaffold" }),
             } : null}
           />

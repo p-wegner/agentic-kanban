@@ -184,7 +184,14 @@ export function createPluginLoopExtras(ctx: PluginLoopExtrasCtx) {
     const plugin = await requirePlugin(pluginRowId);
     const project = await requireProject(projectId);
     const scaffold = plugin.manifest.scaffold;
-    if (!scaffold) throw new PluginError("This plugin declares no scaffold", "NOT_FOUND");
+    // #658: "this plugin declares no scaffold" is a legitimate ANSWER to a read, not an
+    // error. Throwing NOT_FOUND made every Plugins-panel poll a 404 — dozens a minute of
+    // console noise for a plugin that is behaving exactly as designed, and noise like that is
+    // what trains people to ignore the console. The write paths below still refuse: acting on
+    // a scaffold that does not exist IS an error. `targetPath: null` is the discriminator.
+    if (!scaffold) {
+      return { targetPath: null, exists: false as const, content: null, fields: [] };
+    }
     const repoPath = await resolveOutputRepoPath(plugin, project);
     const target = resolveInside(repoPath, scaffold.targetPath, `scaffold targetPath "${scaffold.targetPath}"`);
     if (!existsSync(target)) {

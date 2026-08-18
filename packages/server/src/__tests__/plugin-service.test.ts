@@ -989,3 +989,52 @@ describe("plugin.service", () => {
     expect(afterDisable[0]).toMatchObject({ enabled: false });
   });
 });
+
+/**
+ * #658 — a plugin with no scaffold made every Plugins-panel poll a 404.
+ *
+ * `getScaffoldForm` threw NOT_FOUND when the manifest declared no scaffold, so the panel's
+ * poll produced dozens of 404s a minute in the browser console for a plugin behaving exactly
+ * as designed. Noise like that is what trains people to ignore the console.
+ *
+ * "No scaffold" is a legitimate ANSWER to a read. It is still an ERROR for the writes, which
+ * is the asymmetry these tests pin.
+ */
+describe("scaffold read for a plugin that declares none (#658)", () => {
+  let db: TestDb;
+  let service: ReturnType<typeof createPluginService>;
+
+  beforeEach(() => {
+    db = createTestDb().db;
+    service = createPluginService({ database: db as unknown as Database });
+  });
+
+  afterEach(async () => {
+    await stopAllPluginViewsAsync();
+    for (const dir of tempDirs.splice(0)) {
+      try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+    }
+  });
+
+  async function installWithoutScaffold() {
+    // Same manifest, minus `scaffold` — the app-runner shape from the report.
+    const { scaffold: _dropped, ...withoutScaffold } = MANIFEST;
+    const pluginDir = makePluginDir(withoutScaffold);
+    const row = await service.installPlugin({ source: pluginDir });
+    const projectId = await insertProject(db, makeProjectRepo());
+    return { pluginId: row.id, projectId };
+  }
+
+  it("answers with targetPath null instead of throwing NOT_FOUND", async () => {
+    const { pluginId, projectId } = await installWithoutScaffold();
+    expect(await service.getScaffoldForm(pluginId, projectId))
+      .toEqual({ targetPath: null, exists: false, content: null, fields: [] });
+  });
+
+  it("still REFUSES to write one — acting on a scaffold that does not exist is an error", async () => {
+    const { pluginId, projectId } = await installWithoutScaffold();
+    await expect(service.fillScaffoldForm(pluginId, projectId, [{ index: 0, value: "x" }]))
+      .rejects.toThrow(/declares no scaffold/);
+  });
+});
+
