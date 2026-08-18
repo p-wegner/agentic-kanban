@@ -48,10 +48,16 @@
 //     - git.service.test.ts real git on temp dirs; Windows file-locking / timing
 //     - done-unmerged-invariant-scanner.test.ts, workspace-merge-service.test.ts,
 //       workspace-already-merged.test.ts, api-workspace.test.ts, workspace-lifecycle-transitions.test.ts,
-//       merge-endpoint-reconcile-noop.test.ts, merge-service-edge-cases.test.ts, preferences.test.ts,
-//       auto-review-pref.test.ts (#173) — every one of these is green in isolation; under full
+//       merge-endpoint-reconcile-noop.test.ts, merge-service-edge-cases.test.ts, preferences.test.ts
+//       (#173) — every one of these is green in isolation; under full
 //       parallelism a single file can hit CPU-contention timeouts of 15-17min, flaking the
 //       merge gate red and (via #172) leaking a vitest worker fleet on each retry.
+//     - auto-review-pref.test.ts was on this list and is NOT any more (#647 item 5). It is
+//       half accessor test, half WHOLE-TREE scan for hand-rolled auto_review reads — and the
+//       scanning half is reachable by no other command, so excluding it meant that guard ran
+//       nowhere while looking like it was covered. Measured 5 tests / ~19s, no DB, no git, no
+//       docker: it is slow-ish because it walks the tree, not because it contends, which is
+//       not the #173 shape the rest of this list has. It carries @gate:always-run now.
 //     - worker-git-transport-e2e.test.ts — same #173 shape, arrived with the worker-fleet
 //       epic (#188) and was never added here. It stands up TWO http listeners (board +
 //       git-http) and does real `git clone`/`push` over the wire, so it is the heaviest
@@ -116,7 +122,6 @@ export const PACKAGES = [
       "**/merge-endpoint-reconcile-noop.test.ts",
       "**/merge-service-edge-cases.test.ts",
       "**/preferences.test.ts",
-      "**/auto-review-pref.test.ts",
       "**/worker-git-transport-e2e.test.ts",
       "**/compose-lifecycle-real-docker.test.ts",
     ],

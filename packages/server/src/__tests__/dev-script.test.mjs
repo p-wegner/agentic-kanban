@@ -1,3 +1,4 @@
+// @gate:always-run — reads scripts/dev.mjs and the repo package manifests; imports nothing it checks (#647).
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer, request as httpRequest } from "node:http";

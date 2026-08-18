@@ -1,3 +1,4 @@
+// @gate:always-run — reads the copilot event-type source across packages to hold the lockstep; no import edge to it (#647).
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";

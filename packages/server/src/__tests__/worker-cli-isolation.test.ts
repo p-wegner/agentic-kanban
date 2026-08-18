@@ -1,3 +1,4 @@
+// @gate:always-run — walks the server src import graph from the worker CLI entry; no import edge to it (#647).
 // The `agentic-kanban-worker` binary exists so a worker machine can run the
 // daemon WITHOUT the board's command tree — no database layer, no server
 // services. That promise is an import-graph property, and import graphs rot

@@ -1,3 +1,4 @@
+// @gate:always-run — reads startup/scheduled-tasks.ts as text to assert a property it cannot import (#647).
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

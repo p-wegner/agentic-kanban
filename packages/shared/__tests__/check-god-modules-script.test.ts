@@ -1,3 +1,4 @@
+// @gate:always-run — runs scripts/check-god-modules.mjs against the repo tree; imports nothing it checks (#647).
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
