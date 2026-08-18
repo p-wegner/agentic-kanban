@@ -1,5 +1,5 @@
 import { tags, issueTags } from "@agentic-kanban/shared/schema";
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -104,4 +104,39 @@ export async function getIssueIdsByTagIds(
     .select({ issueId: issueTags.issueId })
     .from(issueTags)
     .where(inArray(issueTags.tagId, tagIds));
+}
+
+/**
+ * An issue's tag links, name included (#629/#633).
+ *
+ * Lives here, not in `repo-tags.service`: a service reaching for drizzle directly is the
+ * `services-bypass-repositories` violation `pnpm lint:arch` enforces. And here rather than in
+ * `issue-ai.repository`, which is already grandfathered at the cohesion ceiling — this file
+ * already owns `issueTags`, so it is the cohesive home anyway.
+ */
+export async function getIssueTagRows(
+  issueId: string,
+  database: Database = db,
+): Promise<{ tagId: string; name: string }[]> {
+  return database
+    .select({ tagId: tags.id, name: tags.name })
+    .from(issueTags)
+    .innerJoin(tags, eq(issueTags.tagId, tags.id))
+    .where(eq(issueTags.issueId, issueId));
+}
+
+/**
+ * Unlink specific tags from ONE issue.
+ *
+ * Scoped to the issue on purpose — contrast {@link removeIssueTagsByTagIds}, which unlinks by
+ * tag across every issue. Tag rows are global, so an issue-blind delete here would strip a
+ * `repo:<name>` tag from every other issue that shares it.
+ */
+export async function deleteIssueTagLinks(
+  issueId: string,
+  tagIds: string[],
+  database: Database = db,
+): Promise<void> {
+  if (tagIds.length === 0) return;
+  await database.delete(issueTags).where(and(eq(issueTags.issueId, issueId), inArray(issueTags.tagId, tagIds)));
 }
