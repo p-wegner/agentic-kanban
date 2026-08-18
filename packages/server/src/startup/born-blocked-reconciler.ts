@@ -57,6 +57,7 @@ import { db } from "../db/index.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
+import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
 
 /** How long since the last setup attempt before this reconciler will try again. */
 export const SETUP_RETRY_INTERVAL_MS = 30 * 60 * 1000;
@@ -171,7 +172,10 @@ export async function reconcileBornBlockedWorkspaces(
       continue;
     }
     if (action === "close") {
-      await setWorkspaceStatus(database, row.workspaceId, "closed", { now });
+      // #547: the documented close transition, so a born-blocked closure stamps `closedAt`
+      // and shows up in the activity/timeline/digest readers like every other close.
+      // `markMerged: false` — this workspace never produced anything to merge.
+      await closeWorkspace({ database, workspaceId: row.workspaceId, now, markMerged: false });
       result.closed.push(row.workspaceId);
       log(`closed ${ref} — ${reason}`);
       continue;

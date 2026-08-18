@@ -11,6 +11,7 @@ import type { MergeGateToken } from "../services/pre-merge-gate.service.js";
 import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.repository.js";
 import { clearMergeBackoff, recordMergeFailure, type MergeBackoffDeps } from "../services/merge-backoff.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
 
 export type LogMonitorActionFn = (action: MonitorActionName, workspaceId: string, issueId: string, extra?: Pick<MonitorAction, "endpoint" | "httpStatus" | "responseSummary" | "verificationResult">) => void;
 
@@ -82,8 +83,13 @@ export async function mergeWorkspaceWithFixFallback(
  */
 export async function closeDirectWorkspaceAsDone(ws: WorkspaceCandidate, logAction: LogMonitorActionFn): Promise<void> {
   const now = new Date().toISOString();
-  await setWorkspaceStatus(db, ws.wsId, "closed", { now });
+  // #547: the documented close transition, so this stamps `closedAt` like every other close.
+  // `markMerged: false` — a direct workspace lands on the branch it is already on; there is
+  // no merge to record.
+  await closeWorkspace({ database: db, workspaceId: ws.wsId, now, markMerged: false });
   // #226 — mirror column, cleared through the helper that also updates the leading repos row.
+  // NOT `closeWorkspace({ clearWorkingDir: true })`, which nulls the workspace column only
+  // and would leave the repos row pointing at a directory that is about to be removed.
   await clearWorkspaceWorkingDir(ws.wsId, now, db);
   const doneStatusId = await getProjectStatusIdByName(ws.projectId, "Done");
   if (doneStatusId) await transitionIssueStatus(db, ws.issueId, doneStatusId, { now }).catch((err) => console.warn(`[monitor] failed to move direct-workspace issue ${ws.issueId} to Done:`, errorMessage(err)));

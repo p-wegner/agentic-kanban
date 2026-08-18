@@ -35,6 +35,7 @@ import type { MonitorWorkspaceActions } from "./monitor-workspace-actions.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { shouldSkipMergeForBackoff, type MergeBackoffDeps } from "../services/merge-backoff.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
 
 export { DEFAULT_STUCK_BUILDER_TIMEOUT_MS } from "../services/monitor-cycle-rules.js";
 
@@ -422,12 +423,16 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
     const inReviewStatusId = await getProjectStatusIdByName(ws.projectId, "In Review");
     const fallbackStatusId = needsReviewStatusId ?? inReviewStatusId;
     if (fallbackStatusId) await transitionIssueStatus(db, ws.issueId, fallbackStatusId).catch((err) => console.warn(`[monitor] failed to move issue ${ws.issueId} to review fallback status:`, errorMessage(err)));
-    await setWorkspaceStatus(db, ws.wsId, "closed");
+    // #547: the documented close transition. It stamps `closedAt`, which a raw
+    // setWorkspaceStatus(…, "closed") does not — and that column is what issue-activity,
+    // project-activity, workspace-timeline, the digest route and the handoff bundle read,
+    // so a raw close was invisible in all five. `markMerged: false`: nothing landed here.
+    await closeWorkspace({ database: db, workspaceId: ws.wsId, markMerged: false });
     logAction("mark_idle", ws.wsId, ws.issueId, { responseSummary: `${sessionCount} sessions — flagged stuck`, verificationResult: "ok" });
     console.log(`[monitor] Workspace ${ws.wsId} has ${sessionCount} sessions  flagged as stuck, closing`);
     deps.boardEvents.broadcast(ws.projectId, "board_changed");
   } else if (sessionCount >= 5 && ws.issueStatusName === "In Review") {
-    await setWorkspaceStatus(db, ws.wsId, "closed");
+    await closeWorkspace({ database: db, workspaceId: ws.wsId, markMerged: false });
     logAction("mark_idle", ws.wsId, ws.issueId, { responseSummary: "Closed to break review loop", verificationResult: "ok" });
     console.log(`[monitor] Workspace ${ws.wsId} has ${sessionCount} sessions with issue in review  closing to break review loop (merge or create new workspace)`);
     deps.boardEvents.broadcast(ws.projectId, "board_changed");
