@@ -19,16 +19,19 @@ vi.mock("../services/git.service.js", () => ({
 }));
 vi.mock("../services/butler-event-feed.js", () => ({ emitButlerSystemEvent: vi.fn() }));
 vi.mock("../services/agent-settings.service.js", () => ({
+  // #541: exit-workflow / merge-workflow now resolve their launch settings here instead
+  // of hand-rolling the ladder, so these two must exist on the mock.
+  applyWorkspaceProfileToPrefs: vi.fn((m: Map<string, string>) => m),
+  resolveWorkspaceLaunchSettings: vi.fn(() => ({
+    agentCommand: undefined, agentArgs: undefined, profile: undefined,
+    provider: "claude", resumeWithNewModel: false, permissionPromptTool: undefined,
+  })),
   isMockProfile: vi.fn(() => false),
   toExecutorProvider: vi.fn((p: string) => p),
   MOCK_AGENT_COMMAND: "mock",
 }));
 vi.mock("../startup/review-helpers.js", () => ({
-  applyWorkspaceProfileToPrefs: vi.fn((prefs: Map<string, string>) => prefs),
-  buildReviewArgs: vi.fn(() => undefined),
   buildReviewPrompt: vi.fn(async () => ({ prompt: "review", model: undefined })),
-  getEffectiveProfile: vi.fn(() => undefined),
-  parseProviderPref: vi.fn(() => "claude"),
 }));
 vi.mock("../startup/merge-strategy.js", () => ({
   isAutomaticMergeEnabled: vi.fn(() => false),

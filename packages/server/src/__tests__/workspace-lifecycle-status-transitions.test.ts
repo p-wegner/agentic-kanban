@@ -23,7 +23,6 @@ vi.mock("../services/agent-settings.service.js", () => {
   const stubAgentSettings = () => ({
     agentCommand: undefined,
     agentArgs: undefined,
-    claudeProfile: undefined,
     profile: undefined,
     provider: "claude",
     resumeWithNewModel: false,
@@ -35,14 +34,13 @@ vi.mock("../services/agent-settings.service.js", () => {
     MOCK_AGENT_COMMAND: "mock",
     loadAgentSettings: vi.fn(async () => stubAgentSettings()),
     resolveAgentSettings: vi.fn(() => stubAgentSettings()),
+    // #541: exit-workflow resolves its launch settings here now.
+    applyWorkspaceProfileToPrefs: vi.fn((m: Map<string, string>) => m),
+    resolveWorkspaceLaunchSettings: vi.fn(() => stubAgentSettings()),
   };
 });
 vi.mock("../startup/review-helpers.js", () => ({
-  applyWorkspaceProfileToPrefs: vi.fn((m: Map<string, string>) => m),
-  buildReviewArgs: vi.fn(() => undefined),
   buildReviewPrompt: vi.fn(async () => ({ prompt: "review", model: undefined })),
-  getEffectiveProfile: vi.fn(() => undefined),
-  parseProviderPref: vi.fn(() => "claude"),
 }));
 vi.mock("../startup/merge-strategy.js", () => ({
   isAutomaticMergeEnabled: vi.fn(() => false),
