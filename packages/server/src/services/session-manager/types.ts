@@ -90,6 +90,58 @@ export interface SessionState {
   dbWriteTimers: Map<string, ReturnType<typeof setTimeout>>;
 }
 
+/**
+ * Clear every per-session transient map/set for a session that has TERMINATED (#543).
+ *
+ * This existed as hand-maintained delete-lists at several call sites, and they had
+ * drifted: `cleanupStaleSession` cleared 14 members while `notifyExternalExit` cleared
+ * those same 14 PLUS `messageBuffer`, `sessionTextParts`, `sessionFinalText`,
+ * `stoppedByUser` and `sessionExitPlanModeDenied` — so a stale-session cleanup leaked
+ * every buffered message of that session for the process's lifetime. A list that must be
+ * updated by hand whenever `SessionState` gains a member is a leak waiting to be
+ * reintroduced, which is the actual argument for this function.
+ *
+ * Deliberately NOT cleared:
+ *  - `subscribers` — WebSocket listeners have their own unsubscribe lifecycle; dropping
+ *    them here would silently disconnect a client that is still attached.
+ *  - `sessionExitHandled` — the duplicate-exit guard. It must OUTLIVE teardown at the
+ *    external-exit site (a second notification for the same session has to stay ignored),
+ *    and the live path deletes it itself once its finalize promise settles.
+ *  - `workspaceAutoResumeCount` / `workspaceStaleResumeRecoveryCount` — keyed by
+ *    WORKSPACE, not session. Clearing them per session would reset the loop bounds those
+ *    counters exist to enforce.
+ *
+ * Not used by `stopSession` (the process is still alive and its exit event still needs the
+ * buffers) nor by `broadcast()`'s exit block (which also SETS `sessionFinalText` from
+ * `sessionTextParts`, so it is ordering-sensitive rather than pure teardown).
+ */
+export function teardownSessionState(state: SessionState, sessionId: string): void {
+  state.messageBuffer.delete(sessionId);
+  state.sessionContexts.delete(sessionId);
+  state.turnStates.delete(sessionId);
+  state.stoppedByUser.delete(sessionId);
+  state.sessionToolUses.delete(sessionId);
+  state.sessionModels.delete(sessionId);
+  state.sessionSubagents.delete(sessionId);
+  state.sessionContextTokens.delete(sessionId);
+  state.sessionLastTool.delete(sessionId);
+  state.sessionAgentToolUseIds.delete(sessionId);
+  state.sessionTextParts.delete(sessionId);
+  state.sessionFinalText.delete(sessionId);
+  state.sessionSubstantiveOutput.delete(sessionId);
+  state.sessionTasks.delete(sessionId);
+  state.sessionHasTodoWrite.delete(sessionId);
+  state.sessionExitPlanModeDenied.delete(sessionId);
+  state.sessionProviders.delete(sessionId);
+
+  const pendingTimer = state.dbWriteTimers.get(sessionId);
+  if (pendingTimer !== undefined) {
+    clearTimeout(pendingTimer);
+    state.dbWriteTimers.delete(sessionId);
+  }
+  state.dbWriteBuffer.delete(sessionId);
+}
+
 export function createSessionState(): SessionState {
   return {
     subscribers: new Map(),

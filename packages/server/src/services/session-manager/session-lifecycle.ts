@@ -16,6 +16,7 @@ import { emitButlerSystemEvent } from "../butler-event-feed.js";
 import { narrowProviderName, type ProviderName } from "../agent-provider.js";
 import { getProviderExitBehavior } from "../agent-provider/provider-exit-behavior.js";
 import { type AgentOutputMessage, modelBelongsToProvider } from "@agentic-kanban/shared";
+import { teardownSessionState } from "./types.js";
 import type { SessionManagerOptions, SessionState, StartSessionOptions } from "./types.js";
 import { workspaceLaunchPreflight } from "../preflight-check.js";
 import { resolveContainerProvision, surfaceIsolationDowngrade } from "./devcontainer-launch.js";
@@ -762,24 +763,10 @@ export function createSessionLifecycle(
   /** Clean up stale in-memory state for a session whose process is gone. */
   async function cleanupStaleSession(sessionId: string): Promise<void> {
     console.log(`[session] cleaning up stale session: sessionId=${sessionId}`);
-    state.sessionContexts.delete(sessionId);
-    state.turnStates.delete(sessionId);
-    state.sessionSubagents.delete(sessionId);
-    state.sessionTasks.delete(sessionId);
-    state.sessionHasTodoWrite.delete(sessionId);
-    state.sessionToolUses.delete(sessionId);
-    state.sessionModels.delete(sessionId);
-    state.sessionContextTokens.delete(sessionId);
-    state.sessionLastTool.delete(sessionId);
-    state.sessionAgentToolUseIds.delete(sessionId);
-    state.sessionProviders.delete(sessionId);
-    state.sessionSubstantiveOutput.delete(sessionId);
-    const pendingTimer = state.dbWriteTimers.get(sessionId);
-    if (pendingTimer !== undefined) {
-      clearTimeout(pendingTimer);
-      state.dbWriteTimers.delete(sessionId);
-    }
-    state.dbWriteBuffer.delete(sessionId);
+    // #543: this listed 14 of the 19 session-keyed members by hand, so a stale session
+    // leaked its messageBuffer, sessionTextParts, sessionFinalText, stoppedByUser and
+    // sessionExitPlanModeDenied for the lifetime of the process.
+    teardownSessionState(state, sessionId);
     const now = new Date().toISOString();
     await lifecycleRepo.updateSessionStoppedNoStats(sessionId, now, db);
     // Also reset workspace status to idle
@@ -828,30 +815,9 @@ export function createSessionLifecycle(
     const providerFromState = state.sessionProviders.get(sessionId);
 
     const ctx = state.sessionContexts.get(sessionId);
-    // Clear in-memory state
-    state.sessionContexts.delete(sessionId);
-    state.turnStates.delete(sessionId);
-    state.sessionProviders.delete(sessionId);
-    state.sessionSubagents.delete(sessionId);
-    state.sessionTasks.delete(sessionId);
-    state.sessionHasTodoWrite.delete(sessionId);
-    state.sessionToolUses.delete(sessionId);
-    state.sessionModels.delete(sessionId);
-    state.sessionContextTokens.delete(sessionId);
-    state.sessionLastTool.delete(sessionId);
-    state.sessionAgentToolUseIds.delete(sessionId);
-    state.sessionTextParts.delete(sessionId);
-    state.sessionFinalText.delete(sessionId);
-    state.sessionSubstantiveOutput.delete(sessionId);
-    state.sessionExitPlanModeDenied.delete(sessionId);
-    state.stoppedByUser.delete(sessionId);
-    state.messageBuffer.delete(sessionId);
-    const externalExitTimer = state.dbWriteTimers.get(sessionId);
-    if (externalExitTimer !== undefined) {
-      clearTimeout(externalExitTimer);
-      state.dbWriteTimers.delete(sessionId);
-    }
-    state.dbWriteBuffer.delete(sessionId);
+    // #543: read `ctx` FIRST — teardown clears sessionContexts, and the activity/todo
+    // clears below need the project/issue ids off it.
+    teardownSessionState(state, sessionId);
 
     const existing = await lifecycleRepo.getSessionStatus(sessionId, db);
     if (!existing || existing.status !== "running") {
