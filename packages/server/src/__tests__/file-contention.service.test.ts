@@ -152,7 +152,7 @@ describe("getFileContention", () => {
 
   it("detects contention on a SIBLING-repo file across two workspaces (#77)", async () => {
     const { projectId, statusId, now } = await seedProject(db);
-    await seedWorkspace(db, projectId, statusId, now, { workingDir: "/tmp/ws1" });
+    const { workspaceId: ws1 } = await seedWorkspace(db, projectId, statusId, now, { workingDir: "/tmp/ws1" });
     const { workspaceId: ws2 } = await seedWorkspace(db, projectId, statusId, now, { workingDir: "/tmp/ws2" });
     // Each workspace has a sibling auth-svc worktree; both edit the SAME sibling file, while
     // their leading worktrees touch different files (no leading overlap).
