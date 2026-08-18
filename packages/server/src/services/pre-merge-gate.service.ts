@@ -718,6 +718,13 @@ function contentMatch(evidence: MergeGateEvidence, current: MergeGateShas | unde
 
 function evidenceIsValid(evidence: MergeGateEvidence | undefined, now: number, current?: MergeGateShas): boolean {
   if (!evidence || typeof evidence.source !== "string" || !evidence.source.trim()) return false;
+  // #642: `stage: "none"` is the gate's own word for "nothing ran" — a docs-only skip, an
+  // unconfigured verify_script, a projectless workspace. Honouring it as `already-passed`
+  // evidence turns a record of NO verification into a merge permit, and because SHA-pinned
+  // evidence deliberately waives the age check (see `contentMatch`), that permit never
+  // expires. Reject it and let the gate re-decide: for a genuinely docs-only diff the re-run
+  // re-skips in milliseconds, so this costs nothing where the skip was legitimate.
+  if (evidence.stage === "none") return false;
   const match = contentMatch(evidence, current);
   // Content says the verified state is gone → reject regardless of age.
   if (match === "mismatch") return false;

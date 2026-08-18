@@ -35,6 +35,35 @@ describe("content-keyed merge gate evidence", () => {
     expect(result.ran).toBe(false);
   });
 
+  /**
+   * #642 — evidence that records NOTHING having run must not act as a merge permit.
+   *
+   * `stage: "none"` is what the gate writes for a docs-only skip, an unconfigured
+   * verify_script, or a projectless workspace. Combined with SHA pinning (which deliberately
+   * waives the age check above) it produced a permanent "already passed" for a run that never
+   * happened. Re-deciding is nearly free where the skip was legitimate.
+   */
+  it("REJECTS stage:'none' evidence however well its SHAs match (nothing ran is not a pass)", async () => {
+    const result = await resolveMergeGate({
+      token: gateAlreadyPassed({ ranAt: FRESH, stage: "none", source: "review-exit gate", branchSha: "aaa1", baseSha: "bbb2" }),
+      workspace,
+      projectId: null,
+      database: db,
+      currentShas: { branchSha: "aaa1", baseSha: "bbb2" },
+    });
+    expect(result.decision).toBe("run-gate-stale-evidence");
+  });
+
+  it("REJECTS stage:'none' evidence even when fresh and unpinned (the age path too)", async () => {
+    const result = await resolveMergeGate({
+      token: gateAlreadyPassed({ ranAt: FRESH, stage: "none", source: "review-exit gate" }),
+      workspace,
+      projectId: null,
+      database: db,
+    });
+    expect(result.decision).toBe("run-gate-stale-evidence");
+  });
+
   it("REJECTS fresh evidence when the branch moved (a commit landed after the gate)", async () => {
     const result = await resolveMergeGate({
       token: gateAlreadyPassed({ ranAt: FRESH, stage: "verify", source: "pre-lock-merge", branchSha: "aaa1", baseSha: "bbb2" }),
