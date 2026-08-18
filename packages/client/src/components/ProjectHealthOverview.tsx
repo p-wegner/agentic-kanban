@@ -10,6 +10,8 @@ interface ProjectHealth {
   issueCounts: Record<string, number>;
   totalIssues: number;
   warnings: string[];
+  /** #632 — how many of the project's repos were actually checked. */
+  reposChecked?: number;
 }
 
 interface ProjectHealthData {
@@ -137,6 +139,14 @@ export function ProjectHealthOverview({ activeProjectId, onProjectChange, onClos
                           {project.defaultBranch && (
                             <span className="ml-2 text-gray-500 dark:text-gray-400">
                               on <span className="font-mono">{project.defaultBranch}</span>
+                            </span>
+                          )}
+                          {/* #632: on a multi-repo project, say how many repos this verdict
+                              covers. Without it, "no warnings" for 1 of 17 checked repos
+                              renders identically to a genuinely clean project. */}
+                          {(project.reposChecked ?? 1) > 1 && (
+                            <span className="ml-2 text-gray-500 dark:text-gray-400">
+                              · {project.reposChecked} repos checked
                             </span>
                           )}
                         </div>
