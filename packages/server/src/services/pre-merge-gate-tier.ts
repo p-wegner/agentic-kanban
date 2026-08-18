@@ -113,6 +113,14 @@ export interface GateTierInfo {
   changedFileCount: number;
   guardSuiteCount: number;
   maxWorkers: number;
+  /**
+   * Were new builder starts held for the duration of this gate (#581)? An operator reading
+   * a merge comment has to be able to tell a result produced on a quiet box from one
+   * produced while builders were competing for the same cores — the second kind is where
+   * the `mergeWorkspace` load flakes came from, and it named a real test with a plausible
+   * defect, so nothing about the failure itself said "contention".
+   */
+  buildersQuiesced?: boolean;
 }
 
 /**
@@ -136,6 +144,9 @@ export function buildGateTierMessage(tierInfo: GateTierInfo | null): string {
     `${tierInfo.changedFileCount} changed file(s)`,
     ...(tierInfo.fileScoped ? [`+${tierInfo.guardSuiteCount} guard suites`] : []),
     `workers ${tierInfo.maxWorkers}`,
+    ...(tierInfo.buildersQuiesced === undefined
+      ? []
+      : [tierInfo.buildersQuiesced ? "builders held" : "builders NOT held"]),
   ];
   return `pre-merge gate passed (${parts.join(", ")})`;
 }

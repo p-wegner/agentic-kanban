@@ -16,6 +16,7 @@ import { getProjectSetupScript } from "../repositories/stack-profile.repository.
 import { getProjectById } from "../repositories/project.repository.js";
 import { buildSmokeCheck, getStackProfile, populateVerifyScript, verifyScriptPrefKey } from "./stack-profile.service.js";
 import { resolveProjectDevServerPlan } from "./dev-server.service.js";
+import { quiesceBuildersEnabled } from "./gate-quiesce.js";
 import { isSelfProjectRepo } from "./self-project.js";
 import { getProjectRepoPath } from "../repositories/project.repository.js";
 import { runUnderBuildGate } from "./jvm-build-gate.js";
@@ -458,6 +459,10 @@ export async function runPreMergeGate(
       changedFileCount: changedFiles.length,
       guardSuiteCount: countAlwaysRunGuardSuites(workingDir),
       maxWorkers: gateMaxWorkers,
+      // #581: say whether this run was protected from builder contention. A gate that
+      // failed with builders competing for the box is a different claim from one that
+      // failed on a quiet machine, and the failure text alone never distinguishes them.
+      buildersQuiesced: await quiesceBuildersEnabled(projectId, database).catch(() => undefined),
     };
     const runVerify = () =>
       runUnderBuildGate(() =>

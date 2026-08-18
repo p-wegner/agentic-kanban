@@ -73,6 +73,13 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // operator could otherwise misalign) with ONE dial. See `resolveVerifyGateStrategy`
   // in `pre-merge-gate.service.ts` for the mapping onto the existing knobs.
   "verify_gate_strategy",
+  // Quiesce builders while a verify gate runs (#581). Measured: raising the gate to 6
+  // workers cut the server suite 2380s -> 1564s, and the first gate that then ran WHILE
+  // two builders were working failed three real-git `mergeWorkspace` tests that pass in
+  // isolation — a load flake indistinguishable from a regression at a glance. Holding new
+  // builder STARTS (never killing running ones) for the duration of a gate is the cheapest
+  // of #581's options. Default ON; set to "false" to prefer throughput over gate fidelity.
+  "quiesce_builders_during_gate",
   // Onboarding plan state (#463): `onboarding_state_<projectId>` holds the JSON record of
   // explicit user skips + a dismissal timestamp — the plan's steps themselves are derived from
   // the world (prefs/columns/issues), never stored, so this is the only piece that needs a key.

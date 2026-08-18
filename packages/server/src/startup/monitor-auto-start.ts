@@ -9,6 +9,7 @@ import type { MonitorActionName } from "../services/monitor-nudge.js";
 import { resolveMonitorTunables } from "../services/strategy-objective.service.js";
 import { narrowProviderName } from "../services/agent-provider.js";
 import { projectCanDispatch } from "../services/worker-fleet.service.js";
+import { shouldQuiesceBuildersForGate } from "../services/gate-quiesce.js";
 import { isMonitorEligibleIssue, monitorEligibleIssueSql } from "./monitor-eligibility.js";
 import { buildFileContentionGate, shouldDeferForContention, type BuildFileContentionGate } from "./monitor-file-contention.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -125,6 +126,16 @@ export type AutoStartSkipReason =
   | "wip_cap"
   | "no_auto_start_tag"
   | "contention_gate"
+  /**
+   * A verify/build/smoke gate is running right now, so new builder STARTS are held for this
+   * cycle (#581). Running agents are never touched — only the decision to add MORE load is
+   * deferred. Measured: a gate at 6 workers competing with two builders failed three
+   * real-git `mergeWorkspace` tests that pass in isolation, and the failure named a real
+   * test with a plausible defect, so it cost a 55-minute gate plus two isolated re-runs to
+   * classify as a flake. The monitor runs every few minutes, so the cost of holding is one
+   * cycle of latency; the cost of not holding is a gate result nobody can trust.
+   */
+  | "verify_gate_running"
   | "cycle_start_cap"
   | "feature_type_excluded"
   /**
@@ -402,6 +413,14 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
     const currentWip = capacity.active;
     if (capacity.inactiveStale > 0) {
       console.log(`[monitor] Auto-start pull capacity for project ${inProgressSt.projectId}: active=${capacity.active}/${wipLimit} inactiveStale=${capacity.inactiveStale}`);
+    }
+
+    // #581: hold new starts while a gate holds the build semaphore. Checked per project so
+    // a project can opt out, but the resource being protected is the BOX — one project's
+    // builder saturates another project's gate just as well.
+    if (await shouldQuiesceBuildersForGate(inProgressSt.projectId, db)) {
+      noteSkip(inProgressSt.projectId, null, "verify_gate_running");
+      continue;
     }
 
     if (currentWip >= wipLimit) {
