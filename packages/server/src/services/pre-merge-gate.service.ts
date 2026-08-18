@@ -15,6 +15,9 @@ import { getPreference } from "../repositories/preferences.repository.js";
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
 import { getProjectById } from "../repositories/project.repository.js";
 import { buildSmokeCheck, getStackProfile, populateVerifyScript, verifyScriptPrefKey } from "./stack-profile.service.js";
+import { resolveProjectDevServerPlan } from "./dev-server.service.js";
+import { isSelfProjectRepo } from "./self-project.js";
+import { getProjectRepoPath } from "../repositories/project.repository.js";
 import { runUnderBuildGate } from "./jvm-build-gate.js";
 import {
   resolveVerifyGateStrategy,
@@ -544,7 +547,22 @@ export async function runPreMergeGate(
   let smokeInconclusive: string | null = null;
   try {
     const profile = await getStackProfile(projectId, database);
-    const smokeCheck = buildSmokeCheck(profile);
+    // #657: resolve the same dev-server plan the Diagnostics tab and the dev-server skill
+    // use, so an operator's `health_url_<projectId>` / `dev_command_<projectId>` reaches the
+    // merge gate too. It also supplies the port for a project whose dev ports are computed at
+    // RUNTIME — this repo's own 3001+N/5173+N worktree math, which no static package.json read
+    // can know, and which left `devPort: null` and the smoke gate permanently inert.
+    const plan = await resolveProjectDevServerPlan(projectId, database, {
+      profile,
+      workingDir: workspace.workingDir,
+      isSelfProject: isSelfProjectRepo(await getProjectRepoPath(projectId, database)),
+    }).catch((err: unknown) => {
+      // Non-fatal on purpose: a failed plan read degrades to the profile-only smoke check
+      // that existed before, rather than turning the whole gate inconclusive.
+      console.warn(`[pre-merge-gate] dev-server plan unavailable for project ${projectId}:`, errorMessage(err));
+      return null;
+    });
+    const smokeCheck = buildSmokeCheck(profile, plan);
     if (smokeCheck) {
       if (!workspace.workingDir) {
         // Fail-closed: smoke (UI) gate applies but can't run without a worktree (#826).

@@ -4,6 +4,7 @@
 // profile. Re-exported byte-identically through ../stack-profile.service.ts.
 
 import type { StackProfile, SmokeCheck } from "@agentic-kanban/shared";
+import type { DevServerPlan } from "../dev-server.service.js";
 
 /**
  * Resolve the health URL to poll, from an explicit URL or a known dev port.
@@ -11,7 +12,22 @@ import type { StackProfile, SmokeCheck } from "@agentic-kanban/shared";
  * `explicit` distinguishes "the user named a real health route" from "we guessed the root URL
  * off the dev port" — only the latter may be graded leniently (#121).
  */
-function resolveHealthUrl(profile: StackProfile): { url: string; explicit: boolean } | null {
+function resolveHealthUrl(
+  profile: StackProfile,
+  plan?: DevServerPlan | null,
+): { url: string; explicit: boolean } | null {
+  // #657: the operator override comes FIRST, because it is the one source that knows a port
+  // the static profile cannot. `resolveDevServerPlan` is the single ladder that already
+  // resolves `health_url_<projectId>` over the profile over this app's worktree-port
+  // convention — reading its answer here is what stops the smoke gate from being a second,
+  // narrower precedence ladder that disagrees with the dev-server one.
+  //
+  // A plan-derived URL counts as `explicit` when the plan did not merely guess it off a port:
+  // both a pref and a profile health route are routes a human named, while the worktree
+  // convention is arithmetic and is graded leniently for the same reason a guessed port is.
+  if (plan?.healthUrl?.trim()) {
+    return { url: plan.healthUrl.trim(), explicit: plan.source.healthUrl !== "worktree-port" };
+  }
   if (profile.devHealthUrl && profile.devHealthUrl.trim())
     return { url: profile.devHealthUrl.trim(), explicit: true };
   if (profile.devPort && profile.devPort > 0)
@@ -50,10 +66,13 @@ function smokeTimeoutSecondsFor(profile: StackProfile): number | undefined {
  * app-specific text, since the harness can't know a toy project's copy). A service with no HTML
  * passes on the 200 alone.
  */
-export function buildSmokeCheck(profile: StackProfile | null): SmokeCheck | null {
+export function buildSmokeCheck(profile: StackProfile | null, plan?: DevServerPlan | null): SmokeCheck | null {
   if (!profile || !profile.isWeb) return null;
-  if (!profile.devCommand || !profile.devCommand.trim()) return null;
-  const health = resolveHealthUrl(profile);
+  // The dev command follows the same rule as the health URL: an operator who told the board
+  // how to boot this project should not have to tell it twice (#657).
+  const devCommand = (plan?.command?.trim() || profile.devCommand?.trim()) ?? "";
+  if (!devCommand) return null;
+  const health = resolveHealthUrl(profile, plan);
   if (!health) return null;
 
   // Render assertion: for a browser UI the served document contains an <html>/<body> shell.
@@ -62,7 +81,7 @@ export function buildSmokeCheck(profile: StackProfile | null): SmokeCheck | null
   const expectBodyContains = isLikelyBrowserStack(profile) ? ["<html", "<body"] : [];
 
   return {
-    devCommand: profile.devCommand.trim(),
+    devCommand,
     healthUrl: health.url,
     expectBodyContains,
     // A guessed root URL against a JSON-only API answers 404 from a healthy server (#121), so
