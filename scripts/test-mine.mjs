@@ -362,17 +362,66 @@ function runPackage({ dir, label, exclude }, mode = null) {
     // No shell — pass argv as an array so globs reach vitest verbatim (vitest does
     // its own glob matching; the OS shell must NOT expand them). cwd = package dir
     // so vitest picks up that package's vitest.config.ts.
+    //
+    // #643: a `related` run carries `--passWithNoTests`, so a changed file that NO test
+    // imports (a config, a .sql, an asset, or a module nobody covers) exits 0 having asserted
+    // nothing — and the gate then reports "passed (tier: file-scoped, N changed files)". The
+    // run is therefore TEE'd rather than inherited: output still streams live, and we can also
+    // see whether vitest selected anything. `selectedNothing` is what the caller uses to fall
+    // back to the package suite instead of banking a green from an empty run.
+    const tee = mode?.kind === "related";
     const child = spawn(process.execPath, args, {
       cwd: pkgDir,
-      stdio: "inherit",
+      stdio: tee ? ["inherit", "pipe", "pipe"] : "inherit",
       windowsHide: true,
     });
-    child.on("exit", (code) => resolvePromise(code ?? 1));
+    let sawNoTestFiles = false;
+    if (tee) {
+      const watch = (stream, sink) => {
+        stream.on("data", (chunk) => {
+          sink.write(chunk);
+          if (/No test files found/i.test(chunk.toString())) sawNoTestFiles = true;
+        });
+      };
+      watch(child.stdout, process.stdout);
+      watch(child.stderr, process.stderr);
+    }
+    child.on("exit", (code) => resolvePromise({ code: code ?? 1, selectedNothing: sawNoTestFiles }));
     child.on("error", (err) => {
       console.error(`[test:mine] ${label} failed to start:`, err);
-      resolvePromise(1);
+      resolvePromise({ code: 1, selectedNothing: false });
     });
   });
+}
+
+/** Extensions whose change SHOULD be covered by some test — the ones worth falling back for. */
+const SOURCE_EXTENSIONS = /\.(ts|tsx|js|jsx|mjs|cjs)$/i;
+
+/**
+ * Run a package's file-scoped `related` selection, falling back to its FULL suite when that
+ * selection turned out to be empty for a real source change (#643).
+ *
+ * "Empty selection" is not a pass: `vitest related` selects by import graph, so a source file
+ * nobody imports — or imports only through a mechanism vitest cannot see — yields zero tests
+ * and a green exit. Falling back for source files keeps the cheap case cheap (a .sql/.json/
+ * asset change still selects nothing and still costs nothing) while refusing to bank a green
+ * from a run that asserted nothing about code.
+ */
+async function runRelatedWithFallback(pkg, files) {
+  const { code, selectedNothing } = await runPackage(pkg, { kind: "related", files });
+  if (!selectedNothing) return code;
+  const sourceChanges = files.filter((f) => SOURCE_EXTENSIONS.test(f));
+  if (sourceChanges.length === 0) {
+    console.log(
+      `[test:mine] ${pkg.label}: 0 tests selected for ${files.length} changed file(s) — none are source files, nothing to fall back to.`
+    );
+    return code;
+  }
+  console.warn(
+    `[test:mine] ${pkg.label}: 0 tests selected for ${sourceChanges.length} changed SOURCE file(s) — ` +
+      `a green here would assert nothing. Falling back to the package's full suite.`
+  );
+  return runPackage(pkg).then((r) => r.code);
 }
 
 /**
@@ -414,21 +463,21 @@ if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
       const upstream = upstreamChangedFiles(pkg.label);
       if (upstream.length > 0) {
         console.log(`\n[test:mine] ${pkg.label}: no own changes; file-scoped to ${upstream.length} upstream changed file(s)`);
-        if (await runPackage(pkg, { kind: "related", files: upstream }) !== 0) failed = true;
+        if (await runRelatedWithFallback(pkg, upstream) !== 0) failed = true;
         const guards = (ALWAYS_RUN_TESTS[pkg.label] ?? []).filter((f) => existsSync(resolve(ROOT, pkg.dir, f)));
-        if (guards.length > 0 && await runPackage(pkg, { kind: "guards", files: guards }) !== 0) failed = true;
+        if (guards.length > 0 && (await runPackage(pkg, { kind: "guards", files: guards })).code !== 0) failed = true;
         continue;
       }
     }
     if (relatedFiles.length === 0) {
       // Nothing of this package changed (or no file scope at all) — full suite, as before.
-      if (await runPackage(pkg) !== 0) failed = true;
+      if ((await runPackage(pkg)).code !== 0) failed = true;
       continue;
     }
     console.log(`\n[test:mine] ${pkg.label}: file-scoped to ${relatedFiles.length} changed file(s) (KANBAN_TEST_FILES)`);
-    if (await runPackage(pkg, { kind: "related", files: relatedFiles }) !== 0) failed = true;
+    if (await runRelatedWithFallback(pkg, relatedFiles) !== 0) failed = true;
     const guards = (ALWAYS_RUN_TESTS[pkg.label] ?? []).filter((f) => existsSync(resolve(ROOT, pkg.dir, f)));
-    if (guards.length > 0 && await runPackage(pkg, { kind: "guards", files: guards }) !== 0) failed = true;
+    if (guards.length > 0 && (await runPackage(pkg, { kind: "guards", files: guards })).code !== 0) failed = true;
   }
 
   if (failed) {

@@ -111,6 +111,28 @@ describe("scopedTestPackages", () => {
     expect(a).toEqual(b);
     expect(a).toEqual(["shared", "server", "mcp-server"]);
   });
+  /**
+   * #643 — the global scope-breakers were ROOT-anchored, so a PER-PACKAGE package.json or
+   * vitest.config.ts scoped like an ordinary source file. A dependency bump or a vitest-config
+   * change (environment, setup files, pool, timeouts) can alter how every suite behaves,
+   * including suites in other packages, so it must forfeit scoping like its root equivalents.
+   */
+  it.each([
+    ["packages/client/package.json"],
+    ["packages/server/package.json"],
+    ["packages/shared/vitest.config.ts"],
+    ["packages/server/vitest.workspace.mts"],
+    ["packages/client/tsconfig.app.json"],
+  ])("refuses to scope a per-package config change: %s (#643)", (file) => {
+    expect(scopedTestPackages([file])).toBeNull();
+    // …and it breaks scope for the whole diff, not just its own package.
+    expect(scopedTestPackages(["packages/server/src/index.ts", file])).toBeNull();
+  });
+
+  it("still scopes an ordinary source file next to those names", () => {
+    expect(scopedTestPackages(["packages/client/src/package.json.ts"])).toEqual(["shared", "client"]);
+    expect(scopedTestPackages(["packages/server/src/config/vitest.config.helper.ts"])).toEqual(["shared", "server"]);
+  });
 });
 
 describe("testPackagesEnvValue", () => {
