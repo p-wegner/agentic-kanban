@@ -63,26 +63,10 @@ export function createSessionLifecycle(
   /** Create a session DB row and launch the agent process. */
   async function startSession(opts: StartSessionOptions): Promise<string> {
     const {
-      workspaceId,
-      prompt,
-      agentCommand,
-      agentArgs,
-      resumeFromId,
-      multiTurn,
-      permissionPromptTool,
-      planMode,
-      resumeWithNewModel,
-      provider,
-      triggerType,
-      profile,
-      model,
-      contextFiles,
-      extraEnv,
-      workingDirOverride,
-      skipLaunchPreflight,
-      skipPermissions: skipPermissionsOpt,
-      systemInstructions,
-      placement,
+      workspaceId, prompt, agentCommand, agentArgs, resumeFromId, multiTurn,
+      permissionPromptTool, planMode, resumeWithNewModel, provider, triggerType, profile,
+      model, contextFiles, extraEnv, workingDirOverride, skipLaunchPreflight,
+      skipPermissions: skipPermissionsOpt, systemInstructions, placement,
     } = opts;
 
     // Look up workspace to get workingDir
@@ -384,9 +368,8 @@ export function createSessionLifecycle(
         // (see `applyAuthFailureRecovery`: it rotates off a dead login and returns true when it
         // parked the workspace `blocked` instead, which is what stops the retry loop).
         const authHandled = isStaleResume ? false : await applyAuthFailureRecovery(db, {
-          // #528: was `profile?.name ?? claudeProfile`, which for a codex/copilot launch with
-          // no provider profile set would record the failure streak against the CLAUDE profile
-          // name under this session's (non-claude) provider.
+          // #528: `?? claudeProfile` here blamed the CLAUDE profile name under a
+          // non-claude provider.
           provider: narrowProviderName(executor), profileName: profile?.name,
           errorText: errorText || capturedStderr, workspaceId, projectId, sessionId, now: endNow,
           setWorkspaceStatus: (status) => lifecycleRepo.updateWorkspaceStatus(workspaceId, status, endNow, db),
@@ -642,26 +625,13 @@ export function createSessionLifecycle(
         sessionId,
         prompt: effectivePrompt,
         agentArgs: effectiveAgentArgs,
-        // #524: these fifteen values used to TRAIL the callback below as positional
-        // arguments, so reading the call meant counting commas past a multi-line closure.
-        // Named fields, same values.
-        //
-        // When resumeWithNewModel is true, omit --resume so the new profile/provider is
-        // used instead.
+        // resumeWithNewModel omits --resume so the new profile/provider is used instead.
         providerSessionId: resumeWithNewModel ? undefined : providerSessionId,
-        agentCommand,
-        keepAlive: multiTurn,
-        permissionPromptTool,
-        planMode,
-        provider,
-        profile: launchProfile,
-        extraEnv: effectiveExtraEnv,
-        skipPermissions,
-        model: effectiveModel,
-        contextFiles,
+        agentCommand, keepAlive: multiTurn, permissionPromptTool, planMode,
+        provider, profile: launchProfile, extraEnv: effectiveExtraEnv, skipPermissions,
+        model: effectiveModel, contextFiles,
         systemInstructions: (effectiveSystemInstructions ?? "").trim() || undefined,
-        containerProvision,
-        placement: effectivePlacement,
+        containerProvision, placement: effectivePlacement,
         onOutput: (event) => {
           if (event.type === "exit") {
             if (state.sessionExitHandled.has(sessionId)) {
