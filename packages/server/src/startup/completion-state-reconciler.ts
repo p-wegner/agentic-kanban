@@ -3,19 +3,10 @@ import { sessions, workspaces, issues, projectStatuses } from "@agentic-kanban/s
 import type { Database } from "../db/index.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { workspaceHasCommittedWork } from "../services/workspace-commits.js";
+import { isPidAlive } from "../lib/pid.js";
 
 /** How long a workspace must be in 'active' with a live PID before we reconcile it (hung agent). */
 const HUNG_AGENT_THRESHOLD_MS = 30 * 60 * 1000;
-
-function isPidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "EPERM") return true;
-    return false;
-  }
-}
 
 /**
  * #539: was a private third implementation that spawned git raw, outside the git-service

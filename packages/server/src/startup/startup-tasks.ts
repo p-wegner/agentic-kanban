@@ -13,6 +13,7 @@ import type { SessionManager } from "../services/session.manager.js";
 import type { Database } from "../db/index.js";
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
+import { isPidAlive } from "../lib/pid.js";
 import { reconcileAncestorBranchWorkspaces } from "./ancestor-branch-reconciler.js";
 import { reconcileHandMergedBranches } from "./hand-merged-branch-reconciler.js";
 import { scanDoneUnmergedWorkspaces } from "./done-unmerged-invariant-scanner.js";
@@ -328,21 +329,11 @@ export async function cleanupStaleSessions(sessionManager: SessionManager, agent
   const dead = [];
   const alive = [];
   for (const s of staleSessions) {
-    if (s.pid) {
-      try {
-        process.kill(s.pid, 0);
-        alive.push(s);
-      } catch (err: unknown) {
-        // #574: EPERM means the process EXISTS but we may not signal it — the live PID
-        // poll in agent.service.ts already treats it as alive. Catching it here as "dead"
-        // marked an EPERM-protected live agent "stopped" on every single restart, and its
-        // workspace was then reset out from under a running process.
-        if ((err as NodeJS.ErrnoException).code === "EPERM") alive.push(s);
-        else dead.push(s);
-      }
-    } else {
-      dead.push(s);
-    }
+    // #574/#545: EPERM means the process EXISTS but we may not signal it. Catching it as
+    // "dead" here marked an EPERM-protected live agent "stopped" on every single restart and
+    // reset its workspace out from under a running process. `isPidAlive` owns that rule now.
+    if (s.pid && isPidAlive(s.pid)) alive.push(s);
+    else dead.push(s);
   }
   for (const s of dead) {
     await db.update(sessions).set({ status: "stopped", endedAt: now }).where(eq(sessions.id, s.id));

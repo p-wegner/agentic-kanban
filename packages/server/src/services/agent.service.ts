@@ -19,6 +19,7 @@ import {
 import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
 import { wrapLaunchConfigForContainer } from "./agent-provider/container-wrap.js";
 import { dockerExec } from "@agentic-kanban/shared/lib/docker-exec";
+import { isPidAlive as probePid } from "../lib/pid.js";
 
 function resolveWorktreeDevPorts(worktreePath: string): { serverPort: string; clientPort: string } | null {
   const ports = resolveWorktreeDevPortsShared(worktreePath);
@@ -238,15 +239,12 @@ function startPidWatcher(
   let closed = false;
   const timer = setInterval(() => {
     if (closed) return;
-    try {
-      process.kill(pid, 0);
-    } catch (err: unknown) {
-      // EPERM means the process exists but we lack permission to signal it — don't call onExit.
-      if ((err as NodeJS.ErrnoException).code === "EPERM") return;
-      closed = true;
-      clearInterval(timer);
-      onExit();
-    }
+    // #545: EPERM means the process exists but we lack permission to signal it, so it must
+    // NOT trigger onExit — `isPidAlive` is the one rule that encodes that.
+    if (probePid(pid)) return;
+    closed = true;
+    clearInterval(timer);
+    onExit();
   }, 5000);
   if (timer.unref) timer.unref();
   return {
@@ -707,15 +705,9 @@ export function getPid(sessionId: string): number | undefined {
 export function isPidAlive(sessionId: string): boolean {
   const pid = getPid(sessionId);
   if (!pid) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err: unknown) {
-    // EPERM means the process exists but we lack permission to signal it — treat as alive.
-    if ((err as NodeJS.ErrnoException).code === "EPERM") return true;
-    agentState.activePids.delete(sessionId);
-    return false;
-  }
+  if (probePid(pid)) return true;
+  agentState.activePids.delete(sessionId);
+  return false;
 }
 
 /**

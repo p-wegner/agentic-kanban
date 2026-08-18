@@ -8,6 +8,7 @@ import { PREF_RECONCILER_ZOMBIE_FIX_ENABLED } from "../constants/preference-keys
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { getMergeJob } from "../services/merge-job.service.js";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
+import { isPidAlive } from "../lib/pid.js";
 
 /** Grace window: a fix-and-merge session must be this old before it is a candidate. */
 const GRACE_WINDOW_MS = 60_000;
@@ -108,18 +109,9 @@ export async function reconcileZombieFixSessions(deps: ZombieFixSessionReconcile
   let recovered = 0;
 
   for (const s of fixOrReview) {
-    // Check if the process is still alive.
-    let processAlive = false;
-    if (s.pid != null) {
-      try {
-        process.kill(s.pid, 0); // No-op signal — just probes existence.
-        processAlive = true;
-      } catch {
-        processAlive = false;
-      }
-    }
-
-    if (processAlive) continue; // Real running session — leave it alone.
+    // #545: this probe used to read EPERM as DEAD, so an agent running under a protected
+    // PID would have been "recovered" out from under itself. `isPidAlive` is the one rule.
+    if (s.pid != null && isPidAlive(s.pid)) continue; // Real running session — leave it alone.
 
     // No PID yet: the launch may simply not have finished registering — give it the long
     // grace before treating the missing process as proof of death (#270).
