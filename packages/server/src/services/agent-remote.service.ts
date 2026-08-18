@@ -1,3 +1,4 @@
+import type { AgentLaunchRequest } from "./agent-dispatch.service.js";
 import { resolveEffectivePrompt } from "./agent-provider/context-files-prompt.js";
 // Remote agent execution over a fleet worker's WebSocket (epic #1, phase 1c #5).
 //
@@ -23,16 +24,15 @@ import { resolveEffectivePrompt } from "./agent-provider/context-files-prompt.js
 //    does not reconnect within the grace window, the session is finalized with
 //    a synthesized stderr + exit(1) so it never hangs "running" forever.
 
-import { buildAgentLaunchConfig, type ProviderId, type ProviderName } from "./agent-provider.js";
+import { buildAgentLaunchConfig } from "./agent-provider.js";
 import { resolveLaunchPorts, buildAgentSpawnEnv, resolveAgentHangTimeoutMs } from "../lib/agent-launch-env.js";
 import { buildRemoteSpecEnv } from "../lib/remote-spec-env.js";
 import { resolveWorktreeDevPorts } from "./worktree-ports.js";
 import { db as realDb } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { updateSessionWorkerId } from "../repositories/worker.repository.js";
-import type { AgentExecutionService, AgentHandle, Placement } from "./agent-dispatch.service.js";
+import type { AgentExecutionService, AgentHandle } from "./agent-dispatch.service.js";
 import type { AgentOutputCallback } from "./agent.service.js";
-import type { ContainerProvision } from "./devcontainer-workspace.service.js";
 import type { WorkerConnectionManager } from "./worker-connection.service.js";
 import { ensureGitHttpServer } from "./git-http.service.js";
 import { syncIncomingBranch, clearIncomingRef, incomingRefFor } from "./worker-remote-sync.service.js";
@@ -183,28 +183,16 @@ export function createRemoteAgentService(
     }
   });
 
-  function launch(
-    worktreePath: string,
-    sessionId: string,
-    prompt: string,
-    agentArgs: string | undefined,
-    onOutput: AgentOutputCallback,
-    providerSessionId?: string,
-    agentCommand?: string,
-    claudeProfile?: string,
-    keepAlive?: boolean,
-    permissionPromptTool?: string,
-    planMode?: boolean,
-    provider?: ProviderId,
-    profile?: { provider: ProviderName; name: string },
-    extraEnv?: Record<string, string>,
-    skipPermissions?: boolean,
-    model?: string,
-    contextFiles?: string[],
-    systemInstructions?: string,
-    _containerProvision?: ContainerProvision,
-    placement?: Placement,
-  ): AgentHandle {
+  function launch(request: AgentLaunchRequest): AgentHandle {
+    // #524: one object instead of twenty positional parameters. `_containerProvision`
+    // stays unread here — a remote worker provisions its own environment — and that is
+    // now visible as an unused FIELD rather than a placeholder in argument position 19.
+    const {
+      worktreePath, sessionId, prompt, agentArgs, onOutput,
+      providerSessionId, agentCommand, claudeProfile, keepAlive, permissionPromptTool,
+      planMode, provider, profile, extraEnv, skipPermissions,
+      model, contextFiles, systemInstructions, placement,
+    } = request;
     if (placement?.kind !== "remote") {
       throw new Error("remote agent service requires a remote placement");
     }

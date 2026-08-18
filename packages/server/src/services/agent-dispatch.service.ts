@@ -81,29 +81,45 @@ export interface AgentHandle {
  * (remote worker) can be substituted per session. The real agent.service
  * module satisfies this structurally.
  */
+/**
+ * Everything a launch needs, as ONE object (#524).
+ *
+ * This was twenty POSITIONAL parameters, re-typed in three places and relayed
+ * positionally three more — so every new knob (six so far: skipPermissions, model,
+ * contextFiles, systemInstructions, containerProvision, placement) meant appending an
+ * argument at six sites in the right order. Two adjacent optionals of the same type
+ * transpose silently; with named fields that becomes a compile error, and a field an
+ * implementation forgets to read is visible rather than being "argument 17".
+ */
+export interface AgentLaunchRequest {
+  worktreePath: string;
+  sessionId: string;
+  prompt: string;
+  agentArgs: string | undefined;
+  onOutput: AgentOutputCallback;
+  providerSessionId?: string;
+  agentCommand?: string;
+  claudeProfile?: string;
+  keepAlive?: boolean;
+  permissionPromptTool?: string;
+  planMode?: boolean;
+  provider?: ProviderId;
+  profile?: { provider: ProviderName; name: string };
+  extraEnv?: Record<string, string>;
+  skipPermissions?: boolean;
+  model?: string;
+  contextFiles?: string[];
+  systemInstructions?: string;
+  /**
+   * When present the agent runs INSIDE this provisioned devcontainer instead of on the
+   * host. Provisioning is async and happens in the caller; launching stays synchronous.
+   */
+  containerProvision?: ContainerProvision;
+  placement?: Placement;
+}
+
 export interface AgentExecutionService {
-  launch(
-    worktreePath: string,
-    sessionId: string,
-    prompt: string,
-    agentArgs: string | undefined,
-    onOutput: AgentOutputCallback,
-    providerSessionId?: string,
-    agentCommand?: string,
-    claudeProfile?: string,
-    keepAlive?: boolean,
-    permissionPromptTool?: string,
-    planMode?: boolean,
-    provider?: ProviderId,
-    profile?: { provider: ProviderName; name: string },
-    extraEnv?: Record<string, string>,
-    skipPermissions?: boolean,
-    model?: string,
-    contextFiles?: string[],
-    systemInstructions?: string,
-    containerProvision?: ContainerProvision,
-    placement?: Placement,
-  ): AgentHandle;
+  launch(request: AgentLaunchRequest): AgentHandle;
   kill(sessionId: string): boolean;
   sendInput(sessionId: string, content: string): boolean;
   closeStdin(sessionId: string): boolean;
@@ -149,25 +165,17 @@ export function createAgentDispatch(implementations: AgentDispatchImplementation
     bySession.get(sessionId) ?? implementations.host;
 
   return {
-    launch(
-      worktreePath, sessionId, prompt, agentArgs, onOutput,
-      providerSessionId, agentCommand, claudeProfile, keepAlive, permissionPromptTool,
-      planMode, provider, profile, extraEnv, skipPermissions,
-      model, contextFiles, systemInstructions, containerProvision, placement,
-    ) {
+    launch(request) {
+      const { sessionId, placement, onOutput } = request;
       const impl = resolveImplementation(sessionId, placement);
       bySession.set(sessionId, impl);
       const onOutputWithCleanup: AgentOutputCallback = (event) => {
         if (event.type === "exit") bySession.delete(sessionId);
         onOutput(event);
       };
+      const relayed: AgentLaunchRequest = { ...request, onOutput: onOutputWithCleanup };
       try {
-        return impl.launch(
-          worktreePath, sessionId, prompt, agentArgs, onOutputWithCleanup,
-          providerSessionId, agentCommand, claudeProfile, keepAlive, permissionPromptTool,
-          planMode, provider, profile, extraEnv, skipPermissions,
-          model, contextFiles, systemInstructions, containerProvision, placement,
-        );
+        return impl.launch(relayed);
       } catch (err) {
         // A remote launch can race the worker disconnecting between placement
         // and assign. Degrade to host rather than failing the session — UNLESS
@@ -188,12 +196,9 @@ export function createAgentDispatch(implementations: AgentDispatchImplementation
           `[agent-dispatch] non-host launch failed (${errorMessage(err)}); falling back to host: sessionId=${sessionId}`,
         );
         bySession.set(sessionId, implementations.host);
-        return implementations.host.launch(
-          worktreePath, sessionId, prompt, agentArgs, onOutputWithCleanup,
-          providerSessionId, agentCommand, claudeProfile, keepAlive, permissionPromptTool,
-          planMode, provider, profile, extraEnv, skipPermissions,
-          model, contextFiles, systemInstructions, containerProvision, { kind: "host" },
-        );
+        // The fallback differs from the relayed request in exactly one field, which is
+        // now visible instead of being the twentieth positional argument.
+        return implementations.host.launch({ ...relayed, placement: { kind: "host" } });
       }
     },
     kill(sessionId) {

@@ -76,12 +76,11 @@ describe("worker dispatch e2e (phase 1c)", () => {
   });
 
   function launchRemote(sessionId: string, onOutput: (e: AgentOutputEvent) => void, keepAlive = false) {
-    return dispatch.launch(
-      tmpdir(), sessionId, "the-prompt", undefined, onOutput,
-      undefined, `node ${scriptPath}`, undefined, keepAlive, undefined,
-      undefined, undefined, undefined, undefined, undefined,
-      undefined, undefined, undefined, undefined, { kind: "remote", workerId: daemon.workerId },
-    );
+    return dispatch.launch({
+      worktreePath: tmpdir(), sessionId, prompt: "the-prompt", agentArgs: undefined, onOutput,
+      agentCommand: `node ${scriptPath}`, keepAlive,
+      placement: { kind: "remote", workerId: daemon.workerId },
+    });
   }
 
   it("runs a dispatched session on the worker and streams events back", async () => {

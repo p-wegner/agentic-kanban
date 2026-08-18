@@ -26,12 +26,11 @@ function launchOn(
   placement?: Placement,
   onOutput: AgentOutputCallback = () => {},
 ) {
-  return dispatch.launch(
-    "/worktree", sessionId, "do the thing", undefined, onOutput,
-    undefined, undefined, undefined, undefined, undefined,
-    undefined, undefined, undefined, undefined, undefined,
-    undefined, undefined, undefined, undefined, placement,
-  );
+  // #524: was fifteen `undefined`s positioned so that `placement` landed in slot 20.
+  return dispatch.launch({
+    worktreePath: "/worktree", sessionId, prompt: "do the thing",
+    agentArgs: undefined, onOutput, placement,
+  });
 }
 
 describe("agent-dispatch", () => {
@@ -99,7 +98,10 @@ describe("agent-dispatch", () => {
     launchOn(dispatch, "s1", { kind: "remote", workerId: "w1" }, (e) => seen.push(e.type));
 
     // The wrapped callback passed to the implementation is what fires events.
-    const wrapped = (remote.launch as ReturnType<typeof vi.fn>).mock.calls[0][4] as AgentOutputCallback;
+    // #524: read by NAME. This was `mock.calls[0][4]` — the test knew onOutput was the
+    // fifth positional argument, so appending a parameter anywhere before it would have
+    // broken this assertion for reasons having nothing to do with what it checks.
+    const wrapped = (remote.launch as ReturnType<typeof vi.fn>).mock.calls[0][0].onOutput as AgentOutputCallback;
     wrapped({ type: "stdout", sessionId: "s1", data: "x" });
     expect(seen).toEqual(["stdout"]);
     dispatch.sendInput("s1", "still remote");

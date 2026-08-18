@@ -75,7 +75,13 @@ describe("agent.service", () => {
       (spawnMock as any).mockReturnValue(mockProc);
 
       const onOutput = vi.fn();
-      launch("/tmp/worktree", "sess-1", "test prompt", undefined, onOutput);
+      launch({
+        worktreePath: "/tmp/worktree",
+        sessionId: "sess-1",
+        prompt: "test prompt",
+        agentArgs: undefined,
+        onOutput: onOutput,
+      });
 
       expect(spawnMock).toHaveBeenCalled();
       const [cmd, _args, opts] = (spawnMock as any).mock.calls[0];
@@ -89,25 +95,15 @@ describe("agent.service", () => {
       (spawnMock as any).mockReturnValue(mockProc);
       (readFileSync as any).mockReturnValue("# Ticket context\n\nPrimer");
 
-      launch(
-        "/tmp/worktree",
-        "sess-codex-context",
-        "test prompt",
-        undefined,
-        vi.fn(),
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        "codex",
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        ["/tmp/worktree/CLAUDE.local.md"],
-      );
+      launch({
+        worktreePath: "/tmp/worktree",
+        sessionId: "sess-codex-context",
+        prompt: "test prompt",
+        agentArgs: undefined,
+        onOutput: vi.fn(),
+        provider: "codex",
+        contextFiles: ["/tmp/worktree/CLAUDE.local.md"],
+      });
 
       expect(mockProc.stdin.end).toHaveBeenCalledWith(expect.stringContaining("[Attached context files]"));
       expect(mockProc.stdin.end).toHaveBeenCalledWith(expect.stringContaining("# Ticket context"));
@@ -129,20 +125,14 @@ describe("agent.service", () => {
         path.endsWith(".claude/skills/kanban-workflow/SKILL.md")
       );
 
-      launch(
-        "C:\\repo\\worktree",
-        "sess-pi-skills",
-        "test prompt",
-        undefined,
-        vi.fn(),
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        "pi",
-      );
+      launch({
+        worktreePath: "C:\\repo\\worktree",
+        sessionId: "sess-pi-skills",
+        prompt: "test prompt",
+        agentArgs: undefined,
+        onOutput: vi.fn(),
+        provider: "pi",
+      });
 
       const [, args] = (spawnMock as any).mock.calls[0];
       expect(args).toContain("--extension");
@@ -156,7 +146,13 @@ describe("agent.service", () => {
       (spawnMock as any).mockReturnValue(mockProc);
 
       const onOutput = vi.fn();
-      launch("/tmp", "sess-2", "prompt", undefined, onOutput);
+      launch({
+        worktreePath: "/tmp",
+        sessionId: "sess-2",
+        prompt: "prompt",
+        agentArgs: undefined,
+        onOutput: onOutput,
+      });
 
       expect(mockProc.stdout.on).toHaveBeenCalledWith("data", expect.any(Function));
       expect(mockProc.stderr.on).toHaveBeenCalledWith("data", expect.any(Function));
@@ -169,7 +165,13 @@ describe("agent.service", () => {
       (spawnMock as any).mockReturnValue(mockProc);
 
       const onOutput = vi.fn();
-      launch("/tmp", "sess-3", "prompt", undefined, onOutput);
+      launch({
+        worktreePath: "/tmp",
+        sessionId: "sess-3",
+        prompt: "prompt",
+        agentArgs: undefined,
+        onOutput: onOutput,
+      });
 
       // Find the stdout data handler
       const stdoutHandler = mockProc.stdout.on.mock.calls.find(
@@ -189,7 +191,13 @@ describe("agent.service", () => {
       (spawnMock as any).mockReturnValue(mockProc);
 
       const onOutput = vi.fn();
-      launch("/tmp", "sess-4", "prompt", undefined, onOutput);
+      launch({
+        worktreePath: "/tmp",
+        sessionId: "sess-4",
+        prompt: "prompt",
+        agentArgs: undefined,
+        onOutput: onOutput,
+      });
 
       const stderrHandler = mockProc.stderr.on.mock.calls.find(
         (c: any[]) => c[0] === "data",
@@ -208,7 +216,13 @@ describe("agent.service", () => {
       (spawnMock as any).mockReturnValue(mockProc);
 
       const onOutput = vi.fn();
-      launch("/tmp", "sess-5", "prompt", undefined, onOutput);
+      launch({
+        worktreePath: "/tmp",
+        sessionId: "sess-5",
+        prompt: "prompt",
+        agentArgs: undefined,
+        onOutput: onOutput,
+      });
 
       const exitHandler = mockProc.on.mock.calls.find(
         (c: any[]) => c[0] === "exit",
@@ -233,7 +247,13 @@ describe("agent.service", () => {
         if (callCount === 1) throw new Error("boom");
       });
 
-      launch("/tmp", "sess-6", "prompt", undefined, badCallback);
+      launch({
+        worktreePath: "/tmp",
+        sessionId: "sess-6",
+        prompt: "prompt",
+        agentArgs: undefined,
+        onOutput: badCallback,
+      });
 
       // Trigger stdout (which will throw) then exit (should still fire)
       const stdoutHandler = mockProc.stdout.on.mock.calls.find(
@@ -255,7 +275,14 @@ describe("agent.service", () => {
       const mockProc = createMockProc();
       (spawnMock as any).mockReturnValue(mockProc);
 
-      launch("/tmp", "sess-7", "prompt", undefined, vi.fn(), "claude-sess-id");
+      launch({
+        worktreePath: "/tmp",
+        sessionId: "sess-7",
+        prompt: "prompt",
+        agentArgs: undefined,
+        onOutput: vi.fn(),
+        providerSessionId: "claude-sess-id",
+      });
 
       const args = (spawnMock as any).mock.calls[0][1] as string[];
       expect(args).toContain("--resume");
@@ -266,7 +293,14 @@ describe("agent.service", () => {
       const mockProc = createMockProc();
       (spawnMock as any).mockReturnValue(mockProc);
 
-      launch("/tmp", "sess-8", "prompt", undefined, vi.fn(), undefined, undefined, undefined, true);
+      launch({
+        worktreePath: "/tmp",
+        sessionId: "sess-8",
+        prompt: "prompt",
+        agentArgs: undefined,
+        onOutput: vi.fn(),
+        keepAlive: true,
+      });
 
       const args = (spawnMock as any).mock.calls[0][1] as string[];
       expect(args).toContain("--profile");
@@ -277,7 +311,14 @@ describe("agent.service", () => {
       const mockProc = createMockProc();
       (spawnMock as any).mockReturnValue(mockProc);
 
-      launch("/tmp", "sess-9", "hello world", undefined, vi.fn(), undefined, undefined, undefined, true);
+      launch({
+        worktreePath: "/tmp",
+        sessionId: "sess-9",
+        prompt: "hello world",
+        agentArgs: undefined,
+        onOutput: vi.fn(),
+        keepAlive: true,
+      });
 
       expect(mockProc.stdin.write).toHaveBeenCalledWith("hello world\n");
       expect(isStdinOpen("sess-9")).toBe(true);
@@ -298,10 +339,17 @@ describe("agent.service", () => {
 
         // provider=claude (12th arg), keepAlive=true (9th arg), agentCommand="claude"
         // keeps it on the shell/attached path so no detached file descriptors are needed.
-        launch(
-          "/tmp/wt", "sess-fam", "resolve the conflict", undefined, vi.fn(),
-          undefined, "claude", undefined, true, undefined, false, "claude",
-        );
+        launch({
+          worktreePath: "/tmp/wt",
+          sessionId: "sess-fam",
+          prompt: "resolve the conflict",
+          agentArgs: undefined,
+          onOutput: vi.fn(),
+          agentCommand: "claude",
+          keepAlive: true,
+          planMode: false,
+          provider: "claude",
+        });
 
         expect(mockProc.stdin.end).toHaveBeenCalledWith("resolve the conflict\n");
         expect(mockProc.stdin.write).not.toHaveBeenCalled();
@@ -314,7 +362,13 @@ describe("agent.service", () => {
       (spawnMock as any).mockReturnValue(mockProc);
 
       const onOutput = vi.fn();
-      launch("/tmp", "sess-10", "prompt", undefined, onOutput);
+      launch({
+        worktreePath: "/tmp",
+        sessionId: "sess-10",
+        prompt: "prompt",
+        agentArgs: undefined,
+        onOutput: onOutput,
+      });
 
       const errorHandler = mockProc.on.mock.calls.find(
         (c: any[]) => c[0] === "error",
@@ -341,7 +395,13 @@ describe("agent.service", () => {
       (spawnMock as any).mockReturnValue(mockProc);
 
       process.env.KANBAN_SERVER_PORT = "3005";
-      launch("/tmp", "sess-11", "prompt", undefined, vi.fn());
+      launch({
+        worktreePath: "/tmp",
+        sessionId: "sess-11",
+        prompt: "prompt",
+        agentArgs: undefined,
+        onOutput: vi.fn(),
+      });
 
       const opts = (spawnMock as any).mock.calls[0][2];
       expect(opts.env.KANBAN_SERVER_PORT).toBe("3005");
@@ -356,7 +416,13 @@ describe("agent.service", () => {
 
       process.env.KANBAN_SERVER_PORT = "3001";
       process.env.KANBAN_CLIENT_PORT = "5173";
-      launch("C:\\andrena\\.worktrees\\feature_ak-145-workflow-analytics-drilldown", "sess-ports", "prompt", undefined, vi.fn());
+      launch({
+        worktreePath: "C:\\andrena\\.worktrees\\feature_ak-145-workflow-analytics-drilldown",
+        sessionId: "sess-ports",
+        prompt: "prompt",
+        agentArgs: undefined,
+        onOutput: vi.fn(),
+      });
 
       const opts = (spawnMock as any).mock.calls[0][2];
       expect(opts.env.KANBAN_BOARD_SERVER_PORT).toBe("3001");
@@ -398,7 +464,15 @@ describe("agent.service", () => {
 
       // agentCommand "claude" → useShell on Windows → attached pipe mode (deterministic
       // in tests, no file watcher). isMockAgent stays false so the watchdog arms.
-      launch("/tmp", "hang-1", "prompt", undefined, onOutput, undefined, "claude", undefined, undefined, undefined, undefined, "claude");
+      launch({
+        worktreePath: "/tmp",
+        sessionId: "hang-1",
+        prompt: "prompt",
+        agentArgs: undefined,
+        onOutput: onOutput,
+        agentCommand: "claude",
+        provider: "claude",
+      });
       expect(getProcess("hang-1")).toBeDefined();
 
       vi.advanceTimersByTime(1001);
@@ -419,7 +493,15 @@ describe("agent.service", () => {
       (spawnMock as any).mockReturnValue(mockProc);
       const onOutput = vi.fn();
 
-      launch("/tmp", "hang-2", "prompt", undefined, onOutput, undefined, "claude", undefined, undefined, undefined, undefined, "claude");
+      launch({
+        worktreePath: "/tmp",
+        sessionId: "hang-2",
+        prompt: "prompt",
+        agentArgs: undefined,
+        onOutput: onOutput,
+        agentCommand: "claude",
+        provider: "claude",
+      });
 
       const stdoutHandler = mockProc.stdout.on.mock.calls.find(
         (c: any[]) => c[0] === "data",
@@ -445,7 +527,15 @@ describe("agent.service", () => {
       (spawnMock as any).mockReturnValue(mockProc);
       const onOutput = vi.fn();
 
-      launch("/tmp", "hang-3", "prompt", undefined, onOutput, undefined, "claude", undefined, undefined, undefined, undefined, "claude");
+      launch({
+        worktreePath: "/tmp",
+        sessionId: "hang-3",
+        prompt: "prompt",
+        agentArgs: undefined,
+        onOutput: onOutput,
+        agentCommand: "claude",
+        provider: "claude",
+      });
       vi.advanceTimersByTime(60_000);
 
       const hangCalls = onOutput.mock.calls.filter(
@@ -465,7 +555,13 @@ describe("agent.service", () => {
       const mockProc = createMockProc();
       (spawnMock as any).mockReturnValue(mockProc);
 
-      launch("/tmp", "kill-1", "prompt", undefined, vi.fn());
+      launch({
+        worktreePath: "/tmp",
+        sessionId: "kill-1",
+        prompt: "prompt",
+        agentArgs: undefined,
+        onOutput: vi.fn(),
+      });
       expect(getProcess("kill-1")).toBeDefined();
 
       const result = kill("kill-1");
@@ -482,8 +578,20 @@ describe("agent.service", () => {
 
     it("kills all tracked processes and returns count", () => {
       (spawnMock as any).mockReturnValue(createMockProc());
-      launch("/tmp", "ka-1", "prompt", undefined, vi.fn());
-      launch("/tmp", "ka-2", "prompt", undefined, vi.fn());
+      launch({
+        worktreePath: "/tmp",
+        sessionId: "ka-1",
+        prompt: "prompt",
+        agentArgs: undefined,
+        onOutput: vi.fn(),
+      });
+      launch({
+        worktreePath: "/tmp",
+        sessionId: "ka-2",
+        prompt: "prompt",
+        agentArgs: undefined,
+        onOutput: vi.fn(),
+      });
 
       const count = killAll();
       expect(count).toBe(2);
@@ -508,12 +616,16 @@ describe("agent.service", () => {
       (spawnMock as any).mockReturnValue(mockProc);
       const containerProvision = makeContainerProvision("container-abc123");
 
-      launch(
-        "/tmp", "sess-container-1", "prompt", undefined, vi.fn(),
-        undefined, "claude", undefined, undefined, undefined, undefined, "claude",
-        undefined, undefined, undefined, undefined, undefined, undefined,
-        containerProvision,
-      );
+      launch({
+        worktreePath: "/tmp",
+        sessionId: "sess-container-1",
+        prompt: "prompt",
+        agentArgs: undefined,
+        onOutput: vi.fn(),
+        agentCommand: "claude",
+        provider: "claude",
+        containerProvision: containerProvision,
+      });
 
       const result = kill("sess-container-1");
 
@@ -525,13 +637,23 @@ describe("agent.service", () => {
 
     it("killAll() sends docker kill for every containerized session", () => {
       (spawnMock as any).mockReturnValue(createMockProc());
-      launch(
-        "/tmp", "sess-container-2", "prompt", undefined, vi.fn(),
-        undefined, "claude", undefined, undefined, undefined, undefined, "claude",
-        undefined, undefined, undefined, undefined, undefined, undefined,
-        makeContainerProvision("container-def456"),
-      );
-      launch("/tmp", "sess-host-only", "prompt", undefined, vi.fn());
+      launch({
+        worktreePath: "/tmp",
+        sessionId: "sess-container-2",
+        prompt: "prompt",
+        agentArgs: undefined,
+        onOutput: vi.fn(),
+        agentCommand: "claude",
+        provider: "claude",
+        containerProvision: makeContainerProvision("container-def456"),
+      });
+      launch({
+        worktreePath: "/tmp",
+        sessionId: "sess-host-only",
+        prompt: "prompt",
+        agentArgs: undefined,
+        onOutput: vi.fn(),
+      });
 
       const count = killAll();
 
@@ -544,7 +666,13 @@ describe("agent.service", () => {
       const mockProc = createMockProc();
       (spawnMock as any).mockReturnValue(mockProc);
 
-      launch("/tmp", "sess-host-1", "prompt", undefined, vi.fn());
+      launch({
+        worktreePath: "/tmp",
+        sessionId: "sess-host-1",
+        prompt: "prompt",
+        agentArgs: undefined,
+        onOutput: vi.fn(),
+      });
       const result = kill("sess-host-1");
 
       expect(result).toBe(true);
@@ -556,12 +684,16 @@ describe("agent.service", () => {
     it("version-checks the pre-wrap agent CLI command, not the wrapped `docker`", () => {
       (spawnMock as any).mockReturnValue(createMockProc());
 
-      launch(
-        "/tmp", "sess-container-version", "prompt", undefined, vi.fn(),
-        undefined, "claude", undefined, undefined, undefined, undefined, "claude",
-        undefined, undefined, undefined, undefined, undefined, undefined,
-        makeContainerProvision("container-version1"),
-      );
+      launch({
+        worktreePath: "/tmp",
+        sessionId: "sess-container-version",
+        prompt: "prompt",
+        agentArgs: undefined,
+        onOutput: vi.fn(),
+        agentCommand: "claude",
+        provider: "claude",
+        containerProvision: makeContainerProvision("container-version1"),
+      });
 
       expect(warnIfCliVersionRiskyMock).toHaveBeenCalledTimes(1);
       const [, checkedCommand] = (warnIfCliVersionRiskyMock as any).mock.calls[0];
@@ -577,12 +709,17 @@ describe("agent.service", () => {
     it("carries session/extraEnv vars into the container's `-e` allowlist, not just the host docker client", () => {
       (spawnMock as any).mockReturnValue(createMockProc());
 
-      launch(
-        "/tmp", "sess-container-env", "prompt", undefined, vi.fn(),
-        undefined, "claude", undefined, undefined, undefined, undefined, "claude",
-        undefined, { KANBAN_CUSTOM_TEST: "abc123" }, undefined, undefined, undefined, undefined,
-        makeContainerProvision("container-env1"),
-      );
+      launch({
+        worktreePath: "/tmp",
+        sessionId: "sess-container-env",
+        prompt: "prompt",
+        agentArgs: undefined,
+        onOutput: vi.fn(),
+        agentCommand: "claude",
+        provider: "claude",
+        extraEnv: { KANBAN_CUSTOM_TEST: "abc123" },
+        containerProvision: makeContainerProvision("container-env1"),
+      });
 
       const [cmd, args, opts] = (spawnMock as any).mock.calls[0];
       expect(cmd).toBe("docker");
@@ -612,7 +749,14 @@ describe("agent.service", () => {
       const mockProc = createMockProc();
       (spawnMock as any).mockReturnValue(mockProc);
 
-      launch("/tmp", "stdin-1", "prompt", undefined, vi.fn(), undefined, undefined, undefined, true);
+      launch({
+        worktreePath: "/tmp",
+        sessionId: "stdin-1",
+        prompt: "prompt",
+        agentArgs: undefined,
+        onOutput: vi.fn(),
+        keepAlive: true,
+      });
       expect(isStdinOpen("stdin-1")).toBe(true);
 
       const result = sendInput("stdin-1", "follow up");
@@ -626,7 +770,14 @@ describe("agent.service", () => {
       const mockProc = createMockProc();
       (spawnMock as any).mockReturnValue(mockProc);
 
-      launch("/tmp", "stdin-2", "prompt", undefined, vi.fn(), undefined, undefined, undefined, true);
+      launch({
+        worktreePath: "/tmp",
+        sessionId: "stdin-2",
+        prompt: "prompt",
+        agentArgs: undefined,
+        onOutput: vi.fn(),
+        keepAlive: true,
+      });
       expect(isStdinOpen("stdin-2")).toBe(true);
 
       const result = closeStdin("stdin-2");

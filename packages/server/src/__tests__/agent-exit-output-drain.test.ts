@@ -62,7 +62,14 @@ describe("agent.service exit-before-output drain (#909)", () => {
     const onOutput = (e: any) => events.push({ type: e.type, data: e.data });
 
     // Launch as claude (no agentCommand) => detached file-poll path.
-    launch("/tmp", sessionId, "prompt", undefined, onOutput, undefined, undefined, undefined, undefined, undefined, undefined, "claude");
+    launch({
+      worktreePath: "/tmp",
+      sessionId: sessionId,
+      prompt: "prompt",
+      agentArgs: undefined,
+      onOutput: onOutput,
+      provider: "claude",
+    });
 
     // The detached launch opens the .out file (openSync "w"). Spawn is mocked, so the
     // "agent" never actually writes — we simulate its final-second output landing in
@@ -89,7 +96,14 @@ describe("agent.service exit-before-output drain (#909)", () => {
     const events: { type: string; data?: string }[] = [];
     const onOutput = (e: any) => events.push({ type: e.type, data: e.data });
 
-    launch("/tmp", sessionId, "prompt", undefined, onOutput, undefined, undefined, undefined, undefined, undefined, undefined, "claude");
+    launch({
+      worktreePath: "/tmp",
+      sessionId: sessionId,
+      prompt: "prompt",
+      agentArgs: undefined,
+      onOutput: onOutput,
+      provider: "claude",
+    });
 
     // First chunk consumed by a normal poll tick.
     appendFileSync(outPath, "first chunk ");
