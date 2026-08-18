@@ -1,7 +1,9 @@
 import { spawn } from "child_process";
 
 /**
- * Launch a dev server for the E2E run with extra environment applied.
+ * Run a command with extra environment applied — the E2E stack's dev servers, and the
+ * `test:system` lane, which needs KANBAN_E2E_SYSTEM=1 in an npm script on a platform
+ * with no `VAR=value cmd` prefix syntax.
  *
  * Usage: node web-server.mjs KEY=VALUE [KEY=VALUE ...] -- <command> [...args]
  *

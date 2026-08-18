@@ -41,6 +41,23 @@ async function findProjectByRepoPath(
   return projects.find((project) => normalizeRepoPath(project.repoPath) === targetPath) ?? null;
 }
 
+/**
+ * Registration derives a stack-aware setup script (#810) — for this monorepo, `pnpm install -r`.
+ * Every workspace a spec creates then runs it in its fresh worktree, and MEASURED on this repo
+ * that put `POST /api/workspaces` at 153s. A suite whose central object costs two and a half
+ * minutes to make is a suite nobody runs, which is #645's actual complaint. The specs assert
+ * board behaviour, not that a worktree can install dependencies, so the E2E project has no
+ * setup script.
+ */
+async function disableSetupScript(apiContext: APIRequestContext, projectId: string): Promise<void> {
+  const res = await apiContext.patch(`/api/projects/${projectId}`, {
+    data: { setupScript: null },
+  });
+  if (!res.ok()) {
+    console.warn(`[global-setup] could not clear the setup script (${res.status()}) — workspace creation will be slow`);
+  }
+}
+
 export async function ensureE2EProject(
   apiContext: APIRequestContext,
   repoPath: string,
@@ -55,6 +72,7 @@ export async function ensureE2EProject(
 
   if (registerRes.status() === 201) {
     const project: Project = await registerRes.json();
+    await disableSetupScript(apiContext, project.id);
     await apiContext.put("/api/preferences/active-project", {
       data: { projectId: project.id },
     });
@@ -67,6 +85,9 @@ export async function ensureE2EProject(
       throw new Error("Project registration reported a duplicate path, but the existing project was not found");
     }
 
+    // Also on the reuse path: the E2E database survives between runs, so a project created
+    // before this was added would otherwise keep its derived `pnpm install -r` forever.
+    await disableSetupScript(apiContext, existingProject.id);
     await apiContext.put("/api/preferences/active-project", {
       data: { projectId: existingProject.id },
     });
