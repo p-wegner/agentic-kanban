@@ -29,6 +29,18 @@ export function buildGateActive(): number {
 }
 
 /**
+ * Is a heavyweight verify/build/smoke task running right now (#581)?
+ *
+ * The monitor asks this before starting a builder: a gate at 6 workers plus a builder's own
+ * toolchain saturates the box, and a saturated box manufactures assertion failures in the
+ * slow real-git suites that pass everywhere else. Deliberately process-global, because the
+ * resource being protected is the machine, not a project.
+ */
+export function buildGateBusy(): boolean {
+  return active > 0;
+}
+
+/**
  * Run `task` under the build-concurrency gate: at most `buildGateConcurrency()` run at once; the
  * rest queue FIFO. Never rejects from the gate itself — a task's own rejection propagates to its
  * caller, and the slot is always released (finally), so one failing/hanging task can't wedge the
