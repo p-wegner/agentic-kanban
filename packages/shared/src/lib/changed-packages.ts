@@ -76,8 +76,18 @@ const IGNORABLE_UNOWNED_PATHS: ReadonlyArray<RegExp> = [
  * and bundle-safety gates (`max-file-size.test.ts` walks every package's files;
  * `barrel-client-safety.test.ts` reasons about what the client can import), and those are
  * exactly the checks a narrow, confident diff is most likely to violate.
+ *
+ * #647: `server` belongs here for the same reason and was missing. Most of the repo-wide
+ * guards actually live there — time-injection-spelling, windows-hide-spawn,
+ * start-policy-single-source, repo-path-literal, the always-run marker ratchet — so an
+ * mcp-only or client-only diff dropped EVERY one of them. That is the precise opposite of
+ * what a tree-scanning guard is for: the diffs least likely to be checked by their own
+ * package's suites were the ones that skipped the checks covering the whole tree.
+ *
+ * The cost is real (server is the largest suite) and is accepted: this list is the safety
+ * floor under scoping, and a floor that omits most of the guards is not a floor.
  */
-const ALWAYS_RUN: ReadonlyArray<TestPackageLabel> = ["shared"];
+const ALWAYS_RUN: ReadonlyArray<TestPackageLabel> = ["shared", "server"];
 
 /**
  * DOWNSTREAM dependents of each package (#241). Ownership is not the same as blast radius:

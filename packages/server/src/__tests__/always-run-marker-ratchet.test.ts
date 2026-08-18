@@ -31,13 +31,25 @@ import path from "node:path";
  */
 
 const packagesRoot = path.join(import.meta.dirname!, "..", "..", "..");
-const SCAN_PACKAGES = [
+/**
+ * #647: `client` was missing, so a client guard could match every unsound signature and never
+ * be asked for a marker. Not hypothetical — the client owns `fetch-in-effect-ratchet`, a
+ * repo-wide scan of exactly this shape. Kept in lockstep with `test-mine`'s
+ * `ALWAYS_RUN_TESTS_DIR` and the gate tier's `ALWAYS_RUN_TESTS_DIRS` by
+ * `always-run-dirs-lockstep.test.ts` — three lists describing one thing is how they drifted.
+ */
+export const SCAN_PACKAGES = [
   { label: "shared", testsDir: path.join(packagesRoot, "shared", "__tests__") },
   { label: "server", testsDir: path.join(packagesRoot, "server", "src", "__tests__") },
   { label: "mcp-server", testsDir: path.join(packagesRoot, "mcp-server", "src", "__tests__") },
+  { label: "client", testsDir: path.join(packagesRoot, "client", "src", "__tests__") },
 ];
 
 const MARKER = "@gate:always-run";
+
+/** Test-file extensions this ratchet inspects. `.tsx`/`.mjs` were invisible before #647 —
+ *  `test-mine-scope-derivation.test.mjs` carries the marker and was never even looked at. */
+const TEST_FILE = /\.test\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 
 /** A suite that spawns/requires/reads a script OUTSIDE its own package's `src` — vitest's
  *  import graph has no edge to it, so a diff that breaks the target script selects nothing. */
@@ -92,17 +104,34 @@ interface Offender {
   signatures: string[];
 }
 
+/** Every test file under a `__tests__` tree. Recursive since #647: the flat read never saw
+ *  `mcp-server/src/__tests__/tools/` (33 suites). */
+function collectTestFiles(testsDir: string, rel = ""): { name: string; rel: string; full: string }[] {
+  const dir = rel ? path.join(testsDir, rel) : testsDir;
+  if (!fs.existsSync(dir)) return [];
+  const out: { name: string; rel: string; full: string }[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const childRel = rel ? path.posix.join(rel, entry.name) : entry.name;
+    if (entry.isDirectory()) {
+      if (entry.name === "node_modules" || entry.name === "dist" || entry.name.startsWith(".")) continue;
+      out.push(...collectTestFiles(testsDir, childRel));
+      continue;
+    }
+    if (!TEST_FILE.test(entry.name)) continue;
+    out.push({ name: entry.name, rel: childRel, full: path.join(dir, entry.name) });
+  }
+  return out;
+}
+
 function scanTestsDir(testsDir: string): Offender[] {
-  if (!fs.existsSync(testsDir)) return [];
   const offenders: Offender[] = [];
-  for (const name of fs.readdirSync(testsDir)) {
-    if (!name.endsWith(".test.ts")) continue;
-    const full = path.join(testsDir, name);
+  for (const { name, rel, full } of collectTestFiles(testsDir)) {
     const source = fs.readFileSync(full, "utf8");
     if (source.includes(MARKER)) continue;
+    // Matched by BASENAME, so an allowlisted file keeps its exemption wherever it moves to.
     if (KNOWN_SAFE_UNMARKED.has(name)) continue;
     const matched = UNSOUND_SIGNATURES.filter((sig) => sig.pattern.test(source)).map((sig) => sig.name);
-    if (matched.length > 0) offenders.push({ file: name, signatures: matched });
+    if (matched.length > 0) offenders.push({ file: rel, signatures: matched });
   }
   return offenders;
 }
@@ -128,16 +157,40 @@ describe("always-run marker ratchet (#538)", () => {
 
   it("KNOWN_SAFE_UNMARKED entries are not stale", () => {
     const stale: string[] = [];
+    const byName = new Map<string, string>();
     for (const { testsDir } of SCAN_PACKAGES) {
-      if (!fs.existsSync(testsDir)) continue;
+      for (const f of collectTestFiles(testsDir)) byName.set(f.name, f.full);
+    }
+    {
       for (const name of KNOWN_SAFE_UNMARKED) {
-        const full = path.join(testsDir, name);
-        if (!fs.existsSync(full)) continue;
+        const full = byName.get(name);
+        if (!full) continue;
         const source = fs.readFileSync(full, "utf8");
         const stillMatches = UNSOUND_SIGNATURES.some((sig) => sig.pattern.test(source));
         if (!stillMatches) stale.push(`${name}: no longer matches any unsound signature — remove the entry`);
       }
     }
     expect(stale, `Stale KNOWN_SAFE_UNMARKED entries:\n${stale.join("\n")}`).toEqual([]);
+  });
+
+  /**
+   * #647 — the scan surface itself. A marker mechanism whose scan is narrower than the tree it
+   * claims to guard fails silently in the one direction that matters, so assert the reach
+   * rather than trusting it.
+   */
+  it("reaches every marked suite in every scanned package, at any depth", () => {
+    const marked: string[] = [];
+    for (const { label, testsDir } of SCAN_PACKAGES) {
+      for (const f of collectTestFiles(testsDir)) {
+        if (fs.readFileSync(f.full, "utf8").includes(MARKER)) marked.push(`${label}/${f.rel}`);
+      }
+    }
+    // Sanity floor: the mechanism is worthless if the walk finds nothing.
+    expect(marked.length).toBeGreaterThan(20);
+    // The two blind spots #647 named: a non-.ts suite, and a nested directory.
+    const serverFiles = collectTestFiles(SCAN_PACKAGES[1].testsDir);
+    expect(serverFiles.some((f) => f.name.endsWith(".test.mjs"))).toBe(true);
+    const mcpFiles = collectTestFiles(SCAN_PACKAGES[2].testsDir);
+    expect(mcpFiles.some((f) => f.rel.includes("/"))).toBe(true);
   });
 });

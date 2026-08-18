@@ -7,10 +7,12 @@ import { scopedTestPackages, testPackagesEnvValue } from "../src/lib/changed-pac
  * widely — every "I don't understand this path" case must come back as `null` (= run all).
  */
 describe("scopedTestPackages", () => {
-  it("scopes a client-only diff to client + the always-run shared suites", () => {
-    // `shared` is forced in because its suites scan the whole tree (max-file-size,
-    // barrel-client-safety) — a client-only diff can absolutely break those.
-    expect(scopedTestPackages(["packages/client/src/lib/viewRegistry.tsx"])).toEqual(["shared", "client"]);
+  it("scopes a client-only diff to client + the always-run tree-scanning suites", () => {
+    // `shared` and `server` are forced in because their suites scan the whole tree
+    // (max-file-size, barrel-client-safety in shared; time-injection, windows-hide-spawn,
+    // start-policy-single-source and the marker ratchet in server) — a client-only diff can
+    // absolutely break those, and #647 found it was skipping every server-side one.
+    expect(scopedTestPackages(["packages/client/src/lib/viewRegistry.tsx"])).toEqual(["shared", "server", "client"]);
   });
 
   it("scopes a server-only diff to server + shared", () => {
@@ -23,7 +25,7 @@ describe("scopedTestPackages", () => {
         "packages/client/src/App.tsx",
         "packages/mcp-server/src/index.ts",
       ]),
-    ).toEqual(["shared", "mcp-server", "client"]);
+    ).toEqual(["shared", "server", "mcp-server", "client"]);
   });
 
   it("refuses to scope an EMPTY diff — that is ignorance, not a small change", () => {
@@ -53,10 +55,12 @@ describe("scopedTestPackages", () => {
   it("does NOT treat .github/** or an unrelated scripts/ file as a global scope breaker", () => {
     expect(scopedTestPackages([".github/workflows/arch-gate.yml", "packages/client/src/App.tsx"])).toEqual([
       "shared",
+      "server",
       "client",
     ]);
     expect(scopedTestPackages(["scripts/board-monitor/loop.sh", "packages/client/src/App.tsx"])).toEqual([
       "shared",
+      "server",
       "client",
     ]);
   });
@@ -98,11 +102,13 @@ describe("scopedTestPackages", () => {
     ])).toBe("shared,server,mcp-server,client");
   });
 
-  it("does NOT let the always-run `shared` entry expand a narrow diff to everything", () => {
+  it("does NOT let the ALWAYS_RUN entries expand a narrow diff to everything", () => {
     // `shared` is forced in for every diff; if downstream expansion ran after that, scoping
-    // would degenerate to "run all packages" and the whole module would be pointless.
-    expect(scopedTestPackages(["packages/client/src/App.tsx"])).toEqual(["shared", "client"]);
+    // would degenerate to "run all packages" and the whole module would be pointless. The
+    // #647 addition of `server` must not reintroduce that: mcp-server and client stay out.
+    expect(scopedTestPackages(["packages/client/src/App.tsx"])).toEqual(["shared", "server", "client"]);
     expect(scopedTestPackages(["packages/server/src/index.ts"])).toEqual(["shared", "server"]);
+    expect(scopedTestPackages(["packages/mcp-server/src/x.ts"])).toEqual(["shared", "server", "mcp-server"]);
   });
 
   it("returns a stable order regardless of input order", () => {
@@ -130,7 +136,7 @@ describe("scopedTestPackages", () => {
   });
 
   it("still scopes an ordinary source file next to those names", () => {
-    expect(scopedTestPackages(["packages/client/src/package.json.ts"])).toEqual(["shared", "client"]);
+    expect(scopedTestPackages(["packages/client/src/package.json.ts"])).toEqual(["shared", "server", "client"]);
     expect(scopedTestPackages(["packages/server/src/config/vitest.config.helper.ts"])).toEqual(["shared", "server"]);
   });
 });
@@ -140,7 +146,7 @@ describe("testPackagesEnvValue", () => {
     // The old assertion here pinned the bug: it expected "shared", i.e. a client-only diff
     // running zero client tests. Inverted deliberately, because the pin is what would have
     // made an agent "fix" the test instead of the filter.
-    expect(testPackagesEnvValue(["packages/client/src/App.tsx"])).toBe("shared,client");
+    expect(testPackagesEnvValue(["packages/client/src/App.tsx"])).toBe("shared,server,client");
   });
 
   it("emits a comma-separated list for a multi-package diff", () => {
