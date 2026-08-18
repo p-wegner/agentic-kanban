@@ -65,7 +65,33 @@ async function resolveVerifyTimeoutMs(projectId: string, database: Database): Pr
  */
 export const DEFAULT_VERIFY_MAX_WORKERS = 2;
 
-/** Preference key for a per-project override of the verify-gate vitest worker cap. */
+/**
+ * Preference key for a per-project override of the verify-gate vitest worker cap
+ * (integer, clamped to 1..{@link MAX_VERIFY_WORKERS}; anything unparseable falls back to
+ * {@link DEFAULT_VERIFY_MAX_WORKERS}).
+ *
+ * **There is no UI for this** — it is set through the preferences API/CLI/MCP like any other
+ * project-scoped pref, which is why the revert procedure is written down here rather than in a
+ * settings panel description.
+ *
+ * **What raising it buys, measured (#536).** This repo's gate was CPU-bound at the 2-worker
+ * cap: 4127s of test CPU against 2380s wall, i.e. both workers ~87% busy on a 16-core box with
+ * 14 cores idle. Raising it to 6 cut the run to 1564s. Two effects made that safe rather than
+ * flaky: the 60s per-test timeouts were already in place, and #581 now holds builder launches
+ * while a gate runs (`quiesce_builders_during_gate`), so the six forks are not competing with
+ * an agent's own test run for the same box.
+ *
+ * **Revert procedure — one pref write, no deploy, no restart.** The value is read fresh on
+ * every gate run (`resolveVerifyMaxWorkers` below), so clearing the override takes effect on
+ * the next merge — set `verify_max_workers_<projectId>` back to `2` (the shipped default), or
+ * to the empty string, which the clamp turns into the same thing.
+ *
+ * **Revert when** the gate starts failing with timeout-class errors that pass on a re-run and
+ * on a solo run of the same suite — that is fork contention, not a real defect. Step down to 4
+ * before going back to 2; the win is sublinear, so half the workers is nowhere near half the
+ * benefit. A raise is per-project on purpose: it is a statement about THIS box's core count and
+ * what else runs on it, not about the code.
+ */
 export function verifyMaxWorkersPrefKey(projectId: string): string {
   return verifyMaxWorkersPrefDef.key(projectId);
 }
