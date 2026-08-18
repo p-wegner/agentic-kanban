@@ -4,6 +4,7 @@ import { apiFetch, apiPost } from "../lib/api.js";
 import { fetchProjectRepos } from "../lib/projectReposQuery.js";
 import { getSettings, setSettings } from "../lib/settingsStore.js";
 import { suggestBranchName, sanitizeBranchName } from "@agentic-kanban/shared/lib/branch";
+import { repoNameFromTag } from "@agentic-kanban/shared/lib/repo-tags";
 import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import type { IssueWithStatus, ProfileSelection, ProjectRepoResponse, WorkspaceResponse } from "@agentic-kanban/shared";
 import { defaultProfileToken, profileOptionLabel } from "@agentic-kanban/shared/lib/provider-traits";
@@ -125,13 +126,29 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
       apiFetch<{ local: string[]; remote: string[] }>(`/api/projects/${project.id}/branches`)
         .then((data) => setBranches(data))
         .catch(() => setBranches(null));
-      // Additional repos (multi-repo project). All checked by default so the
-      // default behavior fans out to every repo exactly like before (#91).
-      // Served from the shared repos cache (#403) — warm opens skip the network.
+      // Additional repos (multi-repo project). Served from the shared repos cache (#403) —
+      // warm opens skip the network.
+      //
+      // #634: the form used to open with EVERY repo checked, so scoping a documentation-only
+      // ticket on a 17-repo project meant unchecking 16 boxes one at a time — and each of
+      // those boxes is a real dependency install (one Maven repo measured 209 s warm). The
+      // default now comes from the ticket's own `repo:` tags when it has any, which is the
+      // same source `resolveEffectiveRepoScope` uses server-side (#629), so the form agrees
+      // with what an unattended launch would do. With no tags it still checks everything —
+      // that remains the safe default until a ticket can be relied on to declare its repos.
       fetchProjectRepos(queryClient, project.id)
         .then((rows) => {
           setProjectRepos(rows);
-          setSelectedRepoIds(new Set(rows.map((r) => r.id)));
+          const declared = new Set(
+            (issue.tags ?? [])
+              .map((t) => repoNameFromTag(t.name))
+              .filter((n): n is string => Boolean(n))
+              .map((n) => n.toLowerCase()),
+          );
+          const fromTicket = declared.size > 0
+            ? rows.filter((r) => declared.has((r.name ?? r.path.split(/[/\\]/).filter(Boolean).pop() ?? "").toLowerCase()))
+            : rows;
+          setSelectedRepoIds(new Set(fromTicket.map((r) => r.id)));
         })
         .catch(() => {});
     }
@@ -487,12 +504,32 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
       )}
       {showRepoSelector && (
         <div className="border border-gray-200 dark:border-gray-700 rounded p-2 space-y-1" data-testid="repo-scope-selector">
-          <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block">
-            Repositories ({selectedRepoIds.size + 1}/{projectRepos.length + 1})
-          </label>
+          <div className="flex items-center justify-between gap-2">
+            <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+              Repositories ({selectedRepoIds.size + 1}/{projectRepos.length + 1})
+            </label>
+            {/* #634: without these, narrowing a 17-repo launch meant 16 individual clicks —
+                which is why nobody did it and every ticket provisioned everything. */}
+            <div className="flex items-center gap-1 text-[10px]">
+              <button type="button" onClick={() => setSelectedRepoIds(new Set(projectRepos.map((r) => r.id)))}
+                className="px-1.5 py-0.5 rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-brand-400">
+                all
+              </button>
+              <button type="button" onClick={() => setSelectedRepoIds(new Set())}
+                className="px-1.5 py-0.5 rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-brand-400"
+                title="Leading repo only — it is always included">
+                leading only
+              </button>
+              <button type="button"
+                onClick={() => setSelectedRepoIds(new Set(projectRepos.filter((r) => !selectedRepoIds.has(r.id)).map((r) => r.id)))}
+                className="px-1.5 py-0.5 rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-brand-400">
+                invert
+              </button>
+            </div>
+          </div>
           <p className="text-[10px] text-gray-400 dark:text-gray-500">
-            Choose which repos this workspace spans. A worktree (and setup) is created only for
-            the checked repos; the leading repo is always included.
+            Choose which repos this workspace spans. A worktree <strong>and a dependency install</strong> run
+            for every checked repo, so each one costs real time; the leading repo is always included.
           </p>
           <label className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
             <input type="checkbox" checked disabled className="rounded border-gray-300 opacity-60" />
