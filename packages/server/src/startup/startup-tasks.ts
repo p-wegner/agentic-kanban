@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { db, rawClient, rawWriteClient } from "../db/index.js";
-import { workspaces, issues, projects, preferences, sessions, pluginViewProcesses } from "@agentic-kanban/shared/schema";
+import { workspaces, issues, projects, preferences, sessions, pluginViewProcesses, repos as reposTable } from "@agentic-kanban/shared/schema";
 import { and, eq, isNotNull, ne } from "drizzle-orm";
 import { applyMigrations } from "../db/manual-migrate.js";
 import { deduplicateProjects, unregisterLeakedTempProjects, findProjectsWithMissingRepoPath } from "../services/project-registration.js";
@@ -9,6 +9,7 @@ import { sweepHookWiring, formatHookWiringReport } from "../services/hook-wiring
 import type * as agentServiceType from "../services/agent.service.js";
 import * as agentService from "../services/agent.service.js";import * as gitService from "../services/git.service.js";
 import { cleanupSiblingWorktrees } from "../services/workspace-repos.service.js";
+import { listProjectRepos } from "../repositories/repo.repository.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { Database } from "../db/index.js";
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
@@ -591,8 +592,67 @@ export async function pruneOrphanedWorktrees(): Promise<void> {
       if (report.removed.length > 0 || report.keptWithUnshippedWork.length > 0) {
         console.log(`[startup] orphaned worktrees for project '${project.name}': removed ${report.removed.length}, kept (unshipped work) ${report.keptWithUnshippedWork.length}`);
       }
+
+      // #630: the sweep above only ever looked at the LEADING repo, so for a multi-repo
+      // project every sibling worktree was invisible to it. That is not a corner case —
+      // it is where the debris actually accumulates: an interrupted create leaves sibling
+      // worktrees on disk with no workspace row at all, and on `comet` (17 repos) that
+      // reached 104 orphaned worktrees across 13 repos against ZERO workspace rows, and
+      // regenerated indefinitely because the monitor restarted the ticket each time.
+      //
+      // The claims for a sibling repo live in `repos` (worktree_path/branch per workspace),
+      // not on the `workspaces` row, so they have to be read per repo path.
+      await pruneOrphanedSiblingWorktrees(project);
     } catch (err) {
       console.warn(`[startup] pruneOrphanedWorktrees failed for project '${project.name}' (non-fatal):`, errorMessage(err));
+    }
+  }
+}
+
+/**
+ * The sibling-repo half of {@link pruneOrphanedWorktrees} (#630).
+ *
+ * Same conservative classification as the leading repo — anything carrying unlanded commits
+ * or uncommitted edits is reported and kept — but the "is this claimed?" question is answered
+ * from the per-workspace `repos` rows for that repo path, joined to the owning workspace's
+ * status so a live workspace's sibling worktree is never touched.
+ */
+export async function pruneOrphanedSiblingWorktrees(
+  project: { id: string; name: string },
+  deps: {
+    database?: Database;
+    git?: Parameters<typeof reconcileOrphanedWorktrees>[0]["git"];
+    listRepos?: typeof listProjectRepos;
+  } = {},
+): Promise<void> {
+  const database = deps.database ?? db;
+  const git = deps.git ?? gitService;
+  const listRepos = deps.listRepos ?? listProjectRepos;
+  const projectRepos = await listRepos(project.id, database).catch(() => [] as Awaited<ReturnType<typeof listProjectRepos>>);
+  for (const repo of projectRepos) {
+    if (!repo.path || !existsSync(repo.path)) continue;
+    try {
+      // Every workspace-scoped `repos` row for THIS repo path, with its workspace's status.
+      // A row whose workspace is gone entirely yields no claim, which is the point.
+      const claims = await database
+        .select({ workingDir: reposTable.worktreePath, branch: reposTable.branch, status: workspaces.status })
+        .from(reposTable)
+        .innerJoin(workspaces, eq(reposTable.workspaceId, workspaces.id))
+        .where(and(eq(reposTable.projectId, project.id), eq(reposTable.path, repo.path)));
+      const report = await reconcileOrphanedWorktrees({
+        repoPath: repo.path,
+        baseBranch: repo.defaultBranch || "master",
+        claims,
+        git,
+      });
+      if (report.removed.length > 0 || report.keptWithUnshippedWork.length > 0) {
+        console.log(
+          `[startup] orphaned SIBLING worktrees in '${repo.name ?? repo.path}' (project '${project.name}'): ` +
+            `removed ${report.removed.length}, kept (unshipped work) ${report.keptWithUnshippedWork.length}`,
+        );
+      }
+    } catch (err) {
+      console.warn(`[startup] sibling worktree sweep failed for '${repo.path}' (non-fatal):`, errorMessage(err));
     }
   }
 }
