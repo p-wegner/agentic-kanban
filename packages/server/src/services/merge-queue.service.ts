@@ -61,6 +61,7 @@ import { listWorkspaceRepos } from "../repositories/repo.repository.js";
 import { createWorkspaceMergeService } from "./workspace-merge.service.js";
 import { runMergeTrain } from "./merge-train.service.js";
 import { runPreMergeGate } from "./pre-merge-gate.service.js";
+import { isPreMergeGateFailure } from "./workspace-merge-gate.js";
 import type { BoardEvents } from "./board-events.js";
 import type { SessionManager } from "./session.manager.js";
 
@@ -836,8 +837,9 @@ export function createMergeQueueService(deps: {
         // tagged with `data.mergeReason: "pre_merge_gate_failed"`. Classify it separately so it
         // never enters the conflict→reconciler escalation path: a batch reconciler agent can't
         // fix a red verify script, and routing it there just burns attempts/tokens (#170).
-        const gateReason = err instanceof Error ? (err as unknown as { data?: { mergeReason?: string } }).data?.mergeReason : undefined;
-        if (gateReason === "pre_merge_gate_failed") {
+        // #638: the predicate now lives beside the throw, because the monitor needed the same
+        // rule and its absence there was an ungated-merge bypass.
+        if (isPreMergeGateFailure(err)) {
           skipped.push(ws.id);
           yield {
             type: "skipped",

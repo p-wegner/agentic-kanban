@@ -12,6 +12,7 @@ import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.reposit
 import { clearMergeBackoff, recordMergeFailure, type MergeBackoffDeps } from "../services/merge-backoff.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
+import { isPreMergeGateFailure } from "../services/workspace-merge-gate.js";
 
 export type LogMonitorActionFn = (action: MonitorActionName, workspaceId: string, issueId: string, extra?: Pick<MonitorAction, "endpoint" | "httpStatus" | "responseSummary" | "verificationResult">) => void;
 
@@ -62,6 +63,27 @@ export async function mergeWorkspaceWithFixFallback(
       mergeError,
       backoff,
     );
+    // #638: a RED verify gate is not a merge conflict, and routing it here converted every
+    // gate failure into an ungated merge — fix-and-merge's prompt is entirely about
+    // working-tree cleanliness (it never runs verify/build/tests), yet its exit-0 path merges
+    // under `gateSkipExplicit`, a claim the prompt does not support. A gate timeout took the
+    // same road, so a slow suite on a loaded box was enough; no malice required.
+    //
+    // The merge queue already classifies this correctly ("a batch reconciler agent can't fix a
+    // red verify script") — this is the monitor path adopting the same rule. The workspace
+    // stays unmerged with its backoff recorded, which is the honest outcome: someone has to
+    // make the tests pass.
+    if (isPreMergeGateFailure(err)) {
+      console.warn(
+        `[monitor] merge withheld for workspace ${ws.wsId} by the pre-merge gate — NOT routing to fix-and-merge (#638): ${mergeError}`,
+      );
+      logAction("merge", ws.wsId, ws.issueId, {
+        endpoint: `POST /api/workspaces/${ws.wsId}/merge`,
+        responseSummary: `verify_failed (no fix-and-merge fallback): ${mergeError.slice(0, 160)}`,
+        verificationResult: "failed",
+      });
+      return;
+    }
     let fixOk = true;
     try {
       await workspaceActions.fixAndMerge(ws.wsId, mergeError);

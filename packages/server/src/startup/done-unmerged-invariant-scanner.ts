@@ -409,6 +409,17 @@ export async function scanDoneUnmergedWorkspaces(
       database,
     });
     console.log(`[done-unmerged-scanner] merge-gate decision for workspace ${c.wsId}: ${gateDecision.decision} — ${gateDecision.message}`);
+    // #638 (related finding): the decision used to be LOGGED and then ignored — the merge below
+    // ran unconditionally, so this call decorated the log rather than gating anything. With the
+    // skip-explicit token above that is a distinction without a difference TODAY, but a
+    // decorative gate call is exactly what makes the next token change silently ineffective.
+    // Honour it.
+    if (!gateDecision.passed) {
+      console.warn(
+        `[done-unmerged-scanner] merge-gate withheld workspace ${c.wsId} — not merging: ${gateDecision.message}`,
+      );
+      return;
+    }
     // Narrow to locals: the top-of-function guard doesn't survive into the closure below.
     const repoPath = c.repoPath;
     const branch = c.branch;
