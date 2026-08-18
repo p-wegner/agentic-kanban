@@ -41,6 +41,34 @@ export async function resolveVerifyGateStrategy(projectId: string, database: Dat
     : DEFAULT_VERIFY_GATE_STRATEGY;
 }
 
+/**
+ * The scoping decision, as a pure function of the inputs the gate has already resolved (#643).
+ *
+ * Extracted because the bug was invisible inline: `full` is documented as "no scoping; every
+ * package's full suite runs", but the code only disabled FILE-level scoping and set
+ * `KANBAN_TEST_PACKAGES` regardless — so on the DEFAULT setting a diff still skipped whole
+ * packages while the operator-facing knob said otherwise. A tier that may only weaken
+ * verification VISIBLY cannot afford that gap between its name and its behaviour.
+ *
+ * `packagesEnv: null` means "set no scope env", which is what makes `test:mine` run everything.
+ */
+export function resolveGateScoping(args: {
+  strategy: VerifyGateStrategy;
+  /** The scope `testPackagesEnvValue` derived from the diff, or null when it refused to scope. */
+  testScope: string | null;
+  /** The per-project `verify_file_scope` pref, already read. */
+  fileScopePref: boolean;
+  changedFileCount: number;
+}): { packagesEnv: string | null; fileScoped: boolean } {
+  const packagesEnv = args.strategy === "full" ? null : args.testScope;
+  return {
+    packagesEnv,
+    // File scoping is strictly narrower than package scoping — it can never apply where the
+    // gate refused to narrow packages at all, and it needs a diff it could actually read.
+    fileScoped: Boolean(packagesEnv) && args.fileScopePref && args.changedFileCount > 0,
+  };
+}
+
 /** Package `__tests__` dirs to scan for the `@gate:always-run` marker (#538), mirroring
  *  `scripts/test-mine.mjs`'s `ALWAYS_RUN_TESTS_DIR`. Best-effort: this repo checkout's own
  *  monorepo layout, so it is inert (returns 0) for a project this gate runs FOR that isn't

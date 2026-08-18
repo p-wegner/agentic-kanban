@@ -20,6 +20,7 @@ import {
   resolveVerifyGateStrategy,
   countAlwaysRunGuardSuites,
   buildGateTierMessage,
+  resolveGateScoping,
   type GateTierInfo,
   type VerifyGateStrategy,
 } from "./pre-merge-gate-tier.js";
@@ -426,22 +427,32 @@ export async function runPreMergeGate(
     // then it behaves identically to `scoped`, which is itself the honest description of what
     // this gate is currently proven to do.
     const gateStrategy = await resolveVerifyGateStrategy(projectId, database);
-    const fileScope =
-      testScope && gateStrategy !== "full" ? await resolveVerifyFileScope(projectId, database) : false;
-    const verifyEnv = testScope
+    // #643: `full` is documented as "no scoping; every package's full suite runs". It only ever
+    // disabled FILE-level scoping — `KANBAN_TEST_PACKAGES` was set regardless — so on the
+    // DEFAULT setting a diff still skipped whole packages while the knob claimed otherwise. The
+    // tier message was honest ("package-scoped"); the operator-facing name was not. Since the
+    // pref's whole purpose is that a level may only weaken verification VISIBLY, the code moves
+    // to match the documentation rather than the reverse.
+    const { packagesEnv: effectiveTestScope, fileScoped: fileScope } = resolveGateScoping({
+      strategy: gateStrategy,
+      testScope,
+      fileScopePref: testScope ? await resolveVerifyFileScope(projectId, database) : false,
+      changedFileCount: changedFiles.length,
+    });
+    const verifyEnv = effectiveTestScope
       ? {
           ...isolationEnv,
-          KANBAN_TEST_PACKAGES: testScope,
-          ...(fileScope && changedFiles.length > 0 ? { KANBAN_TEST_FILES: changedFiles.join(",") } : {}),
+          KANBAN_TEST_PACKAGES: effectiveTestScope,
+          ...(fileScope ? { KANBAN_TEST_FILES: changedFiles.join(",") } : {}),
         }
       : isolationEnv;
-    if (testScope && fileScope && changedFiles.length > 0) {
+    if (fileScope) {
       console.log(`[pre-merge-gate] file-scoping verify tests to ${changedFiles.length} changed file(s) for workspace ${workspace.id}`);
     }
     gateTierInfo = {
       strategy: gateStrategy,
-      packageScoped: Boolean(testScope),
-      fileScoped: Boolean(fileScope && changedFiles.length > 0),
+      packageScoped: Boolean(effectiveTestScope),
+      fileScoped: fileScope,
       changedFileCount: changedFiles.length,
       guardSuiteCount: countAlwaysRunGuardSuites(workingDir),
       maxWorkers: gateMaxWorkers,

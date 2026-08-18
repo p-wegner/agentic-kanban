@@ -44,6 +44,18 @@ const GLOBAL_SCOPE_BREAKERS: ReadonlyArray<RegExp> = [
   /^scripts\/check-god-modules\.mjs$/,
   /^scripts\/build-.*\.mjs$/,
   /^scripts\/copy-assets\.mjs$/,
+  // #643: the breakers above are ROOT-anchored, so a PER-PACKAGE `package.json` or
+  // `vitest.config.ts` was scoped to its own package like any source file — even though a
+  // dependency bump or a vitest-config change (environment, setup files, timeouts, pool) can
+  // alter how EVERY suite behaves, including suites in other packages that import it. Same
+  // class of mistake as the root-level entries, just one directory down.
+  /^packages\/[^/]+\/package\.json$/,
+  // Any `vitest.*.{ts,mts,js,…}` sitting directly in a package root — `vitest.config.ts`,
+  // `vitest.workspace.mts`, `vitest.setup.ts`. The root-level breaker can afford to name only
+  // `*config*` because anything else at the root is unowned and fails open anyway; a file
+  // inside a package IS owned, so this one has to be the broader pattern.
+  /^packages\/[^/]+\/vitest\.[^/]*\.[cm]?[jt]s$/,
+  /^packages\/[^/]+\/tsconfig(\.[a-z]+)?\.json$/,
 ];
 
 /**
