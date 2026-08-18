@@ -26,7 +26,7 @@ curl -s http://127.0.0.1:3001/api/projects/d28f01c9-3fd3-488b-9eb4-d66268c4f7d4/
 
 **1.4 Typecheck** — `pnpm -r exec tsc -b --noEmit` across all packages. Any error → ABORT.
 
-**1.5 Tests** — `pnpm --filter agentic-kanban test:mine` (excludes documented-flaky #89). If `test:mine` absent (pre-#89), fall back to `pnpm --filter agentic-kanban test` and tolerate ONLY the CLAUDE.md "Known Flaky Test Suites". Any new failure → ABORT.
+**1.5 Tests** — `pnpm test:mine` from the repo ROOT (#640: the old command here, `pnpm --filter agentic-kanban test:mine`, named a script that does not exist in `packages/server/package.json` — `test:mine` is a root script). For a release, prefer `pnpm test:full`, which is the only command that runs the suites `test:mine` excludes; the exclusion list and its reasons are documented at the top of `scripts/test-mine.mjs`. Any new failure → ABORT.
 
 **1.6 Build** — `pnpm build`, then the [[skill-publish]] step-2 checks: `grep -c "agentic-kanban/shared" packages/server/dist/cli.js` must be 0; `cd packages/server && npm pack --dry-run` → expected files, ~400KB, no invalid bin warnings. Any deviation → ABORT.
 
