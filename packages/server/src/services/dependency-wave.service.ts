@@ -8,7 +8,7 @@ import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { claimIssueForAutoStart, isAutoStartClaimed } from "./auto-start-claim.js";
 import { completeCreateJob, failCreateJob } from "./create-job.service.js";
 import {
-  getWipLimitPref,
+  getWipLimitPrefMap,
   getInProgressStatusIds,
   getActiveWipCount,
   getProjectIssuesForWave,
@@ -19,6 +19,7 @@ import {
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { BLOCKING_DEPENDENCY_TYPES } from "@agentic-kanban/shared/lib/dependency-type-traits";
 import { findCycleNodes } from "@agentic-kanban/shared/lib/dependency-graph";
+import { resolveMonitorTunables } from "@agentic-kanban/shared/lib/strategy-objective-file";
 
 const STARTABLE_STATUS_NAMES = new Set(["Backlog", "Todo"]);
 
@@ -81,10 +82,37 @@ function isBlockingType(type: string): type is BlockingDependencyType {
   return (BLOCKING_DEPENDENCY_TYPES as readonly string[]).includes(type);
 }
 
+/**
+ * The WIP limit this project actually runs under (#654).
+ *
+ * Precedence, most specific first:
+ *  1. an explicit caller override (the API's `wipLimit` query param),
+ *  2. `wip_limit_<projectId>` — the per-project pref the onboarding wizard writes,
+ *  3. `resolveMonitorTunables` — the Strategy Bullseye if there is one, else the legacy global
+ *     `nudge_wip_limit`, else its own default.
+ *
+ * Step 3 is the important one: it is the SAME function the Board Monitor popover reads, so the
+ * two surfaces can no longer disagree. Before this, `getWipInfo` read only `nudge_wip_limit`,
+ * which is unset in most installs — so it fell through to a hardcoded 5 and offered
+ * "Start Next Wave (5)" on a project configured for 2.
+ */
+async function resolveWaveWipLimit(
+  database: Database,
+  projectId: string,
+  wipLimitOverride?: number,
+): Promise<number> {
+  if (wipLimitOverride !== undefined && Number.isFinite(wipLimitOverride) && wipLimitOverride > 0) {
+    return wipLimitOverride;
+  }
+  const prefMap = await getWipLimitPrefMap(projectId, database);
+  const perProject = Number.parseInt(prefMap.get(`wip_limit_${projectId}`) ?? "", 10);
+  if (Number.isFinite(perProject) && perProject > 0) return perProject;
+  const { tunables } = resolveMonitorTunables(prefMap, projectId);
+  return tunables.activeAgentsTarget > 0 ? tunables.activeAgentsTarget : 5;
+}
+
 async function getWipInfo(database: Database, projectId: string, wipLimitOverride?: number) {
-  const prefValue = await getWipLimitPref(database);
-  const parsedLimit = wipLimitOverride ?? Number.parseInt(prefValue ?? "5", 10);
-  const wipLimit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 5;
+  const wipLimit = await resolveWaveWipLimit(database, projectId, wipLimitOverride);
 
   const inProgressStatusIds = await getInProgressStatusIds(projectId, database);
   if (inProgressStatusIds.length === 0) {

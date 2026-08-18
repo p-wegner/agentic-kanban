@@ -3,15 +3,27 @@ import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
-export async function getWipLimitPref(
+/**
+ * The preference rows the WIP limit is derived from (#654).
+ *
+ * This used to read ONLY the global `nudge_wip_limit`, so the Dependency Waves panel reported
+ * "0/5 WIP, 5 slots open" on a project whose per-project limit AND Strategy Bullseye both said
+ * 2 — while the Board Monitor popover two clicks away correctly said 2. The board presented
+ * two contradictory WIP numbers, both authoritatively.
+ *
+ * Returns the whole map rather than one value so the caller can apply the same precedence the
+ * monitor uses (`resolveMonitorTunables`) instead of re-deriving a second answer here.
+ */
+export async function getWipLimitPrefMap(
+  projectId: string,
   database: Database = db,
-): Promise<string | undefined> {
+): Promise<Map<string, string>> {
+  const keys = [`wip_limit_${projectId}`, `board_strategy_${projectId}`, "nudge_wip_limit"];
   const prefRows = await database
-    .select({ value: preferences.value })
+    .select({ key: preferences.key, value: preferences.value })
     .from(preferences)
-    .where(eq(preferences.key, "nudge_wip_limit"))
-    .limit(1);
-  return prefRows[0]?.value;
+    .where(inArray(preferences.key, keys));
+  return new Map(prefRows.map((r) => [r.key, r.value] as const));
 }
 
 export async function getInProgressStatusIds(
