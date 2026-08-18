@@ -46,7 +46,7 @@
  * that finds the process gone without a code). If reattach classification can be made determinate,
  * this pass goes back to being a backstop rather than a routine.
  */
-import { commitsAhead } from "../startup/branch-commits.js";
+import { getCommitCountAhead as commitsAhead } from "./git.service.js";
 import type { LoopStall } from "./plugin-loop-stall.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 

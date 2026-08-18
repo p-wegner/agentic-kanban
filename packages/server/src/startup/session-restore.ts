@@ -2,7 +2,6 @@ import { db } from "../db/index.js";
 import { sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { eq, inArray } from "drizzle-orm";
 import { setWorkspaceStatus, type WorkspaceStatus } from "../repositories/workspace-status.repository.js";
-import { hasCommitsAhead } from "./branch-commits.js";
 
 interface WorkflowSets {
   reviewSessionIds: Set<string>;

@@ -1,14 +1,31 @@
 import { execGit, isGitWorkingTree } from "./internal.js";
 import { revParse, isAncestor } from "./branch.js";
 
-/** Get the number of commits on HEAD that are not reachable from baseBranch. */
+/**
+ * How many commits `headRef` has that `baseBranch` lacks — the ONLY correct predicate for
+ * "did this workspace produce work?".
+ *
+ * #365: callers used to ask `git diff --quiet <base>` instead. With a single ref that is a
+ * WORKING-TREE diff against the base branch TIP, so it exits non-zero — "has changes" —
+ * whenever the base has merely moved ahead of the worktree. A workspace with ZERO commits
+ * of its own that is simply BEHIND master therefore reported "has commits", got parked at
+ * ready_for_merge, and stalled its pipeline unit (#363). Measured on the `ak-6` worktree:
+ * 0 commits ahead, 8 behind master, `git diff --quiet master` exit 1. `rev-list --count
+ * <base>..<head>` asks the actual question and is immune to the base moving.
+ *
+ * Returns `null` when git could not answer (spawn failure, unknown ref, not a worktree).
+ * Callers decide what an unknown means; they must NOT read it as zero — see
+ * `hasCommitsAhead` for why. (#539 gave this the `headRef` parameter that the server-side
+ * duplicate had and this one lacked, which is what kept the duplicate alive.)
+ */
 export async function getCommitCountAhead(
   worktreePath: string,
   baseBranch: string,
+  headRef = "HEAD",
 ): Promise<number | null> {
   if (!isGitWorkingTree(worktreePath)) return null;
   try {
-    const output = await execGit(["rev-list", "--count", `${baseBranch}..HEAD`], worktreePath);
+    const output = await execGit(["rev-list", "--count", `${baseBranch}..${headRef}`], worktreePath);
     const trimmed = output.trim();
     if (!trimmed) return null;
     const count = Number.parseInt(trimmed, 10);
@@ -16,6 +33,32 @@ export async function getCommitCountAhead(
   } catch {
     return null;
   }
+}
+
+/**
+ * True when `headRef` has at least one commit its base lacks. An UNKNOWN answer reads as
+ * `true`, and that polarity is the whole point of having this next to
+ * `getCommitCountAhead`: the downstream of "no commits" can close a workspace and force
+ * its issue to Done, so a transient git failure must never take that path.
+ *
+ * #539: three implementations of this question existed with three different unknown
+ * policies — `null`, `true`, and `false`. The `false` one (a private copy in
+ * completion-state-reconciler) meant a transient git failure read as "no work" and the
+ * workspace was closed, which is exactly the outcome this policy exists to prevent.
+ * Anything that must NOT act on an unknown should call `getCommitCountAhead` and handle
+ * `null` explicitly instead of reaching for this.
+ */
+export async function hasCommitsAhead(
+  worktreePath: string,
+  baseBranch: string,
+  headRef = "HEAD",
+): Promise<boolean> {
+  const ahead = await getCommitCountAhead(worktreePath, baseBranch, headRef);
+  if (ahead === null) {
+    console.warn(`[git] could not count commits of ${headRef} ahead of ${baseBranch} in ${worktreePath} — assuming it has commits`);
+    return true;
+  }
+  return ahead > 0;
 }
 
 /** Get the latest commit SHA (short) and message on the current branch. Returns null when no commits exist. */

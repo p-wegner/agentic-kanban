@@ -15,7 +15,10 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
-import { commitsAhead, hasCommitsAhead } from "../startup/branch-commits.js";
+// #539: the implementation moved into the shared git-service (the SSOT for git ops);
+// `commitsAhead` is `getCommitCountAhead`, which gained the `headRef` parameter that
+// kept the server-side duplicate alive.
+import { getCommitCountAhead as commitsAhead, hasCommitsAhead } from "@agentic-kanban/shared/lib/git-service";
 
 async function git(args: string[], cwd: string): Promise<void> {
   const res = await gitExec(args, { cwd });
