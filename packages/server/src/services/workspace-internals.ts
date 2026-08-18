@@ -95,7 +95,6 @@ export function applyWorkspaceAgentSelection(
     ...settings,
     agentArgs,
     provider,
-    claudeProfile: provider === "claude" ? profileName : undefined,
     profile: profileName ? { provider: provider as ProviderName, name: profileName } : undefined,
   };
 }
@@ -136,7 +135,6 @@ export async function resolveRelaunchAgentSelection(
   return {
     agentCommand: runtime.provider.agentCommand,
     agentArgs: runtime.provider.agentArgs,
-    claudeProfile: runtime.provider.provider === "claude" ? runtime.provider.profileName : undefined,
     profile: runtime.provider.profileSelection,
     provider: runtime.provider.provider,
     resumeWithNewModel: runtime.provider.resumeWithNewModel,

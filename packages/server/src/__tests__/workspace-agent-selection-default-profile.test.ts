@@ -17,7 +17,6 @@ function settings(over: Partial<AgentSettings> = {}): AgentSettings {
   return {
     agentCommand: undefined,
     agentArgs: undefined,
-    claudeProfile: "board_default",
     profile: { provider: "claude", name: "board_default" },
     provider: "claude",
     resumeWithNewModel: false,
@@ -39,14 +38,12 @@ describe("applyWorkspaceAgentSelection — board default profile", () => {
   it("inherits the board's default profile when the workspace pins none", () => {
     const out = applyWorkspaceAgentSelection(settings(), workspace({ claudeProfile: null }));
 
-    expect(out.claudeProfile).toBe("board_default");
     expect(out.profile).toEqual({ provider: "claude", name: "board_default" });
   });
 
   it("still lets a profile pinned on the workspace win over the board default", () => {
     const out = applyWorkspaceAgentSelection(settings(), workspace({ claudeProfile: "pinned_one" }));
 
-    expect(out.claudeProfile).toBe("pinned_one");
     expect(out.profile).toEqual({ provider: "claude", name: "pinned_one" });
   });
 
@@ -56,7 +53,6 @@ describe("applyWorkspaceAgentSelection — board default profile", () => {
     const out = applyWorkspaceAgentSelection(settings(), workspace({ provider: "codex", claudeProfile: null }));
 
     expect(out.provider).toBe("codex");
-    expect(out.claudeProfile).toBeUndefined();
     expect(out.profile).toBeUndefined();
   });
 

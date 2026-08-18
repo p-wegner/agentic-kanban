@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { readSessionStdoutFile } from "../lib/session-output-reader.js";
+import { profileNameOf } from "@agentic-kanban/shared/lib/profile-selection";
 import {
   selectAllPreferences,
   selectAgentSkillById,
@@ -257,7 +258,7 @@ export function createWorkflowForkService(deps: {
       baseBranch: parent.branch,
       status: "active",
       provider: cfg.provider,
-      claudeProfile: cfg.claudeProfile ?? null,
+      claudeProfile: profileNameOf(cfg.profile),
       agentCommand: cfg.agentCommand ?? null,
       model: cfg.model ?? null,
       skillId: entry.skillId ?? null,
