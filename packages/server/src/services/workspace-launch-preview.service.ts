@@ -17,7 +17,8 @@ import { isResolvedDependencyStatusView } from "@agentic-kanban/shared/lib/statu
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { derivePortsFromBranch } from "./worktree-ports.js";
 import { preflightAgentProfile } from "./agent-profile-health.service.js";
-import { resolveScopedSiblingRepos } from "./workspace-repos.service.js";
+import { resolveScopedSiblingRepos, resolveEffectiveRepoScope } from "./workspace-repos.service.js";
+import { getIssueReposTouched } from "./repo-tags.service.js";
 import { estimateBudget, type BudgetEstimate } from "./budget-estimator.service.js";
 import { listProjectRepos } from "../repositories/repo.repository.js";
 import * as crudRepo from "../repositories/workspace-crud.repository.js";
@@ -216,8 +217,17 @@ export function createLaunchPreviewService(deps: LaunchPreviewDeps) {
       if (!isDirect) {
         const projectRepos = await listProjectRepos(issue.projectId, database).catch(() => []);
         if (projectRepos.length > 0) {
-          const scopedIds = new Set(resolveScopedSiblingRepos(projectRepos, input.repoScope).map((r) => r.id));
           const leadingRepoName = basename(project.repoPath) || project.repoPath;
+          // #629: the preview must resolve the scope the SAME way the launch does, or the
+          // dialog shows 17 repos selected for a launch that will provision one. That is the
+          // failure this module's header warns about — a preview that re-derives its own
+          // answer is a preview that can lie about the launch.
+          const effectiveScope = resolveEffectiveRepoScope({
+            explicit: input.repoScope,
+            reposTouched: await getIssueReposTouched(input.issueId, database),
+            leadingRepoName,
+          });
+          const scopedIds = new Set(resolveScopedSiblingRepos(projectRepos, effectiveScope).map((r) => r.id));
           multiRepo = {
             leadingRepoName,
             worktrees: [

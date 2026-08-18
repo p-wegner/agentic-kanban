@@ -48,6 +48,52 @@ export function resolveScopedSiblingRepos(
   });
 }
 
+/**
+ * The effective repo scope for a workspace, given what the caller asked for and what the
+ * TICKET declares (#629).
+ *
+ * A ticket already says which repos it touches: `POST /api/issues` accepts `reposTouched` and
+ * stores it as `repo:<name>` tags (#94). Workspace creation never read it back, so
+ * `resolveScopedSiblingRepos` saw an omitted scope and did the zero-regression thing — all
+ * repos. Measured on `comet`: `POST /api/workspaces/preview` for a ticket whose work is
+ * entirely in the leading `documentation` repo returned all 17 repos `selected: true`, each
+ * getting a worktree and a full dependency install.
+ *
+ * Precedence, and why:
+ *  1. An EXPLICIT `repoScope` always wins. A human (or an API client) who named the repos has
+ *     more context than the ticket's tags, including the right to widen them.
+ *  2. Otherwise the ticket's `reposTouched`, plus the leading repo — which is always
+ *     provisioned anyway, and which `resolveScopedSiblingRepos` expects to be present in a
+ *     non-empty scope (an empty scope means "all", so the leading entry is what distinguishes
+ *     "leading only" from "everything").
+ *  3. Otherwise undefined — i.e. today's all-repos default, unchanged.
+ *
+ * Step 3 is deliberately NOT "leading-repo only", which is what #629 proposes. A ticket that
+ * genuinely spans repos but carries no tags would then get one worktree and an agent that
+ * cannot see the code it was sent to change — a confusing failure, where the current default
+ * is merely a slow one. Making the field editable (#633) is what makes tagging reliable
+ * enough to flip this; until then the safe direction is the expensive one.
+ */
+export function resolveEffectiveRepoScope(args: {
+  explicit?: string[];
+  reposTouched: readonly string[];
+  leadingRepoName: string;
+}): string[] | undefined {
+  if (args.explicit && args.explicit.length > 0) return args.explicit;
+  const touched = args.reposTouched.map((r) => r.trim()).filter(Boolean);
+  if (touched.length === 0) return undefined;
+  // The leading repo is provisioned unconditionally; including it keeps the scope's meaning
+  // explicit ("these repos") rather than accidentally reading as a sibling filter.
+  const scope = [args.leadingRepoName, ...touched];
+  const seen = new Set<string>();
+  return scope.filter((r) => {
+    const key = r.toLowerCase();
+    if (!r || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 /** A sibling worktree provisioned for one additional repo of the project. */
 export interface SiblingWorktree {
   path: string;
