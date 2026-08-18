@@ -73,7 +73,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
 
 /** @type {{ dir: string, label: string, exclude: string[] }[]} */
-const PACKAGES = [
+export const PACKAGES = [
   {
     dir: "packages/shared",
     label: "shared",
@@ -194,12 +194,17 @@ function resolveVitestEntry(pkgDir) {
  */
 const ALWAYS_RUN_MARKER = "@gate:always-run";
 
-/** `{shared: "__tests__", server: "src/__tests__", "mcp-server": "src/__tests__"}` — the
- *  __tests__ dir is relative to the package dir for each entry in PACKAGES. */
-const ALWAYS_RUN_TESTS_DIR = {
+/** The `__tests__` dir, relative to the package dir, for each entry in PACKAGES.
+ *
+ *  #639: `client` was missing here while `pre-merge-gate-tier.ts` DID scan
+ *  `packages/client/src/__tests__` for the marker — so the gate counted the client's guard in
+ *  its "+N guard suites" pass message and then structurally could not run it. Every label in
+ *  PACKAGES must appear (see `buildAlwaysRunTests`, which now throws rather than skipping). */
+export const ALWAYS_RUN_TESTS_DIR = {
   shared: "__tests__",
   server: "src/__tests__",
   "mcp-server": "src/__tests__",
+  client: "src/__tests__",
 };
 
 /**
@@ -230,7 +235,15 @@ function buildAlwaysRunTests() {
   const map = {};
   for (const pkg of PACKAGES) {
     const testsDir = ALWAYS_RUN_TESTS_DIR[pkg.label];
-    if (!testsDir) continue;
+    // #639: this used to `continue`, which is why the client's marked guard was silently
+    // never force-run. A missing entry is a bug in this file, not a package opting out —
+    // failing loudly is the only way the next added package can't repeat it.
+    if (!testsDir) {
+      throw new Error(
+        `[test:mine] ALWAYS_RUN_TESTS_DIR has no entry for package "${pkg.label}" — ` +
+          `its @gate:always-run guard suites would be silently skipped. Add one.`,
+      );
+    }
     map[pkg.label] = scanAlwaysRunTests(resolve(ROOT, pkg.dir), testsDir);
   }
   return map;
