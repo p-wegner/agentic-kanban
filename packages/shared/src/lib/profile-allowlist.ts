@@ -268,3 +268,47 @@ export function clampProfileToAllowlist(input: {
     note: `profile allowlist: ${reason} → launching on ${profileOptionLabel(chosen.provider, chosen.name)}`,
   };
 }
+
+/**
+ * #651 — may this project's work be dispatched to a FLEET WORKER at all?
+ *
+ * The allowlist is a hard constraint on the board: `resolveProjectRuntimeConfig` clamps
+ * or holds, so a restricted project cannot launch on an unlisted account. A worker is a
+ * different machine: it authenticates the agent with its OWN local login, and the board
+ * deliberately sends no credentials (decision 012 — `CLAUDE_CONFIG_DIR` is not in
+ * `REMOTE_SPEC_ENV_ALLOWLIST`, by design). So the board picks a permitted profile,
+ * records it, and the worker then runs under whatever account that machine is logged
+ * into. The credential correctly does not travel — but neither did the CONSTRAINT, and
+ * nothing refused the dispatch, so a project restricted for billing/tenancy separation
+ * silently lost its guarantee the moment it went remote.
+ *
+ * The rule here is the same one `clampProfileToAllowlist` already applies: for a project
+ * pinned to a specific subscription, the wrong account is worse than no progress. A
+ * restricted project therefore does not place remotely. The caller decides what "does
+ * not place" means — host fallback (the board CAN enforce there) for a normal project,
+ * a refusal for a strict one that forbids the host.
+ *
+ * A malformed value blocks too: `parseProfileAllowlist` reports it as `restricted`, and
+ * failing closed on an unreadable restriction is the whole point of that flag.
+ *
+ * This is deliberately not the last word. Worker-side ATTESTATION — the worker declaring
+ * which profiles/config dirs it can authenticate as, the way it already declares
+ * `--providers` and `--labels` — would let a restricted project dispatch to a worker
+ * that can prove it satisfies the list. That check would go right here, narrowing the
+ * block instead of replacing it.
+ */
+export function remoteDispatchBlockedByAllowlist(
+  allowlistRaw: string | null | undefined,
+): { blocked: false } | { blocked: true; reason: string } {
+  const allowlist = parseProfileAllowlist(allowlistRaw);
+  if (!allowlist.restricted) return { blocked: false };
+  const detail = allowlist.malformed
+    ? "its profile allowlist is present but unreadable"
+    : `it is restricted to [${allowlist.entries.map(allowedProfileId).join(", ")}]`;
+  return {
+    blocked: true,
+    reason:
+      `${detail}, and a fleet worker authenticates with its own machine-local login ` +
+      "(the board sends no credentials), so the restriction cannot be enforced there",
+  };
+}

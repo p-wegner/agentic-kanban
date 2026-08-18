@@ -19,6 +19,10 @@ import { getProjectById } from "../repositories/project.repository.js";
 // name the label without importing this service's graph. Re-exported here for
 // existing importers.
 import { SHARES_FILESYSTEM_LABEL } from "@agentic-kanban/shared/lib/worker-protocol";
+import {
+  allowedProfilesPrefKey,
+  remoteDispatchBlockedByAllowlist,
+} from "@agentic-kanban/shared/lib/profile-allowlist";
 export { SHARES_FILESYSTEM_LABEL };
 
 // Strict-mode refusal. Defined in the dispatch layer (which must throw it when it
@@ -191,6 +195,19 @@ export async function resolveWorkerPlacement(params: {
     const refuseHost = (reason: string): never => {
       throw new DispatchUnavailable(`${reason} and worker dispatch is strict for project ${projectId}`);
     };
+    // #651: a restricted project does not go remote. Checked BEFORE worker selection —
+    // the answer does not depend on which worker is free, and refusing early keeps a
+    // strict project's message about the restriction rather than about capacity.
+    const allowlistBlock = remoteDispatchBlockedByAllowlist(
+      await getPreferenceValue(allowedProfilesPrefKey(projectId), database),
+    );
+    if (allowlistBlock.blocked) {
+      if (strict) refuseHost(`project ${projectId} cannot dispatch remotely: ${allowlistBlock.reason}`);
+      console.warn(
+        `[worker-fleet] project ${projectId} wants worker dispatch but ${allowlistBlock.reason}; launching on host`,
+      );
+      return { kind: "host" };
+    }
     const requiredLabels = parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(projectId), database));
     const workerId = await selectWorkerForLaunch(fleet, providerName, requiredLabels, now);
     if (!workerId) {
@@ -257,6 +274,12 @@ export async function projectCanDispatch(params: {
   try {
     if ((await getPreferenceValue(workerDispatchPrefKey(projectId), database)) !== "true") return { available: true };
     if ((await getPreferenceValue(workerStrictPrefKey(projectId), database)) !== "true") return { available: true };
+    // #651: same refusal the placement makes, surfaced one step earlier so the monitor
+    // skips the start with the real reason instead of starting and then failing.
+    const allowlistBlock = remoteDispatchBlockedByAllowlist(
+      await getPreferenceValue(allowedProfilesPrefKey(projectId), database),
+    );
+    if (allowlistBlock.blocked) return { available: false, reason: allowlistBlock.reason };
     const fleet = getWorkerFleet(database);
     const requiredLabels = parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(projectId), database));
     const capacity = await resolveFleetCapacity(fleet, providerName, requiredLabels, now);
