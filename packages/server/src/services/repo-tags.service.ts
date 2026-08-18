@@ -8,8 +8,7 @@ import { repoTagName, repoNameFromTag, resolveRepoName, REPO_TAG_COLOR } from "@
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { getTagByName, insertTag, getIssueTagLink, insertIssueTag } from "../repositories/issue-ai.repository.js";
-import { issueTags, tags } from "@agentic-kanban/shared/schema";
-import { and, eq, inArray } from "drizzle-orm";
+import { getIssueTagRows, deleteIssueTagLinks } from "../repositories/tag.repository.js";
 import { getProjectRepoNames } from "../repositories/repo.repository.js";
 
 /** Ensure a `repo:<name>` tag exists, returning its id. */
@@ -67,11 +66,7 @@ export async function getIssueReposTouched(
   database: Database = db,
 ): Promise<string[]> {
   try {
-    const rows = await database
-      .select({ name: tags.name })
-      .from(issueTags)
-      .innerJoin(tags, eq(issueTags.tagId, tags.id))
-      .where(eq(issueTags.issueId, issueId));
+    const rows = await getIssueTagRows(issueId, database);
     return rows.map((r) => repoNameFromTag(r.name)).filter((r): r is string => Boolean(r));
   } catch {
     return [];
@@ -114,16 +109,10 @@ export async function setIssueReposTouched(
   // Remove the repo tags that are no longer selected. Scoped to THIS issue's links and to
   // `repo:` tags only — a plain `removeIssueTagsByTagIds` would unlink the tag from every
   // issue that shares it, since repo tags are global rows.
-  const current = await database
-    .select({ tagId: tags.id, name: tags.name })
-    .from(issueTags)
-    .innerJoin(tags, eq(issueTags.tagId, tags.id))
-    .where(eq(issueTags.issueId, issueId));
+  const current = await getIssueTagRows(issueId, database);
   const wanted = new Set(valid.map((r) => repoTagName(r)));
   const staleIds = current.filter((t) => repoNameFromTag(t.name) && !wanted.has(t.name)).map((t) => t.tagId);
-  if (staleIds.length > 0) {
-    await database.delete(issueTags).where(and(eq(issueTags.issueId, issueId), inArray(issueTags.tagId, staleIds)));
-  }
+  await deleteIssueTagLinks(issueId, staleIds, database);
 
   if (valid.length > 0) await applyRepoTags(issueId, valid, database);
   return valid;
