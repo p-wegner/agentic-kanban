@@ -3,7 +3,7 @@ import { isSpecPlanningStageName, transitionIssueStatus } from "@agentic-kanban/
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { runUnderBuildGate } from "../services/jvm-build-gate.js";
-import { runPreMergeGate, resolveMergeGateShas, gateAlreadyPassed, gateSkipExplicit, RUN_GATE, type MergeGateToken } from "../services/pre-merge-gate.service.js";
+import { runPreMergeGate, resolveMergeGateShas, gateAlreadyPassed, RUN_GATE, type MergeGateToken } from "../services/pre-merge-gate.service.js";
 import { getAutoLandLoopTicket } from "../services/plugin-loop-hooks.service.js";
 import { movedDuringGate } from "../services/workspace-merge-gate.js";
 import { issues, preferences, projectStatuses, projects, scheduledRunHistory, scheduledRuns, sessions, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
@@ -486,12 +486,18 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         console.log(`[workflow] fix-and-merge session ${sessionId} completed  retrying merge`);
         // autoMerge swallows its own conflict errors, so its return tells us nothing.
         // The landing guard below is what verifies the branch actually merged.
-        // Merge-gate DECISION (arch-review §1.2): a fix-and-merge session just rebuilt/verified the
-        // branch in its own worktree this cycle, so re-running the verify/smoke gate here would
-        // double that expensive build. Express that as an EXPLICIT documented skip rather than the
-        // old implicit no-gate.
-        await autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now,
-          gateSkipExplicit("fix-and-merge retry: the fix agent already rebuilt/verified the branch in-worktree this session"));
+        // #638: this used to pass `gateSkipExplicit("the fix agent already rebuilt/verified the
+        // branch in-worktree this session")` — a claim the fix agent's own prompt does not
+        // support. That prompt (`merge-helpers.service.ts`) is entirely about working-tree
+        // cleanliness; it never instructs the agent to run verify, build or tests. So the
+        // "explicit documented skip" documented something that was not happening, and every
+        // fix-and-merge landed ungated.
+        //
+        // It also cannot be right in principle: a fix session exists because the merge did not
+        // apply cleanly, so it rebases/resolves — which changes the merge RESULT. Whatever was
+        // verified before is not what is about to land. Run the gate. Where the branch is
+        // genuinely unchanged, the gate's own SHA-pinned evidence path makes the re-run cheap.
+        await autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now, RUN_GATE);
       }
     } else {
       console.log(`[workflow] fix-and-merge session ${sessionId} exited with code ${exitCode}  not retrying merge`);

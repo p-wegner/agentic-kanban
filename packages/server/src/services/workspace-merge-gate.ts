@@ -54,6 +54,30 @@ type RecordMergeAttempt = (
  * otherwise spam a fresh "merge-attempt" comment every cycle (#170). Only inserts a new note
  * when the gate message actually changed (new failure signature) or none was recorded yet.
  */
+/**
+ * The `mergeReason` tag a pre-merge-gate withhold carries on its `WorkspaceError`.
+ *
+ * The withhold uses the "CONFLICT" error CODE (for HTTP-status purposes) but is emphatically
+ * not a merge conflict, and every caller that recovers from a merge failure has to tell the
+ * two apart. Callers used to sniff for this themselves, or — worse — not at all: #638 was the
+ * monitor treating a red verify gate exactly like a dirty worktree and handing it to
+ * fix-and-merge, which merges without ever running the gate.
+ */
+export const PRE_MERGE_GATE_FAILURE_REASON = "pre_merge_gate_failed";
+
+/**
+ * True when a rejected merge was withheld BY THE GATE rather than by a conflict/lock/etc.
+ *
+ * A batch reconciler or fix agent cannot fix a red verify script, so this is the predicate
+ * that keeps such a failure out of every agent-driven retry path (#170 for the merge queue,
+ * #638 for the monitor). It reads the structured `data.mergeReason` the withhold sets — never
+ * the message text, which is localized prose.
+ */
+export function isPreMergeGateFailure(err: unknown): boolean {
+  const data = err instanceof Error ? (err as unknown as { data?: { mergeReason?: string } }).data : undefined;
+  return data?.mergeReason === PRE_MERGE_GATE_FAILURE_REASON;
+}
+
 export async function recordGateFailureNote(args: {
   workspace: WorkspaceRow;
   stage: string;
@@ -213,7 +237,7 @@ export async function runPreLockGate(args: {
     throw new WorkspaceError(
       `Pre-merge gate failed (${preGate.stage}) — merge withheld. ${gateMessage}`,
       "CONFLICT",
-      { mergeReason: "pre_merge_gate_failed", gateStage: preGate.stage },
+      { mergeReason: PRE_MERGE_GATE_FAILURE_REASON, gateStage: preGate.stage },
     );
   }
 
