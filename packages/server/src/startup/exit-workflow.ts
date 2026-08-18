@@ -770,9 +770,14 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     // Direct workspaces WITH changes fall through to the review flow below.
     if (workspace.isDirect && !committedChanges) {
       const doneStatus = findStatus("Done");
-      await setWorkspaceStatus(db, workspaceId, "closed", { now });
+      // #547: the documented close transition, which stamps `closedAt` — a raw
+      // setWorkspaceStatus(…, "closed") does not, and that column is what issue-activity,
+      // project-activity, workspace-timeline, the digest route and the handoff bundle read.
+      // `markMerged: false`: a direct workspace with no committed changes merged nothing.
+      await closeWorkspace({ database: db, workspaceId, now, markMerged: false });
       // #226 — workingDir is a leading-repo mirror column; clear it through the helper that
-      // writes the `repos` row too, not through setWorkspaceStatus (which cannot mirror).
+      // writes the `repos` row too, not through `closeWorkspace({ clearWorkingDir: true })`
+      // (which nulls the workspace column only and cannot mirror).
       await clearWorkspaceWorkingDir(workspaceId, now, db);
       if (doneStatus) {
         await transitionIssueStatus(db, issueId, doneStatus.id, { now });
