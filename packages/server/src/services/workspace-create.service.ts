@@ -23,6 +23,11 @@ import { withTransaction, type Database, type TransactionClient } from "../db/in
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
 import * as crudRepo from "../repositories/workspace-crud.repository.js";
+import {
+  beginProvisioning,
+  finishProvisioning,
+  updateProvisioning,
+} from "../repositories/workspace-provisioning.repository.js";
 import { warnIfBranchHeldByLiveWorkspace } from "./workspace-branch-holders.js";
 import type { ProviderName } from "./agent-provider.js";
 import {
@@ -528,6 +533,8 @@ export function createWorkspaceCreateService(deps: {
     // Sibling worktrees provisioned for the project's additional repos (multi-repo);
     // hoisted so the catch block can roll them back alongside the leading worktree.
     let siblingWorktrees: SiblingWorktree[] = [];
+    // #630: whether the in-flight marker exists, so both exits can clear it exactly once.
+    let provisioningMarked = false;
 
     const phaseStart = Date.now();
     const timing = (phase: string, startMs: number) =>
@@ -573,6 +580,19 @@ export function createWorkspaceCreateService(deps: {
       resolvedProvider = agentConfig.resolvedProvider;
       timing("agent-config", t);
 
+      // #630: mark the create as in flight BEFORE anything lands on disk. Everything from
+      // here to the final transaction is invisible to the board otherwise — minutes on a
+      // single repo, tens of minutes on a multi-repo project — so a restart in this window
+      // used to leave worktrees and branches nobody had a record of.
+      await beginProvisioning({
+        id,
+        issueId: input.issueId,
+        projectId: issue.projectId,
+        branch: input.branch || (isDirect ? null : suggestBranchName(issue)),
+        worktreePath: null,
+      }, database);
+      provisioningMarked = true;
+
       t = Date.now();
       ({ branch, worktreePath, baseBranch, baseCommitSha, latestSetup, setupCompletion, symlinkRun: latestSymlink } = await setupWorktree(
         isDirect, project.repoPath, project.defaultBranch, input, setupConfig, symlinkConfig, id,
@@ -585,6 +605,9 @@ export function createWorkspaceCreateService(deps: {
         issue,
       ));
       timing("worktree-setup", t);
+      // The branch is only settled here (it can be derived), and the worktree path is what a
+      // reclaim needs — record both before the sibling loop, which is the long part.
+      await updateProvisioning(id, { phase: "siblings", branch, worktreePath }, database).catch(() => {});
 
       // Multi-repo (full-peers): a worktree on the same branch in every additional
       // repo. No-op for single-repo projects and direct workspaces. A failure here
@@ -670,6 +693,9 @@ export function createWorkspaceCreateService(deps: {
       // was the whole illusion, and it silently corrupted every latency number taken from it.
       const committedAt = new Date().toISOString();
       await withTransaction(database, async (tx) => {
+        // #630: the marker dies with the same commit that makes the workspace real, so
+        // there is no window in which both — or neither — exist.
+        await finishProvisioning(id, tx);
         await insertWorkspaceRecord({
           id, issueId: input.issueId, branch, worktreePath, baseBranch, isDirect,
           baseCommitSha, requiresReview, thoroughReview, planMode, tddMode, includeVisualProof,
@@ -773,6 +799,10 @@ export function createWorkspaceCreateService(deps: {
         updatedAt: now,
       };
     } catch (err) {
+      // #630: a create that fails CLEANLY has rolled its worktrees back below, so its marker
+      // must go too — a surviving row is reserved for the case the marker exists for: a
+      // process that died mid-create and never ran either exit path.
+      if (provisioningMarked) await finishProvisioning(id, database).catch(() => {});
       if (err instanceof WorkspaceError) {
         // A WorkspaceError raised AFTER the worktree was provisioned (e.g. an
         // agent-config WorkspaceError, or a workflow-init / move-to-In-Progress
