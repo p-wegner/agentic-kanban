@@ -3,10 +3,13 @@ import type { APIRequestContext } from "@playwright/test";
 import { normalize, resolve } from "node:path";
 import { execSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
+import { E2E_SERVER_PORT } from "./ports.js";
 
 export const E2E_STATE_FILE = resolve(import.meta.dirname, ".e2e-run-state.json");
 
-const serverPort = Number(process.env.SERVER_PORT) || 3001;
+// #645: was its own `|| 3001` default — a third copy that would have pointed setup
+// and teardown at the live dev board while the stack ran on the E2E ports.
+const serverPort = E2E_SERVER_PORT;
 
 export interface Project {
   id: string;

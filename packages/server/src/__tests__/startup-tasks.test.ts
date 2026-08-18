@@ -25,7 +25,7 @@ vi.mock("../db/seed.js", () => ({ ensureBuiltinTags: vi.fn(async () => {}), ensu
 vi.mock("../services/project-registration.js", () => ({ deduplicateProjects: vi.fn(async () => {}) }));
 vi.mock("../services/workspace-repos.service.js", () => ({ cleanupSiblingWorktrees: vi.fn(async () => {}) }));
 
-import { abortStaleMerges, pruneStaleWorktrees, shouldKillOrphanedServerProcess } from "../startup/startup-tasks.js";
+import { abortStaleMerges, pruneStaleWorktrees, shouldKillOrphanedServerProcess, shouldSkipOrphanCleanup } from "../startup/startup-tasks.js";
 import { db } from "../db/index.js";
 import * as gitService from "../services/git.service.js";
 import { cleanupSiblingWorktrees } from "../services/workspace-repos.service.js";
@@ -181,5 +181,16 @@ describe("shouldKillOrphanedServerProcess", () => {
       checkoutRoot: "C:\\andrena\\agentic-kanban\\packages\\server",
       commandLine: "node C:\\andrena\\agentic-kanban\\packages\\server\\node_modules\\tsx\\dist\\cli.mjs watch src/index.ts",
     })).toBe(false);
+  });
+});
+
+describe("shouldSkipOrphanCleanup", () => {
+  it("is off by default", () => {
+    expect(shouldSkipOrphanCleanup({})).toBe(false);
+  });
+
+  it("opts a co-tenant server out of reaping its own checkout (#645)", () => {
+    expect(shouldSkipOrphanCleanup({ KANBAN_SKIP_ORPHAN_CLEANUP: "1" })).toBe(true);
+    expect(shouldSkipOrphanCleanup({ KANBAN_SKIP_ORPHAN_CLEANUP: "true" })).toBe(true);
   });
 });
