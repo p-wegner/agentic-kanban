@@ -70,6 +70,55 @@ const ALLOWLIST = new Map<string, string>([
     "Dependency-free scaffolded PreToolUse guard shipped into user repos' .claude/hooks/. Runs standalone " +
       "in scaffolded repos (no @agentic-kanban/shared on disk), so it cannot import the adapter.",
   ],
+  // #647 item 4: the repo's OWN `.claude/hooks/*.js` guards. Claude Code / Codex execute
+  // each of these as a bare `node <file>` PreToolUse hook, with no bundler, no package
+  // context and no guarantee that `packages/shared` is even built — several exist precisely
+  // to run when the tree is in a bad state. Importing the adapter would make a safety guard
+  // fail open exactly when it is most needed, so they spawn git themselves (with windowsHide)
+  // and are listed here. Same standing rule as the scaffold copies: do not rewrite these to
+  // import shared.
+  [
+    join(".claude", "hooks", "check-conflict-markers.js"),
+    "Dependency-free PreToolUse hook run as bare `node <file>`; resolves the repo root and reads " +
+      "the diff before shared may be built.",
+  ],
+  [
+    join(".claude", "hooks", "check-skill-frontmatter.js"),
+    "Dependency-free PreToolUse hook; reads skill files from the git INDEX (`git show :<path>`), " +
+      "which the adapter's API does not change and which must work with no shared build.",
+  ],
+  [
+    join(".claude", "hooks", "check-uncommitted.js"),
+    "Dependency-free Stop hook; a single `git status --porcelain` that must run standalone.",
+  ],
+  [
+    join(".claude", "hooks", "prevent-cross-worktree-writes.js"),
+    "Dependency-free write guard; enumerates worktrees to decide whether a write escapes this " +
+      "checkout. Must not depend on the tree it is protecting.",
+  ],
+  [
+    join(".claude", "hooks", "require-read-before-write.js"),
+    "Dependency-free write guard; resolves the repo root only.",
+  ],
+  [
+    join(".claude", "hooks", "smart-hooks-runner.js"),
+    "Dependency-free hook dispatcher — the .codex parity entry point too. The in-repo twin of " +
+      "packages/server/src/scaffold/smart-hooks-runner.js, allowlisted above for the same reason.",
+  ],
+  [
+    join(".claude", "hooks", "validate-command-safety.js"),
+    "Dependency-free PreToolUse guard — the one that blocks kanban.db destruction. It must run " +
+      "even when the checkout is broken, so it cannot import anything from packages/.",
+  ],
+  [
+    join(".claude", "hooks", "vital-file-guard.js"),
+    "Dependency-free PreToolUse guard shielding vital files; in-repo twin of the scaffold copy.",
+  ],
+  [
+    join("scripts", "shared-preflight.mjs"),
+    "Runs `git restore packages/shared` when packages/shared looks WIPED — importing the adapter " +
+      "from the package it is repairing is exactly the thing that cannot work here.",
+  ],
   [
     join("packages", "e2e", "global-setup.ts"),
     "Playwright global-setup — test-harness bootstrap that resolves the repo root (a single read-only " +
@@ -97,6 +146,14 @@ const GIT_COMMANDS = new Set(["git", "git.exe"]);
  * the scan silently asserted nothing (a vacuous pass) in every worktree, which is where
  * agents actually work. Matching the relative path keeps the exclusion doing its real
  * job (skipping a worktree nested INSIDE the repo) without the root prefix aliasing it.
+ */
+/**
+ * `__tests__` covers `__tests__/helpers/` too, and #647 item 4 listed that as a bypass.
+ * Kept deliberately: a helper is extracted TEST code, and the exclusion's stated reason —
+ * tests legitimately drive real git to build fixtures — applies to it identically. The
+ * only thing moving a fixture builder from a `.test.ts` into `helpers/` would change is
+ * whether the gate shouts about it, which is not a property worth gating on. The real
+ * scope gap was the repo-root trees, fixed in collectAllPackageSources below.
  */
 const EXCLUDED_DIRS = ["node_modules", "dist", ".worktrees", "__tests__"];
 
@@ -149,6 +206,28 @@ function resolveString(expr: ts.Expression, consts: Map<string, string>): string
   if (ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
   if (ts.isIdentifier(node)) return consts.get(node.text) ?? null;
   return null;
+}
+
+/**
+ * The PROGRAM a command expression launches, when that much is statically known (#647 item 4).
+ *
+ * `resolveString` deliberately answers "is this expression exactly this string", and a template
+ * literal with a substitution — `` exec(`git log ${ref}`) `` — is not, so it returned null and
+ * the call passed the gate. That is a real bypass and the most natural way to write a dynamic
+ * git command. But the gate never needs the whole string: only the first token, the binary.
+ *
+ * So for a `TemplateExpression` we read the literal HEAD and take its first token. `` `git
+ * ${args}` `` → "git" (flagged); `` `${bin} status` `` → an empty head → no token → not flagged,
+ * which is the correct answer rather than a guess. Kept separate from `resolveString` so the
+ * const map is never poisoned with a partially-resolved value.
+ */
+function resolveCommandProgram(expr: ts.Expression, consts: Map<string, string>): string | null {
+  const node = unwrap(expr);
+  const whole = resolveString(node, consts);
+  const head = whole ?? (ts.isTemplateExpression(node) ? node.head.text : null);
+  if (head == null) return null;
+  const program = head.trim().split(/\s+/, 1)[0];
+  return program === "" ? null : program;
 }
 
 /**
@@ -277,12 +356,11 @@ function findGitSpawns(filePath: string, text: string): Offender[] {
     if (ts.isCallExpression(node) && calleeIsSpawn(node.expression)) {
       const arg0 = node.arguments[0];
       if (arg0) {
-        const cmd = resolveString(arg0, stringConsts);
         // For `exec`/`execSync` the whole shell command line is arg0 (e.g.
         // `exec("git status")`), so the program is the FIRST whitespace token.
         // For `execFile`/`spawn` arg0 is already just the binary. Taking the
         // first token works for both and never widens to a false positive.
-        const program = cmd == null ? null : cmd.trim().split(/\s+/, 1)[0];
+        const program = resolveCommandProgram(arg0, stringConsts);
         if (program != null && GIT_COMMANDS.has(program)) {
           const { line } = sf.getLineAndCharacterOfPosition(node.getStart(sf));
           offenders.push({ line: line + 1, snippet: lineTextAt(text, line) });
@@ -330,6 +408,31 @@ describe("git-exec single-spawn gate", () => {
     expect(offenders.map((o) => o.line)).toEqual([3, 4]);
   });
 
+  it("flags a template literal WITH substitution — the most natural dynamic git call (#647)", () => {
+    // The bypass: `resolveString` answers "is this exactly this string", and an interpolated
+    // template is not, so it returned null and every one of these passed the gate silently.
+    const source = [
+      "import { exec, execSync, execFile } from \"node:child_process\";",
+      "execSync(`git log ${ref}`);",
+      "exec(`git diff --stat ${a}..${b}`, () => {});",
+      "execFile(`git`, [`log`, ref], () => {});",
+    ].join("\n");
+
+    expect(findGitSpawns("sample.ts", source).map((o) => o.line)).toEqual([2, 3, 4]);
+  });
+
+  it("does NOT guess when the binary itself is the substitution", () => {
+    // `` `${bin} status` `` has an empty head, so no program is known. Refusing to answer is
+    // correct here — flagging it would be a guess, and one that fires on every dynamic spawn.
+    const source = [
+      "import { execSync } from \"node:child_process\";",
+      "execSync(`${bin} status`);",
+      "execSync(`${pnpm} run build`);",
+    ].join("\n");
+
+    expect(findGitSpawns("sample.ts", source)).toEqual([]);
+  });
+
   it("does not flag legitimate non-git spawns (pnpm, taskkill, where claude)", () => {
     const source = [
       `import { execSync, execFile, spawn } from "node:child_process";`,
@@ -349,7 +452,16 @@ describe("git-exec single-spawn gate", () => {
     expect(offenders[0]?.line).toBe(2); // the call expression starts on line 2
   });
 
-  /** Every .ts/.js/.mjs/.cjs source file across all packages, minus the isExcluded set. */
+  /**
+   * Every .ts/.js/.mjs/.cjs source file the gate governs, minus the isExcluded set.
+   *
+   * `packages/` plus the two repo-root trees that actually run code (#647 item 4): the
+   * scan was packages-only, so 8 live `.claude/hooks/*.js` guards and
+   * `scripts/shared-preflight.mjs` spawned git completely unseen — the gate reported a
+   * single spawn site while nine others sat outside its glob. They are allowlisted
+   * rather than rewritten (see ALLOWLIST for why each must stay standalone), but the
+   * point is that they are now VISIBLE and each is an explicit decision.
+   */
   function collectAllPackageSources(): string[] {
     const packagesDir = join(REPO_ROOT, "packages");
     const files: string[] = [];
@@ -358,6 +470,9 @@ describe("git-exec single-spawn gate", () => {
       // Walk the WHOLE package dir (not just src/) so files outside src — e.g.
       // packages/e2e/global-setup.ts and the scaffold .js hook scripts — are visible.
       collectSourceFiles(join(packagesDir, pkg), files);
+    }
+    for (const rootTree of [join(".claude", "hooks"), "scripts"]) {
+      collectSourceFiles(join(REPO_ROOT, rootTree), files);
     }
     return files;
   }
@@ -376,6 +491,14 @@ describe("git-exec single-spawn gate", () => {
       files.some((f) => f.endsWith(join("src", "lib", "git-exec.ts"))),
       "scan did not reach the adapter itself — the gate is disarmed",
     ).toBe(true);
+    // #647 item 4: the two repo-root trees. Nine live git spawns sat in them, invisible,
+    // while this gate claimed a single spawn site — so assert the reach, don't assume it.
+    for (const tree of [join(".claude", "hooks"), "scripts"]) {
+      expect(
+        files.some((f) => f.startsWith(join(REPO_ROOT, tree))),
+        `scan did not reach ${tree}/ — the gate is blind there again`,
+      ).toBe(true);
+    }
   });
 
   it("no package source spawns git outside the git-exec adapter", () => {
