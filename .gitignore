@@ -69,3 +69,4 @@ docker-compose.override.yml
 .claude/skills/
 .codex/skills
 .claude/smart-hooks-rules.json
+packages/e2e/.e2e-data/
