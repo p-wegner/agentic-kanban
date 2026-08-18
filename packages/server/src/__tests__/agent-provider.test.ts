@@ -128,12 +128,12 @@ describe("ClaudeProvider", () => {
       expect(config.args).toContain("mcp__approve");
     });
 
-    it("adds --settings when claudeProfile points to existing file", () => {
+    it("adds --settings when the selected profile points to an existing file", () => {
       (existsSyncMock as any).mockImplementation((p: string) =>
         p.includes("settings_test-profile.json")
       );
 
-      const config = provider.buildLaunchConfig({ claudeProfile: "test-profile" });
+      const config = provider.buildLaunchConfig({ profile: { provider: "claude", name: "test-profile" } });
       expect(config.args).toContain("--settings");
       const settingsIdx = config.args.indexOf("--settings");
       expect(config.args[settingsIdx + 1]).toContain("settings_test-profile.json");
@@ -142,7 +142,7 @@ describe("ClaudeProvider", () => {
     it("skips --settings when profile file does not exist", () => {
       (existsSyncMock as any).mockReturnValue(false);
 
-      const config = provider.buildLaunchConfig({ claudeProfile: "nonexistent" });
+      const config = provider.buildLaunchConfig({ profile: { provider: "claude", name: "nonexistent" } });
       expect(config.args).not.toContain("--settings");
     });
 
@@ -169,7 +169,7 @@ describe("ClaudeProvider", () => {
         JSON.stringify({ env: { ANTHROPIC_BASE_URL: "https://api.z.ai/anthropic", ANTHROPIC_MODEL: "glm-5.1" } })
       );
 
-      const config = provider.buildLaunchConfig({ claudeProfile: "zai", model: "opus" });
+      const config = provider.buildLaunchConfig({ profile: { provider: "claude", name: "zai" }, model: "opus" });
       expect(config.args).not.toContain("--model");
     });
 
@@ -181,7 +181,7 @@ describe("ClaudeProvider", () => {
         JSON.stringify({ env: { ANTHROPIC_API_KEY: "sk-test" } })
       );
 
-      const config = provider.buildLaunchConfig({ claudeProfile: "work", model: "sonnet" });
+      const config = provider.buildLaunchConfig({ profile: { provider: "claude", name: "work" }, model: "sonnet" });
       expect(config.args).toContain("--model");
       expect(config.args[config.args.indexOf("--model") + 1]).toBe("sonnet");
     });

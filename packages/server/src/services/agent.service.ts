@@ -397,7 +397,7 @@ export function launch(request: AgentLaunchRequest): ChildProcess {
   // body below is unchanged; only how the values arrive is.
   const {
     worktreePath, sessionId, prompt, agentArgs, onOutput,
-    providerSessionId, agentCommand, claudeProfile, keepAlive, permissionPromptTool,
+    providerSessionId, agentCommand, keepAlive, permissionPromptTool,
     planMode, provider, profile, extraEnv, skipPermissions,
     model, contextFiles, systemInstructions, containerProvision,
   } = request;
@@ -407,7 +407,6 @@ export function launch(request: AgentLaunchRequest): ChildProcess {
     agentArgs,
     providerSessionId,
     agentCommand,
-    claudeProfile,
     profile,
     model,
     systemInstructions,

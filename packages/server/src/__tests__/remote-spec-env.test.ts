@@ -126,7 +126,7 @@ describe("assign messages carry no credentials (#244)", () => {
       worktreePath: "C:/some/worktree", sessionId: "s1", prompt: "do the ticket",
       agentArgs: undefined, onOutput: () => {},
       agentCommand: "node fleet-mock-agent.cjs",
-      claudeProfile: "someprofile",
+      profile: { provider: "claude", name: "someprofile" },
       keepAlive: false,
       // An auth-rotation dir is a board-local credential path and must not cross
       // either, even though callers pass it for host launches. (#524: this comment

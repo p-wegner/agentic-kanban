@@ -19,7 +19,6 @@ export class ClaudeProvider implements AgentProvider {
       agentArgs,
       providerSessionId,
       agentCommand,
-      claudeProfile,
       profile,
       model,
       keepAlive,
@@ -29,7 +28,10 @@ export class ClaudeProvider implements AgentProvider {
       oneShotText,
     } = options;
 
-    const effectiveProfileName = profile?.name ?? claudeProfile;
+    // #528: was `profile?.name ?? claudeProfile`. The fallback was dead for claude —
+    // producers set claudeProfile to the same name they put in `profile` — and live only
+    // for a non-claude provider, whose name has no business selecting a claude settings file.
+    const effectiveProfileName = profile?.name;
 
     const { isMockAgent, command: resolvedCommand, mockArgs } = resolveMockLaunch(
       { agentCommand, providerSessionId, keepAlive },

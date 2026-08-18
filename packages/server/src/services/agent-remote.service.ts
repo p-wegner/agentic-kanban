@@ -189,7 +189,7 @@ export function createRemoteAgentService(
     // now visible as an unused FIELD rather than a placeholder in argument position 19.
     const {
       worktreePath, sessionId, prompt, agentArgs, onOutput,
-      providerSessionId, agentCommand, claudeProfile, keepAlive, permissionPromptTool,
+      providerSessionId, agentCommand, keepAlive, permissionPromptTool,
       planMode, provider, profile, extraEnv, skipPermissions,
       model, contextFiles, systemInstructions, placement,
     } = request;
@@ -206,7 +206,6 @@ export function createRemoteAgentService(
       agentArgs,
       providerSessionId,
       agentCommand,
-      claudeProfile,
       profile,
       model,
       systemInstructions,
