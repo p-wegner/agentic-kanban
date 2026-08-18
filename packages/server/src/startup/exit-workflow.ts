@@ -13,13 +13,14 @@ import { commitsAhead, hasCommitsAhead } from "./branch-commits.js";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { db as defaultDb } from "../db/index.js";
-import { MOCK_AGENT_COMMAND, isMockProfile, toExecutorProvider } from "../services/agent-settings.service.js";
+import { toExecutorProvider } from "../services/agent-settings.service.js";
 import { createBoardEvents } from "../services/board-events.js";
 import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
 import { ensureBuildableFromClean } from "../services/project-scaffold.js";
 import * as gitService from "../services/git.service.js";
 import { createSessionManager } from "../services/session.manager.js";
-import { applyWorkspaceProfileToPrefs, buildReviewArgs, buildReviewPrompt, getEffectiveProfile, parseProviderPref } from "./review-helpers.js";
+import { buildReviewPrompt } from "./review-helpers.js";
+import { applyWorkspaceProfileToPrefs, resolveWorkspaceLaunchSettings } from "../services/agent-settings.service.js";
 import { buildReviewContext } from "../services/phase-context.service.js";
 import type { MergeWorkspace } from "./merge-workflow.js";
 import { isAutomaticMergeEnabled } from "./merge-strategy.js";
@@ -153,16 +154,10 @@ async function launchLearningStep(database: Database, sessionManager: ReturnType
   try {
     // Run the learning step on the same provider/profile the workspace was built
     // with (e.g. its Codex OAuth license), not the global default which may have rotated.
-    const learnPrefs = applyWorkspaceProfileToPrefs(prefMap, workspace);
-    const provider = parseProviderPref(learnPrefs);
-    const profile = learnPrefs.get("claude_profile") || undefined;
-    const agentCommand = isMockProfile(profile) ? MOCK_AGENT_COMMAND : (learnPrefs.get("agent_command") || undefined);
-    const agentArgs = learnPrefs.get("agent_args") || undefined;
-    const claudeProfile = isMockProfile(profile) ? undefined : profile;
-    const effectiveProfile = getEffectiveProfile(learnPrefs, provider, claudeProfile);
-    const profileSelection = effectiveProfile ? { provider, name: effectiveProfile } : undefined;
+    // #541: was an eight-line hand-rolled copy of resolveAgentSettings.
+    const { agentCommand, agentArgs, provider, profile } = resolveWorkspaceLaunchSettings(prefMap, workspace);
     const prompt = buildLearningStepPrompt(false);
-    const learnSessId = await sessionManager.startSession({ workspaceId, prompt, agentCommand, agentArgs, provider: toExecutorProvider(provider), triggerType: "learning", profile: profileSelection });
+    const learnSessId = await sessionManager.startSession({ workspaceId, prompt, agentCommand, agentArgs, provider: toExecutorProvider(provider), triggerType: "learning", profile });
     learningSessionIds.add(learnSessId);
     console.log(`[workflow] learning step (${label}) started: session=${learnSessId}`);
     return wait ? waitForLearningSession(database, learnSessId, label, `[workflow] learning step (${label}) timed out after 3m`) : Promise.resolve();
@@ -939,13 +934,11 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     const workspaceId = workspace.id;
     // Review on the same provider/profile the workspace was built with (e.g. its
     // Codex OAuth license), not the global default which may have rotated since.
+    // #541: same ladder as the learning step, spelled differently. Now one call.
     const reviewPrefs = applyWorkspaceProfileToPrefs(prefMap, workspace);
-    const reviewProvider = parseProviderPref(reviewPrefs), reviewProfile = reviewPrefs.get("claude_profile") || undefined;
-    const agentCommand = isMockProfile(reviewProfile) ? MOCK_AGENT_COMMAND : (reviewPrefs.get("agent_command") || undefined);
-    const claudeProfile = isMockProfile(reviewProfile) ? undefined : reviewProfile;
-    const effectiveReviewProfile = getEffectiveProfile(reviewPrefs, reviewProvider, claudeProfile);
-    const profileSelection = effectiveReviewProfile ? { provider: reviewProvider, name: effectiveReviewProfile } : undefined;
-    const reviewArgs = buildReviewArgs(reviewPrefs, reviewProvider), autoFix = workspace.isDirect ? false : getBool(reviewPrefs, "review_auto_fix");
+    const { agentCommand, agentArgs: reviewArgs, provider: reviewProvider, profile: profileSelection } =
+      resolveWorkspaceLaunchSettings(prefMap, workspace);
+    const autoFix = workspace.isDirect ? false : getBool(reviewPrefs, "review_auto_fix");
     let diffRef = workspace.baseBranch || defaultBranch, conflictingFiles: string[] | undefined, uncommittedChanges: string[] | undefined;
     if (workspace.isDirect) diffRef = workspace.baseCommitSha || defaultBranch;
     else if (workspace.workingDir) {

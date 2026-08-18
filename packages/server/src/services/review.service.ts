@@ -14,12 +14,10 @@ import {
   getProjectDefaultBranch,
 } from "../repositories/review.repository.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
-import type { ProviderName } from "./agent-provider.js";
-import { narrowProviderName, getProfilePrefKey } from "./agent-provider.js";
 import type { BoardEvents } from "./board-events.js";
 import type { SessionManager } from "./session.manager.js";
 import * as gitService from "./git.service.js";
-import { MOCK_AGENT_COMMAND, isMockProfile, toExecutorProvider } from "./agent-settings.service.js";
+import { applyWorkspaceProfileToPrefs, resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { loadProjectRuntimeConfig } from "./project-runtime-config.service.js";
 import { buildReviewContext } from "./phase-context.service.js";
 import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
@@ -49,46 +47,6 @@ Workspace ID: {{workspaceId}}`;
  */
 export const REVIEW_CONTEXT_FALLBACK = `First, run 'git diff --stat {{baseBranch}}' to see an overview of changed files.
 Then review each file individually with 'git diff {{baseBranch}} -- <filepath>' — do NOT dump the entire diff at once.`;
-
-export function buildReviewArgs(prefMap: Map<string, string>, provider: ProviderName): string | undefined {
-  const skipPerms = getBool(prefMap, "skip_permissions") && provider === "claude";
-  const baseArgs = prefMap.get("agent_args") || "";
-  if (skipPerms) {
-    return baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions";
-  }
-  return baseArgs || undefined;
-}
-
-export function parseProviderPref(prefMap: Map<string, string>): ProviderName {
-  return narrowProviderName(prefMap.get("provider"));
-}
-
-export function getEffectiveProfile(prefMap: Map<string, string>, provider: ProviderName, claudeProfile: string | undefined): string | undefined {
-  // Claude uses the passed (mock-filtered) profile; others read their own profilePrefKey.
-  return provider === "claude" ? claudeProfile : (prefMap.get(getProfilePrefKey(provider)) || undefined);
-}
-
-/**
- * Return a copy of `prefMap` with the provider + matching profile key overridden
- * from the workspace's recorded selection, so a review/continuation runs on the
- * SAME provider+profile the workspace was built with instead of silently falling
- * back to the global default. This is what keeps a per-workspace Codex OAuth license
- * (or any chosen profile) sticky across review — without it, getEffectiveProfile
- * reads the global `codex_profile`, which may differ (or have rotated). Leaves the
- * global default in place when the workspace recorded no provider/profile.
- */
-export function applyWorkspaceProfileToPrefs(
-  prefMap: Map<string, string>,
-  workspace: { provider: string | null; claudeProfile: string | null },
-): Map<string, string> {
-  const provider = workspace.provider;
-  if (provider !== "claude" && provider !== "codex" && provider !== "copilot" && provider !== "pi") return prefMap;
-  const next = new Map(prefMap);
-  next.set("provider", provider);
-  const name = workspace.claudeProfile || undefined;
-  if (name) next.set(getProfilePrefKey(provider), name);
-  return next;
-}
 
 export async function buildReviewPrompt(
   database: Database,
@@ -450,15 +408,14 @@ export async function startManualReview(
     const runtime = recoverBlockedReview
       ? await loadProjectRuntimeConfig(database, { projectId })
       : null;
-    const manualProfile = prefMap.get("claude_profile") || undefined;
-    const provider = runtime?.provider.provider ?? parseProviderPref(prefMap);
-    const agentCommand = runtime?.provider.agentCommand ?? (isMockProfile(manualProfile) ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined));
-    const claudeProfile = runtime
-      ? (runtime.provider.provider === "claude" ? runtime.provider.profileName : undefined)
-      : (isMockProfile(manualProfile) ? undefined : manualProfile);
-    const effectiveProfileName = getEffectiveProfile(prefMap, provider, claudeProfile);
-    const manualProfileSelection = runtime?.provider.profileSelection ?? (effectiveProfileName ? { provider, name: effectiveProfileName } : undefined);
-    const reviewArgs = runtime?.provider.agentArgs ?? buildReviewArgs(prefMap, provider);
+    // #541: the fifth copy of the prefs -> {command, args, provider, profile} ladder.
+    // `prefMap` is already workspace-pinned above (except on the recover path, which takes
+    // its values from `runtime` instead), so plain resolveAgentSettings is the right call.
+    const settings = resolveAgentSettings(prefMap);
+    const provider = runtime?.provider.provider ?? settings.provider;
+    const agentCommand = runtime?.provider.agentCommand ?? settings.agentCommand;
+    const manualProfileSelection = runtime?.provider.profileSelection ?? settings.profile;
+    const reviewArgs = runtime?.provider.agentArgs ?? settings.agentArgs;
     const autoFix = getBool(prefMap, "review_auto_fix");
 
     const defaultBranch = (await getProjectDefaultBranch(projectId, database))?.defaultBranch ?? null;

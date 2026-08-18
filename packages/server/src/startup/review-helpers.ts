@@ -8,10 +8,6 @@ import {
 export {
   DEFAULT_MONITOR_NUDGE_PROMPT,
   DEFAULT_REVIEW_PROMPT,
-  buildReviewArgs,
-  parseProviderPref,
-  getEffectiveProfile,
-  applyWorkspaceProfileToPrefs,
 } from "../services/review.service.js";
 
 // Backward-compat wrappers that inject `db` so existing callers (exit-workflow, monitor-setup)

@@ -119,6 +119,48 @@ export function resolveAgentSettings(
   return { agentCommand, agentArgs, profile, provider, resumeWithNewModel, permissionPromptTool };
 }
 
+/**
+ * Return a copy of `prefMap` with the provider + matching profile key overridden from the
+ * workspace's recorded selection, so a review/learning/verify session runs on the SAME
+ * provider+profile the workspace was built with instead of falling back to the global
+ * default. Without it a per-workspace Codex OAuth license is lost the moment the board's
+ * default rotates. Leaves the global default in place when the workspace recorded none.
+ *
+ * Moved here from review.service in #541: it shapes a pref map for `resolveAgentSettings`,
+ * so `startup/` reaching into the review service for it was backwards.
+ */
+export function applyWorkspaceProfileToPrefs(
+  prefMap: Map<string, string>,
+  workspace: { provider: string | null; claudeProfile: string | null },
+): Map<string, string> {
+  const provider = workspace.provider;
+  if (provider !== "claude" && provider !== "codex" && provider !== "copilot" && provider !== "pi") return prefMap;
+  const next = new Map(prefMap);
+  next.set("provider", provider);
+  const name = workspace.claudeProfile || undefined;
+  if (name) next.set(getProfilePrefKey(provider), name);
+  return next;
+}
+
+/**
+ * The one ladder for a NON-builder session (learning, verify, auto-review, manual review)
+ * launched against an existing workspace: pin the workspace's own provider/profile, then
+ * resolve everything else through the single source of truth.
+ *
+ * #541 replaced five hand-rolled copies of this with one call. They had drifted: two
+ * skipped the mock command's `--profile`/`--delay-ms` flags by using the bare
+ * MOCK_AGENT_COMMAND, and the learning ladders read `agent_args` raw, so a board with
+ * skip_permissions on gave its builders `--dangerously-skip-permissions` and its learning
+ * sessions none.
+ */
+export function resolveWorkspaceLaunchSettings(
+  prefMap: Map<string, string>,
+  workspace: { provider: string | null; claudeProfile: string | null },
+  commandOverride?: string,
+): AgentSettings {
+  return resolveAgentSettings(applyWorkspaceProfileToPrefs(prefMap, workspace), commandOverride);
+}
+
 function parseProviderName(provider: string | undefined): ProviderName {
   return narrowProviderName(provider);
 }

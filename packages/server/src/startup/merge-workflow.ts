@@ -5,7 +5,7 @@ import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engin
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { db, type Database } from "../db/index.js";
-import { MOCK_AGENT_COMMAND, isMockProfile, toExecutorProvider } from "../services/agent-settings.service.js";
+import { toExecutorProvider } from "../services/agent-settings.service.js";
 import { createBoardEvents } from "../services/board-events.js";
 import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
 import * as gitService from "../services/git.service.js";
@@ -22,7 +22,7 @@ import { createBackup } from "../db/backup.js";
 import { killProcessesInDir } from "../services/process-cleanup.js";
 import { runScript } from "../services/script-runner.js";
 import { createSessionManager } from "../services/session.manager.js";
-import { getEffectiveProfile, parseProviderPref } from "./review-helpers.js";
+import { resolveAgentSettings } from "../services/agent-settings.service.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { buildLearningStepPrompt } from "../services/merge-helpers.service.js";
@@ -253,13 +253,12 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
       if (getBool(prefMapLearning, "learning_step_before_merge") && workspace.workingDir) {
         try {
           const learningPrompt = buildLearningStepPrompt(true);
-          const learningProfile = prefMapLearning.get("claude_profile") || undefined;
-          const agentCmd = isMockProfile(learningProfile) ? MOCK_AGENT_COMMAND : (prefMapLearning.get("agent_command") || undefined);
-          const agentArgs = prefMapLearning.get("agent_args") || undefined;
-          const claudeProfile = isMockProfile(learningProfile) ? undefined : learningProfile;
-          const providerLearnMerge = parseProviderPref(prefMapLearning);
-          const effectiveProfileLearnMerge = getEffectiveProfile(prefMapLearning, providerLearnMerge, claudeProfile);
-          const profileSelectionLearnMerge = effectiveProfileLearnMerge ? { provider: providerLearnMerge, name: effectiveProfileLearnMerge } : undefined;
+          // #541: resolveAgentSettings, not resolveWorkspaceLaunchSettings — MergeWorkspace
+          // carries no provider/claudeProfile, so this step has never been able to pin the
+          // workspace's own profile the way the exit-workflow learning step does. Widening
+          // that type is a separate change; this only removes the copy.
+          const { agentCommand: agentCmd, agentArgs, provider: providerLearnMerge, profile: profileSelectionLearnMerge } =
+            resolveAgentSettings(prefMapLearning);
           const learningSessId = await sessionManager.startSession({ workspaceId: workspace.id, prompt: learningPrompt, agentCommand: agentCmd, agentArgs, profile: profileSelectionLearnMerge, provider: toExecutorProvider(providerLearnMerge), triggerType: "learning" });
           learningSessionIds.add(learningSessId);
           console.log(`[workflow] learning step started: session=${learningSessId}`);
@@ -457,12 +456,8 @@ If the dev server is not responding, wait 10 seconds and retry once.
 Issue ID: ${issueId}
 Workspace ID: ${workspace.id}
 Server: http://localhost:${serverPort}`;
-                  const verifyProfile = prefMapLearning.get("claude_profile") || undefined;
-                  const verifyCmd = isMockProfile(verifyProfile) ? MOCK_AGENT_COMMAND : (prefMapLearning.get("agent_command") || undefined);
-                  const verifyArgs = prefMapLearning.get("agent_args") || undefined;
-                  const verifyProvider = parseProviderPref(prefMapLearning);
-                  const effectiveVerifyProfile = getEffectiveProfile(prefMapLearning, verifyProvider, isMockProfile(verifyProfile) ? undefined : verifyProfile);
-                  const verifyProfileSelection = effectiveVerifyProfile ? { provider: verifyProvider, name: effectiveVerifyProfile } : undefined;
+                  const { agentCommand: verifyCmd, agentArgs: verifyArgs, provider: verifyProvider, profile: verifyProfileSelection } =
+                    resolveAgentSettings(prefMapLearning);
                   const verifySessId = await sessionManager.startSession({ workspaceId: workspace.id, prompt: verifyPrompt, agentCommand: verifyCmd, agentArgs: verifyArgs, provider: toExecutorProvider(verifyProvider), triggerType: "verify", profile: verifyProfileSelection, workingDirOverride: repoPath, extraEnv: { KANBAN_SESSION_TYPE: "verify" } });
                   console.log(`[workflow] dedicated verification session started: session=${verifySessId}`);
                 } catch (err) {
