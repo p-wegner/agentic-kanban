@@ -8,6 +8,30 @@ import {
 } from "../repositories/project-health.repository.js";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { getLatestBaseBranchHealth } from "../repositories/base-branch-health.repository.js";
+import { listProjectRepos } from "../repositories/repo.repository.js";
+
+/** Last path segment, for labelling a sibling repo whose row carries no name. */
+function baseName(path: string): string {
+  return path.split(/[/\\]/).filter(Boolean).pop() ?? path;
+}
+
+/** Bounded so a 17-repo project does not spawn 34 git processes at once on a request path. */
+const HEALTH_CHECK_CONCURRENCY = 6;
+
+/** Bounded-concurrency `map`, preserving input order. */
+async function mapBounded<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker));
+  return results;
+}
 
 interface ProjectHealthEntry {
   id: string;
@@ -18,6 +42,13 @@ interface ProjectHealthEntry {
   issueCounts: Record<string, number>;
   totalIssues: number;
   warnings: string[];
+  /**
+   * How many of the project's repos were actually checked (#632). Absence of a warning used
+   * to mean two different things — "checked and clean" and "never looked at" — and they
+   * rendered identically, next to other projects that DID show `Git check failed`. On a
+   * 17-repo project that read as a clean bill of health for 16 unchecked repos.
+   */
+  reposChecked: number;
 }
 
 interface ProjectHealthResult {
@@ -55,21 +86,40 @@ export async function getProjectHealth(database: Database = db): Promise<Project
     projectRows.map(async (project): Promise<ProjectHealthEntry> => {
       const warnings: string[] = [];
 
-      const gitError = await validateGitRepo(project.repoPath);
-      if (gitError) {
-        warnings.push(gitError);
-      } else {
+      // #632: every check here read `project.repoPath` and nothing else, so for a multi-repo
+      // project 16 of 17 repos were never looked at — while the row rendered exactly like a
+      // healthy one. A dirty or detached SIBLING is just as merge-blocking as a dirty leading
+      // repo, so the checks run across every registered repo and roll up, and the count of
+      // repos checked is reported so silence can't be mistaken for a pass.
+      const siblings = await listProjectRepos(project.id, database).catch(() => []);
+      const allRepos = [
+        { path: project.repoPath, label: null as string | null },
+        ...siblings.map((r) => ({ path: r.path, label: r.name ?? baseName(r.path) })),
+      ];
+
+      // Bounded fan-out: a 17-repo project would otherwise spawn 34 git processes at once on
+      // a request path, which is the shape that made the worktrees endpoint take 112s (#342).
+      const perRepo = await mapBounded(allRepos, HEALTH_CHECK_CONCURRENCY, async (repo) => {
+        const found: string[] = [];
+        const where = repo.label ? `${repo.label}: ` : "";
+        const gitError = await validateGitRepo(repo.path);
+        if (gitError) {
+          found.push(`${where}${gitError}`);
+          return found;
+        }
         try {
-          const dirtyFiles = await getDirtyTrackedSourceFiles(project.repoPath);
+          const dirtyFiles = await getDirtyTrackedSourceFiles(repo.path);
           if (dirtyFiles.length > 0) {
             const preview = dirtyFiles.slice(0, 3).join(", ");
             const more = dirtyFiles.length > 3 ? ` (+${dirtyFiles.length - 3} more)` : "";
-            warnings.push(`Dirty main checkout: ${dirtyFiles.length} uncommitted source file(s) — ${preview}${more}`);
+            found.push(`${where}Dirty ${repo.label ? "checkout" : "main checkout"}: ${dirtyFiles.length} uncommitted source file(s) — ${preview}${more}`);
           }
         } catch {
           // non-fatal — dirty check best-effort only
         }
-      }
+        return found;
+      });
+      warnings.push(...perRepo.flat());
 
       // #491 — surface an already-red base branch loudly, without opening a log: a cheap
       // read of the last recorded verify result, never a live check on this request path.
@@ -96,6 +146,7 @@ export async function getProjectHealth(database: Database = db): Promise<Project
         issueCounts,
         totalIssues,
         warnings,
+        reposChecked: allRepos.length,
       };
     }),
   );
