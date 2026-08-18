@@ -133,6 +133,10 @@ export function renderWorkerConnectMarkdown(
   lines.push("");
   lines.push("```bash");
   lines.push("KANBAN_FLEET_PORT=3003 KANBAN_GIT_HTTP_PORT=3002 pnpm dev   # board machine");
+  lines.push("");
+  lines.push("# VPN-only: bind both listeners to the VPN interface instead of every interface");
+  lines.push("KANBAN_FLEET_PORT=3003 KANBAN_FLEET_HOST=100.x.y.z \\");
+  lines.push("KANBAN_GIT_HTTP_PORT=3002 KANBAN_GIT_HTTP_HOST=100.x.y.z pnpm dev");
   lines.push("```");
   lines.push("");
   lines.push(
@@ -140,6 +144,22 @@ export function renderWorkerConnectMarkdown(
       "git transport (pin it — otherwise it moves every boot and no firewall rule can match). The board API itself " +
       "stays on 127.0.0.1 and is not reachable from the network at all. Point a remote worker's --board at the " +
       "FLEET port. Still keep the board on a trusted network (LAN/VPN/Tailscale) rather than the open internet.",
+  );
+  lines.push("");
+  lines.push(
+    "`KANBAN_FLEET_HOST` / `KANBAN_GIT_HTTP_HOST` narrow WHICH interface each listener binds (absent = every " +
+      "interface, as before). On a VPN this is what makes \"trusted network\" a control rather than a hope: " +
+      "with the bind host set to the VPN address, the two ports do not exist on the office LAN, the home LAN or " +
+      "hotel wifi at all, so reaching them requires being on the VPN — the bearer tokens stop being the only " +
+      "thing between a stranger's packet and the board.",
+  );
+  lines.push("");
+  lines.push(
+    "**Do not put a path-based reverse proxy in front of the git transport** (`tailscale serve`, an nginx " +
+      "location prefix). The worker builds its clone URL as `scheme://<board-host>:<git-port>/git/<projectId>` — " +
+      "it discards any path prefix and substitutes the port it was told, so behind a serve-style proxy the clone " +
+      "hangs with no obvious cause. Use the machine's own name/address (e.g. MagicDNS) with the ports directly. " +
+      "Tailscale Funnel must never be used: that is the public internet in front of a board.",
   );
   lines.push("");
   lines.push("## Notes");
