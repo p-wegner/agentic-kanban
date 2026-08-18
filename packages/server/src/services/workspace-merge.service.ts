@@ -55,6 +55,7 @@ import { prevalidateSiblingMerges, executeSiblingMerges } from "./workspace-repo
 import { getAllWorkspaceRepos } from "./workspace-all-repos.js";
 import { getRepoMergeStatus } from "./repo-merge-status.service.js";
 import { checkAlreadyMerged as checkAlreadyMergedImpl, reconcileAlreadyMerged as reconcileAlreadyMergedImpl } from "./workspace-already-merged.service.js";
+import { createWorkspaceCleanupService } from "./workspace-cleanup.service.js";
 import { resolveMergeGate, RUN_GATE, type MergeGateToken } from "./pre-merge-gate.service.js";
 import { recordGateFailureNote as recordGateFailureNoteImpl, runPreLockGate } from "./workspace-merge-gate.js";
 import { getBaseBranchHealthAtMergeBase, describeRedBaseAttribution, verifyBaseBranchHealth } from "./base-branch-health.service.js";
@@ -943,8 +944,20 @@ export function createWorkspaceMergeService(deps: {
   // + the recordMergeAttempt closure) so importers and the returned API are unchanged.
   const checkAlreadyMerged = (id: string, opts: { adoptMainCheckout?: boolean } = {}) =>
     checkAlreadyMergedImpl(id, { database, gitService, adoptMainCheckout: opts.adoptMainCheckout });
+  // #650: reconciling removes the worktree, so any agent still running in it has to be
+  // stopped first. The cleanup service already owns that (graceful stop -> kill the whole
+  // process tree); build it here rather than duplicating the logic, since this service
+  // already holds exactly the deps it needs.
+  const { stopAndKillWorkspaceSessions } = createWorkspaceCleanupService({ database, getSessionManager, gitService });
   const reconcileAlreadyMerged = (id: string, opts: { adoptMainCheckout?: boolean } = {}) =>
-    reconcileAlreadyMergedImpl(id, { database, gitService, boardEvents, recordMergeAttempt, adoptMainCheckout: opts.adoptMainCheckout });
+    reconcileAlreadyMergedImpl(id, {
+      database,
+      gitService,
+      boardEvents,
+      recordMergeAttempt,
+      adoptMainCheckout: opts.adoptMainCheckout,
+      stopWorkspaceSessions: stopAndKillWorkspaceSessions,
+    });
 
   /**
    * Deduplicating entry point for HTTP merge requests: if a merge for this workspace is

@@ -232,6 +232,14 @@ export async function reconcileAlreadyMerged(
     boardEvents?: BoardEvents;
     /** Operator-asserted recovery override — see `checkAlreadyMerged`'s doc (#218). */
     adoptMainCheckout?: boolean;
+    /**
+     * Stop + hard-kill every RUNNING session of the workspace, so no agent is still
+     * standing in the worktree when it is removed (#650). Injected rather than imported
+     * to keep this module free of the session manager; the production wiring is
+     * `createWorkspaceCleanupService(...).stopAndKillWorkspaceSessions` in
+     * workspace-merge.service.ts. Omitted in tests that do not exercise the race.
+     */
+    stopWorkspaceSessions?: (workspaceId: string) => Promise<void>;
     recordMergeAttempt: (
       workspace: typeof workspaces.$inferSelect,
       eventType: "already-merged",
@@ -241,7 +249,7 @@ export async function reconcileAlreadyMerged(
     ) => Promise<void>;
   },
 ) {
-  const { database, gitService, boardEvents, adoptMainCheckout, recordMergeAttempt } = deps;
+  const { database, gitService, boardEvents, adoptMainCheckout, recordMergeAttempt, stopWorkspaceSessions } = deps;
   const workspace = await getWorkspaceById(id, database);
   if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
   if (workspace.status === "closed") throw new WorkspaceError("Workspace is already closed", "BAD_REQUEST");
@@ -257,6 +265,26 @@ export async function reconcileAlreadyMerged(
 
   const { repoPath } = await resolveProjectRepo(id, database);
   const now = new Date().toISOString();
+
+  // #650: an agent can still be LIVE in this worktree — a fix-and-merge session was
+  // observed mid-conflict-resolution when a sibling workspace landed the same content,
+  // this path fired, and the directory was removed out from under it. From inside, that
+  // reads as `fatal: not a git repository` in a tree `git status` had just called clean,
+  // and the session has no way to tell a teardown from a corrupted checkout. Reconciling
+  // is still the right call (the branch really is merged), so the fix is not to skip the
+  // teardown but to END the session first, which is what every other terminal path does
+  // (`removeWorktreeAndBranch`, delete-workspace). Graceful stop then hard-kill of the
+  // process TREE also stops descendants holding handles inside the directory, which is
+  // what makes the removal below succeed on Windows rather than race it.
+  if (stopWorkspaceSessions) {
+    try {
+      await stopWorkspaceSessions(id);
+    } catch (err) {
+      // Non-fatal: a session we could not stop is worse than one we could, but it must
+      // not block reconciling a branch that is demonstrably already on the base.
+      console.warn(`[workspace-merge] reconcile-as-done: could not stop live sessions for ${id}: ${errorMessage(err)}`);
+    }
+  }
 
   await finalizeMergeCleanup({
     database,
