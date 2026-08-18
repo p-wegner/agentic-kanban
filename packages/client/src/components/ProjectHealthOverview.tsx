@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
+import { sortProjectHealth } from "../lib/projectHealthOrder.js";
 
 interface ProjectHealth {
   id: string;
@@ -104,7 +105,7 @@ export function ProjectHealthOverview({ activeProjectId, onProjectChange, onClos
               {data.projects.length === 0 && (
                 <p className="text-center py-8 text-gray-400 text-sm">No projects registered.</p>
               )}
-              {data.projects.map((project) => {
+              {sortProjectHealth(data.projects, activeProjectId).map((project) => {
                 const isActive = project.id === activeProjectId;
                 const hasWarnings = project.warnings.length > 0;
                 return (

@@ -13,6 +13,7 @@ import type { CardDensity } from "../hooks/useBoardPreferences.js";
 import { PRIORITY_META } from "../lib/chartColors.js";
 import { computeVisibleTabCount, splitToolbarViews } from "../lib/toolbarTabOverflow.js";
 import { buildMonitorTitle, countActiveMonitors } from "../lib/monitorToolbarStatus.js";
+import { warningsForProject, describeMonitorWarnings } from "../lib/monitorWarningSummary.js";
 import { validateAgingThreshold } from "../lib/agingHeatmapThresholds.js";
 import { formatBoardActivitySummary } from "../lib/boardActivitySummary.js";
 
@@ -240,7 +241,12 @@ export function BoardToolbar({
   const allViewsRef = useRef<HTMLDivElement>(null);
   const activeView = VIEW_REGISTRY.find((v) => v.id === viewMode);
   const boardActivitySummary = formatBoardActivitySummary(activeColumns);
-  const hasMonitorWarnings = (monitorStatus?.warnings?.length ?? 0) > 0;
+  // #637: the monitor status is global, so warnings for OTHER projects used to turn
+  // this board's button red. Scope the button to the active project; the popover below
+  // still shows every project's warnings, each badged with its project name.
+  const myWarnings = warningsForProject(monitorStatus?.warnings, projectId);
+  const hasMonitorWarnings = myWarnings.length > 0;
+  const monitorWarningTitle = describeMonitorWarnings(myWarnings) ?? undefined;
   // Dogfooding orchestrator loop status + opt-in notifications (hidden when no loop).
   const { status: orchestrator, notify: orchestratorNotify, setNotify: setOrchestratorNotify } = useOrchestrator(projectId);
   // Monitor Butler enabled state (loaded from prefs).
@@ -445,7 +451,7 @@ export function BoardToolbar({
           }`}
           title={
             hasMonitorWarnings
-              ? "Board monitor warning - dirty main checkout"
+              ? monitorWarningTitle
               : buildMonitorTitle(autoMonitor, monitorButlerEnabled, orchestrator?.available && orchestrator.alive)
           }
         >
