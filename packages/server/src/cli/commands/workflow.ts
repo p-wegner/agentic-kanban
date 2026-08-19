@@ -6,10 +6,9 @@ import {
   cliCreateWorkflowTemplate,
   cliDeleteWorkflowTemplate,
 } from "../../services/workflow.service.js";
-import { runMigrations, resolveProjectIdArg } from "../shared.js";
+import { resolveProjectIdArg, cliAction } from "../shared.js";
 import { normalizeImportedTemplate, validateImportedTemplate } from "../../lib/workflow-template-import.js";
 import type { TemplateInput } from "@agentic-kanban/shared/lib/workflow-engine";
-import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 type WorkflowTemplateGraph = NonNullable<Awaited<ReturnType<typeof cliGetWorkflowTemplateGraph>>>;
 
@@ -47,153 +46,117 @@ export function registerWorkflowCommand(program: Command) {
     .command("list")
     .description("List workflow templates for the active project (project-scoped + global built-ins).")
     .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
-    .action(async (options: { project?: string }) => {
-      try {
-        await runMigrations();
-        const projectId = await resolveProjectIdArg(options.project);
-        const tpls = await cliListWorkflowTemplates(projectId);
-        if (tpls.length === 0) {
-          console.log("No workflow templates.");
-          process.exit(0);
-        }
-        for (const t of tpls) {
-          const g = await cliGetWorkflowTemplateGraph(t.id);
-          const tags = [t.isBuiltin ? "builtin" : "custom", t.ticketType ? `type:${t.ticketType}${t.isDefault ? "/default" : ""}` : null].filter(Boolean).join(", ");
-          console.log(`  ${t.name}  [${tags}]  ${g?.nodes.length ?? 0} stages, ${g?.edges.length ?? 0} transitions`);
-          console.log(`    id: ${t.id}`);
-        }
+    .action(cliAction(async (options: { project?: string }) => {
+      const projectId = await resolveProjectIdArg(options.project);
+      const tpls = await cliListWorkflowTemplates(projectId);
+      if (tpls.length === 0) {
+        console.log("No workflow templates.");
         process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
-        process.exit(1);
       }
-    });
+      for (const t of tpls) {
+        const g = await cliGetWorkflowTemplateGraph(t.id);
+        const tags = [t.isBuiltin ? "builtin" : "custom", t.ticketType ? `type:${t.ticketType}${t.isDefault ? "/default" : ""}` : null].filter(Boolean).join(", ");
+        console.log(`  ${t.name}  [${tags}]  ${g?.nodes.length ?? 0} stages, ${g?.edges.length ?? 0} transitions`);
+        console.log(`    id: ${t.id}`);
+      }
+      process.exit(0);
+    }));
 
   wf
     .command("get <templateId>")
     .description("Print a workflow template's full graph as JSON.")
-    .action(async (templateId: string) => {
-      try {
-        await runMigrations();
-        const g = await cliGetWorkflowTemplateGraph(templateId);
-        if (!g) {
-          console.error(`Template ${templateId} not found`);
-          process.exit(1);
-        }
-        console.log(JSON.stringify(g, null, 2));
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
+    .action(cliAction(async (templateId: string) => {
+      const g = await cliGetWorkflowTemplateGraph(templateId);
+      if (!g) {
+        console.error(`Template ${templateId} not found`);
         process.exit(1);
       }
-    });
+      console.log(JSON.stringify(g, null, 2));
+      process.exit(0);
+    }));
 
   wf
     .command("export <templateId>")
     .description("Print a workflow template's importable JSON (metadata + nodes + edges).")
     .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
-    .action(async (templateId: string) => {
-      try {
-        await runMigrations();
-        const g = await cliGetWorkflowTemplateGraph(templateId);
-        if (!g) {
-          console.error(`Template ${templateId} not found`);
-          process.exit(1);
-        }
-        console.log(JSON.stringify(toExportJson(g), null, 2));
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
+    .action(cliAction(async (templateId: string) => {
+      const g = await cliGetWorkflowTemplateGraph(templateId);
+      if (!g) {
+        console.error(`Template ${templateId} not found`);
         process.exit(1);
       }
-    });
+      console.log(JSON.stringify(toExportJson(g), null, 2));
+      process.exit(0);
+    }));
 
   wf
     .command("create <jsonFile>")
     .description("Create a workflow template from a JSON file: { name, description?, ticketType?, isDefault?, nodes:[{id,name,nodeType,statusName?,skillName?,maxVisits?,config?}], edges:[{fromNodeId,toNodeId,label?,condition?}] }")
     .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
-    .action(async (jsonFile: string, options: { project?: string }) => {
-      try {
-        await runMigrations();
-        const projectId = await resolveProjectIdArg(options.project);
-        const spec = readJsonFile(jsonFile) as Omit<TemplateInput, "projectId">;
-        const res = await cliCreateWorkflowTemplate({
-          projectId,
-          name: spec.name,
-          description: spec.description,
-          ticketType: spec.ticketType ?? null,
-          isDefault: spec.isDefault,
-          nodes: spec.nodes ?? [],
-          edges: spec.edges ?? [],
-        });
-        if (!res.ok) {
-          console.error("Invalid workflow graph:");
-          for (const e of res.errors) console.error("  - " + e);
-          process.exit(1);
-        }
-        console.log(`Created workflow template: ${spec.name}`);
-        console.log(`  id: ${res.id}`);
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
+    .action(cliAction(async (jsonFile: string, options: { project?: string }) => {
+      const projectId = await resolveProjectIdArg(options.project);
+      const spec = readJsonFile(jsonFile) as Omit<TemplateInput, "projectId">;
+      const res = await cliCreateWorkflowTemplate({
+        projectId,
+        name: spec.name,
+        description: spec.description,
+        ticketType: spec.ticketType ?? null,
+        isDefault: spec.isDefault,
+        nodes: spec.nodes ?? [],
+        edges: spec.edges ?? [],
+      });
+      if (!res.ok) {
+        console.error("Invalid workflow graph:");
+        for (const e of res.errors) console.error("  - " + e);
         process.exit(1);
       }
-    });
+      console.log(`Created workflow template: ${spec.name}`);
+      console.log(`  id: ${res.id}`);
+      process.exit(0);
+    }));
 
   wf
     .command("import <jsonFile>")
     .description("Import a workflow template JSON file into the active project as a new template.")
     .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
-    .action(async (jsonFile: string, options: { project?: string }) => {
-      try {
-        await runMigrations();
-        const projectId = await resolveProjectIdArg(options.project);
-        const spec = normalizeImportedTemplate(readJsonFile(jsonFile));
-        const importErrors = validateImportedTemplate(spec);
-        if (importErrors.length > 0) {
-          console.error("Invalid workflow import:");
-          for (const e of importErrors) console.error("  - " + e);
-          process.exit(1);
-        }
-        const res = await cliCreateWorkflowTemplate({
-          projectId,
-          name: spec.name.trim(),
-          description: spec.description,
-          ticketType: spec.ticketType ?? null,
-          isDefault: spec.isDefault,
-          nodes: spec.nodes,
-          edges: spec.edges,
-        });
-        if (!res.ok) {
-          console.error("Invalid workflow graph:");
-          for (const e of res.errors) console.error("  - " + e);
-          process.exit(1);
-        }
-        console.log(`Imported workflow template: ${spec.name}`);
-        console.log(`  id: ${res.id}`);
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
+    .action(cliAction(async (jsonFile: string, options: { project?: string }) => {
+      const projectId = await resolveProjectIdArg(options.project);
+      const spec = normalizeImportedTemplate(readJsonFile(jsonFile));
+      const importErrors = validateImportedTemplate(spec);
+      if (importErrors.length > 0) {
+        console.error("Invalid workflow import:");
+        for (const e of importErrors) console.error("  - " + e);
         process.exit(1);
       }
-    });
+      const res = await cliCreateWorkflowTemplate({
+        projectId,
+        name: spec.name.trim(),
+        description: spec.description,
+        ticketType: spec.ticketType ?? null,
+        isDefault: spec.isDefault,
+        nodes: spec.nodes,
+        edges: spec.edges,
+      });
+      if (!res.ok) {
+        console.error("Invalid workflow graph:");
+        for (const e of res.errors) console.error("  - " + e);
+        process.exit(1);
+      }
+      console.log(`Imported workflow template: ${spec.name}`);
+      console.log(`  id: ${res.id}`);
+      process.exit(0);
+    }));
 
   wf
     .command("delete <templateId>")
     .description("Delete a non-built-in workflow template.")
-    .action(async (templateId: string) => {
-      try {
-        await runMigrations();
-        const res = await cliDeleteWorkflowTemplate(templateId);
-        if (!res.ok) {
-          console.error(res.error);
-          process.exit(1);
-        }
-        console.log("Deleted.");
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
+    .action(cliAction(async (templateId: string) => {
+      const res = await cliDeleteWorkflowTemplate(templateId);
+      if (!res.ok) {
+        console.error(res.error);
         process.exit(1);
       }
-    });
+      console.log("Deleted.");
+      process.exit(0);
+    }));
 }

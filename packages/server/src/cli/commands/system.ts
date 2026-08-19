@@ -2,7 +2,7 @@ import type { Command } from "commander";
 import { getProjectStatusById, deleteProjectStatusById } from "../../repositories/project.repository.js";
 import { getFirstIssueIdWithStatus } from "../../repositories/issue.repository.js";
 import { BUILTIN_SKILLS } from "../../builtin-skills.js";
-import { runMigrations, logDefaultBranch, timeSince } from "../shared.js";
+import { runMigrations, logDefaultBranch, timeSince, cliAction } from "../shared.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { parseIssueNumberFromBranch } from "@agentic-kanban/shared/lib/branch";
 
@@ -10,27 +10,21 @@ export function registerSystemCommands(program: Command) {
   program
     .command("delete-status <status-id>")
     .description("Delete a project status (fails if issues are linked to it)")
-    .action(async (statusId: string) => {
-      try {
-        await runMigrations();
-        const status = await getProjectStatusById(statusId);
-        if (!status) {
-          console.error(`Status "${statusId}" not found.`);
-          process.exit(1);
-        }
-        const linkedId = await getFirstIssueIdWithStatus(statusId);
-        if (linkedId) {
-          console.error(`Cannot delete status "${status.name}" -- it has linked issues. Move or delete those issues first.`);
-          process.exit(1);
-        }
-        await deleteProjectStatusById(statusId);
-        console.log(`Deleted status "${status.name}" (${statusId})`);
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
+    .action(cliAction(async (statusId: string) => {
+      const status = await getProjectStatusById(statusId);
+      if (!status) {
+        console.error(`Status "${statusId}" not found.`);
         process.exit(1);
       }
-    });
+      const linkedId = await getFirstIssueIdWithStatus(statusId);
+      if (linkedId) {
+        console.error(`Cannot delete status "${status.name}" -- it has linked issues. Move or delete those issues first.`);
+        process.exit(1);
+      }
+      await deleteProjectStatusById(statusId);
+      console.log(`Deleted status "${status.name}" (${statusId})`);
+      process.exit(0);
+    }));
 
   program
     .command("init")

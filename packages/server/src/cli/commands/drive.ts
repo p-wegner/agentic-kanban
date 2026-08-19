@@ -1,5 +1,5 @@
 import type { Command } from "commander";
-import { runMigrations, getActiveProjectId } from "../shared.js";
+import { getActiveProjectId, cliAction } from "../shared.js";
 import { getDriveById } from "../../repositories/drive.repository.js";
 import type { DriveRow } from "../../repositories/drive.repository.js";
 import {
@@ -8,7 +8,6 @@ import {
   resolveDriveIssueIds,
 } from "../../services/review-effectiveness.service.js";
 import { buildApiUrl } from "./workspace-api-url.js";
-import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const apiBase = () => buildApiUrl("", "/api");
 
@@ -32,45 +31,39 @@ Examples:
   $ pnpm cli -- drive start --target "All 12 tickets Done" --meta-issue abc-123 --contract "N/N issues merged"
   $ pnpm cli -- drive start --project proj-id --target "Finish auth module" --json`,
     )
-    .action(async (options: { project?: string; target?: string; metaIssue?: string; contract?: string; json?: boolean }) => {
-      try {
-        await runMigrations();
-        const projectId = options.project ?? (await getActiveProjectId());
-        if (!options.target) {
-          console.error("Error: --target is required");
-          process.exit(1);
-        }
-        const body: Record<string, string> = { target: options.target };
-        if (options.metaIssue) body.metaIssueId = options.metaIssue;
-        if (options.contract) body.completionContract = options.contract;
-
-        const res = await fetch(`${apiBase()}/projects/${encodeURIComponent(projectId)}/drives`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        if (!res.ok) {
-          const text = await res.text();
-          console.error(`Error ${res.status}: ${text}`);
-          process.exit(1);
-        }
-        const drive = (await res.json()) as DriveRow;
-        if (options.json) {
-          console.log(JSON.stringify(drive, null, 2));
-        } else {
-          console.log(`Drive started: ${drive.id}`);
-          console.log(`  Target:  ${drive.target}`);
-          if (drive.metaIssueId) console.log(`  Meta-issue: ${drive.metaIssueId}`);
-          if (drive.completionContract) console.log(`  Contract: ${drive.completionContract}`);
-          console.log(`  Status:  ${drive.status}`);
-          console.log(`  Started: ${drive.startedAt}`);
-        }
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
+    .action(cliAction(async (options: { project?: string; target?: string; metaIssue?: string; contract?: string; json?: boolean }) => {
+      const projectId = options.project ?? (await getActiveProjectId());
+      if (!options.target) {
+        console.error("Error: --target is required");
         process.exit(1);
       }
-    });
+      const body: Record<string, string> = { target: options.target };
+      if (options.metaIssue) body.metaIssueId = options.metaIssue;
+      if (options.contract) body.completionContract = options.contract;
+
+      const res = await fetch(`${apiBase()}/projects/${encodeURIComponent(projectId)}/drives`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        console.error(`Error ${res.status}: ${text}`);
+        process.exit(1);
+      }
+      const drive = (await res.json()) as DriveRow;
+      if (options.json) {
+        console.log(JSON.stringify(drive, null, 2));
+      } else {
+        console.log(`Drive started: ${drive.id}`);
+        console.log(`  Target:  ${drive.target}`);
+        if (drive.metaIssueId) console.log(`  Meta-issue: ${drive.metaIssueId}`);
+        if (drive.completionContract) console.log(`  Contract: ${drive.completionContract}`);
+        console.log(`  Status:  ${drive.status}`);
+        console.log(`  Started: ${drive.startedAt}`);
+      }
+      process.exit(0);
+    }));
 
   // ── list ─────────────────────────────────────────────────────────────────
   driveCmd
@@ -87,40 +80,34 @@ Examples:
   $ pnpm cli -- drive list --status active
   $ pnpm cli -- drive list --json`,
     )
-    .action(async (options: { project?: string; status?: string; json?: boolean }) => {
-      try {
-        await runMigrations();
-        const projectId = options.project ?? (await getActiveProjectId());
-        const res = await fetch(`${apiBase()}/projects/${encodeURIComponent(projectId)}/drives`);
-        if (!res.ok) {
-          const text = await res.text();
-          console.error(`Error ${res.status}: ${text}`);
-          process.exit(1);
-        }
-        let drives = (await res.json()) as DriveRow[];
-        if (options.status) {
-          drives = drives.filter((d) => d.status === options.status);
-        }
-        if (options.json) {
-          console.log(JSON.stringify(drives, null, 2));
-        } else {
-          if (drives.length === 0) {
-            console.log("No drives found.");
-          } else {
-            for (const d of drives) {
-              const window = d.finishedAt
-                ? `${String(d.startedAt).slice(0, 10)}..${String(d.finishedAt).slice(0, 10)}`
-                : `${String(d.startedAt).slice(0, 10)}..now`;
-              console.log(`${d.id}  [${d.status}]  ${window}  ${d.target}`);
-            }
-          }
-        }
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
+    .action(cliAction(async (options: { project?: string; status?: string; json?: boolean }) => {
+      const projectId = options.project ?? (await getActiveProjectId());
+      const res = await fetch(`${apiBase()}/projects/${encodeURIComponent(projectId)}/drives`);
+      if (!res.ok) {
+        const text = await res.text();
+        console.error(`Error ${res.status}: ${text}`);
         process.exit(1);
       }
-    });
+      let drives = (await res.json()) as DriveRow[];
+      if (options.status) {
+        drives = drives.filter((d) => d.status === options.status);
+      }
+      if (options.json) {
+        console.log(JSON.stringify(drives, null, 2));
+      } else {
+        if (drives.length === 0) {
+          console.log("No drives found.");
+        } else {
+          for (const d of drives) {
+            const window = d.finishedAt
+              ? `${String(d.startedAt).slice(0, 10)}..${String(d.finishedAt).slice(0, 10)}`
+              : `${String(d.startedAt).slice(0, 10)}..now`;
+            console.log(`${d.id}  [${d.status}]  ${window}  ${d.target}`);
+          }
+        }
+      }
+      process.exit(0);
+    }));
 
   // ── get ──────────────────────────────────────────────────────────────────
   driveCmd
@@ -135,36 +122,30 @@ Examples:
   $ pnpm cli -- drive get <drive-id>
   $ pnpm cli -- drive get <drive-id> --json`,
     )
-    .action(async (driveId: string, options: { project?: string; json?: boolean }) => {
-      try {
-        await runMigrations();
-        const projectId = options.project ?? (await getActiveProjectId());
-        const res = await fetch(
-          `${apiBase()}/projects/${encodeURIComponent(projectId)}/drives/${encodeURIComponent(driveId)}`,
-        );
-        if (!res.ok) {
-          const text = await res.text();
-          console.error(`Error ${res.status}: ${text}`);
-          process.exit(1);
-        }
-        const drive = (await res.json()) as DriveRow;
-        if (options.json) {
-          console.log(JSON.stringify(drive, null, 2));
-        } else {
-          console.log(`ID:       ${drive.id}`);
-          console.log(`Status:   ${drive.status}`);
-          console.log(`Target:   ${drive.target}`);
-          if (drive.metaIssueId) console.log(`Meta-issue: ${drive.metaIssueId}`);
-          if (drive.completionContract) console.log(`Contract: ${drive.completionContract}`);
-          console.log(`Started:  ${drive.startedAt}`);
-          if (drive.finishedAt) console.log(`Finished: ${drive.finishedAt}`);
-        }
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
+    .action(cliAction(async (driveId: string, options: { project?: string; json?: boolean }) => {
+      const projectId = options.project ?? (await getActiveProjectId());
+      const res = await fetch(
+        `${apiBase()}/projects/${encodeURIComponent(projectId)}/drives/${encodeURIComponent(driveId)}`,
+      );
+      if (!res.ok) {
+        const text = await res.text();
+        console.error(`Error ${res.status}: ${text}`);
         process.exit(1);
       }
-    });
+      const drive = (await res.json()) as DriveRow;
+      if (options.json) {
+        console.log(JSON.stringify(drive, null, 2));
+      } else {
+        console.log(`ID:       ${drive.id}`);
+        console.log(`Status:   ${drive.status}`);
+        console.log(`Target:   ${drive.target}`);
+        if (drive.metaIssueId) console.log(`Meta-issue: ${drive.metaIssueId}`);
+        if (drive.completionContract) console.log(`Contract: ${drive.completionContract}`);
+        console.log(`Started:  ${drive.startedAt}`);
+        if (drive.finishedAt) console.log(`Finished: ${drive.finishedAt}`);
+      }
+      process.exit(0);
+    }));
 
   // ── finish ───────────────────────────────────────────────────────────────
   driveCmd
@@ -181,41 +162,35 @@ Examples:
   $ pnpm cli -- drive finish <drive-id> --status abandoned
   $ pnpm cli -- drive finish <drive-id> --json`,
     )
-    .action(async (driveId: string, options: { project?: string; status?: string; json?: boolean }) => {
-      try {
-        await runMigrations();
-        const projectId = options.project ?? (await getActiveProjectId());
-        const body: Record<string, string> = {};
-        if (options.status) body.status = options.status;
+    .action(cliAction(async (driveId: string, options: { project?: string; status?: string; json?: boolean }) => {
+      const projectId = options.project ?? (await getActiveProjectId());
+      const body: Record<string, string> = {};
+      if (options.status) body.status = options.status;
 
-        const res = await fetch(
-          `${apiBase()}/projects/${encodeURIComponent(projectId)}/drives/${encodeURIComponent(driveId)}/finish`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          },
-        );
-        if (!res.ok) {
-          const text = await res.text();
-          console.error(`Error ${res.status}: ${text}`);
-          process.exit(1);
-        }
-        const drive = (await res.json()) as DriveRow & { retroPath?: string | null };
-        if (options.json) {
-          console.log(JSON.stringify(drive, null, 2));
-        } else {
-          console.log(`Drive ${drive.id} finished.`);
-          console.log(`  Status:   ${drive.status}`);
-          console.log(`  Finished: ${String(drive.finishedAt)}`);
-          if (drive.retroPath) console.log(`  Retro:    ${drive.retroPath}`);
-        }
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
+      const res = await fetch(
+        `${apiBase()}/projects/${encodeURIComponent(projectId)}/drives/${encodeURIComponent(driveId)}/finish`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      );
+      if (!res.ok) {
+        const text = await res.text();
+        console.error(`Error ${res.status}: ${text}`);
         process.exit(1);
       }
-    });
+      const drive = (await res.json()) as DriveRow & { retroPath?: string | null };
+      if (options.json) {
+        console.log(JSON.stringify(drive, null, 2));
+      } else {
+        console.log(`Drive ${drive.id} finished.`);
+        console.log(`  Status:   ${drive.status}`);
+        console.log(`  Finished: ${String(drive.finishedAt)}`);
+        if (drive.retroPath) console.log(`  Retro:    ${drive.retroPath}`);
+      }
+      process.exit(0);
+    }));
 
   // ── review-effectiveness ─────────────────────────────────────────────────
   driveCmd
@@ -234,70 +209,64 @@ Examples:
       "--whole-project",
       "Ignore the meta-issue subtree restriction and scope to the whole project within the drive's window.",
     )
-    .action(async (driveId: string, options: { json?: boolean; deep?: boolean; wholeProject?: boolean }) => {
-      try {
-        await runMigrations();
+    .action(cliAction(async (driveId: string, options: { json?: boolean; deep?: boolean; wholeProject?: boolean }) => {
 
-        const drive = await getDriveById(driveId);
-        if (!drive) {
-          console.error(`Drive '${driveId}' not found.`);
-          process.exit(1);
-        }
+      const drive = await getDriveById(driveId);
+      if (!drive) {
+        console.error(`Drive '${driveId}' not found.`);
+        process.exit(1);
+      }
 
-        const sinceIso = drive.startedAt;
-        // Open drives report up to "now"; finished drives are bounded by finishedAt.
-        const untilIso = drive.finishedAt ?? null;
+      const sinceIso = drive.startedAt;
+      // Open drives report up to "now"; finished drives are bounded by finishedAt.
+      const untilIso = drive.finishedAt ?? null;
 
-        const issueIds = options.wholeProject
-          ? null
-          : await resolveDriveIssueIds(drive.metaIssueId, drive.projectId);
+      const issueIds = options.wholeProject
+        ? null
+        : await resolveDriveIssueIds(drive.metaIssueId, drive.projectId);
 
-        const report = await computeReviewEffectiveness({
-          projectId: drive.projectId,
-          sinceIso,
-          untilIso,
-          issueIds,
-          deep: options.deep,
-        });
+      const report = await computeReviewEffectiveness({
+        projectId: drive.projectId,
+        sinceIso,
+        untilIso,
+        issueIds,
+        deep: options.deep,
+      });
 
-        if (options.json) {
-          console.log(
-            JSON.stringify(
-              {
-                drive: {
-                  id: drive.id,
-                  target: drive.target,
-                  status: drive.status,
-                  metaIssueId: drive.metaIssueId,
-                  startedAt: drive.startedAt,
-                  finishedAt: drive.finishedAt,
-                  scope: options.wholeProject ? "whole-project" : drive.metaIssueId ? "meta-issue-subtree" : "whole-project-in-window",
-                },
-                ...report,
-              },
-              null,
-              2,
-            ),
-          );
-          process.exit(0);
-        }
-
-        const scopeNote = options.wholeProject
-          ? "whole project in window"
-          : issueIds
-            ? `${issueIds.length} drive issues`
-            : "whole project in window (no meta-issue)";
-        const windowNote = untilIso ? `${sinceIso.slice(0, 10)}..${untilIso.slice(0, 10)}` : `${sinceIso.slice(0, 10)}..now`;
+      if (options.json) {
         console.log(
-          renderReviewEffectivenessReport(
-            report,
-            `=== Drive Review Effectiveness — ${drive.target.slice(0, 50)} [${drive.status}] (${windowNote}, ${scopeNote}) ===`,
+          JSON.stringify(
+            {
+              drive: {
+                id: drive.id,
+                target: drive.target,
+                status: drive.status,
+                metaIssueId: drive.metaIssueId,
+                startedAt: drive.startedAt,
+                finishedAt: drive.finishedAt,
+                scope: options.wholeProject ? "whole-project" : drive.metaIssueId ? "meta-issue-subtree" : "whole-project-in-window",
+              },
+              ...report,
+            },
+            null,
+            2,
           ),
         );
         process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
-        process.exit(1);
       }
-    });
+
+      const scopeNote = options.wholeProject
+        ? "whole project in window"
+        : issueIds
+          ? `${issueIds.length} drive issues`
+          : "whole project in window (no meta-issue)";
+      const windowNote = untilIso ? `${sinceIso.slice(0, 10)}..${untilIso.slice(0, 10)}` : `${sinceIso.slice(0, 10)}..now`;
+      console.log(
+        renderReviewEffectivenessReport(
+          report,
+          `=== Drive Review Effectiveness — ${drive.target.slice(0, 50)} [${drive.status}] (${windowNote}, ${scopeNote}) ===`,
+        ),
+      );
+      process.exit(0);
+    }));
 }

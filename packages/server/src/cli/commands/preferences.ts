@@ -3,8 +3,7 @@ import { getPreference, setPreference } from "../../repositories/preferences.rep
 import type { Database } from "../../db/index.js";
 import { PROVIDER_DIVERGENCE_KEYS, createPreferenceService } from "../../services/preference.service.js";
 import type { ProviderDivergenceRejection } from "../../services/preference.service.js";
-import { runMigrations } from "../shared.js";
-import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { cliAction } from "../shared.js";
 
 function formatDivergence(key: string, value: string, d: ProviderDivergenceRejection): string {
   const bullseye = `${d.bullseyeProvider ?? "?"}:${d.bullseyeProfile ?? ""}`;
@@ -61,34 +60,22 @@ Examples:
   prefCmd
     .command("set <key> <value>")
     .description("Set a preference value. Provider/profile keys are checked against the active project's Strategy Bullseye (#903).")
-    .action(async (key: string, value: string) => {
-      try {
-        await runMigrations();
-        const result = await setPreferenceGuarded(key, value);
-        if (!result.ok) {
-          console.error("Error:", result.error);
-          process.exit(1);
-        }
-        console.log(`Set ${key} = ${value}`);
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
+    .action(cliAction(async (key: string, value: string) => {
+      const result = await setPreferenceGuarded(key, value);
+      if (!result.ok) {
+        console.error("Error:", result.error);
         process.exit(1);
       }
-    });
+      console.log(`Set ${key} = ${value}`);
+      process.exit(0);
+    }));
 
   prefCmd
     .command("get <key>")
     .description("Get a preference value.")
-    .action(async (key: string) => {
-      try {
-        await runMigrations();
-        const value = await getPreference(key);
-        console.log(value === null ? `(not set)` : value);
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
-        process.exit(1);
-      }
-    });
+    .action(cliAction(async (key: string) => {
+      const value = await getPreference(key);
+      console.log(value === null ? `(not set)` : value);
+      process.exit(0);
+    }));
 }

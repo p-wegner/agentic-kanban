@@ -10,7 +10,7 @@ import { getIssueTitleAndDescription } from "../../repositories/workspace-sessio
 import { getProjectIssueIds } from "../../repositories/review-effectiveness.repository.js";
 import { randomUUID } from "node:crypto";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
-import { runMigrations, resolveProjectIdArg, describeIssueNumberMiss } from "../shared.js";
+import { resolveProjectIdArg, describeIssueNumberMiss, cliAction } from "../shared.js";
 import { buildWorkspaceApiUrl, buildApiUrl } from "./workspace-api-url.js";
 import { registerWorkspaceInteractionCommands } from "./workspace-interaction.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -90,39 +90,33 @@ Examples:
   $ agentic-kanban workspace list -s closed    # only closed/merged workspaces
 `)
     .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
-    .action(async (options: { project?: string; status?: string }) => {
-      try {
-        await runMigrations();
-        const projectId = await resolveProjectIdArg(options.project);
+    .action(cliAction(async (options: { project?: string; status?: string }) => {
+      const projectId = await resolveProjectIdArg(options.project);
 
-        const projectIssues = await getProjectIssueIds(projectId);
+      const projectIssues = await getProjectIssueIds(projectId);
 
-        if (projectIssues.length === 0) {
-          console.log("No workspaces found (no issues in active project).");
-          process.exit(0);
-        }
-
-        const issueIds = projectIssues.map((i) => i.id);
-        let rows = await getWorkspacesForIssues(issueIds);
-
-        if (options.status) rows = rows.filter((r) => r.status === options.status);
-
-        if (rows.length === 0) {
-          console.log("No workspaces found.");
-          process.exit(0);
-        }
-
-        for (const ws of rows) {
-          console.log(`  [${ws.status.padEnd(6)}] ${ws.branch}`);
-          console.log(`         id: ${ws.id}`);
-          if (ws.workingDir) console.log(`         dir: ${ws.workingDir}`);
-        }
+      if (projectIssues.length === 0) {
+        console.log("No workspaces found (no issues in active project).");
         process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
-        process.exit(1);
       }
-    });
+
+      const issueIds = projectIssues.map((i) => i.id);
+      let rows = await getWorkspacesForIssues(issueIds);
+
+      if (options.status) rows = rows.filter((r) => r.status === options.status);
+
+      if (rows.length === 0) {
+        console.log("No workspaces found.");
+        process.exit(0);
+      }
+
+      for (const ws of rows) {
+        console.log(`  [${ws.status.padEnd(6)}] ${ws.branch}`);
+        console.log(`         id: ${ws.id}`);
+        if (ws.workingDir) console.log(`         dir: ${ws.workingDir}`);
+      }
+      process.exit(0);
+    }));
 
   wsCmd
     .command("create <issue-id>")
@@ -137,61 +131,55 @@ Examples:
 
 Tip: Use 'issue list' to find the issue ID.
 `)
-    .action(async (issueId: string, options: { project?: string; branch?: string; base?: string }) => {
-      try {
-        await runMigrations();
+    .action(cliAction(async (issueId: string, options: { project?: string; branch?: string; base?: string }) => {
 
-        const issueRows = await getIssueById(issueId);
-        if (issueRows.length === 0) {
-          console.error(`Issue '${issueId}' not found.`);
-          process.exit(1);
-        }
-
-        const project = await getProjectById(issueRows[0].projectId);
-        if (!project || !project.repoPath) {
-          console.error("Project has no repo path configured.");
-          process.exit(1);
-        }
-        const { createWorktree } = await import("../../services/git.service.js");
-
-        // #220 ask 2: `suggestBranchName` is the ONE branch-name producer for the whole
-        // board. This site used to mint `workspace/<id8>` — not a different slug of the
-        // same convention but a different CONVENTION, so a CLI-created workspace was
-        // invisible to every reconciler that recognizes `feature/ak-<n>-…`
-        // (hand-merged-branch-reconciler) and to the monitor's duplicate-start guard.
-        const branchName = options.branch ?? suggestBranchName(issueRows[0]);
-        const baseBranch = options.base ?? project.defaultBranch;
-        if (!baseBranch) {
-          console.error("No base branch configured. Set the project's default branch in settings or pass --base <branch>.");
-          process.exit(1);
-        }
-        const worktreePath = await createWorktree(project.repoPath, branchName, baseBranch);
-
-        const id = randomUUID();
-        const now = new Date().toISOString();
-
-        await insertWorkspaceRecordRow({
-          id,
-          issueId,
-          branch: branchName,
-          workingDir: worktreePath,
-          baseBranch,
-          isDirect: false,
-          status: "active",
-          createdAt: now,
-          updatedAt: now,
-        });
-
-        console.log(`Created workspace for issue '${issueId}'`);
-        console.log(`  id: ${id}`);
-        console.log(`  branch: ${branchName}`);
-        console.log(`  dir: ${worktreePath}`);
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
+      const issueRows = await getIssueById(issueId);
+      if (issueRows.length === 0) {
+        console.error(`Issue '${issueId}' not found.`);
         process.exit(1);
       }
-    });
+
+      const project = await getProjectById(issueRows[0].projectId);
+      if (!project || !project.repoPath) {
+        console.error("Project has no repo path configured.");
+        process.exit(1);
+      }
+      const { createWorktree } = await import("../../services/git.service.js");
+
+      // #220 ask 2: `suggestBranchName` is the ONE branch-name producer for the whole
+      // board. This site used to mint `workspace/<id8>` — not a different slug of the
+      // same convention but a different CONVENTION, so a CLI-created workspace was
+      // invisible to every reconciler that recognizes `feature/ak-<n>-…`
+      // (hand-merged-branch-reconciler) and to the monitor's duplicate-start guard.
+      const branchName = options.branch ?? suggestBranchName(issueRows[0]);
+      const baseBranch = options.base ?? project.defaultBranch;
+      if (!baseBranch) {
+        console.error("No base branch configured. Set the project's default branch in settings or pass --base <branch>.");
+        process.exit(1);
+      }
+      const worktreePath = await createWorktree(project.repoPath, branchName, baseBranch);
+
+      const id = randomUUID();
+      const now = new Date().toISOString();
+
+      await insertWorkspaceRecordRow({
+        id,
+        issueId,
+        branch: branchName,
+        workingDir: worktreePath,
+        baseBranch,
+        isDirect: false,
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      console.log(`Created workspace for issue '${issueId}'`);
+      console.log(`  id: ${id}`);
+      console.log(`  branch: ${branchName}`);
+      console.log(`  dir: ${worktreePath}`);
+      process.exit(0);
+    }));
 
   wsCmd
     .command("launch <workspace-id>")
@@ -203,48 +191,42 @@ Examples:
   $ agentic-kanban workspace launch <workspace-id>
   $ agentic-kanban workspace launch <workspace-id> --prompt "Fix the failing tests"
 `)
-    .action(async (workspaceId: string, options: { project?: string; prompt?: string; port?: string }) => {
-      try {
-        await runMigrations();
+    .action(cliAction(async (workspaceId: string, options: { project?: string; prompt?: string; port?: string }) => {
 
-        const ws = await getWorkspaceById(workspaceId);
-        if (!ws) {
-          console.error(`Workspace '${workspaceId}' not found.`);
-          process.exit(1);
-        }
-        let prompt = options.prompt;
-        if (!prompt) {
-          const detail = await getIssueTitleAndDescription(ws.issueId);
-          if (detail) {
-            prompt = detail.description
-              ? `${detail.title}\n\n${detail.description}`
-              : detail.title;
-          } else {
-            prompt = "Continue working on this issue.";
-          }
-        }
-
-        const port = options.port ?? "";
-        const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "launch"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt }),
-        });
-        const data = await res.json() as LaunchResponse;
-
-        if (!res.ok) {
-          console.error(`Launch failed: ${data.error ?? res.statusText}`);
-          process.exit(1);
-        }
-
-        console.log(`Launched workspace '${workspaceId}'`);
-        console.log(`  sessionId: ${String(data.sessionId)}`);
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
+      const ws = await getWorkspaceById(workspaceId);
+      if (!ws) {
+        console.error(`Workspace '${workspaceId}' not found.`);
         process.exit(1);
       }
-    });
+      let prompt = options.prompt;
+      if (!prompt) {
+        const detail = await getIssueTitleAndDescription(ws.issueId);
+        if (detail) {
+          prompt = detail.description
+            ? `${detail.title}\n\n${detail.description}`
+            : detail.title;
+        } else {
+          prompt = "Continue working on this issue.";
+        }
+      }
+
+      const port = options.port ?? "";
+      const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "launch"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+      const data = await res.json() as LaunchResponse;
+
+      if (!res.ok) {
+        console.error(`Launch failed: ${data.error ?? res.statusText}`);
+        process.exit(1);
+      }
+
+      console.log(`Launched workspace '${workspaceId}'`);
+      console.log(`  sessionId: ${String(data.sessionId)}`);
+      process.exit(0);
+    }));
 
   wsCmd
     .command("resume <issue-number>")
@@ -257,62 +239,56 @@ Examples:
   $ agentic-kanban workspace resume 17 --prompt "Continue fixing the setup script"
 `)
     .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
-    .action(async (issueNumberArg: string, options: { project?: string; prompt?: string; port?: string }) => {
-      try {
-        await runMigrations();
-        const projectId = await resolveProjectIdArg(options.project);
+    .action(cliAction(async (issueNumberArg: string, options: { project?: string; prompt?: string; port?: string }) => {
+      const projectId = await resolveProjectIdArg(options.project);
 
-        const num = Number(issueNumberArg);
-        if (!Number.isInteger(num) || num <= 0) {
-          console.error(`Invalid issue number: ${issueNumberArg}`);
-          process.exit(1);
-        }
-
-        const issueId = await getIssueIdByNumberInProject(num, projectId);
-        if (issueId === null) {
-          console.error(await describeIssueNumberMiss(num, projectId));
-          process.exit(1);
-        }
-
-        const ws = await getLatestWorkspaceForIssue(issueId);
-        if (!ws) {
-          console.error(`No workspace found for issue #${num}. Create one first.`);
-          process.exit(1);
-        }
-        let prompt = options.prompt;
-        if (!prompt) {
-          const detail = await getIssueTitleAndDescription(ws.issueId);
-          if (detail) {
-            prompt = detail.description
-              ? `${detail.title}\n\n${detail.description}`
-              : detail.title;
-          } else {
-            prompt = "Continue working on this issue.";
-          }
-        }
-
-        const port = options.port ?? "";
-        const res = await fetch(buildWorkspaceApiUrl(port, ws.id, "launch"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt }),
-        });
-        const data = await res.json() as LaunchResponse;
-
-        if (!res.ok) {
-          console.error(`Resume failed: ${data.error ?? res.statusText}`);
-          process.exit(1);
-        }
-
-        console.log(`Resumed #${num} (${ws.branch})`);
-        console.log(`  workspace: ${ws.id}`);
-        console.log(`  sessionId: ${String(data.sessionId)}`);
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
+      const num = Number(issueNumberArg);
+      if (!Number.isInteger(num) || num <= 0) {
+        console.error(`Invalid issue number: ${issueNumberArg}`);
         process.exit(1);
       }
-    });
+
+      const issueId = await getIssueIdByNumberInProject(num, projectId);
+      if (issueId === null) {
+        console.error(await describeIssueNumberMiss(num, projectId));
+        process.exit(1);
+      }
+
+      const ws = await getLatestWorkspaceForIssue(issueId);
+      if (!ws) {
+        console.error(`No workspace found for issue #${num}. Create one first.`);
+        process.exit(1);
+      }
+      let prompt = options.prompt;
+      if (!prompt) {
+        const detail = await getIssueTitleAndDescription(ws.issueId);
+        if (detail) {
+          prompt = detail.description
+            ? `${detail.title}\n\n${detail.description}`
+            : detail.title;
+        } else {
+          prompt = "Continue working on this issue.";
+        }
+      }
+
+      const port = options.port ?? "";
+      const res = await fetch(buildWorkspaceApiUrl(port, ws.id, "launch"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+      const data = await res.json() as LaunchResponse;
+
+      if (!res.ok) {
+        console.error(`Resume failed: ${data.error ?? res.statusText}`);
+        process.exit(1);
+      }
+
+      console.log(`Resumed #${num} (${ws.branch})`);
+      console.log(`  workspace: ${ws.id}`);
+      console.log(`  sessionId: ${String(data.sessionId)}`);
+      process.exit(0);
+    }));
 
   wsCmd
     .command("wait <issue-number>")
@@ -344,36 +320,30 @@ Examples:
 Example:
   $ agentic-kanban workspace review <workspace-id>
 `)
-    .action(async (workspaceId: string, options: { project?: string; port?: string }) => {
-      try {
-        await runMigrations();
+    .action(cliAction(async (workspaceId: string, options: { project?: string; port?: string }) => {
 
-        if (!(await getWorkspaceById(workspaceId))) {
-          console.error(`Workspace '${workspaceId}' not found.`);
-          process.exit(1);
-        }
-
-        const port = options.port ?? "";
-        const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "review"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
-        });
-        const data = await res.json() as LaunchResponse;
-
-        if (!res.ok) {
-          console.error(`Review failed: ${data.error ?? res.statusText}`);
-          process.exit(1);
-        }
-
-        console.log(`Review started for workspace '${workspaceId}'`);
-        console.log(`  sessionId: ${String(data.sessionId)}`);
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
+      if (!(await getWorkspaceById(workspaceId))) {
+        console.error(`Workspace '${workspaceId}' not found.`);
         process.exit(1);
       }
-    });
+
+      const port = options.port ?? "";
+      const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "review"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json() as LaunchResponse;
+
+      if (!res.ok) {
+        console.error(`Review failed: ${data.error ?? res.statusText}`);
+        process.exit(1);
+      }
+
+      console.log(`Review started for workspace '${workspaceId}'`);
+      console.log(`  sessionId: ${String(data.sessionId)}`);
+      process.exit(0);
+    }));
 
   // ─── New commands ───────────────────────────────────────────────────────────
 
@@ -640,48 +610,42 @@ Examples:
   $ agentic-kanban workspace relaunch <workspace-id>
   $ agentic-kanban workspace relaunch <workspace-id> --prompt "Fix the failing tests"
 `)
-    .action(async (workspaceId: string, options: { project?: string; prompt?: string; port?: string }) => {
-      try {
-        await runMigrations();
+    .action(cliAction(async (workspaceId: string, options: { project?: string; prompt?: string; port?: string }) => {
 
-        const ws = await getWorkspaceById(workspaceId);
-        if (!ws) {
-          console.error(`Workspace '${workspaceId}' not found.`);
-          process.exit(1);
-        }
-        let prompt = options.prompt;
-        if (!prompt) {
-          const detail = await getIssueTitleAndDescription(ws.issueId);
-          if (detail) {
-            prompt = detail.description
-              ? `${detail.title}\n\n${detail.description}`
-              : detail.title;
-          } else {
-            prompt = "Continue working on this issue.";
-          }
-        }
-
-        const port = options.port ?? "";
-        const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "launch"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt }),
-        });
-        const data = await res.json() as LaunchResponse;
-
-        if (!res.ok) {
-          console.error(`Relaunch failed: ${data.error ?? res.statusText}`);
-          process.exit(1);
-        }
-
-        console.log(`Relaunched workspace '${workspaceId}'`);
-        console.log(`  sessionId: ${String(data.sessionId)}`);
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
+      const ws = await getWorkspaceById(workspaceId);
+      if (!ws) {
+        console.error(`Workspace '${workspaceId}' not found.`);
         process.exit(1);
       }
-    });
+      let prompt = options.prompt;
+      if (!prompt) {
+        const detail = await getIssueTitleAndDescription(ws.issueId);
+        if (detail) {
+          prompt = detail.description
+            ? `${detail.title}\n\n${detail.description}`
+            : detail.title;
+        } else {
+          prompt = "Continue working on this issue.";
+        }
+      }
+
+      const port = options.port ?? "";
+      const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "launch"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+      const data = await res.json() as LaunchResponse;
+
+      if (!res.ok) {
+        console.error(`Relaunch failed: ${data.error ?? res.statusText}`);
+        process.exit(1);
+      }
+
+      console.log(`Relaunched workspace '${workspaceId}'`);
+      console.log(`  sessionId: ${String(data.sessionId)}`);
+      process.exit(0);
+    }));
 
   wsCmd
     .command("mark-ready <workspace-id>")

@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { getWorkspaceIssueContext } from "../../repositories/workspace.repository.js";
 import { insertIssueComment } from "../../repositories/issue-comments.repository.js";
 import { cliProposeTransition } from "../../services/workflow.service.js";
-import { runMigrations } from "../shared.js";
+import { cliAction } from "../shared.js";
 import { buildWorkspaceApiUrl, buildApiUrl } from "./workspace-api-url.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -28,69 +28,63 @@ Examples:
   $ agentic-kanban workspace clarify <workspace-id> --question "Should I update the tests?"
   $ agentic-kanban workspace clarify <workspace-id> --action propose --to Done --summary "Implementation complete"
 `)
-    .action(async (workspaceId: string, options: { action?: string; question?: string; header?: string; to?: string; summary?: string; testsPassed?: boolean; json?: boolean }) => {
-      try {
-        await runMigrations();
-        const action = options.action ?? "clarify";
-        if (action !== "clarify" && action !== "propose") {
-          console.error(`Invalid --action '${action}'. Use clarify or propose.`);
-          process.exit(1);
-        }
-
-        const ws = await getWorkspaceIssueContext(workspaceId);
-        if (!ws) {
-          console.error(`Workspace '${workspaceId}' not found.`);
-          process.exit(1);
-        }
-
-        if (action === "clarify") {
-          if (!options.question || !options.question.trim()) {
-            console.error("--question is required for action=clarify.");
-            process.exit(1);
-          }
-          const toolUseId = `cli-clarify-${randomUUID()}`;
-          const question = { question: options.question.trim(), header: options.header, options: [{ label: "Answer in free text" }] };
-          const body = [
-            options.summary?.trim() || "The phase agent needs clarification before continuing.",
-            "",
-            `1. ${question.header ? `${question.header}: ` : ""}${question.question}`,
-          ].join("\n");
-          await insertIssueComment({
-            issueId: ws.issueId,
-            workspaceId,
-            kind: "agent-question",
-            author: "agent",
-            body,
-            payload: { toolUseId, questions: [question], source: "cli_clarify_or_propose" },
-          });
-          const result = { ok: true, action: "clarify", toolUseId, workspaceId, issueId: ws.issueId, issueNumber: ws.issueNumber, question };
-          if (options.json) { console.log(JSON.stringify(result, null, 2)); process.exit(0); }
-          console.log(`Clarifying question recorded for workspace '${workspaceId}' (issue #${ws.issueNumber}).`);
-          console.log(`  toolUseId: ${toolUseId}`);
-          console.log("  It is now visible in the interactive UI on next refresh.");
-          process.exit(0);
-        }
-
-        const result = await cliProposeTransition(workspaceId, { to: options.to, summary: options.summary, testsPassed: options.testsPassed });
-        if (!result.ok) {
-          console.error(`Transition failed: ${result.error ?? "unknown error"}`);
-          process.exit(1);
-        }
-        const next = (result.nextTransitions ?? []).map((t) => t.toNodeName);
-        if (options.json) {
-          console.log(JSON.stringify({ ok: true, action: "propose", movedTo: result.toNode?.name, autoRouted: result.autoResolved ?? false, status: result.statusName, terminal: next.length === 0, nextStages: next }, null, 2));
-          process.exit(0);
-        }
-        console.log(`Proposed transition for workspace '${workspaceId}'.`);
-        if (result.toNode?.name) console.log(`  movedTo: ${result.toNode.name}`);
-        if (result.statusName) console.log(`  status: ${result.statusName}`);
-        console.log(next.length === 0 ? "  terminal: workflow complete" : `  nextStages: ${next.join(", ")}`);
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
+    .action(cliAction(async (workspaceId: string, options: { action?: string; question?: string; header?: string; to?: string; summary?: string; testsPassed?: boolean; json?: boolean }) => {
+      const action = options.action ?? "clarify";
+      if (action !== "clarify" && action !== "propose") {
+        console.error(`Invalid --action '${action}'. Use clarify or propose.`);
         process.exit(1);
       }
-    });
+
+      const ws = await getWorkspaceIssueContext(workspaceId);
+      if (!ws) {
+        console.error(`Workspace '${workspaceId}' not found.`);
+        process.exit(1);
+      }
+
+      if (action === "clarify") {
+        if (!options.question || !options.question.trim()) {
+          console.error("--question is required for action=clarify.");
+          process.exit(1);
+        }
+        const toolUseId = `cli-clarify-${randomUUID()}`;
+        const question = { question: options.question.trim(), header: options.header, options: [{ label: "Answer in free text" }] };
+        const body = [
+          options.summary?.trim() || "The phase agent needs clarification before continuing.",
+          "",
+          `1. ${question.header ? `${question.header}: ` : ""}${question.question}`,
+        ].join("\n");
+        await insertIssueComment({
+          issueId: ws.issueId,
+          workspaceId,
+          kind: "agent-question",
+          author: "agent",
+          body,
+          payload: { toolUseId, questions: [question], source: "cli_clarify_or_propose" },
+        });
+        const result = { ok: true, action: "clarify", toolUseId, workspaceId, issueId: ws.issueId, issueNumber: ws.issueNumber, question };
+        if (options.json) { console.log(JSON.stringify(result, null, 2)); process.exit(0); }
+        console.log(`Clarifying question recorded for workspace '${workspaceId}' (issue #${ws.issueNumber}).`);
+        console.log(`  toolUseId: ${toolUseId}`);
+        console.log("  It is now visible in the interactive UI on next refresh.");
+        process.exit(0);
+      }
+
+      const result = await cliProposeTransition(workspaceId, { to: options.to, summary: options.summary, testsPassed: options.testsPassed });
+      if (!result.ok) {
+        console.error(`Transition failed: ${result.error ?? "unknown error"}`);
+        process.exit(1);
+      }
+      const next = (result.nextTransitions ?? []).map((t) => t.toNodeName);
+      if (options.json) {
+        console.log(JSON.stringify({ ok: true, action: "propose", movedTo: result.toNode?.name, autoRouted: result.autoResolved ?? false, status: result.statusName, terminal: next.length === 0, nextStages: next }, null, 2));
+        process.exit(0);
+      }
+      console.log(`Proposed transition for workspace '${workspaceId}'.`);
+      if (result.toNode?.name) console.log(`  movedTo: ${result.toNode.name}`);
+      if (result.statusName) console.log(`  status: ${result.statusName}`);
+      console.log(next.length === 0 ? "  terminal: workflow complete" : `  nextStages: ${next.join(", ")}`);
+      process.exit(0);
+    }));
 
   wsCmd
     .command("analyze-touched <issue-id>")

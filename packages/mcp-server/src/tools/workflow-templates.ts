@@ -1,6 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { resolveActiveProjectIdOrNull, resolveProjectName, mcpText, mcpJson } from "../db-utils.js";
 import {
