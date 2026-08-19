@@ -1,3 +1,4 @@
+import { GIT_HEAVY_TEST_TIMEOUT_MS } from "./helpers/timeouts.js";
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -40,7 +41,7 @@ describe("GitService", () => {
 
   beforeAll(async () => {
     repoPath = await createTempRepo();
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   afterAll(async () => {
     try {
@@ -65,7 +66,7 @@ describe("GitService", () => {
 
     // Cleanup
     await gitService.removeWorktree(repoPath, worktreePath);
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("reuses existing worktree for an already-checked-out branch", async () => {
     const worktreePath = await gitService.createWorktree(repoPath, "feature/dup-test");
@@ -76,7 +77,7 @@ describe("GitService", () => {
     } finally {
       await gitService.removeWorktree(repoPath, worktreePath);
     }
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("gets diff between worktree and base branch", async () => {
     const worktreePath = await gitService.createWorktree(repoPath, "feature/diff-test");
@@ -93,7 +94,7 @@ describe("GitService", () => {
     expect(diff).toContain("New content");
 
     await gitService.removeWorktree(repoPath, worktreePath);
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("merges a branch via plumbing and syncs the working tree when the target is checked out", async () => {
     const worktreePath = await gitService.createWorktree(repoPath, "feature/merge-test");
@@ -123,7 +124,7 @@ describe("GitService", () => {
     // And the synced working tree must be clean (no phantom uncommitted diff).
     const dirty = await gitService.getUncommittedTrackedChanges(repoPath);
     expect(dirty).toEqual([]);
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("is idempotent when merging a branch that is already reachable from the target", async () => {
     const worktreePath = await gitService.createWorktree(repoPath, "feature/already-merged");
@@ -147,7 +148,7 @@ describe("GitService", () => {
     expect(second).toContain("already merged");
     expect(headAfterSecond).toBe(headAfterFirst);
     expect(countAfterSecond).toBe(countAfterFirst);
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("syncs a clean checked-out target when retrying after the target ref already contains the feature", async () => {
     const worktreePath = await gitService.createWorktree(repoPath, "feature/interrupted-merge-retry");
@@ -180,7 +181,7 @@ describe("GitService", () => {
     expect(result).toContain("already merged");
     expect((await exec("git", ["rev-parse", "HEAD"], repoPath)).trim()).toBe(newCommit);
     expect(fsExistsSync(join(repoPath, "interrupted-retry.txt"))).toBe(true);
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("does not reset dirty already-merged targets unless they match an interrupted plumbing merge", async () => {
     const worktreePath = await gitService.createWorktree(repoPath, "feature/already-ancestor-dirty");
@@ -207,7 +208,7 @@ describe("GitService", () => {
     } finally {
       await exec("git", ["reset", "--hard", "HEAD"], repoPath);
     }
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("refuses to merge into a checked-out branch with uncommitted tracked changes", async () => {
     const { writeFileSync, readFileSync } = await import("node:fs");
@@ -231,7 +232,7 @@ describe("GitService", () => {
 
     // Restore a clean checkout for subsequent tests.
     await exec("git", ["checkout", "--", "README.md"], repoPath);
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("aborts merge on conflict and leaves main checkout clean", async () => {
     const { writeFileSync, readFileSync } = await import("node:fs");
@@ -271,7 +272,7 @@ describe("GitService", () => {
     expect(shared.trim()).toBe("branch A content");
     expect(shared).not.toContain("<<<<<<<");
     expect(shared).not.toContain("branch B content");
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("aborts merge on _journal.json conflict and leaves main checkout clean", async () => {
     const { writeFileSync, readFileSync } = await import("node:fs");
@@ -321,7 +322,7 @@ describe("GitService", () => {
     expect(journalContent).not.toContain("<<<<<<<");
     expect(journalContent).not.toContain("=======");
     expect(journalContent).not.toContain(">>>>>>>");
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("rejects a conflicting plumbing merge and never commits conflict markers (regression: #598)", async () => {
     // This is the exact failure mode from commit 4bf8c52c: mergeBranch used git plumbing
@@ -387,7 +388,7 @@ describe("GitService", () => {
       }
       expect(fileContent).not.toContain("<<<<<<<");
     }
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("isMergeInProgress returns false when no merge is in progress", async () => {
     const result = await gitService.isMergeInProgress(repoPath);
@@ -520,7 +521,7 @@ describe("autoRenumberMigrations", () => {
     } finally {
       await rm(repo, { recursive: true, force: true });
     }
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("renumbers a single colliding migration and the merge then succeeds cleanly", async () => {
     // Branch A added 0001_a and merged. Branch B (older) also added 0001_b.
@@ -555,7 +556,7 @@ describe("autoRenumberMigrations", () => {
     } finally {
       await rm(repo, { recursive: true, force: true });
     }
-  }, 40000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("renumbers MULTIPLE feature migrations without clobbering (0001+0002 vs base 0001)", async () => {
     const repo = await createMigrationRepo([{ tag: "0000_base", when: 1000 }]);
@@ -592,7 +593,7 @@ describe("autoRenumberMigrations", () => {
     } finally {
       await rm(repo, { recursive: true, force: true });
     }
-  }, 40000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("is idempotent - a second renumber after a successful one is a no-op", async () => {
     const repo = await createMigrationRepo([{ tag: "0000_base", when: 1000 }]);
@@ -619,7 +620,7 @@ describe("autoRenumberMigrations", () => {
     } finally {
       await rm(repo, { recursive: true, force: true });
     }
-  }, 40000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("rebaseOntoBase commits leftover worktree changes instead of failing on a dirty tree", async () => {
     // Agents routinely leave a stray .gitignore/CLAUDE.local.md edit uncommitted; the rebase
@@ -641,5 +642,5 @@ describe("autoRenumberMigrations", () => {
     } finally {
       await rm(repo, { recursive: true, force: true });
     }
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 });

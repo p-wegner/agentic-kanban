@@ -1,3 +1,4 @@
+import { GIT_HEAVY_TEST_TIMEOUT_MS } from "./helpers/timeouts.js";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import { drizzle } from "drizzle-orm/libsql";
@@ -208,20 +209,20 @@ describe("CLI register", () => {
     expect(result.stdout).toContain("Set as active project");
   });
 
-  it("is idempotent for same repo path", { timeout: 30_000 }, () => {
+  it("is idempotent for same repo path", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, () => {
     runCli(["register", PKG_DIR], ctx.dbPath);
     const result = runCli(["register", PKG_DIR], ctx.dbPath);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("already registered");
   });
 
-  it("registers with custom name", { timeout: 30_000 }, () => {
+  it("registers with custom name", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, () => {
     const result = runCli(["register", PKG_DIR, "--name", "my-custom-name"], ctx.dbPath);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('Registered project "my-custom-name"');
   });
 
-  it("errors for non-git path", { timeout: 30_000 }, () => {
+  it("errors for non-git path", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, () => {
     const result = runCli(["register", "C:\\Windows"], ctx.dbPath);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("Error:");
@@ -496,7 +497,7 @@ describe("CLI skill list", () => {
     expect(result.stdout).toContain("No agent skills found");
   });
 
-  it("lists skills after creation", { timeout: 30_000 }, () => {
+  it("lists skills after creation", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, () => {
     runCli(["skill", "create", "my-skill", "-d", "A test skill", "-p", "Do the thing"], ctx.dbPath);
     const result = runCli(["skill", "list"], ctx.dbPath);
     expect(result.status).toBe(0);
@@ -518,7 +519,7 @@ describe("CLI skill create", () => {
     expect(result.stdout).toContain("(global)");
   });
 
-  it("creates a project-scoped skill", { timeout: 30_000 }, async () => {
+  it("creates a project-scoped skill", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, async () => {
     const { id: projectId } = await seedProject(ctx.dbPath);
     const result = runCli(["skill", "create", "scoped-skill", "-d", "Scoped", "-p", "Prompt", "--project", projectId], ctx.dbPath);
     expect(result.status).toBe(0);
@@ -526,14 +527,14 @@ describe("CLI skill create", () => {
     expect(result.stdout).toContain("project:");
   });
 
-  it("rejects duplicate names in same scope", { timeout: 30_000 }, () => {
+  it("rejects duplicate names in same scope", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, () => {
     runCli(["skill", "create", "dup-skill", "-p", "Prompt 1"], ctx.dbPath);
     const result = runCli(["skill", "create", "dup-skill", "-p", "Prompt 2"], ctx.dbPath);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("already exists");
   });
 
-  it("allows same name in different scopes", { timeout: 30_000 }, async () => {
+  it("allows same name in different scopes", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, async () => {
     const { id: projectId } = await seedProject(ctx.dbPath);
     runCli(["skill", "create", "scope-test", "-p", "Global prompt"], ctx.dbPath);
     const result = runCli(["skill", "create", "scope-test", "-p", "Project prompt", "--project", projectId], ctx.dbPath);
@@ -560,7 +561,7 @@ describe("CLI skill get", () => {
   beforeEach(() => { ctx = createTestDb(); });
   afterEach(() => { ctx.cleanup(); });
 
-  it("gets a skill by name", { timeout: 30_000 }, () => {
+  it("gets a skill by name", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, () => {
     runCli(["skill", "create", "findable-skill", "-d", "Can be found", "-p", "Test prompt content"], ctx.dbPath);
     const result = runCli(["skill", "get", "findable-skill"], ctx.dbPath);
     expect(result.status).toBe(0);
@@ -568,7 +569,7 @@ describe("CLI skill get", () => {
     expect(result.stdout).toContain("Test prompt content");
   });
 
-  it("gets a skill by ID", { timeout: 30_000 }, () => {
+  it("gets a skill by ID", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, () => {
     const createResult = runCli(["skill", "create", "by-id-skill", "-p", "Prompt"], ctx.dbPath);
     const idMatch = createResult.stdout.match(/id: ([a-f0-9-]+)/);
     expect(idMatch).toBeTruthy();
@@ -613,7 +614,7 @@ describe("CLI issue dependency", () => {
     expect(result.stdout).toContain(issueBId);
   });
 
-  it("rejects a duplicate dependency with a friendly message, not a raw driver error (#857)", { timeout: 30_000 }, () => {
+  it("rejects a duplicate dependency with a friendly message, not a raw driver error (#857)", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, () => {
     const first = runCli(["issue", "dependency", "add", issueAId, issueBId], ctx.dbPath);
     expect(first.status).toBe(0);
 
@@ -643,14 +644,14 @@ describe("CLI issue dependency", () => {
     expect(result.stderr).toContain("Invalid type");
   });
 
-  it("lists dependencies", { timeout: 30_000 }, () => {
+  it("lists dependencies", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, () => {
     runCli(["issue", "dependency", "add", issueAId, issueBId], ctx.dbPath);
     const result = runCli(["issue", "dependency", "list", issueAId], ctx.dbPath);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Issue B");
   });
 
-  it("removes a dependency", { timeout: 30_000 }, () => {
+  it("removes a dependency", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, () => {
     const addResult = runCli(["issue", "dependency", "add", issueAId, issueBId], ctx.dbPath);
     const idMatch = addResult.stdout.match(/id: ([a-f0-9-]+)/);
     expect(idMatch).toBeTruthy();
@@ -673,7 +674,7 @@ describe("CLI issue delete (#858 — FK-safe cascade)", () => {
   });
   afterEach(() => { ctx.cleanup(); });
 
-  it("deletes an issue with a direct artifact, issue-level comment, time entry, showdown and an incoming dependency", { timeout: 30_000 }, async () => {
+  it("deletes an issue with a direct artifact, issue-level comment, time entry, showdown and an incoming dependency", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, async () => {
     const issue = await seedIssue(ctx.dbPath, projectId, { title: "Has children" });
     const other = await seedIssue(ctx.dbPath, projectId, { title: "Other" });
 
@@ -731,7 +732,7 @@ describe("CLI issue move terminal-move guard (#854)", () => {
   });
   afterEach(() => { ctx.cleanup(); });
 
-  it("blocks 'issue move <n> Done' while a non-direct workspace is open + unmerged", { timeout: 30_000 }, async () => {
+  it("blocks 'issue move <n> Done' while a non-direct workspace is open + unmerged", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, async () => {
     const issue = await seedIssue(ctx.dbPath, projectId, { title: "Has open ws" });
     await seedWorkspace(issue.id, { status: "idle", isDirect: false });
 
@@ -752,14 +753,14 @@ describe("CLI issue move terminal-move guard (#854)", () => {
     client.close();
   });
 
-  it("allows 'issue move <n> Done' when no workspace is open", { timeout: 30_000 }, async () => {
+  it("allows 'issue move <n> Done' when no workspace is open", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, async () => {
     const issue = await seedIssue(ctx.dbPath, projectId, { title: "No ws" });
     const result = runCli(["issue", "move", issue.id, "Done"], ctx.dbPath);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Moved issue to 'Done'");
   });
 
-  it("allows a non-terminal move even with an open workspace", { timeout: 30_000 }, async () => {
+  it("allows a non-terminal move even with an open workspace", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, async () => {
     const issue = await seedIssue(ctx.dbPath, projectId, { title: "Open ws, non-terminal move" });
     await seedWorkspace(issue.id, { status: "active", isDirect: false });
     const result = runCli(["issue", "move", issue.id, "In Progress"], ctx.dbPath);
