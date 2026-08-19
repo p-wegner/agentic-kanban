@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { AppError, AiOperationError } from "../errors/index.js";
+import { AppError, AiOperationError, type DomainErrorCode } from "../errors/index.js";
 import { WorkspaceError } from "../services/workspace-internals.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -20,7 +20,9 @@ type StatusCode = 400 | 403 | 404 | 409 | 500 | 503;
  * Node system errors (ENOENT, ECONNRESET, …) carry codes that are NOT in this set,
  * so they correctly fall through to 500 instead of being mistaken for domain errors.
  */
-const DOMAIN_CODE_STATUS: Record<string, StatusCode> = {
+// #587 — keyed by `DomainErrorCode`, so the union in `errors/` and this mapping cannot
+// drift: adding a code without a status (or a status without a code) is a type error.
+const DOMAIN_CODE_STATUS: Record<DomainErrorCode, StatusCode> = {
   NOT_FOUND: 404,
   CONFLICT: 409,
   FORBIDDEN: 403,
@@ -34,7 +36,11 @@ const DOMAIN_CODE_STATUS: Record<string, StatusCode> = {
 function domainCodeStatus(err: unknown): StatusCode | null {
   if (err && typeof err === "object" && "code" in err) {
     const code = (err as { code?: unknown }).code;
-    if (typeof code === "string" && code in DOMAIN_CODE_STATUS) return DOMAIN_CODE_STATUS[code];
+    // The narrowing is the point: an arbitrary string is NOT a DomainErrorCode, and the
+    // `in` check is what proves it is one before the lookup.
+    if (typeof code === "string" && code in DOMAIN_CODE_STATUS) {
+      return DOMAIN_CODE_STATUS[code as DomainErrorCode];
+    }
   }
   return null;
 }
