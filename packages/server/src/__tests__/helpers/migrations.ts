@@ -1,24 +1,21 @@
-import { readFileSync } from "node:fs";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-export const MIGRATIONS_DIR = resolve(__dirname, "../../../../shared/drizzle");
-
-interface JournalEntry { tag: string }
-
 /**
- * Migration tags in journal apply-order — NOT lexical (e.g. 0023 runs before 0020).
- * Read from the drizzle journal so this never goes stale as migrations are added
- * (the old hardcoded list froze at 0068 and broke the MCP integration suite).
+ * Migration source for the server test suite (#562).
+ *
+ * Was a hand-written journal read + path expression; now a thin re-export so the server
+ * tests, the mcp-server tests and production all agree on where migrations live and what
+ * order they apply in. The old comment noted a hardcoded list that "froze at 0068 and broke
+ * the MCP integration suite" — deriving from the journal is what fixed that, and sharing the
+ * derivation is what keeps the two test helpers from diverging again.
  */
-export function migrationFilesInOrder(): string[] {
-  const journal = JSON.parse(
-    readFileSync(resolve(MIGRATIONS_DIR, "meta/_journal.json"), "utf-8"),
-  ) as { entries: JournalEntry[] };
-  return journal.entries.map((e) => `${e.tag}.sql`);
-}
+export {
+  MIGRATIONS_DIR,
+  migrationFilesInOrder,
+  readMigrationJournal,
+  splitMigrationStatements,
+  readMigrationStatements,
+} from "@agentic-kanban/shared/lib/migration-source";
+
+import { migrationFilesInOrder } from "@agentic-kanban/shared/lib/migration-source";
 
 /**
  * All migration SQL files in journal apply-order.

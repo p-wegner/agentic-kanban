@@ -3,35 +3,25 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Client } from "@libsql/client";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { resolveMigrationsDir, splitMigrationStatements, type JournalEntry } from "@agentic-kanban/shared/lib/migration-source";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export function getMigrationsFolder(): string {
-  // Probe candidate locations and use the first that actually has the journal. This
-  // is robust to where the bundle entry lives: a FLAT bundle (dist/cli.js) finds
-  // migrations at ./migrations, a NESTED bundle (dist/cli/index.js) finds them at
-  // ../migrations, and dev/monorepo runs fall back to the shared drizzle dir.
-  // (A previous hardcoded "./migrations" broke the published CLI once it moved to
-  // dist/cli/index.js — it resolved to a non-existent dist/cli/migrations.)
-  const candidates = [
-    resolve(__dirname, "migrations"),       // flat bundle  → dist/migrations
-    resolve(__dirname, "../migrations"),    // nested bundle → dist/migrations
+  // The candidate ORDER is the load-bearing part: a FLAT bundle (dist/cli.js) finds
+  // migrations at ./migrations, a NESTED bundle (dist/cli/index.js) at ../migrations, and
+  // dev/monorepo runs fall back to the shared drizzle dir. (A previous hardcoded
+  // "./migrations" broke the published CLI once the entry moved to dist/cli/index.js.)
+  // The probing itself is `resolveMigrationsDir` (#562) — `db/migrations.ts` held a second,
+  // OLDER copy of this that never got the fix and had gone dead.
+  return resolveMigrationsDir([
+    resolve(__dirname, "migrations"),              // flat bundle   → dist/migrations
+    resolve(__dirname, "../migrations"),           // nested bundle → dist/migrations
     resolve(__dirname, "../../../shared/drizzle"), // dev / monorepo
-  ];
-  for (const candidate of candidates) {
-    try {
-      if (existsSync(resolve(candidate, "meta/_journal.json"))) return candidate;
-    } catch { /* ignore */ }
-  }
-  return candidates[candidates.length - 1];
+  ]);
 }
 
-interface JournalEntry {
-  idx: number;
-  tag: string;
-  when: number;
-  breakpoints: boolean;
-}
+
 
 /**
  * Idempotency-shim cutoff (#954).
@@ -306,9 +296,7 @@ export async function applyMigrations(client: Client, options?: { folder?: strin
     const sql = readFileSync(sqlFile, "utf8");
 
     // Split on statement breakpoints
-    const statements = entry.breakpoints
-      ? sql.split("--> statement-breakpoint").map(s => s.trim()).filter(Boolean)
-      : [sql.trim()];
+    const statements = splitMigrationStatements(sql, entry.breakpoints);
 
     // A migration that toggles `PRAGMA foreign_keys` MUST run outside a
     // transaction (SQLite ignores the pragma inside one — the §3.1 bug); every

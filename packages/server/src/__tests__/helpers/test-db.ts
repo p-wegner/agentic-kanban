@@ -16,12 +16,7 @@ export type TestDb = ReturnType<typeof drizzle<typeof schema>>;
  */
 export function applyMigrationsToClient(client: Client): void {
   for (const file of MIGRATION_FILES) {
-    const sql = readFileSync(resolve(MIGRATIONS_DIR, file), "utf-8");
-    const statements = sql
-      .split("--> statement-breakpoint")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-    for (const stmt of statements) {
+    for (const stmt of readMigrationStatements(file, MIGRATIONS_DIR)) {
       client.execute(stmt);
     }
   }
