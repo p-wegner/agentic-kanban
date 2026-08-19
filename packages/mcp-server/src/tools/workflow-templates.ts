@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { resolveActiveProjectIdOrNull, resolveProjectName, mcpText, mcpJson } from "../db-utils.js";
+import { ISSUE_TYPES } from "@agentic-kanban/shared";
 import {
   listWorkflowTemplates,
   getTemplateGraph,
@@ -74,7 +75,7 @@ export function registerCreateWorkflowTemplate(server: McpServer, deps: ToolDeps
       projectId: z.string().optional().describe("Project ID (defaults to active project)"),
       name: z.string(),
       description: z.string().optional(),
-      ticketType: z.enum(["task", "bug", "feature", "chore"]).nullable().optional().describe("Make this the default workflow for the given ticket type"),
+      ticketType: z.enum(ISSUE_TYPES).nullable().optional().describe("Make this the default workflow for the given ticket type"),
       isDefault: z.boolean().optional(),
       nodes: z.array(nodeSchema),
       edges: z.array(edgeSchema),
@@ -104,7 +105,7 @@ export function registerUpdateWorkflowTemplate(server: McpServer, deps: ToolDeps
       templateId: z.string(),
       name: z.string().optional(),
       description: z.string().nullable().optional(),
-      ticketType: z.enum(["task", "bug", "feature", "chore"]).nullable().optional(),
+      ticketType: z.enum(ISSUE_TYPES).nullable().optional(),
       isDefault: z.boolean().optional(),
       nodes: z.array(nodeSchema).optional(),
       edges: z.array(edgeSchema).optional(),

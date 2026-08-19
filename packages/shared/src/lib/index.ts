@@ -50,3 +50,5 @@ export * from "./docs-only-diff.js";
 export * from "./onboarding-plan.js";
 // The one number-or-id policy for issue references (#509) — pure string logic.
 export * from "./issue-ref.js";
+// Issue-domain closed vocabularies as runtime arrays (#570) — pure, no Node builtins.
+export * from "./issue-vocab.js";

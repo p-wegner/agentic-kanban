@@ -6,6 +6,7 @@ import { showToast } from "./Toast.js";
 import TicketMentionInput from "./TicketMentionInput.js";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
 import { handleImagePaste, mergeDescriptionWithImages } from "../lib/pastedImages.js";
+import { ISSUE_TYPES, issueTypeLabel } from "@agentic-kanban/shared";
 
 interface Skill {
   id: string;
@@ -260,10 +261,9 @@ export function CreateIssueForm({
           onChange={(e) => setIssueType(e.target.value as CreateIssueRequest["issueType"])}
           className="flex-1 text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
         >
-          <option value="task">Task</option>
-          <option value="bug">Bug</option>
-          <option value="feature">Feature</option>
-          <option value="chore">Chore</option>
+          {ISSUE_TYPES.map((t) => (
+            <option key={t} value={t}>{issueTypeLabel(t)}</option>
+          ))}
         </select>
         <select
           value={estimate}

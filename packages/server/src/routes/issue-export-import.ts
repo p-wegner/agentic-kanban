@@ -3,6 +3,7 @@ import type { BoardEvents } from "../services/board-events.js";
 import { createIssueService } from "../services/issue.service.js";
 import { getIssuesForExport, getTagsForIssues } from "../repositories/issue.repository.js";
 import { createRouter } from "../middleware/create-router.js";
+import { ISSUE_TYPES } from "@agentic-kanban/shared";
 
 const EXPORT_COLUMNS = [
   "number",
@@ -159,7 +160,12 @@ interface PreviewRow {
 }
 
 const VALID_PRIORITIES = new Set(["low", "medium", "high", "critical"]);
-const VALID_ISSUE_TYPES = new Set(["task", "bug", "feature", "epic", "chore"]);
+// #570: derived from the shared vocabulary, so this Set cannot drift from what the rest of
+// the app renders and validates. `epic` was accepted here and NOWHERE else — it is a TAG
+// (seed.ts seeds it as one), not an issue type, so importing it produced issues whose type
+// no client select can display. Dropping it is the deliberate half of that decision; see
+// ISSUE_TYPE_ALIASES_REJECTED.
+const VALID_ISSUE_TYPES: ReadonlySet<string> = new Set(ISSUE_TYPES);
 // Bulk import defaults for a missing/invalid priority or type (#426): medium /
 // feature. (Manual single-issue create still defaults to medium / task.)
 const DEFAULT_PRIORITY = "medium";

@@ -22,6 +22,7 @@ import {
   providerFromSelection,
 } from "../lib/profileOptionLabels.js";
 import { defaultModelForProvider, type AgentProvider } from "../lib/settings-shared.js";
+import { ISSUE_TYPES, issueTypeLabel } from "@agentic-kanban/shared";
 
 interface Skill {
   id: string;
@@ -294,10 +295,9 @@ export function CreateIssuePanel({
                 onChange={(e) => setIssueType(e.target.value as CreateIssueRequest["issueType"])}
                 className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
               >
-                <option value="task">Task</option>
-                <option value="bug">Bug</option>
-                <option value="feature">Feature</option>
-                <option value="chore">Chore</option>
+                {ISSUE_TYPES.map((t) => (
+                  <option key={t} value={t}>{issueTypeLabel(t)}</option>
+                ))}
               </select>
             </div>
             <div className="flex flex-col gap-1.5">
