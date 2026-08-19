@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { boardApi, boardErrorText, mcpJson, mcpText } from "../board-call.js";
+import { mcpError } from "../db-utils.js";
 import { eq, or } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -32,7 +33,7 @@ export function registerUnregisterProject(server: McpServer, deps: ToolDeps = pr
         // Use REST DELETE so the server handles cascade + board event broadcast
         const { ok, statusText, data } = await boardApi(`/api/projects/${projectId}`, { method: "DELETE" });
 
-        if (!ok) return mcpText(`Error unregistering project: ${boardErrorText(data, statusText)}`);
+        if (!ok) return mcpError(`Error unregistering project: ${boardErrorText(data, statusText)}`);
 
         return mcpJson({ success: true, message: `Unregistered project "${projectName}" (${projectId})` });
       } catch (err) {

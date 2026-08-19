@@ -1,13 +1,15 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { boardApi, boardErrorText, mcpJson, mcpText, mcpUnreachable } from "../board-call.js";
-import { db, schema } from "../db.js";
+import { prodDeps, type ToolDeps } from "./deps.js";
+import { boardApi, boardErrorText, mcpJson, mcpText } from "../board-call.js";
 import { eq } from "drizzle-orm";
 import { notifyBoard } from "../notify.js";
 import { requireEntity } from "../db-utils.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
-export function registerReviewWorkspace(server: McpServer) {
+export function registerReviewWorkspace(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "review_workspace",
     "Trigger an AI code review for an idle workspace. The workspace must be in 'idle' status.",

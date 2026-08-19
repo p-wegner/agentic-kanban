@@ -3,7 +3,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { isIssueNumberUniqueConstraintError, nextIssueNumber, resolveStatusByName, mcpText } from "../db-utils.js";
+import { isIssueNumberUniqueConstraintError, mcpError, mcpText, nextIssueNumber, resolveStatusByName } from "../db-utils.js";
 
 const ISSUE_NUMBER_INSERT_ATTEMPTS = 3;
 
@@ -25,7 +25,7 @@ export function registerCreateSubIssue(server: McpServer, deps: ToolDeps = prodD
     },
     async ({ parentIssueId, title, description, priority, issueType, estimate, sortOrder, statusName }) => {
 
-      if (!title.trim()) return mcpText("Error: title is required");
+      if (!title.trim()) return mcpError("Error: title is required");
 
       const parents = await db
         .select({ projectId: schema.issues.projectId, issueNumber: schema.issues.issueNumber, title: schema.issues.title })
@@ -33,7 +33,7 @@ export function registerCreateSubIssue(server: McpServer, deps: ToolDeps = prodD
         .where(eq(schema.issues.id, parentIssueId))
         .limit(1);
       const parent = parents[0];
-      if (!parent) return mcpText(`Error: parent issue not found: ${parentIssueId}`);
+      if (!parent) return mcpError(`Error: parent issue not found: ${parentIssueId}`);
 
       let statusId: string;
       if (statusName) {
@@ -47,7 +47,7 @@ export function registerCreateSubIssue(server: McpServer, deps: ToolDeps = prodD
           .where(eq(schema.projectStatuses.projectId, parent.projectId))
           .orderBy(schema.projectStatuses.sortOrder)
           .limit(1);
-        if (statuses.length === 0) return mcpText("Error: no statuses configured for parent project");
+        if (statuses.length === 0) return mcpError("Error: no statuses configured for parent project");
         statusId = statuses[0].id;
       }
 
@@ -97,7 +97,7 @@ export function registerCreateSubIssue(server: McpServer, deps: ToolDeps = prodD
       }
 
       if (id === null || dependencyId === null || issueNumber === null) {
-        return mcpText("Error: could not allocate a unique issue number");
+        return mcpError("Error: could not allocate a unique issue number");
       }
 
       notifyBoard(parent.projectId, "mcp_create_sub_issue");

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { mcpJson, mcpText } from "../db-utils.js";
+import { mcpError, mcpJson } from "../db-utils.js";
 
 const VALID_TYPES = ["depends_on", "blocked_by", "related_to", "duplicates", "parent_of", "child_of", "coupled_with"] as const;
 const DIRECTIONAL = new Set<string>(["depends_on", "blocked_by", "parent_of", "child_of"]);
@@ -172,7 +172,7 @@ export function registerUpdateDependenciesBatch(server: McpServer, deps: ToolDep
     async ({ edges }) => {
       const result = await applyUpdateDependenciesBatch(deps, edges);
       if (!result.ok) {
-        return mcpText(`Error: ${result.message}`);
+        return mcpError(`Error: ${result.message}`);
       }
 
       return mcpJson({ added: result.added, removed: result.removed, skipped: result.skipped });

@@ -16,9 +16,14 @@ vi.mock("../../db.js", async () => {
   return { db: createTestDb().db, schema: sharedSchema };
 });
 
+// `getDiff`/`getDiffShortstat` are not used by start_workspace, but the tool now reaches
+// the DB through `tools/deps.ts` (#605), whose `prodDeps` reads them at module load — so
+// the mock has to be complete, not just complete enough for this handler.
 vi.mock("../../git-service.js", () => ({
   getCurrentBranch: vi.fn(async () => "master"),
   createWorktree: vi.fn(async () => "C:/repo/.worktrees/test"),
+  getDiff: vi.fn(async () => ""),
+  getDiffShortstat: vi.fn(async () => ({ filesChanged: 0, insertions: 0, deletions: 0 })),
 }));
 
 vi.mock("../../notify.js", () => ({ notifyBoard: vi.fn() }));

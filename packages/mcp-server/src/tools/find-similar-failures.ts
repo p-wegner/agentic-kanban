@@ -4,7 +4,7 @@ import { extractKeywords } from "@agentic-kanban/shared";
 import type { ToolDeps } from "./deps.js";
 import { prodDeps } from "./deps.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import { mcpText } from "../db-utils.js";
+import { mcpError, mcpText } from "../db-utils.js";
 
 function overlapScore(patternKw: string[], querySet: Set<string>): { score: number; matched: string[] } {
   const matched = patternKw.filter(k => querySet.has(k));
@@ -70,7 +70,7 @@ export function registerFindSimilarFailures(server: McpServer, deps: ToolDeps = 
 
         return mcpText(lines.join("\n\n"));
       } catch (err) {
-        return mcpText(`Error: ${errorMessage(err)}`);
+        return mcpError(`Error: ${errorMessage(err)}`);
       }
     },
   );

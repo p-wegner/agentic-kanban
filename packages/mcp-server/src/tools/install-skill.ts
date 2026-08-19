@@ -3,12 +3,14 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { access } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
-import { db, schema } from "../db.js";
 import { writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import { mcpText } from "../db-utils.js";
+import { prodDeps, type ToolDeps } from "./deps.js";
+import { mcpError, mcpText } from "../db-utils.js";
 
-export function registerInstallSkill(server: McpServer) {
+export function registerInstallSkill(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "install_skill",
     "Install built-in agent skills as SKILL.md files into a project's .claude/skills/ directory and link .codex/skills to the same location. Mirrors CLI `install-skill [target-path]`. Reads built-in global skills from the DB (requires db:seed to have run). Each skill is written as <targetPath>/.claude/skills/<name>/SKILL.md.",
@@ -40,7 +42,7 @@ export function registerInstallSkill(server: McpServer) {
       try {
         await access(resolvedPath);
       } catch {
-        return mcpText(`Error: Target path does not exist: ${resolvedPath}`);
+        return mcpError(`Error: Target path does not exist: ${resolvedPath}`);
       }
 
       let skills = [...globalBuiltins];

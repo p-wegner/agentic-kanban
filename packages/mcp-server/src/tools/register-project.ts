@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { boardApi, boardErrorText, mcpJson, mcpText, mcpUnreachable } from "../board-call.js";
+import { boardApi, boardErrorText, mcpJson, mcpUnreachable } from "../board-call.js";
+import { mcpError } from "../db-utils.js";
 
 export function registerRegisterProject(server: McpServer) {
   server.tool(
@@ -35,7 +36,7 @@ export function registerRegisterProject(server: McpServer) {
           if (status === 409) {
             return mcpJson({ alreadyRegistered: true, ...(data as Record<string, unknown>) });
           }
-          return mcpText(`Error registering project: ${boardErrorText(data, statusText)}`);
+          return mcpError(`Error registering project: ${boardErrorText(data, statusText)}`);
         }
 
         return mcpJson(data);

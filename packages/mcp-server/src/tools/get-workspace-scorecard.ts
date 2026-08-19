@@ -1,10 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
+import { prodDeps, type ToolDeps } from "./deps.js";
 import { mcpText, requireEntity } from "../db-utils.js";
 
-export function registerGetWorkspaceScorecard(server: McpServer) {
+export function registerGetWorkspaceScorecard(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "get_workspace_scorecard",
     "Get the PR quality scorecard for a workspace. Returns a 0-100 score with per-dimension breakdown (Tests, Types, Scope, Diff size, Conflicts, Docs, Skill output).",

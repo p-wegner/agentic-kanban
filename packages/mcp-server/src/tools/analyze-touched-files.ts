@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { boardApi, boardErrorText, mcpJson, mcpText, mcpUnreachable } from "../board-call.js";
+import { boardApi, boardErrorText, mcpJson } from "../board-call.js";
+import { mcpError } from "../db-utils.js";
 
 export function registerAnalyzeTouchedFiles(server: McpServer) {
   server.tool(
@@ -15,7 +16,7 @@ export function registerAnalyzeTouchedFiles(server: McpServer) {
         method: "POST",
         body: JSON.stringify({ refresh: refresh ?? false }),
       });
-      if (!ok) return mcpText(`Error: ${boardErrorText(data, statusText)}`);
+      if (!ok) return mcpError(`Error: ${boardErrorText(data, statusText)}`);
       return mcpJson(data);
     },
   );

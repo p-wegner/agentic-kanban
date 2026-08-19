@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { boardApi, boardErrorText, mcpJson, mcpText, mcpUnreachable } from "../board-call.js";
+import { boardApi, boardErrorText, mcpJson, mcpUnreachable } from "../board-call.js";
+import { mcpError } from "../db-utils.js";
 
 export function registerAddProjectRepo(server: McpServer) {
   server.tool(
@@ -17,7 +18,7 @@ export function registerAddProjectRepo(server: McpServer) {
     },
     async ({ projectId, path, cloneUrl, createName, name, setupScript, composeFile }) => {
       if ([path, cloneUrl, createName].filter((v) => typeof v === "string" && v.trim()).length !== 1) {
-        return mcpText("Error: provide exactly one of `path`, `cloneUrl`, or `createName`.");
+        return mcpError("Error: provide exactly one of `path`, `cloneUrl`, or `createName`.");
       }
       try {
         const body: Record<string, unknown> = {};
@@ -32,7 +33,7 @@ export function registerAddProjectRepo(server: McpServer) {
           method: "POST",
           body: JSON.stringify(body),
         });
-        if (!ok) return mcpText(`Error adding repo to project: ${boardErrorText(data, statusText)}`);
+        if (!ok) return mcpError(`Error adding repo to project: ${boardErrorText(data, statusText)}`);
         return mcpJson(data);
       } catch (err) {
         return mcpUnreachable(err);

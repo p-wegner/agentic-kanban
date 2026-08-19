@@ -3,7 +3,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { isIssueNumberUniqueConstraintError, mcpJson, mcpText, nextIssueNumber, resolveActiveProjectId, resolveProjectName, resolveStatusByName } from "../db-utils.js";
+import { isIssueNumberUniqueConstraintError, mcpError, mcpJson, nextIssueNumber, resolveActiveProjectId, resolveProjectName, resolveStatusByName } from "../db-utils.js";
 
 const ISSUE_NUMBER_INSERT_ATTEMPTS = 3;
 
@@ -71,7 +71,7 @@ export function registerCreateIssue(server: McpServer, deps: ToolDeps = prodDeps
       }
 
       if (id === null || issueNumber === null) {
-        return mcpText("Error: could not allocate a unique issue number");
+        return mcpError("Error: could not allocate a unique issue number");
       }
 
       notifyBoard(pid, "mcp_create_issue");

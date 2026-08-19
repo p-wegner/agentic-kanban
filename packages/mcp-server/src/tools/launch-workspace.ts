@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { boardApi, boardErrorText, mcpJson, mcpText, mcpUnreachable } from "../board-call.js";
+import { boardApi, boardErrorText, mcpJson, mcpText } from "../board-call.js";
 import { eq } from "drizzle-orm";
 import { mcpStructuredError, workspaceNotFoundError, workspaceClosedError } from "../db-utils.js";
 import { prodDeps, type ToolDeps } from "./deps.js";

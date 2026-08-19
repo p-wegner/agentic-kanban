@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { eq, and, gte } from "drizzle-orm";
 import type { SessionFrictionStats } from "@agentic-kanban/shared";
-import { db, schema } from "../db.js";
+import { prodDeps, type ToolDeps } from "./deps.js";
 import { mcpText, resolveActiveProjectId } from "../db-utils.js";
 
 /**
@@ -12,7 +12,9 @@ import { mcpText, resolveActiveProjectId } from "../db-utils.js";
  * from `sessions.stats` (populated at session exit / via
  * `pnpm cli -- session backfill-friction`).
  */
-export function registerGetFleetFriction(server: McpServer) {
+export function registerGetFleetFriction(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "get_fleet_friction",
     "Aggregate agent-session friction (failed tool calls, repeated commands, error counts) across all sessions in a recent time window. Use to find systemic, compounding improvements (skills/hooks/helper scripts). Reads persisted friction stats; run `session backfill-friction` first if coverage is low.",

@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { loadIssueSummary } from "@agentic-kanban/shared/lib/issue-summary";
-import { mcpJson, mcpText, resolveActiveProjectId } from "../db-utils.js";
+import { mcpError, mcpJson, mcpText, resolveActiveProjectId } from "../db-utils.js";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -46,7 +46,7 @@ export function registerGetIssueSummary(server: McpServer, deps: ToolDeps = prod
 
         return mcpJson(result);
       } catch (err) {
-        return mcpText(`Error: ${errorMessage(err)}`);
+        return mcpError(`Error: ${errorMessage(err)}`);
       }
     },
   );

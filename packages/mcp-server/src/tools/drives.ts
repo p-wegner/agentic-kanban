@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { DRIVE_STATUSES } from "@agentic-kanban/shared";
 import { generateDriveRetro } from "@agentic-kanban/shared/lib/drive-retro";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { mcpJson, mcpText, requireEntity } from "../db-utils.js";
+import { mcpError, mcpJson, requireEntity } from "../db-utils.js";
 
 /**
  * MCP surface for the first-class Drive entity (#799): a Drive records an
@@ -26,7 +26,7 @@ export function registerStartDrive(server: McpServer, deps: ToolDeps = prodDeps)
     },
     async ({ projectId, target, metaIssueId, completionContract }) => {
       if (!target.trim()) {
-        return mcpText("Error: target is required");
+        return mcpError("Error: target is required");
       }
       const projectRows = await db.select({ id: schema.projects.id })
         .from(schema.projects).where(eq(schema.projects.id, projectId)).limit(1);

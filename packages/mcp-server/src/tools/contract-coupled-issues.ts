@@ -5,7 +5,7 @@ import { planContraction, resolveCoupledComponent } from "@agentic-kanban/shared
 import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { applyUpdateDependenciesBatch } from "./update-dependencies-batch.js";
-import { mcpJson, mcpText } from "../db-utils.js";
+import { mcpError, mcpJson } from "../db-utils.js";
 
 type ContractIssueRow = {
   id: string;
@@ -57,7 +57,7 @@ export function registerContractCoupledIssues(server: McpServer, deps: ToolDeps 
       const uniqueIssueIds = [...new Set(issueIds)];
       const leadId = leadIssueId ?? uniqueIssueIds[0];
       if (!leadId || !uniqueIssueIds.includes(leadId)) {
-        return mcpText("Error: leadIssueId must be included in issueIds");
+        return mcpError("Error: leadIssueId must be included in issueIds");
       }
 
       const issueRows = await db
@@ -72,12 +72,12 @@ export function registerContractCoupledIssues(server: McpServer, deps: ToolDeps 
         .from(schema.issues)
         .where(inArray(schema.issues.id, uniqueIssueIds));
       if (issueRows.length !== uniqueIssueIds.length) {
-        return mcpText("Error: one or more issues were not found");
+        return mcpError("Error: one or more issues were not found");
       }
 
       const projectIds = new Set(issueRows.map((row) => row.projectId));
       if (projectIds.size !== 1) {
-        return mcpText("Error: cannot contract issues across projects");
+        return mcpError("Error: cannot contract issues across projects");
       }
 
       const projectId = issueRows[0].projectId;
@@ -98,14 +98,14 @@ export function registerContractCoupledIssues(server: McpServer, deps: ToolDeps 
       }));
       const component = resolveCoupledComponent(leadId, edges);
       if (component.size < 2) {
-        return mcpText("Error: selected issues are not a coupled component");
+        return mcpError("Error: selected issues are not a coupled component");
       }
 
       const selected = new Set(uniqueIssueIds);
       const missing = [...component].filter((id) => !selected.has(id));
       const extra = uniqueIssueIds.filter((id) => !component.has(id));
       if (missing.length > 0 || extra.length > 0) {
-        return mcpText("Error: issueIds must exactly match the lead issue's coupled component");
+        return mcpError("Error: issueIds must exactly match the lead issue's coupled component");
       }
 
       const openWorkspaces = await db
@@ -113,12 +113,12 @@ export function registerContractCoupledIssues(server: McpServer, deps: ToolDeps 
         .from(schema.workspaces)
         .where(and(inArray(schema.workspaces.issueId, [...component]), ne(schema.workspaces.status, "closed")));
       if (openWorkspaces.length > 0) {
-        return mcpText("Error: cannot contract a component with open workspaces");
+        return mcpError("Error: cannot contract a component with open workspaces");
       }
 
       const leadIssue = issueRows.find((row) => row.id === leadId);
       if (!leadIssue) {
-        return mcpText("Error: leadIssueId must be included in issueIds");
+        return mcpError("Error: leadIssueId must be included in issueIds");
       }
       const absorbedIssueIds = issueRows
         .filter((row) => row.id !== leadId)
@@ -136,7 +136,7 @@ export function registerContractCoupledIssues(server: McpServer, deps: ToolDeps 
         terminalStatuses.find((status) => status.name === "Cancelled")?.id ??
         terminalStatuses.find((status) => status.name === "Done")?.id;
       if (!terminalStatusId) {
-        return mcpText("Error: project must have a Cancelled or Done status to absorb issues");
+        return mcpError("Error: project must have a Cancelled or Done status to absorb issues");
       }
 
       const mutations = [
@@ -150,7 +150,7 @@ export function registerContractCoupledIssues(server: McpServer, deps: ToolDeps 
       ];
       const result = await applyUpdateDependenciesBatch(deps, mutations);
       if (!result.ok) {
-        return mcpText(`Error: ${result.message}`);
+        return mcpError(`Error: ${result.message}`);
       }
 
       const now = new Date().toISOString();

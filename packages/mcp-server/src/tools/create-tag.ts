@@ -1,10 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
 import { randomUUID } from "node:crypto";
+import { prodDeps, type ToolDeps } from "./deps.js";
 import { mcpJson } from "../db-utils.js";
 
-export function registerCreateTag(server: McpServer) {
+export function registerCreateTag(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "create_tag",
     "Create a new tag (label) for categorizing issues",

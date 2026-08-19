@@ -3,7 +3,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import { mcpJson, mcpText } from "../db-utils.js";
+import { mcpError, mcpJson } from "../db-utils.js";
 
 export function registerListProjects(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema } = deps;
@@ -49,7 +49,7 @@ export function registerListProjects(server: McpServer, deps: ToolDeps = prodDep
 
         return mcpJson({ activeProjectId: activeId, projects: result });
       } catch (err) {
-        return mcpText(`Error listing projects: ${errorMessage(err)}`);
+        return mcpError(`Error listing projects: ${errorMessage(err)}`);
       }
     },
   );

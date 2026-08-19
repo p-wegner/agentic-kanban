@@ -1,8 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { db, schema } from "../db.js";
+import { prodDeps, type ToolDeps } from "./deps.js";
 import { mcpJson } from "../db-utils.js";
 
-export function registerListTags(server: McpServer) {
+export function registerListTags(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "list_tags",
     "List all available tags (labels) for categorizing issues",

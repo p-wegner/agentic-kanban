@@ -109,8 +109,23 @@ Trigger: process start (`main()`, `index.ts:216`). Steps: read `disabled_mcp_too
 | `merge-workspace.ts` | The delegate-don't-reimplement policy and the local fast-fail pre-checks; the canonical example of "agents get the same safety net as humans" | `merge-workspace.ts:8`, `merge-workspace.ts:35` |
 | `get-board-status.ts` | "What are my agents doing right now" — assembles per-issue state from *shared* classifiers/projections to stay identical to the server's | `get-board-status.ts:8`, `get-board-status.ts:22` |
 | `db.ts` | DB-path resolution policy (dev DB beats published DB) + pragma discipline so MCP can't bypass FK enforcement | `db.ts:15`, `db.ts:32` |
-| `tools/deps.ts` | The dependency-injection seam that makes every tool unit-testable without spawning stdio | `tools/deps.ts:16` |
+| `tools/deps.ts` | The dependency-injection seam that makes every tool unit-testable without spawning stdio — the ONLY sanctioned DB reach for a tool (#605) | `tools/deps.ts:16` |
+| `__tests__/tool-board-reach.test.ts` | Pins the two board-reach styles: DB **through the deps seam**, and HTTP for state the server holds in memory | `__tests__/tool-board-reach.test.ts:29` |
 | `notify.ts` / `server-url.ts` | The two ways out to the REST process: UI-refresh ping vs. authoritative delegation, plus port resolution | `notify.ts:8`, `server-url.ts:3` |
+
+### How a tool reaches the board — two styles, and the rule that picks between them
+A tool may read/write the database **only through the `ToolDeps` seam** (`register(server, deps: ToolDeps = prodDeps)`,
+then `const { db, schema } = deps` or `deps.db`). Importing the `db`/`schema` module singletons from `../db.js` is no
+longer allowed anywhere under `tools/` — 27 tools did, and not one of the 30 tool tests could mock them, so those tools
+were effectively untestable (#605).
+
+The other style is **HTTP to the REST server**, and it is not a matter of taste: state that lives in the server's MEMORY
+— a running session, a merge lock, a compose stack — is invisible to a DB read, so a tool that writes a workspace's or
+session's *lifecycle* fields directly would diverge from what the board believes. Those tools (`launch`, `relaunch`,
+`review`, `merge`, `start`, `stop`, `close`, `delete` workspace) delegate. Analysis columns are not lifecycle state:
+`backfill_friction` writes `sessions.stats` through the seam and that is correct.
+
+Both halves are pinned by `__tests__/tool-board-reach.test.ts` rather than left to convention.
 
 ### Notable tools beyond the core CRUD
 The catalog reveals the breadth of agent self-management: **Drives** (`drives.ts` — first-class records of an autonomous epic push under a "completion contract"), **session forensics** (`analyze-session`, `get-fleet-friction`, `session-review-effectiveness`, `reviewer-fixes` — the Smith/compounding-engineering surface), **dependency graph ops** (`update-dependencies-batch` with cycle detection, `contract-coupled-issues`), **OpenSpec living specs** (`openspec.ts`), **workflow-template CRUD** (configurable workflow graphs), **project lifecycle** (`register/create/unregister/cleanup/init_project`), **evidence capture** (`attach_artifact` — how an agent records proof-of-work: a text/link/image/`.webm` "visual proof" artifact keyed to a workspace and resolved back to its issue; `attach-artifact.ts:9`), and the **Butler family** (10 tools fronting a warm per-project Claude assistant). The agent can effectively run the entire board.

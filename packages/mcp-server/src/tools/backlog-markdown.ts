@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { boardApi, boardApiText, mcpJson, mcpText } from "../board-call.js";
-import { resolveActiveProjectId } from "../db-utils.js";
+import { mcpError, resolveActiveProjectId } from "../db-utils.js";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -53,10 +53,10 @@ export function registerExportBacklogMarkdown(server: McpServer, deps: ToolDeps 
     p.set("download", "0");
     try {
       const { ok, status, text } = await boardApiText(`/api/projects/${rpid.projectId}/backlog.md?${p.toString()}`);
-      if (!ok) return mcpText(`Error: export failed (${status}): ${text.slice(0, 300)}`);
+      if (!ok) return mcpError(`Error: export failed (${status}): ${text.slice(0, 300)}`);
       return mcpText(text);
     } catch (e) {
-      return mcpText(`Error: board unreachable — ${errorMessage(e)}`);
+      return mcpError(`Error: board unreachable — ${errorMessage(e)}`);
     }
   });
 }
@@ -80,11 +80,11 @@ export function registerImportBacklogMarkdown(server: McpServer, deps: ToolDeps 
         method: "POST",
         body: JSON.stringify({ text, mode, matchBy, defaultStatus, unknownStatus }),
       });
-      if (!ok) return mcpText(`Error: ${path} failed (${status}): ${JSON.stringify(data).slice(0, 400)}`);
+      if (!ok) return mcpError(`Error: ${path} failed (${status}): ${JSON.stringify(data).slice(0, 400)}`);
       if (path === "import") notifyBoard(rpid.projectId, "mcp_import_backlog_markdown");
       return mcpJson({ dryRun: path === "preview", ...(data as Record<string, unknown>) });
     } catch (e) {
-      return mcpText(`Error: board unreachable — ${errorMessage(e)}`);
+      return mcpError(`Error: board unreachable — ${errorMessage(e)}`);
     }
   });
 }

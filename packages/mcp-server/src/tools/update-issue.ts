@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { mcpStructuredError, requireEntity, resolveStatusByName, checkOpenUnmergedWorkspace } from "../db-utils.js";
+import { mcpJson, mcpStructuredError, requireEntity, resolveStatusByName, checkOpenUnmergedWorkspace } from "../db-utils.js";
 import { fireIssueStatusWebhook } from "@agentic-kanban/shared/lib/issue-status-orchestration";
 import { isTerminalStatusName } from "@agentic-kanban/shared/lib";
 import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
@@ -84,19 +84,17 @@ export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps
         });
       }
 
-      return {
-        // #501 moved the status write out of `updates`, so "statusId" is re-added here
-        // explicitly. Deriving the response purely from the object's keys would have
-        // silently dropped it from the reported field list — a response-contract change
-        // that has nothing to do with the invariant being fixed.
-        content: [{ type: "text" as const, text: JSON.stringify({
-          id: issueId,
-          updated: [
-            ...Object.keys(updates).filter(k => k !== "updatedAt" && k !== "statusChangedAt"),
-            ...(resolvedStatusId ? ["statusId"] : []),
-          ],
-        }, null, 2) }],
-      };
+      // #501 moved the status write out of `updates`, so "statusId" is re-added here
+      // explicitly. Deriving the response purely from the object's keys would have
+      // silently dropped it from the reported field list — a response-contract change
+      // that has nothing to do with the invariant being fixed.
+      return mcpJson({
+        id: issueId,
+        updated: [
+          ...Object.keys(updates).filter(k => k !== "updatedAt" && k !== "statusChangedAt"),
+          ...(resolvedStatusId ? ["statusId"] : []),
+        ],
+      });
     },
   );
 }

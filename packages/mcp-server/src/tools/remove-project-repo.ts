@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { boardApi, boardErrorText, mcpJson, mcpText, mcpUnreachable } from "../board-call.js";
+import { boardApi, boardErrorText, mcpJson, mcpUnreachable } from "../board-call.js";
+import { mcpError } from "../db-utils.js";
 
 export function registerRemoveProjectRepo(server: McpServer) {
   server.tool(
@@ -15,7 +16,7 @@ export function registerRemoveProjectRepo(server: McpServer) {
         const { ok, statusText, data } = await boardApi(`/api/projects/${projectId}/repos/${repoId}`, {
           method: "DELETE",
         });
-        if (!ok) return mcpText(`Error removing repo from project: ${boardErrorText(data, statusText)}`);
+        if (!ok) return mcpError(`Error removing repo from project: ${boardErrorText(data, statusText)}`);
         return mcpJson(data);
       } catch (err) {
         return mcpUnreachable(err);
