@@ -25,6 +25,7 @@ import {
 import { spawnShellCommand, taskkillTree } from "./process-exec.js";
 import { tailOutput as tail } from "./plugin-exec.js";
 import { findView, probeHealth } from "./plugin-view-probe.js";
+import type { EnabledPlugin } from "./plugin-enabled.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
@@ -225,10 +226,9 @@ export function createPluginViewsRuntime<P extends PluginWithManifest, Pr extend
   requireProject: (projectId: string) => Promise<Pr>;
   resolveOutputRepoPath: (plugin: P, project: Pr) => Promise<string>;
   /** slug set per project, from the `plugin_enabled_<slug>_<projectId>` prefs. */
-  enabledSlugsByProject: () => Promise<Map<string, Set<string>>>;
+  /** #552: the one enabled-plugin iterator; injected so this module stays database-free. */
+  listEnabledPlugins: (projectId: string) => Promise<EnabledPlugin[]>;
   /** Installed plugin rows (raw, manifest still JSON — a broken one must not blank the panel). */
-  listPluginRows: () => Promise<Array<{ id: string; pluginId: string; name: string; manifestJson: string }>>;
-  parseManifest: (manifestJson: string) => PluginManifest;
   /** Externally reachable board API base URL (`{{boardUrl}}`) — resolved by the composition
    *  root, not read from env here, so a worktree server hands out its own URL. */
   boardUrl: string;
@@ -240,7 +240,7 @@ export function createPluginViewsRuntime<P extends PluginWithManifest, Pr extend
   persistViewProcess?: (values: { pluginRowId: string; viewId: string; projectId: string; pid: number; port: number; command: string }) => Promise<void>;
   dropViewProcess?: (pluginRowId: string, viewId: string, projectId: string) => Promise<void>;
 }) {
-  const { requirePlugin, requireProject, resolveOutputRepoPath, enabledSlugsByProject, listPluginRows, parseManifest, boardUrl, persistViewProcess, dropViewProcess } = deps;
+  const { requirePlugin, requireProject, resolveOutputRepoPath, listEnabledPlugins, boardUrl, persistViewProcess, dropViewProcess } = deps;
 
   async function startView(pluginRowId: string, viewId: string, projectId: string): Promise<PluginViewStartResult> {
     // Serialize per view BEFORE the first await — see `startingViews` (#251).
@@ -397,17 +397,12 @@ export function createPluginViewsRuntime<P extends PluginWithManifest, Pr extend
   /** Flat list of the ENABLED plugins' views for a project (the client view host). */
   async function listProjectViews(projectId: string) {
     await requireProject(projectId);
-    const enabled = (await enabledSlugsByProject()).get(projectId) ?? new Set<string>();
     const out = [];
-    for (const row of await listPluginRows()) {
-      if (!enabled.has(row.pluginId)) continue;
+    for (const { row, manifest, owner } of await listEnabledPlugins(projectId)) {
       try {
-        const manifest = parseManifest(row.manifestJson);
         for (const view of manifest.views ?? []) {
           out.push({
-            pluginId: row.id,
-            pluginSlug: row.pluginId,
-            pluginName: row.name,
+            ...owner,
             id: view.id,
             label: view.label,
             kind: view.kind,

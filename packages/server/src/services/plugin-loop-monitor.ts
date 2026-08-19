@@ -1,8 +1,6 @@
-import { parsePluginManifest } from "@agentic-kanban/shared/lib/plugin-manifest";
-import { isPluginEnabledPreferenceKey } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
-import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
 import type { Database } from "../db/index.js";
-import { getWorkspaceGitCoordinates, listPluginEnabledPreferences, listPluginRows } from "../repositories/plugins.repository.js";
+import { getWorkspaceGitCoordinates } from "../repositories/plugins.repository.js";
+import { enabledPluginSlugsByProject, listEnabledPluginsByProjects } from "./plugin-enabled.js";
 import { recoverStrandedAutoLand } from "./plugin-loop-autoland-recovery.js";
 import { latestPluginLoopEvent } from "../repositories/plugin-loop-events.repository.js";
 import { getPluginService } from "./plugin.service.js";
@@ -83,33 +81,18 @@ export async function advanceDuePluginLoops(
   const minBlockedIntervalMs = options.minBlockedAdvanceIntervalMs ?? DEFAULT_MIN_BLOCKED_ADVANCE_INTERVAL_MS;
   const service = getPluginService(database);
 
-  // plugin_enabled_<slug>_<projectId> — the projectId is the fixed-length uuid tail.
-  const enabled = new Map<string, Set<string>>();
-  for (const row of await listPluginEnabledPreferences(database)) {
-    // plugin_enabled_* has no SETTINGS_REGISTRY entry (dynamic per-plugin-per-project key),
-    // so parseBoolSetting falls back to the explicit `false` default below — same polarity
-    // as the raw `!== "true"` check this replaces, but routed through the #947 accessor.
-    if (!isPluginEnabledPreferenceKey(row.key) || !parseBoolSetting(row.key, row.value, false)) continue;
-    const rest = row.key.slice("plugin_enabled_".length);
-    const projectId = rest.slice(-36);
-    if (!options.allowProject(projectId)) continue;
-    if (!enabled.has(projectId)) enabled.set(projectId, new Set());
-    enabled.get(projectId)!.add(rest.slice(0, -37));
-  }
-  if (enabled.size === 0) return 0;
+  // #552: one enabled-plugin iterator — the preference scan, the row read and every
+  // manifest parse happen once for the whole sweep, and a broken cached manifest is
+  // skipped there rather than being re-decided here.
+  const projectIds = [...(await enabledPluginSlugsByProject(database)).keys()].filter((id) => options.allowProject(id));
+  if (projectIds.length === 0) return 0;
+  const enabled = await listEnabledPluginsByProjects(projectIds, database);
 
-  const pluginRows = await listPluginRows(database);
   let advanced = 0;
 
-  for (const [projectId, slugs] of enabled) {
-    for (const row of pluginRows) {
-      if (!slugs.has(row.pluginId)) continue;
-      let loopDefs: { name: string; autoLand?: boolean }[] = [];
-      try {
-        loopDefs = parsePluginManifest(row.manifestJson).loops ?? [];
-      } catch {
-        continue; // broken cached manifest — never take the monitor down for it
-      }
+  for (const [projectId, plugins] of enabled) {
+    for (const { row, manifest } of plugins) {
+      const loopDefs: { name: string; autoLand?: boolean }[] = manifest.loops ?? [];
       if (loopDefs.length === 0) continue;
 
       let statuses;

@@ -1,7 +1,7 @@
-import { DEFAULT_PLUGIN_AUDIENCE, parsePluginManifest, pluginSkillName, type PluginManifest } from "@agentic-kanban/shared/lib/plugin-manifest";
+import { DEFAULT_PLUGIN_AUDIENCE, pluginSkillName } from "@agentic-kanban/shared/lib/plugin-manifest";
 import type { Database } from "../db/index.js";
-import { listPluginRows, type PluginRow } from "../repositories/plugins.repository.js";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
+import { listEnabledPlugins, listEnabledPluginsByProjects, type PluginOwner } from "./plugin-enabled.js";
 import { resolveStartPolicy } from "./start-policy.service.js";
 import type { PluginLoopEngine, LoopStatus } from "./plugin-loop.service.js";
 
@@ -15,12 +15,11 @@ import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 export function createPluginProjectSurfaceOps(deps: {
   database: Database;
   requireProject: (projectId: string) => Promise<unknown>;
-  enabledSlugsByProject: () => Promise<Map<string, Set<string>>>;
   loops: PluginLoopEngine;
   readManifestDrift: (row: { localPath: string; manifestJson: string }) => Promise<boolean>;
   getViewStatus: (pluginRowId: string, viewId: string, projectId: string) => Promise<Record<string, unknown>>;
 }) {
-  const { database, requireProject, enabledSlugsByProject, loops, readManifestDrift, getViewStatus } = deps;
+  const { database, requireProject, loops, readManifestDrift, getViewStatus } = deps;
 
   /**
    * Everything the ENABLED plugins offer this project, in one read: the board's
@@ -29,22 +28,13 @@ export function createPluginProjectSurfaceOps(deps: {
    */
   async function listProjectSurface(projectId: string) {
     await requireProject(projectId);
-    const enabled = (await enabledSlugsByProject()).get(projectId) ?? new Set<string>();
     const views = [];
     const projectLoops = [];
     const scripts = [];
     const skills = [];
     /** Enabled plugins whose on-disk manifest is ahead of the one the board runs (#442). */
-    const drifted: Array<{ pluginId: string; pluginSlug: string; pluginName: string }> = [];
-    for (const row of await listPluginRows(database)) {
-      if (!enabled.has(row.pluginId)) continue;
-      let manifest: PluginManifest;
-      try {
-        manifest = parsePluginManifest(row.manifestJson);
-      } catch {
-        continue; // a broken cached manifest must not blank the whole panel
-      }
-      const owner = { pluginId: row.id, pluginSlug: row.pluginId, pluginName: row.name };
+    const drifted: PluginOwner[] = [];
+    for (const { row, manifest, owner } of await listEnabledPlugins(projectId, database)) {
       if (await readManifestDrift(row)) drifted.push(owner);
       for (const view of manifest.views ?? []) {
         views.push({
@@ -105,17 +95,14 @@ export function createPluginProjectSurfaceOps(deps: {
   /** Flat list of the ENABLED plugins' loops for a project (the board Plugins panel). */
   async function listProjectLoops(projectId: string) {
     await requireProject(projectId);
-    const enabled = (await enabledSlugsByProject()).get(projectId) ?? new Set<string>();
     const out = [];
-    for (const row of await listPluginRows(database)) {
-      if (!enabled.has(row.pluginId)) continue;
+    for (const { row, manifest, owner } of await listEnabledPlugins(projectId, database)) {
       try {
-        const manifest = parsePluginManifest(row.manifestJson);
         for (const status of await loops.loopStatuses(manifest, row.pluginId, projectId)) {
-          out.push({ pluginId: row.id, pluginSlug: row.pluginId, pluginName: row.name, ...status });
+          out.push({ ...owner, ...status });
         }
       } catch {
-        /* skip plugins with a broken cached manifest */
+        /* skip plugins whose loop statuses cannot be read */
       }
     }
     return out;
@@ -131,24 +118,17 @@ export function createPluginProjectSurfaceOps(deps: {
    * plugin never empties another project's inbox.
    */
   async function listLoopSurfacesForProjects(projectIds: string[]) {
-    const out = new Map<string, Array<LoopStatus & { pluginId: string; pluginSlug: string; pluginName: string }>>();
+    const out = new Map<string, Array<LoopStatus & PluginOwner>>();
     if (projectIds.length === 0) return out;
-    const enabledMap = await enabledSlugsByProject();
-    // Parse each installed plugin's manifest ONCE, not once per project.
-    const parsedRows: Array<{ row: PluginRow; manifest: PluginManifest }> = [];
-    for (const row of await listPluginRows(database)) {
-      try {
-        parsedRows.push({ row, manifest: parsePluginManifest(row.manifestJson) });
-      } catch { /* a broken cached manifest must not blank every project's inbox */ }
-    }
+    // The preference scan, the row read and every manifest parse happen ONCE for the
+    // whole batch, not once per project (#552).
+    const enabledByProject = await listEnabledPluginsByProjects(projectIds, database);
     await Promise.all(projectIds.map(async (projectId) => {
-      const enabled = enabledMap.get(projectId) ?? new Set<string>();
-      const projectLoops: Array<LoopStatus & { pluginId: string; pluginSlug: string; pluginName: string }> = [];
-      for (const { row, manifest } of parsedRows) {
-        if (!enabled.has(row.pluginId)) continue;
+      const projectLoops: Array<LoopStatus & PluginOwner> = [];
+      for (const { row, manifest, owner } of enabledByProject.get(projectId) ?? []) {
         try {
           for (const status of await loops.loopStatuses(manifest, row.pluginId, projectId, { includeCosts: false })) {
-            projectLoops.push({ pluginId: row.id, pluginSlug: row.pluginId, pluginName: row.name, ...status });
+            projectLoops.push({ ...owner, ...status });
           }
         } catch { /* one plugin's broken loop state must not drop the project's other items */ }
       }

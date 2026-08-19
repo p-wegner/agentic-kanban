@@ -16,8 +16,8 @@ import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { buildAgentPrompt } from "./workspace-create/policy.js";
 import type { Database } from "../db/index.js";
 import * as crudRepo from "../repositories/workspace-crud.repository.js";
-import { listPluginRows, isPluginEnabledForProject } from "../repositories/plugins.repository.js";
-import { parsePluginManifest, parsePluginLoopUnitKey, pluginSkillName } from "@agentic-kanban/shared/lib/plugin-manifest";
+import { getEnabledPluginBySlug, listEnabledPlugins } from "./plugin-enabled.js";
+import { parsePluginLoopUnitKey, pluginSkillName } from "@agentic-kanban/shared/lib/plugin-manifest";
 import { parseOnboardingUnitKey, parseInitSkillStepId } from "@agentic-kanban/shared/lib/onboarding-plan";
 import type { ProviderName } from "./agent-provider.js";
 import { runSetupScript } from "./setup-script.js";
@@ -261,15 +261,9 @@ export function createWorkspaceProvisionService(deps: {
    */
   async function materializeEnabledPluginSkills(worktreePath: string, repoPath: string, projectId: string): Promise<void> {
     try {
-      const rows = await listPluginRows(database);
-      for (const row of rows) {
-        if (!(await isPluginEnabledForProject(row.pluginId, projectId, database))) continue;
-        let manifest;
-        try {
-          manifest = parsePluginManifest(row.manifestJson);
-        } catch {
-          continue;
-        }
+      // #552: one enabled-plugin iterator — this used to run `isPluginEnabledForProject`
+      // once per INSTALLED plugin, i.e. a DB query per plugin on the workspace-create path.
+      for (const { manifest } of await listEnabledPlugins(projectId, database)) {
         for (const skill of manifest.skills ?? []) {
           const name = basename(skill.dir.replace(/\\/g, "/"));
           await copySkillToWorktree(repoPath, name, worktreePath);
@@ -304,10 +298,9 @@ export function createWorkspaceProvisionService(deps: {
     const unit = parsePluginLoopUnitKey(externalKey);
     if (!unit) return null;
     try {
-      const row = (await listPluginRows(database)).find((r) => r.pluginId === unit.pluginSlug);
-      if (!row) return null;
-      if (!(await isPluginEnabledForProject(row.pluginId, projectId, database))) return null;
-      const loop = (parsePluginManifest(row.manifestJson).loops ?? []).find((l) => l.name === unit.loopName);
+      const plugin = await getEnabledPluginBySlug(unit.pluginSlug, projectId, database);
+      if (!plugin) return null;
+      const loop = (plugin.manifest.loops ?? []).find((l) => l.name === unit.loopName);
       return loop?.skill ?? null;
     } catch (err) {
       // Best-effort, exactly like the materialization above: a broken manifest must not fail a
@@ -351,10 +344,9 @@ export function createWorkspaceProvisionService(deps: {
       }
     }
     try {
-      const row = (await listPluginRows(database)).find((r) => r.pluginId === parsed.pluginSlug);
-      if (!row) return none;
-      if (!(await isPluginEnabledForProject(row.pluginId, projectId, database))) return none;
-      const stillDeclared = (parsePluginManifest(row.manifestJson).skills ?? [])
+      const plugin = await getEnabledPluginBySlug(parsed.pluginSlug, projectId, database);
+      if (!plugin) return none;
+      const stillDeclared = (plugin.manifest.skills ?? [])
         .some((s) => pluginSkillName(s.dir) === parsed.skillName);
       return stillDeclared ? { skillId: null, diskSkillName: parsed.skillName } : none;
     } catch (err) {

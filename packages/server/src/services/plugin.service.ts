@@ -8,8 +8,6 @@ import {
   type PluginManifest,
   type PluginPlaceholderVars,
 } from "@agentic-kanban/shared/lib/plugin-manifest";
-import { isPluginEnabledPreferenceKey } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
-import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
 import type { Database } from "../db/index.js";
 import { resolvePublicBoardUrl } from "../runtime-port.js";
 import { runPluginCommand, type PluginCommandResult } from "./plugin-exec.js";
@@ -18,12 +16,12 @@ import { getProjectById } from "../repositories/project.repository.js";
 import { createPluginOutputLocationOps } from "./plugin-output-location.service.js";
 import {
   getPluginRowById,
-  listPluginEnabledPreferences,
   listPluginRows,
   type PluginRow,
 } from "../repositories/plugins.repository.js";
 import type { CreateIssueInput, CreateIssueResult } from "./issue.service.js";
 import type { CreateWorkspaceInput, CreateWorkspaceResult } from "./workspace-internals.js";
+import { enabledPluginSlugsByProject, listEnabledPlugins } from "./plugin-enabled.js";
 import { createPluginEnablementOps } from "./plugin-enablement.service.js";
 import { createPluginLifecycleOps } from "./plugin-lifecycle.service.js";
 import { createPluginListingOps } from "./plugin-listing.service.js";
@@ -135,9 +133,7 @@ export function createPluginService(deps: {
     requirePlugin,
     requireProject,
     resolveOutputRepoPath,
-    enabledSlugsByProject,
-    listPluginRows: () => listPluginRows(database),
-    parseManifest: parsePluginManifest,
+    listEnabledPlugins: (projectId) => listEnabledPlugins(projectId, database),
     boardUrl,
     // PID bookkeeping for the startup reap of orphaned view servers (#228).
     persistViewProcess: (values) => upsertPluginViewProcess(values, database),
@@ -157,21 +153,7 @@ export function createPluginService(deps: {
   }
 
   async function enabledSlugsByProject(): Promise<Map<string, Set<string>>> {
-    const rows = await listPluginEnabledPreferences(database);
-    const map = new Map<string, Set<string>>();
-    for (const row of rows) {
-      // plugin_enabled_* has no SETTINGS_REGISTRY entry (dynamic per-plugin-per-project key),
-      // so parseBoolSetting falls back to the explicit `false` default below — same polarity
-      // as the raw `!== "true"` check this replaces, but routed through the #947 accessor.
-      if (!isPluginEnabledPreferenceKey(row.key) || !parseBoolSetting(row.key, row.value, false)) continue;
-      // key = plugin_enabled_<slug>_<uuid>; the uuid is the fixed-length tail.
-      const rest = row.key.slice("plugin_enabled_".length);
-      const projectId = rest.slice(-36);
-      const slug = rest.slice(0, -37);
-      if (!map.has(projectId)) map.set(projectId, new Set());
-      map.get(projectId)!.add(slug);
-    }
-    return map;
+    return enabledPluginSlugsByProject(database);
   }
 
   // Per-project enable/disable + skill fan-out extracted to its own module
@@ -221,8 +203,8 @@ export function createPluginService(deps: {
   }
 
   async function getButlerFragments(projectId: string): Promise<string[]> {
-    const enabled = (await enabledSlugsByProject()).get(projectId);
-    if (!enabled || enabled.size === 0) return [];
+    const enabledPlugins = await listEnabledPlugins(projectId, database);
+    if (enabledPlugins.length === 0) return [];
     let project: { id: string; repoPath: string; name: string } | null = null;
     try {
       project = await requireProject(projectId);
@@ -230,10 +212,8 @@ export function createPluginService(deps: {
       return [];
     }
     const fragments: string[] = [];
-    for (const row of await listPluginRows(database)) {
-      if (!enabled.has(row.pluginId)) continue;
+    for (const { row, manifest } of enabledPlugins) {
       try {
-        const manifest = parsePluginManifest(row.manifestJson);
         // `{{repoPath}}` is the OUTPUT repo at every other substitution site; this one used to
         // hand the butler the LEADING repo for both placeholders, so in sidecar mode a fragment
         // saying "the register lives in {{repoPath}}/docs" named a path with nothing in it.
@@ -467,7 +447,7 @@ export function createPluginService(deps: {
   // "Everything the enabled plugins offer this project (or projects)" reads extracted
   // to their own module (god-module ceiling) — see plugin-project-surface.service.ts.
   const { listProjectSurface, listProjectLoops, listLoopSurfacesForProjects } = createPluginProjectSurfaceOps({
-    database, requireProject, enabledSlugsByProject, loops, readManifestDrift, getViewStatus,
+    database, requireProject, loops, readManifestDrift, getViewStatus,
   });
 
   return {
