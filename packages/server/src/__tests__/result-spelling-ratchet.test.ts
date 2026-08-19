@@ -30,7 +30,15 @@ const SERVER_SRC = path.join(import.meta.dirname!, "..");
 const SHARED_LIB = path.join(SERVER_SRC, "..", "..", "shared", "src", "lib");
 
 const SUCCESS_SPELLING_CAP = 38;
-const INLINE_ROUTE_ERROR_CAP = 168;
+/**
+ * 168 -> 169 (#595). NOT a new inline body: `routes/internal-monitor.ts` MOVED here from
+ * `startup/monitor-setup.ts`, carrying its unchanged `c.json({ error: "resource sweep
+ * unavailable" }, 503)`. It was uncounted before only because this scan covers `routes/`
+ * and `startup/` sat outside it — the same blind spot #595 found in depcruise, showing up
+ * here too. Raising a ratchet is otherwise forbidden; this is an accounting correction for
+ * a population that grew by relocation, and the guard is unchanged for new code.
+ */
+const INLINE_ROUTE_ERROR_CAP = 169;
 
 function tsFiles(dir: string, skip: (name: string, full: string) => boolean = () => false): string[] {
   if (!fs.existsSync(dir)) return [];
