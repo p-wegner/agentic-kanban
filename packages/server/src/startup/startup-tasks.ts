@@ -31,6 +31,7 @@ import { refreshContainerMcpConfig } from "../services/devcontainer-workspace.se
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { runNonFatal } from "./run-non-fatal.js";
 
 /** Kill orphaned tsx server processes from previous hot-reload cycles (Windows only). */
 export function shouldKillOrphanedServerProcess(input: {
@@ -843,17 +844,25 @@ export async function runCriticalStartupTasks(sessionManager: SessionManager, _d
 export async function runGatedDeferredStartupTasks(): Promise<void> {
   await abortStaleMerges();
   await abortStaleRebases();
-  try {
-    // Worker fleet (epic #184): land any remote-worker pushes that arrived while
-    // the board was down. Must run AFTER cleanupStaleSessions — that sweep
-    // finalizes the pid-less remote session rows, and this recovers their work
-    // from the incoming ref so a restart mid-flight does not lose it.
+  // Worker fleet (epic #184): land any remote-worker pushes that arrived while the board was
+  // down. Must run AFTER cleanupStaleSessions — that sweep finalizes the pid-less remote
+  // session rows, and this recovers their work from the incoming ref so a restart mid-flight
+  // does not lose it.
+  await runNonFatal("sweepIncomingWorkerRefs", async () => {
     const { sweepIncomingWorkerRefs } = await import("./worker-incoming-sweep.js");
     await sweepIncomingWorkerRefs();
-  } catch (err) {
-    console.warn("[startup] sweepIncomingWorkerRefs failed (non-fatal):", errorMessage(err));
-  }
+  });
   await reconcileSilentlyMergedWorkspaces();
+}
+
+// Re-exported so `startup-tasks` stays the one import site for the startup sequence.
+export { runNonFatal } from "./run-non-fatal.js";
+
+/** One entry of the startup audit tail. */
+export interface StartupAuditTask {
+  /** Reported in the non-fatal warning, so a failed entry is identifiable in the log. */
+  name: string;
+  run: () => Promise<unknown>;
 }
 
 /**
@@ -861,64 +870,60 @@ export async function runGatedDeferredStartupTasks(): Promise<void> {
  * it. Every entry is idempotent and has a periodic counterpart in BACKGROUND_SERVICES, so
  * a write racing one of them sees the same outcome a minute later either way — which is
  * why this runs ungated, with no request waiting on it.
+ *
+ * A table rather than eight copies of try/catch-warn (#564): adding a reconciler is a row,
+ * ORDER is readable at a glance (it is load-bearing in two places, noted below), and the
+ * wiring test can assert the list instead of re-deriving it.
  */
-export async function runStartupAuditTasks(): Promise<void> {
-  try {
-    await reapOrphanedPluginViewProcesses();
-  } catch (err) {
-    console.warn("[startup] reapOrphanedPluginViewProcesses failed (non-fatal):", errorMessage(err));
-  }
-  try {
-    // Catch the orphans the DB does not know about (#281) — must run AFTER the
-    // DB-tracked reap so a row's process is attributed to its row (and its command
-    // line cross-checked) rather than being swept anonymously here.
-    await reapParentlessChildServers();
-  } catch (err) {
-    console.warn("[startup] reapParentlessChildServers failed (non-fatal):", errorMessage(err));
-  }
-  try {
-    // Multi-repo crash gap: a crash between the leading merge and the sibling merges
-    // strands sibling repos unmerged on a mergedAt-stamped workspace — no other startup
-    // reconciler sees them. Dynamically imported: merge-workflow pulls in the whole
-    // merge pipeline, which other startup-task consumers don't need at module load.
-    const { reconcileStrandedSiblingMerges } = await import("./merge-workflow.js");
-    await reconcileStrandedSiblingMerges();
-  } catch (err) {
-    console.warn("[startup] reconcileStrandedSiblingMerges failed (non-fatal):", errorMessage(err));
-  }
-  try {
-    await reconcileAncestorBranchWorkspaces();
-  } catch (err) {
-    console.warn("[startup] reconcileAncestorBranchWorkspaces failed (non-fatal):", errorMessage(err));
-  }
-  try {
-    // #113: hand-merged `feature/ak-<N>` branches (dev fixes landed WITHOUT a board
-    // workspace) have no workspace row to key off, so the linked issue #N never
-    // auto-transitions. Scan each project's default-branch merge history and converge
-    // still-open matching issues to Done. Idempotent; skips Backlog/terminal issues.
-    await reconcileHandMergedBranches();
-  } catch (err) {
-    console.warn("[startup] reconcileHandMergedBranches failed (non-fatal):", errorMessage(err));
-  }
-  try {
-    await scanDoneUnmergedWorkspaces({ reopenToInReview: false });
-  } catch (err) {
-    console.warn("[startup] scanDoneUnmergedWorkspaces failed (non-fatal):", errorMessage(err));
-  }
-  try {
-    await reapTerminalWorkspaces();
-  } catch (err) {
-    console.warn("[startup] reapTerminalWorkspaces failed (non-fatal):", errorMessage(err));
-  }
-  await pruneStaleWorktrees();
-  // #361: pruneStaleWorktrees above is DB-driven and can only see a closed workspace that still
-  // has a workingDir — which a completed merge nulls. This runs the same sweep from GIT truth so a
-  // worktree left behind by a merge (measured: kassenbuch `.worktrees/ak-6` and `ak-12`) is
-  // recovered instead of blocking every later auto-merge on the project.
-  await pruneOrphanedWorktrees();
+export const STARTUP_AUDIT_TASKS: StartupAuditTask[] = [
+  { name: "reapOrphanedPluginViewProcesses", run: () => reapOrphanedPluginViewProcesses() },
+  {
+    // Catch the orphans the DB does not know about (#281) — must run AFTER the DB-tracked
+    // reap so a row's process is attributed to its row (and its command line cross-checked)
+    // rather than being swept anonymously here.
+    name: "reapParentlessChildServers",
+    run: () => reapParentlessChildServers(),
+  },
+  {
+    // Multi-repo crash gap: a crash between the leading merge and the sibling merges strands
+    // sibling repos unmerged on a mergedAt-stamped workspace — no other startup reconciler
+    // sees them. Dynamically imported: merge-workflow pulls in the whole merge pipeline,
+    // which other startup-task consumers don't need at module load.
+    name: "reconcileStrandedSiblingMerges",
+    run: async () => {
+      const { reconcileStrandedSiblingMerges } = await import("./merge-workflow.js");
+      await reconcileStrandedSiblingMerges();
+    },
+  },
+  { name: "reconcileAncestorBranchWorkspaces", run: () => reconcileAncestorBranchWorkspaces() },
+  {
+    // #113: hand-merged `feature/ak-<N>` branches (dev fixes landed WITHOUT a board workspace)
+    // have no workspace row to key off, so the linked issue #N never auto-transitions. Scan
+    // each project's default-branch merge history and converge still-open matching issues to
+    // Done. Idempotent; skips Backlog/terminal issues.
+    name: "reconcileHandMergedBranches",
+    run: () => reconcileHandMergedBranches(),
+  },
+  { name: "scanDoneUnmergedWorkspaces", run: () => scanDoneUnmergedWorkspaces({ reopenToInReview: false }) },
+  { name: "reapTerminalWorkspaces", run: () => reapTerminalWorkspaces() },
+  { name: "pruneStaleWorktrees", run: () => pruneStaleWorktrees() },
+  {
+    // #361: pruneStaleWorktrees above is DB-driven and can only see a closed workspace that
+    // still has a workingDir — which a completed merge nulls. This runs the same sweep from
+    // GIT truth so a worktree left behind by a merge (measured: kassenbuch `.worktrees/ak-6`
+    // and `ak-12`) is recovered instead of blocking every later auto-merge on the project.
+    name: "pruneOrphanedWorktrees",
+    run: () => pruneOrphanedWorktrees(),
+  },
   // #630: after the disk sweeps, so the report can honestly say the debris is handled.
-  await reconcileAbandonedProvisioning();
-  await checkMainCheckoutHeads();
+  { name: "reconcileAbandonedProvisioning", run: () => reconcileAbandonedProvisioning() },
+  { name: "checkMainCheckoutHeads", run: () => checkMainCheckoutHeads() },
+];
+
+export async function runStartupAuditTasks(): Promise<void> {
+  for (const task of STARTUP_AUDIT_TASKS) {
+    await runNonFatal(task.name, task.run);
+  }
 }
 
 /**
