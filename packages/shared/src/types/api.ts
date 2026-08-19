@@ -26,6 +26,7 @@ export type * from "./api/drive.js";
 export type * from "./api/board.js";
 export type * from "./api/monitor.js";
 export type * from "./api/agent-questions.js";
+export type * from "./api/plugin.js";
 export type * from "./api/preflight.js";
 export type * from "./api/scorecard.js";
 export type * from "./api/orchestrator.js";

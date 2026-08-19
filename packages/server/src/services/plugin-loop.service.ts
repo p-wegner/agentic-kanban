@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isTerminalStatusName } from "@agentic-kanban/shared";
 import {
+  buildPluginPlaceholderVars,
   DEFAULT_LOOP_MAX_UNITS_PER_ADVANCE,
   parsePluginLoopPlan,
   pluginLoopConvergedPreferenceKey,
@@ -13,7 +14,6 @@ import {
   substitutePluginPlaceholders,
   type PluginLoopDef,
   type PluginManifest,
-  type PluginPlaceholderVars,
 } from "@agentic-kanban/shared/lib/plugin-manifest";
 import type { Database } from "../db/index.js";
 import { listPluginLoopIssues, listPluginLoopSessionStats, listPluginLoopUnmergedWorkspaces } from "../repositories/plugins.repository.js";
@@ -419,14 +419,14 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
       throw new PluginLoopError("Loop advance is not available on this route", "BAD_REQUEST");
     }
     const loop = findLoop(args.manifest, args.loopName);
-    const vars: PluginPlaceholderVars = {
-      repoPath: args.repoPath,
+    const vars = buildPluginPlaceholderVars({
+      outputRepoPath: args.repoPath,
       leadingRepoPath: args.leadingRepoPath,
       projectName: args.projectName,
       pluginPath: args.pluginLocalPath,
       boardUrl,
       projectId: args.projectId,
-    };
+    });
 
     const result = await runPluginCommand(substitutePluginPlaceholders(loop.plan.command, vars), {
       // A planner defaults to the plugin's own checkout — that is where its
@@ -735,14 +735,14 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
           throw new PluginLoopError(`Action "${action.id}" requires a text input (e.g. revision feedback)`, "BAD_REQUEST");
         }
 
-        const vars: PluginPlaceholderVars = {
-          repoPath: args.repoPath,
+        const vars = buildPluginPlaceholderVars({
+          outputRepoPath: args.repoPath,
           leadingRepoPath: args.leadingRepoPath,
           projectName: args.projectName,
           pluginPath: args.pluginLocalPath,
           boardUrl,
           projectId: args.projectId,
-        };
+        });
         // The human's text goes through a FILE: it is arbitrary prose, and no amount of
         // quoting makes interpolating it into a shell command safe.
         const inputFile = action.input === "text"

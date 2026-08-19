@@ -18,15 +18,11 @@
 import { isPluginEnabledPreferenceKey } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
 import { parsePluginManifest, type PluginManifest } from "@agentic-kanban/shared/lib/plugin-manifest";
+import type { PluginOwner } from "@agentic-kanban/shared";
 import { db, type Database } from "../db/index.js";
 import { getPluginRowBySlug, listPluginEnabledPreferences, listPluginRows, type PluginRow } from "../repositories/plugins.repository.js";
 
-/** How every plugin-owned row identifies its owner to the client. */
-export interface PluginOwner {
-  pluginId: string;
-  pluginSlug: string;
-  pluginName: string;
-}
+export type { PluginOwner };
 
 export interface EnabledPlugin {
   row: PluginRow;

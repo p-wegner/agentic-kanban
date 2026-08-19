@@ -353,6 +353,16 @@ export interface PluginDocDef {
   audience?: PluginAudience;
 }
 
+export type {
+  PluginPlaceholderVars,
+} from "./plugin-placeholders.js";
+export {
+  PLUGIN_PLACEHOLDER_KEYS,
+  buildPluginPlaceholderVars,
+  substitutePluginPlaceholders,
+  substitutePluginEnv,
+} from "./plugin-placeholders.js";
+
 export interface PluginManifest {
   /** Unique slug ([a-z0-9-]+); doubles as the install directory name and pref-key segment. */
   id: string;
@@ -750,52 +760,6 @@ function parseLoopChecks(value: unknown): PluginLoopCheck[] | undefined {
   });
 }
 
-export interface PluginPlaceholderVars {
-  /** Where this plugin's output goes — the project's leading repo, or a sidecar repo. */
-  repoPath?: string;
-  /** The project's leading (product) repo, regardless of output location. Lets a manifest
-   *  read the source from `{{leadingRepoPath}}` while writing output to `{{repoPath}}`. */
-  leadingRepoPath?: string;
-  projectName?: string;
-  pluginPath?: string;
-  port?: number | string;
-  /** Externally REACHABLE base URL of the board's REST API — scheme+host+port, no trailing
-   *  slash (e.g. `http://localhost:3001`). This is what a plugin view server, script, or loop
-   *  planner calls to read board data. In dev the backend binds an INTERNAL port behind the
-   *  stable proxy; this is always the public (proxy) URL, never the internal one. */
-  boardUrl?: string;
-  /** The board project the view/script/loop was started FOR — the id to pass as `projectId`
-   *  in board API calls. */
-  projectId?: string;
-}
-
-/**
- * Substitute the supported `{{placeholder}}`s in a manifest env value or template
- * text. Unknown placeholders are left as-is; a placeholder whose var is not
- * provided is also left as-is (so a later pass — e.g. `{{port}}` at serve time —
- * can fill it).
- */
-export function substitutePluginPlaceholders(text: string, vars: PluginPlaceholderVars): string {
-  let out = text;
-  if (vars.repoPath !== undefined) out = out.replace(/\{\{repoPath}}/g, vars.repoPath);
-  if (vars.leadingRepoPath !== undefined) out = out.replace(/\{\{leadingRepoPath}}/g, vars.leadingRepoPath);
-  if (vars.projectName !== undefined) out = out.replace(/\{\{projectName}}/g, vars.projectName);
-  if (vars.pluginPath !== undefined) out = out.replace(/\{\{pluginPath}}/g, vars.pluginPath);
-  if (vars.port !== undefined) out = out.replace(/\{\{port}}/g, String(vars.port));
-  if (vars.boardUrl !== undefined) out = out.replace(/\{\{boardUrl}}/g, vars.boardUrl);
-  if (vars.projectId !== undefined) out = out.replace(/\{\{projectId}}/g, vars.projectId);
-  return out;
-}
-
-/** Apply placeholder substitution to every value of a manifest env map. */
-export function substitutePluginEnv(
-  env: Record<string, string> | undefined,
-  vars: PluginPlaceholderVars,
-): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(env ?? {})) out[k] = substitutePluginPlaceholders(v, vars);
-  return out;
-}
 
 /**
  * Count unfilled `TODO:` markers left in a scaffold file's content.

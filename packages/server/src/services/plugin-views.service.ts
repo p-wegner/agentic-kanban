@@ -17,10 +17,10 @@
 import net from "node:net";
 import type { ChildProcess } from "node:child_process";
 import {
+  buildPluginPlaceholderVars,
   substitutePluginEnv,
   substitutePluginPlaceholders,
   type PluginManifest,
-  type PluginPlaceholderVars,
 } from "@agentic-kanban/shared/lib/plugin-manifest";
 import { spawnShellCommand, taskkillTree } from "./process-exec.js";
 import { tailOutput as tail } from "./plugin-exec.js";
@@ -279,15 +279,15 @@ export function createPluginViewsRuntime<P extends PluginWithManifest, Pr extend
 
     const port = await allocateFreePort();
     const outputRepoPath = await resolveOutputRepoPath(plugin, project);
-    const vars: PluginPlaceholderVars = {
-      repoPath: outputRepoPath,
+    const vars = buildPluginPlaceholderVars({
+      outputRepoPath,
       leadingRepoPath: project.repoPath,
       projectName: project.name,
       pluginPath: plugin.localPath,
       port,
       boardUrl,
       projectId,
-    };
+    });
     const env: Record<string, string> = substitutePluginEnv(view.serve.env, vars);
     if (view.serve.portEnv) env[view.serve.portEnv] = String(port);
     const command = substitutePluginPlaceholders(view.serve.command, vars);
