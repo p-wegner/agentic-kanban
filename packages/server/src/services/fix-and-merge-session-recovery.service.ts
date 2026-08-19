@@ -1,7 +1,7 @@
 import type { workspaces } from "@agentic-kanban/shared/schema";
 import { isFailedLaunchSession } from "@agentic-kanban/shared/lib/workspace-activity-state";
 import type { Database } from "../db/index.js";
-import type { SessionManager } from "./session.manager.js";
+import type { SessionLauncher } from "./session.manager.js";
 import {
   countSessionMessages,
   getLatestSessionForWorkspace,
@@ -23,7 +23,7 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export interface FixAndMergeRecoveryDeps {
   database: Database;
-  getSessionManager?: () => SessionManager;
+  getSessionManager?: () => SessionLauncher;
   /** Only `abortRebase`/`ensureOnBranch` are used — narrowed so the module needs no GitService type. */
   gitService: {
     abortRebase: (workingDir: string) => Promise<unknown>;

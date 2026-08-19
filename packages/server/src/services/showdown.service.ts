@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { showdowns } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
-import type { BoardEvents } from "./board-events.js";
+import type { BoardEventSink } from "./board-events.js";
 import { createWorkspaceCrudService } from "./workspace-crud.service.js";
 import { createWorkspaceService } from "./workspace.service.js";
 import type { ShowdownContestant, ShowdownContestantResult, ShowdownResponse } from "@agentic-kanban/shared";
@@ -29,7 +29,7 @@ const LABELS = ["A", "B", "C", "D"] as const;
 export function createShowdownService(deps: {
   database: Database;
   getSessionManager?: () => SessionManager;
-  boardEvents?: BoardEvents;
+  boardEvents?: BoardEventSink;
 }) {
   const { database, boardEvents } = deps;
   const crudService = createWorkspaceCrudService(deps);

@@ -1,5 +1,5 @@
 import type { Database } from "../db/index.js";
-import type { BoardEvents } from "./board-events.js";
+import type { BoardEventSink } from "./board-events.js";
 import { getIssueProjectId } from "../repositories/issue.repository.js";
 import type { IssueComment } from "@agentic-kanban/shared/types";
 import { isIssueCommentKind } from "@agentic-kanban/shared/lib/issue-comment-kind";
@@ -37,7 +37,7 @@ function toApiComment(row: IssueCommentRow): IssueComment {
 
 export function createIssueCommentsService(deps: {
   database: Database;
-  boardEvents?: BoardEvents;
+  boardEvents?: BoardEventSink;
 }) {
   const { database, boardEvents } = deps;
 

@@ -5,7 +5,7 @@ import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
-import type { BoardEvents } from "./board-events.js";
+import type { BoardEventSink } from "./board-events.js";
 import type { SessionManager } from "./session.manager.js";
 import { WorkspaceError } from "./workspace-internals.js";
 import {
@@ -199,7 +199,7 @@ function formatResult(result: BisectResult): string {
 export function createBisectService(deps: {
   database: Database;
   getSessionManager?: () => SessionManager;
-  boardEvents?: BoardEvents;
+  boardEvents?: BoardEventSink;
 }) {
   const { database, getSessionManager, boardEvents } = deps;
 

@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import type { Database } from "../db/index.js";
-import type { BoardEvents } from "../services/board-events.js";
+import type { BoardEventSink } from "../services/board-events.js";
 import { createRouter } from "../middleware/create-router.js";
 import { requireProject } from "../services/require-project.js";
 import {
@@ -15,7 +15,7 @@ import {
  *   POST /api/projects/:id/backlog.md/preview   { text, mode?, matchBy?, defaultStatus?, unknownStatus? } | multipart file
  *   POST /api/projects/:id/backlog.md/import    same body — applies; returns the result
  */
-export function createBacklogMarkdownRoute(database: Database, options?: { boardEvents?: BoardEvents }) {
+export function createBacklogMarkdownRoute(database: Database, options?: { boardEvents?: BoardEventSink }) {
   const router = createRouter();
 
   const list = (v: string | undefined) => (v ?? "").split(",").map((s) => s.trim()).filter(Boolean);

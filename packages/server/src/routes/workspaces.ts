@@ -1,5 +1,5 @@
 import type { SessionManager } from "../services/session.manager.js";
-import type { BoardEvents } from "../services/board-events.js";
+import type { BoardEventSink } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
 import { createWorkspaceService } from "../services/workspace.service.js";
 import type { CreateWorkspaceInput } from "../services/workspace.service.js";
@@ -24,7 +24,7 @@ import { claimIssueForAutoStart } from "../services/auto-start-claim.js";
 export function createWorkspacesRoute(
   database: Database,
   getSessionManager?: () => SessionManager,
-  options?: { boardEvents?: BoardEvents },
+  options?: { boardEvents?: BoardEventSink },
 ) {
   const router = createRouter();
 

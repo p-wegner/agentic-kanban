@@ -1,6 +1,6 @@
 import type { workspaces } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
-import type { BoardEvents } from "./board-events.js";
+import type { BoardEventSink } from "./board-events.js";
 import {
   resolveProjectRepo,
   getWorkspaceById,
@@ -228,7 +228,7 @@ export async function reconcileAlreadyMerged(
   deps: {
     database: Database;
     gitService: GitService;
-    boardEvents?: BoardEvents;
+    boardEvents?: BoardEventSink;
     /** Operator-asserted recovery override — see `checkAlreadyMerged`'s doc (#218). */
     adoptMainCheckout?: boolean;
     /**

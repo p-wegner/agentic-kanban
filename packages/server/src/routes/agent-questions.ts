@@ -9,7 +9,7 @@
  */
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "../services/session.manager.js";
-import type { BoardEvents } from "../services/board-events.js";
+import type { BoardEventSink } from "../services/board-events.js";
 import { getIssueDescription } from "../repositories/issue.repository.js";
 import { getWorkspaceById } from "../repositories/workspace.repository.js";
 import { createRouter } from "../middleware/create-router.js";
@@ -30,7 +30,7 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 export function createAgentQuestionsRoute(
   database: Database,
   getSessionManager: () => SessionManager,
-  options?: { boardEvents?: BoardEvents },
+  options?: { boardEvents?: BoardEventSink },
 ) {
   const router = createRouter();
   const workspaceService = createWorkspaceService({

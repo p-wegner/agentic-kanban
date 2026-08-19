@@ -1,6 +1,6 @@
 import type { Database } from "../db/index.js";
-import type { SessionManager } from "./session.manager.js";
-import type { BoardEvents } from "./board-events.js";
+import type { SessionLauncher } from "./session.manager.js";
+import type { BoardEventSink } from "./board-events.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
 import * as crudRepo from "../repositories/workspace-crud.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -32,8 +32,8 @@ import type { WorkspaceDevServerPlanResponse } from "@agentic-kanban/shared";
 
 export function createWorkspaceCrudService(deps: {
   database: Database;
-  getSessionManager?: () => SessionManager;
-  boardEvents?: BoardEvents;
+  getSessionManager?: () => SessionLauncher;
+  boardEvents?: BoardEventSink;
   gitService?: GitService;
 }) {
   const { database, getSessionManager, boardEvents } = deps;

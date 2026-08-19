@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Database } from "../db/index.js";
 import { withTransaction } from "../db/index.js";
-import type { BoardEvents } from "./board-events.js";
+import type { BoardEventSink } from "./board-events.js";
 import { DEPENDENCY_TYPES, type DependencyType } from "@agentic-kanban/shared/schema";
 import { IssueError } from "./issue-error.js";
 import type { BatchDependencyInput } from "./issue.service.js";
@@ -99,7 +99,7 @@ export function validateBatchDependencies(
  */
 export function createIssueDependencyService(deps: {
   database: Database;
-  boardEvents?: BoardEvents;
+  boardEvents?: BoardEventSink;
 }) {
   const { database, boardEvents } = deps;
 

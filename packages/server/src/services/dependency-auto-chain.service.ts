@@ -1,7 +1,7 @@
 import { isResolvedDependencyStatusView } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
-import type { BoardEvents } from "./board-events.js";
-import type { SessionManager } from "./session.manager.js";
+import type { BoardEventSink } from "./board-events.js";
+import type { SessionLauncher } from "./session.manager.js";
 import type { GitService } from "./workspace-internals.js";
 import { createWorkspaceCrudService } from "./workspace-crud.service.js";
 import { resolveStartPolicy } from "./start-policy.service.js";
@@ -178,8 +178,8 @@ export async function autoStartUnblockedDependencyIssue(args: {
   projectId: string | null;
   completedIssueId: string;
   prefMap: Map<string, string>;
-  getSessionManager?: () => SessionManager;
-  boardEvents?: BoardEvents;
+  getSessionManager?: () => SessionLauncher;
+  boardEvents?: BoardEventSink;
   gitService?: GitService;
   createWorkspace?: (candidate: AutoStartCandidate, branch: string) => Promise<{ id?: string; error?: string }>;
 }): Promise<void> {

@@ -13,7 +13,7 @@ import {
   insertPlanGateAuditMessage,
 } from "../repositories/workspace-session.repository.js";
 import type { SessionManager } from "./session.manager.js";
-import type { BoardEvents } from "./board-events.js";
+import type { BoardEventSink } from "./board-events.js";
 import { loadAgentSettings, resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import {
   getWorkspaceById,
@@ -46,7 +46,7 @@ import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 export function createWorkspaceSessionService(deps: {
   database: Database;
   getSessionManager?: () => SessionManager;
-  boardEvents?: BoardEvents;
+  boardEvents?: BoardEventSink;
   gitService?: GitService;
   /** Optional override for workspace setup (worktree rebuild). Tests inject a fake. */
   setupWorkspace?: (id: string) => Promise<{ id: string; workingDir: string }>;

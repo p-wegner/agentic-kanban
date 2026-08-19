@@ -1,5 +1,5 @@
 import type { Database } from "../db/index.js";
-import type { BoardEvents } from "./board-events.js";
+import type { BoardEventSink } from "./board-events.js";
 import { closeWorkspace, stopWorkspaceSessions } from "./workspace-lifecycle-reconcile.service.js";
 import {
   getIssueStatusAndProject,
@@ -12,7 +12,7 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export interface FinalizeMergeCleanupInput {
   database: Database;
-  boardEvents?: BoardEvents;
+  boardEvents?: BoardEventSink;
   workspaceId: string;
   issueId: string;
   now?: string;

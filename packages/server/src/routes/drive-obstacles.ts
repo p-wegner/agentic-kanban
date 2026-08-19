@@ -9,7 +9,7 @@ import {
   DRIVE_OBSTACLE_SEVERITIES,
 } from "../services/drive-obstacles.service.js";
 import type { DriveObstacleKind, DriveObstacleSeverity } from "../services/drive-obstacles.service.js";
-import type { BoardEvents } from "../services/board-events.js";
+import type { BoardEventSink } from "../services/board-events.js";
 
 import { queryInt } from "../middleware/query-params.js";
 const VALID_KINDS = new Set<string>(DRIVE_OBSTACLE_KINDS);
@@ -28,7 +28,7 @@ function parseSeverities(raw: string | undefined): DriveObstacleSeverity[] | und
 }
 
 interface DriveObstaclesRouteOptions {
-  boardEvents?: BoardEvents;
+  boardEvents?: BoardEventSink;
 }
 
 /**

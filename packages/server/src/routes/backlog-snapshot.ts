@@ -1,5 +1,5 @@
 import type { Database } from "../db/index.js";
-import type { BoardEvents } from "../services/board-events.js";
+import type { BoardEventSink } from "../services/board-events.js";
 import { createRouter } from "../middleware/create-router.js";
 import { requireProject } from "../services/require-project.js";
 import {
@@ -15,7 +15,7 @@ import {
  */
 export function createBacklogSnapshotRoute(
   database: Database,
-  options?: { boardEvents?: BoardEvents },
+  options?: { boardEvents?: BoardEventSink },
 ) {
   const router = createRouter();
 

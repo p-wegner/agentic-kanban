@@ -4,8 +4,8 @@ import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import type { Database } from "../db/index.js";
 import * as gitService from "./git.service.js";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
-import type { SessionManager } from "./session.manager.js";
-import type { BoardEvents } from "./board-events.js";
+import type { SessionLauncher } from "./session.manager.js";
+import type { BoardEventSink } from "./board-events.js";
 import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../constants/preference-keys.js";
 import { hasSkipAutoStartTag } from "../repositories/dependency-auto-chain.repository.js";
 import {
@@ -38,9 +38,9 @@ export async function autoStartFollowups(
   mergedIssueId: string,
   projectId: string,
   database: Database,
-  getSessionManager: () => SessionManager,
+  getSessionManager: () => SessionLauncher,
   prefMap: Map<string, string>,
-  options?: { boardEvents?: BoardEvents },
+  options?: { boardEvents?: BoardEventSink },
 ): Promise<void> {
   const dependents = await getDependentsOf(mergedIssueId, database);
 

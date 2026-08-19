@@ -13,7 +13,7 @@
 
 import { existsSync } from "node:fs";
 import type { Database } from "../db/index.js";
-import type { SessionManager } from "./session.manager.js";
+import type { SessionLauncher } from "./session.manager.js";
 import { kill as killAgent } from "./agent.service.js";
 import { teardownWorktree, killProcessTree, removeDirWithRetry } from "./workspace-teardown.service.js";
 import { resolveProjectRepo, getWorkspaceById } from "../repositories/workspace.repository.js";
@@ -55,7 +55,7 @@ export interface CleanupWarningEntry {
 
 export function createWorkspaceCleanupService(deps: {
   database: Database;
-  getSessionManager?: () => SessionManager;
+  getSessionManager?: () => SessionLauncher;
   gitService: GitService;
 }) {
   const { database, getSessionManager, gitService } = deps;

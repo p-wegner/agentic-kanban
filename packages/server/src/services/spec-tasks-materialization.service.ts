@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Database } from "../db/index.js";
-import type { BoardEvents } from "./board-events.js";
+import type { BoardEventSink } from "./board-events.js";
 import {
   getWorkspaceMaterializationContext,
   getExistingChildLinks,
@@ -129,7 +129,7 @@ function buildDependencyEdges(tasks: ParsedTask[], created: Array<{ id: string; 
 export async function materializeSpecTasksForWorkspace(
   workspaceId: string,
   database: Database,
-  options?: { boardEvents?: BoardEvents; requireCurrentTasks?: boolean },
+  options?: { boardEvents?: BoardEventSink; requireCurrentTasks?: boolean },
 ): Promise<MaterializeResult> {
   const workspace = await getWorkspaceMaterializationContext(workspaceId, database);
   if (!workspace || (options?.requireCurrentTasks !== false && workspace.nodeName?.toLowerCase() !== "tasks")) {

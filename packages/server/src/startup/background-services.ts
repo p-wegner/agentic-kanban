@@ -1,5 +1,5 @@
 import type { Database } from "../db/index.js";
-import type { BoardEvents } from "../services/board-events.js";
+import type { BoardEventSink } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 import { setupScheduledTasks, stopScheduledTasks } from "./scheduled-tasks.js";
 import { createWorkspaceService } from "../services/workspace.service.js";
@@ -41,7 +41,7 @@ export type CleanupFn = () => void;
 /** Everything a background service may need at startup, injected by server-start.ts. */
 export interface BackgroundServiceContext {
   db: Database;
-  boardEvents: BoardEvents;
+  boardEvents: BoardEventSink;
   getSessionManager: () => SessionManager;
   serverPort: number;
   /** In-memory set of review session ids, owned by the workflow engine. */

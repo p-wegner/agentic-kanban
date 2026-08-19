@@ -5,7 +5,7 @@ import {
   getAllPreferences,
   clearWorkspaceReadyForMerge,
 } from "../repositories/workspace-merge-prevalidation.repository.js";
-import type { BoardEvents } from "./board-events.js";
+import type { BoardEventSink } from "./board-events.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import { teardownWorktree } from "./workspace-teardown.service.js";
 import {
@@ -45,7 +45,7 @@ export async function handleWorkspaceMergeResolution(args: {
   baseBranch: string;
   resolution: MergeResolutionState;
   database: Database;
-  boardEvents?: BoardEvents;
+  boardEvents?: BoardEventSink;
   gitService: GitService;
   createBackup: (reason: string) => Promise<unknown>;
   killProcesses: (dir: string) => Promise<number>;
@@ -130,7 +130,7 @@ async function reconcileAlreadyMergedRetry(args: {
   project: typeof projects.$inferSelect | null;
   repoPath: string;
   database: Database;
-  boardEvents?: BoardEvents;
+  boardEvents?: BoardEventSink;
   gitService: GitService;
   createBackup: (reason: string) => Promise<unknown>;
   killProcesses: (dir: string) => Promise<number>;
@@ -251,7 +251,7 @@ async function closeDirectWorkspace(args: {
   id: string;
   workspace: typeof workspaces.$inferSelect;
   database: Database;
-  boardEvents?: BoardEvents;
+  boardEvents?: BoardEventSink;
   recordMergeAttempt: RecordMergeAttempt;
 }) {
   const { id, workspace, database, boardEvents } = args;
@@ -284,7 +284,7 @@ async function reconcileAncestorWorkspace(
     id: string;
     workspace: typeof workspaces.$inferSelect;
     database: Database;
-    boardEvents?: BoardEvents;
+    boardEvents?: BoardEventSink;
     baseBranch: string;
     gitService: GitService;
     recordMergeAttempt: RecordMergeAttempt;

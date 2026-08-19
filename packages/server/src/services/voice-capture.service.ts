@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Database } from "../db/index.js";
 import { invokeClaudePrompt } from "./claude-cli.service.js";
-import type { BoardEvents } from "./board-events.js";
+import type { BoardEventSink } from "./board-events.js";
 import { getOutgoingTransitions, syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import {
   ensureVoiceCaptureTag as ensureVoiceCaptureTagRepo,
@@ -156,7 +156,7 @@ async function moveIssueFromVoiceCommand(
   projectId: string,
   intent: Extract<VoiceCommandIntent, { type: "move_issue" }>,
   database: Database,
-  boardEvents?: BoardEvents,
+  boardEvents?: BoardEventSink,
 ): Promise<VoiceCaptureActionResult> {
   const issue = await getIssueByNumberForVoiceCapture(projectId, intent.issueNumber, database);
   if (!issue) throw new VoiceCaptureCommandError(`Issue #${intent.issueNumber} not found`);
@@ -261,7 +261,7 @@ Respond ONLY with valid JSON (no markdown, no explanation):
 export async function createVoiceCaptureIssue(
   input: VoiceCaptureInput,
   database: Database,
-  boardEvents?: BoardEvents,
+  boardEvents?: BoardEventSink,
 ): Promise<VoiceCaptureResult> {
   const { projectId, transcript, speechLanguage, speechLanguageLabel } = input;
   const intent = parseVoiceCommandIntent(transcript);

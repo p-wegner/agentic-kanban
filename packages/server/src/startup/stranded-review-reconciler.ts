@@ -4,8 +4,8 @@ import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/share
 import { and, eq } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
-import type { BoardEvents } from "../services/board-events.js";
-import type { SessionManager } from "../services/session.manager.js";
+import type { BoardEventSink } from "../services/board-events.js";
+import type { SessionLauncher } from "../services/session.manager.js";
 import * as realGitService from "../services/git.service.js";
 import type { GitService } from "../services/workspace-internals.js";
 import { workspaceHasCommittedWork } from "../services/workspace-commits.js";
@@ -50,8 +50,8 @@ async function computePreflightSignature(workingDir: string, baseBranch: string,
 
 export interface StrandedReviewReconcilerDeps {
   database?: Database;
-  getSessionManager: () => SessionManager;
-  boardEvents: BoardEvents;
+  getSessionManager: () => SessionLauncher;
+  boardEvents: BoardEventSink;
   /** The SAME set the workflow engine uses, so a re-launched review's exit completes the chain. */
   reviewSessionIds: Set<string>;
   /**

@@ -1,7 +1,7 @@
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import type { Database } from "../db/index.js";
-import type { BoardEvents } from "../services/board-events.js";
+import type { BoardEventSink } from "../services/board-events.js";
 import { createVoiceCaptureIssue, VoiceCaptureCommandError } from "../services/voice-capture.service.js";
 
 /**
@@ -10,7 +10,7 @@ import { createVoiceCaptureIssue, VoiceCaptureCommandError } from "../services/v
  */
 export function createVoiceCaptureRoute(
   database: Database,
-  options?: { boardEvents?: BoardEvents },
+  options?: { boardEvents?: BoardEventSink },
 ) {
   const router = createRouter();
 

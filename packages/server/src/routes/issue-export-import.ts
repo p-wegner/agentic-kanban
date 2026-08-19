@@ -1,5 +1,5 @@
 import type { Database } from "../db/index.js";
-import type { BoardEvents } from "../services/board-events.js";
+import type { BoardEventSink } from "../services/board-events.js";
 import { createIssueService } from "../services/issue.service.js";
 import { getIssuesForExport, getTagsForIssues } from "../repositories/issue.repository.js";
 import { createRouter } from "../middleware/create-router.js";
@@ -431,7 +431,7 @@ function validateRows(parsedRows: ImportRow[]): {
 
 export function createIssueExportImportRoute(
   database: Database,
-  options?: { boardEvents?: BoardEvents },
+  options?: { boardEvents?: BoardEventSink },
 ) {
   const router = createRouter();
   const issueService = createIssueService({ database, boardEvents: options?.boardEvents });

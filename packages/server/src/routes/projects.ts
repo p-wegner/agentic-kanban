@@ -7,7 +7,7 @@ import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../middleware/ai-operation.js";
 import { getProjectActivity } from "../services/project-activity.service.js";
 import type { BoardEvents } from "../services/board-events.js";
-import type { SessionManager } from "../services/session.manager.js";
+import type { SessionLauncher } from "../services/session.manager.js";
 import { isAbsolute } from "node:path";
 import { createWorkspaceSummaryCache } from "../services/workspace-summary-cache.service.js";
 import { computeBodyEtag, conditionalJsonResponse, createBoardEtagCache } from "../services/board-etag-cache.service.js";
@@ -174,7 +174,7 @@ function parseServicesConfig(raw: unknown): ServiceStackConfig | null {
   return parseServiceStackConfig(typeof raw === "string" ? raw : null);
 }
 
-export function createProjectsRoute(database: Database, options?: { boardEvents?: BoardEvents; getSessionManager?: () => SessionManager }) {
+export function createProjectsRoute(database: Database, options?: { boardEvents?: BoardEvents; getSessionManager?: () => SessionLauncher }) {
   const router = createRouter();
 
   const workspaceSummaryCache = createWorkspaceSummaryCache();
