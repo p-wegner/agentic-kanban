@@ -3,7 +3,6 @@ import { drives, issueDependencies, issues, issueTags, projectStatuses, tags, wo
 import { and, eq, or, sql, inArray } from "drizzle-orm";
 import { resolveCoupledComponent } from "@agentic-kanban/shared/lib/dependency-graph";
 import { MAX_TICKET_GROUP_SIZE, isAutoGroupEnabled } from "@agentic-kanban/shared/lib/ticket-group";
-import { filterIssuesWithLiveGroupWorkspace } from "../repositories/workspace-issue-members.repository.js";
 import { db } from "../db/index.js";
 import { createBoardEvents } from "../services/board-events.js";
 import { parsePluginLoopUnitKey } from "@agentic-kanban/shared/lib/plugin-manifest";
@@ -295,7 +294,6 @@ async function resolveAutoStartGroupMembers(args: {
   lead: { id: string; issueNumber: number | null };
   candidates: Array<{ id: string; title: string; description: string | null; issueType: string | null; issueNumber: number | null; externalKey: string | null }>;
   startedAsMember: Set<string>;
-  liveGroupMembers: Set<string>;
   contentionGate: Parameters<typeof shouldDeferForContention>[0];
   allowFeatureTypes: boolean;
   passesDependencyGate: (issueId: string) => Promise<boolean>;
@@ -317,18 +315,18 @@ async function resolveAutoStartGroupMembers(args: {
   for (const candidate of candidates) {
     if (members.length >= MAX_TICKET_GROUP_SIZE - 1) break;
     if (candidate.id === lead.id || !component.has(candidate.id)) continue;
-    if (args.startedAsMember.has(candidate.id) || args.liveGroupMembers.has(candidate.id)) continue;
+    if (args.startedAsMember.has(candidate.id)) continue;
     // A plugin-loop unit carries its loop's skill and its lifecycle is the loop's —
     // it never rides in someone else's workspace.
     if (parsePluginLoopUnitKey(candidate.externalKey)) continue;
     if (!isMonitorEligibleIssue(candidate, args.allowFeatureTypes)) continue;
     if (await hasSkipAutoStartTag(candidate.id)) continue;
     if (shouldDeferForContention(args.contentionGate, candidate.id, candidate.issueNumber)) continue;
-    // Any workspace history (open OR merged) disqualifies: an open one means the ticket
-    // is being worked, a merged one means joining a group would re-run reopen semantics
-    // the group path does not implement.
+    // Any workspace history (own or as a group member, open OR merged) disqualifies:
+    // an open one means the ticket is being worked, a merged one means joining a group
+    // would re-run reopen semantics the group path does not implement.
     const history = await db.select({ id: workspaces.id }).from(workspaces)
-      .where(sql`${workspaces.issueId} = ${candidate.id}`).limit(1);
+      .where(sql`${workspaces.issueId} = ${candidate.id} OR ${workspaces.id} IN (SELECT workspace_id FROM workspace_issue_members WHERE issue_id = ${candidate.id})`).limit(1);
     if (history.length > 0) continue;
     if (!(await args.passesDependencyGate(candidate.id))) continue;
     members.push(candidate.id);
@@ -397,16 +395,15 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
 
     const inProgressIssues = await db.select({ id: issues.id, title: issues.title, description: issues.description, issueType: issues.issueType, issueNumber: issues.issueNumber, externalKey: issues.externalKey }).from(issues)
       .where(and(eq(issues.statusId, inProgressSt.id), notDriveOrEpicMetaSql())); // #824: don't backfill a builder onto a meta created directly In Progress
-    // Ticket group (#661): a MEMBER issue sits In Progress with no workspace row of its
-    // own (the group workspace is keyed by the lead), so without this set the backfill
-    // would start a duplicate builder for every member of every live group.
-    const backfillGroupMembers = await filterIssuesWithLiveGroupWorkspace(inProgressIssues.map((i) => i.id), db);
     for (const issue of inProgressIssues) {
       if (currentWip >= wipLimit) break;
       if (startsRemaining(inProgressSt.projectId) <= 0) break;
-      if (backfillGroupMembers.has(issue.id)) continue;
+      // Ticket group (#661): the membership subquery makes a MEMBER issue (In Progress
+      // with no workspace row of its own — the group workspace is keyed by the lead)
+      // look exactly like an issue with its own workspaces, so the open-workspace skip
+      // AND the already-merged reconcile below cover group members with no extra query.
       const issueWorkspaces = await db.select({ id: workspaces.id, status: workspaces.status, mergedAt: workspaces.mergedAt }).from(workspaces)
-        .where(sql`${workspaces.issueId} = ${issue.id}`);
+        .where(sql`${workspaces.issueId} = ${issue.id} OR ${workspaces.id} IN (SELECT workspace_id FROM workspace_issue_members WHERE issue_id = ${issue.id})`);
       if (issueWorkspaces.some((w) => w.status !== "closed")) continue;
       const mergedWs = issueWorkspaces.find((w) => w.mergedAt != null);
       let isReopenRetry = false;
@@ -543,9 +540,6 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       .where(sql`${projectStatuses.name} IN ('Done', 'Cancelled')`);
     const doneStatusIds = new Set(doneStatuses.map((s) => s.id));
 
-    // Ticket group (#661): the same member-blindness as the backfill loop — a candidate
-    // already riding in a live group workspace must not be started again.
-    const pullGroupMembers = await filterIssuesWithLiveGroupWorkspace(todoIssues.map((i) => i.id), db);
     // Candidates consumed as GROUP MEMBERS this cycle: their workspace row is minutes
     // away (async provisioning), so only this in-cycle set stops the loop from also
     // starting them individually.
@@ -592,10 +586,10 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
         noteSkip(inProgressSt.projectId, issue.issueNumber, "cycle_start_cap");
         break;
       }
-      if (pullGroupMembers.has(issue.id)) continue;
       if (startedAsMember.has(issue.id)) continue;
+      // Ticket group (#661): same membership-aware query as the backfill loop above.
       const issueWorkspaces = await db.select({ id: workspaces.id, status: workspaces.status, mergedAt: workspaces.mergedAt }).from(workspaces)
-        .where(sql`${workspaces.issueId} = ${issue.id}`);
+        .where(sql`${workspaces.issueId} = ${issue.id} OR ${workspaces.id} IN (SELECT workspace_id FROM workspace_issue_members WHERE issue_id = ${issue.id})`);
       if (issueWorkspaces.some((w) => w.status !== "closed")) continue;
       const mergedWs = issueWorkspaces.find((w) => w.mergedAt != null);
       let isReopenRetry = false;
@@ -630,14 +624,17 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       // reopen-retry never groups (its branch/workspace history is its own).
       let memberIssueIds: string[] = [];
       if (!isReopenRetry && isAutoGroupEnabled(prefMap, issue.projectId)) {
+        // Best-effort: grouping must never break the start it decorates.
         memberIssueIds = await resolveAutoStartGroupMembers({
           lead: issue,
           candidates: todoIssues,
           startedAsMember,
-          liveGroupMembers: pullGroupMembers,
           contentionGate,
           allowFeatureTypes,
           passesDependencyGate,
+        }).catch((err) => {
+          console.warn(`[monitor] ticket-group expansion failed for #${issue.issueNumber} (starting it solo): ${errorMessage(err)}`);
+          return [] as string[];
         });
       }
 

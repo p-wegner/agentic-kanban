@@ -152,6 +152,7 @@ Steps:
 3. Use update_issue to save the improved title and/or description
 4. Keep the original intent — enhance, don't redesign
 5. If visual confirmation is relevant, describe it only as board-owned after-merge verification configured by \`visual_verification_mode\` / \`after_merge_verify_agent\`, not as a builder task.
+6. Sizing check (#661): every ticket costs a full worktree + review + merge-gate run. If this ticket is a few-minutes change that clearly belongs with an adjacent open ticket (same files, same mechanical pattern), do NOT pad it — instead add a \`coupled_with\` edge to that ticket (add_dependency), so the board implements them together as one ticket group. Never couple across an existing depends_on/blocked_by edge.
 
 Format the description with clear sections:
 - What needs to be done
