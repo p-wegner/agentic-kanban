@@ -1,3 +1,4 @@
+import { createTtlMemo } from "@agentic-kanban/shared/lib/ttl-memo";
 import { join } from "node:path";
 import { readFile, stat } from "node:fs/promises";
 import {
@@ -32,7 +33,12 @@ export function createPluginListingOps(deps: {
   // in-flight promise is memoized so concurrent requests share one compute; a rejection
   // evicts itself so errors are never cached.
   const LIST_PLUGINS_TTL_MS = 15_000;
-  const listPluginsMemo = new Map<string, { at: number; result: ReturnType<typeof computePluginList> }>();
+  // #559 — the shared TTL memo. `singleFlight` is exactly what the hand-rolled version
+  // approximated: concurrent callers share one compute, and a rejection evicts itself
+  // instead of caching the error.
+  const listPluginsMemo = createTtlMemo<string, Awaited<ReturnType<typeof computePluginList>>>({
+    ttlMs: LIST_PLUGINS_TTL_MS,
+  });
 
   /**
    * Manifest-drift verdicts keyed by manifest path (#425). Invalidated by the file's own
@@ -43,13 +49,7 @@ export function createPluginListingOps(deps: {
   const manifestDriftCache = new Map<string, { mtimeMs: number; manifestJson: string; drift: boolean }>();
 
   function listPlugins(projectId?: string) {
-    const key = projectId ?? "";
-    const memo = listPluginsMemo.get(key);
-    if (memo && Date.now() - memo.at < LIST_PLUGINS_TTL_MS) return memo.result;
-    const result = computePluginList(projectId);
-    listPluginsMemo.set(key, { at: Date.now(), result });
-    result.catch(() => listPluginsMemo.delete(key));
-    return result;
+    return listPluginsMemo.singleFlight(projectId ?? "", () => computePluginList(projectId));
   }
 
   /** Wrap a listing-affecting mutator so it clears the listPlugins memo (even on throw —

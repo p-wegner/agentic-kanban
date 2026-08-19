@@ -1,3 +1,4 @@
+import { createTtlMemo } from "@agentic-kanban/shared/lib/ttl-memo";
 import { summarizeRepoInstalls } from "@agentic-kanban/shared/lib/repo-install-state";
 import type {
   DiffStatsRepoEntry,
@@ -59,7 +60,10 @@ export function parseIncludeParam(raw: string | undefined): RepoStatusFacet[] {
 }
 
 // ── short in-memory memo ─────────────────────────────────────────────────────
-const memo = new Map<string, { body: string; at: number }>();
+// #559 — the shared TTL memo. The bespoke `__resetWorkspaceRepoStatusMemoForTests` export
+// existed only because this Map is module-global; `memo.clear()` is the same thing without
+// a public API that only tests call. Kept as a thin alias so existing suites are untouched.
+const memo = createTtlMemo<string, string>({ ttlMs: BATCH_MEMO_TTL_MS });
 export function __resetWorkspaceRepoStatusMemoForTests(): void {
   memo.clear();
 }
@@ -95,11 +99,11 @@ export async function serveWorkspaceRepoStatusBatch(
 ): Promise<string> {
   const key = `${projectId}::${[...include].sort().join(",")}`;
   const hit = memo.get(key);
-  if (hit && Date.now() - hit.at < BATCH_MEMO_TTL_MS) return hit.body;
+  if (hit !== undefined) return hit;
   const result = await buildWorkspaceRepoStatusBatch(projectId, include, deps);
   const body = JSON.stringify(result);
   if (memo.size > 200) memo.clear(); // crude cap — entries are per (project, include-set)
-  memo.set(key, { body, at: Date.now() });
+  memo.set(key, body);
   return body;
 }
 
