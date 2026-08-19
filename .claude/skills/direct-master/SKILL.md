@@ -1,6 +1,6 @@
 ---
 name: direct-master
-description: Change master in the main checkout without the board's workspace machinery — from a quick doc fix to implementing full tickets in-session. Covers choosing between four execution modes (main agent direct, subagents on shared master, subagents in worktrees, board workspace) by time criticality, traceability, and context budget; grouping adjacent tickets (including ones pulled forward from Backlog) so the expensive gates run once per group instead of once per ticket; plus the commit discipline (aggressive pathspec commits, tree never left dirty) that keeps auto-merge unblocked.
+description: Change master in the main checkout without the board's workspace machinery — from a quick doc fix to implementing full tickets in-session. Covers choosing between four execution modes (main agent direct, subagents on shared master, subagents in worktrees, board workspace) by time criticality, traceability, and context budget; grouping adjacent tickets (including ones pulled forward from Backlog) so the expensive gates run once per group instead of once per ticket — reading/writing the board's coupled_with edges and using ticket-group workspaces (#661, memberIssueIds) where they fit; plus the commit discipline (aggressive pathspec commits, tree never left dirty) that keeps auto-merge unblocked.
 argument-hint: "[short description of the change]"
 ---
 
@@ -42,6 +42,25 @@ So when you have several tickets in hand — including ones still sitting in **B
 **batch them into groups that share a gate surface, and run the full gates once per group.**
 Pulling an adjacent backlog ticket forward into a group you are already paying for is close
 to free; leaving it for its own pass costs a whole gate cycle later.
+
+**Ticket groups (#661) are this discipline made board-native — use them, don't reinvent them:**
+
+- **Read `coupled_with` edges FIRST when forming groups.** They are the board's declared
+  "implement together" signal (a group-scan or the ticket author put them there deliberately).
+  A ticket's coupled component is a pre-built group — take it whole (cap 4) rather than
+  splitting it across your own ad-hoc groups.
+- **In mode 4, a group is ONE workspace:** pass `memberIssueIds` to `POST /api/workspaces`
+  (or let the monitor auto-start the coupled component). One agent, one review, one gate run;
+  every member ticket keeps its identity and the merge fans Done out to all of them. Never
+  create N workspaces for tickets you intend as one group.
+- **In modes 1–3, when you form a group the board doesn't know about, teach it:** if you're
+  NOT landing the group this session (e.g. you only triaged), write the `coupled_with` edges
+  (`add_dependency`, or `propose_ticket_groups` / `POST /api/issues/group-scan` with
+  `apply: true` for a whole granular backlog) so the monitor executes it as a group later.
+  If you ARE landing it now, edges are unnecessary ceremony — just close all members with
+  the shared evidence line.
+- **Closing a group landed directly:** move EVERY member ticket to Done, not just the one
+  you happened to anchor on — a directly-landed group has no merge fan-out doing this for you.
 
 **Commit granularity and gate granularity are different decisions.** Keep commits per
 ticket (traceability, clean revert, honest messages) and run the expensive gates per group.
