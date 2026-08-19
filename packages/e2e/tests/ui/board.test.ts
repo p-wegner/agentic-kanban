@@ -1,6 +1,7 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
 import { getE2EProjectId } from "../helpers/e2e-project.js";
+import { boardColumn, completedToggle, issueCard, narrowBoardTo } from "../helpers/board-ui.js";
 
 type BoardIssue = {
   id: string;
@@ -72,25 +73,26 @@ async function waitForIssueInColumn(
 test.describe("Board UI", () => {
   test("shows kanban columns with expected names", async ({ page }) => {
     await page.goto("/");
-
     await page.waitForSelector("h2");
 
-    const columns = page.locator("h2");
-    const names = (await columns.allTextContents()).map((n) =>
-      n.replace(/\s*\d+$/, "").trim(),
-    );
-    expect(names).toContain("Todo");
-    expect(names).toContain("In Progress");
-    expect(names).toContain("In Review");
+    // Assert on the columns' declared identity, not on every <h2> in the document: the old
+    // version scraped all h2 text and stripped a trailing count with a regex, so any other
+    // heading on the page (the detail panel's own "Issue Details") joined the column list.
+    await expect(boardColumn(page, "Todo")).toBeVisible();
+    await expect(boardColumn(page, "In Progress")).toBeVisible();
+    await expect(boardColumn(page, "In Review")).toBeVisible();
 
-    await page.locator("button", { hasText: "Completed" }).click();
-
-    const allColumns = page.locator("h2");
-    const allNames = (await allColumns.allTextContents()).map((n) =>
-      n.replace(/\s*\d+$/, "").trim(),
-    );
-    expect(allNames).toContain("Done");
-    expect(allNames).toContain("Cancelled");
+    // Done and Cancelled are NOT columns any more — they are folded into the Completed
+    // group, which renders a card grid behind a collapse bar. The old assertion looked for
+    // them as <h2> column headings, i.e. it described a UI that no longer exists. The bar
+    // itself is absent when nothing is completed, so this only asserts the shape when there
+    // is something to show.
+    const toggle = completedToggle(page);
+    if (await toggle.count()) {
+      await expect(toggle).toContainText("Completed");
+      await toggle.click();
+      await expect(page.locator("[data-testid='completed-grid']")).toBeVisible();
+    }
   });
 
   test("shows header with title", async ({ page }) => {
@@ -128,22 +130,24 @@ test.describe("Board interactions", () => {
 
     await page.goto("/");
     await page.waitForSelector("h2");
+    await narrowBoardTo(page, suffix);
 
-    const firstColumn = page.locator(".bg-gray-100.rounded-lg").first();
+    const firstColumn = boardColumn(page, "Todo");
     await firstColumn.locator("button[title='Add issue']").click();
 
-    const form = page.locator("form");
-    await form
-      .locator("input[placeholder='Issue title']")
-      .fill(title);
-    await form
-      .locator("textarea[placeholder='Description (optional)']")
-      .fill("Created by e2e test");
-    await form.locator("select").selectOption("high");
-    await form.locator('button:has-text("Add")').click();
+    // Three separate drifts had accumulated here, none of them visible from the old locators:
+    // the title is a <textarea> (not an <input>), the description placeholder gained a
+    // "— paste screenshots with Ctrl+V" suffix that an exact `[placeholder=…]` match cannot
+    // see, and the form has no PRIORITY select at all any more — `form.locator("select")`
+    // now resolves to the issue-type and estimate selects, so `selectOption("high")` was
+    // setting a control that does not exist.
+    const form = page.locator("[data-testid='create-issue-form']");
+    await form.locator("[data-testid='create-issue-title']").fill(title);
+    await form.locator("[data-testid='create-issue-description']").fill("Created by e2e test");
+    await form.locator("[data-testid='create-issue-submit']").click();
 
     await expect(
-      page.locator("p", { hasText: title }).first(),
+      issueCard(page, title),
     ).toBeVisible();
 
     // Fetch the created issue ID for cleanup
@@ -159,7 +163,7 @@ test.describe("Board interactions", () => {
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    const firstColumn = page.locator(".bg-gray-100.rounded-lg").first();
+    const firstColumn = boardColumn(page, "Todo");
     await firstColumn.locator("button[title='Add issue']").click();
 
     await expect(page.locator("form")).toBeVisible();
@@ -190,8 +194,9 @@ test.describe("Board interactions", () => {
 
     await page.goto("/");
     await page.waitForSelector("h2");
+    await narrowBoardTo(page, suffix);
 
-    await page.locator("p", { hasText: title }).first().click();
+    await issueCard(page, title).click();
 
     await expect(
       page.locator("h2", { hasText: "Issue Details" }),
@@ -199,7 +204,9 @@ test.describe("Board interactions", () => {
     await expect(
       page.locator("h3", { hasText: title }),
     ).toBeVisible();
-    await expect(page.locator(".whitespace-pre-wrap", { hasText: "Click me" })).toBeVisible();
+    // The description renders as MARKDOWN now (`.markdown-body`), not preformatted text, so
+    // the old `.whitespace-pre-wrap` class chain matched nothing.
+    await expect(page.locator("[data-testid='issue-description']")).toContainText("Click me");
   });
 
   test("edit issue from detail panel", async ({ page, request }, testInfo) => {
@@ -226,6 +233,7 @@ test.describe("Board interactions", () => {
 
     await page.goto("/");
     await page.waitForSelector("h2");
+    await narrowBoardTo(page, editSuffix);
 
     await page.getByLabel(`Open issue ${originalTitle}`).click();
 
@@ -273,8 +281,9 @@ test.describe("Board interactions", () => {
 
     await page.goto("/");
     await page.waitForSelector("h2");
+    await narrowBoardTo(page, suffix);
 
-    await page.locator("p", { hasText: title }).first().click();
+    await issueCard(page, title).click();
     await expect(
       page.locator("h2", { hasText: "Issue Details" }),
     ).toBeVisible();
@@ -287,8 +296,8 @@ test.describe("Board interactions", () => {
     await page.getByRole("button", { name: "Confirm delete issue" }).click();
 
     await expect(
-      page.locator("p", { hasText: title }),
-    ).not.toBeVisible({ timeout: 5000 });
+      issueCard(page, title),
+    ).toHaveCount(0, { timeout: 5000 });
   });
 
   test("escape closes detail panel", async ({ page, request }) => {
@@ -303,8 +312,9 @@ test.describe("Board interactions", () => {
 
     await page.goto("/");
     await page.waitForSelector("h2");
+    await narrowBoardTo(page, suffix);
 
-    await page.locator("p", { hasText: title }).first().click();
+    await issueCard(page, title).click();
     await expect(
       page.locator("h2", { hasText: "Issue Details" }),
     ).toBeVisible();
@@ -340,6 +350,7 @@ test.describe("Board interactions", () => {
 
     await page.goto("/");
     await page.waitForSelector("h2");
+    await narrowBoardTo(page, suffix);
 
     // Precondition: the card starts rendered in Todo.
     const cardInTodo = page
@@ -388,9 +399,10 @@ test.describe("Board interactions", () => {
 
     await page.goto("/");
     await page.waitForSelector("h2");
+    await narrowBoardTo(page, suffix);
 
     // Open detail panel
-    await page.locator("p", { hasText: title }).first().click();
+    await issueCard(page, title).click();
     await expect(page.locator("h2", { hasText: "Issue Details" })).toBeVisible();
 
     // Panel starts in sidebar mode — expand button title should say "Expand to modal"
@@ -425,9 +437,10 @@ test.describe("Board interactions", () => {
 
     await page.goto("/");
     await page.waitForSelector("h2");
+    await narrowBoardTo(page, suffix);
 
     // Open detail panel and expand to fullscreen
-    await page.locator("p", { hasText: title }).first().click();
+    await issueCard(page, title).click();
     await expect(page.locator("h2", { hasText: "Issue Details" })).toBeVisible();
     await page.locator('button[title="Expand to modal"]').click();
     await page.locator('button[title="Expand to fullscreen"]').click();
@@ -454,13 +467,11 @@ test.describe("Board interactions", () => {
       }
     });
 
-    const firstColumn = page.locator(".bg-gray-100.rounded-lg").first();
+    const firstColumn = boardColumn(page, "Todo");
     await firstColumn.locator("button[title='Add issue']").click();
-    const form = page.locator("form");
-    await form
-      .locator("input[placeholder='Issue title']")
-      .fill("Should Fail");
-    await form.locator('button:has-text("Add")').click();
+    const form = page.locator("[data-testid='create-issue-form']");
+    await form.locator("[data-testid='create-issue-title']").fill("Should Fail");
+    await form.locator("[data-testid='create-issue-submit']").click();
 
     await expect(page.locator("text=Failed to create issue")).toBeVisible();
   });

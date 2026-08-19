@@ -88,6 +88,7 @@ export async function ensureE2EProject(
     // Also on the reuse path: the E2E database survives between runs, so a project created
     // before this was added would otherwise keep its derived `pnpm install -r` forever.
     await disableSetupScript(apiContext, existingProject.id);
+    await pruneEmptyDuplicateStatuses(apiContext, existingProject.id);
     await apiContext.put("/api/preferences/active-project", {
       data: { projectId: existingProject.id },
     });
@@ -127,6 +128,61 @@ async function waitForServer(apiContext: APIRequestContext, timeoutMs = 120_000)
   throw new Error(
     `[global-setup] server on port ${serverPort} did not answer /health within ${timeoutMs}ms — last error: ${lastError}`,
   );
+}
+
+/**
+ * Remove EMPTY duplicate statuses from the E2E project.
+ *
+ * The reused E2E database had accumulated a second full set of default statuses (#668), so
+ * the board rendered two columns named "Todo" — one holding every issue, one permanently
+ * empty. Playwright is strict about ambiguous locators, so every spec that clicked anything
+ * inside a column died on a strict-mode violation naming two ids, and every spec that
+ * resolved a status by name was picking one of two arbitrarily.
+ *
+ * Issues sitting on a duplicate are moved onto the canonical status of the same name first,
+ * so nothing is lost. That is a fixture decision about a disposable database; what should
+ * happen to a USER's board with duplicate statuses is #668, and is deliberately not decided
+ * here.
+ */
+async function pruneEmptyDuplicateStatuses(
+  apiContext: APIRequestContext,
+  projectId: string,
+): Promise<void> {
+  const res = await apiContext.get(`/api/projects/${projectId}/statuses`);
+  if (!res.ok()) return;
+  const statuses: { id: string; name: string }[] = await res.json();
+
+  const boardRes = await apiContext.get(`/api/projects/${projectId}/board`);
+  if (!boardRes.ok()) return;
+  const board: { id: string; name: string; issues: { id: string }[] }[] = await boardRes.json();
+  const issueCountByStatusId = new Map(board.map((col) => [col.id, col.issues?.length ?? 0]));
+
+  const seen = new Set<string>();
+  for (const status of statuses) {
+    if (!seen.has(status.name)) {
+      seen.add(status.name);
+      continue;
+    }
+    const canonical = statuses.find((s) => s.name === status.name)!;
+    const column = board.find((col) => col.id === status.id);
+    const issueCount = issueCountByStatusId.get(status.id) ?? 0;
+
+    // A duplicate that owns issues is moved onto the canonical status of the same name
+    // before the duplicate goes. Re-pointing an issue's status is an ordinary API call and
+    // the E2E database is disposable, so the fixture can make itself deterministic here —
+    // whereas the PRODUCT decision about a user's real board (merge? refuse? migrate?)
+    // belongs to #668, not to a test setup.
+    for (const issue of (column?.issues ?? []) as { id: string }[]) {
+      await apiContext.patch(`/api/issues/${issue.id}`, {
+        data: { statusId: canonical.id },
+      });
+    }
+
+    const del = await apiContext.delete(`/api/projects/${projectId}/statuses/${status.id}`);
+    console.log(
+      `[global-setup] pruned duplicate status "${status.name}" (${status.id}), moved ${issueCount} issue(s) to ${canonical.id} — ${del.status()}`,
+    );
+  }
 }
 
 async function globalSetup() {
