@@ -6,7 +6,8 @@ import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
-import { revParse } from "../services/git.service.js";
+import * as realGitService from "../services/git.service.js";
+import type { GitService } from "../services/workspace-internals.js";
 import { workspaceHasCommittedWork } from "../services/workspace-commits.js";
 import { startManualReview, isReviewLaunchPending } from "../services/review.service.js";
 import { getMergeJob } from "../services/merge-job.service.js";
@@ -35,11 +36,11 @@ const UNKNOWN_SIGNATURE = "unknown";
  * `<branchHeadSha>..<baseHeadSha>` — the identity of a preflight attempt. When it changes,
  * the conflict may genuinely have been resolved, so any existing block is void.
  */
-async function computePreflightSignature(workingDir: string, baseBranch: string): Promise<string> {
+async function computePreflightSignature(workingDir: string, baseBranch: string, gitService: GitService): Promise<string> {
   try {
     const [head, base] = await Promise.all([
-      revParse(workingDir, "HEAD"),
-      revParse(workingDir, baseBranch),
+      gitService.revParse(workingDir, "HEAD"),
+      gitService.revParse(workingDir, baseBranch),
     ]);
     return `${head.trim()}..${base.trim()}`;
   } catch {
@@ -67,6 +68,8 @@ export interface StrandedReviewReconcilerDeps {
   hasCommittedWork?: (
     workspace: { id: string; workingDir: string | null; baseBranch: string | null },
   ) => Promise<boolean>;
+  /** Injectable git service (#558) — defaults to the real one. */
+  gitService?: GitService;
 }
 
 /**
@@ -109,6 +112,7 @@ export async function clearReviewPreflightBlock(database: Database, workspaceId:
 export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDeps): Promise<number> {
   const database = deps.database ?? db;
   const { getSessionManager, boardEvents, reviewSessionIds } = deps;
+  const gitService = deps.gitService ?? realGitService;
 
   // ONE short-TTL cached prefs scan per tick (#402) serves both the live enabled
   // check (so a pref-level disable still takes effect on the next tick, no restart)
@@ -175,7 +179,7 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
     let signature: string | null = null;
     const priorFailures = c.preflightFailures ?? 0;
     if (priorFailures > 0) {
-      signature = await computePreflightSignature(c.workingDir, c.baseBranch);
+      signature = await computePreflightSignature(c.workingDir, c.baseBranch, gitService);
       if (c.preflightSignature && c.preflightSignature !== signature) {
         // Either tip moved — the conflict may be resolved, so the block is void.
         await clearReviewPreflightBlock(database, c.wsId);
@@ -211,7 +215,7 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
       const message = errorMessage(err);
       console.warn(`[reconcile] failed to recover stranded workspace ${c.wsId}:`, message);
       // #283 — remember the failure so the next cycle does not repeat it blindly.
-      signature ??= await computePreflightSignature(c.workingDir, c.baseBranch);
+      signature ??= await computePreflightSignature(c.workingDir, c.baseBranch, gitService);
       const failures = (c.preflightSignature === signature ? priorFailures : 0) + 1;
       const exhausted = failures >= MAX_REVIEW_PREFLIGHT_ATTEMPTS;
       await database.update(workspaces).set({

@@ -18,7 +18,8 @@ import { toExecutorProvider } from "../services/agent-settings.service.js";
 import { createBoardEvents } from "../services/board-events.js";
 import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
 import { ensureBuildableFromClean } from "../services/project-scaffold.js";
-import * as gitService from "../services/git.service.js";
+import * as realGitService from "../services/git.service.js";
+import type { GitService } from "../services/workspace-internals.js";
 import { createSessionManager } from "../services/session.manager.js";
 // #557: the pure service helper, called with the ENGINE's db — the `review-helpers.ts` shim
 // existed only to inject the process singleton, which silently ignored an injected `database`.
@@ -134,6 +135,13 @@ export interface WorkflowDeps {
   autoMerge: (workspace: MergeWorkspace, projectId: string, issueId: string, doneStatusId: string | null, now: string, gate: MergeGateToken) => Promise<void>;
   /** Injectable database for testing (defaults to the global singleton). */
   database?: Database;
+  /**
+   * Injectable git service (#558), the same dep the ten workspace services already take.
+   * Defaults to the real one. A test passing a partial fake here does not have to
+   * `vi.mock` the 60-export git.service module — which also mocks it for every transitive
+   * importer of that module in the same file.
+   */
+  gitService?: GitService;
 }
 
 async function waitForLearningSession(database: Database, learnSessId: string, label: string, timeoutMessage: string) {
@@ -215,8 +223,9 @@ async function isSpecPlanningNode(database: Database, currentNodeId: string | nu
   return isSpecPlanningStageName(rows[0]?.name);
 }
 
-export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, database }: WorkflowDeps) {
+export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, database, gitService: injectedGitService }: WorkflowDeps) {
   const db = database ?? defaultDb;
+  const gitService = injectedGitService ?? realGitService;
   const reviewSessionIds = new Set<string>(), fixAndMergeSessionIds = new Set<string>(), learningSessionIds = new Set<string>();
 
   /**
