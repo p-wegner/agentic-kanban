@@ -48,6 +48,15 @@ export interface TicketGroupScanResult {
 const MAX_PROPOSAL_SIZE = 8;
 const DESCRIPTION_SNIPPET_LENGTH = 600;
 
+/**
+ * Timeout budget for the one model call (#665). Base + per-candidate, capped: a 17-ticket
+ * backlog gets ~2.5 min and a 100-ticket one the 10-minute ceiling, instead of every size
+ * sharing `invokeClaudePrompt`'s 60s default and the big ones always failing.
+ */
+const GROUP_SCAN_BASE_TIMEOUT_MS = 90_000;
+const GROUP_SCAN_MS_PER_TICKET = 4_000;
+const GROUP_SCAN_TIMEOUT_CAP_MS = 600_000;
+
 export async function scanForTicketGroups(
   projectId: string,
   database: Database,
@@ -97,7 +106,13 @@ ${listing}
 Respond with JSON only:
 {"groups": [{"issueNumbers": [12, 14, 15], "rationale": "one sentence naming the shared surface"}]}`;
 
-  const stdout = await invokeClaudePrompt(prompt, { database });
+  // #665 — the 60s default is far too short for THIS operation. The prompt embeds every open
+  // backlog ticket with a description snippet, and the feature exists for backlogs that are
+  // "too granular", i.e. long ones — 17 tickets already timed the call out on this board.
+  // Nobody watches a spinner for a batch consolidation, so scale the budget with the input
+  // rather than making the operator retry into the same wall.
+  const timeout = Math.min(GROUP_SCAN_TIMEOUT_CAP_MS, GROUP_SCAN_BASE_TIMEOUT_MS + candidates.length * GROUP_SCAN_MS_PER_TICKET);
+  const stdout = await invokeClaudePrompt(prompt, { database, timeout });
   const parsed = extractModelJson(stdout, { shape: "object" }) as {
     groups?: Array<{ issueNumbers?: unknown; rationale?: unknown }>;
   };
