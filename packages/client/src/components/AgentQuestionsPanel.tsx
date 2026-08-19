@@ -13,53 +13,18 @@ import { apiPost, apiDelete } from "../lib/api.js";
 import { getAgentQuestions, invalidateAgentQuestions } from "../lib/agentQuestionsStore.js";
 import { startStaggeredPoll } from "../lib/pollScheduler.js";
 import { useBoardWsRefresh } from "../hooks/useBoardWsRefresh.js";
+import type { AgentQuestion, Staleness, PendingQuestionSet } from "@agentic-kanban/shared";
 
-export interface AgentQuestionOption {
-  label: string;
-  description?: string;
-}
-
-export interface AgentQuestionRecommendation {
-  recommendedOptionIndexes: number[];
-  freeText?: string;
-  rationale: string;
-}
-
-export interface AgentQuestion {
-  question: string;
-  header?: string;
-  multiSelect?: boolean;
-  options: AgentQuestionOption[];
-  /** Butler-recommended answer. undefined = not yet computed; null = failed (graceful degrade). */
-  recommendation?: AgentQuestionRecommendation | null;
-}
-
-export type StalenessReason =
-  | "workspace-merged"
-  | "issue-done"
-  | "superseded"
-  | "older-than-24h";
-
-export interface Staleness {
-  reason: StalenessReason;
-  /** Human-readable label, e.g. "stale — workspace merged". */
-  label: string;
-  /** Relevant timestamp for the tooltip. */
-  at: string | null;
-}
-
-export interface PendingQuestionSet {
-  toolUseId: string;
-  workspaceId: string;
-  sessionId: string;
-  issueId: string;
-  issueNumber: number | null;
-  issueTitle: string;
-  questions: AgentQuestion[];
-  askedAt: string | null;
-  /** Set when the question is likely no longer actionable; null/undefined when fresh. */
-  staleness?: Staleness | null;
-}
+// Declared once, in shared (#569). This component used to own the wire contract —
+// `lib/agentQuestionsStore.ts` imported the types FROM here.
+export type {
+  AgentQuestionOption,
+  AgentQuestionRecommendation,
+  AgentQuestion,
+  StalenessReason,
+  Staleness,
+  PendingQuestionSet,
+} from "@agentic-kanban/shared";
 
 interface Props {
   projectId: string;

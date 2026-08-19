@@ -1,26 +1,11 @@
 import { useState } from "react";
 import { apiPatch } from "../lib/api.js";
+import type { PreflightResponse as PreflightResult, PreflightVerdict, PreflightClarification } from "@agentic-kanban/shared";
 
-export type PreflightVerdict = string;
-
-export interface PreflightResult {
-  verdict: PreflightVerdict;
-  questions: string[];
-  summary: string;
-  duplicateOfNumber?: number;
-  blockedByNumber?: number;
-  /** True when the ticket looks like a non-trivial / multi-file feature. Combined with a
-   *  direct workspace, this surfaces a warning recommending an isolated worktree. */
-  looksComplex?: boolean;
-  /** Markdown block of answered clarifications, returned when the re-check was run
-   *  with clarifications. Caller prepends it to the launching agent's context. */
-  clarificationsBlock?: string;
-}
-
-export interface PreflightClarification {
-  question: string;
-  answer: string;
-}
+// Declared once, in shared (#569). The local `PreflightVerdict = string` is gone —
+// the template-literal union already encodes `duplicate-of-#N` / `blocked-by-#N`.
+export type { PreflightVerdict, PreflightClarification } from "@agentic-kanban/shared";
+export type { PreflightResponse as PreflightResult } from "@agentic-kanban/shared";
 
 interface PreflightModalProps {
   result: PreflightResult;

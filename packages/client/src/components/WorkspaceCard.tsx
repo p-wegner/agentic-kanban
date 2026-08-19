@@ -47,6 +47,7 @@ import type {
 } from "@agentic-kanban/shared";
 
 import type { Project } from "../lib/projectTypes.js";
+import type { ScorecardResult } from "@agentic-kanban/shared";
 export type { Project };
 
 export interface SessionInfo {
@@ -64,18 +65,8 @@ export interface SessionInfo {
   skillName: string | null;
 }
 
-export interface ScorecardDimension {
-  name: string;
-  score: number;
-  maxScore: number;
-  signal: string;
-}
-
-export interface ScorecardResult {
-  total: number;
-  dimensions: ScorecardDimension[];
-  computedAt: string;
-}
+// Declared once, in shared (#569).
+export type { ScorecardDimension, ScorecardResult } from "@agentic-kanban/shared";
 
 export type AvailableSkill = {
   id: string;

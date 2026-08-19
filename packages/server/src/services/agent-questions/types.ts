@@ -10,59 +10,26 @@
 
 /** Function signature for sending a follow-up turn to a workspace — injected so the
  *  service does not depend on the session manager singleton directly. */
+import type {
+  AgentQuestionOption,
+  AgentQuestion,
+  AgentQuestionRecommendation,
+  StalenessReason,
+  Staleness,
+  PendingQuestionSet,
+} from "@agentic-kanban/shared/types";
+
 export type AutoAnswerSendTurn = (workspaceId: string, content: string) => Promise<void>;
 
-export interface AgentQuestionOption {
-  label: string;
-  description?: string;
-}
-
-export interface AgentQuestion {
-  question: string;
-  header?: string;
-  multiSelect?: boolean;
-  options: AgentQuestionOption[];
-  /** Butler's recommended answer for this question. Attached server-side when available;
-   *  null = recommendation attempted and failed (don't retry); undefined = not yet computed. */
-  recommendation?: AgentQuestionRecommendation | null;
-}
-
-export interface AgentQuestionRecommendation {
-  recommendedOptionIndexes: number[];
-  freeText?: string;
-  rationale: string;
-}
-
-/** Why a pending question is considered stale. `null` when the question is still fresh.
- *  Muted-gray badge in the UI — not an error, just a hint the answer may no longer matter. */
-export type StalenessReason =
-  | "workspace-merged"
-  | "issue-done"
-  | "superseded"
-  | "older-than-24h";
-
-export interface Staleness {
-  reason: StalenessReason;
-  /** Human-readable label for the badge, e.g. "stale — workspace merged". */
-  label: string;
-  /** Relevant timestamp for the tooltip (workspace.closedAt, newer session start, or askedAt). */
-  at: string | null;
-}
-
-export interface PendingQuestionSet {
-  /** The `tool_use_id` from the denied AskUserQuestion call — unique per ask. */
-  toolUseId: string;
-  workspaceId: string;
-  sessionId: string;
-  issueId: string;
-  issueNumber: number | null;
-  issueTitle: string;
-  questions: AgentQuestion[];
-  /** When the session ended (session.endedAt). */
-  askedAt: string | null;
-  /** Set when the question is likely no longer actionable; null when fresh. */
-  staleness: Staleness | null;
-}
+// The six wire types moved to shared (#569); the client had its own drifted copy.
+export type {
+  AgentQuestionOption,
+  AgentQuestion,
+  AgentQuestionRecommendation,
+  StalenessReason,
+  Staleness,
+  PendingQuestionSet,
+};
 
 export interface StalenessInput {
   /** workspace.status — "closed" means merged/closed. */

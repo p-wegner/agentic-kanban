@@ -13,6 +13,7 @@
 import { existsSync, statSync, openSync, readSync, closeSync, readFileSync } from "fs";
 import { join } from "path";
 import { PROJECT_CONDUCTOR_OBJECTIVE_RELATIVE_PATH, PROJECT_CONDUCTOR_STATE_RELATIVE_DIR } from "./strategy-objective.service.js";
+import type { OrchestratorStatus } from "@agentic-kanban/shared/types";
 
 // A healthy loop sleeps MONITOR_SLEEP (default 300s) between iterations and streams
 // output during each one, so loop.log is touched at least every few minutes. If it
@@ -21,26 +22,8 @@ import { PROJECT_CONDUCTOR_OBJECTIVE_RELATIVE_PATH, PROJECT_CONDUCTOR_STATE_RELA
 // Node's process.kill checks the wrong PID namespace and always reports dead.)
 const ALIVE_STALENESS_MS = 11 * 60 * 1000;
 
-export interface OrchestratorStatus {
-  available: boolean;
-  /** Driver considered alive iff loop.log was written within ALIVE_STALENESS_MS. */
-  alive: boolean;
-  pid: number | null;
-  /** ISO timestamp loop.log was last written (freshness / "last activity"). */
-  lastLogAt: string | null;
-  /** ISO timestamp of the most recent iteration boundary seen in loop.log. */
-  lastEventAt: string | null;
-  /** Current/last iteration number. */
-  iteration: number | null;
-  /** "running" if the last boundary was a START with no matching END, else "idle". */
-  phase: "running" | "idle" | "unknown";
-  /** Exit code of the last completed iteration (124 = hit the 30-min cap). */
-  lastExit: number | null;
-  /** Duration in seconds of the last completed iteration. */
-  lastDurationSec: number | null;
-  /** Most recent cycle-summary lines from state.md (newest last), comments stripped. */
-  recentCycles: string[];
-}
+// Shape lives in shared (#569) — the client had a self-declared hand mirror.
+export type { OrchestratorStatus };
 
 // Strip stray NUL bytes (U+0000) that interleaved process output leaves in loop.log.
 const NUL = new RegExp(String.fromCharCode(0), "g");
