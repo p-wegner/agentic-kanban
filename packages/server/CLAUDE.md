@@ -3,6 +3,40 @@
 ## Self-HTTP calls are an anti-pattern
 A service must never `fetch('http://127.0.0.1:PORT/api/...')` to call its own server. Instead, accept the target service function as a constructor/factory parameter (dependency injection). Self-HTTP calls: create a hard runtime dependency on port availability, bypass TypeScript types (JSON round-trip), are impossible to unit-test without a running server, and swallow errors through JSON re-parsing. The fix: pass `createWorkspace` (or similar) directly to the service that needs it.
 
+## How a service is WIRED — factory vs fn-module, and the ONE injection seam (#604)
+
+Both shapes are legitimate. Say which you are writing and why:
+
+| Shape | Use it when | Signature |
+|---|---|---|
+| **factory** `createXService(deps)` — 63 of them | the service is stateful or orchestrating: it holds collaborators, a cache, a queue, or wires several other services together | one `deps` OBJECT for new factories (`{ database, boardEvents, … }`), never positional — a positional list stops being readable at three arguments and every added collaborator is a breaking change |
+| **fn-module** `doX(id, database)` — 107 of them | the service is stateless: each function is a transaction over arguments | plain exported functions; no factory ceremony for something with nothing to hold |
+
+**The injection seam has TWO sanctioned spellings, and this is the part that is enforced.**
+The seam was spelled SIX ways across 64 sites, so you could not tell whether a service was
+db-injectable — the thing you need in order to test it — without opening it and reading the
+signature. Exactly the defect #614 found in `now`, and it gets the same remedy:
+
+- **`database: Database = db`** — fn-modules (47 sites, the dominant form).
+- **`deps.database ?? db`** — factories taking a `deps` object (6 sites).
+
+`db: Database = realDb`, `{ database = db }` destructuring, `database: typeof db = db` and
+`deps.db ?? realDb` are grandfathered at their current counts by
+`service-wiring-ratchet.test.ts` (`@gate:always-run`) and may **only shrink**. A seventh
+spelling fails the gate. A service that imports the global `db` with NO seam at all fails
+outright — it cannot be tested against a fixture database, and that check is zero-tolerance
+because the count is currently zero.
+
+**Module singletons** (`export const xService = createXService({ database: db })`) are not
+banned — they are how a route gets a ready instance without wiring — but they pin the
+service to the global db at module load, so a consumer cannot swap the database.
+`routes/config-export-import.ts` already builds its own `createPreferenceService({database})`
+for a service another route took as a singleton. Frozen at 6, shrink-only.
+
+**`createXOps` is not a second kind.** All five are plugin sub-services extracted from an
+oversized service, which is the only meaning the noun carries: *a sub-service split out of a
+>800-line service*. Anything else is a `Service`. Frozen at 5.
+
 ## Circular imports
 Route modules that need services (e.g., `sessionManager`) should receive them via factory functions or lazy getters, not direct imports from `index.ts`.
 
