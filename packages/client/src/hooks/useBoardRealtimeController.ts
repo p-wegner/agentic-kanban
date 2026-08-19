@@ -11,6 +11,7 @@ import {
 import { boardBulkSelectionActions } from "../stores/boardBulkSelectionStore.js";
 import { agentActivityActions } from "../stores/agentActivityStore.js";
 import type { ApprovalRequest, LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
+import type { ClientRefreshReason } from "@agentic-kanban/shared/lib/board-events-contract";
 
 type NotificationIssue = { id: string; issueNumber?: number; title?: string; workspaceId?: string };
 
@@ -22,7 +23,7 @@ interface BoardRealtimeControllerParams {
   creatingInColumnId: string | null;
   loadProjectsRef: MutableRefObject<() => Promise<string | undefined>>;
   addNotificationApprovalEvent: (key: string, issue?: NotificationIssue) => void;
-  addNotificationBoardEvent: (reason: string, issue?: NotificationIssue) => void;
+  addNotificationBoardEvent: (reason: ClientRefreshReason, issue?: NotificationIssue) => void;
   addNotificationPluginGateEvent?: (gate: { pluginSlug: string; pluginName: string; loopName: string; loopLabel: string; gateId: string; question: string }) => void;
   setColumns: Dispatch<SetStateAction<StatusWithIssues[]>>;
 }

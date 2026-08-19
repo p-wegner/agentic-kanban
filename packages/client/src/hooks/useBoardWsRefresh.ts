@@ -19,12 +19,15 @@
 
 import { useEffect, useRef } from "react";
 import { BOARD_WS_EVENT, type BoardWsEventDetail } from "../lib/useBoardEvents.js";
+import type { ClientRefreshReason } from "@agentic-kanban/shared/lib/board-events-contract";
 
 export interface BoardWsRefreshOptions {
   /** Only events for this project trigger a refresh. A null/undefined id disables. */
   projectId: string | null | undefined;
   /** Which `reason` values this panel cares about. */
-  shouldRefetch: (reason: string) => boolean;
+  /** #566: the reason vocabulary, not a free string — so a filter cannot list a
+   *  reason nobody broadcasts (three of them listed the dead "workspace_updated"). */
+  shouldRefetch: (reason: ClientRefreshReason) => boolean;
   /** The loader. May be async; overlapping calls are prevented. */
   refresh: () => void | Promise<void>;
   /** Trailing debounce window. Default 250ms — a merge cascade emits bursts. */

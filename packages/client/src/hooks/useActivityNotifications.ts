@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { ClientRefreshReason } from "@agentic-kanban/shared/lib/board-events-contract";
 
 export type NotificationEventType =
   | "workspace_merged"
@@ -66,7 +67,12 @@ function writeLastRead(projectId: string, ts: string) {
   }
 }
 
-const RELEVANT_REASONS = new Set<string>([
+/**
+ * Which reasons raise a user-facing notification (#566): a workspace finished or is
+ * waiting, a session started/ended, a workflow errored or moved, a project completed.
+ * Typed against the shared vocabulary so a retired reason cannot sit here silently.
+ */
+const RELEVANT_REASONS: ReadonlySet<ClientRefreshReason> = new Set<ClientRefreshReason>([
   "workspace_merged",
   "workspace_ready_for_merge",
   "session_completed",
@@ -101,7 +107,7 @@ export function useActivityNotifications(projectId: string | null) {
   }, [projectId]);
 
   const addBoardEvent = useCallback(
-    (reason: string, issueSnapshot?: IssueSnapshot) => {
+    (reason: ClientRefreshReason, issueSnapshot?: IssueSnapshot) => {
       if (!projectId) return;
       if (!RELEVANT_REASONS.has(reason)) return;
 

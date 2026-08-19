@@ -8,8 +8,8 @@
  */
 import type { MonitorWarning, AutodriveStallWarning, StartMode } from "@agentic-kanban/shared";
 
-export type { MonitorTunables } from "@agentic-kanban/shared/lib/strategy-objective-file";
 export type {
+  MonitorTunables,
   StartMode,
   StartPolicy,
   ResolvedTunablesResponse as ResolvedTunables,

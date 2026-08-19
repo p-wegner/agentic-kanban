@@ -12,6 +12,7 @@ import {
 } from "../lib/crossRepoActivity.js";
 import { LEADING_REPO_LABEL } from "../lib/groupConflictsByRepo.js";
 import { useBoardWsRefresh } from "./useBoardWsRefresh.js";
+import { SESSION_LIFECYCLE_REASONS, WORKFLOW_REASONS, type ClientRefreshReason } from "@agentic-kanban/shared/lib/board-events-contract";
 
 /**
  * WS `board_changed` reasons that can move cross-repo state (a merge landing, a
@@ -20,15 +21,21 @@ import { useBoardWsRefresh } from "./useBoardWsRefresh.js";
  * server produces a reconnect storm, and each re-snapshot is a slow /api/workspaces
  * fan-out — amplifying exactly the load that made the server flap.
  */
-function shouldRefetch(reason: string): boolean {
-  return (
-    reason.startsWith("workspace_merged") ||
-    reason.startsWith("session") ||
-    reason.startsWith("workflow") ||
-    reason.startsWith("drive_obstacle") ||
-    reason.includes("merge") ||
-    reason.includes("conflict")
-  );
+/**
+ * #566: was six string tests over an untyped reason, one of which
+ * (`reason.includes("conflict")`) matched NOTHING — no reason has ever contained
+ * "conflict". Set membership over the shared vocabulary; same members minus that one.
+ */
+const CROSS_REPO_ACTIVITY_REASONS: ReadonlySet<ClientRefreshReason> = new Set<ClientRefreshReason>([
+  ...SESSION_LIFECYCLE_REASONS,
+  ...WORKFLOW_REASONS,
+  "workspace_merged",
+  "workspace_ready_for_merge",
+  "drive_obstacle",
+]);
+
+function shouldRefetch(reason: ClientRefreshReason): boolean {
+  return CROSS_REPO_ACTIVITY_REASONS.has(reason);
 }
 
 interface Snapshot {
