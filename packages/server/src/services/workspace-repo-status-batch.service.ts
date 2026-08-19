@@ -1,3 +1,4 @@
+import { summarizeRepoInstalls } from "@agentic-kanban/shared/lib/repo-install-state";
 import type {
   DiffStatsRepoEntry,
   DiffStatsResponse,
@@ -183,6 +184,11 @@ export async function buildWorkspaceRepoStatusBatch(
           baseBranch,
           allMerged: repoEntries.every((r) => !r.hasWork || r.merged),
           repos: repoEntries,
+          // #666 — the batch is a PARITY endpoint for the per-workspace one, and #628 added
+          // `installSummary` to `repo-merge-status.service.ts` without adding it here. A
+          // client reading the batch therefore saw no install progress at all, which is
+          // exactly the state #628 exists to surface (installs deferred off the launch path).
+          installSummary: summarizeRepoInstalls(refs.map((r) => r.installState)),
         };
         entry.mergeStatus = mergeStatus;
       } catch { /* per-workspace best-effort — entry.mergeStatus stays null */ }
