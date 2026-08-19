@@ -103,3 +103,31 @@ export async function runE2ESmokeLane(
     child.stdin?.end();
   });
 }
+
+/**
+ * Decide whether the pre-merge gate should RUN the E2E smoke lane (#660).
+ *
+ * A `decision function` (see packages/server/CLAUDE.md): pure and synchronous, co-located
+ * with the executor that acts on it. The gate's own branch reads a preference, a worktree
+ * path and a diff classification and then does I/O, so without this split the whole table of
+ * cheap cases below would need a database and a spawned Playwright run to exercise.
+ *
+ * `inconclusive` is a THIRD outcome, not a flavour of skip: "the operator asked for this
+ * check and we could not perform it" must reach the gate message, while "docs-only, so the
+ * check cannot have changed" is a clean, silent skip.
+ */
+export function decideE2ESmokeStage(input: {
+  enabled: boolean;
+  hasWorktree: boolean;
+  docsOnly: boolean;
+  laneExists: boolean;
+}): { action: "run" | "skip" | "inconclusive"; reason: string } {
+  if (!input.enabled) return { action: "skip", reason: "not enabled for this project" };
+  if (!input.hasWorktree) return { action: "inconclusive", reason: "workspace has no worktree" };
+  // Checked BEFORE the lane's existence: a docs-only diff is a clean skip whether or not the
+  // lane is present, and reporting "no packages/e2e" for a diff we would not have run anyway
+  // would put a warning on the gate for no reason.
+  if (input.docsOnly) return { action: "skip", reason: "docs-only diff (#198)" };
+  if (!input.laneExists) return { action: "inconclusive", reason: "no packages/e2e in this worktree" };
+  return { action: "run", reason: "enabled, non-docs diff, lane present" };
+}

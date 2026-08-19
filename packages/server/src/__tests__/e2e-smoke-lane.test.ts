@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { E2E_SMOKE_TIMEOUT_MS, e2eLaneExists, runE2ESmokeLane } from "../services/e2e-smoke-lane.js";
+import { E2E_SMOKE_TIMEOUT_MS, decideE2ESmokeStage, e2eLaneExists, runE2ESmokeLane } from "../services/e2e-smoke-lane.js";
 
 /**
  * The E2E smoke lane, runnable on ALLOCATED ports (#660).
@@ -66,5 +66,49 @@ describe("runE2ESmokeLane", () => {
     // Measured: ~52 s of tests, behind two servers each allowed 120 s to boot. A budget sized
     // to the test time alone would kill every cold run.
     expect(E2E_SMOKE_TIMEOUT_MS).toBeGreaterThan((52 + 120 + 120) * 1000);
+  });
+});
+
+describe("decideE2ESmokeStage", () => {
+  const base = { enabled: true, hasWorktree: true, docsOnly: false, laneExists: true };
+
+  it("does NOT run when the project has not opted in — this is the default", () => {
+    // The pref defaults OFF because enabling it taxes every merge on the project with ~52s
+    // plus a cold two-server boot. A default that expensive has to be the operator's choice.
+    expect(decideE2ESmokeStage({ ...base, enabled: false }).action).toBe("skip");
+  });
+
+  it("runs when enabled with a worktree, a code diff and a lane present", () => {
+    expect(decideE2ESmokeStage(base).action).toBe("run");
+  });
+
+  it("SKIPS a docs-only diff — silently, because the check cannot have changed", () => {
+    const d = decideE2ESmokeStage({ ...base, docsOnly: true });
+    expect(d.action).toBe("skip");
+    expect(d.reason).toContain("docs-only");
+  });
+
+  it("is INCONCLUSIVE, never a failure, when the worktree has no e2e package", () => {
+    // A worktree off an older commit legitimately has no lane. Red here would block a merge
+    // on an absence, which is the habit-forming flake #644 exists to prevent.
+    const d = decideE2ESmokeStage({ ...base, laneExists: false });
+    expect(d.action).toBe("inconclusive");
+    expect(d.reason).toContain("packages/e2e");
+  });
+
+  it("is INCONCLUSIVE when there is no worktree to run in", () => {
+    expect(decideE2ESmokeStage({ ...base, hasWorktree: false }).action).toBe("inconclusive");
+  });
+
+  it("prefers the docs-only skip over the missing-lane warning", () => {
+    // Both conditions hold. Reporting "no packages/e2e" would put a warning on the gate for a
+    // diff the lane would not have run against anyway.
+    expect(decideE2ESmokeStage({ ...base, docsOnly: true, laneExists: false }).action).toBe("skip");
+  });
+
+  it("opting out wins over every other condition", () => {
+    expect(
+      decideE2ESmokeStage({ enabled: false, hasWorktree: false, docsOnly: false, laneExists: false }).action,
+    ).toBe("skip");
   });
 });
