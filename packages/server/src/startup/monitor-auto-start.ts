@@ -15,67 +15,14 @@ import { shouldQuiesceBuildersForGate } from "../services/gate-quiesce.js";
 import { isMonitorEligibleIssue, monitorEligibleIssueSql } from "./monitor-eligibility.js";
 import { buildFileContentionGate, shouldDeferForContention, type BuildFileContentionGate } from "./monitor-file-contention.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-
-/** Issues carrying this tag are an explicit opt-out of monitor auto-start. */
-const SKIP_AUTO_START_TAG = "no-auto-start";
-
-/**
- * SQL predicate matching workspaces that occupy ACTIVE agent capacity.
- *
- * A workspace counts toward WIP only when it is genuinely running build/review/fix
- * work. The old `status != 'closed'`
- * check over-counted launch failures: a provider usage-limit launch lands the
- * workspace in `blocked`, and a zero-output launch failure lands it in `idle`
- * — neither has a live agent, yet both held WIP indefinitely, so the board
- * looked full while nothing was working (#690). Counting only active statuses
- * frees that capacity for auto-start.
- */
-const AUTO_START_WIP_STATUSES = ["active", "reviewing", "fixing"] as const;
-const activeWipPredicate = sql`${workspaces.status} IN (${sql.join(AUTO_START_WIP_STATUSES.map((s) => sql`${s}`), sql`, `)})`;
-
-export interface WipCapacitySnapshot {
-  active: number;
-  inactiveStale: number;
-}
-
-/**
- * Count distinct In-Progress issues whose workspace is ACTIVELY running an agent
- * for a single In-Progress status — the real WIP for auto-start decisions.
- *
- * Exported + database-injectable so the #690 regression can prove that a
- * usage-limit `blocked` workspace and a zero-output `idle` launch failure do
- * NOT inflate the count (they would have under the old `status != 'closed'`).
- */
-export async function countActiveWip(
-  database: Pick<typeof db, "select">,
-  inProgressStatusId: string,
-): Promise<number> {
-  return (await countWipCapacity(database, inProgressStatusId)).active;
-}
-
-/**
- * Capacity diagnostics for the auto-start gate.
- *
- * `active` is the only value that consumes WIP slots. `inactiveStale` is reported
- * separately so lingering idle/closed/merged rows remain visible without blocking
- * the next unblocked ticket.
- */
-export async function countWipCapacity(
-  database: Pick<typeof db, "select">,
-  inProgressStatusId: string,
-): Promise<WipCapacitySnapshot> {
-  const rows = await database.select({
-    active: sql<number>`count(distinct CASE WHEN ${activeWipPredicate} THEN ${issues.id} END)`,
-    inactiveStale: sql<number>`count(distinct CASE WHEN NOT (${activeWipPredicate}) THEN ${workspaces.id} END)`,
-  }).from(issues)
-    .innerJoin(workspaces, eq(workspaces.issueId, issues.id))
-    .where(sql`${issues.statusId} = ${inProgressStatusId}`);
-  const legacyCount = (rows[0] as { count?: number } | undefined)?.count;
-  return {
-    active: Number(rows[0]?.active ?? legacyCount ?? 0),
-    inactiveStale: Number(rows[0]?.inactiveStale ?? 0),
-  };
-}
+import {
+  AUTO_START_WIP_STATUSES,
+  SKIP_AUTO_START_TAG,
+  activeWipPredicate,
+  countActiveWip,
+  countWipCapacity,
+  type WipCapacitySnapshot,
+} from "../services/wip-capacity.service.js";
 
 async function hasSkipAutoStartTag(issueId: string): Promise<boolean> {
   const rows = await db.select({ id: tags.id }).from(issueTags)
@@ -690,3 +637,15 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
 
   return skipInfo;
 }
+
+/**
+ * #594 — re-exported so the many existing importers and the `monitor-auto-start-wip-capacity`
+ * suite keep their import path while the implementation lives in `services/`.
+ */
+export {
+  AUTO_START_WIP_STATUSES,
+  SKIP_AUTO_START_TAG,
+  countActiveWip,
+  countWipCapacity,
+  type WipCapacitySnapshot,
+};
