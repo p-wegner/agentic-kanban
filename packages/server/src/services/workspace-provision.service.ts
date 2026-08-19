@@ -22,9 +22,8 @@ import { parseOnboardingUnitKey, parseInitSkillStepId } from "@agentic-kanban/sh
 import type { ProviderName } from "./agent-provider.js";
 import { runSetupScript } from "./setup-script.js";
 import type { SetupScriptContainer } from "@agentic-kanban/shared/lib/setup-script";
-import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
 import { getPreference } from "../repositories/preferences.repository.js";
-import { provisionContainerForWorkspace } from "./devcontainer-workspace.service.js";
+import { provisionContainerForWorkspace, resolveDevcontainerProvisionOptions } from "./devcontainer-workspace.service.js";
 import {
   buildSetupRunFromResult,
   buildSetupRunFromError,
@@ -138,29 +137,27 @@ export function createWorkspaceProvisionService(deps: {
     let setupContainer: SetupScriptContainer | undefined;
     if (!isDirect && setupScript && setupEnabled && !input.skipSetup) {
       try {
-        const { provision } = await provisionContainerForWorkspace({
-          enabled: parseBoolSetting(
-            "devcontainer_builders",
-            await getPreference("devcontainer_builders", database),
-          ),
+        const provisionOptions = await resolveDevcontainerProvisionOptions({
           worktreePath,
           workspaceId,
-          // #577: gate on `enabled`, exactly as the launch-time builder does
-          // (devcontainer-launch.ts). Line 105 above already refuses to bootstrap
-          // symlinks when the feature is off — passing the dirs here anyway mounted
-          // dependency volumes the project had switched OFF, and because
-          // `devcontainer up` reuses an existing container whose CREATION-TIME mounts
-          // win, that mismatch then outlived the launch-time request that got it right.
-          symlinkDirs: symlinkConfig.enabled ? symlinkConfig.dirs : null,
-          claudeProfile: agentProfile.claudeProfile,
-          settingsProfile: agentProfile.settingsProfile,
+          readPreference: (key) => getPreference(key, database),
+          // #577: gate on `enabled`, exactly as the launch-time builder does. Line 105
+          // above already refuses to bootstrap symlinks when the feature is off — passing
+          // the dirs here anyway mounted dependency volumes the project had switched OFF,
+          // and because `devcontainer up` reuses an existing container whose CREATION-TIME
+          // mounts win, that mismatch then outlived the launch-time request that got it right.
+          resolveSymlink: async () => symlinkConfig,
           // #577: `strict` was not read here at all, so a strict project's SETUP silently
           // ran on the host — the precise thing #135 moved into the container to avoid.
-          strict: parseBoolSetting(
-            "devcontainer_strict",
-            await getPreference("devcontainer_strict", database),
-          ),
+          // It now comes from the shared resolver, so it cannot go missing again.
+          profile: {
+            claudeProfile: agentProfile.claudeProfile,
+            settingsProfile: agentProfile.settingsProfile,
+          },
         });
+        const { provision } = provisionOptions
+          ? await provisionContainerForWorkspace(provisionOptions)
+          : { provision: undefined };
         setupContainer = provision?.handle;
       } catch (err) {
         console.warn(

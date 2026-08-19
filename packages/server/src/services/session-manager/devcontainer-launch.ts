@@ -6,12 +6,12 @@
  * be visible: persisted on the workspace and posted as a workspace comment. In
  * `devcontainer_strict` mode, a downgrade refuses the launch instead.
  */
-import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
 import type { Database } from "../../db/index.js";
 import * as lifecycleRepo from "../../repositories/session-lifecycle.repository.js";
 import { updateWorkspaceIsolationDowngrade } from "../../repositories/workspace-isolation.repository.js";
 import {
   provisionContainerForWorkspace,
+  resolveDevcontainerProvisionOptions,
   DevcontainerIsolationRefusedError,
   type ContainerProvision,
 } from "../devcontainer-workspace.service.js";
@@ -49,35 +49,37 @@ export async function resolveContainerProvision(
 ): Promise<ResolveContainerProvisionResult> {
   const { db, state, sessionId, workspaceId, projectId, effectiveWorkingDir, profile, launchProfile, effectiveExtraEnv } = params;
 
-  const devcontainerEnabled = parseBoolSetting(
-    "devcontainer_builders",
-    await lifecycleRepo.getPreferenceValue("devcontainer_builders", db),
-  );
-  if (!devcontainerEnabled) return { devcontainerEnabled };
-
+  let devcontainerEnabled = false;
   try {
-    const strict = parseBoolSetting(
-      "devcontainer_strict",
-      await lifecycleRepo.getPreferenceValue("devcontainer_strict", db),
-    );
-    // Only read the project when the feature is on — this is the default-off
-    // path for every launch, and it should not pay for a lookup it won't use.
-    const projectInfo = projectId ? await lifecycleRepo.getProjectPreflightInfo(projectId, db) : null;
-    const result = await provisionContainerForWorkspace({
-      enabled: true,
+    // One resolver for both provision call sites (#555) — it reads
+    // `devcontainer_builders`/`devcontainer_strict` and gates the dependency volumes
+    // on the project's symlink `enabled` flag, so setup time and launch time cannot
+    // hand-build disagreeing options for the same container (#155/#577).
+    const options = await resolveDevcontainerProvisionOptions({
       worktreePath: effectiveWorkingDir,
       workspaceId,
-      symlinkDirs: projectInfo?.symlinkEnabled ? projectInfo.symlinkDirs : null,
+      readPreference: (key) => lifecycleRepo.getPreferenceValue(key, db),
+      // Only read the project when the feature is on — this is the default-off
+      // path for every launch, and it should not pay for a lookup it won't use.
+      resolveSymlink: async () => {
+        const projectInfo = projectId ? await lifecycleRepo.getProjectPreflightInfo(projectId, db) : null;
+        return projectInfo ? { enabled: projectInfo.symlinkEnabled, dirs: projectInfo.symlinkDirs } : null;
+      },
       // Seed the narrow container profile from whatever this launch actually
       // authenticates with (#133). An OAuth subscription resolved above put its
       // CLAUDE_CONFIG_DIR in effectiveExtraEnv and reset launchProfile to
       // "default"; a settings-file profile keeps its name and needs its
       // settings_<name>.json seeded too.
-      claudeProfile: profile?.name ?? "default",
-      claudeConfigDir: effectiveExtraEnv?.CLAUDE_CONFIG_DIR,
-      settingsProfile: launchProfile?.name !== "default" ? launchProfile?.name : undefined,
-      strict,
+      profile: {
+        claudeProfile: profile?.name ?? "default",
+        claudeConfigDir: effectiveExtraEnv?.CLAUDE_CONFIG_DIR,
+        settingsProfile: launchProfile?.name !== "default" ? launchProfile?.name : undefined,
+      },
     });
+    if (!options) return { devcontainerEnabled: false };
+    devcontainerEnabled = true;
+
+    const result = await provisionContainerForWorkspace(options);
     return { devcontainerEnabled, containerProvision: result.provision, isolationDowngradeReason: result.downgradeReason };
   } catch (err) {
     if (err instanceof DevcontainerIsolationRefusedError) {
