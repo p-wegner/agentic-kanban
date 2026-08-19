@@ -24,4 +24,5 @@ export type * from "./api/diff.js";
 export type * from "./api/dependency.js";
 export type * from "./api/drive.js";
 export type * from "./api/board.js";
+export type * from "./api/monitor.js";
 export type * from "./api/quality-metrics.js";

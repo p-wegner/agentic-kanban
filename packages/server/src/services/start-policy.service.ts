@@ -1,5 +1,6 @@
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
-import { resolveMonitorTunables, type MonitorTunables } from "./strategy-objective.service.js";
+import type { StartPolicy } from "@agentic-kanban/shared/types";
+import { resolveMonitorTunables } from "./strategy-objective.service.js";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { START_MODE_VALUES } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 
@@ -26,30 +27,11 @@ import { START_MODE_VALUES } from "@agentic-kanban/shared/lib/dynamic-preference
  */
 export type StartMode = (typeof START_MODE_VALUES)[number];
 
-export interface StartPolicy {
-  mode: StartMode;
-  /** The in-process monitor may auto-start unblocked backlog/todo tickets. */
-  autoStartUnblocked: boolean;
-  /** The post-merge dependency cascade may start the next unblocked ticket. */
-  postMergeCascade: boolean;
-  /**
-   * The post-merge FOLLOW-UP auto-start (`autoStartFollowups`, gated by the
-   * `auto_start_followup` pref) may run. A second, independent post-merge starter that
-   * predates Start Mode and gated only on its own global pref — so `manual` was not the
-   * kill-switch it claims to be: merging one ticket still launched agents on a project
-   * whose drive was explicitly off. Same shape as `postMergeCascade`: the mode decides
-   * whether it may run at all, the fine-grained pref stays the enable signal.
-   */
-  postMergeFollowups: boolean;
-  /** The backlog-empty refill skill may run to generate tickets. */
-  backlogRefill: boolean;
-  /** Cron/HTTP scheduled runs are honored. */
-  scheduledRuns: boolean;
-  /** Effective WIP/refill tunables (from the Strategy Bullseye, else legacy prefs). */
-  wip: MonitorTunables;
-  /** Whether the mode came from an explicit per-project `start_mode_<id>` or was derived. */
-  source: "start_mode" | "derived";
-}
+
+// The response shape lives in shared (#567) — the client had its own drifted copy that
+// was missing `postMergeFollowups`. Re-exported here because that is where the server
+// already imports it from.
+export type { StartPolicy };
 
 // #496: built from the registry, so an unregistered prefix is a COMPILE error.
 const startModePrefDef = projectPref("start_mode");

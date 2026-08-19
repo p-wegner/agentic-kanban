@@ -2,6 +2,7 @@ import { sessionMessages } from "@agentic-kanban/shared/schema";
 import { desc, eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { MonitorActionName } from "../services/monitor-nudge.js";
+import type { MonitorAction } from "@agentic-kanban/shared/types";
 import { readSessionStdoutFileTailAsync } from "../lib/session-output-reader.js";
 
 /**
@@ -10,20 +11,8 @@ import { readSessionStdoutFileTailAsync } from "../lib/session-output-reader.js"
  */
 const MONITOR_EXCERPT_TAIL_BYTES = 512 * 1024;
 
-export type MonitorAction = {
-  at: string;
-  action: MonitorActionName;
-  workspaceId: string;
-  issueId: string;
-  /** HTTP endpoint called for this action, e.g. /api/workspaces/:id/merge */
-  endpoint?: string;
-  /** HTTP response status code, e.g. 200, 409 */
-  httpStatus?: number;
-  /** Truncated response body summary (max 200 chars) */
-  responseSummary?: string;
-  /** Post-action verification: did the state change as expected? */
-  verificationResult?: "ok" | "failed" | "skipped";
-};
+// Shape lives in shared (#567) so the client's ACTION_LABELS maps type-check against it.
+export type { MonitorAction };
 
 export function logMonitorAction(
   recentActions: MonitorAction[],

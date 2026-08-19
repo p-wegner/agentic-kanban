@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import type { DirtyMainCheckoutWarning } from "@agentic-kanban/shared/types";
 import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
@@ -30,15 +31,9 @@ const SOURCE_PATHSPECS = [
   ":(glob)packages/**/*.sql",
 ];
 
-export interface DirtyMainCheckoutWarning {
-  projectId: string;
-  projectName: string;
-  repoPath: string;
-  detectedAt: string;
-  fileCount: number;
-  files: string[];
-  message: string;
-}
+// Shape lives in shared (#567), where it gained a `type` discriminant so the client
+// stops narrowing the warning union with a structural `"type" in warning` test.
+export type { DirtyMainCheckoutWarning };
 
 export async function getDirtyTrackedSourceFiles(repoPath: string): Promise<string[]> {
   const stdout = await gitExecOrThrow(
@@ -74,6 +69,7 @@ export async function scanDirtyMainCheckouts(database: Database = db): Promise<D
             `[dirty-main-checkout] auto-archived project "${project.name}" (${project.id}) — repoPath missing for ${MISSING_REPO_ARCHIVE_THRESHOLD} consecutive scans: ${project.repoPath}. Unarchive it after fixing the path.`,
           );
           warnings.push({
+            type: "dirty_main_checkout",
             projectId: project.id,
             projectName: project.name,
             repoPath: project.repoPath,
@@ -88,6 +84,7 @@ export async function scanDirtyMainCheckouts(database: Database = db): Promise<D
         continue;
       }
       warnings.push({
+        type: "dirty_main_checkout",
         projectId: project.id,
         projectName: project.name,
         repoPath: project.repoPath,
@@ -115,6 +112,7 @@ export async function scanDirtyMainCheckouts(database: Database = db): Promise<D
     const preview = files.slice(0, 5).join(", ");
     const more = files.length > 5 ? ` (and ${files.length - 5} more)` : "";
     warnings.push({
+      type: "dirty_main_checkout",
       projectId: project.id,
       projectName: project.name,
       repoPath: project.repoPath,

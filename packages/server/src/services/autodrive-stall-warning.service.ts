@@ -7,6 +7,7 @@ import { isCodexUsageLimitStats } from "./codex-rate-limit.js";
 import { resolveStartPolicy } from "./start-policy.service.js";
 import { classifyQuotaBlock, parseSessionStats } from "./monitor-cycle-rules.js";
 import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
+import type { AutodriveStallWarning } from "@agentic-kanban/shared/types";
 import {
   getAllPreferences,
   getActiveAutodriveWorkspaceRows,
@@ -33,20 +34,8 @@ export type AutodriveStallCause =
   | "no_progress"
   | "unblocked_backlog_not_started";
 
-export interface AutodriveStallWarning {
-  type: "autodrive_stall";
-  projectId: string;
-  projectName: string;
-  detectedAt: string;
-  thresholdMin: number;
-  stalledForMin: number;
-  lastProgressAt: string;
-  activeIssueCount: number;
-  workspaceIds: string[];
-  issueNumbers: number[];
-  cause: AutodriveStallCause;
-  message: string;
-}
+// Shape lives in shared (#567) — it is one arm of the monitor-status warning union.
+export type { AutodriveStallWarning };
 
 interface ActiveWorkspaceRow {
   projectId: string;
