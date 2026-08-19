@@ -1,11 +1,9 @@
+import type { Tag } from "../lib/boardTypes.js";
 import { useRef, useState } from "react";
 import { useDismissable } from "./useDismissable.js";
 
-export interface Tag {
-  id: string;
-  name: string;
-  color: string | null;
-}
+/** #610 — was a byte-identical second declaration; the board DTO module owns it. */
+export type { Tag } from "../lib/boardTypes.js";
 
 /**
  * Encapsulates the TableView bulk-action UI state: row selection, the six

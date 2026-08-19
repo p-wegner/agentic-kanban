@@ -17,7 +17,7 @@
 import { apiFetch } from "./api.js";
 import { queryClient } from "./queryClient.js";
 import { boardQueryKeys } from "./boardQueryKeys.js";
-import type { PendingQuestionSet } from "../components/AgentQuestionsPanel.js";
+import type { PendingQuestionSet } from "@agentic-kanban/shared";
 
 /** Short cache window so near-simultaneous pollers share one result. */
 const CACHE_TTL_MS = 5_000;

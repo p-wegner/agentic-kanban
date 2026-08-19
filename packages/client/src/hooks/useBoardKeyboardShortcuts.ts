@@ -1,5 +1,5 @@
 import { useEffect, useMemo, type Dispatch, type RefObject, type SetStateAction } from "react";
-import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
+import type { CreateIssueFormState } from "../lib/boardTypes.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { apiPost } from "../lib/api.js";
 import { registerAction } from "../lib/actions.js";

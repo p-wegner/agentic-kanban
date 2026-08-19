@@ -8,7 +8,7 @@ import { getSettings } from "../lib/settingsStore.js";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { runCreateIssueFlow, type CreateIssuePayload } from "../lib/createIssueService.js";
-import type { ExpandedCreatePanel } from "../routes/BoardPage.js";
+import type { ExpandedCreatePanel } from "../lib/boardTypes.js";
 import type { IssueWithStatus, UpdateIssueRequest, StatusWithIssues } from "@agentic-kanban/shared";
 import { resolveWorkspaceLaunchDefaults } from "../lib/workspaceLaunchDefaults.js";
 import { boardSelectionActions } from "../stores/boardSelectionStore.js";

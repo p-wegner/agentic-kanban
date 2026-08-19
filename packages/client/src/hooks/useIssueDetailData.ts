@@ -1,5 +1,6 @@
+import type { ActivityEvent, CycleTimeData, RelatedIssue, TimeEntriesData, TouchedFile } from "../lib/issueDetailTypes.js";
 import { useEffect, useState } from "react";
-import type { IssueArtifact, IssueWithStatus, DependencyInfo, MilestoneResponse, MergedCommitsResponse } from "@agentic-kanban/shared";
+import type { IssueArtifact, IssueWithStatus, DependencyInfo, MilestoneResponse, MergedCommitsResponse, IssueComment} from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { getCachedBundle, revalidateBundle } from "../lib/issueDetailBundleCache.js";
 import {
@@ -10,12 +11,6 @@ import {
 } from "../lib/clientInvalidation.js";
 // Type-only imports (erased at compile time, so they don't violate the
 // hooks-can't-import-components arch rule).
-import type { ActivityEvent } from "../components/IssueActivitySection.js";
-import type { IssueComment } from "../components/IssueDetailComments.js";
-import type { CycleTimeData } from "../components/IssueCycleTimeBadge.js";
-import type { TimeEntriesData } from "../components/IssueWorkLogSection.js";
-import type { TouchedFile } from "../components/IssueTouchedFilesSection.js";
-import type { RelatedIssue } from "../components/IssueRelatedIssuesSection.js";
 
 // Module-level cache for the project-wide issue list feeding the dependency
 // picker (it only needs id/issueNumber/title). The list is project-scoped, not

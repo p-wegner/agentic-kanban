@@ -1,3 +1,5 @@
+/** #610 — was a byte-identical local copy; the board DTO module owns it. */
+import type { Tag } from "../lib/boardTypes.js";
 import { useCallback, useEffect, useMemo } from "react";
 import { apiPost, apiPatch } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
@@ -6,11 +8,6 @@ import type { IssueWithStatus, UpdateIssueRequest } from "@agentic-kanban/shared
 
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 
-interface Tag {
-  id: string;
-  name: string;
-  color: string | null;
-}
 
 /**
  * Bulk-selection orchestration on top of the boardBulkSelectionStore (#958).

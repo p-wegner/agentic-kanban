@@ -1,3 +1,5 @@
+/** #610 — was a byte-identical local copy; the board DTO module owns it. */
+import type { Tag } from "../lib/boardTypes.js";
 import type { IssueWithStatus, DependencyInfo, IssueArtifact, MergedCommit, MergedCommitsResponse } from "@agentic-kanban/shared";
 import { apiPost, apiDelete, apiPut } from "../lib/api.js";
 import { showToast } from "./Toast.js";
@@ -18,7 +20,6 @@ import { ReposTouchedField } from "./ReposTouchedField.js";
 import { useProjectRepos } from "../hooks/useProjectRepos.js";
 import { repoNameFromTag, repoTagName, REPO_TAG_COLOR } from "@agentic-kanban/shared/lib/repo-tags";
 
-type Tag = { id: string; name: string; color: string | null };
 
 interface IssueSecondaryDetailsProps {
   issue: IssueWithStatus;

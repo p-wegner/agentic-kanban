@@ -4,8 +4,8 @@ import { apiFetch, apiPost } from "../lib/api.js";
 import { setSettings as savePreferences } from "../lib/settingsStore.js";
 import { showToast } from "../lib/toast.js";
 import { buildMigrationConfig } from "../lib/strategy-targets.js";
-import type { MonitorTunables } from "../components/SettingsPanel.shared.js";
-import type { MonitorAction } from "../components/MonitorPopover.js";
+import type { MonitorTunables } from "../lib/settings-shared.js";
+import type { MonitorAction } from "@agentic-kanban/shared";
 
 export type MonitorStatus = {
   /**
