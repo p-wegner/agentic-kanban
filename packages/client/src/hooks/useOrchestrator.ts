@@ -1,21 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { startStaggeredPoll } from "../lib/pollScheduler.js";
+import type { OrchestratorStatus } from "@agentic-kanban/shared";
 
-// Mirrors OrchestratorStatus in
-// packages/server/src/services/orchestrator-monitor.service.ts
-export interface OrchestratorStatus {
-  available: boolean;
-  alive: boolean;
-  pid: number | null;
-  lastLogAt: string | null;
-  lastEventAt: string | null;
-  iteration: number | null;
-  phase: "running" | "idle" | "unknown";
-  lastExit: number | null;
-  lastDurationSec: number | null;
-  recentCycles: string[];
-}
+// Declared once, in shared (#569) — this was a self-declared hand mirror.
+export type { OrchestratorStatus } from "@agentic-kanban/shared";
 
 const POLL_MS = 20_000;
 const NOTIFY_PREF_KEY = "orchestrator_notify";

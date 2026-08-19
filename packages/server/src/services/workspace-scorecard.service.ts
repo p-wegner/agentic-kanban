@@ -3,6 +3,7 @@ import { detectConflicts, getDiff } from "./git.service.js";
 import { getWorkspaceById, resolveProjectRepo } from "../repositories/workspace.repository.js";
 import { getSessionMessageRows } from "../repositories/session.repository.js";
 import { resolveDiffRef } from "@agentic-kanban/shared/lib/git-service";
+import type { ScorecardDimension, ScorecardResult } from "@agentic-kanban/shared/types";
 import {
   getScorecardIssue,
   getScorecardReviewSessions,
@@ -10,18 +11,8 @@ import {
   getScorecardColumns,
 } from "../repositories/workspace-scorecard.repository.js";
 
-export interface ScorecardDimension {
-  name: string;
-  score: number;
-  maxScore: number;
-  signal: string;
-}
-
-export interface ScorecardResult {
-  total: number;
-  dimensions: ScorecardDimension[];
-  computedAt: string;
-}
+// Shapes live in shared (#569) — WorkspaceCard.tsx had its own copy.
+export type { ScorecardDimension, ScorecardResult };
 
 export async function computeScorecard(workspaceId: string, database: Database): Promise<ScorecardResult | null> {
   const ws = await getWorkspaceById(workspaceId, database);

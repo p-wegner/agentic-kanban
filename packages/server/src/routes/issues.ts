@@ -674,10 +674,17 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
       payload?: unknown;
       workspaceId?: string;
     }>(c);
-    const validKinds: IssueCommentKind[] = ["preflight-clarification", "agent-question", "merge-attempt", "note"];
+    /**
+     * Deliberately NARROWER than ISSUE_COMMENT_KINDS (#569). `preflight-verdict` and
+     * `gate-decision` are written by the server itself (routes/issues.ts:469 and
+     * plugin-loop.service.ts) and are records of a machine decision — a human POSTing
+     * one would be forging it, so they are not accepted here. This is a whitelist by
+     * intent, not a copy of the vocabulary that fell behind.
+     */
+    const userPostableKinds: IssueCommentKind[] = ["preflight-clarification", "agent-question", "merge-attempt", "note"];
     const validAuthors: IssueCommentAuthor[] = ["user", "butler", "agent", "preflight", "system"];
     if (!body.body?.trim()) return c.json({ error: "body is required" }, 400);
-    const kind = body.kind && validKinds.includes(body.kind) ? body.kind : "note";
+    const kind = body.kind && userPostableKinds.includes(body.kind) ? body.kind : "note";
     const author = body.author && validAuthors.includes(body.author) ? body.author : "user";
     const comment = await issueCommentsService.addComment({
       issueId,
