@@ -39,7 +39,7 @@ const SANCTIONED = new Set(["now: string", "nowMs: number"]);
 /** Non-canonical spellings, `<spelling>` → count. Only ever lower these. */
 const BASELINE: Record<string, number> = {
   "now: Date": 32,
-  "now: number": 18,
+  "now: number": 17,
   "nowIso: string": 9,
   "nowOverride: string": 6,
   "now: () => Date": 4,
