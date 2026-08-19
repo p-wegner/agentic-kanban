@@ -1,3 +1,4 @@
+import { apiFetch } from "../lib/api.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentOutputMessage, StatusWithIssues } from "@agentic-kanban/shared";
 import { apiFetchConditional } from "../lib/api.js";
@@ -76,8 +77,9 @@ export function useAgentLiveTicker(
   const fetchSessionId = useCallback(async (workspaceId: string): Promise<string | null> => {
     if (sessionIdCacheRef.current[workspaceId]) return sessionIdCacheRef.current[workspaceId];
     try {
-      const sessions = await fetch(`/api/workspaces/${workspaceId}/sessions`)
-        .then((r) => r.json() as Promise<Array<{ id: string; status: string; startedAt: string }>>);
+      const sessions = await apiFetch<Array<{ id: string; status: string; startedAt: string }>>(
+        `/api/workspaces/${workspaceId}/sessions`,
+      );
       const running = sessions.find((s) => s.status === "running");
       const latest = running ?? sessions.sort((a, b) =>
         new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()

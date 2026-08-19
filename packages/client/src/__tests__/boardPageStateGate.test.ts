@@ -1,3 +1,4 @@
+// @gate:always-run — scans BoardPage's source for the #905 state ratchet; imports nothing it checks (#601).
 // Ratchet gate for the BoardPage decentralisation (#905, parent #895/B).
 //
 // BoardPage is the board's hottest file precisely because every piece of
@@ -24,7 +25,7 @@ function countMatches(text: string, pattern: RegExp): number {
 
 describe("BoardPage state-centrality gate (#905)", () => {
   it("caps BoardPage local state hooks (useState + useRef) — ratchet DOWN only", () => {
-    const src = readFileSync(resolve(HERE, "BoardPage.tsx"), "utf8");
+    const src = readFileSync(resolve(HERE, "..", "routes", "BoardPage.tsx"), "utf8");
     // Call sites only: `useState(` / `useState<` and `useRef(` / `useRef<`.
     // (Bare `useState`/`useRef` words in imports/comments are excluded.)
     const useStateCount = countMatches(src, /useState[<(]/g);
@@ -45,7 +46,7 @@ describe("BoardPage state-centrality gate (#905)", () => {
   });
 
   it("caps the BoardPageView view-model prop surface — ratchet DOWN only", () => {
-    const src = readFileSync(resolve(HERE, "../components/BoardPageView.tsx"), "utf8");
+    const src = readFileSync(resolve(HERE, "..", "components", "BoardPageView.tsx"), "utf8");
     // Count the fields of the BoardPageViewModel interface — the single mega
     // object every prop is Pick<>ed from. Each `^  name:` line (2-space indent,
     // identifier, colon) is one prop on the view's surface.
