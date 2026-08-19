@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { db, schema } from "../db.js";
 import { sql } from "drizzle-orm";
+import { mcpJson } from "../db-utils.js";
 
 export function registerListAgentSkills(server: McpServer) {
   server.tool(
@@ -33,9 +34,7 @@ export function registerListAgentSkills(server: McpServer) {
         isBuiltin: s.isBuiltin,
         isInit: s.isInit,
       }));
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify(summary, null, 2) }],
-      };
+      return mcpJson(summary);
     },
   );
 }

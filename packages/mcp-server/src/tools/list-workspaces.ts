@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
+import { mcpJson } from "../db-utils.js";
 
 export function registerListWorkspaces(server: McpServer) {
   server.tool(
@@ -15,7 +16,7 @@ export function registerListWorkspaces(server: McpServer) {
       if (issueId) {
         const result = await db.select().from(schema.workspaces)
           .where(eq(schema.workspaces.issueId, issueId));
-        return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+        return mcpJson(result);
       }
 
       const allWorkspaces = await db.select().from(schema.workspaces);
@@ -24,9 +25,7 @@ export function registerListWorkspaces(server: McpServer) {
         ? allWorkspaces.filter(w => w.status === status)
         : allWorkspaces;
 
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify(filtered, null, 2) }],
-      };
+      return mcpJson(filtered);
     },
   );
 }

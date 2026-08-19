@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
-import { requireEntity, resolveActiveProjectId } from "../db-utils.js";
+import { mcpJson, requireEntity, resolveActiveProjectId } from "../db-utils.js";
 
 export function registerGetContext(server: McpServer) {
   server.tool(
@@ -48,7 +48,7 @@ export function registerGetContext(server: McpServer) {
         activeWorkspaces: workspaces.length,
       };
 
-      return { content: [{ type: "text" as const, text: JSON.stringify(context, null, 2) }] };
+      return mcpJson(context);
     },
   );
 }

@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { prodDeps, type ToolDeps } from "./deps.js";
+import { mcpText } from "../db-utils.js";
 import { SETTINGS_REGISTRY_KEYS } from "@agentic-kanban/shared/lib/settings-registry";
 import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-preference-write";
 import {
@@ -119,14 +120,7 @@ export function registerSetPreference(server: McpServer, deps: ToolDeps = prodDe
         };
       }
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify({ key, value, updatedAt: now, ok: true }),
-          },
-        ],
-      };
+      return mcpText(JSON.stringify({ key, value, updatedAt: now, ok: true }));
     },
   );
 }

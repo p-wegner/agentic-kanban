@@ -4,7 +4,7 @@ import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
 import * as gitService from "../git-service.js";
 import { notifyBoard } from "../notify.js";
-import { requireEntity } from "../db-utils.js";
+import { mcpJson, requireEntity } from "../db-utils.js";
 import { setWorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import { setWorkspaceWorkingDir } from "@agentic-kanban/shared/lib/workspace-git-state";
 
@@ -49,9 +49,7 @@ export function registerCloseWorkspace(server: McpServer) {
 
       if (projectId) notifyBoard(projectId, "mcp_close_workspace");
 
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify({ id: workspaceId, status: "closed" }, null, 2) }],
-      };
+      return mcpJson({ id: workspaceId, status: "closed" });
     },
   );
 }

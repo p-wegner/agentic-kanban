@@ -3,7 +3,7 @@ import { z } from "zod";
 import { eq, and, gte } from "drizzle-orm";
 import type { SessionFrictionStats } from "@agentic-kanban/shared";
 import { db, schema } from "../db.js";
-import { resolveActiveProjectId } from "../db-utils.js";
+import { mcpText, resolveActiveProjectId } from "../db-utils.js";
 
 /**
  * Fleet-level friction snapshot over a recent time window — the data backbone
@@ -97,7 +97,7 @@ export function registerGetFleetFriction(server: McpServer) {
         ? "\n\nNo friction stats found in this window. Run `pnpm cli -- session backfill-friction --hours " + windowHours + "` to populate from stored transcripts."
         : "";
 
-      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) + hint }] };
+      return mcpText(JSON.stringify(result, null, 2) + hint);
     },
   );
 }

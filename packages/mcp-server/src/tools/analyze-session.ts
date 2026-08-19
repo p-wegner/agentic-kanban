@@ -3,7 +3,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { parseSessionSummary } from "@agentic-kanban/shared";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { requireEntity } from "../db-utils.js";
+import { mcpJson, requireEntity } from "../db-utils.js";
 
 /**
  * Shape of the dynamic `sessions.stats` JSON blob, as read by this tool. All
@@ -89,10 +89,7 @@ export function registerAnalyzeSession(server: McpServer, deps: ToolDeps = prodD
         try { stats = JSON.parse(session.stats) as SessionStatsBlob; } catch { /* ignore */ }
       }
 
-      return {
-        content: [{
-          type: "text" as const,
-          text: JSON.stringify({
+      return mcpJson({
             session: {
               id: session.id,
               status: session.status,
@@ -124,9 +121,7 @@ export function registerAnalyzeSession(server: McpServer, deps: ToolDeps = prodD
                   agentSummary: stats.agentSummary,
                 }
               : null,
-          }, null, 2),
-        }],
-      };
+          });
     },
   );
 }

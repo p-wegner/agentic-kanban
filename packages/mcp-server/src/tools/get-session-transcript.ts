@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { requireEntity } from "../db-utils.js";
+import { mcpJson, requireEntity } from "../db-utils.js";
 import { readSessionMessages } from "@agentic-kanban/shared/lib/session-messages";
 
 export function registerGetSessionTranscript(server: McpServer, deps: ToolDeps = prodDeps) {
@@ -55,15 +55,10 @@ export function registerGetSessionTranscript(server: McpServer, deps: ToolDeps =
       // paging this tool relies on for long transcripts.
       const { messages } = await readSessionMessages(db, sessionId, { limit: messageLimit });
 
-      return {
-        content: [{
-          type: "text" as const,
-          text: JSON.stringify({
+      return mcpJson({
             ...r.value,
             messages,
-          }, null, 2),
-        }],
-      };
+          });
     },
   );
 }

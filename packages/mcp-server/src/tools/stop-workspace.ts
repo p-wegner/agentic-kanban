@@ -3,7 +3,7 @@ import { z } from "zod";
 import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
 import { notifyBoard } from "../notify.js";
-import { requireEntity } from "../db-utils.js";
+import { mcpJson, requireEntity } from "../db-utils.js";
 import { setWorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 
 export function registerStopWorkspace(server: McpServer) {
@@ -46,12 +46,7 @@ export function registerStopWorkspace(server: McpServer) {
         notifyBoard(issueRows[0].projectId, "mcp_stop_workspace");
       }
 
-      return {
-        content: [{
-          type: "text" as const,
-          text: JSON.stringify({ id: workspaceId, stopped: running.length > 0, sessionsStopped: running.length }, null, 2),
-        }],
-      };
+      return mcpJson({ id: workspaceId, stopped: running.length > 0, sessionsStopped: running.length });
     },
   );
 }

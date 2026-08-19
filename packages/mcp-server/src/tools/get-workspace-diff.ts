@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { workspaceClosedError, workspaceMissingWorkingDirError, workspaceNotFoundError } from "../db-utils.js";
+import { mcpJson, mcpText, workspaceClosedError, workspaceMissingWorkingDirError, workspaceNotFoundError } from "../db-utils.js";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -51,7 +51,7 @@ export function registerGetWorkspaceDiff(server: McpServer, deps: ToolDeps = pro
           }
         }
         if (!resolvedBaseBranch) {
-          return { content: [{ type: "text" as const, text: "No base branch configured for this workspace or project." }] };
+          return mcpText("No base branch configured for this workspace or project.");
         }
 
         const [diff, stats] = await Promise.all([
@@ -60,25 +60,18 @@ export function registerGetWorkspaceDiff(server: McpServer, deps: ToolDeps = pro
         ]);
 
         if (!diff.trim()) {
-          return { content: [{ type: "text" as const, text: "No changes detected." }] };
+          return mcpText("No changes detected.");
         }
 
-        return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify({
+        return mcpJson({
               workspaceId,
               baseBranch: resolvedBaseBranch,
               changedFiles: extractChangedFiles(diff),
               stats,
               diff,
-            }, null, 2),
-          }],
-        };
+            });
       } catch (err) {
-        return {
-          content: [{ type: "text" as const, text: `Failed to get diff: ${errorMessage(err)}` }],
-        };
+        return mcpText(`Failed to get diff: ${errorMessage(err)}`);
       }
     },
   );

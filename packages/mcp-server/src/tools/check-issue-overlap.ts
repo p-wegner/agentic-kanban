@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { inArray } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
+import { mcpJson } from "../db-utils.js";
 
 export function registerCheckIssueOverlap(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema } = deps;
@@ -38,7 +39,7 @@ export function registerCheckIssueOverlap(server: McpServer, deps: ToolDeps = pr
         result.warning = `${issuesWithoutCache.length} issue(s) have no cached prediction yet. Run analyze_touched_files on them first: ${issuesWithoutCache.join(", ")}`;
       }
 
-      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+      return mcpJson(result);
     },
   );
 }

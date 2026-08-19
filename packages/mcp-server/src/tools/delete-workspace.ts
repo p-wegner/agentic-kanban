@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { requireEntity } from "../db-utils.js";
+import { mcpJson, requireEntity } from "../db-utils.js";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { deleteWorkspaceCascade } from "@agentic-kanban/shared/lib/cascade-delete";
 
@@ -32,9 +32,7 @@ export function registerDeleteWorkspace(server: McpServer, deps: ToolDeps = prod
         notifyBoard(issueRows[0].projectId, "mcp_delete_workspace");
       }
 
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify({ id: workspaceId, deleted: true }, null, 2) }],
-      };
+      return mcpJson({ id: workspaceId, deleted: true });
     },
   );
 }

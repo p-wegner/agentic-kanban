@@ -4,6 +4,7 @@ import { extractKeywords } from "@agentic-kanban/shared";
 import type { ToolDeps } from "./deps.js";
 import { prodDeps } from "./deps.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { mcpText } from "../db-utils.js";
 
 function overlapScore(patternKw: string[], querySet: Set<string>): { score: number; matched: string[] } {
   const matched = patternKw.filter(k => querySet.has(k));
@@ -27,12 +28,12 @@ export function registerFindSimilarFailures(server: McpServer, deps: ToolDeps = 
         const queryKw = extractKeywords(errorText);
 
         if (queryKw.length === 0) {
-          return { content: [{ type: "text" as const, text: "No meaningful keywords found in the error text." }] };
+          return mcpText("No meaningful keywords found in the error text.");
         }
 
         const all = await toolDb.select().from(s.failurePatterns);
         if (all.length === 0) {
-          return { content: [{ type: "text" as const, text: "No failure patterns stored yet. Patterns are ingested from docs/learnings/ on startup." }] };
+          return mcpText("No failure patterns stored yet. Patterns are ingested from docs/learnings/ on startup.");
         }
 
         const querySet = new Set(queryKw);
@@ -46,7 +47,7 @@ export function registerFindSimilarFailures(server: McpServer, deps: ToolDeps = 
           .slice(0, effectiveLimit);
 
         if (scored.length === 0) {
-          return { content: [{ type: "text" as const, text: "No similar failures found. This may be a new class of error." }] };
+          return mcpText("No similar failures found. This may be a new class of error.");
         }
 
         const lines = [
@@ -67,9 +68,9 @@ export function registerFindSimilarFailures(server: McpServer, deps: ToolDeps = 
           }),
         ];
 
-        return { content: [{ type: "text" as const, text: lines.join("\n\n") }] };
+        return mcpText(lines.join("\n\n"));
       } catch (err) {
-        return { content: [{ type: "text" as const, text: `Error: ${errorMessage(err)}` }] };
+        return mcpText(`Error: ${errorMessage(err)}`);
       }
     },
   );

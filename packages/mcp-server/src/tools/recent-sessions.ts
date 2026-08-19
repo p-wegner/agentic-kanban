@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { desc, eq } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
+import { mcpText } from "../db-utils.js";
 
 /**
  * Mirrors `pnpm cli -- session recent`.
@@ -39,10 +40,7 @@ export function registerRecentSessions(server: McpServer, deps: ToolDeps = prodD
         .orderBy(desc(schema.sessions.startedAt))
         .limit(n);
 
-      return {
-        content: [{
-          type: "text" as const,
-          text: JSON.stringify(
+      return mcpText(JSON.stringify(
             rows.map((r) => ({
               sessionId: r.sessionId,
               sessionStatus: r.sessionStatus,
@@ -55,9 +53,7 @@ export function registerRecentSessions(server: McpServer, deps: ToolDeps = prodD
             })),
             null,
             2,
-          ),
-        }],
-      };
+          ));
     },
   );
 }

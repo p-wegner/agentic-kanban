@@ -3,7 +3,7 @@ import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { isResolvedDependencyStatusView } from "@agentic-kanban/shared";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { resolveActiveProjectId, requireEntity } from "../db-utils.js";
+import { mcpJson, requireEntity, resolveActiveProjectId } from "../db-utils.js";
 
 export function registerGetIssue(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema } = deps;
@@ -110,9 +110,7 @@ export function registerGetIssue(server: McpServer, deps: ToolDeps = prodDeps) {
         isBlocked,
       };
 
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-      };
+      return mcpJson(result);
     },
   );
 }

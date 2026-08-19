@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { db, schema } from "../db.js";
 import { eq, desc } from "drizzle-orm";
-import { requireEntity } from "../db-utils.js";
+import { mcpJson, mcpText, requireEntity } from "../db-utils.js";
 
 export function registerGetSessionStats(server: McpServer) {
   server.tool(
@@ -25,13 +25,13 @@ export function registerGetSessionStats(server: McpServer) {
           .limit(1);
 
         if (wsSessions.length === 0) {
-          return { content: [{ type: "text" as const, text: "No sessions found for this workspace" }] };
+          return mcpText("No sessions found for this workspace");
         }
         targetSessionId = wsSessions[0].id;
       }
 
       if (!targetSessionId) {
-        return { content: [{ type: "text" as const, text: "Provide either sessionId or workspaceId" }] };
+        return mcpText("Provide either sessionId or workspaceId");
       }
 
       const rows = await db
@@ -45,27 +45,22 @@ export function registerGetSessionStats(server: McpServer) {
 
       const session = r.value;
       if (!session.stats) {
-        return { content: [{ type: "text" as const, text: `No stats available for session ${targetSessionId} (session may still be running or stats were not captured)` }] };
+        return mcpText(`No stats available for session ${targetSessionId} (session may still be running or stats were not captured)`);
       }
 
       let stats: Record<string, unknown>;
       try {
         stats = JSON.parse(session.stats) as Record<string, unknown>;
       } catch {
-        return { content: [{ type: "text" as const, text: `Invalid stats data for session ${targetSessionId}` }] };
+        return mcpText(`Invalid stats data for session ${targetSessionId}`);
       }
-      return {
-        content: [{
-          type: "text" as const,
-          text: JSON.stringify({
+      return mcpJson({
             sessionId: session.id,
             status: session.status,
             startedAt: session.startedAt,
             endedAt: session.endedAt,
             ...stats,
-          }, null, 2),
-        }],
-      };
+          });
     },
   );
 }

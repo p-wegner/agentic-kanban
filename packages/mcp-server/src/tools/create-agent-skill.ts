@@ -4,6 +4,7 @@ import { db, schema } from "../db.js";
 import { eq, and, isNull } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { isSafeSkillName } from "@agentic-kanban/shared/lib/agent-skill-files";
+import { mcpJson, mcpText } from "../db-utils.js";
 
 export function registerCreateAgentSkill(server: McpServer) {
   server.tool(
@@ -19,7 +20,7 @@ export function registerCreateAgentSkill(server: McpServer) {
     },
     async ({ name, description, prompt, model, projectId, isInit }) => {
       if (!isSafeSkillName(name)) {
-        return { content: [{ type: "text" as const, text: "Error: Skill name must be a single safe path segment (no '/', '\\', '..', '.', empty, NUL, or drive-relative names like 'C:')" }] };
+        return mcpText("Error: Skill name must be a single safe path segment (no '/', '\\', '..', '.', empty, NUL, or drive-relative names like 'C:')");
       }
 
       const scopeProjectId = projectId || null;
@@ -30,7 +31,7 @@ export function registerCreateAgentSkill(server: McpServer) {
         : and(eq(schema.agentSkills.name, name), isNull(schema.agentSkills.projectId));
       const existing = await db.select().from(schema.agentSkills).where(scopeCondition).limit(1);
       if (existing.length > 0) {
-        return { content: [{ type: "text" as const, text: `Skill '${name}' already exists in this scope with ID ${existing[0].id}` }] };
+        return mcpText(`Skill '${name}' already exists in this scope with ID ${existing[0].id}`);
       }
 
       const id = randomUUID();
@@ -49,9 +50,7 @@ export function registerCreateAgentSkill(server: McpServer) {
         updatedAt: now,
       });
 
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify({ id, name, description, model: model ?? null, projectId: scopeProjectId, isInit: isInit ?? false }, null, 2) }],
-      };
+      return mcpJson({ id, name, description, model: model ?? null, projectId: scopeProjectId, isInit: isInit ?? false });
     },
   );
 }

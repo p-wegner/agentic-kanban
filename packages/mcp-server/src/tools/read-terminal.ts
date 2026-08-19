@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
-import { requireEntity } from "../db-utils.js";
+import { mcpJson, requireEntity } from "../db-utils.js";
 import { readSessionMessages } from "@agentic-kanban/shared/lib/session-messages";
 
 // Strip ANSI escape sequences
@@ -45,18 +45,13 @@ export function registerReadTerminal(server: McpServer) {
         exitCode: row.exitCode != null ? Number(row.exitCode) : undefined,
       }));
 
-      return {
-        content: [{
-          type: "text" as const,
-          text: JSON.stringify({
+      return mcpJson({
             sessionId,
             totalMessages,
             returned: messages.length,
             sessionStatus: r.value.status,
             messages,
-          }, null, 2),
-        }],
-      };
+          });
     },
   );
 }

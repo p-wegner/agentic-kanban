@@ -6,6 +6,7 @@ import { resolve as resolvePath } from "node:path";
 import { db, schema } from "../db.js";
 import { writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { mcpText } from "../db-utils.js";
 
 export function registerInstallSkill(server: McpServer) {
   server.tool(
@@ -28,27 +29,18 @@ export function registerInstallSkill(server: McpServer) {
       const globalBuiltins = allBuiltins.filter(s => s.projectId === null);
 
       if (listOnly) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(
+        return mcpText(JSON.stringify(
                 { availableSkills: globalBuiltins.map(s => ({ name: s.name, description: s.description })) },
                 null,
                 2,
-              ),
-            },
-          ],
-        };
+              ));
       }
 
       const resolvedPath = resolvePath(targetPath);
       try {
         await access(resolvedPath);
       } catch {
-        return {
-          content: [{ type: "text" as const, text: `Error: Target path does not exist: ${resolvedPath}` }],
-        };
+        return mcpText(`Error: Target path does not exist: ${resolvedPath}`);
       }
 
       let skills = [...globalBuiltins];
@@ -56,14 +48,7 @@ export function registerInstallSkill(server: McpServer) {
         const nameSet = new Set(names);
         skills = skills.filter(s => nameSet.has(s.name));
         if (skills.length === 0) {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: `No matching skills found. Available: ${globalBuiltins.map(s => s.name).join(", ")}`,
-              },
-            ],
-          };
+          return mcpText(`No matching skills found. Available: ${globalBuiltins.map(s => s.name).join(", ")}`);
         }
       }
 
@@ -87,11 +72,7 @@ export function registerInstallSkill(server: McpServer) {
         }
       }
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify(
+      return mcpText(JSON.stringify(
               {
                 targetPath: resolvedPath,
                 installed,
@@ -100,10 +81,7 @@ export function registerInstallSkill(server: McpServer) {
               },
               null,
               2,
-            ),
-          },
-        ],
-      };
+            ));
     },
   );
 }

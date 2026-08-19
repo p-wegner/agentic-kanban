@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { mcpStructuredError, requireEntity, resolveStatusByName, checkOpenUnmergedWorkspace } from "../db-utils.js";
+import { checkOpenUnmergedWorkspace, mcpJson, mcpStructuredError, requireEntity, resolveStatusByName } from "../db-utils.js";
 import { transitionIssueStatus, getOutgoingTransitions } from "@agentic-kanban/shared/lib/workflow-engine";
 import { fireIssueStatusWebhook } from "@agentic-kanban/shared/lib/issue-status-orchestration";
 import { isTerminalStatusName } from "@agentic-kanban/shared/lib";
@@ -89,9 +89,7 @@ export function registerMoveIssue(server: McpServer, deps: ToolDeps = prodDeps) 
         statusChangedAt: now,
       });
 
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify({ id: issueId, movedTo: statusName }, null, 2) }],
-      };
+      return mcpJson({ id: issueId, movedTo: statusName });
     },
   );
 }

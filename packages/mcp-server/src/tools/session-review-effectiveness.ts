@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { eq, gte, and, inArray } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { resolveActiveProjectId } from "../db-utils.js";
+import { mcpJson, resolveActiveProjectId } from "../db-utils.js";
 
 /**
  * Mirrors `pnpm cli -- session review-effectiveness`.
@@ -199,12 +199,7 @@ export function registerSessionReviewEffectiveness(server: McpServer, deps: Tool
         perTicket,
       };
 
-      return {
-        content: [{
-          type: "text" as const,
-          text: JSON.stringify(report, null, 2),
-        }],
-      };
+      return mcpJson(report);
     },
   );
 }

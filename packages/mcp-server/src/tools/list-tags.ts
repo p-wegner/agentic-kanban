@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { db, schema } from "../db.js";
+import { mcpJson } from "../db-utils.js";
 
 export function registerListTags(server: McpServer) {
   server.tool(
@@ -9,9 +10,7 @@ export function registerListTags(server: McpServer) {
     async () => {
       const result = await db.select().from(schema.tags);
 
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-      };
+      return mcpJson(result);
     },
   );
 }
