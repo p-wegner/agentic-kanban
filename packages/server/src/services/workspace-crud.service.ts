@@ -25,8 +25,7 @@ import {
 import { createWorkspaceCleanupService } from "./workspace-cleanup.service.js";
 import { cleanupSiblingWorktrees } from "./workspace-repos.service.js";
 import { createWorkspaceCreateService } from "./workspace-create.service.js";
-import { workspaceServicesService, parseStoredComposeProjectName } from "./workspace-services.service.js";
-import { reapWorkspaceContainer } from "./devcontainer-workspace.service.js";
+import { releaseWorkspaceResources } from "./workspace-resource-release.js";
 import { resolveProjectDevServerPlan } from "./dev-server.service.js";
 import { isSelfProjectRepo } from "./self-project.js";
 import type { WorkspaceDevServerPlanResponse } from "@agentic-kanban/shared";
@@ -64,23 +63,11 @@ export function createWorkspaceCrudService(deps: {
 
     await deleteWorkspaceCascade(workspaceId, database);
 
-    // Per-workspace Docker service stack teardown runs UNCONDITIONALLY (stacks are
-    // keyed per workspace/compose project, NOT per worktree) — it must not hide behind
-    // the sharedByOthers worktree gate below, or a deleted sharer's own stack leaks
-    // (finding 12). The engine's last-reference guard skips the down while another
-    // live workspace still references the SAME compose project (shared-worktree
-    // adoption), so the last sharer to go downs the shared stack. Uses the STORED
-    // compose project name (never a recompute, #F1). Best-effort — never throws.
-    if (workingDir && !isDirect && repoPath) {
-      const delComposeName = parseStoredComposeProjectName(wsRow[0]?.serviceState);
-      if (delComposeName) {
-        await workspaceServicesService.teardownWorkspaceServices({
-          composeProjectName: delComposeName,
-          composeWorktreePath: workingDir,
-          releasedByWorkspaceId: workspaceId,
-        });
-      }
-    }
+    // Runs UNCONDITIONALLY, ahead of the sharedByOthers worktree gate below: stacks are
+    // keyed per workspace/compose project, NOT per worktree, so hiding this behind that
+    // gate leaks a deleted sharer's own stack (finding 12). The engine's last-reference
+    // guard is what protects a genuinely SHARED stack.
+    await releaseWorkspaceResources({ id: workspaceId, workingDir, isDirect, serviceState: wsRow[0]?.serviceState });
 
     // A shared-worktree fork child reuses its parent's workingDir. Never remove the
     // directory while another (e.g. the parent) workspace still points at it — this
@@ -144,28 +131,14 @@ export function createWorkspaceCrudService(deps: {
     let workingDirRemoved = workspace.isDirect;
     let cleanupWarning: string | null = null;
     if (!workspace.isDirect && workspace.workingDir) {
-      // Per-workspace Docker service stack down (only when one was provisioned) before
-      // the worktree goes away. Uses the STORED compose project name (#F1). Best-effort —
-      // the engine never throws. This workspace's own (still-live) row must not block
-      // its own release, so it is passed as the releaser; the engine's last-reference
-      // guard still skips the down while a co-resident sharer references the stack.
-      const closeComposeName = parseStoredComposeProjectName(workspace.serviceState);
-      if (closeComposeName) {
-        await withStepTimeout("teardown-service-stack", () =>
-          workspaceServicesService.teardownWorkspaceServices({
-            composeProjectName: closeComposeName,
-            composeWorktreePath: workspace.workingDir!,
-            releasedByWorkspaceId: workspaceId,
-          }),
-        ).catch((err) => console.warn(`[workspaces] close: service-stack teardown failed/timed out for ${workspaceId} (best-effort)`, err));
-      }
-      // Devcontainer builder teardown (#138), also before the worktree goes away:
-      // the container bind-mounts this directory, and its dependency volumes
-      // cannot be removed while it still holds them. No-op when the workspace was
-      // never containerized (nothing matches the label / name prefix).
-      await withStepTimeout("reap-devcontainer", () =>
-        reapWorkspaceContainer({ worktreePath: workspace.workingDir!, workspaceId }),
-      ).catch((err) => console.warn(`[workspaces] close: devcontainer reap failed/timed out for ${workspaceId} (best-effort)`, err));
+      // Stack + container, before the worktree goes away. This workspace's own
+      // (still-live) row must not block its own release, so it is passed as the
+      // releaser; the engine's last-reference guard still skips the down while a
+      // co-resident sharer references the stack.
+      await releaseWorkspaceResources(
+        { id: workspaceId, workingDir: workspace.workingDir, isDirect: workspace.isDirect, serviceState: workspace.serviceState },
+        { step: withStepTimeout, phase: "close" },
+      );
 
       const { repoPath } = await resolveProjectRepo(workspaceId, database).catch(() => ({ repoPath: null as string | null }));
       if (repoPath) {
