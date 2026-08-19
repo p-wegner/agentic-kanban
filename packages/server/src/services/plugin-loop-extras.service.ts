@@ -13,6 +13,7 @@ import { parseScaffoldFields, applyScaffoldValues } from "./plugin-scaffold.js";
 import { listPluginLoopSessionStats } from "../repositories/plugins.repository.js";
 import type { PluginRow } from "../repositories/plugins.repository.js";
 import type { PluginLoopEngine } from "./plugin-loop.service.js";
+import type { PluginLoopRunContext } from "./plugin-loop-types.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
@@ -33,13 +34,19 @@ export interface PluginLoopExtrasCtx {
   requireProject: (projectId: string) => Promise<{ id: string; name: string; repoPath: string }>;
   resolveOutputRepoPath: (plugin: PluginWithManifest, project: { id: string; repoPath: string }) => Promise<string>;
   resolveWorkflowTemplateId: (projectId: string, workflow: string | undefined) => Promise<string | null>;
+  /** #554: the one prelude every loop entry point runs — see plugin.service. */
+  resolveLoopRunContext: (
+    pluginRowId: string,
+    loopName: string,
+    projectId: string,
+  ) => Promise<PluginLoopRunContext>;
 }
 
 /** Cap on artifact bytes returned to the panel — a doc, not a data dump. */
 const ARTIFACT_CONTENT_CAP = 256 * 1024;
 
 export function createPluginLoopExtras(ctx: PluginLoopExtrasCtx) {
-  const { database, loops, requirePlugin, requireProject, resolveOutputRepoPath, resolveWorkflowTemplateId } = ctx;
+  const { database, loops, requirePlugin, requireProject, resolveOutputRepoPath, resolveWorkflowTemplateId, resolveLoopRunContext } = ctx;
 
   /** Apply a human's gate decision (#286), then re-plan. See plugin-loop.service. */
   async function resolveLoopGate(
@@ -48,24 +55,11 @@ export function createPluginLoopExtras(ctx: PluginLoopExtrasCtx) {
     projectId: string,
     body: { gateId: string; actionId: string; input?: string },
   ) {
-    const plugin = await requirePlugin(pluginRowId);
-    const project = await requireProject(projectId);
-    const outputRepoPath = await resolveOutputRepoPath(plugin, project);
-    const loopDef = (plugin.manifest.loops ?? []).find((l) => l.name === loopName);
-    const skillDef = (plugin.manifest.skills ?? []).find((s) => pluginSkillName(s.dir) === loopDef?.skill);
-    const workflowTemplateId = await resolveWorkflowTemplateId(projectId, loopDef?.workflow ?? skillDef?.workflow);
+    // Same prelude as advanceLoop, resolved by the SAME function (#554) — this used to be
+    // a hand-copied twin, workflow-inheritance rule and all.
+    const { args } = await resolveLoopRunContext(pluginRowId, loopName, projectId);
     return loops.resolveGate({
-      manifest: plugin.manifest,
-      pluginSlug: plugin.pluginId,
-      pluginName: plugin.name,
-      pluginRowId: plugin.id,
-      pluginLocalPath: plugin.localPath,
-      loopName,
-      projectId,
-      projectName: project.name,
-      repoPath: outputRepoPath,
-      leadingRepoPath: project.repoPath,
-      workflowTemplateId,
+      ...args,
       gateId: body.gateId,
       actionId: body.actionId,
       input: body.input,

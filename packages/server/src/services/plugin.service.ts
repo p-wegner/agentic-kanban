@@ -4,6 +4,7 @@ import {
   parsePluginManifest,
   pluginSkillName,
   substitutePluginEnv,
+  buildPluginPlaceholderVars,
   substitutePluginPlaceholders,
   type PluginManifest,
   type PluginPlaceholderVars,
@@ -22,6 +23,7 @@ import {
 import type { CreateIssueInput, CreateIssueResult } from "./issue.service.js";
 import type { CreateWorkspaceInput, CreateWorkspaceResult } from "./workspace-internals.js";
 import { enabledPluginSlugsByProject, listEnabledPlugins } from "./plugin-enabled.js";
+import type { PluginLoopRunContext, PluginRunContext } from "./plugin-loop-types.js";
 import { createPluginEnablementOps } from "./plugin-enablement.service.js";
 import { createPluginLifecycleOps } from "./plugin-lifecycle.service.js";
 import { createPluginListingOps } from "./plugin-listing.service.js";
@@ -219,14 +221,14 @@ export function createPluginService(deps: {
         // saying "the register lives in {{repoPath}}/docs" named a path with nothing in it.
         // Resolved WITHOUT creating anything — assembling a prompt must not materialize a repo —
         // so a sidecar that has not been created yet still falls back to the leading repo.
-        const vars = {
-          repoPath: await peekOutputRepoPath(row.pluginId, project),
+        const vars = buildPluginPlaceholderVars({
+          outputRepoPath: await peekOutputRepoPath(row.pluginId, project),
           leadingRepoPath: project.repoPath,
           projectName: project.name,
           pluginPath: row.localPath,
           boardUrl,
           projectId,
-        };
+        });
 
         const parts: string[] = [];
         if (manifest.butler?.promptFragment) {
@@ -256,20 +258,9 @@ export function createPluginService(deps: {
 
   async function runScript(pluginRowId: string, scriptName: string, projectId: string): Promise<PluginScriptResult> {
     const plugin = await requirePlugin(pluginRowId);
-    const project = await requireProject(projectId);
     const script = (plugin.manifest.scripts ?? []).find((s) => s.name === scriptName);
     if (!script) throw new PluginError(`Script "${scriptName}" not found in plugin manifest`, "NOT_FOUND");
-    const outputRepoPath = await resolveOutputRepoPath(plugin, project);
-    await requireScaffoldReady(plugin, outputRepoPath, "scripts");
-
-    const vars: PluginPlaceholderVars = {
-      repoPath: outputRepoPath,
-      leadingRepoPath: project.repoPath,
-      projectName: project.name,
-      pluginPath: plugin.localPath,
-      boardUrl,
-      projectId,
-    };
+    const { outputRepoPath, vars } = await resolvePluginRunContext(pluginRowId, projectId, { requireScaffoldFor: "scripts" });
     return runPluginCommand(substitutePluginPlaceholders(script.command, vars), {
       cwd: script.cwd === "plugin" ? plugin.localPath : outputRepoPath,
       env: substitutePluginEnv(script.env, vars),
@@ -388,36 +379,77 @@ export function createPluginService(deps: {
   }
 
   /**
+   * Everything a plugin RUN needs, resolved once (#554): the plugin row + manifest, the
+   * project, where its output goes, and the placeholder vars. The prelude (requirePlugin →
+   * requireProject → resolveOutputRepoPath → optional scaffold check) was written out at
+   * every entry point, and each copy could disagree — the measured one handed the butler
+   * the leading repo as `{{repoPath}}`.
+   */
+  async function resolvePluginRunContext(
+    pluginRowId: string,
+    projectId: string,
+    opts?: { requireScaffoldFor?: "loops" | "scripts" },
+  ): Promise<PluginRunContext> {
+    const plugin = await requirePlugin(pluginRowId);
+    const project = await requireProject(projectId);
+    const outputRepoPath = await resolveOutputRepoPath(plugin, project);
+    if (opts?.requireScaffoldFor) await requireScaffoldReady(plugin, outputRepoPath, opts.requireScaffoldFor);
+    return {
+      plugin,
+      project,
+      outputRepoPath,
+      vars: buildPluginPlaceholderVars({
+        outputRepoPath,
+        leadingRepoPath: project.repoPath,
+        projectName: project.name,
+        pluginPath: plugin.localPath,
+        boardUrl,
+        projectId,
+      }),
+    };
+  }
+
+  /**
+   * The same, plus the flat argument object every loop entry point passes to the loop
+   * engine — `advanceLoop` and `resolveLoopGate` built it field by field from identical
+   * preludes, including the "a loop declares its own workflow, or inherits its skill's"
+   * rule, which nobody is at the keyboard to supply when the monitor advances a round.
+   */
+  async function resolveLoopRunContext(
+    pluginRowId: string,
+    loopName: string,
+    projectId: string,
+    opts?: { requireScaffoldFor?: "loops" },
+  ): Promise<PluginLoopRunContext> {
+    const ctx = await resolvePluginRunContext(pluginRowId, projectId, opts);
+    const loopDef = (ctx.plugin.manifest.loops ?? []).find((l) => l.name === loopName);
+    const skillDef = (ctx.plugin.manifest.skills ?? []).find((s) => pluginSkillName(s.dir) === loopDef?.skill);
+    const workflowTemplateId = await resolveWorkflowTemplateId(projectId, loopDef?.workflow ?? skillDef?.workflow);
+    return {
+      ...ctx,
+      args: {
+        pluginRowId: ctx.plugin.id,
+        manifest: ctx.plugin.manifest,
+        pluginSlug: ctx.plugin.pluginId,
+        pluginName: ctx.plugin.name,
+        pluginLocalPath: ctx.plugin.localPath,
+        loopName,
+        projectId,
+        projectName: ctx.project.name,
+        repoPath: ctx.outputRepoPath,
+        leadingRepoPath: ctx.project.repoPath,
+        workflowTemplateId,
+      },
+    };
+  }
+
+  /**
    * Advance one converging loop: plan, then create a ticket per outstanding unit.
    * The board's monitor is what STARTS those tickets — see plugin-loop.service.
    */
   async function advanceLoop(pluginRowId: string, loopName: string, projectId: string): Promise<LoopAdvanceResult> {
-    const plugin = await requirePlugin(pluginRowId);
-    const project = await requireProject(projectId);
-    const outputRepoPath = await resolveOutputRepoPath(plugin, project);
-    await requireScaffoldReady(plugin, outputRepoPath, "loops");
-    // A loop declares its own workflow, or inherits the one its skill declares — nobody is at
-    // the keyboard when the monitor advances a round, so the manifest is the only place this
-    // choice can come from.
-    const loopDef = (plugin.manifest.loops ?? []).find((l) => l.name === loopName);
-    const skillDef = (plugin.manifest.skills ?? []).find((s) => pluginSkillName(s.dir) === loopDef?.skill);
-    const workflowTemplateId = await resolveWorkflowTemplateId(
-      projectId,
-      loopDef?.workflow ?? skillDef?.workflow,
-    );
-    return loops.advanceLoop({
-      pluginRowId: plugin.id,
-      manifest: plugin.manifest,
-      pluginSlug: plugin.pluginId,
-      pluginName: plugin.name,
-      pluginLocalPath: plugin.localPath,
-      loopName,
-      projectId,
-      projectName: project.name,
-      repoPath: outputRepoPath,
-      leadingRepoPath: project.repoPath,
-      workflowTemplateId,
-    });
+    const { args } = await resolveLoopRunContext(pluginRowId, loopName, projectId, { requireScaffoldFor: "loops" });
+    return loops.advanceLoop(args);
   }
 
   // Loop-adjacent extras (#286–#295) — gate resolve, timeline+costs, artifacts,
@@ -433,6 +465,7 @@ export function createPluginService(deps: {
     requireProject,
     resolveOutputRepoPath,
     resolveWorkflowTemplateId,
+    resolveLoopRunContext,
   });
 
 

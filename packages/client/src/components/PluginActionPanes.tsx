@@ -64,12 +64,11 @@ function OpenTicketLinks({ refs }: { refs: Array<{ issueId: string; issueNumber:
   );
 }
 
-export type PluginOwner = {
-  /** Plugin DB row id — the `:id` segment of the plugin routes. */
-  pluginId: string;
-  pluginSlug: string;
-  pluginName: string;
-};
+// Declared once, in shared (#569) — the server builds the same shape in
+// services/plugin-enabled.ts.
+export type { PluginOwner } from "@agentic-kanban/shared";
+
+import type { PluginOwner } from "@agentic-kanban/shared";
 
 export type PluginLoop = PluginOwner & {
   name: string;

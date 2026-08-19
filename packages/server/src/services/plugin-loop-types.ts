@@ -1,4 +1,11 @@
-import type { PluginLoopCheck, PluginLoopGate, PluginLoopProgressStep } from "@agentic-kanban/shared/lib/plugin-manifest";
+import type {
+  PluginLoopCheck,
+  PluginLoopGate,
+  PluginLoopProgressStep,
+  PluginManifest,
+  PluginPlaceholderVars,
+} from "@agentic-kanban/shared/lib/plugin-manifest";
+import type { PluginRow } from "../repositories/plugins.repository.js";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "./board-events.js";
 import type { CreateIssueInput, CreateIssueResult } from "./issue.service.js";
@@ -11,6 +18,36 @@ import type { LoopStall } from "./plugin-loop-stall.js";
  * Split out (#465) so the engine file stays under the god-module line ceiling — pure
  * interfaces, no logic.
  */
+
+/**
+ * One plugin RUN, resolved once (#554) — see `resolvePluginRunContext` in plugin.service.
+ * Every entry point (butler fragment, script, view, loop plan, loop gate) needs the same
+ * four things, and assembling them by hand is what let `{{repoPath}}` disagree per site.
+ */
+export interface PluginRunContext {
+  plugin: PluginRow & { manifest: PluginManifest };
+  project: { id: string; name: string; repoPath: string };
+  /** Where this plugin's output goes: the leading repo, or its sidecar. */
+  outputRepoPath: string;
+  vars: PluginPlaceholderVars;
+}
+
+/** A run context plus the flat argument object the loop engine takes. */
+export interface PluginLoopRunContext extends PluginRunContext {
+  args: {
+    pluginRowId: string;
+    manifest: PluginManifest;
+    pluginSlug: string;
+    pluginName: string;
+    pluginLocalPath: string;
+    loopName: string;
+    projectId: string;
+    projectName: string;
+    repoPath: string;
+    leadingRepoPath: string;
+    workflowTemplateId: string | null;
+  };
+}
 
 export interface LoopCreatedTicket {
   unitId: string;
