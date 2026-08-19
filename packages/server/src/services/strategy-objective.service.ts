@@ -1,3 +1,4 @@
+import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { preferences } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import { getProfilePrefKey } from "./agent-provider.js";
@@ -149,7 +150,7 @@ export async function resolveStrategyProviderSelection(
   projectId: string | null | undefined,
 ): Promise<{ provider: "claude" | "codex" | "copilot" | "pi"; profileName: string; model?: string } | null> {
   if (!projectId) return null;
-  const prefRows = await database.select().from(preferences);
+  const prefRows = await getAllPreferencesCached(database);
   const prefMap = toPrefMap(prefRows);
   // #497: read+parse via the shared helper. It returns null for absent OR malformed, which
   // the outer catch below already collapsed to the same `return null`.

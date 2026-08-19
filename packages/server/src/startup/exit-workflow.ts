@@ -1,3 +1,5 @@
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
+import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { isSpecPlanningStageName, transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
@@ -308,7 +310,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     roleFlags: SessionRoleFlags,
   ): Promise<void> {
     const resetsAt = parseRateLimitRetryAfter(statsJson);
-    const rotationPrefMap = new Map((await db.select().from(preferences)).map((r) => [r.key, r.value]));
+    const rotationPrefMap = toPrefMap(await getAllPreferencesCached(db));
     const currentProfile = rotationPrefMap.get(cfg.profilePrefKey) || "default";
     const rotation = await cfg.rotate(db, rotationPrefMap, currentProfile, resetsAt, new Date(now));
     // Builder = none of the special roles. Resolved from the in-memory sets AND the
@@ -460,7 +462,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
 
       const statuses = await db.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
       const findStatus = (name: string) => statuses.find((s) => s.name === name);
-      const prefMap = new Map((await db.select().from(preferences)).map((r) => [r.key, r.value]));
+      const prefMap = toPrefMap(await getAllPreferencesCached(db));
       const autoMergeEnabled = isAutomaticMergeEnabled(prefMap);
       const projectRows = await db.select({ defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.id, projectId)).limit(1);
       const defaultBranch = projectRows.length > 0 ? projectRows[0].defaultBranch : null;

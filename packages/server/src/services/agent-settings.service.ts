@@ -1,3 +1,4 @@
+import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { readBoardEnv } from "../lib/env-registry.js";
 import { resolve, dirname } from "node:path";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
@@ -42,7 +43,7 @@ export async function loadAgentSettings(
   database: Database,
   commandOverride?: string,
 ): Promise<AgentSettings> {
-  const prefRows = await database.select().from(preferences);
+  const prefRows = await getAllPreferencesCached(database);
   const prefMap = toPrefMap(prefRows);
   return resolveAgentSettings(prefMap, commandOverride);
 }

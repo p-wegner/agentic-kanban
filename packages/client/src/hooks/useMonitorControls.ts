@@ -1,3 +1,4 @@
+import { boardStrategyPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { useState } from "react";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { setSettings as savePreferences } from "../lib/settingsStore.js";
@@ -75,7 +76,7 @@ export function useMonitorControls(
     setMigratingToStrategy(true);
     try {
       const strategyConfig = buildMigrationConfig(wipLimit);
-      await savePreferences({ [`board_strategy_${activeProjectId}`]: JSON.stringify(strategyConfig) });
+      await savePreferences({ [boardStrategyPref.key(activeProjectId)]: JSON.stringify(strategyConfig) });
       showToast("Migrated to Strategy Bullseye", "success");
       await fetchMonitorTunables();
     } catch {

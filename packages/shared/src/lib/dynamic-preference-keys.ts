@@ -36,6 +36,12 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   "monitor_policy_presets",
   "wip_limit",
   "outbound_webhook_url",
+  // #613 — was absent from this table for its whole life. It was still ACCEPTED on write,
+  // via the dedicated `isBoardStrategyPreferenceKey` predicate OR-ed in beside the table,
+  // so the gap was invisible; what it actually cost is that `projectPref` could not be used
+  // for it, and eleven sites hand-wrote `board_strategy_${projectId}` instead — including a
+  // SECOND deriver in the client. Registering it is what makes the family buildable.
+  "board_strategy",
   "board_autodrive",
   "start_mode",
   "board_conductor",
@@ -150,9 +156,12 @@ function matchesScopedKey(key: string, prefixes: readonly string[], suffixIsVali
 }
 
 /**
- * True for a recognized per-project / per-name dynamic preference key. Pure — does
- * NOT cover the board-strategy key (which has its own predicate below, and which the
- * server service ORs in via a normalize-aware wrapper).
+ * True for a recognized per-project / per-name dynamic preference key. Pure.
+ *
+ * Since #613 this DOES cover the board-strategy key, because `board_strategy` is finally in
+ * the prefix table. Its dedicated predicate below is still OR-ed in by the server service
+ * and is deliberately LOOSER (any hex-dash suffix, not the strict UUID shape), so nothing
+ * that used to be accepted stopped being accepted.
  */
 export function isProjectScopedDynamicKey(key: string): boolean {
   return matchesScopedKey(key, PROJECT_SCOPED_KEY_PREFIXES, (rest) => PROJECT_ID_SUFFIX.test(rest))
@@ -263,3 +272,19 @@ export function projectPref(prefix: ProjectScopedPrefix): ProjectPref {
     },
   };
 }
+
+/**
+ * The Strategy Bullseye key family (#613).
+ *
+ * CLAUDE.md calls this preference "the single source of truth" for provider selection and
+ * monitor tunables, and it was the most hand-written key in the repo: eleven production
+ * sites building `board_strategy_${projectId}` inline, plus `settingsKey` in
+ * `client/lib/strategy-targets.ts` deriving it a second time. A key with two derivers is a
+ * key with two spellings waiting to happen, and the client's copy is the one nothing on the
+ * server would catch.
+ *
+ * Exported as a ready-made family rather than left to each caller's `projectPref(...)` call
+ * so the CLIENT can use it too — `client/` cannot import server services, which is exactly
+ * why the second deriver existed.
+ */
+export const boardStrategyPref: ProjectPref = projectPref("board_strategy");

@@ -27,7 +27,7 @@ import {
   getWorkspaceSessions,
   getWorkspaceSkillName,
 } from "../repositories/session.repository.js";
-import { getPreference } from "../repositories/preferences.repository.js";
+import { getPreference, getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { buildImplementPrompt, buildRejectPrompt, writePlanFile, PLAN_FILE } from "./plan-mode.service.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import { buildPhaseArtifactsContext, isImplementWorkflowNode } from "./phase-artifacts.service.js";
@@ -101,7 +101,7 @@ export function createWorkspaceSessionService(deps: {
       }
     }
 
-    const prefRows = await database.select().from(preferences);
+    const prefRows = await getAllPreferencesCached(database);
     const prefMap = toPrefMap(prefRows);
     const { agentCommand, agentArgs, profile: agentProfile, provider: agentProvider, resumeWithNewModel, permissionPromptTool } =
       applyWorkspaceAgentSelection(resolveAgentSettings(prefMap, body.agentCommand as string | undefined), ws0);
