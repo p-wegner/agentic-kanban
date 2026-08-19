@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { resolve, sep, join } from "node:path";
 import { getDefaultSkillId } from "./project-scaffold.js";
 import { scaffoldAndPopulateProject } from "./project-registration.js";
+import { getNumber } from "@agentic-kanban/shared/lib/settings-registry";
 import { getPreference, getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import type { Database } from "../db/index.js";
 import { branchExists, detectRepoInfo, getProjectGitStatsAsync } from "./git-info.service.js";
@@ -633,8 +634,10 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     ]);
 
     const prefValue = (key: string) => prefRows.find((r) => r.key === key)?.value;
-    const staleDays = parseInt(prefValue("backlog_stale_days") ?? "14", 10) || 14;
-    const inProgressStaleDays = parseInt(prefValue("inprogress_stale_days") ?? "3", 10) || 3;
+    // #572: the registry owns these defaults (14 / 3) — `getNumber` reads them from it.
+    const prefMap = new Map(prefRows.map((r) => [r.key, r.value] as const));
+    const staleDays = getNumber(prefMap, "backlog_stale_days");
+    const inProgressStaleDays = getNumber(prefMap, "inprogress_stale_days");
     const now = new Date(nowOverride ?? new Date().toISOString()).getTime();
 
     return buildBoardColumns({
