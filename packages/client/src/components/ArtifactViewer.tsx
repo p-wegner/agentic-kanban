@@ -10,7 +10,7 @@ import {
   splitHighlight,
   splitLines,
   type MarkdownHeading,
-} from "./markdownNavigation.js";
+} from "../lib/markdownNavigation.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export { findMatchingLines, parseMarkdownOutline, slugifyHeading, splitHighlight, type MarkdownHeading };

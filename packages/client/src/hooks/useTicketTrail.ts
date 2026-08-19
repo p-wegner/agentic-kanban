@@ -12,9 +12,9 @@ import {
   visit as coreVisit,
   type TrailEntry,
   type TrailState,
-} from "./ticketTrailCore.js";
+} from "../lib/ticketTrailCore.js";
 
-export type { TrailEntry } from "./ticketTrailCore.js";
+export type { TrailEntry } from "../lib/ticketTrailCore.js";
 
 // Multi-ticket detail tracking (#383).
 //

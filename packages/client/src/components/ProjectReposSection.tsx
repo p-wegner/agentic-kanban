@@ -5,7 +5,7 @@ import { apiDelete, apiPatch, apiPost } from "../lib/api.js";
 import { fetchProjectRepos, invalidateProjectRepos } from "../lib/projectReposQuery.js";
 import { showToast } from "./Toast.js";
 import { CollapsibleSection } from "./SettingsPanel.shared.js";
-import { buildRepoPatch, repoFormFromResponse, type RepoEditFormState } from "./repoEditPayload.js";
+import { buildRepoPatch, repoFormFromResponse, type RepoEditFormState } from "../lib/repoEditPayload.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**

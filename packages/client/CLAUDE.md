@@ -1,5 +1,41 @@
 # Client Package — Architecture Patterns
 
+## Two client patterns that were consistent but unnamed (#589)
+
+### `lib/<feature>.ts` — the pure core beside a component or hook
+
+The client's testable logic already lives this way: a pure view-model in `lib/`, paired with
+the component or hook that renders it — `crossRepoImpact.ts` ↔ `CrossRepoImpactHeatmap.tsx`,
+`mergeReadiness.ts` ↔ `MergeReadinessBoard.tsx`, `boardRouteSync.ts` ↔ `useBoardPageRoute.ts`,
+`ticketTrailCore.ts` ↔ `useTicketTrail.ts`. The split is visible in the test ratio: 85 test
+files for 125 `lib/` files, against 43 for 244 components.
+
+**Rule: a pure module belongs in `lib/`, whatever renders it.** `components/` is `.tsx`;
+`hooks/` is `use*`. A pure `.ts` in either is a stray, and five had accumulated
+(`gateCardPolicy`, `markdownNavigation`, `repoEditPayload`, `workflowHistory`,
+`hooks/ticketTrailCore`) — all now in `lib/` with their tests. `components/boardLazyViews.ts`
+is the one deliberate exception: it is lazy-import WIRING for components, not logic, and it
+names them.
+
+### `lib/<entity>Query.ts` — the query-options module
+
+`xQueryOptions(id) → { queryKey, queryFn, staleTime }` plus `fetchX` and
+`invalidateX(queryClient)`, with keys in `boardQueryKeys.ts`: `boardColumnsQuery.ts`,
+`projectReposQuery.ts`, `workspacesListQuery.ts`, `workspaceRepoStatusQuery.ts`.
+
+This is the endorsed TARGET of the client data-fetching ring (#513) — the ~40 hand-rolled
+`data/loading/error/cancelled/retryKey` ladders migrate here. Naming it is what makes
+"migrate to react-query" a concrete instruction rather than a direction.
+
+### And the DTOs they consume: `lib/<feature>Types.ts` (#610)
+
+`projectTypes.ts`, `issueDetailTypes.ts`, `boardTypes.ts`, `settingsTypes.ts`. A type-only
+import is erased at compile time, so a hook importing its own return type UP from the
+component that renders it never fails — which is how `routes/BoardPage.tsx` became the
+board's DTO module, `Tag` ended up declared five times, and `WorkspaceInitial` twice with a
+real disagreement about whether `sessionId` was optional. Declare the DTO in `lib/`; the
+component may re-export it.
+
 ## tsconfig excludes test files
 `tsconfig.json` uses `"include": ["src"]` which picks up `*.test.ts` files. Always include `"exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]` — otherwise `tsc -b` fails because vitest isn't a declared type dep for production builds.
 
