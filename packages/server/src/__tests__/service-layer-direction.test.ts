@@ -16,7 +16,11 @@ import { walkPackageSources } from "../../../shared/__tests__/helpers/guard-scan
  *
  * Four were fixed by relocating pure utilities. The last needed a real extraction:
  * `plugin-loop-start.service` wanted ~40 lines of WIP counting and had to import a 579-line
- * orchestrator to get them, so those lines became `services/wip-capacity.service.ts`.
+ * orchestrator to get them, so those lines became `repositories/wip-capacity.repository.ts`
+ * — a REPOSITORY, because the first attempt put them in `services/` and depcruise's
+ * `services-bypass-repositories` rejected it on the spot for building a drizzle query. The
+ * same code had sat in `startup/` for months without complaint, since `startup/` is outside
+ * every depcruise rule (#595).
  *
  * Zero-tolerance. `pattern_edges.py` measures this too, but nothing runs it in CI — which is
  * how five violations accumulated in a three-month-old repo.

@@ -1,6 +1,6 @@
 import type { Database } from "../db/index.js";
 import { getInProgressStatusId } from "../repositories/plugins.repository.js";
-import { countActiveWip } from "./wip-capacity.service.js";
+import { countActiveWip } from "../repositories/wip-capacity.repository.js";
 import { claimIssueForAutoStart } from "./auto-start-claim.js";
 import { completeCreateJob, failCreateJob } from "./create-job.service.js";
 import type { StartPolicy } from "./start-policy.service.js";
