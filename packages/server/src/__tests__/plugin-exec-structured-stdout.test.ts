@@ -66,13 +66,20 @@ describe("plugin-exec structured stdout", () => {
     expect(plan.units).toHaveLength(24);
   });
 
-  it("still tail-truncates by default, and that is why a plan must opt out", async () => {
+  it("still tail-truncates by default, and a clipped payload is REFUSED, not read (#662)", async () => {
     const result = await runPluginCommand(command, { cwd: process.cwd(), env: {} });
     expect(result.code, `stderr: ${result.stderr}`).toBe(0);
     expect(result.stdoutTruncated).toBe(true);
     expect(result.stdout.length).toBeLessThanOrEqual(16_384);
-    // Front clipped ⇒ unparseable at every offset. This is the bug, pinned.
-    expect(() => parsePluginLoopPlan(result.stdout)).toThrow(/not JSON/);
+
+    // Told the payload was clipped, the parser refuses before looking at the bytes.
+    expect(() => parsePluginLoopPlan(result.stdout, { truncated: true })).toThrow(/truncated/);
+
+    // And even WITHOUT the flag it must not invent a plan. Front-clipping used to make this
+    // throw "not JSON"; since the tolerant extractor (#550) it recovers ONE unit object from
+    // the middle of the stream — which has no `units` key, so it used to parse as an empty,
+    // CONVERGED plan and silently end the loop. That is the #662 regression, pinned.
+    expect(() => parsePluginLoopPlan(result.stdout)).toThrow(/not a plan|not JSON/);
   });
 
   it("tailOutput keeps its default cap for existing callers", () => {
