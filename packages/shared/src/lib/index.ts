@@ -53,3 +53,4 @@ export * from "./issue-ref.js";
 // Issue-domain closed vocabularies as runtime arrays (#570) — pure, no Node builtins.
 export * from "./issue-vocab.js";
 export * from "./project-statuses.js";
+export * from "./board-health-events.js";
