@@ -241,10 +241,24 @@ export function getBool(source: PrefSource, key: string, fallback = false): bool
   return parseBoolSetting(key, readRaw(source, key), fallback);
 }
 
-/** Numeric read: parses the string; returns `fallback` when absent or unparseable. */
+/**
+ * Numeric read. Unset/empty ⇒ the SETTINGS_REGISTRY default for the key, exactly as
+ * `getBool` does (#572) — `fallback` remains for keys outside the registry (a dynamic
+ * per-project key has no registry row to default from).
+ *
+ * The asymmetry this closes is what #947 introduced by fixing the bool half only: with
+ * `getNumber` ignoring the registry, `auto_monitor_interval` (registry default "4") was
+ * re-defaulted inline at seven call sites across server and client, so the registry was the
+ * source of truth for bool defaults and merely a suggestion for number ones. An unparseable
+ * stored value still falls back rather than defaulting — garbage is the caller's problem to
+ * survive, not a reason to silently adopt the registry value.
+ */
 export function getNumber(source: PrefSource, key: string, fallback = 0): number {
+  const def = (SETTINGS_REGISTRY as Record<string, SettingDef | undefined>)[key];
+  const registryDefault = def && def.type === "number" && def.default !== "" ? Number(def.default) : undefined;
+  const unsetValue = registryDefault !== undefined && Number.isFinite(registryDefault) ? registryDefault : fallback;
   const raw = readRaw(source, key);
-  if (raw === undefined || raw === "") return fallback;
+  if (raw === undefined || raw === "") return unsetValue;
   const n = Number(raw);
   return Number.isFinite(n) ? n : fallback;
 }

@@ -1,6 +1,6 @@
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { issues, preferences, projectStatuses, projects, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
-import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
+import { getBool, getNumber } from "@agentic-kanban/shared/lib/settings-registry";
 import { eq, inArray, sql } from "drizzle-orm";
 import type { Hono } from "hono";
 import { db } from "../db/index.js";
@@ -239,7 +239,7 @@ export function setupMonitorRoutes(app: Hono, monitorState: MonitorState, runMon
       globalToggle: getBool(prefMap, "auto_monitor"),
       /** Projects whose resolved Start Mode makes them monitor-driven regardless of the toggle. */
       monitorDrivenProjectCount: drivenProjectIds.size,
-      intervalMin: parseInt(prefMap.get("auto_monitor_interval") || "4", 10),
+      intervalMin: getNumber(prefMap, "auto_monitor_interval"),
       /** Is a timer armed for a future cycle? (NOT "is a cycle running" — see cycleInFlight.) */
       active: monitorState.timer !== null,
       /** Is a cycle executing right now? */
@@ -535,7 +535,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       // #416: global cycle wall-clock budget — 2/3 of the interval by default (pref
       // `monitor_cycle_budget_ms` overrides). Measured against the cycle's own start, so
       // the resource sweep and candidate loading already count against it.
-      const intervalMinForBudget = parseInt(prefMap.get("auto_monitor_interval") || "4", 10);
+      const intervalMinForBudget = getNumber(prefMap, "auto_monitor_interval");
       const budgetPrefMs = Number(prefMap.get("monitor_cycle_budget_ms"));
       const cycleBudgetMs = Number.isFinite(budgetPrefMs) && budgetPrefMs > 0
         ? budgetPrefMs
@@ -611,7 +611,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       await advanceDuePluginLoops(db, {
         allowProject: shouldAutoStartProject,
         minBlockedAdvanceIntervalMs: (() => {
-          const minutes = parseInt(prefMap.get("auto_monitor_interval") || "4", 10);
+          const minutes = getNumber(prefMap, "auto_monitor_interval");
           return Number.isFinite(minutes) && minutes > 0 ? minutes * 60 * 1000 : undefined;
         })(),
         // #444 — recovery for an autoLand unit whose exit hook never ran. `RUN_GATE` by way of
@@ -673,7 +673,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       const prefRows = await db.select().from(preferences).catch(() => []);
       const prefMap = new Map(prefRows.map((r: { key: string; value: string }) => [r.key, r.value]));
       if (monitorShouldRun(prefMap)) {
-        const intervalMin = parseInt(prefMap.get("auto_monitor_interval") || "4", 10);
+        const intervalMin = getNumber(prefMap, "auto_monitor_interval");
         monitorState.nextRunAt = new Date(Date.now() + intervalMin * 60 * 1000).toISOString();
         // Always clear the previous timer before re-arming: event-triggered runs call
         // runMonitorCycle directly (not via the timer), so without this the old periodic
@@ -699,7 +699,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
     refreshMonitorWarningsThrottled(prefMap);
     if (stopped) return;
     const enabled = monitorShouldRun(prefMap);
-    const intervalMin = parseInt(prefMap.get("auto_monitor_interval") || "4", 10);
+    const intervalMin = getNumber(prefMap, "auto_monitor_interval");
     if (enabled && (!monitorState.timer || intervalMin !== monitorState.currentIntervalMin)) {
       if (monitorState.timer && intervalMin !== monitorState.currentIntervalMin) {
         console.log(`[monitor] Interval changed to ${intervalMin}m — restarting monitor immediately`);

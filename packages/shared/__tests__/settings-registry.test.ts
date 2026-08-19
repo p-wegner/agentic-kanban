@@ -78,6 +78,23 @@ describe("typed accessors", () => {
     expect(getNumber({ k: "" }, "k", 7)).toBe(7);
   });
 
+  it("getNumber defaults an UNSET registered key from the registry, like getBool (#572)", () => {
+    // The asymmetry #947 left: the registry owned bool defaults but number defaults were
+    // re-typed inline at seven call sites, so `auto_monitor_interval` had its "4" in eight
+    // places. An explicit stored value still wins.
+    expect(getNumber({}, "auto_monitor_interval")).toBe(4);
+    expect(getNumber(new Map(), "backlog_stale_days")).toBe(14);
+    expect(getNumber({ inprogress_stale_days: "" }, "inprogress_stale_days")).toBe(3);
+    expect(getNumber({ auto_monitor_interval: "9" }, "auto_monitor_interval")).toBe(9);
+  });
+
+  it("getNumber still uses the caller's fallback for a garbage value or an unregistered key", () => {
+    // A dynamic per-project key has no registry row to default from, and a stored value that
+    // does not parse is the caller's problem to survive — not a reason to adopt the registry's.
+    expect(getNumber({ auto_monitor_interval: "nope" }, "auto_monitor_interval", 7)).toBe(7);
+    expect(getNumber({}, "wip_limit_abc123", 5)).toBe(5);
+  });
+
   it("getJson parses, falling back on absent/invalid", () => {
     expect(getJson(new Map([["k", '{"a":1}']]), "k", {})).toEqual({ a: 1 });
     expect(getJson({ k: "[1,2]" }, "k", [])).toEqual([1, 2]);

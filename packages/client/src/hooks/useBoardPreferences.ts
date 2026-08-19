@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
+import { DEFAULT_SETTINGS, getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { getSettings, setSettings } from "../lib/settingsStore.js";
@@ -85,7 +85,7 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
       setAutoReview(isAutoReviewEnabled(s.auto_review));
       setAutoMerge(getBool(s, "auto_merge"));
       setAutoMonitor(getBool(s, "auto_monitor"));
-      setAutoMonitorInterval(s.auto_monitor_interval ?? "4");
+      setAutoMonitorInterval(s.auto_monitor_interval ?? DEFAULT_SETTINGS.auto_monitor_interval);
       setNudgeAutoStart(getBool(s, "nudge_auto_start"));
       setNudgeWipLimit(s.nudge_wip_limit ?? "5");
       const loadedWipLimits: Record<string, number | null> = {};
