@@ -9,7 +9,7 @@ import {
   pluginLoopPausedPreferenceKey,
   pluginLoopUnitKey,
 } from "@agentic-kanban/shared/lib/plugin-manifest";
-import { createTestDb, type TestDb } from "./helpers/test-db.js";
+import { createTestDb, type TestDb, ensureTestStatus } from "./helpers/test-db.js";
 import { seedProject, seedIssue } from "./helpers/workflow-test-helpers.js";
 import { advanceDuePluginLoops } from "../services/plugin-loop-monitor.js";
 import { createPluginService } from "../services/plugin.service.js";
@@ -55,15 +55,9 @@ function makePluginDir(): string {
 
 async function setupLoopWithOneClosedRound(db: TestDb) {
   const { projectId } = await seedProject(db, "Loop Project");
-  const doneStatusId = randomUUID();
-  await db.insert(schema.projectStatuses).values({
-    id: doneStatusId,
-    projectId,
-    name: "Done",
-    sortOrder: 1,
-    isDefault: false,
-    createdAt: new Date().toISOString(),
-  });
+  // #668: `seedProject` already seeds the canonical set, which includes "Done" — inserting
+  // another one built a second Done column. Reuse the one the project already has.
+  const doneStatusId = await ensureTestStatus(db, projectId, "Done", { sortOrder: 1, isDefault: false });
   await seedIssue(db, projectId, doneStatusId, 1, "round 1 unit", {
     externalKey: pluginLoopUnitKey("loop-plugin", "sweep", "unit-1"),
   });

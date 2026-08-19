@@ -50,7 +50,11 @@ async function seedWorkspace(
   const now = new Date().toISOString();
   const projectId = randomUUID();
   const statusId = randomUUID();
-  const doneStatusId = randomUUID();
+  const statusName = opts.statusName ?? "In Review";
+  // #668: a project may not hold two statuses with the same name. When the caller asks for a
+  // "Done" fixture, the primary status IS the Done status — inserting a second one seeded the
+  // exact duplication the constraint now refuses, and this fixture was doing it.
+  const doneStatusId = statusName === "Done" ? statusId : randomUUID();
   const issueId = randomUUID();
   const workspaceId = randomUUID();
 
@@ -67,19 +71,21 @@ async function seedWorkspace(
     {
       id: statusId,
       projectId,
-      name: opts.statusName ?? "In Review",
+      name: statusName,
       sortOrder: 2,
       isDefault: false,
       createdAt: now,
     },
-    {
-      id: doneStatusId,
-      projectId,
-      name: "Done",
-      sortOrder: 3,
-      isDefault: false,
-      createdAt: now,
-    },
+    ...(doneStatusId === statusId
+      ? []
+      : [{
+          id: doneStatusId,
+          projectId,
+          name: "Done",
+          sortOrder: 3,
+          isDefault: false,
+          createdAt: now,
+        }]),
   ]);
   await db.insert(issues).values({
     id: issueId,

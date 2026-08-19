@@ -6,6 +6,7 @@ import { resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID, createHash } from "node:crypto";
 import * as schema from "@agentic-kanban/shared/schema";
+import { and, eq } from "drizzle-orm";
 import { MIGRATION_FILES, MIGRATIONS_DIR, readMigrationStatements } from "./migrations.js";
 
 export type TestDb = ReturnType<typeof drizzle<typeof schema>>;
@@ -204,4 +205,38 @@ export function createTestDb() {
     }
   };
   return { client, db, dispose };
+}
+
+/**
+ * Get-or-create one project status, by name (#668).
+ *
+ * A project may not hold two statuses with the same name — a unique index since migration
+ * 0125. Fixtures that seed per ITEM (`seedSession`, `seedIssue`, `seedWorkspace`) were
+ * called repeatedly against ONE project and inserted a status every time, so a three-session
+ * fixture built three "In Progress" columns. That was always wrong about what a project looks
+ * like; it is now also a constraint violation. Use this instead of a bare insert.
+ */
+export async function ensureTestStatus(
+  db: TestDb,
+  projectId: string,
+  name: string,
+  opts: { sortOrder?: number; isDefault?: boolean } = {},
+): Promise<string> {
+  const existing = await db
+    .select({ id: schema.projectStatuses.id })
+    .from(schema.projectStatuses)
+    .where(and(eq(schema.projectStatuses.projectId, projectId), eq(schema.projectStatuses.name, name)))
+    .limit(1);
+  if (existing.length > 0) return existing[0].id;
+
+  const id = randomUUID();
+  await db.insert(schema.projectStatuses).values({
+    id,
+    projectId,
+    name,
+    sortOrder: opts.sortOrder ?? 0,
+    isDefault: opts.isDefault ?? (opts.sortOrder ?? 0) === 0,
+    createdAt: new Date().toISOString(),
+  });
+  return id;
 }

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { projects, projectStatuses, issues, workspaces, sessions } from "@agentic-kanban/shared/schema";
-import { createTestDb, type TestDb } from "./helpers/test-db.js";
+import { createTestDb, type TestDb, ensureTestStatus } from "./helpers/test-db.js";
 import { createInsightsRoute } from "../routes/insights.js";
 
 interface SeedOpts {
@@ -20,13 +20,12 @@ async function seedSession(
 ) {
   const now = new Date().toISOString();
   const startedAt = opts.startedAt ?? now;
-  const statusId = randomUUID();
   const workspaceId = randomUUID();
   const sessionId = randomUUID();
 
-  await db.insert(projectStatuses).values({
-    id: statusId, projectId, name: "In Progress", sortOrder: 0, isDefault: true, createdAt: now,
-  });
+  // #668: this seeder runs once per SESSION against one project — a bare insert built a
+  // second "In Progress" column on the second call.
+  await ensureTestStatus(db, projectId, "In Progress", { isDefault: true });
   await db.insert(workspaces).values({
     id: workspaceId, issueId, branch: "feature/ak", workingDir: "/tmp/repo/.worktrees/ak",
     baseBranch: "main", isDirect: false, status: "closed", provider: "claude",
@@ -42,11 +41,8 @@ async function seedSession(
 
 async function seedIssue(db: TestDb, projectId: string, opts: { issueTitle?: string; issueNumber?: number } = {}) {
   const now = new Date().toISOString();
-  const statusId = randomUUID();
   const issueId = randomUUID();
-  await db.insert(projectStatuses).values({
-    id: statusId, projectId, name: "Todo", sortOrder: 0, isDefault: true, createdAt: now,
-  });
+  const statusId = await ensureTestStatus(db, projectId, "Todo", { isDefault: true });
   await db.insert(issues).values({
     id: issueId, issueNumber: opts.issueNumber ?? Math.floor(Math.random() * 1e9),
     title: opts.issueTitle ?? "T", priority: "medium", sortOrder: 0, statusId, projectId,
