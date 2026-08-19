@@ -50,6 +50,21 @@ line is not a style nit — it is a line nobody will find later.
   Most survivors are `console.warn(variable)` forwarding a pre-tagged string — legitimate,
   hence a ratchet rather than a ban.
 
+## Named kinds in `startup/` and `services/` (#584, #585, #586)
+
+Three shapes that were consistent in code and nameless in docs. Each now has a guard suite, so
+the rule is checked rather than remembered.
+
+| Kind | Shape | Rule | Guard |
+|---|---|---|---|
+| **background sweep** | crash-safe periodic pass over DB state: `reconcileX(deps, now?) -> Report` behind a module-singleton `startX(deps, intervalMs)` / `stopX()` timer pair. Reconciler / reaper / scanner / pruner / scheduler are sub-flavours of the one kind. | Every start/stop pair under `startup/` or `services/` is registered in `BACKGROUND_SERVICES` (`startup/background-services.ts`, array order = start order = reversed shutdown order) — or is listed in the guard's `NOT_A_SWEEP` map with a reason. Placement does NOT decide membership: three sweeps live under `services/` and are registered. | `background-sweep-registry.test.ts` |
+| **decision function** | pure sync verdict co-located with the executor that acts on it: `decideX(row) -> {action, reason}`, `classifyX(...) -> union`, `shouldX(input) -> boolean`. | No `await`, no `db/` or `repositories/` call. The separability is the whole value: it turns a table of cheap cases into the test, while the sweep around it needs a database. | `decision-function-purity.test.ts` |
+| **prefMap resolver** | prefs/env/context -> ONE decision value: `resolveX(prefMap, ctx)`, pure and synchronous. | **First parameter named `prefMap` implies pure.** `resolve*` alone does NOT — ~10 async db-reading `resolveX(id, database)` functions are ordinary services and stay that way. | `prefmap-resolver-purity.test.ts` |
+
+Both purity guards check the FUNCTION, not the file: these live beside the db-reading code that
+calls them, so a file-level import scan would have to fail them or be relaxed into uselessness.
+They slice the declaration with `sliceTopLevelFunction` from the shared guard machinery.
+
 ## Guard suites — the kind, its marker, and its shared machinery (#583)
 
 A **guard suite** is a test whose subject is the REPO TREE rather than a module: no raw `git`
