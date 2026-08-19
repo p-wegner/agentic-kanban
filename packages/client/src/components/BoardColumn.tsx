@@ -286,6 +286,8 @@ export function BoardColumn({
     <div style={{ display: "contents" }}>
     <div
       id={`column-${column.id}`}
+      data-testid="board-column"
+      data-column-name={column.name}
       className={`${stacked ? "w-full shrink-0" : width != null ? "" : "w-[calc(100vw-2rem)] sm:w-72 shrink-0"} bg-surface-sunken dark:bg-surface-sunken-dark rounded-xl p-2 flex flex-col transition-all relative ${
         dragOver ? "ring-2 ring-brand-400 ring-offset-1 ring-offset-surface dark:ring-offset-surface-dark" : ""
       } ${isColumnDragOver ? "ring-2 ring-brand-300 ring-offset-1 ring-offset-surface dark:ring-offset-surface-dark opacity-75" : ""}`}

@@ -528,7 +528,7 @@ export function IssueDetailPanel({
                 </div>
               </div>
             ) : issue.description ? (
-              <div className="markdown-body">
+              <div className="markdown-body" data-testid="issue-description">
                 <ReactMarkdown>{normalizeMarkdown(issue.description)}</ReactMarkdown>
               </div>
             ) : descriptionFetching ? (

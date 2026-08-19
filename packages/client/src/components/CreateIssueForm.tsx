@@ -189,6 +189,7 @@ export function CreateIssueForm({
 
   return (
     <form
+      data-testid="create-issue-form"
       onSubmit={handleSubmit}
       onKeyDown={handleKeyDown}
       onBlur={handleBlur}
@@ -196,6 +197,7 @@ export function CreateIssueForm({
     >
       <textarea
         ref={titleRef}
+        data-testid="create-issue-title"
         placeholder="Issue title"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
@@ -206,6 +208,7 @@ export function CreateIssueForm({
       />
       <TicketMentionInput
         inputRef={descRef}
+        data-testid="create-issue-description"
         placeholder="Description (optional) — paste screenshots with Ctrl+V"
         value={description}
         onChange={(val) => setDescription(val)}
@@ -363,6 +366,7 @@ export function CreateIssueForm({
       <div className="flex gap-1.5 items-center flex-wrap">
         <button
           type="submit"
+          data-testid="create-issue-submit"
           disabled={!title.trim() || submitting}
           className="text-xs bg-brand-600 text-white px-3 py-1.5 rounded hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
