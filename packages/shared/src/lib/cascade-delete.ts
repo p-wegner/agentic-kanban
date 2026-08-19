@@ -129,6 +129,14 @@ async function deleteIssueCascadeRows(issueId: string, database: DbOrTx): Promis
     await deleteWorkspaceCascadeRows(ws.id, database);
   }
 
+  // #666 — `workspace_provisioning` FKs issues AND projects with NO `onDelete` action, so
+  // SQLite's default RESTRICT applies: with `foreign_keys=ON` (which `db-client.ts` sets
+  // deliberately), deleting an issue that still has a live provisioning marker FAILS with an
+  // FK violation rather than orphaning a row. A crashed or in-flight workspace create is
+  // exactly when a marker exists, which is exactly when someone deletes the issue. Deleted
+  // before the issue row for the same reason every other child is.
+  await database.delete(schema.workspaceProvisioning).where(eq(schema.workspaceProvisioning.issueId, issueId));
+
   await database
     .delete(schema.issueDependencies)
     .where(or(eq(schema.issueDependencies.issueId, issueId), eq(schema.issueDependencies.dependsOnId, issueId)));
@@ -235,6 +243,10 @@ async function deleteProjectCascadeRows(projectId: string, database: DbOrTx): Pr
   await database.delete(schema.scheduledRunHistory).where(eq(schema.scheduledRunHistory.projectId, projectId));
   await database.delete(schema.scheduledRuns).where(eq(schema.scheduledRuns.projectId, projectId));
   await database.delete(schema.projectScriptShortcuts).where(eq(schema.projectScriptShortcuts.projectId, projectId));
+  // #666 — see the note in deleteIssueCascadeRows. A marker whose ISSUE was already gone
+  // (or which never got one) is still project-scoped, so the project delete must sweep by
+  // projectId too rather than relying on the per-issue pass above.
+  await database.delete(schema.workspaceProvisioning).where(eq(schema.workspaceProvisioning.projectId, projectId));
 
   const templates = await database
     .select({ id: schema.workflowTemplates.id })

@@ -296,6 +296,7 @@ describe("deduplicateProjects — lossless across the FULL project-child FK grap
       obstacleId: randomUUID(), templateId: randomUUID(), healthId: randomUUID(),
       flakyId: randomUUID(), shortcutId: randomUUID(), metricId: randomUUID(),
       viewProcessId: randomUUID(), baseBranchHealthId: randomUUID(),
+      provisioningId: randomUUID(),
     };
     const earlier = new Date(Date.now() - 60_000).toISOString();
     const later = new Date().toISOString();
@@ -335,6 +336,14 @@ describe("deduplicateProjects — lossless across the FULL project-child FK grap
     await d.insert(schema.pluginViewProcesses).values({ id: ids.viewProcessId, pluginRowId: randomUUID(), viewId: "dashboard", projectId: ids.dupId, pid: 4242, port: 51234, command: "npm run serve", createdAt: earlier });
     // #491 — base_branch_health joined the project-child FK graph.
     await d.insert(schema.baseBranchHealth).values({ id: ids.baseBranchHealthId, projectId: ids.dupId, sha: "deadbeef", branch: "master", outcome: "green", createdAt: earlier });
+    // #666 — workspace_provisioning joined the project-child FK graph and was never seeded
+    // here, so the reassignment path was unexercised for it. Its FKs declare no `onDelete`
+    // action, which is what made the omission matter rather than merely be untidy.
+    await d.insert(schema.workspaceProvisioning).values({
+      id: ids.provisioningId, issueId: ids.dupIssueId, projectId: ids.dupId,
+      branch: "feature/provisioning", worktreePath: null, serverPid: 1234,
+      phase: "worktree", startedAt: earlier,
+    });
     await d.insert(schema.preferences).values({ key: "activeProjectId", value: ids.dupId, updatedAt: later });
     return ids;
   }
@@ -354,6 +363,8 @@ describe("deduplicateProjects — lossless across the FULL project-child FK grap
       "plugin_view_processes",
       // #491 — base branch health results, cascading on project_id (migration 0121).
       "base_branch_health",
+      // #666 — in the FK graph all along; seeding it is what makes the reassignment tested.
+      "workspace_provisioning",
     ]);
     expect(exercised).toEqual(schemaChildren);
   });
