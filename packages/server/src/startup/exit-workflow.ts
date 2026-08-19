@@ -3,10 +3,10 @@ import { isSpecPlanningStageName, transitionIssueStatus } from "@agentic-kanban/
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { runUnderBuildGate } from "../services/jvm-build-gate.js";
-import { runPreMergeGate, resolveMergeGateShas, gateAlreadyPassed, RUN_GATE, type MergeGateToken } from "../services/pre-merge-gate.service.js";
+import { RUN_GATE, type MergeGateToken } from "../services/pre-merge-gate.service.js";
+import { runGateWithEvidence } from "../services/merge-gate-evidence.js";
 import { getAutoLandLoopTicket } from "../services/plugin-loop-hooks.service.js";
 import { reconcileGroupMemberIssues } from "../services/merge-cleanup.service.js";
-import { movedDuringGate } from "../services/workspace-merge-gate.js";
 import { issues, preferences, projectStatuses, projects, scheduledRunHistory, scheduledRuns, sessions, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { desc, eq } from "drizzle-orm";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
@@ -663,36 +663,33 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     // cold-clone check stays a separate opt-in gate. Any failure WITHHOLDS readyForMerge.
     await applyBuildApprovalRepair(ctx);
     const gateWorkspace = { id: workspaceId, workingDir: workspace.workingDir, baseBranch: workspace.baseBranch || defaultBranch };
-    // Pin the tips BEFORE the gate runs (#243). The gate is a 20-40 minute build+test run and
-    // nothing requires the workspace to be stopped while it runs, so SHAs read afterwards can
-    // name a commit the gate never saw — evidence that asserts verification it does not have.
-    const shasBeforeGate = await resolveMergeGateShas(gateWorkspace);
-    const preMergeGate = await runPreMergeGate(gateWorkspace, projectId, db);
+    // #540: pin → gate → re-pin → mint, via the ONE owner of the #243 protocol. `ranAt` is
+    // stamped at gate END, never from `ctx.now` (captured at the START of runWorkflowOnExit,
+    // 30-45 minutes earlier on a repo whose verify gate is a full suite + build — evidence
+    // stamped with it was born older than MERGE_GATE_EVIDENCE_MAX_AGE_MS and could never be
+    // accepted, so every merge re-ran the whole gate).
+    const preMergeGate = await runGateWithEvidence({
+      workspace: gateWorkspace,
+      projectId,
+      source: "review-exit gate",
+      database: db,
+    });
     if (!preMergeGate.passed) {
       console.log(`[workflow] pre-merge gate failed (${preMergeGate.stage}) for workspace ${workspaceId} — withholding readyForMerge: ${preMergeGate.message}`);
       boardEvents.broadcast(projectId, "workflow_error");
       emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Pre-merge gate failed (${preMergeGate.stage}) for workspace ${workspaceId}; not approved for merge. ${preMergeGate.message.slice(0, 300)}` });
       return;
     }
-    // `ctx.now` was captured at the START of runWorkflowOnExit — 30-45 minutes before this
-    // point on a repo whose verify gate is a full suite + build. Stamping the gate evidence
-    // with it made `ranAt` describe when the SESSION EXITED, not when the gate ran, so
-    // evidence was born older than MERGE_GATE_EVIDENCE_MAX_AGE_MS (15 min) and
-    // `evidenceIsFresh` could never accept it — every merge re-ran the whole gate and the
-    // "honest evidence" of #182 was dead on arrival. Stamp the real completion time.
-    const gateRanAt = new Date().toISOString();
-    // Content-key the persisted evidence too (0108), so the monitor's later merge trigger can
-    // trust a pass whose only sin is age while still re-gating when the base has moved.
-    // #243: the persisted tips are the ones read BEFORE the gate — what it actually verified.
-    // If either moved during the run the pass is about a state that no longer exists, so we
-    // persist NO content key (and no ranAt/stage), which forces the later merge to re-gate
-    // rather than trust a proof token for code the gate never saw.
-    const shasAfterGate = await resolveMergeGateShas(gateWorkspace);
-    const tipMovedDuringGate = movedDuringGate(shasBeforeGate, shasAfterGate);
+    const gateRanAt = preMergeGate.ranAt;
+    // Content-key the persisted evidence (0108), so the monitor's later merge trigger can
+    // trust a pass whose only sin is age while still re-gating when the base has moved. A gate
+    // whose worktree moved under it produced no trustworthy proof — the whole evidence quartet
+    // is cleared rather than left with a ranAt/stage the merge path would honour on age alone.
+    const tipMovedDuringGate = preMergeGate.moved;
     if (tipMovedDuringGate) {
       console.warn(`[workflow] pre-merge gate passed for workspace ${workspaceId} but the ${tipMovedDuringGate} moved DURING the run — persisting no gate evidence (#243)`);
     }
-    const gateShas = tipMovedDuringGate ? {} : shasBeforeGate;
+    const gateShas = tipMovedDuringGate ? {} : preMergeGate.shasBefore;
     if (!(await runColdCloneGate(ctx))) return;
     // #629 Guard: re-verify the branch still has committed changes ahead of base.
     // A race (e.g. branch reset/rebased to equal base between review start and exit)
@@ -736,10 +733,14 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         // Merge-gate DECISION (arch-review §1.2): the shared verify/smoke gate ran (and passed)
         // moments ago above, so hand autoMerge that PROOF as an `already-passed` token — it won't
         // re-run the expensive build. Stale/absent proof would force a re-gate in resolveMergeGate.
-        // `gateShas` was resolved with `gateRanAt` above — the proof stays valid through an
-        // arbitrary lock wait but is voided the moment the base moves under it.
+        // The token is pinned to the tips the gate verified — the proof stays valid through an
+        // arbitrary lock wait but is voided the moment the base moves under it. It is null when
+        // there is nothing worth trusting (a tip moved during the run, or nothing was gated), and
+        // then RUN_GATE makes the executor decide for itself. #540 fixed the old branch here: it
+        // minted sha-less evidence for a run whose tip HAD moved, i.e. proof accepted on age alone
+        // for code the gate never saw — the exact thing the persisted-evidence block above nulls.
         await autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now,
-          gateAlreadyPassed({ ranAt: gateRanAt, stage: preMergeGate.stage, source: "review-exit gate", branchSha: gateShas.branchSha, baseSha: gateShas.baseSha }));
+          preMergeGate.token ?? RUN_GATE);
       } else {
         console.log(`[workflow] review session ${sessionId} completed  queued for scheduled auto-merge`);
       }
