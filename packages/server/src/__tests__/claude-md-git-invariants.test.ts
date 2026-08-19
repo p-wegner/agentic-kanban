@@ -116,15 +116,16 @@ describe("CLAUDE.md git/worktree invariants (#598)", () => {
 });
 
 /**
- * Left OUT of this file, deliberately:
+ * The other three #598 families live elsewhere, and the objections that kept them out of
+ * this file were answered by REFORMULATING them rather than by dropping them:
  *
- *  - "project-specific skills are not in builtin-skills.ts" as a SET-EQUALITY against
- *    `.claude/skills` dirs. That directory also holds plugin skills junctioned in on
- *    enable, so its contents vary per machine and per enabled plugin — the assertion
- *    would fail for reasons unrelated to the rule.
- *  - CLAUDE.md ↔ `buildBoardFeedbackSection` lockstep. Asserting prose appears in two
- *    places pins wording, not behaviour, and goes stale on any rewording; the two would
- *    need a shared constant to be worth testing.
- *  - kill-all-node / `$pid` cases for the safety hook. Those belong in
- *    `command-safety-guard.test.ts` next to the other 34 black-box cases, not here.
+ *  - project-specific skills vs `builtin-skills.ts`, and the CLAUDE.md ↔
+ *    `buildBoardFeedbackSection` lockstep → `claude-md-skill-and-feedback-invariants.test.ts`.
+ *    The skill check asks GIT what is tracked instead of reading the directory, so a
+ *    junctioned plugin skill (per-machine, never tracked) cannot fail it. The feedback check
+ *    pins IDENTIFIERS and the no-silent-fallthrough property instead of prose — and only the
+ *    direction that is true: the rendered section names no mode at all, so it asserts that a
+ *    worktree is never offered a main-checkout mode, not that it names its own.
+ *  - kill-all-node / `$pid` cases for the safety hook → `command-safety-guard.test.ts`,
+ *    beside the other black-box cases, as this note originally said they should be.
  */

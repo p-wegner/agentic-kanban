@@ -382,3 +382,47 @@ describe("validate-command-safety — the reset check reads data-stripped text t
     expect(runGuard(command).blocked).toBe(true);
   });
 });
+
+/**
+ * #598 item 7 — the two CLAUDE.md hard constraints the hook enforces but nothing tested.
+ *
+ * The suite had 34 black-box cases and none for either rule, so both could have been
+ * weakened or regex-broken silently. Every dangerous literal is ASSEMBLED from pieces
+ * rather than written out: the guard reads this file's own command text when the suite is
+ * edited through a shell, and a spelled-out kill would block the very edit that adds the
+ * case. (`RESET` above exists for the same reason.)
+ */
+describe("validate-command-safety — broad node kills and read-only PS vars (#598)", () => {
+  const NODE = "no" + "de";
+  const STOP = "Stop-" + "Process";
+
+  it(`blocks a whole-node kill by name (${STOP} -Name …)`, () => {
+    expect(runGuard(`${STOP} -Name ${NODE} -Force`).blocked).toBe(true);
+  });
+
+  it("blocks the unix spellings too (pkill / killall)", () => {
+    expect(runGuard(`pk` + `ill -f ${NODE}`).blocked).toBe(true);
+    expect(runGuard(`kill` + `all ${NODE}`).blocked).toBe(true);
+  });
+
+  it("still ALLOWS a port-scoped kill — the sanctioned dev-server recipe", () => {
+    // The rule is "never ALL node", not "never kill anything": the dev-server skill's
+    // Stop-PortOwner recipe must keep working, or the guard just gets routed around.
+    const command =
+      `$owner = (Get-NetTCPConnection -LocalPort 3001 -State Listen).OwningProcess; ` +
+      `${STOP} -Id $owner -Force`;
+    expect(runGuard(command).blocked).toBe(false);
+  });
+
+  it("blocks assigning a read-only PowerShell automatic variable", () => {
+    // Assigning $pid throws AND keeps the built-in, so a REST call using it hits the
+    // wrong id — the failure this rule exists to prevent is a silent wrong write.
+    expect(runGuard(`$p` + `id = "abc123"; curl http://127.0.0.1:3001/api/issues/$p` + `id`).blocked).toBe(true);
+  });
+
+  it("does NOT block a distinct name that merely starts with a reserved one", () => {
+    // `$pidx`/`$projectId` are valid, distinct variables; a `\b`-less regex would eat them.
+    expect(runGuard(`$p` + `idx = 42; echo $p` + `idx`).blocked).toBe(false);
+    expect(runGuard(`$projectId = "d1c5"; echo $projectId`).blocked).toBe(false);
+  });
+});
