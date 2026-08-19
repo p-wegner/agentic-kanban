@@ -89,11 +89,31 @@ function okPreflight(): typeof workspaceLaunchPreflight {
 }
 
 /** Flush pending microtasks so fire-and-forget DB writes (`.catch()`) settle. */
-async function flush(predicate?: () => boolean): Promise<void> {
-  const deadline = Date.now() + 1000;
+/**
+ * Poll until `predicate` holds, or give up at `budgetMs`.
+ *
+ * #620 — `flush(() => false)` was used as "settle the async handler", which is a fixed
+ * 1000ms SLEEP wearing a condition-wait's clothes: the predicate can never become true, so
+ * it always burns the whole budget and then continues regardless of whether the work
+ * finished. On an idle machine 1s was enough and the suite looked deterministic; under
+ * full-suite load it was not, and the assertion afterwards read a stale row. Waiting on the
+ * ACTUAL condition is both faster when idle and correct when loaded — see
+ * `flushUntilAsync` below for the cases where the condition is a DB read.
+ */
+async function flush(predicate?: () => boolean, budgetMs = 1000): Promise<void> {
+  const deadline = Date.now() + budgetMs;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 20));
     if (!predicate || predicate()) return;
+  }
+}
+
+/** {@link flush} for a predicate that has to await something (typically a DB read). */
+async function flushUntilAsync(predicate: () => Promise<boolean>, budgetMs = 10_000): Promise<void> {
+  const deadline = Date.now() + budgetMs;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 20));
+    if (await predicate()) return;
   }
 }
 
@@ -556,7 +576,11 @@ describe("session-lifecycle", () => {
     onOutput!({ type: "exit", exitCode: 0 } as never);
 
     await flush(() => onSessionExit.mock.calls.length > 0);
-    await flush(() => false); // settle the async plan handler
+    // Wait for the async plan handler's WRITE, not for a fixed slice of wall clock (#620).
+    await flushUntilAsync(async () => {
+      const rows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+      return rows[0]?.planMode === false;
+    });
 
     const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
     expect(wsRows[0].planMode).toBe(false);
@@ -585,7 +609,11 @@ describe("session-lifecycle", () => {
     onOutput!({ type: "exit", exitCode: 0 } as never);
 
     await flush(() => onSessionExit.mock.calls.length > 0);
-    await flush(() => false); // settle the async plan handler
+    // Wait for the async plan handler's WRITE, not for a fixed slice of wall clock (#620).
+    await flushUntilAsync(async () => {
+      const rows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+      return rows[0]?.planMode === false;
+    });
 
     const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
     // planMode must NOT be left stuck-true (the #924 strand) — a follow-up turn must not re-run read-only.
