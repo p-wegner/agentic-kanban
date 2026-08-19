@@ -2,6 +2,7 @@ import type { Command } from "commander";
 import { getPreference } from "../../repositories/preferences.repository.js";
 import { resolveCliPort } from "./workspace-api-url.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import type { ButlerAskResponse } from "@agentic-kanban/shared/types";
 
 const SERVER_PORT = resolveCliPort();
 
@@ -62,12 +63,6 @@ function printJsonOrSummary(data: unknown, summary: string, json?: boolean) {
   else console.log(summary);
 }
 
-interface AskResponse {
-  sessionId: string | null;
-  text: string;
-  isError: boolean;
-  error?: string;
-}
 
 export function registerButlerCommand(program: Command) {
   const butler = program
@@ -93,7 +88,7 @@ export function registerButlerCommand(program: Command) {
           method: "POST",
           body: { content, timeoutMs },
           butler: options.butler,
-        })) as AskResponse;
+        })) as ButlerAskResponse;
         if (options.json) console.log(JSON.stringify(data, null, 2));
         else console.log(data.text);
       });

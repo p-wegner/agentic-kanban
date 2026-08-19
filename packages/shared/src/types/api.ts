@@ -14,6 +14,7 @@
 // would make DTO drift fail loud at runtime (lib/api.ts:19 still casts `res.json() as T`;
 // zero `zValidator` routes) is a separate, wide-blast-radius follow-up — see review §1.4.
 export type * from "./api/common.js";
+export type * from "./api/butler.js";
 export type * from "./api/project.js";
 export type * from "./api/flake.js";
 export type * from "./api/issue.js";

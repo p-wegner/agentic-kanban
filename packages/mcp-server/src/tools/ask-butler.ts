@@ -1,13 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { butlerCall, butlerQuery } from "../butler-api.js";
-
-interface AskResponse {
-  sessionId: string | null;
-  text: string;
-  isError: boolean;
-  error?: string;
-}
+import type { ButlerAskResponse } from "@agentic-kanban/shared/types";
 
 export function registerAskButler(server: McpServer) {
   server.tool(
@@ -24,7 +18,7 @@ export function registerAskButler(server: McpServer) {
       return await butlerCall("Butler", `/api/projects/${projectId}/butler/ask${butlerQuery(butler)}`, {
         method: "POST",
         body: JSON.stringify({ content: question }),
-      }, { render: (data) => String((data as AskResponse).text ?? "") });
+      }, { render: (data) => String((data as ButlerAskResponse).text ?? "") });
     },
   );
 }

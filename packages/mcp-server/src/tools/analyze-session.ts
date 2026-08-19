@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { parseSessionSummary } from "@agentic-kanban/shared";
+import type { SessionStatsBlob } from "@agentic-kanban/shared";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { mcpJson, requireEntity } from "../db-utils.js";
 
@@ -10,16 +11,6 @@ import { mcpJson, requireEntity } from "../db-utils.js";
  * fields are optional because the blob is parsed from untyped JSON and older
  * sessions may omit any of them (the `??` defaults below cover absent fields).
  */
-interface SessionStatsBlob {
-  durationMs?: number;
-  totalCostUsd?: number;
-  inputTokens?: number;
-  outputTokens?: number;
-  numTurns?: number;
-  model?: string;
-  success?: boolean;
-  agentSummary?: string;
-}
 
 /**
  * Mirrors `pnpm cli -- session analyze <session-id>`.
