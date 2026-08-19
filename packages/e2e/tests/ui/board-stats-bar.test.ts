@@ -1,6 +1,34 @@
 import { test, expect } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
 
+/**
+ * Open the board filter menu. It lives in the SETTINGS panel's board-tools slot
+ * (`BoardPageView` → `settingsBoardTools` → `BoardOverlayPanels` → `boardToolsSlot`), so
+ * reaching it means opening Settings first. Settings has no toolbar button — it is a command
+ * palette action — and Chromium swallows a real Ctrl+K, hence the dispatched KeyboardEvent
+ * (same approach as `command-palette.test.ts`).
+ */
+async function openBoardFilterMenu(page: import("@playwright/test").Page) {
+  await page.evaluate(() => {
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true, cancelable: true }),
+    );
+  });
+  const paletteInput = page.locator('input[placeholder="Search actions..."]');
+  await expect(paletteInput).toBeVisible({ timeout: 5000 });
+  await paletteInput.fill("settings");
+  // force: true — the palette backdrop intercepts the hit test in headless Chromium.
+  await page
+    .locator("div.text-sm.font-medium", { hasText: "Open Settings" })
+    .first()
+    .click({ force: true });
+  // The slot lives in the "ui" tab (labelled Appearance); Settings opens on "agent".
+  await page.locator("[data-testid='settings-tab-ui']").click();
+  const filterMenu = page.locator("[data-testid='board-filter-menu']");
+  await expect(filterMenu).toBeVisible({ timeout: 5000 });
+  await filterMenu.click();
+}
+
 test.describe("Board stats bar", () => {
   let projectId: string;
   let todoStatusId: string;
@@ -54,23 +82,33 @@ test.describe("Board stats bar", () => {
     const statsBar = page.locator("[data-testid='board-stats-bar']");
     await expect(statsBar).toBeVisible({ timeout: 10000 });
 
-    // The stats bar lists each active column name followed by its count
-    // We check the Todo column count text matches what the board API returns
-    const todoPart = statsBar.locator("div.flex.items-center.gap-1", {
-      hasText: "Todo",
-    }).first();
+    // #659 — the per-status legend lives INSIDE the breakdown popover now; the bar itself
+    // shows the completion ring and headline count. Open it before asserting.
+    //
+    // This spec used to select the row by `div.flex.items-center.gap-1` — utility classes,
+    // i.e. styling rather than a contract. A restyle that changed no behaviour broke it, and
+    // the failure read "element(s) not found", which says nothing about what actually moved.
+    // `data-testid` hooks are the contract now.
+    await statsBar.getByRole("button").first().click();
+    const todoPart = page.locator("[data-testid='board-stats-status-Todo']");
     await expect(todoPart).toBeVisible();
-    const countSpan = todoPart.locator("span").last();
-    await expect(countSpan).toHaveText(String(todoCount));
+    await expect(page.locator("[data-testid='board-stats-status-count-Todo']")).toHaveText(String(todoCount));
   });
 
   test("shows commits counter in stats bar", async ({ page }) => {
     await page.goto("/");
     await page.waitForSelector("[data-testid='board-stats-bar']", { timeout: 10000 });
 
-    // The commits counter renders as "N commits" text — wait for it (async fetch)
-    const commitsText = page.locator("text=/\\d+ commits/");
-    await expect(commitsText).toBeVisible({ timeout: 10000 });
+    // #659 — the commits counter is inside the breakdown popover, not the always-visible
+    // pulse line. Open it, then assert on a stable hook rather than a text regex: a regex
+    // over "N commits" also matches any other element that happens to say it.
+    await page.locator("[data-testid='board-stats-bar']").getByRole("button").first().click();
+    // 30s, not 10s: the commits number comes from `GET /api/projects/:id/stats`, which on a
+    // COLD E2E database was measured at 11.9-14.9s in this suite's own server log. The old 10s
+    // budget was under the observed latency, so this spec failed on timing while reporting a
+    // missing element — the same "says nothing about what actually happened" problem as the
+    // class-chain selector above.
+    await expect(page.locator("[data-testid='board-stats-commits']")).toBeVisible({ timeout: 30000 });
   });
 
   test("Blocked filter shows only blocked issues, toggle off restores all", async ({
@@ -113,27 +151,43 @@ test.describe("Board stats bar", () => {
     // Wait for board to fully load (past the skeleton phase)
     await page.waitForSelector("[data-testid='board-stats-bar']", { timeout: 10000 });
 
-    // All three issues should be visible before filter
-    await expect(page.locator("p", { hasText: blockerTitle }).first()).toBeVisible();
-    await expect(page.locator("p", { hasText: blockedTitle }).first()).toBeVisible();
-    await expect(page.locator("p", { hasText: normalTitle }).first()).toBeVisible();
+    // Narrow the board to this test's three issues BEFORE asserting on cards.
+    // BoardColumn virtualizes a column past VIRTUALIZE_ISSUE_THRESHOLD (15 issues), so on a
+    // board of any real size a freshly created issue is simply NOT IN THE DOM — which this
+    // spec previously reported as "element(s) not found", i.e. indistinguishable from the
+    // card failing to render at all. The shared suffix is unique per run, so this leaves
+    // exactly the three issues below, well under the threshold.
+    await page.locator("#search-input").fill(suffix);
 
-    // Click the Blocked filter button in the stats bar
-    const blockedToggle = page.locator("button", { hasText: /^Blocked$/ });
+    // Assert on the card's aria-label, not on a bare `p` tag: `p` is incidental markup that
+    // any layout change breaks silently, while the label is the card's accessible identity.
+    const card = (title: string) => page.locator(`[aria-label="Open issue ${title}"]`);
+
+    // All three issues should be visible before the Blocked filter
+    await expect(card(blockerTitle)).toBeVisible();
+    await expect(card(blockedTitle)).toBeVisible();
+    await expect(card(normalTitle)).toBeVisible();
+
+    // The Blocked filter is a checkbox inside the filter MENU, and that menu is rendered into
+    // the SETTINGS panel's board-tools slot — it was a bare button in the stats bar when this
+    // spec was written. `button` + /^Blocked$/ could not survive either move, and reported the
+    // result as "element not found" rather than "the control lives somewhere else now".
+    await openBoardFilterMenu(page);
+    const blockedToggle = page.locator("[data-testid='filter-blocked-only']");
     await expect(blockedToggle).toBeVisible();
-    await blockedToggle.click();
+    await blockedToggle.check();
 
     // After filter: only the blocked issue should be visible
-    await expect(page.locator("p", { hasText: blockedTitle }).first()).toBeVisible();
-    await expect(page.locator("p", { hasText: blockerTitle })).not.toBeVisible();
-    await expect(page.locator("p", { hasText: normalTitle })).not.toBeVisible();
+    await expect(card(blockedTitle)).toBeVisible();
+    await expect(card(blockerTitle)).toHaveCount(0);
+    await expect(card(normalTitle)).toHaveCount(0);
 
-    // Toggle Blocked filter off
-    await blockedToggle.click();
+    // Toggle Blocked filter off (the menu stays open across the assertions above)
+    await blockedToggle.uncheck();
 
     // All issues reappear
-    await expect(page.locator("p", { hasText: blockerTitle }).first()).toBeVisible();
-    await expect(page.locator("p", { hasText: blockedTitle }).first()).toBeVisible();
-    await expect(page.locator("p", { hasText: normalTitle }).first()).toBeVisible();
+    await expect(card(blockerTitle)).toBeVisible();
+    await expect(card(blockedTitle)).toBeVisible();
+    await expect(card(normalTitle)).toBeVisible();
   });
 });

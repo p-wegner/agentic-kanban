@@ -449,6 +449,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
           {TABS.map((t) => (
             <button
               key={t.id}
+              data-testid={`settings-tab-${t.id}`}
               onClick={() => setTab(t.id)}
               className={`shrink-0 whitespace-nowrap px-3 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
                 tab === t.id
