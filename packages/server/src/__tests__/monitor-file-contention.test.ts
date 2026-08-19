@@ -274,7 +274,16 @@ describe("runAutoStart serializes on a shared registration file (#119 reproducti
       .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // ticket-b tag
       // Only consumed when the gate lets ticket-b through (the opt-out case) —
       // in serialize mode the deferral happens before this query.
-      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>); // ticket-b deps
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // ticket-b deps
+      // #666 — a DEFAULT for anything after the scripted prefix, returning no rows.
+      //
+      // This chain was an exact script of every query `runAutoStart` makes, so #661's ticket
+      // groups adding one more read (the `coupled_with` lookup in `resolveTicketGroupMembers`)
+      // exhausted it and the next `db.select()` returned undefined —
+      // `Cannot read properties of undefined (reading 'from')`, which reads like a product
+      // bug and is not one. The scripted prefix above still pins the queries this test is
+      // ABOUT; a new read-only query no longer breaks it, it just finds nothing.
+      .mockReturnValue(makeSelectChain([]) as ReturnType<typeof db.select>);
     vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ id: "ws-new" }) } as Response);
   }
 

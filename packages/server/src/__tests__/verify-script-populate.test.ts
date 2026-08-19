@@ -38,22 +38,26 @@ describe("deriveVerifyScriptFromProfile", () => {
     expect(deriveVerifyScriptFromProfile(p, "/nope")).toBe("cargo test");
   });
 
-  it("falls back to marker rules when the profile has neither test nor build", async () => {
+  // #666 - expected the OLD marker-ladder output until #521 (9b79937d13) retired those
+  // ladders and routed this fallback through deriveVerifyCommand(detectStackProfile(...)),
+  // the canonical per-stack command from #124. The behaviour change was the POINT of #521;
+  // only these expectations were left behind.
+  it("falls back to the canonical per-stack command when the profile has neither test nor build", async () => {
     const dir = await tmp();
     try {
       await writeFile(join(dir, "go.mod"), "module x\n\ngo 1.22\n");
       const p = profile({ stack: null, testCommand: null, buildCommand: null });
-      expect(deriveVerifyScriptFromProfile(p, dir)).toBe("go test ./...");
+      expect(deriveVerifyScriptFromProfile(p, dir)).toBe("go build ./... && go test ./...");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
   });
 
-  it("falls back to marker rules when there is no profile at all", async () => {
+  it("falls back to the canonical per-stack command when there is no profile at all", async () => {
     const dir = await tmp();
     try {
       await writeFile(join(dir, "Cargo.toml"), "[package]\nname = \"x\"\n");
-      expect(deriveVerifyScriptFromProfile(null, dir)).toBe("cargo test");
+      expect(deriveVerifyScriptFromProfile(null, dir)).toBe("cargo check && cargo test && cargo build");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -105,11 +109,12 @@ describe("populateVerifyScript", () => {
 
   it("reads the persisted stack profile when none is passed", async () => {
     const { db } = createTestDb();
-    // No profile arg and no persisted profile → falls back to marker rules from repoPath.
+    // No profile arg and no persisted profile -> falls back to the canonical per-stack
+    // command derived from repoPath (#521 retired the marker ladders; see the note above).
     await writeFile(join(dir, "go.mod"), "module x\n\ngo 1.22\n");
     const written = await populateVerifyScript("proj-4", dir, db);
-    expect(written).toBe("go test ./...");
-    expect(await getPreference(verifyScriptPrefKey("proj-4"), db)).toBe("go test ./...");
+    expect(written).toBe("go build ./... && go test ./...");
+    expect(await getPreference(verifyScriptPrefKey("proj-4"), db)).toBe("go build ./... && go test ./...");
   });
 });
 
