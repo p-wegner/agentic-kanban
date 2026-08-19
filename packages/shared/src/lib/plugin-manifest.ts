@@ -644,7 +644,24 @@ export function parsePluginManifest(input: unknown): PluginManifest {
  * bare array is accepted as `{ units: [...] }`. Anything else throws
  * `PluginManifestError` so the route answers 400 with the offending output.
  */
-export function parsePluginLoopPlan(stdout: string): PluginLoopPlan {
+/** The keys a loop plan may declare — at least one must be present (#662). */
+const PLAN_KEYS = ["units", "converged", "note", "gate", "progress", "checks"] as const;
+
+export function parsePluginLoopPlan(
+  stdout: string,
+  opts: { /** The producer clipped this payload's FRONT (`stdoutTruncated`). */ truncated?: boolean } = {},
+): PluginLoopPlan {
+  // #662: a clipped plan must never be READ, only reported. Tolerant extraction (#550) can
+  // recover some object out of the middle of a front-clipped stream, and a plan is a WORK
+  // LIST — a fragment that parses is strictly worse than one that throws, because the loop
+  // then reports progress it did not make. Refuse before looking at the bytes.
+  if (opts.truncated) {
+    fail(
+      "loop plan output was truncated before it could be read, so it is a fragment, not a plan — " +
+        "raise the structured stdout cap or make the planner emit less",
+    );
+  }
+
   const text = stdout.trim();
   if (!text) fail("loop plan command printed no output");
 
@@ -660,6 +677,17 @@ export function parsePluginLoopPlan(stdout: string): PluginLoopPlan {
   }
 
   const obj = Array.isArray(raw) ? { units: raw } : asRecord(raw, "loop plan");
+  // #662, the second half: even without a truncation flag, the tolerant extractor can hand
+  // back an object that is not a plan at all — e.g. ONE unit recovered from the middle of a
+  // clipped stream. With `obj.units ?? []` below that used to parse as an empty plan, and an
+  // empty plan defaults to `converged: true`: a clipped work list silently ENDED the loop.
+  // A real plan always carries at least one of its own keys.
+  if (!PLAN_KEYS.some((key) => obj[key] !== undefined)) {
+    fail(
+      `loop plan output is not a plan: expected an object with ${PLAN_KEYS.map((k) => `"${k}"`).join("/")}, got keys ` +
+        `${Object.keys(obj).map((k) => `"${k}"`).join(", ") || "(none)"}`,
+    );
+  }
   const seen = new Set<string>();
   const units = requireArray(obj.units ?? [], "loop plan units").map((entry, i) => {
     const rec = asRecord(entry, `units[${i}]`);

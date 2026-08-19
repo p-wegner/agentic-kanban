@@ -379,6 +379,23 @@ describe("parsePluginLoopPlan", () => {
     expect(parsePluginLoopPlan('{"units":[],"converged":false}')).toMatchObject({ units: [], converged: false });
   });
 
+  it("refuses a payload the producer flagged as truncated, without reading it (#662)", () => {
+    // A plan is a WORK LIST. A clipped one that parses is worse than one that throws: the
+    // loop drops units and reports progress it did not make.
+    expect(() => parsePluginLoopPlan('{"units":[],"converged":true}', { truncated: true }))
+      .toThrow(/truncated/);
+  });
+
+  it("refuses an object that is not a plan, so a recovered fragment cannot end a loop (#662)", () => {
+    // Since the tolerant extractor (#550), front-clipped stdout yields the LAST balanced
+    // object in the stream — typically one unit. Without this guard `obj.units ?? []` made
+    // that an empty plan, and an empty plan defaults to converged: the loop silently ended.
+    expect(() => parsePluginLoopPlan('{"id":"billing:r1","title":"Mine billing"}'))
+      .toThrow(/not a plan/);
+    // A plan that declares only `converged` is still a plan.
+    expect(parsePluginLoopPlan('{"converged":true}')).toMatchObject({ units: [], converged: true });
+  });
+
   it("rejects empty output, non-JSON output, and repeated unit ids", () => {
     expect(() => parsePluginLoopPlan("   ")).toThrow(/printed no output/);
     expect(() => parsePluginLoopPlan("boom: command not found")).toThrow(/not JSON/);

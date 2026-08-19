@@ -451,7 +451,7 @@ export function createPluginLoopEngine(deps: PluginLoopDeps) {
 
     let plan;
     try {
-      plan = parsePluginLoopPlan(result.stdout);
+      plan = parsePluginLoopPlan(result.stdout, { truncated: result.stdoutTruncated });
     } catch (err) {
       const base = errorMessage(err);
       // Never let a truncation masquerade as a malformed plan: that misdirects the reader to the
