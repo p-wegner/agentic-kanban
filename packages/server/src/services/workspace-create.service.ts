@@ -43,6 +43,11 @@ import { toExecutorProvider } from "./agent-settings.service.js";
 import { emitButlerSystemEvent } from "./butler-event-feed.js";
 import { moveIssueToInProgressStrict } from "../repositories/workspace.repository.js";
 import {
+  insertWorkspaceIssueMembers,
+  filterIssuesWithLiveGroupWorkspace,
+} from "../repositories/workspace-issue-members.repository.js";
+import { buildGroupPromptSection } from "./workspace-create/policy.js";
+import {
   updateWorkspaceServiceState,
   getWorkspaceLifecycleStatus,
 } from "../repositories/workspace-service-state.repository.js";
@@ -214,6 +219,56 @@ export function createWorkspaceCreateService(deps: {
     );
   }
 
+  /**
+   * Ticket group (#661): validate and resolve the group's MEMBER issues. Members must
+   * exist, belong to the lead's project, and not already be served — by an open
+   * workspace of their own or by another live group. Duplicates and the lead itself
+   * are dropped silently (callers may pass a whole coupled component).
+   */
+  async function resolveGroupMembers(
+    input: CreateWorkspaceInput,
+    leadProjectId: string,
+  ): Promise<Array<{ id: string; issueNumber: number | null; title: string; description: string | null }>> {
+    const unique = [...new Set(input.memberIssueIds ?? [])].filter((memberId) => memberId && memberId !== input.issueId);
+    if (unique.length === 0) return [];
+
+    const members: Array<{ id: string; issueNumber: number | null; title: string; description: string | null }> = [];
+    for (const memberId of unique) {
+      const rows = await crudRepo.getIssueForWorkspaceCreate(memberId, database);
+      if (rows.length === 0) {
+        throw new WorkspaceError(`Ticket-group member issue not found: ${memberId}`, "NOT_FOUND");
+      }
+      const member = rows[0];
+      if (member.projectId !== leadProjectId) {
+        throw new WorkspaceError(
+          `Ticket-group member ${memberId} belongs to a different project than the lead issue — a group shares one worktree, so all members must live in one project.`,
+          "CONFLICT",
+          { code: "GROUP_MEMBER_WRONG_PROJECT", issueId: memberId },
+        );
+      }
+      members.push({ id: memberId, issueNumber: member.issueNumber, title: member.title, description: member.description });
+    }
+
+    const openOwn = await crudRepo.findOpenWorkspacesForIssues(unique, database);
+    if (openOwn.length > 0) {
+      throw new WorkspaceError(
+        `Ticket-group member already has an open workspace (issue ${openOwn[0].issueId} → workspace ${openOwn[0].id}, branch ${openOwn[0].branch}). Close it first, or start the group without that member.`,
+        "CONFLICT",
+        { code: "GROUP_MEMBER_HAS_WORKSPACE", workspaceId: openOwn[0].id, issueId: openOwn[0].issueId },
+      );
+    }
+    const inLiveGroup = await filterIssuesWithLiveGroupWorkspace(unique, database);
+    if (inLiveGroup.size > 0) {
+      const first = [...inLiveGroup][0];
+      throw new WorkspaceError(
+        `Ticket-group member ${first} is already served as a member of another live group workspace.`,
+        "CONFLICT",
+        { code: "GROUP_MEMBER_IN_LIVE_GROUP", issueId: first },
+      );
+    }
+    return members;
+  }
+
   async function launchAgent(params: {
     workspaceId: string;
     branch: string;
@@ -346,6 +401,8 @@ export function createWorkspaceCreateService(deps: {
       siblings: SiblingWorktree[];
       issue: { issueNumber: number | null; title: string; description: string | null; projectId: string };
       contextPrimer: string | null;
+      /** Ticket group (#661): member tickets, preserved across the service-stack rewrite. */
+      groupTickets?: Array<{ issueNumber: number | null; title: string; description: string | null }>;
       timing: (phase: string, startMs: number) => void;
     },
   ): void {
@@ -465,6 +522,7 @@ export function createWorkspaceCreateService(deps: {
                 ctx.contextPrimer,
                 ctx.siblings.map((s) => ({ name: s.name, worktreePath: s.worktreePath })),
                 stackSection,
+                ctx.groupTickets,
               );
             }
           }
@@ -545,6 +603,10 @@ export function createWorkspaceCreateService(deps: {
       const { issue, project, setupConfig, symlinkConfig } = await resolveIssueAndProject(input.issueId);
       timing("resolve-issue", t);
       repoPath = project.repoPath;
+
+      // Ticket group (#661): resolve + validate member issues BEFORE any disk work, so a
+      // bad group fails as a clean 4xx rather than after minutes of provisioning.
+      const groupMembers = await resolveGroupMembers(input, issue.projectId);
 
       t = Date.now();
       await assertNoOpenDirectWorkspaceForIssue(input.issueId);
@@ -663,6 +725,7 @@ export function createWorkspaceCreateService(deps: {
             contextPrimer,
             siblingWorktrees.map((s) => ({ name: s.name, worktreePath: s.worktreePath })),
             null,
+            groupMembers,
           )
         : null;
       if (ticketContextPath) timing("ticket-context", t);
@@ -670,9 +733,15 @@ export function createWorkspaceCreateService(deps: {
       // #269: this span (skill materialization + prompt assembly) was part of the
       // ~153s the phase timers left unaccounted — keep it instrumented.
       t = Date.now();
-      const { agentPrompt, skillName, effectiveSkillId, hasWorkflowStart } = await resolveAgentPromptAndSkill({
+      // eslint-disable-next-line prefer-const
+      let { agentPrompt, skillName, effectiveSkillId, hasWorkflowStart } = await resolveAgentPromptAndSkill({
         issue, input, includeVisualProof, workspaceId: id, worktreePath, project, skillId,
       });
+      // Ticket group (#661): the member tickets ride in the PROMPT too (not only the
+      // ticket-context file) so every provider sees them from turn 1.
+      if (groupMembers.length > 0) {
+        agentPrompt += `\n\n${buildGroupPromptSection(groupMembers)}`;
+      }
       timing("resolve-prompt-skill", t);
 
       // #169: a BLOCKING setup script that failed must not proceed silently — the
@@ -723,6 +792,15 @@ export function createWorkspaceCreateService(deps: {
           // `committedAt`, not `now`: backdating `statusChangedAt` to before provisioning hid the
           // delay entirely on this path, so the board could not even show how long a start took.
           await moveIssueToInProgressStrict(input.issueId, issue.projectId, committedAt, tx);
+        }
+
+        // Ticket group (#661): the membership rows and the members' In-Progress flips ride
+        // the SAME transaction as the workspace row, so a rollback leaves no member half-in.
+        if (groupMembers.length > 0) {
+          await insertWorkspaceIssueMembers(id, groupMembers.map((m) => m.id), committedAt, tx);
+          for (const member of groupMembers) {
+            await moveIssueToInProgressStrict(member.id, issue.projectId, committedAt, tx);
+          }
         }
       }, "workspace create db writes");
       timing("db-writes", t);
@@ -782,6 +860,7 @@ export function createWorkspaceCreateService(deps: {
           siblings: siblingWorktrees,
           issue: { issueNumber: issue.issueNumber, title: issue.title, description: issue.description, projectId: issue.projectId },
           contextPrimer,
+          groupTickets: groupMembers,
           timing,
         });
       }

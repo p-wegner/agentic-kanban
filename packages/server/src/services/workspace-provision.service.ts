@@ -501,6 +501,8 @@ exit 1
       serviceHost: string;
       lintWarnings?: string[] | null;
     } | null,
+    // Ticket group (#661): the member tickets rendered in full below the lead one.
+    groupTickets?: Array<{ issueNumber: number | null; title: string; description: string | null }> | null,
   ): Promise<string | null> {
     let stackProfile = null;
     try {
@@ -537,6 +539,7 @@ exit 1
       additionalRepos,
       serviceStack,
       boardFeedback,
+      groupTickets,
     });
   }
 

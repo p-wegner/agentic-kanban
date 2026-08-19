@@ -7,6 +7,7 @@ import {
   getProjectStatusOptions,
   setIssueStatus,
 } from "../repositories/merge-cleanup.repository.js";
+import { listMemberIssueIds } from "../repositories/workspace-issue-members.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export interface FinalizeMergeCleanupInput {
@@ -140,6 +141,55 @@ export async function reconcileMergedIssue(
 }
 
 /**
+ * Ticket group (#661): converge every MEMBER issue of a merged group workspace to Done,
+ * via the same idempotent, recency-guarded {@link reconcileMergedIssue} the lead uses.
+ * One member failing must not strand the rest, so each is reconciled independently and
+ * failures are logged (the silently-merged reconciler converges stragglers on next boot,
+ * because it re-enters {@link finalizeMergeCleanup}, which calls this again).
+ *
+ * Returns the number of member issues that actually transitioned. Callers with a
+ * workspace id in hand should call this beside every terminal issue-status write —
+ * {@link finalizeMergeCleanup} does it internally, so only the Done writers that bypass
+ * it (exit-workflow autoMerge, the monitor's direct-workspace close) need their own call.
+ */
+export async function reconcileGroupMemberIssues(input: {
+  database: Database;
+  workspaceId: string;
+  now?: string;
+  projectId?: string | null;
+  mergedAt?: string | null;
+  fallbackToAiReviewed?: boolean;
+}): Promise<number> {
+  let memberIds: string[] = [];
+  try {
+    memberIds = await listMemberIssueIds(input.workspaceId, input.database);
+  } catch (err) {
+    console.warn(`[merge-cleanup] failed to list ticket-group members for workspace ${input.workspaceId}:`, errorMessage(err));
+    return 0;
+  }
+  let transitioned = 0;
+  for (const issueId of memberIds) {
+    try {
+      const res = await reconcileMergedIssue({
+        database: input.database,
+        issueId,
+        now: input.now,
+        projectId: input.projectId,
+        mergedAt: input.mergedAt,
+        fallbackToAiReviewed: input.fallbackToAiReviewed,
+      });
+      if (res.issueTransitioned) transitioned++;
+    } catch (err) {
+      console.warn(`[merge-cleanup] ticket-group member ${issueId} failed to converge after merge of workspace ${input.workspaceId}:`, errorMessage(err));
+    }
+  }
+  if (transitioned > 0) {
+    console.log(`[merge-cleanup] ticket group: converged ${transitioned}/${memberIds.length} member issue(s) of workspace ${input.workspaceId}`);
+  }
+  return transitioned;
+}
+
+/**
  * Finalize the DB-visible merge state before slower post-merge cleanup runs.
  * Composes {@link closeWorkspace} (lifecycle status transition) and
  * {@link reconcileMergedIssue} (issue status reconciliation) so callers that
@@ -164,6 +214,16 @@ export async function finalizeMergeCleanup(
   const { issueTransitioned } = await reconcileMergedIssue({
     database: input.database,
     issueId: input.issueId,
+    now,
+    projectId,
+    fallbackToAiReviewed: input.fallbackToAiReviewed,
+  });
+
+  // Ticket group (#661): a merged group workspace lands ALL its tickets, so the member
+  // issues converge to Done alongside the lead. No-op for single-ticket workspaces.
+  const membersTransitioned = await reconcileGroupMemberIssues({
+    database: input.database,
+    workspaceId: input.workspaceId,
     now,
     projectId,
     fallbackToAiReviewed: input.fallbackToAiReviewed,
@@ -208,7 +268,7 @@ export async function finalizeMergeCleanup(
     return false;
   });
 
-  const broadcasted = Boolean(input.boardEvents && projectId && (workspaceUpdated || issueTransitioned || sessionsStopped));
+  const broadcasted = Boolean(input.boardEvents && projectId && (workspaceUpdated || issueTransitioned || membersTransitioned > 0 || sessionsStopped));
   if (broadcasted) {
     input.boardEvents?.broadcast(projectId, "workspace_merged");
   }

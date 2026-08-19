@@ -65,3 +65,4 @@ export {
 } from "./drive-obstacles.js";
 export type { DriveObstacleKind, DriveObstacleSeverity } from "./drive-obstacles.js";
 export { workspaceProvisioning } from "./workspace-provisioning.js";
+export { workspaceIssueMembers, workspaceIssueMembersRelations } from "./workspace-issue-members.js";

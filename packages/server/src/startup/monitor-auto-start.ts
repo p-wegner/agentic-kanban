@@ -1,6 +1,9 @@
 import { computeBlockerReadiness, isTerminalStatusIdView, suggestBranchName, type BlockerWorkspaceLanding } from "@agentic-kanban/shared";
 import { drives, issueDependencies, issues, issueTags, projectStatuses, tags, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
-import { and, eq, sql, inArray } from "drizzle-orm";
+import { and, eq, or, sql, inArray } from "drizzle-orm";
+import { resolveCoupledComponent } from "@agentic-kanban/shared/lib/dependency-graph";
+import { MAX_TICKET_GROUP_SIZE, isAutoGroupEnabled } from "@agentic-kanban/shared/lib/ticket-group";
+import { filterIssuesWithLiveGroupWorkspace } from "../repositories/workspace-issue-members.repository.js";
 import { db } from "../db/index.js";
 import { createBoardEvents } from "../services/board-events.js";
 import { parsePluginLoopUnitKey } from "@agentic-kanban/shared/lib/plugin-manifest";
@@ -280,6 +283,63 @@ function reopenRetryBranch(branch: string, priorWorkspaceCount: number): string 
   return `${branch}-r${priorWorkspaceCount + 1}`;
 }
 
+/**
+ * Ticket group (#661): pick the group MEMBERS to ride along when the monitor starts
+ * `lead`. Membership is the lead's `coupled_with` connected component, restricted to
+ * candidates that are themselves independently startable — same status pool, monitor-
+ * eligible, untagged, uncontended, dependency-unblocked, with no workspace history.
+ * Anything that fails a check is simply left for a later cycle; grouping must never
+ * start a ticket the per-issue gates would have refused.
+ */
+async function resolveAutoStartGroupMembers(args: {
+  lead: { id: string; issueNumber: number | null };
+  candidates: Array<{ id: string; title: string; description: string | null; issueType: string | null; issueNumber: number | null; externalKey: string | null }>;
+  startedAsMember: Set<string>;
+  liveGroupMembers: Set<string>;
+  contentionGate: Parameters<typeof shouldDeferForContention>[0];
+  allowFeatureTypes: boolean;
+  passesDependencyGate: (issueId: string) => Promise<boolean>;
+}): Promise<string[]> {
+  const { lead, candidates } = args;
+  const candidateIds = [lead.id, ...candidates.map((c) => c.id)];
+  const coupledEdges = await db
+    .select({ from: issueDependencies.issueId, to: issueDependencies.dependsOnId, type: issueDependencies.type })
+    .from(issueDependencies)
+    .where(and(
+      eq(issueDependencies.type, "coupled_with"),
+      or(inArray(issueDependencies.issueId, candidateIds), inArray(issueDependencies.dependsOnId, candidateIds)),
+    ));
+  if (coupledEdges.length === 0) return [];
+  const component = resolveCoupledComponent(lead.id, coupledEdges);
+  if (component.size <= 1) return [];
+
+  const members: string[] = [];
+  for (const candidate of candidates) {
+    if (members.length >= MAX_TICKET_GROUP_SIZE - 1) break;
+    if (candidate.id === lead.id || !component.has(candidate.id)) continue;
+    if (args.startedAsMember.has(candidate.id) || args.liveGroupMembers.has(candidate.id)) continue;
+    // A plugin-loop unit carries its loop's skill and its lifecycle is the loop's —
+    // it never rides in someone else's workspace.
+    if (parsePluginLoopUnitKey(candidate.externalKey)) continue;
+    if (!isMonitorEligibleIssue(candidate, args.allowFeatureTypes)) continue;
+    if (await hasSkipAutoStartTag(candidate.id)) continue;
+    if (shouldDeferForContention(args.contentionGate, candidate.id, candidate.issueNumber)) continue;
+    // Any workspace history (open OR merged) disqualifies: an open one means the ticket
+    // is being worked, a merged one means joining a group would re-run reopen semantics
+    // the group path does not implement.
+    const history = await db.select({ id: workspaces.id }).from(workspaces)
+      .where(sql`${workspaces.issueId} = ${candidate.id}`).limit(1);
+    if (history.length > 0) continue;
+    if (!(await args.passesDependencyGate(candidate.id))) continue;
+    members.push(candidate.id);
+  }
+  if (members.length > 0) {
+    const numbers = candidates.filter((c) => members.includes(c.id)).map((c) => `#${c.issueNumber}`).join(", ");
+    console.log(`[monitor] Ticket group for #${lead.issueNumber}: coupled members ${numbers} join the same workspace (#661)`);
+  }
+  return members;
+}
+
 export async function runAutoStart(prefMap: Map<string, string>, { serverPort, boardEvents, logMonitorAction, allowProject, isAutoDrivenProject = () => false, buildContentionGate = buildFileContentionGate, canDispatch = projectCanDispatch }: AutoStartDeps): Promise<Map<string, AutoStartSkipInfo>> {
   const skipInfo = new Map<string, AutoStartSkipInfo>();
   const noteSkip = (projectId: string, issueNumber: number | null | undefined, reason: AutoStartSkipReason, count = 1) => {
@@ -337,9 +397,14 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
 
     const inProgressIssues = await db.select({ id: issues.id, title: issues.title, description: issues.description, issueType: issues.issueType, issueNumber: issues.issueNumber, externalKey: issues.externalKey }).from(issues)
       .where(and(eq(issues.statusId, inProgressSt.id), notDriveOrEpicMetaSql())); // #824: don't backfill a builder onto a meta created directly In Progress
+    // Ticket group (#661): a MEMBER issue sits In Progress with no workspace row of its
+    // own (the group workspace is keyed by the lead), so without this set the backfill
+    // would start a duplicate builder for every member of every live group.
+    const backfillGroupMembers = await filterIssuesWithLiveGroupWorkspace(inProgressIssues.map((i) => i.id), db);
     for (const issue of inProgressIssues) {
       if (currentWip >= wipLimit) break;
       if (startsRemaining(inProgressSt.projectId) <= 0) break;
+      if (backfillGroupMembers.has(issue.id)) continue;
       const issueWorkspaces = await db.select({ id: workspaces.id, status: workspaces.status, mergedAt: workspaces.mergedAt }).from(workspaces)
         .where(sql`${workspaces.issueId} = ${issue.id}`);
       if (issueWorkspaces.some((w) => w.status !== "closed")) continue;
@@ -478,6 +543,48 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       .where(sql`${projectStatuses.name} IN ('Done', 'Cancelled')`);
     const doneStatusIds = new Set(doneStatuses.map((s) => s.id));
 
+    // Ticket group (#661): the same member-blindness as the backfill loop — a candidate
+    // already riding in a live group workspace must not be started again.
+    const pullGroupMembers = await filterIssuesWithLiveGroupWorkspace(todoIssues.map((i) => i.id), db);
+    // Candidates consumed as GROUP MEMBERS this cycle: their workspace row is minutes
+    // away (async provisioning), so only this in-cycle set stops the loop from also
+    // starting them individually.
+    const startedAsMember = new Set<string>();
+
+    // Dependency gate, shared by the lead candidate below and the group-member vetting —
+    // a blocker unblocks only when terminal AND landed (#535/#537/#782/#784).
+    const passesDependencyGate = async (issueId: string): Promise<boolean> => {
+      const deps = await db.select({ dependsOnId: issueDependencies.dependsOnId }).from(issueDependencies)
+        .where(sql`${issueDependencies.issueId} = ${issueId} AND (${issueDependencies.type} = 'depends_on' OR ${issueDependencies.type} = 'blocked_by')`);
+      if (deps.length === 0) return true;
+      const blockerIds = [...new Set(deps.map((d) => d.dependsOnId))];
+      const blockerIssues = await db
+        .select({
+          id: issues.id,
+          statusId: issues.statusId,
+          currentNodeId: issues.currentNodeId,
+          currentNodeType: workflowNodes.nodeType,
+        })
+        .from(issues)
+        .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
+        .where(inArray(issues.id, blockerIds));
+      if (blockerIssues.length !== blockerIds.length) return false;
+      const blockerWorkspaces = await db
+        .select({ issueId: workspaces.issueId, mergedAt: workspaces.mergedAt, isDirect: workspaces.isDirect })
+        .from(workspaces)
+        .where(inArray(workspaces.issueId, blockerIds));
+      const wsByBlocker = new Map<string, BlockerWorkspaceLanding[]>();
+      for (const w of blockerWorkspaces) {
+        const list = wsByBlocker.get(w.issueId) ?? [];
+        list.push({ mergedAt: w.mergedAt, isDirect: w.isDirect });
+        wsByBlocker.set(w.issueId, list);
+      }
+      return blockerIssues.every((b) => computeBlockerReadiness({
+        isTerminal: isTerminalStatusIdView(b, doneStatusIds),
+        workspaces: wsByBlocker.get(b.id) ?? [],
+      }));
+    };
+
     let started = 0;
     for (const issue of todoIssues) {
       if (started >= slotsAvailable) break;
@@ -485,6 +592,8 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
         noteSkip(inProgressSt.projectId, issue.issueNumber, "cycle_start_cap");
         break;
       }
+      if (pullGroupMembers.has(issue.id)) continue;
+      if (startedAsMember.has(issue.id)) continue;
       const issueWorkspaces = await db.select({ id: workspaces.id, status: workspaces.status, mergedAt: workspaces.mergedAt }).from(workspaces)
         .where(sql`${workspaces.issueId} = ${issue.id}`);
       if (issueWorkspaces.some((w) => w.status !== "closed")) continue;
@@ -506,44 +615,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       if (await hasSkipAutoStartTag(issue.id)) { noteSkip(inProgressSt.projectId, issue.issueNumber, "no_auto_start_tag"); continue; }
       if (shouldDeferForContention(contentionGate, issue.id, issue.issueNumber)) { noteSkip(inProgressSt.projectId, issue.issueNumber, "contention_gate"); continue; }
 
-      const deps = await db.select({ dependsOnId: issueDependencies.dependsOnId }).from(issueDependencies)
-        .where(sql`${issueDependencies.issueId} = ${issue.id} AND (${issueDependencies.type} = 'depends_on' OR ${issueDependencies.type} = 'blocked_by')`);
-      if (deps.length > 0) {
-        const blockerIds = [...new Set(deps.map((d) => d.dependsOnId))];
-        const blockerIssues = await db
-          .select({
-            id: issues.id,
-            statusId: issues.statusId,
-            currentNodeId: issues.currentNodeId,
-            currentNodeType: workflowNodes.nodeType,
-          })
-          .from(issues)
-          .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
-          .where(inArray(issues.id, blockerIds));
-        if (blockerIssues.length !== blockerIds.length) continue;
-
-        // Dependency readiness is decided by the ONE shared `computeBlockerReadiness`
-        // helper (also used by the dependency-wave planner) so the whole #535/#537/#782/#784
-        // class is fixed in one place: a blocker unblocks its dependents only when it
-        // reached a terminal status AND its work actually landed on the base branch
-        // (`mergedAt`/`isDirect`), not merely when the issue is Done or its workspace closed.
-        const blockerWorkspaces = await db
-          .select({ issueId: workspaces.issueId, mergedAt: workspaces.mergedAt, isDirect: workspaces.isDirect })
-          .from(workspaces)
-          .where(inArray(workspaces.issueId, blockerIds));
-        const wsByBlocker = new Map<string, BlockerWorkspaceLanding[]>();
-        for (const w of blockerWorkspaces) {
-          const list = wsByBlocker.get(w.issueId) ?? [];
-          list.push({ mergedAt: w.mergedAt, isDirect: w.isDirect });
-          wsByBlocker.set(w.issueId, list);
-        }
-
-        const allResolved = blockerIssues.every((b) => computeBlockerReadiness({
-          isTerminal: isTerminalStatusIdView(b, doneStatusIds),
-          workspaces: wsByBlocker.get(b.id) ?? [],
-        }));
-        if (!allResolved) continue;
-      }
+      if (!(await passesDependencyGate(issue.id))) continue;
 
       // #366: the THIRD slug producer used to live here — `[^a-z0-9\s] -> ""` instead of
       // `[^a-z0-9]+ -> "-"`, which is exactly what turned `PM pipeline 8/9: CI/CD & Deployment`
@@ -551,7 +623,26 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       // for the same issue. Both names were observed on duplicate workspaces of one issue.
       const baseBranchName = suggestBranchName({ issueNumber: issue.issueNumber, title: issue.title });
       const branch = isReopenRetry ? reopenRetryBranch(baseBranchName, issueWorkspaces.length) : baseBranchName;
+
+      // Ticket group (#661): expand the candidate into a group along its explicit
+      // `coupled_with` edges — one workspace, one agent, one review, one gate for the
+      // whole set. Only members that are themselves independently startable join; a
+      // reopen-retry never groups (its branch/workspace history is its own).
+      let memberIssueIds: string[] = [];
+      if (!isReopenRetry && isAutoGroupEnabled(prefMap, issue.projectId)) {
+        memberIssueIds = await resolveAutoStartGroupMembers({
+          lead: issue,
+          candidates: todoIssues,
+          startedAsMember,
+          liveGroupMembers: pullGroupMembers,
+          contentionGate,
+          allowFeatureTypes,
+          passesDependencyGate,
+        });
+      }
+
       const launchBody: Record<string, unknown> = { issueId: issue.id, branch };
+      if (memberIssueIds.length > 0) launchBody.memberIssueIds = memberIssueIds;
       // Auto-driven projects must not stall in plan-only mode (#666).
       if (isAutoDrivenProject(issue.projectId)) launchBody.planMode = false;
       // #269: `?async=1` — same as the backfill loop above; the cycle must not block
@@ -574,11 +665,17 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
         // AWAITED blocking setup script + context packer) then runs for 84s-8min before the row and
         // the issue transition land in one transaction. That log line is the reason a working board
         // read as "an agent has been running for over a minute while the ticket says Backlog".
-        console.log(`[monitor] Auto-start ACCEPTED for unblocked issue "${issue.title}" (${issue.id}) — provisioning a workspace (minutes); the issue moves to In Progress when it completes`);
+        console.log(`[monitor] Auto-start ACCEPTED for unblocked issue "${issue.title}" (${issue.id})${memberIssueIds.length > 0 ? ` as a ticket group with ${memberIssueIds.length} member(s)` : ""} — provisioning a workspace (minutes); the issue moves to In Progress when it completes`);
         boardEvents.broadcast(issue.projectId, "board_changed");
         started++;
         noteStart(inProgressSt.projectId);
         contentionGate.noteStarted(issue.id);
+        // Group members are consumed by THIS start: keep the rest of the cycle (and the
+        // contention snapshot) from starting them individually.
+        for (const memberId of memberIssueIds) {
+          startedAsMember.add(memberId);
+          contentionGate.noteStarted(memberId);
+        }
       } else if (resp?.status === 409) {
         // #366: another automatic starter already holds the claim for this issue.
         console.log(`[monitor] Auto-start declined for unblocked issue "${issue.title}" (${issue.id}) — a workspace creation is already in flight for it (#366)`);
