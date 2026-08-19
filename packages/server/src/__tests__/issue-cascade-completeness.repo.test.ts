@@ -128,6 +128,26 @@ const SUBTREE_SEEDERS: Record<string, (c: SeedCtx) => Promise<void>> = {
       status: "active", createdAt: c.now, updatedAt: c.now,
     });
   },
+  // #666 — both were absent from this map, which is what the completeness assertion exists
+  // to catch: the schema declared them as deletion-subtree children of issues while nothing
+  // seeded them, so neither path was ever exercised. Seeded AFTER `workspaces`, since both
+  // reference it.
+  workspace_issue_members: async (c) => {
+    // Ticket groups (#661). Both FKs carry `onDelete: cascade`, so SQLite removes these rows
+    // itself — seeding it proves the DB-level cascade actually fires.
+    await c.db.insert(schema.workspaceIssueMembers).values({
+      workspaceId: c.workspaceId, issueId: c.issueId, createdAt: c.now,
+    });
+  },
+  workspace_provisioning: async (c) => {
+    // The one that was a real bug: its FKs to issues and projects declare NO `onDelete`
+    // action, so SQLite defaults to RESTRICT and deleting the issue FAILED outright.
+    await c.db.insert(schema.workspaceProvisioning).values({
+      id: randomUUID(), issueId: c.issueId, projectId: c.projectId,
+      branch: "feature/provisioning", worktreePath: null, serverPid: 1234,
+      phase: "worktree", startedAt: c.now,
+    });
+  },
   sessions: async (c) => {
     await c.db.insert(schema.sessions).values({
       id: c.sessionId, workspaceId: c.workspaceId, status: "running", startedAt: c.now,
