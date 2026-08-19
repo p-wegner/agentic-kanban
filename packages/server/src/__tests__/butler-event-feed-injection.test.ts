@@ -11,16 +11,16 @@
 //                       inside the window collapses into ONE summary turn; the
 //                       per-project `state` Map keeps projects independent (a burst
 //                       in project A never delays/merges project B's events).
-//   4. error-handling — a cold session drops the event silently, AND a throwing
-//                       collaborator is swallowed (the try/catch at
-//                       butler-event-feed.ts:106) — emit never rejects.
+//   4. error-handling — a cold session drops the event silently, an UNATTACHED feed
+//                       drops it silently (#561), AND a throwing collaborator is
+//                       swallowed by emit's try/catch — emit never rejects.
 // Plus the routing invariant: the feed only ever targets the DEFAULT butler
 // (plain projectId key) — named butlers never receive a system event.
 //
-// Pure decision-logic test: the two collaborators the module talks to — the
-// preferences repository (`getPreference`) and the butler SDK boundary
-// (`getButlerSession` / `sendButlerTurn`) — are mocked, so no real DB and no real
-// LLM session are involved. Time is driven with vitest fake timers so the 30s
+// Pure decision-logic test: since #561 the module takes its collaborators — a
+// preference read and the butler SDK boundary (is-active / send-turn) — through
+// `attachButlerEventFeed`, so this test attaches fakes rather than mocking modules;
+// no real DB and no real LLM session are involved. Time is driven with vitest fake timers so the 30s
 // rate-limit / burst-collapse window is deterministic (no real sleeps).
 //
 // MUTATION RATIONALE (why each assertion goes RED on a regression):
@@ -37,16 +37,19 @@
 //   - Remove the try/catch swallow → the throwing-collaborator test fails on an
 //     unhandled rejection.
 //
-// NOTE on cold-guard redundancy: the cold check is duplicated at three points
-// (emit gate :102, immediate-send :77, burst-flush :63). The cold-drop tests below
-// exercise the emit gate (:102) and the burst-flush guard (:63); the immediate-send
-// guard (:77) is co-redundant with :102 (same getButlerSession read in one tick) so
-// a single-point regression there is masked — documented here rather than forced.
+// NOTE on cold-guard redundancy: the cold check is duplicated at three points (the
+// emit gate, the immediate send, and the burst flush). The cold-drop tests below
+// exercise the emit gate and the burst-flush guard; the immediate-send guard is
+// co-redundant with the emit gate (same is-active read in one tick) so a
+// single-point regression there is masked — documented here rather than forced.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// --- Mocked collaborators (hoisted so the vi.mock factories can see them) -------
-const h = vi.hoisted(() => ({
+// --- Injected collaborators (#561) ---------------------------------------------
+// The feed no longer imports the global db or the butler-session registry, so
+// nothing here is mocked at the MODULE level: the test attaches a runtime with
+// fakes, exactly the way `server-start.ts` attaches the real one.
+const h = {
   // project -> whether a warm default butler session is active
   active: new Map<string, boolean>(),
   // preference key -> value
@@ -54,29 +57,25 @@ const h = vi.hoisted(() => ({
   sendButlerTurn: vi.fn(),
   getButlerSession: vi.fn(),
   getPreference: vi.fn(),
-}));
-
-vi.mock("../db/index.js", () => ({ db: {} }));
-
-vi.mock("../repositories/preferences.repository.js", () => ({
-  getPreference: (key: string) => h.getPreference(key),
-}));
-
-vi.mock("../services/butler-sdk.service.js", () => ({
-  // The module under test only ever passes a plain projectId — the default
-  // butler key. We model the session state per project.
-  getButlerSession: (projectId: string) => {
-    h.getButlerSession(projectId);
-    return { active: h.active.get(projectId) ?? false };
-  },
-  sendButlerTurn: (...args: unknown[]) => h.sendButlerTurn(...args),
-}));
+};
 
 import {
+  attachButlerEventFeed,
+  detachButlerEventFeed,
   emitButlerSystemEvent,
-  _resetButlerEventFeedState,
   type ButlerSystemEventKind,
 } from "../services/butler-event-feed.js";
+
+function attachFakes(): void {
+  attachButlerEventFeed({
+    readPreference: (key) => h.getPreference(key),
+    isButlerActive: (projectId) => {
+      h.getButlerSession(projectId);
+      return h.active.get(projectId) ?? false;
+    },
+    sendTurn: (projectId, text) => h.sendButlerTurn(projectId, text),
+  });
+}
 
 // Flush the async fire-and-forget IIFE inside emitButlerSystemEvent (it awaits a
 // couple of mocked-promise getPreference calls before reaching `deliver`).
@@ -111,12 +110,26 @@ describe("butler-event-feed: board-event → default-butler injection", () => {
     h.getPreference.mockImplementation(async (key: string) => h.prefs.get(key) ?? null);
     // Feed enabled globally by default for these tests.
     h.prefs.set("butler_event_feed", "true");
-    _resetButlerEventFeedState();
+    detachButlerEventFeed();
+    attachFakes();
   });
 
   afterEach(() => {
-    _resetButlerEventFeedState();
+    detachButlerEventFeed();
     vi.useRealTimers();
+  });
+
+  it("is INERT until attached — an unattached feed drops every event (#561)", async () => {
+    // This is what lets 9 unrelated suites drop their `vi.mock("butler-event-feed")`:
+    // a test that never attaches the feed cannot reach the DB or a butler session.
+    detachButlerEventFeed();
+    h.active.set(PROJECT, true);
+
+    await emit(PROJECT, "merge_failed", "merge of #42 failed");
+
+    expect(h.sendButlerTurn).not.toHaveBeenCalled();
+    expect(h.getPreference).not.toHaveBeenCalled();
+    expect(h.getButlerSession).not.toHaveBeenCalled();
   });
 
   it("injects a [system event] turn into the warm DEFAULT butler when enabled", async () => {

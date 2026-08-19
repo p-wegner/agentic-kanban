@@ -17,7 +17,6 @@ import { createTestDb } from "./helpers/test-db.js";
 import { finalizePlanModeExit } from "../services/session-manager/plan-mode-exit.js";
 import type { Database } from "../db/index.js";
 
-vi.mock("../services/butler-event-feed.js", () => ({ emitButlerSystemEvent: vi.fn() }));
 
 const PLAN = "<!-- PLAN:START -->\n# Plan\n- step one\n<!-- PLAN:END -->";
 
