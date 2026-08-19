@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
+import { prodDeps, type ToolDeps } from "./deps.js";
 import { mcpJson, requireEntity } from "../db-utils.js";
 import { readSessionMessages } from "@agentic-kanban/shared/lib/session-messages";
 
@@ -15,7 +15,9 @@ function stripAnsi(str: string): string {
     .replace(/\r/g, "\n");
 }
 
-export function registerReadTerminal(server: McpServer) {
+export function registerReadTerminal(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "read_terminal",
     "Read agent session output (terminal messages) for a session. Returns the last N messages, stripped of ANSI codes.",

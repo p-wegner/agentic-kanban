@@ -1,10 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
+import { prodDeps, type ToolDeps } from "./deps.js";
 import { mcpJson, requireEntity, resolveActiveProjectId } from "../db-utils.js";
 
-export function registerGetContext(server: McpServer) {
+export function registerGetContext(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "get_context",
     "Get current project context including project info, issues count by status, and active workspaces",

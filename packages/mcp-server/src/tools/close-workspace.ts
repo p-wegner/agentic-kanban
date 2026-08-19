@@ -1,14 +1,16 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
+import { prodDeps, type ToolDeps } from "./deps.js";
 import * as gitService from "../git-service.js";
 import { notifyBoard } from "../notify.js";
 import { mcpJson, requireEntity } from "../db-utils.js";
 import { setWorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import { setWorkspaceWorkingDir } from "@agentic-kanban/shared/lib/workspace-git-state";
 
-export function registerCloseWorkspace(server: McpServer) {
+export function registerCloseWorkspace(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "close_workspace",
     "Close a workspace without merging. For direct workspaces or abandoned work. Use merge_workspace instead if you want to merge the branch.",

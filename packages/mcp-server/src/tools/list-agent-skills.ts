@@ -1,10 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
 import { sql } from "drizzle-orm";
+import { prodDeps, type ToolDeps } from "./deps.js";
 import { mcpJson } from "../db-utils.js";
 
-export function registerListAgentSkills(server: McpServer) {
+export function registerListAgentSkills(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "list_agent_skills",
     "List all available agent skills that can be applied to workspaces",

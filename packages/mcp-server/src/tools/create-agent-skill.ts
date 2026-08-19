@@ -1,12 +1,14 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
 import { eq, and, isNull } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { isSafeSkillName } from "@agentic-kanban/shared/lib/agent-skill-files";
-import { mcpJson, mcpText } from "../db-utils.js";
+import { prodDeps, type ToolDeps } from "./deps.js";
+import { mcpError, mcpJson, mcpText } from "../db-utils.js";
 
-export function registerCreateAgentSkill(server: McpServer) {
+export function registerCreateAgentSkill(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "create_agent_skill",
     "Create a new agent skill with a name, description, and prompt template",
@@ -20,7 +22,7 @@ export function registerCreateAgentSkill(server: McpServer) {
     },
     async ({ name, description, prompt, model, projectId, isInit }) => {
       if (!isSafeSkillName(name)) {
-        return mcpText("Error: Skill name must be a single safe path segment (no '/', '\\', '..', '.', empty, NUL, or drive-relative names like 'C:')");
+        return mcpError("Error: Skill name must be a single safe path segment (no '/', '\\', '..', '.', empty, NUL, or drive-relative names like 'C:')");
       }
 
       const scopeProjectId = projectId || null;

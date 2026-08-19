@@ -1,10 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { prodDeps, type ToolDeps } from "./deps.js";
 import { boardApiText, mcpText } from "../board-call.js";
+import { mcpError } from "../db-utils.js";
 import { eq } from "drizzle-orm";
-import { db, schema } from "../db.js";
 
-export function registerAnalyzeDependencies(server: McpServer) {
+export function registerAnalyzeDependencies(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "analyze_dependencies",
     "Analyze one issue against the current board and create inferred dependency edges. Use after creating related child issues so independent tasks remain unblocked and dependent tasks stay blocked.",
@@ -21,7 +24,7 @@ export function registerAnalyzeDependencies(server: McpServer) {
           .where(eq(schema.issues.id, issueId))
           .limit(1);
         if (rows.length === 0) {
-          return mcpText(`Error: issue not found: ${issueId}`);
+          return mcpError(`Error: issue not found: ${issueId}`);
         }
         pid = rows[0].projectId;
       }
@@ -31,7 +34,7 @@ export function registerAnalyzeDependencies(server: McpServer) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ issueId, projectId: pid }),
       });
-      if (!ok) return mcpText(`Error: dependency analysis failed (${status}): ${text}`);
+      if (!ok) return mcpError(`Error: dependency analysis failed (${status}): ${text}`);
       return mcpText(text);
     },
   );

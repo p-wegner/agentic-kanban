@@ -1,12 +1,14 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
+import { prodDeps, type ToolDeps } from "./deps.js";
 import { notifyBoard } from "../notify.js";
 import { mcpJson, requireEntity } from "../db-utils.js";
 import { setWorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 
-export function registerStopWorkspace(server: McpServer) {
+export function registerStopWorkspace(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "stop_workspace",
     "Stop any running agent session for a workspace",

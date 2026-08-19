@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { boardApi, boardErrorText, mcpJson, mcpText, mcpUnreachable } from "../board-call.js";
+import { boardApi, boardErrorText, mcpJson, mcpUnreachable } from "../board-call.js";
+import { mcpError } from "../db-utils.js";
 
 export function registerListProjectRepos(server: McpServer) {
   server.tool(
@@ -12,7 +13,7 @@ export function registerListProjectRepos(server: McpServer) {
     async ({ projectId }) => {
       try {
         const { ok, statusText, data } = await boardApi(`/api/projects/${projectId}/repos`);
-        if (!ok) return mcpText(`Error listing project repos: ${boardErrorText(data, statusText)}`);
+        if (!ok) return mcpError(`Error listing project repos: ${boardErrorText(data, statusText)}`);
         return mcpJson(data);
       } catch (err) {
         return mcpUnreachable(err);

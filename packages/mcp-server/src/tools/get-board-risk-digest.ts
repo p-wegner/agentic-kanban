@@ -1,8 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { boardApi, boardErrorText, mcpJson, mcpText, mcpUnreachable } from "../board-call.js";
+import { boardApi, boardErrorText, mcpJson, mcpText } from "../board-call.js";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { resolveActiveProjectId } from "../db-utils.js";
+import { mcpError, resolveActiveProjectId } from "../db-utils.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function registerGetBoardRiskDigest(server: McpServer, deps: ToolDeps = prodDeps) {
@@ -23,7 +23,7 @@ export function registerGetBoardRiskDigest(server: McpServer, deps: ToolDeps = p
         if (!ok) return mcpText(`Failed to get board risk digest: ${boardErrorText(data, statusText)}`);
         return mcpJson(data);
       } catch (err) {
-        return mcpText(`Error: ${errorMessage(err)}`);
+        return mcpError(`Error: ${errorMessage(err)}`);
       }
     },
   );

@@ -1,10 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
 import { eq, desc } from "drizzle-orm";
+import { prodDeps, type ToolDeps } from "./deps.js";
 import { mcpJson, mcpText, requireEntity } from "../db-utils.js";
 
-export function registerGetSessionStats(server: McpServer) {
+export function registerGetSessionStats(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "get_session_stats",
     "Get token usage, cost, and duration stats for a session",

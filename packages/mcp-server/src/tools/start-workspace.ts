@@ -1,8 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
+import { prodDeps, type ToolDeps } from "./deps.js";
 import * as gitService from "../git-service.js";
 import { notifyBoard } from "../notify.js";
 import { runSetupScript } from "../setup-script.js";
@@ -13,7 +13,9 @@ import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
-export function registerStartWorkspace(server: McpServer) {
+export function registerStartWorkspace(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "start_workspace",
     "Create a worktree-only workspace record for an issue (no agent, no status change). " +

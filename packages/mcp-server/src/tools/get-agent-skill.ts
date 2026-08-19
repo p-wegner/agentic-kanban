@@ -1,10 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
+import { prodDeps, type ToolDeps } from "./deps.js";
 import { mcpError, mcpJson, mcpText } from "../db-utils.js";
 
-export function registerGetAgentSkill(server: McpServer) {
+export function registerGetAgentSkill(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "get_agent_skill",
     "Get full details of an agent skill including its prompt",

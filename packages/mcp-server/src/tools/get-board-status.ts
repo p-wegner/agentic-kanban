@@ -5,7 +5,7 @@ import { eq, inArray, desc } from "drizzle-orm";
 import { extractMeaningfulOutput, isTerminalStatusIdView } from "@agentic-kanban/shared";
 import type { BoardStatusIssue } from "@agentic-kanban/shared";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { mcpJson, mcpText, readSessionStdoutFile, requireEntity, resolveActiveProjectId } from "../db-utils.js";
+import { mcpError, mcpJson, readSessionStdoutFile, requireEntity, resolveActiveProjectId } from "../db-utils.js";
 // Shared single-source-of-truth classifiers. The previous local copies had drifted
 // behind the server's (emitting only "idle-awaiting", missing "closed-in-review" and
 // "stale-in-review"), so agents over MCP saw a strictly poorer board than humans.
@@ -242,7 +242,7 @@ export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodD
 
         return mcpJson(response);
       } catch (err) {
-        return mcpText(`Error: ${errorMessage(err)}`);
+        return mcpError(`Error: ${errorMessage(err)}`);
       }
     },
   );

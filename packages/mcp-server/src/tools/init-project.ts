@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { boardApi, boardErrorText, mcpJson, mcpText } from "../board-call.js";
+import { mcpError } from "../db-utils.js";
 import { getServerPort } from "../server-url.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -56,7 +57,7 @@ export function registerInitProject(server: McpServer) {
         });
 
         if (!ok) {
-          return mcpText(`Error registering project: ${boardErrorText(data, statusText)}`);
+          return mcpError(`Error registering project: ${boardErrorText(data, statusText)}`);
         }
 
         return mcpJson({ ok: true, project: data });

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { eq, and, isNotNull } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import { mcpJson, mcpText } from "../db-utils.js";
+import { mcpError, mcpJson } from "../db-utils.js";
 
 export function registerCleanupProject(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema } = deps;
@@ -69,7 +69,7 @@ export function registerCleanupProject(server: McpServer, deps: ToolDeps = prodD
               message: `Found ${staleWorktrees.length} closed workspace(s) with stale worktrees. Remove each manually using the 'removeCommand' shown, or run: git worktree remove --force <path>`,
             });
       } catch (err) {
-        return mcpText(`Error scanning for stale worktrees: ${errorMessage(err)}`);
+        return mcpError(`Error scanning for stale worktrees: ${errorMessage(err)}`);
       }
     },
   );
