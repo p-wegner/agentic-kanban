@@ -8,9 +8,12 @@
 // the unified precedence (explicit env override ALWAYS wins) and the split-brain
 // reproduction (server-shaped vs MCP-shaped candidates → identical resolution).
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterAll } from "vitest";
 import { resolve, join } from "node:path";
-import { resolveDbLocation } from "../src/lib/db-path.js";
+import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { DatabaseSync } from "node:sqlite";
+import { resolveDbLocation, sqliteHasBoardContent } from "../src/lib/db-path.js";
 
 const HOME = resolve("/fake/home-dir");
 
@@ -30,6 +33,9 @@ function base(overrides: Partial<Parameters<typeof resolveDbLocation>[0]> = {}) 
     homeDir: HOME,
     existsSync: () => false,
     statSync: VALID_DB_STAT,
+    // Hermetic by default: the real probe would open (nonexistent) fake paths. Tests
+    // that care about the content check inject their own.
+    hasBoardContent: () => true,
     ...overrides,
   };
 }
@@ -245,5 +251,137 @@ describe("resolveDbLocation rule 3 never adopts an empty/invalid local file (#16
       }),
     );
     expect(calls).toEqual([`exists:${SERVER_CANDIDATES[0]}`]);
+  });
+});
+
+// #663 — the size floor cannot see this: a leftover in-checkout DB that has been fully
+// MIGRATED but holds zero rows is ~850 KB, clears the floor, and is adopted, silently
+// shadowing the real board. Only CONTENT separates the two.
+describe("resolveDbLocation content probe (#663)", () => {
+  it("REJECTS a size-passing but EMPTY in-checkout DB and falls through to home-fallback", () => {
+    const loc = resolveDbLocation(
+      base({
+        existsSync: () => true,
+        statSync: () => ({ size: 847_872 }), // the real stray was 847 KB
+        hasBoardContent: () => false,
+        localDbCandidates: SERVER_CANDIDATES,
+      }),
+    );
+    expect(loc.source).toBe("home-fallback");
+    expect(loc.rejectedLocalCandidates).toEqual([SERVER_CANDIDATES[0]]);
+  });
+
+  it("still ADOPTS a populated in-checkout DB (the normal dev-checkout case)", () => {
+    const loc = resolveDbLocation(
+      base({
+        existsSync: () => true,
+        hasBoardContent: () => true,
+        localDbCandidates: SERVER_CANDIDATES,
+      }),
+    );
+    expect(loc.source).toBe("local-checkout");
+    expect(loc.path).toBe(SERVER_CANDIDATES[0]);
+    expect(loc.rejectedLocalCandidates).toEqual([]);
+  });
+
+  it("skips an EMPTY first candidate and adopts a populated second one", () => {
+    const emptyCandidate = resolve("/repo/packages/server/kanban.db");
+    const realCandidate = resolve("/repo/packages/server/src/db/kanban.db");
+    const loc = resolveDbLocation(
+      base({
+        existsSync: () => true,
+        hasBoardContent: (p: string) => p === realCandidate,
+        localDbCandidates: [emptyCandidate, realCandidate],
+      }),
+    );
+    expect(loc.source).toBe("local-checkout");
+    expect(loc.path).toBe(realCandidate);
+    expect(loc.rejectedLocalCandidates).toEqual([emptyCandidate]);
+  });
+
+  it("an explicit env override still wins over the probe (never probes at all)", () => {
+    let probed = false;
+    const loc = resolveDbLocation(
+      base({
+        env: { AGENTIC_KANBAN_DIR: resolve("/data/dir") },
+        existsSync: () => true,
+        hasBoardContent: () => {
+          probed = true;
+          return false;
+        },
+        localDbCandidates: SERVER_CANDIDATES,
+      }),
+    );
+    expect(loc.source).toBe("AGENTIC_KANBAN_DIR");
+    expect(probed).toBe(false);
+  });
+
+  it("the size floor is checked BEFORE the probe — a stub is never opened", () => {
+    let probed = false;
+    const loc = resolveDbLocation(
+      base({
+        existsSync: () => true,
+        statSync: () => ({ size: 4096 }),
+        hasBoardContent: () => {
+          probed = true;
+          return true;
+        },
+        localDbCandidates: SERVER_CANDIDATES,
+      }),
+    );
+    expect(loc.source).toBe("home-fallback");
+    expect(probed).toBe(false);
+  });
+});
+
+describe("sqliteHasBoardContent", () => {
+  const tmpRoot = mkdtempSync(join(tmpdir(), "db-path-probe-"));
+
+  afterAll(() => {
+    rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  function makeDb(name: string, seed: (db: DatabaseSync) => void): string {
+    const file = join(tmpRoot, name);
+    const db = new DatabaseSync(file);
+    db.exec("create table projects (id text primary key, name text)");
+    seed(db);
+    db.close();
+    return file;
+  }
+
+  it("is false for a migrated-but-EMPTY database (the #663 stray)", () => {
+    const file = makeDb("empty.db", () => {});
+    expect(sqliteHasBoardContent(file)).toBe(false);
+  });
+
+  it("is true for a database holding at least one project", () => {
+    const file = makeDb("populated.db", (db) => {
+      db.prepare("insert into projects (id, name) values (?, ?)").run("p1", "board");
+    });
+    expect(sqliteHasBoardContent(file)).toBe(true);
+  });
+
+  // Fails OPEN by design: rejecting on a failed probe would route a healthy-but-locked
+  // dev DB to the home fallback and split the board in two.
+  it("is true when the file cannot be probed at all (missing / not a database)", () => {
+    expect(sqliteHasBoardContent(join(tmpRoot, "does-not-exist.db"))).toBe(true);
+    const notADb = join(tmpRoot, "garbage.db");
+    writeFileSync(notADb, "this is not a sqlite file");
+    expect(sqliteHasBoardContent(notADb)).toBe(true);
+  });
+
+  it("is true for a database with no `projects` table at all (predates the schema)", () => {
+    const file = join(tmpRoot, "no-projects.db");
+    const db = new DatabaseSync(file);
+    db.exec("create table something_else (id text)");
+    db.close();
+    expect(sqliteHasBoardContent(file)).toBe(true);
+  });
+
+  it("does not CREATE a database it probes (read-only)", () => {
+    const missing = join(tmpRoot, "must-not-be-created.db");
+    sqliteHasBoardContent(missing);
+    expect(existsSync(missing)).toBe(false);
   });
 });
