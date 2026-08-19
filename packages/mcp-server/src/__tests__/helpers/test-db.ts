@@ -1,27 +1,23 @@
 import { createClient } from "@libsql/client";
 import type { Client } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
-import { readFileSync, rmSync } from "node:fs";
-import { resolve, dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { rmSync } from "node:fs";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
+import { MIGRATIONS_DIR, migrationFilesInOrder, readMigrationStatements } from "@agentic-kanban/shared/lib/migration-source";
 import * as schema from "@agentic-kanban/shared/schema";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-/** Shared drizzle migrations dir, resolved relative to this file. */
-export const MIGRATIONS_DIR = resolve(__dirname, "../../../../shared/drizzle");
 
 export type TestDb = ReturnType<typeof drizzle<typeof schema>>;
 
-interface JournalEntry { tag: string }
-
-/** Migration tags in journal apply-order — NOT lexical (e.g. 0023 runs before 0020). */
-export function migrationFilesInOrder(): string[] {
-  const journal = JSON.parse(readFileSync(resolve(MIGRATIONS_DIR, "meta/_journal.json"), "utf-8")) as { entries: JournalEntry[] };
-  return journal.entries.map((e) => `${e.tag}.sql`);
-}
+// #562: MIGRATIONS_DIR + migrationFilesInOrder were a byte-for-byte fork of the server's
+// helper — one that had never picked up the #471 client-close fix. Both now come from the
+// shared migration-source module, so there is nothing left here to diverge.
+export {
+  MIGRATIONS_DIR,
+  migrationFilesInOrder,
+} from "@agentic-kanban/shared/lib/migration-source";
 
 /**
  * Apply every migration to a libsql client, in the order recorded in the drizzle
@@ -31,12 +27,7 @@ export function migrationFilesInOrder(): string[] {
  */
 export function applyMigrationsToClient(client: Client): void {
   for (const file of migrationFilesInOrder()) {
-    const sql = readFileSync(resolve(MIGRATIONS_DIR, file), "utf-8");
-    const statements = sql
-      .split("--> statement-breakpoint")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-    for (const stmt of statements) {
+    for (const stmt of readMigrationStatements(file, MIGRATIONS_DIR)) {
       client.execute(stmt);
     }
   }
