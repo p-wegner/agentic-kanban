@@ -6,7 +6,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { StackProfile } from "@agentic-kanban/shared";
-import { detectProjectMarkers, isUvProject } from "./project-setup.service.js";
+import { detectProjectMarkers, isUvProject } from "./stack-markers.js";
 import {
   gradleWrapper,
   isKotlinGradle,
@@ -275,7 +275,7 @@ function detectPhpProfile(repoPath: string): Partial<StackProfile> {
 function detectOtherProfile(repoPath: string, markers: Set<string>): Partial<StackProfile> | null {
   if (markers.has("Cargo.toml")) {
     return {
-      stack: "rust", packageManager: "cargo", isMonorepo: existsSync(join(repoPath, "Cargo.lock")) && /\[workspace\]/.test(readFileSync(join(repoPath, "Cargo.toml"), "utf8").slice(0, 4000)),
+      stack: "rust", packageManager: "cargo", isMonorepo: existsSync(join(repoPath, "Cargo.lock")) && /\[workspace\]/.test(readFileSafe(join(repoPath, "Cargo.toml")).slice(0, 4000)),
       workspaces: [], installCommand: "cargo fetch", buildCommand: "cargo build",
       testCommand: "cargo test", quickTestCommand: "cargo test", lintCommand: "cargo clippy",
       typecheckCommand: "cargo check", devCommand: "cargo run", isWeb: false,
@@ -334,7 +334,7 @@ function detectOtherProfile(repoPath: string, markers: Set<string>): Partial<Sta
   }
   if (markers.has("pom.xml")) {
     return {
-      stack: "java", packageManager: "maven", isMonorepo: /<modules>/.test(readFileSync(join(repoPath, "pom.xml"), "utf8").slice(0, 8000)),
+      stack: "java", packageManager: "maven", isMonorepo: /<modules>/.test(readFileSafe(join(repoPath, "pom.xml")).slice(0, 8000)),
       workspaces: [], installCommand: "mvn install -DskipTests", buildCommand: "mvn package",
       testCommand: "mvn test", quickTestCommand: "mvn test", lintCommand: "mvn verify",
       typecheckCommand: "mvn compile", devCommand: "mvn spring-boot:run", isWeb: false,
@@ -395,8 +395,11 @@ const EMPTY_PROFILE: Omit<StackProfile, "source" | "detectedMarkers" | "updatedA
  * a fact can't be derived). `source` is "detected" even when sparse; the LLM fallback
  * (see populateStackProfile) fills gaps and flips source to "llm".
  */
-export function detectStackProfile(repoPath: string): StackProfile {
-  const markers = detectProjectMarkers(repoPath);
+export function detectStackProfile(repoPath: string, detectedMarkers?: string[]): StackProfile {
+  // `detectedMarkers` lets a caller that already scanned the directory decide from the
+  // SAME marker set instead of re-reading it (#521) — the fallback verify derivation and
+  // its tests both do. Absent, the scan happens here as before.
+  const markers = detectedMarkers ?? detectProjectMarkers(repoPath);
   const markerSet = new Set(markers);
 
   let partial: Partial<StackProfile> | null = null;

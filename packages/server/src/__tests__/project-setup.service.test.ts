@@ -19,13 +19,13 @@ describe("deriveVerifyScript", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it("suggests pnpm test && pnpm run build for a pnpm node repo with test and build scripts", async () => {
+  it("suggests pnpm test && pnpm build for a pnpm node repo with test and build scripts", async () => {
     await writeFile(
       join(dir, "package.json"),
       JSON.stringify({ scripts: { test: "vitest", build: "tsc" } }),
     );
     const result = deriveVerifyScript(dir, ["package.json", "pnpm-lock.yaml"]);
-    expect(result).toBe("pnpm test && pnpm run build");
+    expect(result).toBe("pnpm test && pnpm build");
   });
 
   it("suggests npm test for a npm node repo with only a test script", async () => {
@@ -37,13 +37,13 @@ describe("deriveVerifyScript", () => {
     expect(result).toBe("npm test");
   });
 
-  it("suggests yarn test && yarn run build for a yarn node repo with test and build scripts", async () => {
+  it("suggests yarn test && yarn build for a yarn node repo with test and build scripts", async () => {
     await writeFile(
       join(dir, "package.json"),
       JSON.stringify({ scripts: { test: "jest", build: "webpack" } }),
     );
     const result = deriveVerifyScript(dir, ["package.json", "yarn.lock"]);
-    expect(result).toBe("yarn test && yarn run build");
+    expect(result).toBe("yarn test && yarn build");
   });
 
   it("returns empty string for a node repo with no test or build scripts", async () => {
@@ -55,19 +55,19 @@ describe("deriveVerifyScript", () => {
     expect(result).toBe("");
   });
 
-  it("returns cargo test for a Rust repo", () => {
+  it("returns the full cargo verify chain for a Rust repo", () => {
     const result = deriveVerifyScript(dir, ["Cargo.toml"]);
-    expect(result).toBe("cargo test");
+    expect(result).toBe("cargo check && cargo test && cargo build");
   });
 
-  it("returns go test ./... for a Go repo", () => {
+  it("returns the full go verify chain for a Go repo", () => {
     const result = deriveVerifyScript(dir, ["go.mod"]);
-    expect(result).toBe("go test ./...");
+    expect(result).toBe("go build ./... && go test ./...");
   });
 
-  it("returns mvn test for a Maven repo", () => {
+  it("returns the maven verify chain for a Maven repo", () => {
     const result = deriveVerifyScript(dir, ["pom.xml"]);
-    expect(result).toBe("mvn test");
+    expect(result).toBe("mvn test package -B");
   });
 
   // #521: this used to assert the literal "./gradlew test". On Windows the verify gate
@@ -77,7 +77,7 @@ describe("deriveVerifyScript", () => {
   it("returns a gradle wrapper the host shell can actually execute", () => {
     const result = deriveVerifyScript(dir, ["build.gradle"]);
     // No wrapper file exists in this fixture dir, so both platforms fall back to `gradle`.
-    expect(result).toBe("gradle test");
+    expect(result).toBe("gradle test build --console=plain");
   });
 
   it("uses the platform-correct wrapper when one exists", async () => {
@@ -87,13 +87,13 @@ describe("deriveVerifyScript", () => {
       const isWin = process.platform === "win32";
       await writeFile(join(wrapperDir, isWin ? "gradlew.bat" : "gradlew"), "");
       const result = deriveVerifyScript(wrapperDir, ["build.gradle.kts"]);
-      expect(result.endsWith(" test")).toBe(true);
+      expect(result).toContain(" test build");
       if (isWin) {
         // Must be the .bat form, and must NOT be the POSIX path cmd.exe cannot run.
         expect(result.includes("gradlew.bat")).toBe(true);
         expect(result.startsWith("./")).toBe(false);
       } else {
-        expect(result).toBe("./gradlew test");
+        expect(result.startsWith("./gradlew ")).toBe(true);
       }
     } finally {
       await rm(wrapperDir, { recursive: true, force: true });
@@ -112,23 +112,23 @@ describe("deriveVerifyScript", () => {
     expect(result).toBe("");
   });
 
-  it("returns python -m pytest for a Python repo", () => {
+  it("returns the python verify chain for a Python repo", () => {
     const result = deriveVerifyScript(dir, ["requirements.txt"]);
-    expect(result).toBe("python -m pytest");
+    expect(result).toBe("mypy . && python -m pytest -q --no-header --tb=short");
   });
 
   // #120: bare `python -m pytest` fails with "No module named pytest" in a uv project
   // (deps live in a project-local .venv) and blocked every merge.
-  it("returns uv run pytest for a uv repo (pyproject.toml + uv.lock)", async () => {
+  it("runs every python step through uv for a uv repo (pyproject.toml + uv.lock)", async () => {
     await writeFile(join(dir, "pyproject.toml"), '[project]\nname = "x"\n');
     const result = deriveVerifyScript(dir, ["pyproject.toml", "uv.lock"]);
-    expect(result).toBe("uv run pytest");
+    expect(result).toBe("uv run mypy . && uv run pytest -q --no-header --tb=short");
   });
 
-  it("returns uv run pytest when pyproject declares [tool.uv] without a lockfile", async () => {
+  it("runs every python step through uv when pyproject declares [tool.uv] without a lockfile", async () => {
     await writeFile(join(dir, "pyproject.toml"), '[project]\nname = "x"\n\n[tool.uv]\n');
     const result = deriveVerifyScript(dir, ["pyproject.toml"]);
-    expect(result).toBe("uv run pytest");
+    expect(result).toBe("uv run mypy . && uv run pytest -q --no-header --tb=short");
   });
 
   it("returns bundle exec rake test for a Ruby repo", () => {

@@ -1,27 +1,15 @@
-import { readdirSync } from "node:fs";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { deriveVerifyCommand } from "@agentic-kanban/shared/lib/verify-command";
 import type { Database } from "../db/index.js";
 import { invokeClaudePrompt } from "./claude-cli.service.js";
 import { getProjectById } from "../repositories/project.repository.js";
-import { gradleWrapper } from "./gradle-detect.service.js";
+import { detectProjectMarkers, isUvProject } from "./stack-markers.js";
+import { detectStackProfile } from "./stack-detector.service.js";
 
-const PROJECT_MARKER_FILES = [
-  "package.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock",
-  "Cargo.toml", "go.mod", "requirements.txt", "Pipfile", "pyproject.toml", "uv.lock",
-  "pom.xml", "build.gradle", "build.gradle.kts", "Gemfile", "mix.exs",
-  "composer.json", "composer.lock",
-  "Makefile", "justfile", "Taskfile.yml",
-];
-
-export function detectProjectMarkers(repoPath: string): string[] {
-  try {
-    const files = readdirSync(repoPath);
-    return files.filter(f => PROJECT_MARKER_FILES.includes(f));
-  } catch {
-    return [];
-  }
-}
+// Re-exported so the many existing importers of these two keep working; they LIVE in
+// `stack-markers.ts` now (#521), which is what lets this module call the detector.
+export { detectProjectMarkers, isUvProject };
 
 export async function generateSetupScript(projectId: string, database: Database): Promise<string> {
   const project = await getProjectById(projectId, database);
@@ -89,61 +77,29 @@ ${contextParts.join("\n")}`;
 }
 
 /**
- * Is this Python repo managed by `uv`? (#120)
+ * Verify (merge-gate) command for a project with no persisted stack profile yet (#521).
  *
- * uv installs into a project-local `.venv`, so pytest is NOT importable from the global
- * interpreter — a bare `python -m pytest` merge gate fails with "No module named pytest"
- * and blocks every merge. Detected from the `uv.lock` lockfile or a `[tool.uv]` section
- * in `pyproject.toml`; everything for a uv project must be prefixed with `uv run`.
+ * This was a second per-marker table beside `detectStackProfile`'s — its own node
+ * package-manager cascade (no bun), its own gradle branch (hardcoded `./gradlew`, which
+ * cmd.exe cannot exec, and no Kotlin-multiplatform `allTests`), its own python branch
+ * (no poetry/pipenv `run` prefix). So a project registered before its profile existed
+ * got a DIFFERENT gate command than the same project registered after, and the UI's
+ * "generate verify script" button could disagree with what registration wrote.
  *
- * Lives here (not stack-detector) because stack-detector imports THIS module — putting it
- * the other way round would make the cycle.
+ * The detector is pure and synchronous and already decides all of this, and
+ * `deriveVerifyCommand` turns its profile into the canonical, exit-honest command (#124)
+ * — the same one the builder is told to run. So the fallback is that pair, and the
+ * ladder below is only what the detector does not model yet.
+ *
+ * `detected` is passed through rather than re-read so a caller that already scanned the
+ * directory (and the tests) keeps deciding from the same marker set.
  */
-export function isUvProject(repoPath: string, markers: Set<string> | string[]): boolean {
-  const set = markers instanceof Set ? markers : new Set(markers);
-  if (set.has("uv.lock")) return true;
-  if (!set.has("pyproject.toml")) return false;
-  try {
-    return /^\s*\[tool\.uv[.\]]/m.test(readFileSync(join(repoPath, "pyproject.toml"), "utf8"));
-  } catch {
-    return false;
-  }
-}
-
-/** Rule-based heuristic: derive a verify command from detected marker files. */
 export function deriveVerifyScript(repoPath: string, detected: string[]): string {
+  const canonical = deriveVerifyCommand(detectStackProfile(repoPath, detected));
+  if (canonical) return canonical;
+
   const detectedSet = new Set(detected);
-
-  if (detectedSet.has("package.json")) {
-    try {
-      const pkgRaw = readFileSync(join(repoPath, "package.json"), "utf8");
-      const pkg = JSON.parse(pkgRaw) as { scripts?: Record<string, string> };
-      const scripts = pkg.scripts ?? {};
-      const hasTest = "test" in scripts;
-      const hasBuild = "build" in scripts;
-      const hasBuildTs = "build:ts" in scripts;
-      const pm = detectedSet.has("pnpm-lock.yaml") ? "pnpm" : detectedSet.has("yarn.lock") ? "yarn" : "npm";
-      const parts: string[] = [];
-      if (hasTest) parts.push(`${pm} test`);
-      if (hasBuild) parts.push(`${pm} run build`);
-      else if (hasBuildTs) parts.push(`${pm} run build:ts`);
-      if (parts.length > 0) return parts.join(" && ");
-    } catch {
-      // fall through to AI
-    }
-  }
-
-  if (detectedSet.has("Cargo.toml")) return "cargo test";
-  if (detectedSet.has("go.mod")) return "go test ./...";
-  if (detectedSet.has("pom.xml")) return "mvn test";
-  if (detectedSet.has("build.gradle") || detectedSet.has("build.gradle.kts")) {
-    // #521: NOT the hardcoded "./gradlew" this used to emit. `runSetupScript`/the verify
-    // gate spawn through `cmd.exe /d /s /c` on Windows, which parses `./gradlew` as the
-    // command `.` and exits 1 — so the verify gate failed and the merge was silently
-    // withheld (`pre_merge_gate_failed`) on every JVM project on this platform. The
-    // detector already resolves the right wrapper per platform; use it.
-    return `${gradleWrapper(repoPath)} test`;
-  }
+  // Ecosystems the detector has no profile branch for. Keep them here until it grows one.
   if (detectedSet.has("Makefile")) {
     try {
       const makefile = readFileSync(join(repoPath, "Makefile"), "utf8");
@@ -151,9 +107,6 @@ export function deriveVerifyScript(repoPath: string, detected: string[]): string
     } catch {
       // fall through
     }
-  }
-  if (detectedSet.has("Pipfile") || detectedSet.has("pyproject.toml") || detectedSet.has("requirements.txt")) {
-    return isUvProject(repoPath, detectedSet) ? "uv run pytest" : "python -m pytest";
   }
   if (detectedSet.has("Gemfile")) return "bundle exec rake test";
   if (detectedSet.has("mix.exs")) return "mix test";
