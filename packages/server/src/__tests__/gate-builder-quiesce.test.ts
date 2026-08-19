@@ -22,14 +22,14 @@ import {
   quiesceBuildersEnabled,
   quiesceBuildersDuringGatePrefKey,
 } from "../services/gate-quiesce.js";
-import { runUnderBuildGate, buildGateBusy, buildGateActive } from "../services/jvm-build-gate.js";
+import { runUnderBuildSemaphore, buildGateBusy, buildSemaphoreActive } from "../services/jvm-build-semaphore.js";
 import { buildGateTierMessage } from "../services/pre-merge-gate-tier.js";
 
 const PROJECT_ID = "cccc1111-2222-3333-4444-555566667777";
 
 describe("buildGateBusy (#581)", () => {
   afterEach(() => {
-    expect(buildGateActive()).toBe(0); // no test may leak a held slot
+    expect(buildSemaphoreActive()).toBe(0); // no test may leak a held slot
   });
 
   it("is false on an idle board", () => {
@@ -38,7 +38,7 @@ describe("buildGateBusy (#581)", () => {
 
   it("is true only while a gated task is in flight", async () => {
     let observedInside = false;
-    await runUnderBuildGate(async () => {
+    await runUnderBuildSemaphore(async () => {
       observedInside = buildGateBusy();
     });
     expect(observedInside).toBe(true);
@@ -46,7 +46,7 @@ describe("buildGateBusy (#581)", () => {
   });
 
   it("releases the slot even when the gated task throws", async () => {
-    await expect(runUnderBuildGate(() => Promise.reject(new Error("verify blew up")))).rejects.toThrow();
+    await expect(runUnderBuildSemaphore(() => Promise.reject(new Error("verify blew up")))).rejects.toThrow();
     expect(buildGateBusy()).toBe(false);
   });
 });
@@ -73,7 +73,7 @@ describe("builder quiescing (#581)", () => {
 
   it("holds starts while a gate is in flight", async () => {
     let heldDuringGate: boolean | null = null;
-    await runUnderBuildGate(async () => {
+    await runUnderBuildSemaphore(async () => {
       heldDuringGate = await shouldQuiesceBuildersForGate(PROJECT_ID, db);
     });
     expect(heldDuringGate).toBe(true);
@@ -82,7 +82,7 @@ describe("builder quiescing (#581)", () => {
   it("respects the opt-out even during a gate", async () => {
     await db.insert(preferences).values({ key: quiesceBuildersDuringGatePrefKey(PROJECT_ID), value: "false" });
     let heldDuringGate: boolean | null = null;
-    await runUnderBuildGate(async () => {
+    await runUnderBuildSemaphore(async () => {
       heldDuringGate = await shouldQuiesceBuildersForGate(PROJECT_ID, db);
     });
     expect(heldDuringGate).toBe(false);

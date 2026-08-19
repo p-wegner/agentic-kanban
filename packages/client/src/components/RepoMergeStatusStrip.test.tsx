@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { RepoMergeStatusStripView } from "./RepoMergeStatusStrip.js";
+import { RepoMergeStatusStripBody } from "./RepoMergeStatusStrip.js";
 import type { RepoMergeStatusResponse, RepoMergeStatusRepoEntry } from "@agentic-kanban/shared";
 
 function repo(overrides: Partial<RepoMergeStatusRepoEntry>): RepoMergeStatusRepoEntry {
@@ -26,19 +26,19 @@ function status(overrides: Partial<RepoMergeStatusResponse>): RepoMergeStatusRes
   };
 }
 
-describe("RepoMergeStatusStripView", () => {
+describe("RepoMergeStatusStripBody", () => {
   it("renders nothing without status or for a single-repo workspace", () => {
-    expect(renderToStaticMarkup(<RepoMergeStatusStripView status={null} />)).toBe("");
+    expect(renderToStaticMarkup(<RepoMergeStatusStripBody status={null} />)).toBe("");
     expect(
       renderToStaticMarkup(
-        <RepoMergeStatusStripView status={status({ repos: [repo({ hasWork: true, ahead: 2, stranded: true })] })} />,
+        <RepoMergeStatusStripBody status={status({ repos: [repo({ hasWork: true, ahead: 2, stranded: true })] })} />,
       ),
     ).toBe("");
   });
 
   it("renders one row per repo with 'leading' label, no-changes, merged, and stranded states", () => {
     const html = renderToStaticMarkup(
-      <RepoMergeStatusStripView
+      <RepoMergeStatusStripBody
         status={status({
           repos: [
             repo({ hasWork: false }),
@@ -61,7 +61,7 @@ describe("RepoMergeStatusStripView", () => {
 
   it("renders the allMerged summary when every worked repo has landed", () => {
     const html = renderToStaticMarkup(
-      <RepoMergeStatusStripView
+      <RepoMergeStatusStripBody
         status={status({
           allMerged: true,
           repos: [
@@ -79,7 +79,7 @@ describe("RepoMergeStatusStripView", () => {
 
   it("stays read-only (no action buttons) when no callbacks are supplied", () => {
     const html = renderToStaticMarkup(
-      <RepoMergeStatusStripView
+      <RepoMergeStatusStripBody
         status={status({ repos: [repo({ hasWork: true, ahead: 2, stranded: true }), repo({ name: "svc", path: "/repo/svc", isLeading: false, hasWork: true, ahead: 1, stranded: true })] })}
       />,
     );
@@ -89,7 +89,7 @@ describe("RepoMergeStatusStripView", () => {
 
   it("shows a per-repo rebase button on stranded repos and a workspace retry-merge button when callbacks are supplied", () => {
     const html = renderToStaticMarkup(
-      <RepoMergeStatusStripView
+      <RepoMergeStatusStripBody
         status={status({
           repos: [
             repo({ hasWork: false }),
@@ -109,7 +109,7 @@ describe("RepoMergeStatusStripView", () => {
 
   it("hides the retry-merge button once all repos are merged", () => {
     const html = renderToStaticMarkup(
-      <RepoMergeStatusStripView
+      <RepoMergeStatusStripBody
         status={status({ allMerged: true, repos: [repo({ hasWork: true, ahead: 0, merged: true }), repo({ name: "svc", path: "/repo/svc", isLeading: false, hasWork: true, ahead: 0, merged: true })] })}
         onRebaseRepo={() => {}}
         onRetryMerge={() => {}}
@@ -121,7 +121,7 @@ describe("RepoMergeStatusStripView", () => {
 
   it("surfaces per-repo rebase progress and conflict results", () => {
     const running = renderToStaticMarkup(
-      <RepoMergeStatusStripView
+      <RepoMergeStatusStripBody
         status={status({ repos: [repo({ hasWork: false }), repo({ name: "svc", path: "/repo/svc", isLeading: false, hasWork: true, ahead: 2, stranded: true })] })}
         onRebaseRepo={() => {}}
         actionState={{ svc: { phase: "running" } }}
@@ -130,7 +130,7 @@ describe("RepoMergeStatusStripView", () => {
     expect(running).toContain("rebasing…");
 
     const conflicted = renderToStaticMarkup(
-      <RepoMergeStatusStripView
+      <RepoMergeStatusStripBody
         status={status({ repos: [repo({ hasWork: false }), repo({ name: "svc", path: "/repo/svc", isLeading: false, hasWork: true, ahead: 2, stranded: true })] })}
         onRebaseRepo={() => {}}
         actionState={{ svc: { phase: "done", result: { repo: "svc", success: false, conflictingFiles: ["src/a.ts", "src/b.ts"] } } }}
@@ -139,7 +139,7 @@ describe("RepoMergeStatusStripView", () => {
     expect(conflicted).toContain("conflicts: src/a.ts, src/b.ts");
 
     const clean = renderToStaticMarkup(
-      <RepoMergeStatusStripView
+      <RepoMergeStatusStripBody
         status={status({ repos: [repo({ hasWork: false }), repo({ name: "svc", path: "/repo/svc", isLeading: false, hasWork: true, ahead: 2, stranded: true })] })}
         onRebaseRepo={() => {}}
         actionState={{ svc: { phase: "done", result: { repo: "svc", success: true } } }}
@@ -150,7 +150,7 @@ describe("RepoMergeStatusStripView", () => {
 
   it("surfaces a retry-merge error", () => {
     const html = renderToStaticMarkup(
-      <RepoMergeStatusStripView
+      <RepoMergeStatusStripBody
         status={status({ repos: [repo({ hasWork: false }), repo({ name: "svc", path: "/repo/svc", isLeading: false, hasWork: true, ahead: 1, stranded: true })] })}
         onRetryMerge={() => {}}
         retryState={{ phase: "done", error: "Multi-repo merge blocked — nothing was merged." }}

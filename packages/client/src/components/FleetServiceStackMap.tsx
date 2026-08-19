@@ -160,7 +160,7 @@ function useFleetServiceStacksData(
 }
 
 /** Pure presentational fleet map — data in, markup out (no fetching/effects). */
-export function FleetServiceStackMapView({
+export function FleetServiceStackMapBody({
   data,
   loading,
   error,
@@ -320,7 +320,7 @@ export function FleetServiceStackMap({ projectId, columns }: FleetServiceStackMa
           ↻
         </button>
       </div>
-      <FleetServiceStackMapView data={data} loading={loading} error={error} />
+      <FleetServiceStackMapBody data={data} loading={loading} error={error} />
     </div>
   );
 }

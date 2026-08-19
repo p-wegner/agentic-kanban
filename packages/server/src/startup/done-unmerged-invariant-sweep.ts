@@ -502,11 +502,11 @@ export async function scanDoneUnmergedWorkspaces(
 
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
 
-// Module-level singleton handles — cleared on each startDoneUnmergedScanner call so
+// Module-level singleton handles — cleared on each startDoneUnmergedSweep call so
 // tsx hot-reload never accumulates duplicate intervals (cycle-39 reaper incident).
 let _activeSweep: PeriodicSweepHandle | null = null;
 
-export function stopDoneUnmergedScanner(): void {
+export function stopDoneUnmergedSweep(): void {
   _activeSweep?.stop();
   _activeSweep = null;
 }
@@ -518,11 +518,11 @@ export function stopDoneUnmergedScanner(): void {
  * so tsx hot-reload never accumulates duplicate ticks. Both handles are unref'd so they don't
  * prevent the process from exiting cleanly.
  */
-export function startDoneUnmergedScanner(
+export function startDoneUnmergedSweep(
   deps: Omit<DoneUnmergedScannerDeps, "enabled"> = {},
   intervalMs = DEFAULT_INTERVAL_MS,
 ): PeriodicSweepHandle {
-  stopDoneUnmergedScanner();
+  stopDoneUnmergedSweep();
   _activeSweep = startPeriodicSweep({
     name: "done-unmerged-scanner",
     intervalMs,
@@ -537,7 +537,7 @@ export function startDoneUnmergedScanner(
  * Run the done-unmerged invariant scan immediately (fire-and-forget).
  * Called after a merge completes to catch silent-merge-loss without waiting for the next interval.
  */
-export function runDoneUnmergedScannerNow(
+export function runDoneUnmergedSweepNow(
   deps: Omit<DoneUnmergedScannerDeps, "enabled"> = {},
 ): void {
   scanDoneUnmergedWorkspaces(deps).catch((err) =>

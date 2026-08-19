@@ -13,7 +13,7 @@ const SEVERITY_CLASS: Record<MultirepoHealthSummary["severity"], string> = {
 };
 
 /** Pure presentational pill — renders nothing when there is no summary. */
-export function MultirepoHealthPillView({ summary }: { summary: MultirepoHealthSummary | null }) {
+export function MultirepoHealthPillBody({ summary }: { summary: MultirepoHealthSummary | null }) {
   if (!summary) return null;
   return (
     <span
@@ -82,7 +82,7 @@ export function MultirepoHealthPill({
   if (expanded && status && !summary) return null;
 
   if (expanded && summary) {
-    return <MultirepoHealthPillView summary={summary} />;
+    return <MultirepoHealthPillBody summary={summary} />;
   }
 
   // Collapsed teaser — only when board-loaded data hints multi-repo.

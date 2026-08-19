@@ -3,6 +3,33 @@
 ## Self-HTTP calls are an anti-pattern
 A service must never `fetch('http://127.0.0.1:PORT/api/...')` to call its own server. Instead, accept the target service function as a constructor/factory parameter (dependency injection). Self-HTTP calls: create a hard runtime dependency on port availability, bypass TypeScript types (JSON round-trip), are impossible to unit-test without a running server, and swallow errors through JSON re-parsing. The fix: pass `createWorkspace` (or similar) directly to the service that needs it.
 
+## Vocabulary collisions — what these ten nouns mean HERE (#611)
+
+Ten nouns carry more than one sense in this codebase. Most are fine once written down; four
+were renamed because the minority sense was actively misleading.
+
+**Renamed** (the minority sense was wrong, not just ambiguous):
+
+| Was | Now | Why |
+|---|---|---|
+| `jvm-build-gate.ts` / `runUnderBuildGate` | `jvm-build-semaphore.ts` / `runUnderBuildSemaphore` | It REFUSES nothing — it admits every task, just not all at once. Everywhere else a "gate" is a decision-plus-evidence check that can say no (pre-merge gate, god-module gate, verify gate), and this module sits *inside* `pre-merge-gate.service.ts`, which is where the collision actually bit. |
+| `startup/done-unmerged-invariant-scanner.ts` | `…-invariant-sweep.ts` | A **scanner** in this repo is a guard TEST that scans the tree. This is a runtime periodic pass over DB state — a **background sweep** (see the named-kinds table above), and it is registered in `BACKGROUND_SERVICES` like every other one. |
+
+**Documented, not renamed** (both senses are legitimate; the ambiguity just needed stating):
+
+| Noun | The senses |
+|---|---|
+| **port** | TCP port in 20 of 21 `*Port*` symbols. The hexagonal sense appears once (`OrphanedWorktreeGitPort`). **Prose uses "adapter" for the hexagonal sense** — `port` in a name means TCP. |
+| **provider** | four senses: the AGENT provider (`AgentProvider`, `PROVIDER_NAMES` — ours, and the one a bare "provider" means); a quota provider; the Strategy Bullseye's provider union; and React `*Provider` context components in the client, which is framework vocabulary we do not own. |
+| **gate** | a decision + evidence that can refuse. `PluginLoopGate` is a deliberate HUMAN gate and keeps the name. |
+| **scanner** | a guard TEST that walks the repo tree (`@gate:always-run` suites). Not a runtime pass. |
+| **monitor** | the in-process Autopilot engine (`runMonitorCycle`), vs the out-of-process Conductor loop, vs the `Monitor` view. |
+| **hook** | a Claude Code PreToolUse/Stop hook script under `.claude/hooks/`, vs a React hook, vs a lifecycle callback. |
+| **service** | a `services/` module (factory or fn-module — see the wiring row), vs a project SERVICE STACK container. |
+| **engine** | the monitor engine, vs `workflow-engine/` in shared. |
+| **workflow** | a `workflow_templates` graph, vs `startup/merge-workflow.ts`/`exit-workflow.ts`, which are monitor phases. |
+| **contract** | a wire/DTO contract (`board-events-contract.ts`), vs a test that pins one, vs `/contract` the ticket-consolidation endpoint. |
+
 ## `provider-pair` — one module per agent provider, same shape (#593)
 
 Four providers are registered (`claude`, `codex`, `copilot`, `pi`) and several capabilities

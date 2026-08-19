@@ -40,7 +40,7 @@ const BASELINE: Record<string, string[]> = {
     "**/cli.test.ts",
     "**/cli-butler.test.ts",
     "**/git.service.test.ts",
-    "**/done-unmerged-invariant-scanner.test.ts",
+    "**/done-unmerged-invariant-sweep.test.ts",
     "**/workspace-merge-service.test.ts",
     "**/workspace-already-merged.test.ts",
     "**/api-workspace.test.ts",

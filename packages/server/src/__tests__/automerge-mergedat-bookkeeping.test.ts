@@ -34,8 +34,8 @@ vi.mock("../db/index.js", async () => {
   };
 });
 
-vi.mock("../startup/done-unmerged-invariant-scanner.js", () => ({
-  runDoneUnmergedScannerNow: vi.fn(),
+vi.mock("../startup/done-unmerged-invariant-sweep.js", () => ({
+  runDoneUnmergedSweepNow: vi.fn(),
 }));
 
 const { runMergeCore, cleanupMergedWorktreeAndBranch } = vi.hoisted(() => ({

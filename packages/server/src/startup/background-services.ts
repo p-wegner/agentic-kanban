@@ -11,7 +11,7 @@ import { startZombieFixSessionReconciler, stopZombieFixSessionReconciler } from 
 import { startAncestorBranchReconciler, stopAncestorBranchReconciler } from "./ancestor-branch-reconciler.js";
 import { startBornBlockedReconciler, stopBornBlockedReconciler } from "./born-blocked-reconciler.js";
 import { startWorkflowNodeDivergenceReconciler, stopWorkflowNodeDivergenceReconciler } from "./workflow-node-divergence-reconciler.js";
-import { startDoneUnmergedScanner, stopDoneUnmergedScanner } from "./done-unmerged-invariant-scanner.js";
+import { startDoneUnmergedSweep, stopDoneUnmergedSweep } from "./done-unmerged-invariant-sweep.js";
 import { startTerminalWorkspaceReaper, stopTerminalWorkspaceReaper } from "./terminal-workspace-reaper.js";
 import { startServiceStackReaper, stopServiceStackReaper } from "./service-stack-reaper.js";
 import { startMonitorButler, stopMonitorButler } from "../services/monitor-butler.js";
@@ -139,8 +139,8 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
     // 0-ahead candidates remain log-only. Never reopens an issue.
     name: "done-unmerged-scanner",
     start() {
-      startDoneUnmergedScanner();
-      return stopDoneUnmergedScanner;
+      startDoneUnmergedSweep();
+      return stopDoneUnmergedSweep;
     },
   },
   {

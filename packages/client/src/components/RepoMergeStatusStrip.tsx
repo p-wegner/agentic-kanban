@@ -80,7 +80,7 @@ function rebaseResult(state: RepoActionState | undefined) {
  * single-repo merge), and the workspace gets a "Retry merge" button that re-runs the
  * coordinated all-or-nothing sibling merge. Without callbacks it renders read-only.
  */
-export function RepoMergeStatusStripView({
+export function RepoMergeStatusStripBody({
   status,
   onRebaseRepo,
   onRetryMerge,
@@ -212,7 +212,7 @@ export function RepoMergeStatusStrip({ workspaceId, refreshKey }: { workspaceId:
   }, [workspaceId]);
 
   return (
-    <RepoMergeStatusStripView
+    <RepoMergeStatusStripBody
       status={status}
       onRebaseRepo={onRebaseRepo}
       onRetryMerge={onRetryMerge}

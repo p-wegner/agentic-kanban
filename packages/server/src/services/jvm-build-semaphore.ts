@@ -1,5 +1,11 @@
 /**
- * Concurrency limiter for heavyweight, backend-spawned build/verify/smoke invocations (#823).
+ * Concurrency SEMAPHORE for heavyweight, backend-spawned build/verify/smoke invocations (#823).
+ *
+ * Named a semaphore, not a gate (#611). "Gate" elsewhere in this codebase means a
+ * decision-plus-evidence check that can REFUSE — the pre-merge gate, the god-module gate,
+ * the verify gate. This refuses nothing: it admits every task, just not all at once. Calling
+ * both things a gate made the vocabulary useless at exactly the place it mattered, since
+ * this module sits inside pre-merge-gate.service.ts.
  *
  * The board runs the verify_script (e.g. `gradlew test && build`), the boot/render smoke check
  * (`gradlew run`), and the cold-clone build check itself — IN the server process, on review exit.
@@ -18,13 +24,13 @@ let active = 0;
 const waiters: Array<() => void> = [];
 
 /** Max concurrent backend build/verify invocations. Env-overridable; clamped to >= 1. */
-export function buildGateConcurrency(): number {
+export function buildSemaphoreConcurrency(): number {
   const raw = Number.parseInt(process.env.KANBAN_VERIFY_CONCURRENCY ?? "", 10);
   return Number.isFinite(raw) && raw >= 1 ? raw : 2;
 }
 
 /** Current number of in-flight gated tasks (for diagnostics/tests). */
-export function buildGateActive(): number {
+export function buildSemaphoreActive(): number {
   return active;
 }
 
@@ -41,13 +47,13 @@ export function buildGateBusy(): boolean {
 }
 
 /**
- * Run `task` under the build-concurrency gate: at most `buildGateConcurrency()` run at once; the
+ * Run `task` under the build-concurrency gate: at most `buildSemaphoreConcurrency()` run at once; the
  * rest queue FIFO. Never rejects from the gate itself — a task's own rejection propagates to its
  * caller, and the slot is always released (finally), so one failing/hanging task can't wedge the
  * queue's accounting.
  */
-export async function runUnderBuildGate<T>(task: () => Promise<T>): Promise<T> {
-  if (active >= buildGateConcurrency()) {
+export async function runUnderBuildSemaphore<T>(task: () => Promise<T>): Promise<T> {
+  if (active >= buildSemaphoreConcurrency()) {
     await new Promise<void>((resolve) => waiters.push(resolve));
   }
   active++;

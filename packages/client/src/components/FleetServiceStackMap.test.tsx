@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { ServiceStackState } from "@agentic-kanban/shared";
-import { FleetServiceStackMapView } from "./FleetServiceStackMap.js";
+import { FleetServiceStackMapBody } from "./FleetServiceStackMap.js";
 import { buildFleetServiceStacks, type FleetStackInput } from "../lib/fleetServiceStacks.js";
 
 function stack(partial: Partial<ServiceStackState> = {}): ServiceStackState {
@@ -17,11 +17,11 @@ function stack(partial: Partial<ServiceStackState> = {}): ServiceStackState {
 
 function render(inputs: FleetStackInput[]) {
   return renderToStaticMarkup(
-    <FleetServiceStackMapView data={buildFleetServiceStacks(inputs)} loading={false} error={null} />,
+    <FleetServiceStackMapBody data={buildFleetServiceStacks(inputs)} loading={false} error={null} />,
   );
 }
 
-describe("FleetServiceStackMapView", () => {
+describe("FleetServiceStackMapBody", () => {
   it("renders the empty state with a zeroed summary when no stacks are running", () => {
     const html = render([]);
     expect(html).toContain("fleet-stack-empty");
@@ -32,7 +32,7 @@ describe("FleetServiceStackMapView", () => {
 
   it("shows a loading placeholder while data is null", () => {
     const html = renderToStaticMarkup(
-      <FleetServiceStackMapView data={null} loading={true} error={null} />,
+      <FleetServiceStackMapBody data={null} loading={true} error={null} />,
     );
     expect(html).toContain("Loading service stacks…");
   });
@@ -108,7 +108,7 @@ describe("FleetServiceStackMapView", () => {
 
   it("surfaces an error when no data has loaded yet", () => {
     const html = renderToStaticMarkup(
-      <FleetServiceStackMapView data={null} loading={false} error="boom" />,
+      <FleetServiceStackMapBody data={null} loading={false} error="boom" />,
     );
     expect(html).toContain("boom");
   });

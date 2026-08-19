@@ -78,7 +78,7 @@ vi.mock("../repositories/workspace-status.repository.js", () => ({ setWorkspaceS
 vi.mock("../services/effective-config.service.js", () => ({ MODEL_PREF_KEYS_BY_PROVIDER: {} }));
 vi.mock("../services/agent-provider.js", () => ({ narrowProviderName: vi.fn(() => "claude") }));
 vi.mock("../startup/ancestor-branch-reconciler.js", () => ({ reconcileAncestorBranchWorkspaces: vi.fn(async () => {}) }));
-vi.mock("../startup/done-unmerged-invariant-scanner.js", () => ({ scanDoneUnmergedWorkspaces: vi.fn(async () => {}) }));
+vi.mock("../startup/done-unmerged-invariant-sweep.js", () => ({ scanDoneUnmergedWorkspaces: vi.fn(async () => {}) }));
 vi.mock("../startup/terminal-workspace-reaper.js", () => ({ reapTerminalWorkspaces: vi.fn(async () => {}) }));
 // The target: the stranded-sibling reconciler is dynamically imported by runStartupTasks.
 vi.mock("../startup/merge-workflow.js", () => ({
@@ -96,7 +96,7 @@ import {
 import { reconcileStrandedSiblingMerges } from "../startup/merge-workflow.js";
 import { reapTerminalWorkspaces } from "../startup/terminal-workspace-reaper.js";
 import { reconcileAncestorBranchWorkspaces } from "../startup/ancestor-branch-reconciler.js";
-import { scanDoneUnmergedWorkspaces } from "../startup/done-unmerged-invariant-scanner.js";
+import { scanDoneUnmergedWorkspaces } from "../startup/done-unmerged-invariant-sweep.js";
 import { applyMigrations } from "../db/manual-migrate.js";
 import * as gitService from "../services/git.service.js";
 
