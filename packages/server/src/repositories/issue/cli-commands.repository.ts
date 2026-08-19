@@ -7,6 +7,7 @@
  */
 import { issues, projectStatuses, issueDependencies, projects } from "@agentic-kanban/shared/schema";
 import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { parseIssueRef } from "@agentic-kanban/shared/lib/issue-ref";
 import { eq, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../../db/index.js";
@@ -94,17 +95,17 @@ export async function getIssueByNumberOrId(
   projectId: string | undefined,
   database: Database = db,
 ): Promise<Issue | null> {
-  const isNumeric = /^\d+$/.test(issueArg);
-  if (isNumeric && projectId === undefined) {
+  const ref = parseIssueRef(issueArg);
+  if (ref.kind === "number" && projectId === undefined) {
     // #509: this was `eq(issues.projectId, projectId!)`. The non-null assertion was a
     // claim, not a check — with no project the comparison became `project_id = undefined`,
     // whose result is a driver detail rather than a decision anyone made. A numeric ref
     // is meaningless without a project (numbers are per-project), so say so.
     return null;
   }
-  const whereClause = isNumeric
-    ? and(eq(issues.issueNumber, Number(issueArg)), eq(issues.projectId, projectId as string))
-    : eq(issues.id, issueArg);
+  const whereClause = ref.kind === "number"
+    ? and(eq(issues.issueNumber, ref.issueNumber), eq(issues.projectId, projectId as string))
+    : eq(issues.id, ref.issueId);
   const rows = await database.select().from(issues).where(whereClause).limit(1);
   return rows[0] ?? null;
 }
