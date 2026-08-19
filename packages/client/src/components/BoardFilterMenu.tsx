@@ -67,6 +67,7 @@ export function BoardFilterMenu({
   return (
     <div className="relative shrink-0" ref={ref}>
       <button
+        data-testid="board-filter-menu"
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -192,11 +193,11 @@ export function BoardFilterMenu({
 
           <div className="flex flex-col gap-0.5 border-t border-gray-100 dark:border-gray-800 pt-2">
             <label className="flex items-center gap-2 rounded px-1 py-1 text-xs cursor-pointer hover:bg-surface-sunken dark:hover:bg-gray-800" title="Show only blocked issues">
-              <input type="checkbox" checked={showBlocked} onChange={onToggleBlocked} className="h-3 w-3 rounded border-gray-300 text-brand-600 focus:ring-brand-500" />
+              <input data-testid="filter-blocked-only" type="checkbox" checked={showBlocked} onChange={onToggleBlocked} className="h-3 w-3 rounded border-gray-300 text-brand-600 focus:ring-brand-500" />
               <span className="flex-1 text-ink dark:text-gray-200">Blocked only</span>
             </label>
             <label className="flex items-center gap-2 rounded px-1 py-1 text-xs cursor-pointer hover:bg-surface-sunken dark:hover:bg-gray-800" title="Show only stale backlog issues">
-              <input type="checkbox" checked={showStaleOnly} onChange={onToggleStaleOnly} className="h-3 w-3 rounded border-gray-300 text-brand-600 focus:ring-brand-500" />
+              <input data-testid="filter-stale-only" type="checkbox" checked={showStaleOnly} onChange={onToggleStaleOnly} className="h-3 w-3 rounded border-gray-300 text-brand-600 focus:ring-brand-500" />
               <span className="flex-1 text-ink dark:text-gray-200">Stale only</span>
             </label>
           </div>
