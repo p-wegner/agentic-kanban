@@ -51,6 +51,24 @@ function makeContainerProvision(containerId: string): ContainerProvision {
   };
 }
 
+/**
+ * A `Dirent` stub carrying EVERY predicate `couldHoldSkill`
+ * (`packages/shared/src/lib/agent-skill-files.ts`) calls — currently `isDirectory` and
+ * `isSymbolicLink` (#664).
+ *
+ * The literal `{ name, isDirectory }` objects this replaces threw
+ * `entry.isSymbolicLink is not a function` the moment that predicate was widened to follow
+ * a junctioned PLUGIN skill — readdir reports a junction as a symlink, never a directory.
+ * One factory means the next predicate has one place to be taught instead of N literals.
+ */
+function dirent(name: string, opts: { directory?: boolean; symlink?: boolean } = {}) {
+  return {
+    name,
+    isDirectory: () => opts.directory ?? false,
+    isSymbolicLink: () => opts.symlink ?? false,
+  };
+}
+
 describe("agent.service", () => {
   const originalAgentCommand = process.env.AGENT_COMMAND;
 
@@ -115,8 +133,8 @@ describe("agent.service", () => {
       const mockProc = createMockProc();
       (spawnMock as any).mockReturnValue(mockProc);
       (readdirSync as any).mockReturnValue([
-        { name: "kanban-workflow", isDirectory: () => true },
-        { name: "not-a-skill.md", isDirectory: () => false },
+        dirent("kanban-workflow", { directory: true }),
+        dirent("not-a-skill.md"),
       ]);
       (existsSync as any).mockImplementation((path: string) =>
         path.endsWith(".pi\\plugin\\agentic-kanban-hooks.ts") ||
