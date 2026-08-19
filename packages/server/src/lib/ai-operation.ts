@@ -7,6 +7,11 @@ import { AiOperationError, AppError } from "../errors/index.js";
  *
  * AppError subclasses (e.g. NotFoundError, ValidationError) are re-thrown
  * unchanged so the domain error handler can map them to the correct HTTP status.
+ *
+ * #612 — moved out of `middleware/`. It is not Hono middleware: it takes no `Context` and
+ * no `next()`, and every one of its 18 call sites is a SERVICE wrapping its own model call.
+ * Sitting in `middleware/` made it look like something the router installs once, which is
+ * the opposite of how it is used.
  */
 export async function wrapAiOperation<T>(label: string, fn: () => Promise<T>): Promise<T> {
   try {

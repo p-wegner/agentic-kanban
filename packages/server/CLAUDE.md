@@ -3,6 +3,43 @@
 ## Self-HTTP calls are an anti-pattern
 A service must never `fetch('http://127.0.0.1:PORT/api/...')` to call its own server. Instead, accept the target service function as a constructor/factory parameter (dependency injection). Self-HTTP calls: create a hard runtime dependency on port availability, bypass TypeScript types (JSON round-trip), are impossible to unit-test without a running server, and swallow errors through JSON re-parsing. The fix: pass `createWorkspace` (or similar) directly to the service that needs it.
 
+## One-offs: what was folded, and what is a documented exception (#612)
+
+Nine shapes that were one-of-a-kind — each either folded into an existing element or kept
+with the reason written down. An unexplained one-off is what a later reader copies.
+
+**Folded:**
+- `middleware/ai-operation.ts` → `lib/ai-operation.ts`. It is not Hono middleware: no
+  `Context`, no `next()`, and all 18 call sites are SERVICES wrapping their own model call.
+  In `middleware/` it looked like something the router installs once.
+- `components/Toast.tsx`'s `export { showToast }` re-export is gone. One function was
+  reachable by two paths — 54 importers via the component, 22 via `lib/toast.js` — and
+  importing a pure function FROM a component inverts #589's rule. All 61 now use `lib/toast.js`.
+
+**Documented exceptions, with the reason:**
+- **compat shims are a KIND.** `services/git.service.ts` and `mcp-server/src/git-service.ts`
+  are one-line `export *` re-exports ON PURPOSE — the root CLAUDE.md names them and says to
+  edit only the shared file. `session.manager.ts`, `setup-script.ts`, `agent-provider.ts`,
+  `board-aggregation.service.ts`, `board-status-classifiers.ts` are the same shape: a stable
+  import path over a decomposed implementation. Deleting them means touching every importer
+  to buy nothing.
+- **The three "non-coded" errors are correctly local.** `WorkerDispatchUnavailableError`
+  already carries `NO_AVAILABLE_WORKER`. `VoiceCaptureCommandError` and
+  `StackSharedInUseError` are each caught by their own caller, and the status they map to
+  (422 for the voice one) is not in the shared `DomainErrorCode` table — giving them a shared
+  code would be cosmetic at best and a status change at worst. See the `coded-domain-error`
+  row for which codes belong where.
+- **`hooks/createBoardIssueActions.ts`** — a `create*` factory in `hooks/` is the
+  action-bundle shape, and `client-module-placement.test.ts` (#601) already allows exactly
+  `use*` and `create*` there.
+- **`lib/MentionContext.tsx`** — the client's only React context. Kept: a context is the right
+  primitive for a value read by scattered descendants of one subtree, which is what mentions
+  are. Not a precedent for cross-cutting state; that is what the stores are for.
+
+**Deferred, with an owner:** `shared/types/service-stack.ts`'s runtime exports belong in a
+contract-codec (#531 owns that move), and `lib/boardColumnsStore.ts` folds into whatever
+#513 lands as the data-fetching target — folding it first would just move it twice.
+
 ## `coded-domain-error` — one vocabulary, and why an unknown code is a 500 (#587)
 
 A domain error here is `class XError extends Error` carrying a `code`. `middleware/

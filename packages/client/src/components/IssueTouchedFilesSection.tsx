@@ -1,7 +1,7 @@
 import type { TouchedFile } from "../lib/issueDetailTypes.js";
 import { useEffect, useState } from "react";
 import { apiPost } from "../lib/api.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 
 
 interface IssueTouchedFilesSectionProps {

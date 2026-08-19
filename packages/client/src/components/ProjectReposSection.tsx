@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { ProjectRepoResponse } from "@agentic-kanban/shared";
 import { apiDelete, apiPatch, apiPost } from "../lib/api.js";
 import { fetchProjectRepos, invalidateProjectRepos } from "../lib/projectReposQuery.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { CollapsibleSection } from "./SettingsPanel.shared.js";
 import { buildRepoPatch, repoFormFromResponse, type RepoEditFormState } from "../lib/repoEditPayload.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";

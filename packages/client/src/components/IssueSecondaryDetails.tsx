@@ -2,7 +2,7 @@
 import type { Tag } from "../lib/boardTypes.js";
 import type { IssueWithStatus, DependencyInfo, IssueArtifact, MergedCommit, MergedCommitsResponse } from "@agentic-kanban/shared";
 import { apiPost, apiDelete, apiPut } from "../lib/api.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { formatRelativeTime, formatAbsoluteTime } from "../lib/formatRelativeTime.js";
 import { invalidateAvailableIssuesCache } from "../hooks/useIssueDetailData.js";
 import { IssueChecklistSection } from "./IssueChecklistSection.js";

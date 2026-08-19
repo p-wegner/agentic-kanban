@@ -5,7 +5,7 @@ import {
   saveVoiceLanguage,
   VOICE_LANGUAGE_OPTIONS,
 } from "../lib/voice-language.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 
 interface ButlerVoiceButtonProps {
   /** Disable the button (e.g. while the butler is processing a turn). */

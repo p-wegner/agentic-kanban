@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiDelete, apiFetch, apiPost } from "../lib/api.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { usePluginViewStore } from "../stores/pluginViewStore.js";
 
 /** GET /api/plugins/marketplace — installed plugins merged with the machine's catalog file. */

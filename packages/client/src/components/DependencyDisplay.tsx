@@ -1,7 +1,7 @@
 import React, { useRef, useState } from "react";
 import type { DependencyInfo, IssueWithStatus } from "@agentic-kanban/shared";
 import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 
 interface DependencyDisplayProps {
   issue: IssueWithStatus;

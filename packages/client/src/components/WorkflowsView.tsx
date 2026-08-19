@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
 import { slugify } from "@agentic-kanban/shared/lib/slugify";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { WorkflowBuilder } from "./WorkflowBuilder.js";
 
 interface Template {

@@ -3,7 +3,7 @@ import { CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { getSettings } from "../lib/settingsStore.js";
 import { providerLabel, profileSelectionFromValue, defaultSelectedProfile } from "../lib/workspace-helpers.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import TicketMentionInput from "./TicketMentionInput.js";
 
 interface Skill {

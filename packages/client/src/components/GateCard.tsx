@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiFetch, apiPost, apiPut } from "../lib/api.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import {
   canSubmitGateAction,
   gateActionButtonClasses,

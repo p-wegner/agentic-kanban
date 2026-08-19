@@ -4,7 +4,7 @@ import { getRegistrationProgress } from "../services/registration-progress.servi
 import { searchGraphIssueIds } from "../repositories/graph-search.repository.js";
 import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.js";
 import { createRouter } from "../middleware/create-router.js";
-import { wrapAiOperation } from "../middleware/ai-operation.js";
+import { wrapAiOperation } from "../lib/ai-operation.js";
 import { getProjectActivity } from "../services/project-activity.service.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { SessionLauncher } from "../services/session.manager.js";

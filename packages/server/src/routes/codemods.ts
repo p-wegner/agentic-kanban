@@ -1,6 +1,6 @@
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
-import { wrapAiOperation } from "../middleware/ai-operation.js";
+import { wrapAiOperation } from "../lib/ai-operation.js";
 import { createCodemodService } from "../services/codemod.service.js";
 import {
   createAgentSkill,

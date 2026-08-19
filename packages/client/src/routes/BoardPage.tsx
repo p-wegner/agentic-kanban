@@ -11,7 +11,7 @@ import { useBoardMiscHandlers } from "../hooks/useBoardMiscHandlers.js";
 import { BoardPageView } from "../components/BoardPageView.js";
 import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
 import { SkeletonBoard } from "../components/SkeletonBoard.js";
-import { showToast } from "../components/Toast.js";
+import { showToast } from "../lib/toast.js";
 import { fetchProjectRepos } from "../lib/projectReposQuery.js";
 import { matchesBoardFilters } from "../lib/boardFiltering.js";
 import { reconcileSelectedIssue } from "../lib/selectedIssueSync.js";

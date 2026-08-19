@@ -2,7 +2,7 @@ import type { ActivityEventType, ActivityEvent } from "../lib/issueDetailTypes.j
 import React from "react";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { slugify } from "@agentic-kanban/shared/lib/slugify";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 
 
 interface Props {

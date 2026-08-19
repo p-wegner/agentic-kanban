@@ -3,7 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { IssueArtifact, IssueWithStatus } from "@agentic-kanban/shared";
 import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { AgentQuestionsPanel } from "./AgentQuestionsPanel.js";
 
 type WorkspaceInfo = NonNullable<NonNullable<IssueWithStatus["workspaceSummary"]>["main"]>;

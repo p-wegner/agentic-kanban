@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { PaneHeading } from "./PluginActionPanes.js";
 import type { PluginSkill } from "./PluginActionPanes.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";

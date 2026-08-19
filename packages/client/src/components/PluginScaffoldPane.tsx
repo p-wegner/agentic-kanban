@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { MarkdownView } from "./MarkdownView.js";
 import { apiFetch, apiPost, apiPut } from "../lib/api.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**

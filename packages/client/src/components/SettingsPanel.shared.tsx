@@ -1,7 +1,7 @@
 import type { SkillSetting, TagSetting } from "../lib/settingsTypes.js";
 import { useState, type ReactNode } from "react";
 import { apiPost } from "../lib/api.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 
 export interface SettingsPanelProps {
   onClose: () => void;

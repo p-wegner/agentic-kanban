@@ -12,7 +12,7 @@ import {
   type SavedViewReference,
 } from "../lib/boardSavedViews.js";
 import { getSettings, setSettings } from "../lib/settingsStore.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 import { useDismissable } from "../hooks/useDismissable.js";
 

@@ -2,7 +2,7 @@ import type { Database } from "../db/index.js";
 import { createAgentSkillService } from "../services/agent-skill.service.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { createRouter } from "../middleware/create-router.js";
-import { wrapAiOperation } from "../middleware/ai-operation.js";
+import { wrapAiOperation } from "../lib/ai-operation.js";
 
 import { queryFlag } from "../middleware/query-params.js";
 export function createAgentSkillsRoute(database: Database) {

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { STATUS_COLORS, ACCENT, BRAND } from "../lib/chartColors.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import type { DriveDashboard as DriveDashboardData } from "@agentic-kanban/shared";
 import { startStaggeredPoll } from "../lib/pollScheduler.js";
 

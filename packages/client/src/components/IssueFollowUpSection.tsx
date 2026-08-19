@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { apiPost } from "../lib/api.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 
 interface IssueFollowUpSectionProps {
   /** The issue the new task should depend on. */

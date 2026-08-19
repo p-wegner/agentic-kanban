@@ -5,7 +5,7 @@ import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/share
 import type { CreateIssueFormState } from "./CreateIssueForm.js";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { getSettings } from "../lib/settingsStore.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { MarkdownToolbar } from "./MarkdownToolbar.js";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
 import { useProjectRepos } from "../hooks/useProjectRepos.js";

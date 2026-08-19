@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { type Toast, subscribeToasts, showToast, dismissToast } from "../lib/toast.js";
 
-// Re-export so existing component-side `import { showToast } from "../components/Toast.js"`
-// call sites keep working. The store itself now lives in lib/toast.ts (leaf layer).
-export { showToast };
+// #612 — the `export { showToast }` re-export is GONE. It existed so component-side call
+// sites could import a lib function from a component, which is backwards under #589's rule
+// (a pure module lives in `lib/`, whatever renders it) and left one function reachable by
+// two paths — 54 importers via here, 22 via `lib/toast.js`. All 61 now use `lib/toast.js`;
+// this file exports the `<Toaster>` component and nothing else.
 
 const TOAST_TONE: Record<Toast["type"], string> = {
   error: "bg-red-600 text-white",

@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { apiPost } from "../lib/api.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 interface CodemodFileDiff {

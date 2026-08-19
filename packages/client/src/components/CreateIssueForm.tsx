@@ -3,7 +3,7 @@ import { useRef, useEffect, useState } from "react";
 import type { CreateIssueRequest, IssueEstimate } from "@agentic-kanban/shared";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { isHttpUrl } from "../lib/url.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import TicketMentionInput from "./TicketMentionInput.js";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
 import { handleImagePaste, mergeDescriptionWithImages } from "../lib/pastedImages.js";

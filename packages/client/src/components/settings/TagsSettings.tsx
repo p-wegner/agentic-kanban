@@ -1,6 +1,6 @@
 import type { Dispatch, SetStateAction } from "react";
 import { apiPost, apiPatch, apiDelete } from "../../lib/api.js";
-import { showToast } from "../Toast.js";
+import { showToast } from "../../lib/toast.js";
 import type { TagSetting } from "../SettingsPanel.shared.js";
 
 type TagsSettingsProps = {
