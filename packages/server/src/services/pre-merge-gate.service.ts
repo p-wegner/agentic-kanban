@@ -23,7 +23,7 @@ import { quiesceBuildersEnabled } from "./gate-quiesce.js";
 import { isSelfProjectRepo } from "./self-project.js";
 import { getProjectRepoPath } from "../repositories/project.repository.js";
 import { runUnderBuildSemaphore } from "./jvm-build-semaphore.js";
-import { runE2ESmokeLane, e2eLaneExists, decideE2ESmokeStage } from "./e2e-smoke-lane.js";
+import { runE2ESmokeGateStage } from "./e2e-smoke-lane.js";
 import {
   resolveVerifyGateStrategy,
   countAlwaysRunGuardSuites,
@@ -123,23 +123,6 @@ async function resolveVerifyFileScope(projectId: string, database: Database): Pr
 // `verify_gate_strategy` (the named tier pref), the always-run guard-suite scan, and the
 // pass-message builder live in `pre-merge-gate-tier.ts` (#538) — kept out of this file to stay
 // under the god-module cohesion ceiling (`max-file-size.test.ts` / `check-god-modules.mjs`).
-
-/**
- * `verify_gate_e2e_smoke_<projectId>` — run the E2E smoke lane as a gate stage (#660).
- *
- * Default OFF, and deliberately so: enabling it taxes EVERY merge on the project with the
- * lane's ~52 s plus a cold two-server boot. Whether that trade is worth it depends on how
- * often the project's merges break the smoke path, which is an operator's judgement about
- * their own repo — not something a default can be right about.
- */
-export function verifyGateE2ESmokePrefKey(projectId: string): string {
-  return `verify_gate_e2e_smoke_${projectId}`;
-}
-
-async function resolveE2ESmokeGateEnabled(projectId: string, database: Database): Promise<boolean> {
-  const raw = await getPreference(verifyGateE2ESmokePrefKey(projectId), database).catch(() => null);
-  return raw?.trim().toLowerCase() === "true";
-}
 
 const MAX_VERIFY_WORKERS = 32;
 
@@ -678,44 +661,19 @@ export async function runPreMergeGate(
     console.warn(`[pre-merge-gate] smoke check errored (non-fatal) for workspace ${workspace.id}:`, smokeInconclusive);
   }
 
-  // ---- #660 E2E smoke lane (opt-in) --------------------------------------------------------
-  // Runs AFTER the boot/render check: that one is cheap and catches "does it even start", so
-  // paying a minute for the API lane before it would be paying to learn the same thing slower.
-  //
-  // Three properties this stage must have, all of them the same lesson from #644/#620: a gate
-  // that goes red for a reason that is not the branch teaches people to re-run it, and a gate
-  // people re-run is not a gate.
-  //   - inconclusive is NOT red — a missing package, a spawn failure or a timeout reports as a
-  //     warning on an otherwise-green gate, exactly like the boot/render check above;
-  //   - it holds the build semaphore, so concurrent gate runs do not stampede the machine;
-  //   - it skips a docs-only diff, which cannot change what the lane asserts.
-  let e2eSmokeRan = false;
-  let e2eSmokeInconclusive: string | null = null;
-  try {
-    const decision = decideE2ESmokeStage({
-      enabled: await resolveE2ESmokeGateEnabled(projectId, database),
-      hasWorktree: Boolean(workspace.workingDir),
-      docsOnly,
-      laneExists: Boolean(workspace.workingDir) && e2eLaneExists(workspace.workingDir!),
-    });
-    if (decision.action === "inconclusive") {
-      e2eSmokeInconclusive = decision.reason;
-    } else if (decision.action === "run") {
-      const result = await runUnderBuildSemaphore(() => runE2ESmokeLane(workspace.workingDir!));
-      if (result.inconclusive) {
-        e2eSmokeInconclusive = result.message;
-      } else if (!result.passed) {
-        return { passed: false, skipped: false, stage: "verify", message: result.message };
-      } else {
-        e2eSmokeRan = true;
-      }
-    }
-  } catch (e2eErr) {
-    // Same non-fatal contract as the boot/render block: recorded and reported, never silent.
-    e2eSmokeInconclusive = errorMessage(e2eErr);
-  }
-  if (e2eSmokeInconclusive) {
-    console.warn(`[pre-merge-gate] E2E smoke lane inconclusive (non-fatal) for workspace ${workspace.id}: ${e2eSmokeInconclusive}`);
+  // #660 — the E2E smoke lane, opt-in per project. Lives in `e2e-smoke-lane.ts` with the
+  // runner and the decision it acts on; this file only consumes the verdict.
+  const e2eSmoke = await runE2ESmokeGateStage({
+    projectId,
+    workingDir: workspace.workingDir,
+    workspaceId: workspace.id,
+    docsOnly,
+    database,
+  });
+  const e2eSmokeRan = e2eSmoke.ran;
+  const e2eSmokeInconclusive = e2eSmoke.inconclusive;
+  if (e2eSmoke.failure) {
+    return { passed: false, skipped: false, stage: "verify", message: e2eSmoke.failure };
   }
 
   // `verifyRan` — not `verifyConfigured` — because a docs-only diff skips the verify script.

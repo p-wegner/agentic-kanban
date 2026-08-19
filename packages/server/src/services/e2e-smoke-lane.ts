@@ -2,6 +2,10 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { allocateFreePorts } from "./port-allocator.js";
+import { getPreference } from "../repositories/preferences.repository.js";
+import { runUnderBuildSemaphore } from "./jvm-build-semaphore.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import type { Database } from "../db/index.js";
 
 /**
  * Run the E2E smoke lane on ALLOCATED ports (#660).
@@ -130,4 +134,66 @@ export function decideE2ESmokeStage(input: {
   if (input.docsOnly) return { action: "skip", reason: "docs-only diff (#198)" };
   if (!input.laneExists) return { action: "inconclusive", reason: "no packages/e2e in this worktree" };
   return { action: "run", reason: "enabled, non-docs diff, lane present" };
+}
+
+/**
+ * `verify_gate_e2e_smoke_<projectId>` — run the E2E smoke lane as a gate stage (#660).
+ *
+ * Default OFF, and deliberately so: enabling it taxes EVERY merge on the project with the
+ * lane's ~52 s plus a cold two-server boot. Whether that trade is worth it depends on how
+ * often the project's merges break the smoke path — an operator's judgement about their own
+ * repo, not something a default can be right about.
+ */
+export function verifyGateE2ESmokePrefKey(projectId: string): string {
+  return `verify_gate_e2e_smoke_${projectId}`;
+}
+
+async function resolveE2ESmokeGateEnabled(projectId: string, database: Database): Promise<boolean> {
+  const raw = await getPreference(verifyGateE2ESmokePrefKey(projectId), database).catch(() => null);
+  return raw?.trim().toLowerCase() === "true";
+}
+
+/**
+ * The pre-merge gate's E2E stage: decide, run, and report a verdict the gate can act on.
+ *
+ * `inconclusive` is never `failure`. A missing package, a spawn failure or a timeout is a
+ * warning on an otherwise-green gate, exactly like the boot/render check — because a gate that
+ * goes red for a reason that is not the branch teaches people to re-run it, and a gate people
+ * re-run is not a gate (#644/#620).
+ */
+export async function runE2ESmokeGateStage(args: {
+  projectId: string;
+  workingDir: string | null;
+  workspaceId: string;
+  docsOnly: boolean;
+  database: Database;
+}): Promise<{ ran: boolean; inconclusive: string | null; failure: string | null }> {
+  const { projectId, workingDir, workspaceId, docsOnly, database } = args;
+  let inconclusive: string | null = null;
+  try {
+    const decision = decideE2ESmokeStage({
+      enabled: await resolveE2ESmokeGateEnabled(projectId, database),
+      hasWorktree: Boolean(workingDir),
+      docsOnly,
+      laneExists: Boolean(workingDir) && e2eLaneExists(workingDir!),
+    });
+    if (decision.action === "skip") {
+      if (docsOnly) console.log(`[pre-merge-gate] skipping E2E smoke lane for workspace ${workspaceId} — ${decision.reason}`);
+      return { ran: false, inconclusive: null, failure: null };
+    }
+    if (decision.action === "inconclusive") {
+      inconclusive = decision.reason;
+    } else {
+      // Under the build semaphore, so concurrent gate runs do not stampede the machine.
+      const result = await runUnderBuildSemaphore(() => runE2ESmokeLane(workingDir!));
+      if (result.inconclusive) inconclusive = result.message;
+      else if (!result.passed) return { ran: false, inconclusive: null, failure: result.message };
+      else return { ran: true, inconclusive: null, failure: null };
+    }
+  } catch (err) {
+    // Non-fatal, but recorded and reported — never silent.
+    inconclusive = errorMessage(err);
+  }
+  console.warn(`[pre-merge-gate] E2E smoke lane inconclusive (non-fatal) for workspace ${workspaceId}: ${inconclusive}`);
+  return { ran: false, inconclusive, failure: null };
 }
