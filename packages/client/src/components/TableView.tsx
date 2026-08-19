@@ -12,6 +12,7 @@ import type { BulkOpDeps } from "../lib/tableView-bulk-ops.js";
 import { useBulkOperations } from "../hooks/useBulkOperations.js";
 import type { Tag } from "../hooks/useBulkOperations.js";
 import { resolveRowCells, PRIORITY_LABEL, tagClass } from "../lib/tableView-cells.js";
+import { ISSUE_ESTIMATES } from "@agentic-kanban/shared";
 
 interface TableViewProps {
   columns: StatusWithIssues[];
@@ -22,7 +23,7 @@ interface TableViewProps {
   onClearCreatedDateFilter?: () => void;
 }
 
-const ESTIMATE_OPTIONS = ["XS", "S", "M", "L", "XL"] as const;
+const ESTIMATE_OPTIONS = ISSUE_ESTIMATES;
 const PRIORITY_OPTIONS = ["critical", "high", "medium", "low"] as const;
 
 type TableSort = { key: SortKey; dir: SortDir };

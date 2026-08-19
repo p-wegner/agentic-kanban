@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { isIssueNumberUniqueConstraintError, mcpError, mcpText, nextIssueNumber, resolveStatusByName } from "../db-utils.js";
+import { ISSUE_TYPES } from "@agentic-kanban/shared";
 
 const ISSUE_NUMBER_INSERT_ATTEMPTS = 3;
 
@@ -18,7 +19,7 @@ export function registerCreateSubIssue(server: McpServer, deps: ToolDeps = prodD
       title: z.string().describe("Child issue title"),
       description: z.string().optional().describe("Child issue description"),
       priority: z.enum(["low", "medium", "high", "critical"]).optional().describe("Priority (default: medium)"),
-      issueType: z.string().optional().describe("Issue type (default: task)"),
+      issueType: z.enum(ISSUE_TYPES).optional().describe("Issue type (default: task)"),
       estimate: z.string().nullable().optional().describe("Optional estimate"),
       sortOrder: z.number().optional().describe("Sort order within the status column"),
       statusName: z.string().optional().describe("Status column name (default: first status in parent project)"),

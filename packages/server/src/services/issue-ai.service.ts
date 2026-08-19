@@ -29,6 +29,7 @@ import { getProjectRepoNames } from "../repositories/repo.repository.js";
 import { getProjectRepoPath } from "../repositories/project.repository.js";
 import { nextIssueNumber } from "../repositories/issue-number.repository.js";
 import { normalizeIssuePriority } from "@agentic-kanban/shared/lib/issue-priority";
+import { ISSUE_ESTIMATES } from "@agentic-kanban/shared";
 
 export interface EnhanceIssueResult {
   title: string;
@@ -425,7 +426,7 @@ export interface AiEstimateResult {  estimate: IssueEstimate;
   reasoning: string;
 }
 
-const VALID_ESTIMATES: IssueEstimate[] = ["XS", "S", "M", "L", "XL"];
+const VALID_ESTIMATES: readonly IssueEstimate[] = ISSUE_ESTIMATES;
 
 export async function aiEstimateIssue(
   issueId: string,

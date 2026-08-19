@@ -6,6 +6,7 @@ import { mcpJson, mcpStructuredError, requireEntity, resolveStatusByName, checkO
 import { fireIssueStatusWebhook } from "@agentic-kanban/shared/lib/issue-status-orchestration";
 import { isTerminalStatusName } from "@agentic-kanban/shared/lib";
 import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { ISSUE_TYPES, ISSUE_ESTIMATES } from "@agentic-kanban/shared";
 
 export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, notifyBoard } = deps;
@@ -18,8 +19,8 @@ export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps
       description: z.string().optional().describe("New description"),
       statusName: z.string().optional().describe("Move to status column by name (e.g., 'In Progress', 'Done')"),
       priority: z.enum(["low", "medium", "high", "critical"]).optional().describe("New priority"),
-      issueType: z.enum(["task", "bug", "feature", "chore"]).optional().describe("Issue type (task, bug, feature, chore)"),
-      estimate: z.enum(["XS", "S", "M", "L", "XL"]).nullable().optional().describe("Size estimate (XS/S/M/L/XL), or null to clear"),
+      issueType: z.enum(ISSUE_TYPES).optional().describe("Issue type (task, bug, feature, chore)"),
+      estimate: z.enum(ISSUE_ESTIMATES).nullable().optional().describe("Size estimate (XS/S/M/L/XL), or null to clear"),
     },
     async ({ issueId, title, description, statusName, priority, issueType, estimate }) => {
       const existingResult = await db.select().from(schema.issues).where(eq(schema.issues.id, issueId)).limit(1);

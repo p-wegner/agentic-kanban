@@ -1,9 +1,13 @@
 // Issue / milestone / status-column wire-contract types (pure DTOs). See ../api.ts barrel.
 import type { WorkspaceSummary } from "./workspace.js";
 
-export type IssueType = "task" | "bug" | "feature" | "chore";
-
-export type IssueEstimate = "XS" | "S" | "M" | "L" | "XL";
+// #570: these unions are DERIVED from the runtime arrays in lib/issue-vocab.ts rather than
+// declared here. The types barrel is `export type *`, so a runtime array cannot live in this
+// file — which is exactly why every layer that needed one at runtime hand-listed the literals
+// and then disagreed (four client selects were missing `chore`). Re-exported so every existing
+// importer of `types/api/issue` keeps working.
+export type { IssueType, IssueEstimate, IssueArtifactType } from "../../lib/issue-vocab.js";
+import type { IssueType, IssueEstimate, IssueArtifactType } from "../../lib/issue-vocab.js";
 
 export interface CreateIssueRequest {
   title: string;
@@ -111,7 +115,7 @@ export interface IssueArtifact {
   id: string;
   issueId: string;
   workspaceId: string | null;
-  type: "image" | "text" | "link" | "video";
+  type: IssueArtifactType;
   mimeType: string | null;
   content: string;
   caption: string | null;

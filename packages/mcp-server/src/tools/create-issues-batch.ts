@@ -4,12 +4,13 @@ import { eq, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { mcpError, mcpJson, mcpText, nextIssueNumber, resolveActiveProjectId, resolveProjectName } from "../db-utils.js";
+import { ISSUE_TYPES } from "@agentic-kanban/shared";
 
 const issueInputSchema = z.object({
   title: z.string(),
   description: z.string().optional(),
   priority: z.enum(["low", "medium", "high", "critical"]).optional(),
-  issueType: z.string().optional(),
+  issueType: z.enum(ISSUE_TYPES).optional(),
   estimate: z.string().nullable().optional(),
   sortOrder: z.number().optional(),
   statusName: z.string().optional(),
