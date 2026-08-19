@@ -26,9 +26,8 @@ import { buildReviewContext } from "../services/phase-context.service.js";
 import type { MergeWorkspace } from "./merge-workflow.js";
 import { isAutomaticMergeEnabled } from "./merge-strategy.js";
 import type { Database } from "../db/index.js";
-import { isCodexUsageLimitStats } from "../services/codex-rate-limit.js";
 import { rotateCodexLicense } from "../services/codex-license-ring.js";
-import { isClaudeUsageLimitStats } from "../services/claude-rate-limit.js";
+import { readUsageLimitStats, type UsageLimitKind } from "@agentic-kanban/shared/lib/session-stats-blob";
 import { rotateClaudeSubscription } from "../services/claude-subscription-ring.js";
 import { decideRateLimitExit, formatRateLimitBlockedReason } from "./rate-limit-exit-decision.js";
 import { classifySessionExit, resolveSessionRoleFlags } from "./session-exit-classification.js";
@@ -94,8 +93,8 @@ interface UsageLimitProviderConfig {
   executorProvider: ProviderId;
   /** `profile.provider` passed to `startSession` on relaunch. */
   profileSelectionProvider: ProviderName;
-  /** Recognizes this provider's usage-limit signature on the session's persisted stats. */
-  isUsageLimitStats: (stats: string | null | undefined) => boolean;
+  /** The provider discriminant on a usage-limit stats blob (#542). */
+  kind: UsageLimitKind;
   /** Rotate the provider's profile ring, cooling the exhausted profile. */
   rotate: (
     database: Database,
@@ -112,7 +111,7 @@ const USAGE_LIMIT_PROVIDERS: UsageLimitProviderConfig[] = [
     profilePrefKey: "codex_profile",
     executorProvider: "codex",
     profileSelectionProvider: "codex",
-    isUsageLimitStats: isCodexUsageLimitStats,
+    kind: "codex",
     rotate: rotateCodexLicense,
   },
   {
@@ -120,7 +119,7 @@ const USAGE_LIMIT_PROVIDERS: UsageLimitProviderConfig[] = [
     profilePrefKey: "claude_profile",
     executorProvider: "claude-code",
     profileSelectionProvider: "claude",
-    isUsageLimitStats: isClaudeUsageLimitStats,
+    kind: "claude",
     rotate: rotateClaudeSubscription,
   },
 ];
@@ -182,13 +181,7 @@ async function hasCommittedChanges(workspace: WorkspaceRow, defaultBranch: strin
 
 /** Extract the "try again / resets at X" hint persisted on the rate-limited session's stats. */
 function parseRateLimitRetryAfter(stats: string | null | undefined): string | null {
-  if (!stats) return null;
-  try {
-    const parsed = JSON.parse(stats) as Record<string, unknown>;
-    return typeof parsed.retryAfter === "string" ? parsed.retryAfter : null;
-  } catch {
-    return null;
-  }
+  return readUsageLimitStats(stats)?.retryAfter ?? null;
 }
 
 /** Build a continuation prompt so the rotated-to account picks the ticket back up in the same worktree. */
@@ -391,7 +384,10 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       // reattached review/fix-and-merge/learning session exits into EMPTY sets — the
       // DB value keeps it from being misrouted to the builder handler.
       const roleFlags = resolveSessionRoleFlags(sessionId, sessionRows[0]?.triggerType, { reviewSessionIds, fixAndMergeSessionIds, learningSessionIds });
-      const usageLimitCfg = USAGE_LIMIT_PROVIDERS.find((cfg) => cfg.isUsageLimitStats(sessionRows[0]?.stats));
+      // One read of the discriminant picks the provider config (#542), instead of asking
+      // each provider's predicate whether the blob is its own.
+      const usageLimit = readUsageLimitStats(sessionRows[0]?.stats);
+      const usageLimitCfg = usageLimit ? USAGE_LIMIT_PROVIDERS.find((cfg) => cfg.kind === usageLimit.kind) : undefined;
       if (usageLimitCfg) {
         await handleUsageLimitExit(usageLimitCfg, workspaceId, sessionId, issueId, projectId, now, sessionRows[0]?.stats, roleFlags);
         return;

@@ -2,7 +2,7 @@ import { readSessionStats } from "@agentic-kanban/shared/lib/session-stats-blob"
 import type { Database } from "../db/index.js";
 import { NotFoundError } from "../errors/index.js";
 import { isAnalyticsNoise } from "./session-filter.js";
-import { isCodexUsageLimitStats } from "./codex-rate-limit.js";
+import { readUsageLimitStats } from "@agentic-kanban/shared/lib/session-stats-blob";
 import { getDirtyTrackedSourceFiles } from "./dirty-main-checkout.js";
 import { getProjectById } from "../repositories/project.repository.js";
 import { revParse, countUniqueCommits } from "@agentic-kanban/shared/lib/git-service";
@@ -89,8 +89,9 @@ function isZeroOutputSession(session: { stats: string | null }): boolean {
   return false;
 }
 
+/** Provider-neutral since #542 — this used to see a Codex quota death but not a Claude one. */
 function isRateLimitedSession(session: { stats: string | null }): boolean {
-  return isCodexUsageLimitStats(session.stats);
+  return readUsageLimitStats(session.stats) !== null;
 }
 
 function extractFailureMessage(session: { stats: string | null } | null, setupStderr: string | null | undefined): string | null {

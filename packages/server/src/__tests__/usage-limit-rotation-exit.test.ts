@@ -34,15 +34,10 @@ vi.mock("../services/agent-settings.service.js", () => ({
   MOCK_AGENT_COMMAND: "mock",
 }));
 
-// Stats signatures: a session whose stats contains the provider marker is "limited".
-vi.mock("../services/codex-rate-limit.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../services/codex-rate-limit.js")>()),
-  isCodexUsageLimitStats: vi.fn((stats: string | null | undefined) => !!stats?.includes("codex-limit")),
-}));
-vi.mock("../services/claude-rate-limit.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../services/claude-rate-limit.js")>()),
-  isClaudeUsageLimitStats: vi.fn((stats: string | null | undefined) => !!stats?.includes("claude-limit")),
-}));
+// The provider is read off the stats blob's own discriminant (#542), so the seeded session
+// carries a REAL usage-limit blob instead of a marker string with the two provider
+// predicates mocked to recognise it — one less place where the fixture could disagree with
+// what the writer actually persists.
 
 const rotateCodexLicense = vi.fn();
 const rotateClaudeSubscription = vi.fn();
@@ -62,6 +57,7 @@ import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
 import { issues, projectStatuses, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkflowEngine } from "../startup/exit-workflow.js";
+import { buildUsageLimitStats } from "@agentic-kanban/shared/lib/session-stats-blob";
 
 function makeBoardEvents() {
   return { broadcast: vi.fn(), broadcastActivity: vi.fn() };
@@ -73,7 +69,7 @@ function makeSessionManager() {
 /** Seed a builder workspace whose latest session hit a provider usage limit. */
 async function seedRateLimitedWorkspace(
   db: ReturnType<typeof createTestDb>["db"],
-  statsMarker: string,
+  kind: "codex" | "claude",
 ) {
   const now = new Date().toISOString();
   const projectId = randomUUID();
@@ -101,7 +97,10 @@ async function seedRateLimitedWorkspace(
   });
   await db.insert(sessions).values({
     id: sessionId, workspaceId, status: "stopped",
-    stats: JSON.stringify({ marker: statsMarker, retryAfter: "2026-06-20T00:00:00.000Z" }),
+    stats: JSON.stringify(buildUsageLimitStats(kind, {
+      executor: kind, durationMs: 1000, exitCode: 1,
+      message: `${kind} usage limit reached`, retryAfter: "2026-06-20T00:00:00.000Z",
+    })),
     startedAt: now,
   });
 
@@ -124,7 +123,7 @@ describe("exit-workflow: usage-limit rotation relaunch (handleUsageLimitExit)", 
   });
 
   it("rotates a Codex license and relaunches the builder on the fresh profile (codex provider)", async () => {
-    const { projectId, workspaceId, sessionId } = await seedRateLimitedWorkspace(db, "codex-limit");
+    const { projectId, workspaceId, sessionId } = await seedRateLimitedWorkspace(db, "codex");
     rotateCodexLicense.mockResolvedValue({ rotated: true, fromProfile: "ki14", toProfile: "ki15", reason: "rotated to ki15" });
     const sessionManager = makeSessionManager();
 
@@ -157,7 +156,7 @@ describe("exit-workflow: usage-limit rotation relaunch (handleUsageLimitExit)", 
   });
 
   it("rotates a Claude subscription and relaunches with claude-code provider + the rotated profile", async () => {
-    const { workspaceId, sessionId } = await seedRateLimitedWorkspace(db, "claude-limit");
+    const { workspaceId, sessionId } = await seedRateLimitedWorkspace(db, "claude");
     rotateClaudeSubscription.mockResolvedValue({ rotated: true, fromProfile: "anth", toProfile: "anth2", reason: "rotated to anth2" });
     const sessionManager = makeSessionManager();
 
@@ -181,7 +180,7 @@ describe("exit-workflow: usage-limit rotation relaunch (handleUsageLimitExit)", 
   });
 
   it("leaves the workspace blocked (no relaunch) when the ring cannot rotate", async () => {
-    const { workspaceId, sessionId } = await seedRateLimitedWorkspace(db, "codex-limit");
+    const { workspaceId, sessionId } = await seedRateLimitedWorkspace(db, "codex");
     rotateCodexLicense.mockResolvedValue({ rotated: false, fromProfile: "ki14", reason: "all licenses cooled down" });
     const sessionManager = makeSessionManager();
 

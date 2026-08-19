@@ -1,7 +1,5 @@
-import { parseSessionStatsBlob } from "@agentic-kanban/shared";
+import { parseSessionStatsBlob, readUsageLimitStats } from "@agentic-kanban/shared";
 import { isBuilderCycleTrigger } from "@agentic-kanban/shared/lib/session-trigger";
-import { isClaudeUsageLimitStats } from "./claude-rate-limit.js";
-import { isCodexUsageLimitStats } from "./codex-rate-limit.js";
 import type { WorkspaceCandidate } from "../startup/monitor-cycle.js";
 
 export const MAX_SESSIONS = 10;
@@ -89,10 +87,11 @@ export function classifyQuotaBlock(
   sess: { startedAt?: string | null; stats: string | null } | null | undefined,
   nowMs: number,
 ): QuotaBlock | null {
-  const stats = sess?.stats ?? null;
-  if (!isClaudeUsageLimitStats(stats) && !isCodexUsageLimitStats(stats)) return null;
-  const parsed = parseSessionStats(stats);
-  const rawRetryAfter = typeof parsed.retryAfter === "string" ? parsed.retryAfter : null;
+  // One read (#542): the discriminated reader answers "is this a quota death" and hands
+  // back the reset time, instead of two provider predicates plus a second parse of the blob.
+  const usageLimit = readUsageLimitStats(sess?.stats ?? null);
+  if (!usageLimit) return null;
+  const rawRetryAfter = usageLimit.retryAfter;
   const retryAfterMs = rawRetryAfter ? Date.parse(rawRetryAfter) : Number.NaN;
   if (Number.isFinite(retryAfterMs)) {
     return {

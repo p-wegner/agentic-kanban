@@ -1,10 +1,9 @@
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { isBuilderCycleTrigger } from "@agentic-kanban/shared/lib/session-trigger";
+import { readUsageLimitStats } from "@agentic-kanban/shared/lib/session-stats-blob";
 import type { Database } from "../db/index.js";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { db } from "../db/index.js";
-import { isClaudeUsageLimitStats } from "./claude-rate-limit.js";
-import { isCodexUsageLimitStats } from "./codex-rate-limit.js";
 import { resolveStartPolicy } from "./start-policy.service.js";
 import { classifyQuotaBlock, parseSessionStats } from "./monitor-cycle-rules.js";
 import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
@@ -130,8 +129,7 @@ function classifyCause(rows: ActiveWorkspaceWithSessions[], prefMap: Map<string,
   // the label kept claiming "waiting on quota" for days after the quota had demonstrably
   // reset — a self-healing condition that was not healing, which is the least actionable
   // report of all because it tells the reader to wait.
-  const quotaRows = rows.filter((row) => isCodexUsageLimitStats(row.latestSession?.stats)
-    || isClaudeUsageLimitStats(row.latestSession?.stats));
+  const quotaRows = rows.filter((row) => readUsageLimitStats(row.latestSession?.stats) !== null);
   if (quotaRows.length > 0) {
     const stillWaiting = quotaRows.some((row) => {
       const block = classifyQuotaBlock(row.latestSession, nowMs);
