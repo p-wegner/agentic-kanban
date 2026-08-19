@@ -16,7 +16,8 @@
 // scoped git tokens (#247) — otherwise a revoked machine keeps streaming into
 // in-flight sessions and keeps cloning/pushing until the board restarts.
 
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
+import { createExpiringDigestStore, mintToken, sha256Hex } from "../lib/bearer-token.js";
 import { db as realDb } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import * as workerRepo from "../repositories/worker.repository.js";
@@ -51,10 +52,6 @@ export interface WorkerView extends Omit<WorkerRow, "tokenHash"> {
   effectiveStatus: WorkerStatus;
 }
 
-function sha256Hex(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
-}
-
 /** Constant-time compare that does not leak length via an early return. */
 function tokensMatch(provided: string, expected: string): boolean {
   const a = Buffer.from(provided);
@@ -78,24 +75,23 @@ function effectiveStatus(row: WorkerRow, nowMs: number): WorkerStatus {
 }
 
 export function createWorkerRegistry(database: Database = realDb) {
-  /** Pending pairing tokens: sha256(token) -> expiry epoch ms. In-memory by design. */
-  const pendingPairings = new Map<string, number>();
+  /**
+    * Pending pairing tokens, keyed by digest. In-memory by design. #556: this was a bare
+    * `Map<hash, expiresAtMs>` that only ever deleted the entry it consumed, so an unclaimed
+    * pairing token stayed in memory until the process exited; the shared store prunes on
+    * every issue.
+    */
+  const pendingPairings = createExpiringDigestStore<true>({ ttlMs: PAIRING_TOKEN_TTL_MS });
 
   function mintPairingToken(now?: string): { pairingToken: string; expiresAt: string } {
     const nowMs = now ? new Date(now).getTime() : Date.now();
-    const token = randomBytes(32).toString("hex");
-    const expiresAtMs = nowMs + PAIRING_TOKEN_TTL_MS;
-    pendingPairings.set(sha256Hex(token), expiresAtMs);
-    return { pairingToken: token, expiresAt: new Date(expiresAtMs).toISOString() };
+    const token = pendingPairings.issue(true, { now: nowMs });
+    return { pairingToken: token, expiresAt: new Date(nowMs + PAIRING_TOKEN_TTL_MS).toISOString() };
   }
 
   /** Verify AND consume a pairing token (single-use). */
   function consumePairingToken(token: string, nowMs: number): boolean {
-    const hash = sha256Hex(token);
-    const expiresAtMs = pendingPairings.get(hash);
-    if (expiresAtMs === undefined) return false;
-    pendingPairings.delete(hash);
-    return nowMs <= expiresAtMs;
+    return pendingPairings.consume(token, nowMs) !== null;
   }
 
   async function registerWorker(input: RegisterWorkerInput): Promise<
@@ -109,7 +105,7 @@ export function createWorkerRegistry(database: Database = realDb) {
       return { ok: false, error: "invalid or expired pairing token" };
     }
     const workerId = randomUUID();
-    const workerToken = randomBytes(32).toString("hex");
+    const workerToken = mintToken();
     await workerRepo.insertWorker({
       id: workerId,
       name: input.name.trim(),

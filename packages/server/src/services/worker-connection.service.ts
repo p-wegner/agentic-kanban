@@ -9,6 +9,7 @@
 // their still-running sessions in a fresh `hello`.
 
 import type { Context, Next } from "hono";
+import { extractBearer } from "../lib/bearer-token.js";
 import type { UpgradeWebSocket, WSContext } from "hono/ws";
 import {
   parseWorkerToBoardMessage,
@@ -213,10 +214,7 @@ export type WorkerConnectionManager = ReturnType<typeof createWorkerConnectionMa
  * fallback bought nothing and leaked the credential, so it is gone.
  */
 function extractToken(c: Context): string | null {
-  const header = c.req.header("authorization");
-  if (!header) return null;
-  const match = /^Bearer\s+(.+)$/i.exec(header.trim());
-  return match ? match[1]! : null;
+  return extractBearer(c.req.header("authorization"));
 }
 
 /**

@@ -27,6 +27,7 @@ import type { Database } from "../db/index.js";
 import { createWorkerWsRoute } from "./worker-connection.service.js";
 import { getWorkerFleet } from "./worker-fleet.service.js";
 import type { WorkerRegistry } from "./worker-registry.service.js";
+import { envPort } from "../lib/bearer-token.js";
 
 /**
  * Factory for the owner+worker-facing `/api/workers` router. Injected by the
@@ -47,14 +48,13 @@ export interface FleetListenerHandle {
  * values warn and disable rather than crashing the board on a typo.
  */
 export function resolveFleetPort(env: NodeJS.ProcessEnv = process.env): number | null {
-  const raw = env.KANBAN_FLEET_PORT;
-  if (raw === undefined || raw.trim() === "") return null;
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 65535) {
-    console.warn(`[fleet-listener] ignoring invalid KANBAN_FLEET_PORT=${raw}; the fleet listener stays disabled`);
-    return null;
-  }
-  return parsed;
+  // Fallback null = disabled, deliberately unlike git-http's 0 = OS-assigned: a
+  // single-machine board must not open a network port just by existing (#556).
+  return envPort("KANBAN_FLEET_PORT", {
+    fallback: null,
+    logPrefix: "[fleet-listener]",
+    onInvalid: "the fleet listener stays disabled",
+  }, env);
 }
 
 /**

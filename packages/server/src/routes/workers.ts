@@ -1,6 +1,7 @@
 import type { Context, Hono } from "hono";
 import { createRouter } from "../middleware/create-router.js";
 import { parseOptionalJsonBody } from "../middleware/parse-body.js";
+import { extractBearer } from "../lib/bearer-token.js";
 import type { Database } from "../db/index.js";
 import {
   getWorkerRegistry,
@@ -8,11 +9,8 @@ import {
   type WorkerStatus,
 } from "../services/worker-registry.service.js";
 
-function extractBearer(c: Context): string | null {
-  const header = c.req.header("authorization");
-  if (!header) return null;
-  const match = /^Bearer\s+(.+)$/i.exec(header.trim());
-  return match ? match[1]! : null;
+function bearerFrom(c: Context): string | null {
+  return extractBearer(c.req.header("authorization"));
 }
 
 /**
@@ -80,7 +78,7 @@ function registerWorkerFacingRoutes(router: Hono, reg: WorkerRegistry): void {
   });
 
   router.post("/:id/heartbeat", async (c) => {
-    const token = extractBearer(c);
+    const token = bearerFrom(c);
     const body = await parseOptionalJsonBody<{ status?: WorkerStatus }>(c);
     const result = await reg.heartbeat(c.req.param("id"), token ?? "", { status: body.status });
     if (!result.ok) {

@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { randomBytes } from "node:crypto";
 import { resolveMcpServerInvocation } from "./agent-provider/helpers.js";
+import { mintToken } from "../lib/bearer-token.js";
 
 /**
  * The board-side owner of the HTTP MCP listener that containerized builders dial (#136).
@@ -52,7 +52,7 @@ export async function ensureMcpHttpBridge(): Promise<McpHttpBridge | null> {
 async function startBridge(): Promise<McpHttpBridge | null> {
   // 256 bits, hex. Regenerated per board start, so a token that leaks out of a
   // container is useless after a restart.
-  const token = randomBytes(32).toString("hex");
+  const token = mintToken();
   const invocation = resolveMcpServerInvocation();
 
   const proc = spawn(invocation.command, [...invocation.args, "--http"], {

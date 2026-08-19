@@ -30,7 +30,7 @@
 // (worker-remote-sync service).
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { createHash, randomBytes } from "node:crypto";
+import { createExpiringDigestStore, envPort, extractBearer } from "../lib/bearer-token.js";
 import { createGunzip } from "node:zlib";
 import { Transform } from "node:stream";
 import { gitStream } from "@agentic-kanban/shared/lib/git-exec";
@@ -64,7 +64,6 @@ interface GitTokenScope {
   workerId: string;
   projectId: string;
   incomingRef?: string;
-  expiresAtMs: number;
 }
 
 export interface GitHttpHandle {
@@ -76,81 +75,24 @@ export interface GitHttpHandle {
   close(): Promise<void>;
 }
 
-function sha256Hex(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
-}
-
 /**
- * Token store: clear tokens are never kept, only their sha-256 digests (same
- * rule as the worker registry's bearer tokens). Lookup is by digest, so there is
- * no per-candidate comparison to leak timing.
+ * Token store: clear tokens are never kept, only their sha-256 digests (same rule as the
+ * worker registry's bearer tokens). Lookup is by digest, so there is no per-candidate
+ * comparison to leak timing. #556: the map, the mint, the prune and the digest helper are the
+ * shared `createExpiringDigestStore`; what stays here is the SCOPE — which worker, which
+ * project, which incoming ref — because that is the part git transport actually decides.
  */
 function createGitTokenStore() {
-  const scopes = new Map<string, GitTokenScope>();
-
-  function prune(nowMs: number): void {
-    for (const [hash, scope] of scopes) {
-      if (scope.expiresAtMs <= nowMs) scopes.delete(hash);
-    }
-  }
-
-  function issue(input: IssueGitTokenInput): string {
-    const nowMs = input.now ?? Date.now();
-    prune(nowMs);
-    const token = randomBytes(32).toString("hex");
-    scopes.set(sha256Hex(token), {
-      workerId: input.workerId,
-      projectId: input.projectId,
-      incomingRef: input.incomingRef,
-      expiresAtMs: nowMs + (input.ttlMs ?? DEFAULT_GIT_TOKEN_TTL_MS),
-    });
-    return token;
-  }
-
-  function resolve(token: string, nowMs = Date.now()): GitTokenScope | null {
-    const scope = scopes.get(sha256Hex(token));
-    if (!scope) return null;
-    if (scope.expiresAtMs <= nowMs) {
-      scopes.delete(sha256Hex(token));
-      return null;
-    }
-    return scope;
-  }
-
-  function revokeWorker(workerId: string): number {
-    let removed = 0;
-    for (const [hash, scope] of scopes) {
-      if (scope.workerId === workerId) {
-        scopes.delete(hash);
-        removed += 1;
-      }
-    }
-    return removed;
-  }
-
-  return { issue, resolve, revokeWorker };
-}
-
-function extractToken(req: IncomingMessage): string | null {
-  const header = req.headers.authorization;
-  if (!header || Array.isArray(header)) return null;
-  const bearer = /^Bearer\s+(.+)$/i.exec(header.trim());
-  if (bearer) return bearer[1]!;
-  const basic = /^Basic\s+(.+)$/i.exec(header.trim());
-  if (basic) {
-    try {
-      const decoded = Buffer.from(basic[1]!, "base64").toString("utf8");
-      const idx = decoded.indexOf(":");
-      // Git sends user:password; the token rides in the password slot
-      // (`http://x-token:<token>@...`), but accept it in either slot.
-      const user = idx >= 0 ? decoded.slice(0, idx) : decoded;
-      const pass = idx >= 0 ? decoded.slice(idx + 1) : "";
-      return pass || user || null;
-    } catch {
-      return null;
-    }
-  }
-  return null;
+  const store = createExpiringDigestStore<GitTokenScope>({ ttlMs: DEFAULT_GIT_TOKEN_TTL_MS });
+  return {
+    issue: (input: IssueGitTokenInput): string =>
+      store.issue(
+        { workerId: input.workerId, projectId: input.projectId, incomingRef: input.incomingRef },
+        { now: input.now, ttlMs: input.ttlMs },
+      ),
+    resolve: (token: string, nowMs?: number) => store.resolve(token, nowMs),
+    revokeWorker: (workerId: string) => store.revokeWhere((scope) => scope.workerId === workerId),
+  };
 }
 
 function pktLine(payload: string): string {
@@ -298,14 +240,13 @@ function handleServiceRpc(
  * warning rather than crashing the board on a typo.
  */
 export function resolveConfiguredGitPort(env: NodeJS.ProcessEnv = process.env): number {
-  const raw = env.KANBAN_GIT_HTTP_PORT;
-  if (raw === undefined || raw.trim() === "") return 0;
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 65535) {
-    console.warn(`[git-http] ignoring invalid KANBAN_GIT_HTTP_PORT=${raw}; using an OS-assigned port`);
-    return 0;
-  }
-  return parsed;
+  // Fallback 0 = OS-assigned; the fleet listener's identical parse falls back to null =
+  // disabled. That difference is the whole reason they are two call sites and not one (#556).
+  return envPort("KANBAN_GIT_HTTP_PORT", {
+    fallback: 0,
+    logPrefix: "[git-http]",
+    onInvalid: "using an OS-assigned port",
+  }, env);
 }
 
 /**
@@ -336,7 +277,7 @@ export async function startGitHttpServer(opts?: {
           return;
         }
 
-        const provided = extractToken(req);
+        const provided = extractBearer(req.headers.authorization, { allowBasic: true });
         const scope = provided ? tokens.resolve(provided) : null;
         if (!scope) {
           reject(res, 401, "unauthorized");
