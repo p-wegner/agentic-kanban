@@ -1,3 +1,4 @@
+import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 import { isTerminalStatusView } from "@agentic-kanban/shared";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { issues, projectStatuses, workspaces, workflowNodes, sessions, sessionMessages } from "@agentic-kanban/shared/schema";
@@ -241,7 +242,7 @@ export function createAutoMergeOrchestrator(deps: {
       .where(eq(issues.id, integration.issueId)).limit(1);
     const projectId = issueRow?.projectId ?? "";
     const batch = buildStrandedBatch(open, plan, { baseBranch: integration.baseBranch, projectId });
-    const serverPort = process.env.KANBAN_SERVER_PORT || process.env.SERVER_PORT || process.env.PORT || "3001";
+    const serverPort = String(resolveBoardServerPort()); // #615 — the one ladder
 
     try {
       const { sessionId } = await mergeService.reconcileBatch(integration.id, {
