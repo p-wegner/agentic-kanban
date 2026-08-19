@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import type { Database } from "../db/index.js";
-import type { SessionManager } from "./session.manager.js";
+import type { SessionLauncher } from "./session.manager.js";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { PREF_LEARNING_STEP_BEFORE_MERGE } from "../constants/preference-keys.js";
 import { getSessionStatus } from "../repositories/session.repository.js";
@@ -122,7 +122,7 @@ export async function runLearningStep(
   workspaceId: string,
   prefMap: Map<string, string>,
   database: Database,
-  getSessionManager: () => SessionManager,
+  getSessionManager: () => SessionLauncher,
 ): Promise<void> {
   if (!getBool(prefMap, PREF_LEARNING_STEP_BEFORE_MERGE)) return;
 

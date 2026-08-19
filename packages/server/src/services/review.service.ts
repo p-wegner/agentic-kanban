@@ -14,8 +14,8 @@ import {
   getProjectDefaultBranch,
 } from "../repositories/review.repository.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
-import type { BoardEvents } from "./board-events.js";
-import type { SessionManager } from "./session.manager.js";
+import type { BoardEventSink } from "./board-events.js";
+import type { SessionLauncher } from "./session.manager.js";
 import * as gitService from "./git.service.js";
 import { applyWorkspaceProfileToPrefs, resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { loadProjectRuntimeConfig } from "./project-runtime-config.service.js";
@@ -350,8 +350,8 @@ async function classifyBlockedReviewRecovery(
 
 export async function startManualReview(
   database: Database,
-  getSessionManager: () => SessionManager,
-  boardEvents: BoardEvents,
+  getSessionManager: () => SessionLauncher,
+  boardEvents: BoardEventSink,
   reviewSessionIds: Set<string>,
   workspaceId: string,
   thoroughReview: boolean,

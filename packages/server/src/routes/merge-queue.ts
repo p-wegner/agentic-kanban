@@ -3,14 +3,14 @@ import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { createMergeQueueService } from "../services/merge-queue.service.js";
 import type { Database } from "../db/index.js";
-import type { BoardEvents } from "../services/board-events.js";
-import type { SessionManager } from "../services/session.manager.js";
+import type { BoardEventSink } from "../services/board-events.js";
+import type { SessionLauncher } from "../services/session.manager.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function createMergeQueueRoute(
   database: Database,
-  getSessionManager: () => SessionManager,
-  options?: { boardEvents?: BoardEvents },
+  getSessionManager: () => SessionLauncher,
+  options?: { boardEvents?: BoardEventSink },
 ) {
   const router = createRouter();
 

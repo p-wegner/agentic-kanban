@@ -2,7 +2,7 @@ import { and, eq, ne } from "drizzle-orm";
 import { issues, preferences, projects, projectStatuses, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { isTerminalStatusView } from "@agentic-kanban/shared/lib/status-view";
 import type { Database } from "../db/index.js";
-import type { BoardEvents } from "../services/board-events.js";
+import type { BoardEventSink } from "../services/board-events.js";
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 /** Pref key holding the marker for a project's last-announced completion state. */
@@ -52,7 +52,7 @@ export function isProjectFinished(input: CompletionInput): boolean {
 export async function reconcileProjectCompletion(
   database: Database,
   opts: {
-    boardEvents?: BoardEvents;
+    boardEvents?: BoardEventSink;
     /** Current time override for testing. */
     now?: string;
   } = {},

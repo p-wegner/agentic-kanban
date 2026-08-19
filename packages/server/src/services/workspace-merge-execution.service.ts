@@ -1,6 +1,6 @@
 import type { workspaces } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
-import type { BoardEvents } from "./board-events.js";
+import type { BoardEventSink } from "./board-events.js";
 import { WorkspaceError, type GitService } from "./workspace-internals.js";
 import type { RecordMergeAttempt } from "./workspace-merge-prevalidation.service.js";
 import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
@@ -34,7 +34,7 @@ export async function executeWorkspaceMerge(args: {
   repoPath: string;
   targetBranch: string;
   database: Database;
-  boardEvents?: BoardEvents;
+  boardEvents?: BoardEventSink;
   gitService: GitService;
   createBackup: (reason: string) => Promise<unknown>;
   recordMergeAttempt: RecordMergeAttempt;

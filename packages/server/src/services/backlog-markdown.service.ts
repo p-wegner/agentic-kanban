@@ -1,6 +1,6 @@
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
-import type { BoardEvents } from "./board-events.js";
+import type { BoardEventSink } from "./board-events.js";
 import { getProjectById, getProjectStatuses } from "../repositories/project.repository.js";
 import { getFullIssuesForProject } from "../repositories/backlog-snapshot.repository.js";
 import { getTagsForIssues, getDependenciesForIssues, assignTag } from "../repositories/issue.repository.js";
@@ -276,7 +276,7 @@ export interface ImportResult {
   createdDependencies: number; warnings: string[];
 }
 
-export async function applyBacklogMarkdownImport(projectId: string, text: string, opts: ImportOptions = {}, database: Database = db, boardEvents?: BoardEvents): Promise<ImportResult> {
+export async function applyBacklogMarkdownImport(projectId: string, text: string, opts: ImportOptions = {}, database: Database = db, boardEvents?: BoardEventSink): Promise<ImportResult> {
   const preview = await previewBacklogMarkdownImport(projectId, text, opts, database);
   const { doc, rows } = preview;
   const warnings = [...preview.warnings];

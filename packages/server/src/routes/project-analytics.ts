@@ -1,8 +1,8 @@
 import type { Database } from "../db/index.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
-import type { BoardEvents } from "../services/board-events.js";
-import type { SessionManager } from "../services/session.manager.js";
+import type { BoardEventSink } from "../services/board-events.js";
+import type { SessionLauncher } from "../services/session.manager.js";
 import { computeThroughputByProvider } from "../services/dashboard-analytics.service.js";
 import { clampDays, cutoffDayFor } from "../lib/analytics-window.js";
 import { getDoneIssueProviderAttribution } from "../repositories/project.repository.js";
@@ -25,7 +25,7 @@ import { queryInt } from "../middleware/query-params.js";
  */
 export function createProjectAnalyticsRoute(
   database: Database,
-  options?: { boardEvents?: BoardEvents; getSessionManager?: () => SessionManager },
+  options?: { boardEvents?: BoardEventSink; getSessionManager?: () => SessionLauncher },
 ) {
   const router = createRouter();
 

@@ -3,7 +3,7 @@ import { issues, preferences, sessionMessages, sessions, workspaces } from "@age
 import { and, eq, inArray, lt } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
-import type { BoardEvents } from "../services/board-events.js";
+import type { BoardEventSink } from "../services/board-events.js";
 import { PREF_RECONCILER_ZOMBIE_FIX_ENABLED } from "../constants/preference-keys.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { getMergeJob } from "../services/merge-job.service.js";
@@ -23,7 +23,7 @@ const PIDLESS_GRACE_WINDOW_MS = 5 * 60_000;
 
 export interface ZombieFixSessionReconcilerDeps {
   database?: Database;
-  boardEvents: BoardEvents;
+  boardEvents: BoardEventSink;
   /**
    * Override enabled state for testing. When undefined (production path), the reconciler
    * reads the live preference from the DB at each tick.

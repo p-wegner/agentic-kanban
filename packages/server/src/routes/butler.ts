@@ -1,5 +1,5 @@
-import type { SessionManager } from "../services/session.manager.js";
-import type { BoardEvents } from "../services/board-events.js";
+import type { SessionLauncher } from "../services/session.manager.js";
+import type { BoardEventSink } from "../services/board-events.js";
 import { listPluginRows } from "../repositories/plugins.repository.js";
 import { parsePluginManifest } from "@agentic-kanban/shared/lib/plugin-manifest";
 import type { Database } from "../db/index.js";
@@ -191,8 +191,8 @@ const DEFAULT_BUTLER_PROMPT = [
  */
 export function createButlerRoute(
   database: Database,
-  _getSessionManager: () => SessionManager,
-  _options?: { boardEvents?: BoardEvents },
+  _getSessionManager: () => SessionLauncher,
+  _options?: { boardEvents?: BoardEventSink },
 ) {
   const router = createRouter();
 

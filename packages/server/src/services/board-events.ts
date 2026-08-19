@@ -259,3 +259,15 @@ function createBoardEvents() {
 
 export { createBoardEvents };
 export type BoardEvents = ReturnType<typeof createBoardEvents>;
+
+/**
+ * The narrow port most consumers actually need (#560): emit an event, nothing else.
+ *
+ * `BoardEvents` is the whole 14-method hub — subscribe/unsubscribe, invalidation
+ * listeners, the cleanup timer — and demanding it from a service that only calls
+ * `broadcast` both hides that service's real dependency surface and forces every one
+ * of its tests to fake a hub it never touches (`boardEvents as never`). Wiring code
+ * (`server-start.ts`, `routes/index.ts`, the WS route) keeps the full type; a service
+ * that only emits declares this.
+ */
+export type BoardEventSink = Pick<BoardEvents, "broadcast" | "broadcastActivity">;

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { SessionManager } from "../services/session.manager.js";
-import type { BoardEvents } from "../services/board-events.js";
+import type { BoardEventSink } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
 import { createWorkspaceService } from "../services/workspace.service.js";
 import { createWorkspaceServicesControlService } from "../services/workspace-services-control.service.js";
@@ -15,7 +15,7 @@ import { queryFlag } from "../middleware/query-params.js";
 export function createWorkspaceActionsRoute(
   getSessionManager: () => SessionManager,
   database: Database,
-  options?: { boardEvents?: BoardEvents; fixAndMergeSessionIds?: Set<string> },
+  options?: { boardEvents?: BoardEventSink; fixAndMergeSessionIds?: Set<string> },
 ) {
   const router = createRouter();
 

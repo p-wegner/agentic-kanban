@@ -39,8 +39,8 @@ import {
   selectWorkspaceNodeContext,
 } from "../repositories/workflow-fork.repository.js";
 import type { Database } from "../db/index.js";
-import type { SessionManager } from "./session.manager.js";
-import type { BoardEvents } from "./board-events.js";
+import type { SessionLauncher } from "./session.manager.js";
+import type { BoardEventSink } from "./board-events.js";
 import * as realGitService from "./git.service.js";
 // #558: the ONE GitService type (this file carried a byte-identical private copy).
 import type { GitService } from "./workspace-internals.js";
@@ -78,8 +78,8 @@ const SPEC_PHASE_SESSION_POLL_MS = 1000;
 
 export function createWorkflowForkService(deps: {
   database: Database;
-  getSessionManager?: () => SessionManager;
-  boardEvents?: BoardEvents;
+  getSessionManager?: () => SessionLauncher;
+  boardEvents?: BoardEventSink;
   gitService?: GitService;
 }) {
   const { database, getSessionManager, boardEvents } = deps;

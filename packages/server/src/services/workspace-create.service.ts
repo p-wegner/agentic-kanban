@@ -20,8 +20,8 @@ import { provisionServicesForLaunch } from "./workspace-create-stack.service.js"
 import type { ServiceStackState } from "@agentic-kanban/shared";
 import type { TicketContext } from "@agentic-kanban/shared/lib/ticket-context";
 import { withTransaction, type Database, type TransactionClient } from "../db/index.js";
-import type { SessionManager } from "./session.manager.js";
-import type { BoardEvents } from "./board-events.js";
+import type { SessionLauncher } from "./session.manager.js";
+import type { BoardEventSink } from "./board-events.js";
 import * as crudRepo from "../repositories/workspace-crud.repository.js";
 import {
   beginProvisioning,
@@ -72,8 +72,8 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function createWorkspaceCreateService(deps: {
   database: Database;
-  getSessionManager?: () => SessionManager;
-  boardEvents?: BoardEvents;
+  getSessionManager?: () => SessionLauncher;
+  boardEvents?: BoardEventSink;
   gitService: GitService;
 }) {
   const { database, getSessionManager, boardEvents, gitService } = deps;

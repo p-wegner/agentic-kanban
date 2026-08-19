@@ -1,7 +1,7 @@
 import { computeBlockerReadiness, isResolvedDependencyStatusView, isTerminalStatusView, type BlockerWorkspaceLanding, type DependencyWavePlan, type DependencyWaveStartResult } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
-import type { BoardEvents } from "./board-events.js";
-import type { SessionManager } from "./session.manager.js";
+import type { BoardEventSink } from "./board-events.js";
+import type { SessionLauncher } from "./session.manager.js";
 import type { GitService } from "./workspace-internals.js";
 import { createWorkspaceCrudService } from "./workspace-crud.service.js";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
@@ -44,8 +44,8 @@ type DependencyRow = {
 };
 
 export interface DependencyWaveStartDeps {
-  getSessionManager?: () => SessionManager;
-  boardEvents?: BoardEvents;
+  getSessionManager?: () => SessionLauncher;
+  boardEvents?: BoardEventSink;
   gitService?: GitService;
   createWorkspace?: (
     issue: { id: string; issueNumber: number | null; title: string },

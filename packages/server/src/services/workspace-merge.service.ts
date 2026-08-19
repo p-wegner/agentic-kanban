@@ -8,8 +8,8 @@ import {
 import {
 } from "../repositories/workspace-merge.repository.js";
 import type { Database } from "../db/index.js";
-import type { SessionManager } from "./session.manager.js";
-import type { BoardEvents } from "./board-events.js";
+import type { SessionLauncher } from "./session.manager.js";
+import type { BoardEventSink } from "./board-events.js";
 import * as realGitService from "./git.service.js";
 import { createBackup as realCreateBackup } from "../db/backup.js";
 import {
@@ -63,8 +63,8 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function createWorkspaceMergeService(deps: {
   database: Database;
-  getSessionManager?: () => SessionManager;
-  boardEvents?: BoardEvents;
+  getSessionManager?: () => SessionLauncher;
+  boardEvents?: BoardEventSink;
   gitService?: GitService;
   createBackup?: (reason: string) => Promise<unknown>;
   /** Injectable process killer for testing (defaults to the real killProcessesInDir). */

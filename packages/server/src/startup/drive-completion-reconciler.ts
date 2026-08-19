@@ -8,7 +8,7 @@ import {
 import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { LEGACY_TERMINAL_STATUS_NAMES, isTerminalStatusView } from "@agentic-kanban/shared/lib/status-view";
 import type { Database } from "../db/index.js";
-import type { BoardEvents } from "../services/board-events.js";
+import type { BoardEventSink } from "../services/board-events.js";
 
 /**
  * Encode the `drive-new-project` COMPLETION CONTRACT in the autodrive engine (#801).
@@ -37,7 +37,7 @@ import type { BoardEvents } from "../services/board-events.js";
 export async function reconcileDriveCompletion(
   database: Database,
   opts: {
-    boardEvents?: BoardEvents;
+    boardEvents?: BoardEventSink;
     /** Current time override for testing. */
     now?: string;
   } = {},

@@ -62,8 +62,8 @@ import { createWorkspaceMergeService } from "./workspace-merge.service.js";
 import { runMergeTrain } from "./merge-train.service.js";
 import { runPreMergeGate } from "./pre-merge-gate.service.js";
 import { isPreMergeGateFailure } from "./workspace-merge-gate.js";
-import type { BoardEvents } from "./board-events.js";
-import type { SessionManager } from "./session.manager.js";
+import type { BoardEventSink } from "./board-events.js";
+import type { SessionLauncher } from "./session.manager.js";
 
 export interface WorkspaceConflictPreview {
   workspaceId: string;
@@ -270,8 +270,8 @@ export type MergeQueueEvent =
 
 export function createMergeQueueService(deps: {
   database: Database;
-  boardEvents?: BoardEvents;
-  getSessionManager?: () => SessionManager;
+  boardEvents?: BoardEventSink;
+  getSessionManager?: () => SessionLauncher;
 }) {
   const { database, boardEvents, getSessionManager } = deps;
   const mergeService = createWorkspaceMergeService({

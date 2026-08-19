@@ -4,11 +4,11 @@ import { issues, projectStatuses, workspaces, workflowNodes, sessions, sessionMe
 import { and, count, eq, inArray, ne, or } from "drizzle-orm";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import type { Database } from "../db/index.js";
-import type { BoardEvents } from "../services/board-events.js";
+import type { BoardEventSink } from "../services/board-events.js";
 import { createMergeQueueService } from "../services/merge-queue.service.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
 import { buildStrandedBatch, pickIntegrationWorkspace } from "../services/reconciler.service.js";
-import type { SessionManager } from "../services/session.manager.js";
+import type { SessionLauncher } from "../services/session.manager.js";
 import { resolveMergePolicy } from "./merge-strategy.js";
 import { resolveMergeGateConfig } from "../services/pre-merge-gate.service.js";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
@@ -95,8 +95,8 @@ function collectGatedProjectIds(prefMap: Map<string, string>): Set<string> {
 
 export function createAutoMergeOrchestrator(deps: {
   database: Database;
-  boardEvents?: BoardEvents;
-  getSessionManager?: () => SessionManager;
+  boardEvents?: BoardEventSink;
+  getSessionManager?: () => SessionLauncher;
   /** Test override for the zero-candidate reconcile fallback cadence (default 10 ticks). */
   reconcileFallbackEveryTicks?: number;
 }) {
@@ -401,8 +401,8 @@ export function createAutoMergeOrchestrator(deps: {
 
 export function startAutoMergeOrchestrator(deps: {
   database: Database;
-  boardEvents?: BoardEvents;
-  getSessionManager?: () => SessionManager;
+  boardEvents?: BoardEventSink;
+  getSessionManager?: () => SessionLauncher;
   intervalMs?: number;
 }): AutoMergeOrchestratorState {
   stopAutoMergeOrchestrator();

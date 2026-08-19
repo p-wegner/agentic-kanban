@@ -4,8 +4,8 @@ import { getAllPreferencesCached } from "../repositories/preferences.repository.
 import { and, desc, eq } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
-import type { BoardEvents } from "../services/board-events.js";
-import type { SessionManager } from "../services/session.manager.js";
+import type { BoardEventSink } from "../services/board-events.js";
+import type { SessionLauncher } from "../services/session.manager.js";
 import { extractPlanFromMessages } from "../services/plan-mode.service.js";
 import { narrowProviderName } from "../services/agent-provider.js";
 import { toExecutorProvider } from "../services/agent-settings.service.js";
@@ -19,8 +19,8 @@ import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sw
 
 export interface StrandedPlanReconcilerDeps {
   database?: Database;
-  getSessionManager: () => SessionManager;
-  boardEvents: BoardEvents;
+  getSessionManager: () => SessionLauncher;
+  boardEvents: BoardEventSink;
   /**
    * Override enabled state for testing. When undefined (production path), the reconciler
    * reads the live `reconciler_stranded_plan_enabled` preference from the DB at call time.

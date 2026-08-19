@@ -1,6 +1,6 @@
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "../services/session.manager.js";
-import type { BoardEvents } from "../services/board-events.js";
+import type { BoardEventSink } from "../services/board-events.js";
 import { createShowdownService } from "../services/showdown.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
@@ -8,7 +8,7 @@ import { parseJsonBody } from "../middleware/parse-body.js";
 export function createShowdownsRoute(
   database: Database,
   getSessionManager?: () => SessionManager,
-  options?: { boardEvents?: BoardEvents },
+  options?: { boardEvents?: BoardEventSink },
 ) {
   const router = createRouter();
   const showdownService = createShowdownService({

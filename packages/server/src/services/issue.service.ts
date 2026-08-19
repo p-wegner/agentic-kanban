@@ -62,7 +62,7 @@ import {
 } from "../repositories/issue.repository.js";
 import { findOpenUnmergedWorkspace } from "../repositories/workspace.repository.js";
 import { enrichWorkspacesWithSessionData } from "./board-aggregation.service.js";
-import type { BoardEvents } from "./board-events.js";
+import type { BoardEventSink } from "./board-events.js";
 import { createIssueDependencyService, validateBatchDependencies } from "./issue-dependency.service.js";
 import { IssueError } from "./issue-error.js";
 import { materializePhaseArtifactToWorktree } from "./phase-artifacts.service.js";
@@ -212,7 +212,7 @@ export function buildSharedIssueUpdate(
 
 export function createIssueService(deps: {
   database: Database;
-  boardEvents?: BoardEvents;
+  boardEvents?: BoardEventSink;
   sendWebhook?: WebhookSender;
 }) {
   const { database, boardEvents, sendWebhook } = deps;

@@ -1,5 +1,5 @@
 import type { Database } from "../db/index.js";
-import type { BoardEvents } from "../services/board-events.js";
+import type { BoardEventSink } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { ShowdownContestant } from "@agentic-kanban/shared";
 import { analyzeDependencies, enhanceIssue, aiEstimateIssue, decomposeEpic, confirmEpicDecomposition, contractCoupledComponent, confirmContractComponent, analyzeTouchedFiles } from "../services/issue-ai.service.js";
@@ -53,7 +53,7 @@ import { queryFlag } from "../middleware/query-params.js";
 import { getActiveProjectIdPref } from "../repositories/board-status.repository.js";
 import { setIssueReposTouched } from "../services/repo-tags.service.js";
 import { getIssueById } from "../repositories/followup-workspace.repository.js";
-export function createIssuesRoute(database: Database, options?: { boardEvents?: BoardEvents; getSessionManager?: () => SessionManager }) {
+export function createIssuesRoute(database: Database, options?: { boardEvents?: BoardEventSink; getSessionManager?: () => SessionManager }) {
   const router = createRouter();
 
   const issueService = createIssueService({ database, boardEvents: options?.boardEvents, sendWebhook: createWebhookSender(database) });

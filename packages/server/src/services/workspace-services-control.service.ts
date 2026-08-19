@@ -17,7 +17,7 @@
 
 import type { ServiceStackState } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
-import type { BoardEvents } from "./board-events.js";
+import type { BoardEventSink } from "./board-events.js";
 import { getWorkspaceById, resolveProjectId } from "../repositories/workspace.repository.js";
 import { getProjectById } from "../repositories/project.repository.js";
 import { listWorkspaceRepos } from "../repositories/repo.repository.js";
@@ -48,7 +48,7 @@ interface ResolvedStackContext {
 
 export function createWorkspaceServicesControlService(deps: {
   database: Database;
-  boardEvents?: BoardEvents;
+  boardEvents?: BoardEventSink;
   /** Injectable for tests; defaults to the process-wide real-docker engine. */
   engine?: WorkspaceServicesEngine;
 }) {

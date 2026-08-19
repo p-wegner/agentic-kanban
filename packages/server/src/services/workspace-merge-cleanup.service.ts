@@ -1,8 +1,8 @@
 import { applyOpenSpecDeltas, OPENSPEC_CHANGES_DIR, OPENSPEC_SPECS_DIR } from "@agentic-kanban/shared/lib/openspec";
 import type { Database } from "../db/index.js";
 import { persistWorkspaceCleanupWarning, getWorkspaceById } from "../repositories/workspace-merge-cleanup.repository.js";
-import type { SessionManager } from "./session.manager.js";
-import type { BoardEvents } from "./board-events.js";
+import type { SessionLauncher } from "./session.manager.js";
+import type { BoardEventSink } from "./board-events.js";
 import type { GitService } from "./workspace-internals.js";
 import { teardownWorktree } from "./workspace-teardown.service.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
@@ -48,8 +48,8 @@ export async function runWorkspacePostMergeCleanup(
     killProcesses: (dir: string) => Promise<number>;
     killPorts?: (ports: number[]) => Promise<number>;
     killSupervisor?: (ports: number[]) => Promise<number>;
-    getSessionManager?: () => SessionManager;
-    boardEvents?: BoardEvents;
+    getSessionManager?: () => SessionLauncher;
+    boardEvents?: BoardEventSink;
   },
   hooks: {
     /**
@@ -317,7 +317,7 @@ async function rebuildSharedDist(repoPath: string, postMergeChangedFiles: string
 
 async function runPostMergeLearningStep(
   args: WorkspacePostMergeCleanupArgs,
-  deps: { database: Database; getSessionManager?: () => SessionManager },
+  deps: { database: Database; getSessionManager?: () => SessionLauncher },
 ): Promise<void> {
   try {
     if (deps.getSessionManager) {
@@ -330,7 +330,7 @@ async function runPostMergeLearningStep(
 
 async function maybeAutoStartFollowups(
   args: WorkspacePostMergeCleanupArgs,
-  deps: { database: Database; getSessionManager?: () => SessionManager; boardEvents?: BoardEvents },
+  deps: { database: Database; getSessionManager?: () => SessionLauncher; boardEvents?: BoardEventSink },
 ): Promise<void> {
   try {
     if (!args.projectId || !deps.getSessionManager) return;
@@ -352,8 +352,8 @@ async function maybeAutoStartUnblockedDependency(
   deps: {
     database: Database;
     gitService: GitService;
-    getSessionManager?: () => SessionManager;
-    boardEvents?: BoardEvents;
+    getSessionManager?: () => SessionLauncher;
+    boardEvents?: BoardEventSink;
   },
 ): Promise<void> {
   try {
