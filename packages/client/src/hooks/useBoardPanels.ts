@@ -1,257 +1,130 @@
 import type { Dispatch, SetStateAction } from "react";
 import { useCallback, useMemo, useState } from "react";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
+import {
+  PANEL_CLOSE_ORDER,
+  PANEL_IDS,
+  type PanelCloseProp,
+  type PanelId,
+  type PanelShowProp,
+} from "../lib/panelRegistry.js";
 
-export interface BoardOverlayPanelProps {
-  showSettings: boolean;
-  showQuickTasks: boolean;
-  showCodemod: boolean;
-  showAllWorkspaces: boolean;
-  showLaunchFailures: boolean;
-  showCleanupQueue: boolean;
-  showFileContention: boolean;
-  showWorkerFleet: boolean;
-  showMultiRepoMonitor: boolean;
-  showTranscriptSearch: boolean;
-  showMergeQueue: boolean;
-  showRunQueueForecast: boolean;
-  showWorktreeOverview: boolean;
-  showProjectHealth: boolean;
-  showTimeReport: boolean;
-  showCommandPalette: boolean;
-  showStartWorkspacePicker: boolean;
-  showShortcutHelp: boolean;
-  onCloseSettings: () => void;
-  onCloseQuickTasks: () => void;
-  onCloseCodemod: () => void;
-  onCloseAllWorkspaces: () => void;
-  onCloseLaunchFailures: () => void;
-  onCloseCleanupQueue: () => void;
-  onCloseFileContention: () => void;
-  onCloseWorkerFleet: () => void;
-  onCloseMultiRepoMonitor: () => void;
-  onCloseTranscriptSearch: () => void;
-  onCloseMergeQueue: () => void;
-  onCloseRunQueueForecast: () => void;
-  onCloseWorktreeOverview: () => void;
-  onCloseProjectHealth: () => void;
-  onCloseTimeReport: () => void;
-  onCloseCommandPalette: () => void;
-  onCloseStartWorkspacePicker: () => void;
-  onCloseShortcutHelp: () => void;
+/**
+ * Overlay-panel open/close state, driven by `lib/panelRegistry.ts` (#588).
+ *
+ * This hook used to hold NINETEEN `useState<boolean>` pairs and hand-list every
+ * `showX` / `setShowX` / `onCloseX` three times over — 141 per-panel declarations, and a new
+ * panel meant editing four files. The state is now one `Set<PanelId>` and every surface below
+ * is DERIVED from the registry, so adding a panel is one entry in `PANEL_IDS`.
+ *
+ * The public shape is deliberately unchanged: `showX`, `setShowX` and `overlayPanelProps`
+ * are the same names with the same types, expressed as mapped types instead of by hand, so
+ * `BoardPageView`, `BoardOverlayPanels` and `useBoardKeyboardShortcuts` are untouched. That
+ * is what keeps a 19-panel refactor reviewable — the consumers cannot tell.
+ */
+
+/** `{ showSettings: boolean, showQuickTasks: boolean, … }` — one per registered panel. */
+type PanelShowFlags = { [K in PanelId as PanelShowProp<K>]: boolean };
+/** `{ onCloseSettings: () => void, … }` */
+type PanelCloseHandlers = { [K in PanelId as PanelCloseProp<K>]: () => void };
+/** `{ setShowSettings: Dispatch<SetStateAction<boolean>>, … }` */
+type PanelSetters = { [K in PanelId as `set${Capitalize<PanelShowProp<K>>}`]: Dispatch<SetStateAction<boolean>> };
+
+export type BoardOverlayPanelProps = PanelShowFlags & PanelCloseHandlers & {
   dryRunIssue: IssueWithStatus | null;
   setDryRunIssue: (issue: IssueWithStatus | null) => void;
-}
+};
 
-export interface BoardPanelState {
-  showSettings: boolean;
-  showQuickTasks: boolean;
-  showMergeQueue: boolean;
-  showRunQueueForecast: boolean;
-  showCodemod: boolean;
-  showWorktreeOverview: boolean;
-  showAllWorkspaces: boolean;
-  showLaunchFailures: boolean;
-  showCleanupQueue: boolean;
-  showFileContention: boolean;
-  showWorkerFleet: boolean;
-  showMultiRepoMonitor: boolean;
-  showTranscriptSearch: boolean;
-  showProjectHealth: boolean;
-  showTimeReport: boolean;
-  showCommandPalette: boolean;
-  showShortcutHelp: boolean;
-  showLiveActivityTicker: boolean;
-  showStartWorkspacePicker: boolean;
+export type BoardPanelState = PanelShowFlags & PanelSetters & {
   dryRunIssue: IssueWithStatus | null;
-  setShowSettings: Dispatch<SetStateAction<boolean>>;
-  setShowQuickTasks: Dispatch<SetStateAction<boolean>>;
-  setShowMergeQueue: Dispatch<SetStateAction<boolean>>;
-  setShowRunQueueForecast: Dispatch<SetStateAction<boolean>>;
-  setShowCodemod: Dispatch<SetStateAction<boolean>>;
-  setShowWorktreeOverview: Dispatch<SetStateAction<boolean>>;
-  setShowAllWorkspaces: Dispatch<SetStateAction<boolean>>;
-  setShowLaunchFailures: Dispatch<SetStateAction<boolean>>;
-  setShowCleanupQueue: Dispatch<SetStateAction<boolean>>;
-  setShowFileContention: Dispatch<SetStateAction<boolean>>;
-  setShowWorkerFleet: Dispatch<SetStateAction<boolean>>;
-  setShowMultiRepoMonitor: Dispatch<SetStateAction<boolean>>;
-  setShowTranscriptSearch: Dispatch<SetStateAction<boolean>>;
-  setShowProjectHealth: Dispatch<SetStateAction<boolean>>;
-  setShowTimeReport: Dispatch<SetStateAction<boolean>>;
-  setShowCommandPalette: Dispatch<SetStateAction<boolean>>;
-  setShowShortcutHelp: Dispatch<SetStateAction<boolean>>;
-  setShowLiveActivityTicker: Dispatch<SetStateAction<boolean>>;
-  setShowStartWorkspacePicker: Dispatch<SetStateAction<boolean>>;
   setDryRunIssue: (issue: IssueWithStatus | null) => void;
   openStartWorkspacePicker: () => void;
   closeStartWorkspacePicker: () => void;
+  /** Close the topmost open panel; `false` when none was open (so Escape can fall through). */
   closeTopPanel: () => boolean;
   overlayPanelProps: BoardOverlayPanelProps;
-}
+};
+
+const capitalize = (s: string) => `${s[0].toUpperCase()}${s.slice(1)}`;
 
 export function useBoardPanels(): BoardPanelState {
-  const [showSettings, setShowSettings] = useState(false);
-  const [showQuickTasks, setShowQuickTasks] = useState(false);
-  const [showMergeQueue, setShowMergeQueue] = useState(false);
-  const [showRunQueueForecast, setShowRunQueueForecast] = useState(false);
-  const [showCodemod, setShowCodemod] = useState(false);
-  const [showWorktreeOverview, setShowWorktreeOverview] = useState(false);
-  const [showAllWorkspaces, setShowAllWorkspaces] = useState(false);
-  const [showLaunchFailures, setShowLaunchFailures] = useState(false);
-  const [showCleanupQueue, setShowCleanupQueue] = useState(false);
-  const [showFileContention, setShowFileContention] = useState(false);
-  const [showWorkerFleet, setShowWorkerFleet] = useState(false);
-  const [showMultiRepoMonitor, setShowMultiRepoMonitor] = useState(false);
-  const [showTranscriptSearch, setShowTranscriptSearch] = useState(false);
-  const [showProjectHealth, setShowProjectHealth] = useState(false);
-  const [showTimeReport, setShowTimeReport] = useState(false);
-  const [showCommandPalette, setShowCommandPalette] = useState(false);
-  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
-  const [showLiveActivityTicker, setShowLiveActivityTicker] = useState(false);
-  const [showStartWorkspacePicker, setShowStartWorkspacePicker] = useState(false);
+  const [open, setOpen] = useState<ReadonlySet<PanelId>>(() => new Set());
   const [dryRunIssue, setDryRunIssue] = useState<IssueWithStatus | null>(null);
 
+  /**
+   * One setter per panel, memoised as a group. `SetStateAction` is honoured (callers pass
+   * `(v) => !v` to toggle), which the hand-written `useState` setters did for free and a
+   * naive `(v: boolean) => …` replacement would have silently broken.
+   */
+  const setters = useMemo(() => {
+    const out = {} as Record<string, Dispatch<SetStateAction<boolean>>>;
+    for (const id of PANEL_IDS) {
+      out[`setShow${capitalize(id)}`] = (action) => {
+        setOpen((prev) => {
+          const wasOpen = prev.has(id);
+          const next = typeof action === "function" ? action(wasOpen) : action;
+          if (next === wasOpen) return prev;
+          const copy = new Set(prev);
+          if (next) copy.add(id);
+          else copy.delete(id);
+          return copy;
+        });
+      };
+    }
+    return out as PanelSetters;
+  }, []);
+
+  const flags = useMemo(() => {
+    const out = {} as Record<string, boolean>;
+    for (const id of PANEL_IDS) out[`show${capitalize(id)}`] = open.has(id);
+    return out as PanelShowFlags;
+  }, [open]);
+
+  const closeHandlers = useMemo(() => {
+    const out = {} as Record<string, () => void>;
+    for (const id of PANEL_IDS) {
+      out[`onClose${capitalize(id)}`] = () => setOpen((prev) => {
+        if (!prev.has(id)) return prev;
+        const copy = new Set(prev);
+        copy.delete(id);
+        return copy;
+      });
+    }
+    return out as PanelCloseHandlers;
+  }, []);
+
   const closeTopPanel = useCallback(() => {
-    if (showCommandPalette) { setShowCommandPalette(false); return true; }
-    if (showAllWorkspaces) { setShowAllWorkspaces(false); return true; }
-    if (showLiveActivityTicker) { setShowLiveActivityTicker(false); return true; }
-    if (showLaunchFailures) { setShowLaunchFailures(false); return true; }
-    if (showCleanupQueue) { setShowCleanupQueue(false); return true; }
-    if (showFileContention) { setShowFileContention(false); return true; }
-    if (showWorkerFleet) { setShowWorkerFleet(false); return true; }
-    if (showMultiRepoMonitor) { setShowMultiRepoMonitor(false); return true; }
-    if (showWorktreeOverview) { setShowWorktreeOverview(false); return true; }
-    if (showShortcutHelp) { setShowShortcutHelp(false); return true; }
-    if (showQuickTasks) { setShowQuickTasks(false); return true; }
-    if (showRunQueueForecast) { setShowRunQueueForecast(false); return true; }
-    if (showCodemod) { setShowCodemod(false); return true; }
-    if (showProjectHealth) { setShowProjectHealth(false); return true; }
-    if (showTimeReport) { setShowTimeReport(false); return true; }
-    return false;
-  }, [
-    showAllWorkspaces,
-    showCleanupQueue,
-    showCodemod,
-    showCommandPalette,
-    showFileContention,
-    showWorkerFleet,
-    showLaunchFailures,
-    showLiveActivityTicker,
-    showMultiRepoMonitor,
-    showProjectHealth,
-    showQuickTasks,
-    showRunQueueForecast,
-    showShortcutHelp,
-    showTimeReport,
-    showWorktreeOverview,
-  ]);
+    // The order lives in the registry now; it used to be the sequence of an if-chain, where
+    // "which panel is topmost" could not be read without tracing every branch.
+    const top = PANEL_CLOSE_ORDER.find((id) => open.has(id));
+    if (!top) return false;
+    setOpen((prev) => {
+      const copy = new Set(prev);
+      copy.delete(top);
+      return copy;
+    });
+    return true;
+  }, [open]);
 
-  const openStartWorkspacePicker = useCallback(() => setShowStartWorkspacePicker(true), []);
-  const closeStartWorkspacePicker = useCallback(() => setShowStartWorkspacePicker(false), []);
+  const openStartWorkspacePicker = useCallback(
+    () => setOpen((prev) => new Set(prev).add("startWorkspacePicker")),
+    [],
+  );
+  const closeStartWorkspacePicker = useCallback(() => setOpen((prev) => {
+    const copy = new Set(prev);
+    copy.delete("startWorkspacePicker");
+    return copy;
+  }), []);
 
-  const overlayPanelProps = useMemo<BoardOverlayPanelProps>(() => ({
-    showSettings,
-    showQuickTasks,
-    showCodemod,
-    showAllWorkspaces,
-    showLaunchFailures,
-    showCleanupQueue,
-    showFileContention,
-    showWorkerFleet,
-    showMultiRepoMonitor,
-    showTranscriptSearch,
-    showMergeQueue,
-    showRunQueueForecast,
-    showWorktreeOverview,
-    showProjectHealth,
-    showTimeReport,
-    showCommandPalette,
-    showStartWorkspacePicker,
-    showShortcutHelp,
-    onCloseSettings: () => setShowSettings(false),
-    onCloseQuickTasks: () => setShowQuickTasks(false),
-    onCloseCodemod: () => setShowCodemod(false),
-    onCloseAllWorkspaces: () => setShowAllWorkspaces(false),
-    onCloseLaunchFailures: () => setShowLaunchFailures(false),
-    onCloseCleanupQueue: () => setShowCleanupQueue(false),
-    onCloseFileContention: () => setShowFileContention(false),
-    onCloseWorkerFleet: () => setShowWorkerFleet(false),
-    onCloseMultiRepoMonitor: () => setShowMultiRepoMonitor(false),
-    onCloseTranscriptSearch: () => setShowTranscriptSearch(false),
-    onCloseMergeQueue: () => setShowMergeQueue(false),
-    onCloseRunQueueForecast: () => setShowRunQueueForecast(false),
-    onCloseWorktreeOverview: () => setShowWorktreeOverview(false),
-    onCloseProjectHealth: () => setShowProjectHealth(false),
-    onCloseTimeReport: () => setShowTimeReport(false),
-    onCloseCommandPalette: () => setShowCommandPalette(false),
-    onCloseStartWorkspacePicker: closeStartWorkspacePicker,
-    onCloseShortcutHelp: () => setShowShortcutHelp(false),
-    dryRunIssue,
-    setDryRunIssue,
-  }), [
-    closeStartWorkspacePicker,
-    dryRunIssue,
-    showAllWorkspaces,
-    showCleanupQueue,
-    showCodemod,
-    showCommandPalette,
-    showFileContention,
-    showWorkerFleet,
-    showLaunchFailures,
-    showMergeQueue,
-    showMultiRepoMonitor,
-    showProjectHealth,
-    showQuickTasks,
-    showRunQueueForecast,
-    showSettings,
-    showShortcutHelp,
-    showStartWorkspacePicker,
-    showTimeReport,
-    showTranscriptSearch,
-    showWorktreeOverview,
-  ]);
+  const overlayPanelProps = useMemo<BoardOverlayPanelProps>(
+    () => ({ ...flags, ...closeHandlers, dryRunIssue, setDryRunIssue }),
+    [flags, closeHandlers, dryRunIssue],
+  );
 
   return {
-    showSettings,
-    showQuickTasks,
-    showMergeQueue,
-    showRunQueueForecast,
-    showCodemod,
-    showWorktreeOverview,
-    showAllWorkspaces,
-    showLaunchFailures,
-    showCleanupQueue,
-    showFileContention,
-    showWorkerFleet,
-    showMultiRepoMonitor,
-    showTranscriptSearch,
-    showProjectHealth,
-    showTimeReport,
-    showCommandPalette,
-    showShortcutHelp,
-    showLiveActivityTicker,
-    showStartWorkspacePicker,
+    ...flags,
+    ...setters,
     dryRunIssue,
-    setShowSettings,
-    setShowQuickTasks,
-    setShowMergeQueue,
-    setShowRunQueueForecast,
-    setShowCodemod,
-    setShowWorktreeOverview,
-    setShowAllWorkspaces,
-    setShowLaunchFailures,
-    setShowCleanupQueue,
-    setShowFileContention,
-    setShowWorkerFleet,
-    setShowMultiRepoMonitor,
-    setShowTranscriptSearch,
-    setShowProjectHealth,
-    setShowTimeReport,
-    setShowCommandPalette,
-    setShowShortcutHelp,
-    setShowLiveActivityTicker,
-    setShowStartWorkspacePicker,
     setDryRunIssue,
     openStartWorkspacePicker,
     closeStartWorkspacePicker,

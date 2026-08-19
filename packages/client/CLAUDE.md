@@ -1,5 +1,33 @@
 # Client Package — Architecture Patterns
 
+## `overlay-panel` — one registry, like board views (#588)
+
+A modal or side overlay opened from the toolbar, palette or a shortcut, closed via
+`onClose`. Board VIEWS have had `VIEW_REGISTRY` since #446; panels had nothing — 19 of them
+were hand-wired as parallel `showX: boolean` + `setShowX` + `onCloseX` quadruplets, 141
+per-panel declarations in `useBoardPanels.ts` alone, and adding one meant editing four files.
+
+**`lib/panelRegistry.ts` is the list.** `PANEL_IDS` plus `PANEL_CLOSE_ORDER` — the order is
+part of the registry because it is real behaviour: Escape closes the topmost panel, and
+"topmost" used to be encoded as the sequence of an `if`-chain, unreadable without tracing
+every branch. Panels absent from the close order own their own dismissal, which is now a
+visible omission rather than an implied one.
+
+**`useBoardPanels` holds ONE `Set<PanelId>`.** Everything else is derived, and the public
+shape is unchanged: `showX`, `setShowX` and `overlayPanelProps` are the same names with the
+same types, expressed as MAPPED types over `PanelId` instead of by hand. That is what made a
+19-panel refactor reviewable — `BoardPageView`, `BoardOverlayPanels` and
+`useBoardKeyboardShortcuts` are untouched, and the typechecker proves the shape is identical.
+
+Adding a panel: one entry in `PANEL_IDS`, one in `PANEL_CLOSE_ORDER` if Escape should close
+it, and the render. `panel-registry.test.ts` (`@gate:always-run`) fails if a registered panel
+is never rendered, if the close order names an unregistered id, or if per-panel
+`useState(false)` comes back.
+
+Known wart the guard deliberately exposes rather than hides: most panels render in
+`BoardOverlayPanels`, but `liveActivityTicker` renders inline in `BoardPageView`. The test
+scans both files and says why.
+
 ## `View` means a BOARD VIEW — a container's pure half is `*Body` (#611)
 
 `view` is the client's most overloaded noun: 27 board views in `VIEW_REGISTRY` (guarded by
