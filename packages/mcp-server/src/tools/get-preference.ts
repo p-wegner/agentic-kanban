@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
+import { mcpText } from "../db-utils.js";
 
 export function registerGetPreference(server: McpServer) {
   server.tool(
@@ -18,19 +19,10 @@ export function registerGetPreference(server: McpServer) {
         .limit(1);
 
       if (rows.length === 0) {
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify({ key, value: null, set: false }) }],
-        };
+        return mcpText(JSON.stringify({ key, value: null, set: false }));
       }
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify({ key, value: rows[0].value, set: true, updatedAt: rows[0].updatedAt }),
-          },
-        ],
-      };
+      return mcpText(JSON.stringify({ key, value: rows[0].value, set: true, updatedAt: rows[0].updatedAt }));
     },
   );
 }

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
 import { notifyBoard } from "../notify.js";
-import { requireEntity } from "../db-utils.js";
+import { mcpJson, requireEntity } from "../db-utils.js";
 
 export function registerMarkReadyForMerge(server: McpServer) {
   server.tool(
@@ -32,9 +32,7 @@ export function registerMarkReadyForMerge(server: McpServer) {
 
       if (projectId) notifyBoard(projectId, "workspace_ready_for_merge");
 
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify({ id: workspaceId, readyForMerge: true }, null, 2) }],
-      };
+      return mcpJson({ id: workspaceId, readyForMerge: true });
     },
   );
 }

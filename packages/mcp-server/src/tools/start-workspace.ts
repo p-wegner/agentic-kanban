@@ -8,7 +8,7 @@ import { notifyBoard } from "../notify.js";
 import { runSetupScript } from "../setup-script.js";
 import { writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { resolveProviderProfileFromPrefs } from "@agentic-kanban/shared/lib/strategy-policy";
-import { requireEntity } from "../db-utils.js";
+import { mcpJson, mcpText, requireEntity } from "../db-utils.js";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -47,7 +47,7 @@ export function registerStartWorkspace(server: McpServer) {
         .limit(1);
 
       if (projectRows.length === 0 || !projectRows[0].repoPath) {
-        return { content: [{ type: "text" as const, text: `Project has no repo path configured. Provide repoPath explicitly.` }] };
+        return mcpText(`Project has no repo path configured. Provide repoPath explicitly.`);
       }
 
       if (!resolvedRepoPath) {
@@ -57,7 +57,7 @@ export function registerStartWorkspace(server: McpServer) {
         resolvedBaseBranch = projectRows[0].defaultBranch;
       }
       if (!isDirect && !resolvedBaseBranch) {
-        return { content: [{ type: "text" as const, text: "No default branch configured for this project. Set a default branch in project settings or pass baseBranch." }] };
+        return mcpText("No default branch configured for this project. Set a default branch in project settings or pass baseBranch.");
       }
 
       // #220 ask 2: `suggestBranchName` is the ONE branch-name producer for the whole
@@ -156,13 +156,9 @@ export function registerStartWorkspace(server: McpServer) {
             : `Workspace created. Working directory: ${worktreePath}`,
         };
 
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-        };
+        return mcpJson(result);
       } catch (err) {
-        return {
-          content: [{ type: "text" as const, text: `Failed to create workspace: ${errorMessage(err)}` }],
-        };
+        return mcpText(`Failed to create workspace: ${errorMessage(err)}`);
       }
     },
   );

@@ -6,6 +6,7 @@ import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { ensureCodexSkillsLink, writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { mcpText } from "../db-utils.js";
 
 export function registerExportAgentSkills(server: McpServer) {
   server.tool(
@@ -22,7 +23,7 @@ export function registerExportAgentSkills(server: McpServer) {
         try {
           await access(targetPath);
         } catch {
-          return { content: [{ type: "text" as const, text: `Error: Target path does not exist: ${targetPath}` }] };
+          return mcpText(`Error: Target path does not exist: ${targetPath}`);
         }
 
         // Fetch skills
@@ -41,7 +42,7 @@ export function registerExportAgentSkills(server: McpServer) {
         }
 
         if (rows.length === 0) {
-          return { content: [{ type: "text" as const, text: "No skills found to export." }] };
+          return mcpText("No skills found to export.");
         }
 
         const skillsDir = join(targetPath, ".claude", "skills");
@@ -59,14 +60,9 @@ export function registerExportAgentSkills(server: McpServer) {
           exportedNames.add(skill.name);
         }
 
-        return {
-          content: [{
-            type: "text" as const,
-            text: `Exported ${rows.length} skill(s) to ${skillsDir} and linked .codex/skills to the same directory:\n${rows.map(s => `  - ${s.name} (${s.isBuiltin ? "builtin" : "custom"}${s.projectId ? ", project-scoped" : ", global"})`).join("\n")}\n\nThese skills are now available in Claude Code and Codex when working in ${targetPath}.`,
-          }],
-        };
+        return mcpText(`Exported ${rows.length} skill(s) to ${skillsDir} and linked .codex/skills to the same directory:\n${rows.map(s => `  - ${s.name} (${s.isBuiltin ? "builtin" : "custom"}${s.projectId ? ", project-scoped" : ", global"})`).join("\n")}\n\nThese skills are now available in Claude Code and Codex when working in ${targetPath}.`);
       } catch (err) {
-        return { content: [{ type: "text" as const, text: `Error exporting skills: ${errorMessage(err)}` }] };
+        return mcpText(`Error exporting skills: ${errorMessage(err)}`);
       }
     },
   );

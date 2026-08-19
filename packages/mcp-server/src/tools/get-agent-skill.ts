@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
-import { mcpError } from "../db-utils.js";
+import { mcpError, mcpJson, mcpText } from "../db-utils.js";
 
 export function registerGetAgentSkill(server: McpServer) {
   server.tool(
@@ -14,7 +14,7 @@ export function registerGetAgentSkill(server: McpServer) {
     },
     async ({ skillId, name }) => {
       if (!skillId && !name) {
-        return { content: [{ type: "text" as const, text: "Provide either skillId or name" }] };
+        return mcpText("Provide either skillId or name");
       }
 
       let rows;
@@ -28,9 +28,7 @@ export function registerGetAgentSkill(server: McpServer) {
         return mcpError(`Skill not found: ${skillId ?? name}`);
       }
 
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify(rows[0], null, 2) }],
-      };
+      return mcpJson(rows[0]);
     },
   );
 }

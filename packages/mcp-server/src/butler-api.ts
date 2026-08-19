@@ -13,32 +13,17 @@
  * ticket proposed writing a fresh `mcp-server/src/board-api.ts`; that would have been a
  * second copy of the thing it was trying to deduplicate.)
  */
-import { boardApi } from "@agentic-kanban/shared/lib/board-server-url";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { boardApi, boardErrorText, mcpText, type McpResponse } from "./board-call.js";
 import { getServerPort } from "./server-url.js";
 
-type McpTextResult = { content: Array<{ type: "text"; text: string }> };
-
-/** The MCP text envelope, built once instead of at 232 literal sites. */
-export function mcpText(text: string): McpTextResult {
-  return { content: [{ type: "text" as const, text }] };
-}
-
 /**
- * Pull the server's error message out of a JSON error body, falling back to the HTTP
- * status text.
- *
- * The array check is not defensive noise: `butler_list` returns a JSON ARRAY on success,
- * and its hand-written version had to guard against reading `.error` off one. Keeping the
- * guard here means every tool gets it rather than the one that happened to need it.
+ * The envelope and the error-text rule are NOT redefined here (#508). This file had a
+ * private `mcpText` and an `errorTextFrom` that were byte-for-byte the ones in
+ * `db-utils.ts` / `board-call.ts` — three copies of a two-line helper is the defect the
+ * ticket names, so the butler side imports them like everything else.
  */
-function errorTextFrom(data: unknown, statusText: string): string {
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    const err = (data as { error?: unknown }).error;
-    if (typeof err === "string" && err) return err;
-  }
-  return statusText;
-}
+type McpTextResult = McpResponse;
 
 /**
  * Call a butler endpoint and render the MCP result.
@@ -60,7 +45,7 @@ export async function butlerCall(
 ): Promise<McpTextResult> {
   try {
     const { ok, statusText, data } = await boardApi(path, init);
-    if (!ok) return mcpText(`${label} error: ${errorTextFrom(data, statusText)}`);
+    if (!ok) return mcpText(`${label} error: ${boardErrorText(data, statusText)}`);
     if (opts?.render) return mcpText(opts.render(data));
     return mcpText(JSON.stringify(data, null, opts?.pretty ? 2 : undefined));
   } catch (err) {

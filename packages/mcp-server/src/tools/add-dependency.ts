@@ -4,7 +4,7 @@ import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { notifyBoard } from "../notify.js";
-import { requireEntity } from "../db-utils.js";
+import { mcpJson, mcpText, requireEntity } from "../db-utils.js";
 import { buildAdjacency, wouldCreateCycle as graphWouldCreateCycle } from "@agentic-kanban/shared/lib/dependency-graph";
 
 const VALID_TYPES = ["depends_on", "blocked_by", "related_to", "duplicates", "parent_of", "child_of", "coupled_with"] as const;
@@ -34,7 +34,7 @@ export function registerAddDependency(server: McpServer) {
     },
     async ({ issueId, dependsOnId, type }) => {
       if (dependsOnId === issueId) {
-        return { content: [{ type: "text" as const, text: "Error: An issue cannot depend on itself" }] };
+        return mcpText("Error: An issue cannot depend on itself");
       }
 
       const depType = type || "depends_on";
@@ -49,14 +49,14 @@ export function registerAddDependency(server: McpServer) {
       const r2 = requireEntity(targetIssue, dependsOnId, "Issue");
       if (!r2.ok) return r2.error;
       if (r1.value.projectId !== r2.value.projectId) {
-        return { content: [{ type: "text" as const, text: "Error: Cannot add dependencies across projects" }] };
+        return mcpText("Error: Cannot add dependencies across projects");
       }
 
       // Cycle detection for directional types only
       if (depType === "depends_on" || depType === "blocked_by" || depType === "parent_of" || depType === "child_of") {
         const wouldCycle = await wouldCreateCycle(issueId, dependsOnId, r1.value.projectId);
         if (wouldCycle) {
-          return { content: [{ type: "text" as const, text: "Error: Adding this dependency would create a cycle" }] };
+          return mcpText("Error: Adding this dependency would create a cycle");
         }
       }
 
@@ -72,14 +72,14 @@ export function registerAddDependency(server: McpServer) {
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : undefined;
         if (message?.includes("UNIQUE constraint")) {
-          return { content: [{ type: "text" as const, text: "Error: This dependency already exists" }] };
+          return mcpText("Error: This dependency already exists");
         }
         throw err;
       }
 
       notifyBoard(r1.value.projectId, "mcp_dependency_added");
 
-      return { content: [{ type: "text" as const, text: JSON.stringify({ id, issueId, dependsOnId, type: depType }, null, 2) }] };
+      return mcpJson({ id, issueId, dependsOnId, type: depType });
     },
   );
 }

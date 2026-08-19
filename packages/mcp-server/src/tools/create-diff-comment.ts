@@ -3,7 +3,7 @@ import { z } from "zod";
 import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
-import { requireEntity } from "../db-utils.js";
+import { mcpJson, requireEntity } from "../db-utils.js";
 
 export function registerCreateDiffComment(server: McpServer) {
   server.tool(
@@ -40,9 +40,7 @@ export function registerCreateDiffComment(server: McpServer) {
 
       await db.insert(schema.diffComments).values(comment);
 
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify(comment, null, 2) }],
-      };
+      return mcpJson(comment);
     },
   );
 }

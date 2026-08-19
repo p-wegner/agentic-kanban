@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { loadIssueSummary } from "@agentic-kanban/shared/lib/issue-summary";
-import { resolveActiveProjectId } from "../db-utils.js";
+import { mcpJson, mcpText, resolveActiveProjectId } from "../db-utils.js";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -41,12 +41,12 @@ export function registerGetIssueSummary(server: McpServer, deps: ToolDeps = prod
         });
 
         if (!result) {
-          return { content: [{ type: "text" as const, text: `Issue #${issueNumber} not found` }] };
+          return mcpText(`Issue #${issueNumber} not found`);
         }
 
-        return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+        return mcpJson(result);
       } catch (err) {
-        return { content: [{ type: "text" as const, text: `Error: ${errorMessage(err)}` }] };
+        return mcpText(`Error: ${errorMessage(err)}`);
       }
     },
   );

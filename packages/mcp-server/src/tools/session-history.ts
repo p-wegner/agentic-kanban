@@ -5,6 +5,7 @@ import { readdirSync, statSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseOfflineTranscript } from "@agentic-kanban/shared/lib/offline-transcript";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { mcpJson, mcpText } from "../db-utils.js";
 
 interface SessionResult {
   issueNum: number | null;
@@ -49,27 +50,13 @@ export function registerSessionHistory(server: McpServer) {
           }
         }
       } catch (err) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Cannot read ${claudeProjects}: ${errorMessage(err)}`,
-            },
-          ],
-        };
+        return mcpText(`Cannot read ${claudeProjects}: ${errorMessage(err)}`);
       }
 
       if (issueNumber !== undefined) {
         allDirs = allDirs.filter(d => d.issueNum === issueNumber);
         if (allDirs.length === 0) {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: JSON.stringify({ issueNumber, results: [], message: `No session directory found for issue #${issueNumber}` }),
-              },
-            ],
-          };
+          return mcpText(JSON.stringify({ issueNumber, results: [], message: `No session directory found for issue #${issueNumber}` }));
         }
       }
 
@@ -120,14 +107,7 @@ export function registerSessionHistory(server: McpServer) {
         }
       }
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify({ tailLines, all, results }, null, 2),
-          },
-        ],
-      };
+      return mcpJson({ tailLines, all, results });
     },
   );
 }

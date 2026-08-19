@@ -3,7 +3,7 @@ import { z } from "zod";
 import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
 import { notifyBoard } from "../notify.js";
-import { mcpError } from "../db-utils.js";
+import { mcpError, mcpJson } from "../db-utils.js";
 
 export function registerRemoveDependency(server: McpServer) {
   server.tool(
@@ -32,7 +32,7 @@ export function registerRemoveDependency(server: McpServer) {
         notifyBoard(rows[0].projectId, "mcp_dependency_removed");
       }
 
-      return { content: [{ type: "text" as const, text: JSON.stringify({ success: true }, null, 2) }] };
+      return mcpJson({ success: true });
     },
   );
 }

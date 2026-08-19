@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { db, schema } from "../db.js";
 import { randomUUID } from "node:crypto";
+import { mcpJson } from "../db-utils.js";
 
 export function registerCreateTag(server: McpServer) {
   server.tool(
@@ -20,9 +21,7 @@ export function registerCreateTag(server: McpServer) {
         createdAt: new Date().toISOString(),
       });
 
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify({ id, name, color: color ?? null }, null, 2) }],
-      };
+      return mcpJson({ id, name, color: color ?? null });
     },
   );
 }

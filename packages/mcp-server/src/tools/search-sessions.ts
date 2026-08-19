@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
+import { mcpJson } from "../db-utils.js";
 
 const MAX_LIMIT = 100;
 const DEFAULT_LIMIT = 25;
@@ -33,7 +34,7 @@ export function registerSearchSessions(server: McpServer, deps: ToolDeps = prodD
     async ({ query, projectId, issueNumber, provider, status, limit }) => {
       const q = query.trim();
       if (q.length < 2) {
-        return { content: [{ type: "text" as const, text: JSON.stringify({ results: [], totalMatches: 0 }, null, 2) }] };
+        return mcpJson({ results: [], totalMatches: 0 });
       }
 
       const conditions = [
@@ -99,12 +100,7 @@ export function registerSearchSessions(server: McpServer, deps: ToolDeps = prodD
         };
       });
 
-      return {
-        content: [{
-          type: "text" as const,
-          text: JSON.stringify({ results, totalMatches: results.length }, null, 2),
-        }],
-      };
+      return mcpJson({ results, totalMatches: results.length });
     },
   );
 }

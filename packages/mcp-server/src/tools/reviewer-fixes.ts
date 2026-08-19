@@ -4,7 +4,7 @@ import { eq, and, gte } from "drizzle-orm";
 import { parseSessionSummary } from "@agentic-kanban/shared";
 import { getCommitsForBranch } from "../git-service.js";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { resolveActiveProjectId } from "../db-utils.js";
+import { mcpJson, mcpText, resolveActiveProjectId } from "../db-utils.js";
 
 /**
  * Mirrors `pnpm cli -- session reviewer-fixes`.
@@ -55,7 +55,7 @@ export function registerReviewerFixes(server: McpServer, deps: ToolDeps = prodDe
         .limit(1);
       const repoPath = projRows[0]?.repoPath;
       if (!repoPath) {
-        return { content: [{ type: "text" as const, text: `Project '${pid}' has no repoPath.` }] };
+        return mcpText(`Project '${pid}' has no repoPath.`);
       }
 
       // Fetch sessions in window
@@ -301,12 +301,7 @@ export function registerReviewerFixes(server: McpServer, deps: ToolDeps = prodDe
         reviewerCommitSubjects: r.reviewerCommitSubjects,
       }));
 
-      return {
-        content: [{
-          type: "text" as const,
-          text: JSON.stringify(report, null, 2),
-        }],
-      };
+      return mcpJson(report);
     },
   );
 }

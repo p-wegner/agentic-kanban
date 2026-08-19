@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { eq, and, desc } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { mcpJson, resolveActiveProjectIdOrNull } from "../db-utils.js";
+import { mcpJson, mcpText, resolveActiveProjectIdOrNull } from "../db-utils.js";
 
 /**
  * Workspace statuses that mean the agent has finished its turn successfully.
@@ -82,14 +82,7 @@ export function registerWaitWorkspace(server: McpServer, deps: ToolDeps = prodDe
         .limit(1);
 
       if (issueRows.length === 0) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify({ result: "error", reason: `Issue #${issueNumber} not found in project ${pid}.` }, null, 2),
-            },
-          ],
-        };
+        return mcpJson({ result: "error", reason: `Issue #${issueNumber} not found in project ${pid}.` });
       }
 
       // 3. Resolve latest workspace for the issue
@@ -101,14 +94,7 @@ export function registerWaitWorkspace(server: McpServer, deps: ToolDeps = prodDe
         .limit(1);
 
       if (wsRows.length === 0) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify({ result: "error", reason: `No workspace found for issue #${issueNumber}.` }, null, 2),
-            },
-          ],
-        };
+        return mcpJson({ result: "error", reason: `No workspace found for issue #${issueNumber}.` });
       }
 
       const workspaceId = wsRows[0].id;
@@ -117,18 +103,11 @@ export function registerWaitWorkspace(server: McpServer, deps: ToolDeps = prodDe
       // 4. Fast-path: already terminal
       const initial = classifyStatus(currentStatus);
       if (initial !== "pending") {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(
+        return mcpText(JSON.stringify(
                 { result: initial, workspaceId, status: currentStatus, waited: 0 },
                 null,
                 2,
-              ),
-            },
-          ],
-        };
+              ));
       }
 
       // 5. Bounded poll
@@ -146,44 +125,26 @@ export function registerWaitWorkspace(server: McpServer, deps: ToolDeps = prodDe
           .limit(1);
 
         if (rows.length === 0) {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: JSON.stringify(
+          return mcpText(JSON.stringify(
                   { result: "error", reason: "Workspace no longer exists.", workspaceId },
                   null,
                   2,
-                ),
-              },
-            ],
-          };
+                ));
         }
 
         currentStatus = rows[0].status;
         const classification = classifyStatus(currentStatus);
         if (classification !== "pending") {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: JSON.stringify(
+          return mcpText(JSON.stringify(
                   { result: classification, workspaceId, status: currentStatus, waited: Math.round(elapsed / 1000) },
                   null,
                   2,
-                ),
-              },
-            ],
-          };
+                ));
         }
       }
 
       // Timeout
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify(
+      return mcpText(JSON.stringify(
               {
                 result: "timeout",
                 workspaceId,
@@ -193,10 +154,7 @@ export function registerWaitWorkspace(server: McpServer, deps: ToolDeps = prodDe
               },
               null,
               2,
-            ),
-          },
-        ],
-      };
+            ));
     },
   );
 }

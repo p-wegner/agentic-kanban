@@ -3,7 +3,7 @@ import { z } from "zod";
 import { eq, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { nextIssueNumber, resolveActiveProjectId, resolveProjectName } from "../db-utils.js";
+import { mcpJson, mcpText, nextIssueNumber, resolveActiveProjectId, resolveProjectName } from "../db-utils.js";
 
 const issueInputSchema = z.object({
   title: z.string(),
@@ -49,15 +49,15 @@ export function registerCreateIssuesBatch(server: McpServer, deps: ToolDeps = pr
         .where(eq(schema.projectStatuses.projectId, pid))
         .orderBy(schema.projectStatuses.sortOrder);
       if (statuses.length === 0) {
-        return { content: [{ type: "text" as const, text: "No statuses configured for project" }] };
+        return mcpText("No statuses configured for project");
       }
 
       for (let i = 0; i < issues.length; i++) {
         if (!issues[i].title?.trim()) {
-          return { content: [{ type: "text" as const, text: `Error: issues[${i}].title is required` }] };
+          return mcpText(`Error: issues[${i}].title is required`);
         }
         if (issues[i].statusName && !statuses.find(s => s.name === issues[i].statusName)) {
-          return { content: [{ type: "text" as const, text: `Error: issues[${i}].statusName '${issues[i].statusName}' not found` }] };
+          return mcpText(`Error: issues[${i}].statusName '${issues[i].statusName}' not found`);
         }
       }
 
@@ -74,18 +74,18 @@ export function registerCreateIssuesBatch(server: McpServer, deps: ToolDeps = pr
       for (let i = 0; i < edges.length; i++) {
         const e = edges[i];
         if (e.issueIndex < 0 || e.issueIndex >= issues.length) {
-          return { content: [{ type: "text" as const, text: `Error: dependencies[${i}].issueIndex ${e.issueIndex} out of range (0..${issues.length - 1})` }] };
+          return mcpText(`Error: dependencies[${i}].issueIndex ${e.issueIndex} out of range (0..${issues.length - 1})`);
         }
         if (e.dependsOnIndex < 0 || e.dependsOnIndex >= issues.length) {
-          return { content: [{ type: "text" as const, text: `Error: dependencies[${i}].dependsOnIndex ${e.dependsOnIndex} out of range (0..${issues.length - 1})` }] };
+          return mcpText(`Error: dependencies[${i}].dependsOnIndex ${e.dependsOnIndex} out of range (0..${issues.length - 1})`);
         }
         if (e.issueIndex === e.dependsOnIndex) {
-          return { content: [{ type: "text" as const, text: `Error: dependencies[${i}]: an issue cannot depend on itself` }] };
+          return mcpText(`Error: dependencies[${i}]: an issue cannot depend on itself`);
         }
         const type = e.type ?? "depends_on";
         const key = `${e.issueIndex} ${e.dependsOnIndex} ${type}`;
         if (seenEdges.has(key)) {
-          return { content: [{ type: "text" as const, text: `Error: dependencies[${i}]: duplicate edge (issue ${e.issueIndex} -> ${e.dependsOnIndex}, type ${type})` }] };
+          return mcpText(`Error: dependencies[${i}]: duplicate edge (issue ${e.issueIndex} -> ${e.dependsOnIndex}, type ${type})`);
         }
         seenEdges.add(key);
         if (DIRECTIONAL.has(type)) {
@@ -112,7 +112,7 @@ export function registerCreateIssuesBatch(server: McpServer, deps: ToolDeps = pr
         const e = edges[i];
         const type = e.type ?? "depends_on";
         if (DIRECTIONAL.has(type) && hasPath(e.dependsOnIndex, e.issueIndex)) {
-          return { content: [{ type: "text" as const, text: `Error: dependencies[${i}]: would create a cycle (issue ${e.issueIndex} -> ${e.dependsOnIndex})` }] };
+          return mcpText(`Error: dependencies[${i}]: would create a cycle (issue ${e.issueIndex} -> ${e.dependsOnIndex})`);
         }
       }
 
@@ -123,10 +123,10 @@ export function registerCreateIssuesBatch(server: McpServer, deps: ToolDeps = pr
           .where(eq(schema.issues.id, parentIssueId))
           .limit(1);
         if (parent.length === 0) {
-          return { content: [{ type: "text" as const, text: `Error: parent issue not found: ${parentIssueId}` }] };
+          return mcpText(`Error: parent issue not found: ${parentIssueId}`);
         }
         if (parent[0].projectId !== pid) {
-          return { content: [{ type: "text" as const, text: "Error: parent issue must be in the same project" }] };
+          return mcpText("Error: parent issue must be in the same project");
         }
       }
 
@@ -227,7 +227,7 @@ export function registerCreateIssuesBatch(server: McpServer, deps: ToolDeps = pr
       // mis-file, so the response names the board the issues landed in.
       const projectName = await resolveProjectName(db, schema, pid);
 
-      return { content: [{ type: "text" as const, text: JSON.stringify({ issues: created, dependenciesCreated: edges.length, projectId: pid, projectName }, null, 2) }] };
+      return mcpJson({ issues: created, dependenciesCreated: edges.length, projectId: pid, projectName });
     },
   );
 }
