@@ -83,6 +83,10 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // operator could otherwise misalign) with ONE dial. See `resolveVerifyGateStrategy`
   // in `pre-merge-gate.service.ts` for the mapping onto the existing knobs.
   "verify_gate_strategy",
+  // #660 — opt-in: run the E2E smoke lane as part of this project's pre-merge gate. Default
+  // OFF, because enabling it taxes every merge with ~52s plus a cold two-server boot, and
+  // that is an operator's call rather than a default.
+  "verify_gate_e2e_smoke",
   // Quiesce builders while a verify gate runs (#581). Measured: raising the gate to 6
   // workers cut the server suite 2380s -> 1564s, and the first gate that then ran WHILE
   // two builders were working failed three real-git `mergeWorkspace` tests that pass in
