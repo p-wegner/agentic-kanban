@@ -44,7 +44,8 @@ import { createTimeReportRoute } from "./time-report.js";
 import { createWorkflowForkService } from "../services/workflow-fork.service.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "../services/session.manager.js";
-import type { BoardEvents, BoardEventType } from "../services/board-events.js";
+import type { BoardEvents } from "../services/board-events.js";
+import { isBoardEventReason } from "@agentic-kanban/shared/lib/board-events-contract";
 import { createRouter } from "../middleware/create-router.js";
 import { parseOptionalJsonBody } from "../middleware/parse-body.js";
 
@@ -124,7 +125,14 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
     }
     const body = await parseOptionalJsonBody<{ projectId?: string; reason?: string }>(c);
     if (body.projectId) {
-      options.boardEvents.broadcast(body.projectId, (body.reason ?? "internal_notify") as BoardEventType);
+      // Validated, not cast (#566): the reason vocabulary now includes the mcp_*/drive_*
+      // reasons that only ever arrive here, so an unknown one is a caller bug worth
+      // seeing rather than a string smuggled into a union it was never a member of.
+      const raw = body.reason ?? "internal_notify";
+      if (!isBoardEventReason(raw)) {
+        console.warn(`[routes] board-notify: unknown reason "${raw}" — broadcasting as internal_notify`);
+      }
+      options.boardEvents.broadcast(body.projectId, isBoardEventReason(raw) ? raw : "internal_notify");
     }
     return c.json({ ok: true });
   });

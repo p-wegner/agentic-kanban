@@ -15,6 +15,7 @@ import {
 } from "../lib/crossRepoImpact.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { useBoardWsRefresh } from "../hooks/useBoardWsRefresh.js";
+import { LIVE_ACTIVITY_REFRESH_REASONS } from "@agentic-kanban/shared/lib/board-events-contract";
 
 /**
  * Cross-Repo Change-Impact Heatmap (#97). File-contention detection is
@@ -34,19 +35,9 @@ import { useBoardWsRefresh } from "../hooks/useBoardWsRefresh.js";
  */
 
 /** Board-event reasons that can change a workspace's diff footprint. */
-const RELEVANT_REASONS = new Set<string>([
-  "board_changed",
-  "workspace_created",
-  "workspace_setup",
-  "workspace_merged",
-  "workspace_closed",
-  "workspace_updated",
-  "session_completed",
-  "session_launched",
-  "session_stopped",
-  "reconnect",
-  "poll",
-]);
+// One shared set (#566) — this was a hand-built copy that still listed the dead
+// "workspace_updated" reason. See LIVE_ACTIVITY_REFRESH_REASONS for what changed.
+const RELEVANT_REASONS = LIVE_ACTIVITY_REFRESH_REASONS;
 
 const REFRESH_DEBOUNCE_MS = 1500;
 

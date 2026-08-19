@@ -54,3 +54,4 @@ export * from "./issue-ref.js";
 export * from "./issue-vocab.js";
 export * from "./project-statuses.js";
 export * from "./board-health-events.js";
+export * from "./board-events-contract.js";

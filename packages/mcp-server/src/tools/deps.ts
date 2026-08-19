@@ -2,6 +2,7 @@ import { drizzle } from "drizzle-orm/libsql";
 import * as schema from "@agentic-kanban/shared/schema";
 import { db as prodDb, schema as prodSchema } from "../db.js";
 import { notifyBoard as prodNotifyBoard } from "../notify.js";
+import type { BoardEventReason } from "@agentic-kanban/shared/lib/board-events-contract";
 import { getDiff as prodGetDiff, getDiffShortstat as prodGetDiffShortstat } from "../git-service.js";
 
 /** Drizzle DB instance typed over the shared schema. */
@@ -16,7 +17,8 @@ export type ToolDb = ReturnType<typeof drizzle<typeof schema>>;
 export interface ToolDeps {
   db: ToolDb;
   schema: typeof schema;
-  notifyBoard: (projectId: string, reason: string) => void;
+  /** Reason is the shared board-event vocabulary (#566), not a free string. */
+  notifyBoard: (projectId: string, reason: BoardEventReason) => void;
   getDiff: (workingDir: string, baseRef: string) => Promise<string>;
   getDiffShortstat: (workingDir: string, baseRef: string) => Promise<{ filesChanged: number; insertions: number; deletions: number }>;
 }

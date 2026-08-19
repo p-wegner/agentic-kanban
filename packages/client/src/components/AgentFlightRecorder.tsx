@@ -24,6 +24,7 @@ import {
 } from "../lib/flightRecorderEvents.js";
 import { useBoardWsRefresh } from "../hooks/useBoardWsRefresh.js";
 import { useNow } from "../hooks/usePoll.js";
+import { WORKSPACE_LIFECYCLE_REASONS, SESSION_LIFECYCLE_REASONS, WORKFLOW_REASONS, DRIVE_REASONS, type ClientRefreshReason } from "@agentic-kanban/shared/lib/board-events-contract";
 
 /** Severity → dot colour + label for the row and the filter chips. */
 const SEVERITY_META: Record<FlightRecorderSeverity, { dot: string; label: string; text: string }> = {
@@ -53,16 +54,23 @@ const KIND_LABEL: Record<FlightRecorderEvent["kind"], string> = {
  * amplified exactly the load that made the server flap (perf review 2026-08-11) —
  * the 250ms-debounced refresh on real mutation reasons covers the gap.
  */
-function shouldRefetch(reason: string): boolean {
-  return (
-    reason.startsWith("session") ||
-    reason.startsWith("workflow") ||
-    reason.startsWith("workspace") ||
-    reason.startsWith("drive") ||
-    reason.includes("merge") ||
-    reason.includes("question") ||
-    reason.includes("status")
-  );
+/**
+ * #566: this was seven `startsWith`/`includes` string tests over an untyped reason. Now
+ * it is set membership over the shared vocabulary, so a reason that no longer exists
+ * cannot sit here looking meaningful. Same members as before — the two `mcp_*` reasons
+ * are the ones the old `includes("question")` / `includes("status")` tests matched.
+ */
+const FLIGHT_RECORDER_REASONS: ReadonlySet<ClientRefreshReason> = new Set<ClientRefreshReason>([
+  ...WORKSPACE_LIFECYCLE_REASONS,
+  ...SESSION_LIFECYCLE_REASONS,
+  ...WORKFLOW_REASONS,
+  ...DRIVE_REASONS,
+  "mcp_clarifying_question",
+  "mcp_delete_status",
+]);
+
+function shouldRefetch(reason: ClientRefreshReason): boolean {
+  return FLIGHT_RECORDER_REASONS.has(reason);
 }
 
 interface ResolveIssue {

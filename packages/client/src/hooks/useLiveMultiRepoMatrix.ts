@@ -11,6 +11,7 @@ import {
 import { diffMultiRepoMatrix, type MatrixSnapshot } from "../lib/diffMultiRepoMatrix.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { useBoardWsRefresh } from "./useBoardWsRefresh.js";
+import { LIVE_ACTIVITY_REFRESH_REASONS } from "@agentic-kanban/shared/lib/board-events-contract";
 
 /**
  * Board-event reasons that can change a repo × workspace cell. A merge landing, a
@@ -19,21 +20,9 @@ import { useBoardWsRefresh } from "./useBoardWsRefresh.js";
  * we don't pay for the git fan-out on those. `reconnect`/`poll` are the WS lifecycle
  * refreshes and are treated as relevant so a live panel catches up after a gap.
  */
-const RELEVANT_REASONS = new Set<string>([
-  "board_changed",
-  "workspace_created",
-  "workspace_setup",
-  "workspace_merged",
-  "workspace_closed",
-  "workspace_idle",
-  "workspace_updated",
-  "workspace_ready_for_merge",
-  "session_completed",
-  "session_launched",
-  "session_stopped",
-  "reconnect",
-  "poll",
-]);
+// One shared set (#566) — this was a hand-built copy that still listed the dead
+// "workspace_updated" reason. See LIVE_ACTIVITY_REFRESH_REASONS for what changed.
+const RELEVANT_REASONS = LIVE_ACTIVITY_REFRESH_REASONS;
 
 /** Debounce/coalesce window for bursts of board events (spec: ~1.5s). */
 const REFRESH_DEBOUNCE_MS = 1500;

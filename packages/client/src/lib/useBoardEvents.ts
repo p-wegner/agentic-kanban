@@ -22,57 +22,36 @@ const POLL_INTERVAL_MS = 30_000;
  * events without each opening its own WebSocket or threading new props
  * through BoardPage. detail: { projectId: string, reason: string }.
  */
+import type {
+  BoardWsMessage,
+  ClientRefreshReason,
+  TodoItem,
+  PluginGateMessage,
+} from "@agentic-kanban/shared/lib/board-events-contract";
+
 export const BOARD_WS_EVENT = "agentic-kanban:board-ws-event";
 
 export interface BoardWsEventDetail {
   projectId: string;
-  reason: string;
+  /** A wire reason, or one of the client's own synthetic "reconnect"/"poll". */
+  reason: ClientRefreshReason;
 }
 
-interface BoardChangedEvent {
-  type: "board_changed";
-  projectId: string;
-  reason: string;
-}
+/**
+ * Every frame type comes from shared (#566) — this file used to re-declare the whole
+ * union by hand, and it had drifted: `reason: string` instead of the vocabulary, and an
+ * optional `subagentCount` the server always sends.
+ */
+export type { TodoItem, PluginGateMessage as PluginGateEvent };
+type PluginGateEvent = PluginGateMessage;
 
-interface ProjectsChangedEvent {
-  type: "projects_changed";
-  projectId: string;
-  reason: "project_created" | "project_updated" | "project_deleted";
-}
+type BoardWsEvent = BoardWsMessage;
 
-interface SessionActivityEvent {
-  type: "session_activity";
-  projectId: string;
-  issueId: string;
-  sessionId: string;
-  activity: string;
-}
-
-interface SessionStatsEvent {
-  type: "session_stats";
-  projectId: string;
-  issueId: string;
-  model: string;
-  contextTokens: number;
-  toolUses: number;
-  subagentCount?: number;
-}
-
-export interface TodoItem {
-  id: string;
-  content: string;
-  status: "pending" | "in_progress" | "completed";
-  priority: "high" | "medium" | "low";
-}
-
-interface SessionTodosEvent {
-  type: "session_todos";
-  projectId: string;
-  issueId: string;
-  todos: TodoItem[];
-}
-
+/**
+ * The approval payload as the approval UI consumes it. Kept local and NOT replaced by
+ * the wire type: the message declares `toolInput: unknown` (it forwards whatever the
+ * agent sent), while every consumer here indexes into it as an object.
+ */
 export interface ApprovalRequest {
   id: string;
   sessionId: string;
@@ -81,31 +60,6 @@ export interface ApprovalRequest {
   workspaceId?: string;
 }
 
-interface ApprovalRequestedEvent {
-  type: "approval_requested";
-  projectId: string;
-  id: string;
-  sessionId: string;
-  toolName: string;
-  toolInput: Record<string, unknown>;
-  workspaceId?: string;
-}
-
-/** A plugin loop reached a human-approval gate (#287) — fired once per NEW gate id. */
-export interface PluginGateEvent {
-  type: "plugin_gate";
-  projectId: string;
-  pluginSlug: string;
-  pluginName: string;
-  /** Plugin ROW id (#300) — what deep-linking to the loop pane needs. */
-  pluginId: string | null;
-  loopName: string;
-  loopLabel: string;
-  gateId: string;
-  question: string;
-}
-
-type BoardWsEvent = BoardChangedEvent | ProjectsChangedEvent | SessionActivityEvent | SessionStatsEvent | SessionTodosEvent | ApprovalRequestedEvent | PluginGateEvent;
 
 export interface LiveSessionStats {
   model: string;
@@ -116,7 +70,7 @@ export interface LiveSessionStats {
 
 export function useBoardEvents(
   projectId: string | null,
-  onBoardChange: (reason: string) => void,
+  onBoardChange: (reason: ClientRefreshReason) => void,
   onSessionActivity?: (issueId: string, sessionId: string, activity: string) => void,
   onSessionStats?: (issueId: string, stats: LiveSessionStats) => void,
   onSessionTodos?: (issueId: string, todos: TodoItem[]) => void,
@@ -189,7 +143,9 @@ export function useBoardEvents(
         } else if (msg.type === "session_todos") {
           onSessionTodosRef.current?.(msg.issueId, msg.todos);
         } else if (msg.type === "approval_requested") {
-          onApprovalRequestedRef.current?.({ id: msg.id, sessionId: msg.sessionId, toolName: msg.toolName, toolInput: msg.toolInput, workspaceId: msg.workspaceId });
+          onApprovalRequestedRef.current?.({ id: msg.id, sessionId: msg.sessionId, toolName: msg.toolName, toolInput: (msg.toolInput ?? {}) as Record<string, unknown>, workspaceId: msg.workspaceId });
+          // The wire type is `unknown` — the agent decides the shape; the approval UI
+          // indexes into it, so the narrowing happens once, here, at the boundary.
         } else if (msg.type === "plugin_gate") {
           // A human gate is the one loop state that goes NOWHERE without a person —
           // surface it actively (#287/#300). The server already dedupes to one message

@@ -14,6 +14,11 @@
  */
 import type { MonitorActionName } from "../../lib/monitor-action.js";
 import type { MonitorTunables } from "../../lib/strategy-objective-file.js";
+
+// Re-exported so consumers take it from the wire-contract barrel. The client used to
+// deep-import lib/strategy-objective-file for it, which drags a Node-builtin chain into
+// the client-safety guard's reachability graph even for a type-only import (#596).
+export type { MonitorTunables };
 import type { START_MODE_VALUES } from "../../lib/dynamic-preference-keys.js";
 
 export type StartMode = (typeof START_MODE_VALUES)[number];

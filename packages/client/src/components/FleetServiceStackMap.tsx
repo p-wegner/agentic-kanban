@@ -9,6 +9,7 @@ import {
 } from "../lib/fleetServiceStacks.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { useBoardWsRefresh } from "../hooks/useBoardWsRefresh.js";
+import { LIVE_ACTIVITY_REFRESH_REASONS } from "@agentic-kanban/shared/lib/board-events-contract";
 
 /**
  * Fleet Service-Stack Map (#95). `ServiceStackStatusPanel` shows ONE workspace's
@@ -37,19 +38,9 @@ const NON_CLOSED_WORKSPACE_STATUSES = [
 ].join(",");
 
 /** Board-event reasons that can change a workspace's stack. */
-const RELEVANT_REASONS = new Set<string>([
-  "board_changed",
-  "workspace_created",
-  "workspace_setup",
-  "workspace_merged",
-  "workspace_closed",
-  "workspace_updated",
-  "session_completed",
-  "session_launched",
-  "session_stopped",
-  "reconnect",
-  "poll",
-]);
+// One shared set (#566) — this was a hand-built copy that still listed the dead
+// "workspace_updated" reason. See LIVE_ACTIVITY_REFRESH_REASONS for what changed.
+const RELEVANT_REASONS = LIVE_ACTIVITY_REFRESH_REASONS;
 
 const REFRESH_DEBOUNCE_MS = 1500;
 

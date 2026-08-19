@@ -5,6 +5,7 @@ import { sendDesktopNotification } from "../lib/desktop.js";
 import { showToast } from "../lib/toast.js";
 import { agentActivityActions } from "../stores/agentActivityStore.js";
 import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
+import type { ClientRefreshReason } from "@agentic-kanban/shared/lib/board-events-contract";
 
 type NotificationIssue = { id: string; issueNumber?: number; title?: string; workspaceId?: string };
 
@@ -21,7 +22,7 @@ interface UseBoardLiveHandlersDeps {
   setLiveStats: React.Dispatch<React.SetStateAction<Record<string, LiveSessionStats>>>;
   setSessionTodos: React.Dispatch<React.SetStateAction<Record<string, TodoItem[]>>>;
   setApprovalRequests: React.Dispatch<React.SetStateAction<ApprovalRequest[]>>;
-  addNotificationBoardEvent: (reason: string, issue?: NotificationIssue) => void;
+  addNotificationBoardEvent: (reason: ClientRefreshReason, issue?: NotificationIssue) => void;
   addNotificationApprovalEvent: (key: string, issue?: NotificationIssue) => void;
   addNotificationPluginGateEvent?: (gate: { pluginSlug: string; pluginName: string; loopName: string; loopLabel: string; gateId: string; question: string }) => void;
 }
@@ -51,7 +52,7 @@ export function useBoardLiveHandlers(deps: UseBoardLiveHandlersDeps) {
     addNotificationPluginGateEvent,
   } = deps;
 
-  const handleBoardChange = useCallback((reason: string) => {
+  const handleBoardChange = useCallback((reason: ClientRefreshReason) => {
     // `project_created/updated/deleted` are project-lifecycle reasons that require a
     // project-list reload. `project_completed` (#848) shares the `project_` prefix but is
     // a board notification, NOT a lifecycle change — let it fall through to the
