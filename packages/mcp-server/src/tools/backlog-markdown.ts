@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { boardApi, boardApiText, mcpJson, mcpText } from "../board-call.js";
 import { resolveActiveProjectId } from "../db-utils.js";
-import { boardApiUrl } from "../server-url.js";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -52,12 +52,11 @@ export function registerExportBacklogMarkdown(server: McpServer, deps: ToolDeps 
     if (args.bare) p.set("bare", "1");
     p.set("download", "0");
     try {
-      const res = await fetch(boardApiUrl(`/api/projects/${rpid.projectId}/backlog.md?${p.toString()}`));
-      const text = await res.text();
-      if (!res.ok) return { content: [{ type: "text" as const, text: `Error: export failed (${res.status}): ${text.slice(0, 300)}` }] };
-      return { content: [{ type: "text" as const, text }] };
+      const { ok, status, text } = await boardApiText(`/api/projects/${rpid.projectId}/backlog.md?${p.toString()}`);
+      if (!ok) return mcpText(`Error: export failed (${status}): ${text.slice(0, 300)}`);
+      return mcpText(text);
     } catch (e) {
-      return { content: [{ type: "text" as const, text: `Error: board unreachable — ${errorMessage(e)}` }] };
+      return mcpText(`Error: board unreachable — ${errorMessage(e)}`);
     }
   });
 }
@@ -77,16 +76,15 @@ export function registerImportBacklogMarkdown(server: McpServer, deps: ToolDeps 
     if (!rpid.ok) return rpid.error;
     const path = dryRun === false ? "import" : "preview";
     try {
-      const res = await fetch(boardApiUrl(`/api/projects/${rpid.projectId}/backlog.md/${path}`), {
-        method: "POST", headers: { "Content-Type": "application/json" },
+      const { ok, status, data } = await boardApi(`/api/projects/${rpid.projectId}/backlog.md/${path}`, {
+        method: "POST",
         body: JSON.stringify({ text, mode, matchBy, defaultStatus, unknownStatus }),
       });
-      const data = (await res.json()) as Record<string, unknown>;
-      if (!res.ok) return { content: [{ type: "text" as const, text: `Error: ${path} failed (${res.status}): ${JSON.stringify(data).slice(0, 400)}` }] };
+      if (!ok) return mcpText(`Error: ${path} failed (${status}): ${JSON.stringify(data).slice(0, 400)}`);
       if (path === "import") notifyBoard(rpid.projectId, "mcp_import_backlog_markdown");
-      return { content: [{ type: "text" as const, text: JSON.stringify({ dryRun: path === "preview", ...data }, null, 2) }] };
+      return mcpJson({ dryRun: path === "preview", ...(data as Record<string, unknown>) });
     } catch (e) {
-      return { content: [{ type: "text" as const, text: `Error: board unreachable — ${errorMessage(e)}` }] };
+      return mcpText(`Error: board unreachable — ${errorMessage(e)}`);
     }
   });
 }

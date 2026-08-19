@@ -1,9 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { boardApi, boardErrorText, mcpJson, mcpText, mcpUnreachable } from "../board-call.js";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { resolveActiveProjectId } from "../db-utils.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import { boardApiUrl } from "../server-url.js";
 
 export function registerGetBoardRiskDigest(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema } = deps;
@@ -19,14 +19,11 @@ export function registerGetBoardRiskDigest(server: McpServer, deps: ToolDeps = p
         if (!rpid.ok) return rpid.error;
         const pid = rpid.projectId;
 
-        const res = await fetch(boardApiUrl(`/api/projects/${pid}/board-risk-digest`));
-        if (!res.ok) {
-          return { content: [{ type: "text" as const, text: `Failed to get board risk digest: ${res.statusText}` }] };
-        }
-        const digest = await res.json();
-        return { content: [{ type: "text" as const, text: JSON.stringify(digest, null, 2) }] };
+        const { ok, statusText, data } = await boardApi(`/api/projects/${pid}/board-risk-digest`);
+        if (!ok) return mcpText(`Failed to get board risk digest: ${boardErrorText(data, statusText)}`);
+        return mcpJson(data);
       } catch (err) {
-        return { content: [{ type: "text" as const, text: `Error: ${errorMessage(err)}` }] };
+        return mcpText(`Error: ${errorMessage(err)}`);
       }
     },
   );

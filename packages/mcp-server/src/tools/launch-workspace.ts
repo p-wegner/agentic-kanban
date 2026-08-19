@@ -1,8 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { boardApi, boardErrorText, mcpJson, mcpText, mcpUnreachable } from "../board-call.js";
 import { eq } from "drizzle-orm";
 import { mcpStructuredError, workspaceNotFoundError, workspaceClosedError } from "../db-utils.js";
-import { boardApiUrl } from "../server-url.js";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -64,15 +64,14 @@ export function registerLaunchWorkspace(server: McpServer, deps: ToolDeps = prod
       }
 
       try {
-        const res = await fetch(boardApiUrl(`/api/workspaces/${workspaceId}/launch`), {
+        const { ok, statusText, data: raw } = await boardApi(`/api/workspaces/${workspaceId}/launch`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ prompt: effectivePrompt }),
         });
-        const data = (await res.json()) as Record<string, unknown>;
+        const data = (raw ?? {}) as Record<string, unknown>;
 
-        if (!res.ok) {
-          return mcpStructuredError("LAUNCH_FAILED", data.error as string ?? res.statusText, { workspaceId });
+        if (!ok) {
+          return mcpStructuredError("LAUNCH_FAILED", boardErrorText(raw, statusText), { workspaceId });
         }
 
         // Notify the board so the UI updates
@@ -85,23 +84,9 @@ export function registerLaunchWorkspace(server: McpServer, deps: ToolDeps = prod
           notifyBoard(issueRows[0].projectId, "mcp_launch_workspace");
         }
 
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify({ id: workspaceId, sessionId: data.sessionId }, null, 2),
-            },
-          ],
-        };
+        return mcpJson({ id: workspaceId, sessionId: data.sessionId });
       } catch (err) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Launch failed: ${errorMessage(err)}`,
-            },
-          ],
-        };
+        return mcpText(`Launch failed: ${errorMessage(err)}`);
       }
     },
   );

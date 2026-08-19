@@ -49,8 +49,9 @@ describe("terminal-Done guard — move_issue", () => {
     const text = result.content[0].text;
     // Must return an error, not a success
     const parsed = JSON.parse(text);
-    expect(parsed.error).toBeDefined();
-    expect(parsed.code).toBe("OPEN_WORKSPACE_NOT_MERGED");
+    // #508: the guard now emits the standard mcpStructuredError shape — `{error:{code,message,...}}`.
+    expect(parsed.error.message).toBeDefined();
+    expect(parsed.error.code).toBe("OPEN_WORKSPACE_NOT_MERGED");
   });
 
   it("blocks move to Cancelled when issue has an active workspace", async () => {
@@ -61,8 +62,9 @@ describe("terminal-Done guard — move_issue", () => {
 
     const result = await invoke({ issueId, statusName: "Cancelled" });
     const parsed = JSON.parse(result.content[0].text);
-    expect(parsed.error).toBeDefined();
-    expect(parsed.code).toBe("OPEN_WORKSPACE_NOT_MERGED");
+    // #508: the guard now emits the standard mcpStructuredError shape — `{error:{code,message,...}}`.
+    expect(parsed.error.message).toBeDefined();
+    expect(parsed.error.code).toBe("OPEN_WORKSPACE_NOT_MERGED");
   });
 
   it("allows move to Done when workspace is already closed (merged)", async () => {
@@ -172,8 +174,9 @@ describe("terminal-Done guard — update_issue", () => {
 
     const result = await invoke({ issueId, statusName: "Done" });
     const parsed = JSON.parse(result.content[0].text);
-    expect(parsed.error).toBeDefined();
-    expect(parsed.code).toBe("OPEN_WORKSPACE_NOT_MERGED");
+    // #508: the guard now emits the standard mcpStructuredError shape — `{error:{code,message,...}}`.
+    expect(parsed.error.message).toBeDefined();
+    expect(parsed.error.code).toBe("OPEN_WORKSPACE_NOT_MERGED");
   });
 
   it("allows statusName=Done when workspace is already closed", async () => {

@@ -1,7 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { boardApiUrl } from "../server-url.js";
-import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { boardApi, boardErrorText, mcpJson, mcpText, mcpUnreachable } from "../board-call.js";
 
 export function registerListProjectRepos(server: McpServer) {
   server.tool(
@@ -12,22 +11,11 @@ export function registerListProjectRepos(server: McpServer) {
     },
     async ({ projectId }) => {
       try {
-        const res = await fetch(boardApiUrl(`/api/projects/${projectId}/repos`), {
-          headers: { "Content-Type": "application/json" },
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          const errMsg = (data as Record<string, unknown>).error as string ?? res.statusText;
-          return { content: [{ type: "text" as const, text: `Error listing project repos: ${errMsg}` }] };
-        }
-        return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+        const { ok, statusText, data } = await boardApi(`/api/projects/${projectId}/repos`);
+        if (!ok) return mcpText(`Error listing project repos: ${boardErrorText(data, statusText)}`);
+        return mcpJson(data);
       } catch (err) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: `Failed to reach the board server (is it running?): ${errorMessage(err)}`,
-          }],
-        };
+        return mcpUnreachable(err);
       }
     },
   );

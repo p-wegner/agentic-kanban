@@ -1,8 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { boardApiText, mcpText } from "../board-call.js";
 import { eq } from "drizzle-orm";
 import { workspaceClosedError, workspaceMissingWorkingDirError, workspaceNotFoundError } from "../db-utils.js";
-import { boardApiUrl } from "../server-url.js";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -45,31 +45,25 @@ export function registerMergeWorkspace(server: McpServer, deps: ToolDeps = prodD
       }
 
       // Delegate the actual merge to the authoritative server endpoint.
-      let res: Response;
+      let result: Awaited<ReturnType<typeof boardApiText>>;
       try {
-        res = await fetch(boardApiUrl(`/api/workspaces/${workspaceId}/merge`), {
+        result = await boardApiText(`/api/workspaces/${workspaceId}/merge`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
         });
       } catch (err) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: `Merge failed: could not reach the board server (${errorMessage(err)}). The board server must be running to merge safely.`,
-          }],
-        };
+        return mcpText(
+          `Merge failed: could not reach the board server (${errorMessage(err)}). The board server must be running to merge safely.`,
+        );
       }
 
-      const text = await res.text();
-      if (!res.ok) {
+      if (!result.ok) {
         // The safe path surfaces distinct signals here — e.g. 409 (a merge is
         // already in progress for this repo), 503 (the merge build/verify failed,
         // not a conflict), or a conflict that should be routed to fix-and-merge.
-        return {
-          content: [{ type: "text" as const, text: `Merge not completed (HTTP ${res.status}): ${text}` }],
-        };
+        return mcpText(`Merge not completed (HTTP ${result.status}): ${result.text}`);
       }
-      return { content: [{ type: "text" as const, text }] };
+      return mcpText(result.text);
     },
   );
 }
