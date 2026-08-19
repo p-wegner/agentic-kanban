@@ -54,7 +54,7 @@ export interface WorkerRepoTransport {
   incomingRef: string;
   setupScript?: string;
   /** Agent skills to materialize into the checkout's .claude/skills/. */
-  skills?: Array<{ name: string; content: string }>;
+  skills?: Array<{ name: string; description?: string; content: string }>;
 }
 
 /** Mirrors agent.service's AgentOutputEvent so events plug into broadcast as-is. */
@@ -145,7 +145,13 @@ function parseRepoTransport(raw: unknown): WorkerRepoTransport | null {
         .map((s) => asRecord(s))
         .filter((s): s is Record<string, unknown> => Boolean(s))
         .filter((s) => typeof s.name === "string" && typeof s.content === "string")
-        .map((s) => ({ name: s.name as string, content: s.content as string }))
+        .map((s) => ({
+          name: s.name as string,
+          // Optional on the wire: an older board sends none, and a skill without a
+          // description still materializes (with an empty one) rather than being dropped.
+          ...(typeof s.description === "string" ? { description: s.description } : {}),
+          content: s.content as string,
+        }))
     : undefined;
   return {
     projectId: repo.projectId,

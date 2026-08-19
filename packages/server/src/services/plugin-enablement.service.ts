@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, symlinkSync, cpSync } from "node:fs";
 import { join } from "node:path";
+import { skillDirOf, skillsDirOf } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-preference-write";
 import {
   pluginEnabledPreferenceKey,
@@ -50,8 +51,8 @@ export function createPluginEnablementOps(deps: {
         report.warnings.push(`skill dir not found in plugin: ${skill.dir}`);
         continue;
       }
-      const skillsRoot = join(repoPath, ".claude", "skills");
-      const target = join(skillsRoot, name);
+      const skillsRoot = skillsDirOf(repoPath);
+      const target = skillDirOf(repoPath, name);
       if (existsSync(target) || isLinkPath(target)) {
         report.skills.push({ name, mode: "skipped-existing" });
       } else {
@@ -107,7 +108,7 @@ export function createPluginEnablementOps(deps: {
     const skillsRemoved: string[] = [];
     for (const skill of plugin.manifest.skills ?? []) {
       const name = pluginSkillName(skill.dir);
-      const target = join(project.repoPath, ".claude", "skills", name);
+      const target = skillDirOf(project.repoPath, name);
       if (!isLinkPath(target)) continue;
       removeLink(target);
       skillsRemoved.push(name);
