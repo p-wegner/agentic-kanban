@@ -20,7 +20,9 @@ import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
 import { ensureBuildableFromClean } from "../services/project-scaffold.js";
 import * as gitService from "../services/git.service.js";
 import { createSessionManager } from "../services/session.manager.js";
-import { buildReviewPrompt } from "./review-helpers.js";
+// #557: the pure service helper, called with the ENGINE's db — the `review-helpers.ts` shim
+// existed only to inject the process singleton, which silently ignored an injected `database`.
+import { buildReviewPrompt } from "../services/review.service.js";
 import { applyWorkspaceProfileToPrefs, resolveWorkspaceLaunchSettings } from "../services/agent-settings.service.js";
 import { buildReviewContext } from "../services/phase-context.service.js";
 import type { MergeWorkspace } from "./merge-workflow.js";
@@ -841,7 +843,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     // pref) merges it. Still gated: RUN_GATE makes autoMerge run the same verify/smoke
     // pre-merge gate as every other landing. The post-merge loop advance (#298) then
     // fires from the merge tail, so the loop's next gate appears without the monitor.
-    const autoLandLoop = await getAutoLandLoopTicket(issueId);
+    const autoLandLoop = await getAutoLandLoopTicket(issueId, db);
     if (autoLandLoop) {
       // #325 kept a local commits-ahead re-check here because `committedChanges` above was a
       // working-tree diff against the base BRANCH TIP, so a workspace with ZERO unique
@@ -931,7 +933,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     const precomputedContext = workspace.workingDir && diffRef && !conflictingFiles && !uncommittedChanges
       ? await buildReviewContext({ workingDir: workspace.workingDir, baseRef: diffRef, isDirect: workspace.isDirect })
       : null;
-    const { prompt, model } = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles, uncommittedChanges, workspaceId, reviewSkillName, verifyAgent, precomputedContext);
+    const { prompt, model } = await buildReviewPrompt(db, workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles, uncommittedChanges, workspaceId, reviewSkillName, verifyAgent, precomputedContext);
     const reviewArgsWithModel = model && reviewProvider === "claude" ? `${reviewArgs ?? ""} --model ${model}`.trim() : reviewArgs;
     try {
       await setWorkspaceStatus(db, workspaceId, "reviewing", { now });

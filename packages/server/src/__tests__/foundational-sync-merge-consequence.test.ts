@@ -54,7 +54,10 @@ vi.mock("../services/agent-settings.service.js", () => ({
   toExecutorProvider: vi.fn((p: string) => p),
   MOCK_AGENT_COMMAND: "mock",
 }));
-vi.mock("../startup/review-helpers.js", () => ({
+// #557: the `startup/review-helpers.js` shim is gone — the engine calls the service helper
+// with its own db. Partial mock so the rest of review.service stays real.
+vi.mock("../services/review.service.js", async (importOriginal) => ({
+  ...(await importOriginal() as Record<string, unknown>),
   buildReviewPrompt: vi.fn(async () => ({ prompt: "review", model: undefined })),
 }));
 // Auto-merge must be ENABLED so the review-exit path reaches the foundational branch.

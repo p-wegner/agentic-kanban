@@ -13,7 +13,7 @@ import { runBacklogEmptyStrategy } from "./monitor-backlog.js";
 import { getRecentAgentExcerpts, logMonitorAction, shouldSkipNudge, type MonitorAction } from "./monitor-helpers.js";
 import { processWorkspaceCandidates } from "./monitor-cycle.js";
 import { createMonitorWorkspaceActions } from "./monitor-workspace-actions.js";
-import { buildMonitorNudgePrompt } from "./review-helpers.js";
+import { buildMonitorNudgePrompt } from "../services/review.service.js";
 import { snapshotAndCleanStaleDevProcesses, type BoardMonitorResourceSnapshot } from "../services/stale-dev-processes.js";
 import { healWorkspaceSummaryProjection } from "../services/workspace-summary-projection.service.js";
 import { resolveStartPolicy } from "../services/start-policy.service.js";
@@ -551,7 +551,9 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
         reviewSessionIds,
         monitorRecentActions: monitorState.recentActions,
         logMonitorAction,
-        buildMonitorNudgePrompt,
+        // #557: bound to this monitor's db rather than reached through a shim that injected
+        // the process singleton.
+        buildMonitorNudgePrompt: (projectId: string) => buildMonitorNudgePrompt(db, projectId),
         getRecentAgentExcerpts,
         shouldSkipNudge,
         stuckBuilderTimeoutMs: (() => {
