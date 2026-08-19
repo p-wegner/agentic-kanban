@@ -18,13 +18,14 @@ import { snapshotAndCleanStaleDevProcesses, type BoardMonitorResourceSnapshot } 
 import { healWorkspaceSummaryProjection } from "../services/workspace-summary-projection.service.js";
 import { resolveStartPolicy } from "../services/start-policy.service.js";
 import { advanceDuePluginLoops } from "../services/plugin-loop-monitor.js";
-import { scanDirtyMainCheckouts, type DirtyMainCheckoutWarning } from "../services/dirty-main-checkout.js";
-import { scanAutodriveStallWarnings, buildAutoStartSkipWarnings, type AutodriveStallWarning } from "../services/autodrive-stall-warning.service.js";
+import { scanDirtyMainCheckouts } from "../services/dirty-main-checkout.js";
+import { scanAutodriveStallWarnings, buildAutoStartSkipWarnings } from "../services/autodrive-stall-warning.service.js";
 import { resolveMergeStrategy } from "./merge-strategy.js";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { conditionalJsonResponse } from "../services/board-etag-cache.service.js";
 import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
 import { createMonitorPhaseRecorder, type MonitorCycleTimings } from "../lib/monitor-phase-timings.js";
+import type { MonitorStatusResponse, MonitorWarning, MonitorResourceSummary } from "@agentic-kanban/shared/types";
 import { createSpawnControlProbe } from "../lib/monitor-spawn-control.js";
 import { createMonitorProjectScheduler } from "./monitor-project-scheduler.js";
 import { shouldStartHealthRefresh } from "./health-refresh-gate.js";
@@ -117,7 +118,8 @@ export interface MonitorState {
   lastCyclePhaseTimings: MonitorCycleTimings | null;
 }
 
-export type MonitorWarning = DirtyMainCheckoutWarning | AutodriveStallWarning;
+// Union lives in shared (#567); both members now carry a `type` discriminant.
+export type { MonitorWarning };
 
 /**
  * #349: the health-warning refresh (`scanDirtyMainCheckouts` + `scanAutodriveStallWarnings`)
@@ -144,14 +146,8 @@ const HEALTH_WARNING_REFRESH_INTERVAL_MS = 10 * 60_000;
  */
 const CYCLE_BUDGET_INTERVAL_FRACTION = 2 / 3;
 
-export interface MonitorResourceSummary {
-  processCount: number;
-  listenerCount: number;
-  activeWorkspaceCount: number;
-  keptCount: number;
-  cleanedCount: number;
-  cleanupFailedCount: number;
-}
+// Shape lives in shared (#567) — it is part of the monitor-status wire payload.
+export type { MonitorResourceSummary };
 
 interface MonitorSetupDeps {
   sessionManager: ReturnType<typeof createSessionManager>;
@@ -232,7 +228,7 @@ export function setupMonitorRoutes(app: Hono, monitorState: MonitorState, runMon
           };
     // Computed ONCE (it walks the whole prefMap) — was evaluated twice below.
     const drivenProjectIds = monitorDrivenProjectIds(prefMap);
-    const payload = {
+    const payload: MonitorStatusResponse = {
       /** Will the monitor run on its own? (global toggle OR a monitor-mode project) */
       enabled: getBool(prefMap, "auto_monitor") || drivenProjectIds.size > 0,
       /** The raw `auto_monitor` pref — the state of the settings toggle, nothing more. */

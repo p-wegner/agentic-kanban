@@ -34,6 +34,7 @@ const NON_DECIDING: Record<string, string> = {
   "server/src/butler/board-guide.ts": "user-facing how-to text for the butler",
   "server/src/services/drive.service.ts": "comments describing the legacy keystone flag",
   "server/src/startup/monitor-contract.ts": "comment listing the per-project gates",
+  "shared/src/types/api/monitor.ts": "wire types only — the doc comment names the key the resolver reads",
 };
 
 function sourceFiles(rel: string): string[] {
