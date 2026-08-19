@@ -1,7 +1,11 @@
 import { getPreference } from "../repositories/preferences.repository.js";
+import { parseIssueRef } from "@agentic-kanban/shared/lib/issue-ref";
+import type { issues } from "@agentic-kanban/shared/schema";
 
 // Migration bootstrap lives in the db layer so cli/ never imports db/index directly.
 export { runMigrations } from "../db/manual-migrate.js";
+import { runMigrations as runMigrationsForAction } from "../db/manual-migrate.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export const DEFAULT_STATUSES = [
   { name: "Todo", sortOrder: 0, isDefault: true },
@@ -123,4 +127,63 @@ export async function resolveIssueNumberArg(
     return { ok: false, message: await describeIssueNumberMiss(issueNumber, projectId) };
   }
   return { ok: true, projectId, issueNumber, issueId };
+}
+
+/**
+ * Resolve a CLI issue ARGUMENT that may be a number or a full id (#509).
+ *
+ * The sibling above (`resolveIssueNumberArg`) handles commands whose argument is a number
+ * by contract. `issue update` and `issue move` accept either spelling, and both had their
+ * own copy of the branch — `isNumeric ? resolveProjectIdArg(...) : undefined`, look up, then
+ * print a bare `Issue '42' not found.`. For a NUMERIC ref that message is the exact wrong
+ * conclusion #467 exists to prevent: numbers are per-project, so the ticket usually does
+ * exist, in another project. Routing both through here means the explanation reaches them
+ * too, and the number-or-id decision is `parseIssueRef`'s alone.
+ *
+ * Returns rather than exits, for the same reason `resolveIssueNumberArg` does — the callers
+ * do not agree on how to fail.
+ */
+export async function resolveIssueArg(
+  issueArg: string,
+  options: { project?: string } = {},
+): Promise<{ ok: true; issue: typeof issues.$inferSelect } | { ok: false; message: string }> {
+  const ref = parseIssueRef(issueArg);
+  const projectId = ref.kind === "number" ? await resolveProjectIdArg(options.project) : undefined;
+  const { getIssueByNumberOrId } = await import("../repositories/issue/cli-commands.repository.js");
+  const issue = await getIssueByNumberOrId(issueArg, projectId);
+  if (issue) return { ok: true, issue };
+  if (ref.kind === "number" && projectId) {
+    return { ok: false, message: await describeIssueNumberMiss(ref.issueNumber, projectId) };
+  }
+  return { ok: false, message: `Issue '${issueArg}' not found.` };
+}
+
+/**
+ * The CLI action prelude/epilogue, once (#505).
+ *
+ * 102 commander handlers opened with `try { await runMigrations();` and 87 of them closed
+ * with the byte-identical `catch (err) { console.error("Error:", errorMessage(err));
+ * process.exit(1); }`. That is ~380 lines of ceremony, and the copies had already started to
+ * drift: `workspace wait` ran WITHOUT `runMigrations()`, which is the whole "forgot the
+ * migration" failure class.
+ *
+ * Deliberately NOT `process.exit(code ?? 0)` on the success path. Most handlers already exit
+ * explicitly where they mean to, and forcing an exit here would change every other handler
+ * from "return and let node drain stdout" to "kill the process mid-write" — on Windows that
+ * truncates piped output. A handler that wants a non-zero code returns it; everything else
+ * ends the way it always did.
+ */
+export function cliAction<A extends unknown[]>(
+  fn: (...args: A) => Promise<number | void>,
+): (...args: A) => Promise<void> {
+  return async (...args: A) => {
+    try {
+      await runMigrationsForAction();
+      const code = await fn(...args);
+      if (code) process.exit(code);
+    } catch (err) {
+      console.error("Error:", errorMessage(err));
+      process.exit(1);
+    }
+  };
 }

@@ -2,7 +2,7 @@ import type { Command } from "commander";
 import { parseSessionSummary, computeFrictionStats, extractKeywords } from "@agentic-kanban/shared";
 import type { SessionFrictionStats } from "@agentic-kanban/shared";
 import { getCommitsForBranch } from "@agentic-kanban/shared/lib/git-service";
-import { runMigrations, getActiveProjectId, resolveIssueNumberArg } from "../shared.js";
+import { runMigrations, getActiveProjectId, resolveIssueNumberArg, cliAction } from "../shared.js";
 import {
   getSessionMessageRows,
   getSessionById,
@@ -63,96 +63,84 @@ export function registerSessionCommand(program: Command) {
   sessionCmd
     .command("analyze <session-id>")
     .description("Show a consolidated analysis of a session: workspace, issue, parsed summary with tool patterns, stats, and errors.")
-    .action(async (sessionId: string) => {
-      try {
-        await runMigrations();
+    .action(cliAction(async (sessionId: string) => {
 
-        const session = await getSessionById(sessionId);
-        if (!session) {
-          console.error(`Session '${sessionId}' not found.`);
-          process.exit(1);
-        }
-
-        const ws = await getWorkspaceById(session.workspaceId);
-
-        let issue: Record<string, unknown> | null = null;
-        if (ws) {
-          issue = await getIssueWithStatusById(ws.issueId);
-        }
-
-        const msgRows = await getSessionMessageRows(sessionId);
-
-        const summary = parseSessionSummary(msgRows);
-
-        let stats: ParsedSessionStats | null = null;
-        if (session.stats) {
-          try { stats = JSON.parse(session.stats) as ParsedSessionStats; } catch { /* ignore */ }
-        }
-
-        console.log(JSON.stringify({
-          session: {
-            id: session.id,
-            status: session.status,
-            startedAt: session.startedAt,
-            endedAt: session.endedAt,
-            executor: session.executor,
-            triggerType: session.triggerType,
-          },
-          workspace: ws ? {
-            id: ws.id,
-            branch: ws.branch,
-            status: ws.status,
-            workingDir: ws.workingDir,
-            isDirect: ws.isDirect,
-          } : null,
-          issue,
-          summary,
-          stats: stats ? {
-            durationMs: stats.durationMs ?? 0,
-            totalCostUsd: stats.totalCostUsd ?? 0,
-            inputTokens: stats.inputTokens ?? 0,
-            outputTokens: stats.outputTokens ?? 0,
-            numTurns: stats.numTurns ?? 1,
-            model: stats.model ?? summary.model,
-            success: stats.success ?? false,
-            agentSummary: stats.agentSummary,
-          } : null,
-        }, null, 2));
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
+      const session = await getSessionById(sessionId);
+      if (!session) {
+        console.error(`Session '${sessionId}' not found.`);
         process.exit(1);
       }
-    });
+
+      const ws = await getWorkspaceById(session.workspaceId);
+
+      let issue: Record<string, unknown> | null = null;
+      if (ws) {
+        issue = await getIssueWithStatusById(ws.issueId);
+      }
+
+      const msgRows = await getSessionMessageRows(sessionId);
+
+      const summary = parseSessionSummary(msgRows);
+
+      let stats: ParsedSessionStats | null = null;
+      if (session.stats) {
+        try { stats = JSON.parse(session.stats) as ParsedSessionStats; } catch { /* ignore */ }
+      }
+
+      console.log(JSON.stringify({
+        session: {
+          id: session.id,
+          status: session.status,
+          startedAt: session.startedAt,
+          endedAt: session.endedAt,
+          executor: session.executor,
+          triggerType: session.triggerType,
+        },
+        workspace: ws ? {
+          id: ws.id,
+          branch: ws.branch,
+          status: ws.status,
+          workingDir: ws.workingDir,
+          isDirect: ws.isDirect,
+        } : null,
+        issue,
+        summary,
+        stats: stats ? {
+          durationMs: stats.durationMs ?? 0,
+          totalCostUsd: stats.totalCostUsd ?? 0,
+          inputTokens: stats.inputTokens ?? 0,
+          outputTokens: stats.outputTokens ?? 0,
+          numTurns: stats.numTurns ?? 1,
+          model: stats.model ?? summary.model,
+          success: stats.success ?? false,
+          agentSummary: stats.agentSummary,
+        } : null,
+      }, null, 2));
+      process.exit(0);
+    }));
 
   sessionCmd
     .command("recent")
     .description("List the most recent sessions across all workspaces with metadata.")
     .option("-n, --limit <count>", "Number of sessions to show", "5")
-    .action(async (options: { limit?: string }) => {
-      try {
-        await runMigrations();
+    .action(cliAction(async (options: { limit?: string }) => {
 
-        const limit = Math.min(parseInt(options.limit ?? "5", 10), 20);
+      const limit = Math.min(parseInt(options.limit ?? "5", 10), 20);
 
-        const rows = await getRecentSessionsWithContext(limit);
+      const rows = await getRecentSessionsWithContext(limit);
 
-        console.log(JSON.stringify(rows.map(r => ({
-          sessionId: r.sessionId,
-          sessionStatus: r.sessionStatus,
-          startedAt: r.startedAt,
-          endedAt: r.endedAt,
-          executor: r.executor,
-          triggerType: r.triggerType,
-          workspace: { id: r.workspaceId, branch: r.branch, status: r.wsStatus },
-          issue: { number: r.issueNumber, title: r.issueTitle },
-        })), null, 2));
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
-        process.exit(1);
-      }
-    });
+      console.log(JSON.stringify(rows.map(r => ({
+        sessionId: r.sessionId,
+        sessionStatus: r.sessionStatus,
+        startedAt: r.startedAt,
+        endedAt: r.endedAt,
+        executor: r.executor,
+        triggerType: r.triggerType,
+        workspace: { id: r.workspaceId, branch: r.branch, status: r.wsStatus },
+        issue: { number: r.issueNumber, title: r.issueTitle },
+      })), null, 2));
+      process.exit(0);
+    }));
 
   sessionCmd
     .command("backfill-friction")
@@ -160,48 +148,42 @@ export function registerSessionCommand(program: Command) {
     .option("--hours <n>", "Only backfill sessions started within the last N hours", "48")
     .option("--all", "Backfill all sessions regardless of age (overrides --hours)")
     .option("--force", "Recompute friction even for sessions that already have it")
-    .action(async (options: { hours?: string; all?: boolean; force?: boolean }) => {
-      try {
-        await runMigrations();
+    .action(cliAction(async (options: { hours?: string; all?: boolean; force?: boolean }) => {
 
-        const sinceIso = new Date(
-          Date.now() - Math.max(1, parseInt(options.hours ?? "48", 10) || 48) * 60 * 60 * 1000,
-        ).toISOString();
+      const sinceIso = new Date(
+        Date.now() - Math.max(1, parseInt(options.hours ?? "48", 10) || 48) * 60 * 60 * 1000,
+      ).toISOString();
 
-        const candidates = await getSessionsForFrictionBackfill({
-          includeAll: !!options.all,
-          sinceIso,
-        });
+      const candidates = await getSessionsForFrictionBackfill({
+        includeAll: !!options.all,
+        sinceIso,
+      });
 
-        let scanned = 0, updated = 0, skipped = 0, empty = 0;
-        for (const s of candidates) {
-          scanned++;
-          let stats: Record<string, unknown> = {};
-          if (s.stats) {
-            try { stats = JSON.parse(s.stats) as Record<string, unknown>; } catch { stats = {}; }
-          }
-          if (stats.friction && !options.force) { skipped++; continue; }
-
-          const msgRows = await getSessionMessageRows(s.id);
-
-          const summary = parseSessionSummary(msgRows);
-          const friction = computeFrictionStats(summary);
-          if (friction.totalToolCalls === 0 && friction.errorCount === 0 && friction.repeatedCommands.length === 0) {
-            empty++;
-            continue;
-          }
-          stats.friction = friction;
-          await updateSessionStats(s.id, JSON.stringify(stats));
-          updated++;
+      let scanned = 0, updated = 0, skipped = 0, empty = 0;
+      for (const s of candidates) {
+        scanned++;
+        let stats: Record<string, unknown> = {};
+        if (s.stats) {
+          try { stats = JSON.parse(s.stats) as Record<string, unknown>; } catch { stats = {}; }
         }
+        if (stats.friction && !options.force) { skipped++; continue; }
 
-        console.log(JSON.stringify({ scanned, updated, skipped, empty }, null, 2));
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
-        process.exit(1);
+        const msgRows = await getSessionMessageRows(s.id);
+
+        const summary = parseSessionSummary(msgRows);
+        const friction = computeFrictionStats(summary);
+        if (friction.totalToolCalls === 0 && friction.errorCount === 0 && friction.repeatedCommands.length === 0) {
+          empty++;
+          continue;
+        }
+        stats.friction = friction;
+        await updateSessionStats(s.id, JSON.stringify(stats));
+        updated++;
       }
-    });
+
+      console.log(JSON.stringify({ scanned, updated, skipped, empty }, null, 2));
+      process.exit(0);
+    }));
 
   sessionCmd
     .command("review-effectiveness")
@@ -217,33 +199,27 @@ export function registerSessionCommand(program: Command) {
       "--deep",
       "Also load each review session's transcript and classify its self-reported verdict (approve vs changes-requested). Slower.",
     )
-    .action(async (options: { days?: string; project?: string; json?: boolean; deep?: boolean }) => {
-      try {
-        await runMigrations();
+    .action(cliAction(async (options: { days?: string; project?: string; json?: boolean; deep?: boolean }) => {
 
-        const days = Math.max(1, parseInt(options.days ?? "14", 10) || 14);
-        const sinceIso = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
-        const projectId = options.project ?? (await getActiveProjectId());
+      const days = Math.max(1, parseInt(options.days ?? "14", 10) || 14);
+      const sinceIso = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+      const projectId = options.project ?? (await getActiveProjectId());
 
-        const report = await computeReviewEffectiveness({ projectId, sinceIso, deep: options.deep });
+      const report = await computeReviewEffectiveness({ projectId, sinceIso, deep: options.deep });
 
-        if (options.json) {
-          console.log(JSON.stringify({ ...report, window: { days, since: sinceIso, projectId } }, null, 2));
-          process.exit(0);
-        }
-
-        console.log(
-          renderReviewEffectivenessReport(
-            report,
-            `=== AI Code-Review Effectiveness — last ${days}d (project ${projectId.slice(0, 8)}) ===`,
-          ),
-        );
+      if (options.json) {
+        console.log(JSON.stringify({ ...report, window: { days, since: sinceIso, projectId } }, null, 2));
         process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
-        process.exit(1);
       }
-    });
+
+      console.log(
+        renderReviewEffectivenessReport(
+          report,
+          `=== AI Code-Review Effectiveness — last ${days}d (project ${projectId.slice(0, 8)}) ===`,
+        ),
+      );
+      process.exit(0);
+    }));
 
   sessionCmd
     .command("reviewer-fixes")
@@ -260,114 +236,108 @@ export function registerSessionCommand(program: Command) {
     .option("--limit <n>", "Cap the number of reviewed workspaces inspected (0 = all)", "0")
     .option("--json", "Emit machine-readable JSON instead of a formatted report")
     .option("--deep", "Also parse review transcripts for edits/commits/severity (CRITICAL/MAJOR). Slower.")
-    .action(async (options: { days?: string; project?: string; limit?: string; json?: boolean; deep?: boolean }) => {
-      try {
-        await runMigrations();
+    .action(cliAction(async (options: { days?: string; project?: string; limit?: string; json?: boolean; deep?: boolean }) => {
 
-        const days = Math.max(1, parseInt(options.days ?? "14", 10) || 14);
-        const limit = Math.max(0, parseInt(options.limit ?? "0", 10) || 0);
-        const sinceIso = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
-        const projectId = options.project ?? (await getActiveProjectId());
+      const days = Math.max(1, parseInt(options.days ?? "14", 10) || 14);
+      const limit = Math.max(0, parseInt(options.limit ?? "0", 10) || 0);
+      const sinceIso = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+      const projectId = options.project ?? (await getActiveProjectId());
 
-        const project = await getProjectById(projectId);
-        const repoPath = project?.repoPath;
-        if (!repoPath) {
-          console.error(`Project '${projectId}' has no repoPath.`);
-          process.exit(1);
-        }
-
-        const rows = await getReviewerFixSessionRows({ projectId, sinceIso });
-
-        const GRACE_MS = 2 * 60 * 1000; // a commit can land just after the session's recorded endedAt
-        // Classification, epoch-ms session windows (closed so they don't overlap), and
-        // strict timezone-safe commit attribution all live in the pure, tested
-        // review-effectiveness-report lib — see its tests for the edge cases.
-        const byWs = buildReviewWorkspaces(rows, Date.now());
-
-        // Every reviewed workspace is a candidate. The transcript method works on all of them;
-        // the git method additionally needs a baseCommitSha + a reachable head.
-        let targets = [...byWs.values()].filter((w) => w.hasReview);
-        targets.sort((a, b) => a.issueNumber - b.issueNumber);
-        const gitEligible = targets.filter((w) => w.baseCommitSha && w.headRef).length;
-        if (limit > 0) targets = targets.slice(0, limit);
-
-        const results: ReviewResult[] = [];
-        for (const ws of targets) {
-          const commits = ws.baseCommitSha && ws.headRef ? await getCommitsForBranch(repoPath, ws.baseCommitSha, ws.headRef) : [];
-          results.push(buildReviewResult(ws, commits, GRACE_MS));
-        }
-
-        // Deep transcript pass: per review session, did it change code / commit / cite MAJOR-CRITICAL.
-        if (options.deep) {
-          for (const res of results) {
-            const summaries: ReviewTranscriptSummary[] = [];
-            for (const sid of res.reviewSessionIds) {
-              summaries.push(parseSessionSummary(await getSessionMessageRows(sid)) as unknown as ReviewTranscriptSummary);
-            }
-            Object.assign(res, computeDeepReviewSignals(summaries, res.reviewerCommits));
-          }
-        }
-
-        const reviewedInWindow = [...byWs.values()].filter((w) => w.hasReview).length;
-        const {
-          report,
-          gitResolvedCount,
-          reviewerCommittedCount,
-          highConfReviewerCount,
-          totalReviewerCommits,
-          totalImplCommits,
-          totalReworkCommits,
-        } = summarizeReviewEffectiveness(results, {
-          reviewedWorkspacesInWindow: reviewedInWindow,
-          gitEligible,
-          deep: !!options.deep,
-          window: { days, since: sinceIso, projectId, repoPath },
-        });
-
-        if (options.json) {
-          console.log(JSON.stringify(report, null, 2));
-          process.exit(0);
-        }
-
-        const g = report.gitMethod as Record<string, number>;
-        const L: string[] = [];
-        L.push(`\n=== Reviewer-fixes analysis — last ${days}d (project ${projectId.slice(0, 8)}) ===`);
-        L.push(`Reviewed workspaces in window: ${reviewedInWindow}  |  inspected: ${results.length}  |  git-eligible: ${gitEligible}  |  git history resolved: ${gitResolvedCount}`);
-        if (options.deep) {
-          const d = report.deepMethod as DeepMethodReport;
-          const m = report.methodAgreement as Record<string, number>;
-          L.push(`\n-- TRANSCRIPT method [PRIMARY] (what each review session actually did) --`);
-          L.push(`  Reviews that edited code themselves:      ${d.reviewsThatEditedCode}/${results.length}  (${reviewPct(d.reviewsThatEditedCode, results.length)}%)`);
-          L.push(`  Reviews citing a MAJOR/CRITICAL finding:  ${d.reviewsCitingMajorOrCritical}/${results.length}`);
-          L.push(`  Reviews that FIXED a MAJOR/CRITICAL:      ${d.reviewsThatFixedAMajorOrCriticalFinding}/${results.length}  (${d.pctOfReviewedThatFixedMajorCritical}%)`);
-          L.push(`  └ severity is a heuristic text scan; treat as approximate`);
-          L.push(`  Fixed major/critical on issues: ${d.fixedMajorCriticalIssues.map((i) => "#" + i).join(", ") || "(none)"}`);
-          L.push(`\n-- Method agreement (transcript vs git) --`);
-          L.push(`  both say reviewer fixed: ${m.bothAgreeReviewerFixed}  |  transcript-only: ${m.sessionTranscriptOnly}  |  git-only: ${m.gitOnly}`);
-        } else {
-          L.push(`\n(!) Run with --deep for the reliable transcript-based "reviewer fixed a MAJOR/CRITICAL" numbers.`);
-        }
-        L.push(`\n-- GIT method [corroboration, APPROX] (commit author-time inside a review window) --`);
-        L.push(`  ⚠ under-counts: base..mergedHeadSha is rebase-polluted & mergedHeadSha often null; strict windowing drops ambiguous commits`);
-        L.push(`  Reviewer committed within a review window in:  ${reviewerCommittedCount}/${gitResolvedCount} git-resolved workspaces  (${g.pctOfGitResolvedWhereReviewerCommitted}%)`);
-        L.push(`  └ HIGH-CONFIDENCE (commit names its own issue, noise-filtered): ${highConfReviewerCount}/${gitResolvedCount}  (${g.pctOfGitResolvedHighConfidence}%)`);
-        L.push(`  Window-attributed commits by role:  implementer=${totalImplCommits}  reviewer=${totalReviewerCommits}  rework=${totalReworkCommits}`);
-        L.push(`  Reviewer-fixed workspaces that merged: ${g.reviewerFixesThatMerged}/${reviewerCommittedCount}`);
-        L.push(`\n-- Workspaces where a commit landed in a review window (git; ✓ = commit names its own issue) --`);
-        const fixed = results.filter((r) => r.reviewerCommits > 0).sort((a, b) => b.reviewerCommitsNamingIssue - a.reviewerCommitsNamingIssue || b.reviewerCommits - a.reviewerCommits);
-        if (!fixed.length) L.push("  (none)");
-        for (const r of fixed) {
-          L.push(`  ${r.reviewerCommitsNamingIssue > 0 ? "✓" : " "} #${r.issue} [${r.provider ?? "?"}] reviewer+${r.reviewerCommits} impl+${r.implementerCommits}${options.deep && r.reviewFixedMajorCritical ? "  ⚑MAJOR/CRIT" : ""}  ${r.title}`);
-          for (const subj of r.reviewerCommitSubjects) L.push(`        └ ${subj}`);
-        }
-        L.push("");
-        console.log(L.join("\n"));
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
+      const project = await getProjectById(projectId);
+      const repoPath = project?.repoPath;
+      if (!repoPath) {
+        console.error(`Project '${projectId}' has no repoPath.`);
         process.exit(1);
       }
-    });
+
+      const rows = await getReviewerFixSessionRows({ projectId, sinceIso });
+
+      const GRACE_MS = 2 * 60 * 1000; // a commit can land just after the session's recorded endedAt
+      // Classification, epoch-ms session windows (closed so they don't overlap), and
+      // strict timezone-safe commit attribution all live in the pure, tested
+      // review-effectiveness-report lib — see its tests for the edge cases.
+      const byWs = buildReviewWorkspaces(rows, Date.now());
+
+      // Every reviewed workspace is a candidate. The transcript method works on all of them;
+      // the git method additionally needs a baseCommitSha + a reachable head.
+      let targets = [...byWs.values()].filter((w) => w.hasReview);
+      targets.sort((a, b) => a.issueNumber - b.issueNumber);
+      const gitEligible = targets.filter((w) => w.baseCommitSha && w.headRef).length;
+      if (limit > 0) targets = targets.slice(0, limit);
+
+      const results: ReviewResult[] = [];
+      for (const ws of targets) {
+        const commits = ws.baseCommitSha && ws.headRef ? await getCommitsForBranch(repoPath, ws.baseCommitSha, ws.headRef) : [];
+        results.push(buildReviewResult(ws, commits, GRACE_MS));
+      }
+
+      // Deep transcript pass: per review session, did it change code / commit / cite MAJOR-CRITICAL.
+      if (options.deep) {
+        for (const res of results) {
+          const summaries: ReviewTranscriptSummary[] = [];
+          for (const sid of res.reviewSessionIds) {
+            summaries.push(parseSessionSummary(await getSessionMessageRows(sid)) as unknown as ReviewTranscriptSummary);
+          }
+          Object.assign(res, computeDeepReviewSignals(summaries, res.reviewerCommits));
+        }
+      }
+
+      const reviewedInWindow = [...byWs.values()].filter((w) => w.hasReview).length;
+      const {
+        report,
+        gitResolvedCount,
+        reviewerCommittedCount,
+        highConfReviewerCount,
+        totalReviewerCommits,
+        totalImplCommits,
+        totalReworkCommits,
+      } = summarizeReviewEffectiveness(results, {
+        reviewedWorkspacesInWindow: reviewedInWindow,
+        gitEligible,
+        deep: !!options.deep,
+        window: { days, since: sinceIso, projectId, repoPath },
+      });
+
+      if (options.json) {
+        console.log(JSON.stringify(report, null, 2));
+        process.exit(0);
+      }
+
+      const g = report.gitMethod as Record<string, number>;
+      const L: string[] = [];
+      L.push(`\n=== Reviewer-fixes analysis — last ${days}d (project ${projectId.slice(0, 8)}) ===`);
+      L.push(`Reviewed workspaces in window: ${reviewedInWindow}  |  inspected: ${results.length}  |  git-eligible: ${gitEligible}  |  git history resolved: ${gitResolvedCount}`);
+      if (options.deep) {
+        const d = report.deepMethod as DeepMethodReport;
+        const m = report.methodAgreement as Record<string, number>;
+        L.push(`\n-- TRANSCRIPT method [PRIMARY] (what each review session actually did) --`);
+        L.push(`  Reviews that edited code themselves:      ${d.reviewsThatEditedCode}/${results.length}  (${reviewPct(d.reviewsThatEditedCode, results.length)}%)`);
+        L.push(`  Reviews citing a MAJOR/CRITICAL finding:  ${d.reviewsCitingMajorOrCritical}/${results.length}`);
+        L.push(`  Reviews that FIXED a MAJOR/CRITICAL:      ${d.reviewsThatFixedAMajorOrCriticalFinding}/${results.length}  (${d.pctOfReviewedThatFixedMajorCritical}%)`);
+        L.push(`  └ severity is a heuristic text scan; treat as approximate`);
+        L.push(`  Fixed major/critical on issues: ${d.fixedMajorCriticalIssues.map((i) => "#" + i).join(", ") || "(none)"}`);
+        L.push(`\n-- Method agreement (transcript vs git) --`);
+        L.push(`  both say reviewer fixed: ${m.bothAgreeReviewerFixed}  |  transcript-only: ${m.sessionTranscriptOnly}  |  git-only: ${m.gitOnly}`);
+      } else {
+        L.push(`\n(!) Run with --deep for the reliable transcript-based "reviewer fixed a MAJOR/CRITICAL" numbers.`);
+      }
+      L.push(`\n-- GIT method [corroboration, APPROX] (commit author-time inside a review window) --`);
+      L.push(`  ⚠ under-counts: base..mergedHeadSha is rebase-polluted & mergedHeadSha often null; strict windowing drops ambiguous commits`);
+      L.push(`  Reviewer committed within a review window in:  ${reviewerCommittedCount}/${gitResolvedCount} git-resolved workspaces  (${g.pctOfGitResolvedWhereReviewerCommitted}%)`);
+      L.push(`  └ HIGH-CONFIDENCE (commit names its own issue, noise-filtered): ${highConfReviewerCount}/${gitResolvedCount}  (${g.pctOfGitResolvedHighConfidence}%)`);
+      L.push(`  Window-attributed commits by role:  implementer=${totalImplCommits}  reviewer=${totalReviewerCommits}  rework=${totalReworkCommits}`);
+      L.push(`  Reviewer-fixed workspaces that merged: ${g.reviewerFixesThatMerged}/${reviewerCommittedCount}`);
+      L.push(`\n-- Workspaces where a commit landed in a review window (git; ✓ = commit names its own issue) --`);
+      const fixed = results.filter((r) => r.reviewerCommits > 0).sort((a, b) => b.reviewerCommitsNamingIssue - a.reviewerCommitsNamingIssue || b.reviewerCommits - a.reviewerCommits);
+      if (!fixed.length) L.push("  (none)");
+      for (const r of fixed) {
+        L.push(`  ${r.reviewerCommitsNamingIssue > 0 ? "✓" : " "} #${r.issue} [${r.provider ?? "?"}] reviewer+${r.reviewerCommits} impl+${r.implementerCommits}${options.deep && r.reviewFixedMajorCritical ? "  ⚑MAJOR/CRIT" : ""}  ${r.title}`);
+        for (const subj of r.reviewerCommitSubjects) L.push(`        └ ${subj}`);
+      }
+      L.push("");
+      console.log(L.join("\n"));
+      process.exit(0);
+    }));
   // ── transcript ──────────────────────────────────────────────────────────────
   sessionCmd
     .command("transcript <session-id>")
@@ -425,69 +395,63 @@ Examples:
   pnpm cli -- session search "ReferenceError"
   pnpm cli -- session search "pnpm install" --project <projectId> --limit 10
   pnpm cli -- session search "migration" --issue 42`)
-    .action(async (query: string, options: { project?: string; issue?: string; provider?: string; status?: string; limit?: string; json?: boolean }) => {
-      try {
-        await runMigrations();
+    .action(cliAction(async (query: string, options: { project?: string; issue?: string; provider?: string; status?: string; limit?: string; json?: boolean }) => {
 
-        const q = query.trim();
-        if (q.length < 2) {
-          console.log(JSON.stringify({ results: [], totalMatches: 0 }, null, 2));
-          process.exit(0);
-        }
-
-        const limit = Math.min(Math.max(1, parseInt(options.limit ?? "25", 10) || 25), 100);
-        const issueNumber = options.issue ? parseInt(options.issue, 10) : undefined;
-
-        const SNIPPET_RADIUS = 80;
-        const makeSnippet = (text: string, matchIdx: number): string => {
-          const start = Math.max(0, matchIdx - SNIPPET_RADIUS);
-          const end = Math.min(text.length, matchIdx + SNIPPET_RADIUS);
-          let snippet = text.slice(start, end);
-          if (start > 0) snippet = "..." + snippet;
-          if (end < text.length) snippet += "...";
-          return snippet;
-        };
-
-        const rows = await searchTranscriptMessages({
-          q,
-          projectId: options.project,
-          issueNumber,
-          statusFilter: options.status,
-          providerFilter: options.provider,
-          limit,
-        });
-
-        const results = rows.map((row) => {
-          const data = row.messageData ?? "";
-          const matchOffset = data.toLowerCase().indexOf(q.toLowerCase());
-          return {
-            messageId: row.messageId,
-            sessionId: row.sessionId,
-            providerSessionId: row.providerSessionId,
-            snippet: makeSnippet(data, matchOffset >= 0 ? matchOffset : 0),
-            matchOffset,
-            messageCreatedAt: row.messageCreatedAt,
-            projectId: row.projectId,
-            projectName: row.projectName,
-            issueId: row.issueId,
-            issueNumber: row.issueNumber,
-            issueTitle: row.issueTitle,
-            issueStatusName: row.issueStatusName,
-            workspaceId: row.workspaceId,
-            branch: row.branch,
-            sessionStartedAt: row.sessionStartedAt,
-            sessionStatus: row.sessionStatus,
-            executor: row.executor,
-          };
-        });
-
-        console.log(JSON.stringify({ results, totalMatches: results.length }, null, 2));
+      const q = query.trim();
+      if (q.length < 2) {
+        console.log(JSON.stringify({ results: [], totalMatches: 0 }, null, 2));
         process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
-        process.exit(1);
       }
-    });
+
+      const limit = Math.min(Math.max(1, parseInt(options.limit ?? "25", 10) || 25), 100);
+      const issueNumber = options.issue ? parseInt(options.issue, 10) : undefined;
+
+      const SNIPPET_RADIUS = 80;
+      const makeSnippet = (text: string, matchIdx: number): string => {
+        const start = Math.max(0, matchIdx - SNIPPET_RADIUS);
+        const end = Math.min(text.length, matchIdx + SNIPPET_RADIUS);
+        let snippet = text.slice(start, end);
+        if (start > 0) snippet = "..." + snippet;
+        if (end < text.length) snippet += "...";
+        return snippet;
+      };
+
+      const rows = await searchTranscriptMessages({
+        q,
+        projectId: options.project,
+        issueNumber,
+        statusFilter: options.status,
+        providerFilter: options.provider,
+        limit,
+      });
+
+      const results = rows.map((row) => {
+        const data = row.messageData ?? "";
+        const matchOffset = data.toLowerCase().indexOf(q.toLowerCase());
+        return {
+          messageId: row.messageId,
+          sessionId: row.sessionId,
+          providerSessionId: row.providerSessionId,
+          snippet: makeSnippet(data, matchOffset >= 0 ? matchOffset : 0),
+          matchOffset,
+          messageCreatedAt: row.messageCreatedAt,
+          projectId: row.projectId,
+          projectName: row.projectName,
+          issueId: row.issueId,
+          issueNumber: row.issueNumber,
+          issueTitle: row.issueTitle,
+          issueStatusName: row.issueStatusName,
+          workspaceId: row.workspaceId,
+          branch: row.branch,
+          sessionStartedAt: row.sessionStartedAt,
+          sessionStatus: row.sessionStatus,
+          executor: row.executor,
+        };
+      });
+
+      console.log(JSON.stringify({ results, totalMatches: results.length }, null, 2));
+      process.exit(0);
+    }));
 
   // ── stats ────────────────────────────────────────────────────────────────────
   sessionCmd
@@ -499,59 +463,53 @@ Examples:
 Examples:
   pnpm cli -- session stats abc123
   pnpm cli -- session stats --workspace <workspaceId>`)
-    .action(async (sessionId: string | undefined, options: { workspace?: string; json?: boolean }) => {
-      try {
-        await runMigrations();
+    .action(cliAction(async (sessionId: string | undefined, options: { workspace?: string; json?: boolean }) => {
 
-        let targetSessionId = sessionId;
+      let targetSessionId = sessionId;
 
-        if (!targetSessionId && options.workspace) {
-          const latestId = await getLatestSessionIdForWorkspace(options.workspace);
-          if (!latestId) {
-            console.error("No sessions found for this workspace.");
-            process.exit(1);
-          }
-          targetSessionId = latestId;
-        }
-
-        if (!targetSessionId) {
-          console.error("Provide a session-id argument or --workspace <id>.");
+      if (!targetSessionId && options.workspace) {
+        const latestId = await getLatestSessionIdForWorkspace(options.workspace);
+        if (!latestId) {
+          console.error("No sessions found for this workspace.");
           process.exit(1);
         }
+        targetSessionId = latestId;
+      }
 
-        const session = await getSessionById(targetSessionId);
-
-        if (!session) {
-          console.error(`Session '${targetSessionId}' not found.`);
-          process.exit(1);
-        }
-
-        if (!session.stats) {
-          console.error(`No stats available for session ${targetSessionId} (session may still be running or stats were not captured).`);
-          process.exit(1);
-        }
-
-        let stats: Record<string, unknown>;
-        try {
-          stats = JSON.parse(session.stats) as Record<string, unknown>;
-        } catch {
-          console.error(`Invalid stats data for session ${targetSessionId}.`);
-          process.exit(1);
-        }
-
-        console.log(JSON.stringify({
-          sessionId: session.id,
-          status: session.status,
-          startedAt: session.startedAt,
-          endedAt: session.endedAt,
-          ...stats,
-        }, null, 2));
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
+      if (!targetSessionId) {
+        console.error("Provide a session-id argument or --workspace <id>.");
         process.exit(1);
       }
-    });
+
+      const session = await getSessionById(targetSessionId);
+
+      if (!session) {
+        console.error(`Session '${targetSessionId}' not found.`);
+        process.exit(1);
+      }
+
+      if (!session.stats) {
+        console.error(`No stats available for session ${targetSessionId} (session may still be running or stats were not captured).`);
+        process.exit(1);
+      }
+
+      let stats: Record<string, unknown>;
+      try {
+        stats = JSON.parse(session.stats) as Record<string, unknown>;
+      } catch {
+        console.error(`Invalid stats data for session ${targetSessionId}.`);
+        process.exit(1);
+      }
+
+      console.log(JSON.stringify({
+        sessionId: session.id,
+        status: session.status,
+        startedAt: session.startedAt,
+        endedAt: session.endedAt,
+        ...stats,
+      }, null, 2));
+      process.exit(0);
+    }));
 
   // ── friction ─────────────────────────────────────────────────────────────────
   sessionCmd
@@ -568,110 +526,104 @@ Examples:
   pnpm cli -- session friction
   pnpm cli -- session friction --hours 24 --json
   pnpm cli -- session friction --project <projectId>`)
-    .action(async (options: { project?: string; hours?: string; json?: boolean }) => {
-      try {
-        await runMigrations();
+    .action(cliAction(async (options: { project?: string; hours?: string; json?: boolean }) => {
 
-        const windowHours = Math.max(1, parseInt(options.hours ?? "48", 10) || 48);
-        const projectId = options.project ?? (await getActiveProjectId());
+      const windowHours = Math.max(1, parseInt(options.hours ?? "48", 10) || 48);
+      const projectId = options.project ?? (await getActiveProjectId());
 
-        const sinceIso = new Date(Date.now() - windowHours * 60 * 60 * 1000).toISOString();
+      const sinceIso = new Date(Date.now() - windowHours * 60 * 60 * 1000).toISOString();
 
-        // Reuses the insights session projection (same sessions+workspace+issue
-        // join, window-scoped); this command only consumes each row's `.stats`.
-        const rows = await getInsightsSessionRows(projectId, sinceIso);
+      // Reuses the insights session projection (same sessions+workspace+issue
+      // join, window-scoped); this command only consumes each row's `.stats`.
+      const rows = await getInsightsSessionRows(projectId, sinceIso);
 
-        const byTool = new Map<string, { calls: number; failed: number }>();
-        const repeated = new Map<string, { count: number; sessions: number }>();
-        let totalToolCalls = 0;
-        let failedToolCalls = 0;
-        let errorTotal = 0;
-        let sessionsWithFriction = 0;
+      const byTool = new Map<string, { calls: number; failed: number }>();
+      const repeated = new Map<string, { count: number; sessions: number }>();
+      let totalToolCalls = 0;
+      let failedToolCalls = 0;
+      let errorTotal = 0;
+      let sessionsWithFriction = 0;
 
-        for (const r of rows) {
-          if (!r.stats) continue;
-          let parsed: { friction?: SessionFrictionStats };
-          try { parsed = JSON.parse(r.stats) as { friction?: SessionFrictionStats }; } catch { continue; }
-          const f = parsed.friction;
-          if (!f) continue;
-          sessionsWithFriction++;
-          totalToolCalls += f.totalToolCalls;
-          failedToolCalls += f.failedToolCalls;
-          errorTotal += f.errorCount;
-          for (const t of f.tools ?? []) {
-            const e = byTool.get(t.tool) ?? { calls: 0, failed: 0 };
-            e.calls += t.count;
-            e.failed += t.failedCount;
-            byTool.set(t.tool, e);
-          }
-          for (const rc of f.repeatedCommands ?? []) {
-            const e = repeated.get(rc.command) ?? { count: 0, sessions: 0 };
-            e.count += rc.count;
-            e.sessions += 1;
-            repeated.set(rc.command, e);
-          }
+      for (const r of rows) {
+        if (!r.stats) continue;
+        let parsed: { friction?: SessionFrictionStats };
+        try { parsed = JSON.parse(r.stats) as { friction?: SessionFrictionStats }; } catch { continue; }
+        const f = parsed.friction;
+        if (!f) continue;
+        sessionsWithFriction++;
+        totalToolCalls += f.totalToolCalls;
+        failedToolCalls += f.failedToolCalls;
+        errorTotal += f.errorCount;
+        for (const t of f.tools ?? []) {
+          const e = byTool.get(t.tool) ?? { calls: 0, failed: 0 };
+          e.calls += t.count;
+          e.failed += t.failedCount;
+          byTool.set(t.tool, e);
         }
-
-        const result = {
-          projectId,
-          windowHours,
-          sessionsInWindow: rows.length,
-          sessionsWithFriction,
-          coverage: rows.length > 0 ? Math.round((100 * sessionsWithFriction) / rows.length) / 100 : 0,
-          totalToolCalls,
-          failedToolCalls,
-          failPct: totalToolCalls > 0 ? Math.round((100 * failedToolCalls) / totalToolCalls) : 0,
-          errorTotal,
-          byTool: [...byTool.entries()]
-            .map(([tool, { calls, failed }]) => ({ tool, calls, failed, failPct: calls > 0 ? Math.round((100 * failed) / calls) : 0 }))
-            .sort((a, b) => b.failed - a.failed || b.calls - a.calls)
-            .slice(0, 20),
-          topRepeatedCommands: [...repeated.entries()]
-            .map(([command, { count, sessions: s }]) => ({ command, count, sessions: s }))
-            .sort((a, b) => b.count - a.count || b.sessions - a.sessions)
-            .slice(0, 15),
-        };
-
-        if (options.json) {
-          console.log(JSON.stringify(result, null, 2));
-          if (sessionsWithFriction === 0) {
-            console.error(`\nNo friction stats found. Run: pnpm cli -- session backfill-friction --hours ${windowHours}`);
-          }
-          process.exit(0);
+        for (const rc of f.repeatedCommands ?? []) {
+          const e = repeated.get(rc.command) ?? { count: 0, sessions: 0 };
+          e.count += rc.count;
+          e.sessions += 1;
+          repeated.set(rc.command, e);
         }
-
-        const L: string[] = [];
-        L.push(`\n=== Fleet Friction — last ${windowHours}h (project ${projectId.slice(0, 8)}) ===`);
-        L.push(`Sessions in window: ${result.sessionsInWindow}  |  with friction data: ${sessionsWithFriction}  |  coverage: ${(result.coverage * 100).toFixed(0)}%`);
-        if (sessionsWithFriction === 0) {
-          L.push(`\n(!) No friction stats found. Run: pnpm cli -- session backfill-friction --hours ${windowHours}`);
-        } else {
-          L.push(`\nTool calls: ${totalToolCalls}  |  failed: ${failedToolCalls}  (${result.failPct}%)  |  errors: ${errorTotal}`);
-          L.push(`\n-- Top failing tools --`);
-          if (result.byTool.length === 0) {
-            L.push("  (none)");
-          } else {
-            for (const t of result.byTool.slice(0, 10)) {
-              L.push(`  ${t.tool}: ${t.failed}/${t.calls} failed (${t.failPct}%)`);
-            }
-          }
-          L.push(`\n-- Top repeated commands --`);
-          if (result.topRepeatedCommands.length === 0) {
-            L.push("  (none)");
-          } else {
-            for (const rc of result.topRepeatedCommands.slice(0, 10)) {
-              L.push(`  [${rc.sessions} sessions, ${rc.count}×] ${rc.command.slice(0, 80)}`);
-            }
-          }
-        }
-        L.push("");
-        console.log(L.join("\n"));
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
-        process.exit(1);
       }
-    });
+
+      const result = {
+        projectId,
+        windowHours,
+        sessionsInWindow: rows.length,
+        sessionsWithFriction,
+        coverage: rows.length > 0 ? Math.round((100 * sessionsWithFriction) / rows.length) / 100 : 0,
+        totalToolCalls,
+        failedToolCalls,
+        failPct: totalToolCalls > 0 ? Math.round((100 * failedToolCalls) / totalToolCalls) : 0,
+        errorTotal,
+        byTool: [...byTool.entries()]
+          .map(([tool, { calls, failed }]) => ({ tool, calls, failed, failPct: calls > 0 ? Math.round((100 * failed) / calls) : 0 }))
+          .sort((a, b) => b.failed - a.failed || b.calls - a.calls)
+          .slice(0, 20),
+        topRepeatedCommands: [...repeated.entries()]
+          .map(([command, { count, sessions: s }]) => ({ command, count, sessions: s }))
+          .sort((a, b) => b.count - a.count || b.sessions - a.sessions)
+          .slice(0, 15),
+      };
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+        if (sessionsWithFriction === 0) {
+          console.error(`\nNo friction stats found. Run: pnpm cli -- session backfill-friction --hours ${windowHours}`);
+        }
+        process.exit(0);
+      }
+
+      const L: string[] = [];
+      L.push(`\n=== Fleet Friction — last ${windowHours}h (project ${projectId.slice(0, 8)}) ===`);
+      L.push(`Sessions in window: ${result.sessionsInWindow}  |  with friction data: ${sessionsWithFriction}  |  coverage: ${(result.coverage * 100).toFixed(0)}%`);
+      if (sessionsWithFriction === 0) {
+        L.push(`\n(!) No friction stats found. Run: pnpm cli -- session backfill-friction --hours ${windowHours}`);
+      } else {
+        L.push(`\nTool calls: ${totalToolCalls}  |  failed: ${failedToolCalls}  (${result.failPct}%)  |  errors: ${errorTotal}`);
+        L.push(`\n-- Top failing tools --`);
+        if (result.byTool.length === 0) {
+          L.push("  (none)");
+        } else {
+          for (const t of result.byTool.slice(0, 10)) {
+            L.push(`  ${t.tool}: ${t.failed}/${t.calls} failed (${t.failPct}%)`);
+          }
+        }
+        L.push(`\n-- Top repeated commands --`);
+        if (result.topRepeatedCommands.length === 0) {
+          L.push("  (none)");
+        } else {
+          for (const rc of result.topRepeatedCommands.slice(0, 10)) {
+            L.push(`  [${rc.sessions} sessions, ${rc.count}×] ${rc.command.slice(0, 80)}`);
+          }
+        }
+      }
+      L.push("");
+      console.log(L.join("\n"));
+      process.exit(0);
+    }));
 
   // ── find-similar ─────────────────────────────────────────────────────────────
   sessionCmd
@@ -685,92 +637,86 @@ Examples:
 Examples:
   pnpm cli -- session find-similar 42
   pnpm cli -- session find-similar 42 --error "ReferenceError: X is not defined" --limit 5`)
-    .action(async (issueNumberStr: string, options: { error?: string; limit?: string; json?: boolean; project?: string }) => {
-      try {
-        await runMigrations();
+    .action(cliAction(async (issueNumberStr: string, options: { error?: string; limit?: string; json?: boolean; project?: string }) => {
 
-        const effectiveLimit = Math.min(Math.max(1, parseInt(options.limit ?? "3", 10) || 3), 10);
+      const effectiveLimit = Math.min(Math.max(1, parseInt(options.limit ?? "3", 10) || 3), 10);
 
-        let errorText = options.error ?? "";
-        if (!errorText) {
-          // #509: this prelude was drifted — no `--project`, and a bare "Issue #N not
-          // found." instead of the #467 cross-project explanation. The lookup underneath
-          // was also unscoped, so on a multi-project board it could feed ANOTHER
-          // project's ticket text to the failure-pattern search.
-          const ref = await resolveIssueNumberArg(issueNumberStr, { project: options.project });
-          if (!ref.ok) {
-            console.error(ref.message);
-            process.exit(1);
-          }
-          const issueRow = await getIssueTitleDescriptionByNumber(ref.issueNumber, ref.projectId);
-          if (!issueRow) {
-            console.error(`Issue #${ref.issueNumber} not found.`);
-            process.exit(1);
-          }
-          errorText = [issueRow.title, issueRow.description ?? ""].join(" ");
-        }
-
-        const queryKw = extractKeywords(errorText);
-        if (queryKw.length === 0) {
-          console.error("No meaningful keywords found in the error text.");
+      let errorText = options.error ?? "";
+      if (!errorText) {
+        // #509: this prelude was drifted — no `--project`, and a bare "Issue #N not
+        // found." instead of the #467 cross-project explanation. The lookup underneath
+        // was also unscoped, so on a multi-project board it could feed ANOTHER
+        // project's ticket text to the failure-pattern search.
+        const ref = await resolveIssueNumberArg(issueNumberStr, { project: options.project });
+        if (!ref.ok) {
+          console.error(ref.message);
           process.exit(1);
         }
-
-        const all = await getAllFailurePatterns();
-        if (all.length === 0) {
-          console.log("No failure patterns stored yet. Patterns are ingested from docs/learnings/ on startup.");
-          process.exit(0);
+        const issueRow = await getIssueTitleDescriptionByNumber(ref.issueNumber, ref.projectId);
+        if (!issueRow) {
+          console.error(`Issue #${ref.issueNumber} not found.`);
+          process.exit(1);
         }
+        errorText = [issueRow.title, issueRow.description ?? ""].join(" ");
+      }
 
-        const querySet = new Set(queryKw);
-        const overlapScore = (patternKw: string[], qs: Set<string>): { score: number; matched: string[] } => {
-          const matched = patternKw.filter(k => qs.has(k));
-          if (patternKw.length === 0 && qs.size === 0) return { score: 0, matched: [] };
-          const union = new Set([...patternKw, ...qs]);
-          return { score: union.size > 0 ? matched.length / union.size : 0, matched };
-        };
-
-        const scored = all.map(p => {
-          const patternKw = p.keywords ? p.keywords.split(" ").filter(Boolean) : [];
-          const { score, matched } = overlapScore(patternKw, querySet);
-          return { pattern: p, score, matchedKeywords: matched };
-        })
-          .filter(m => m.score > 0.05)
-          .sort((a, b) => b.score - a.score)
-          .slice(0, effectiveLimit);
-
-        if (options.json) {
-          console.log(JSON.stringify({ query: errorText, keywords: queryKw, matches: scored.map(m => ({ ...m.pattern, score: m.score, matchedKeywords: m.matchedKeywords })) }, null, 2));
-          process.exit(0);
-        }
-
-        if (scored.length === 0) {
-          console.log("No similar failures found. This may be a new class of error.");
-          process.exit(0);
-        }
-
-        const lines = [
-          `Found ${scored.length} similar failure(s) (keywords: ${queryKw.slice(0, 6).join(", ")}):`,
-          "",
-          ...scored.map((m, i) => {
-            const p = m.pattern;
-            const parts = [
-              `## ${i + 1}. ${p.title} (${Math.round(m.score * 100)}% match)`,
-              `**Matched keywords**: ${m.matchedKeywords.slice(0, 8).join(", ")}`,
-            ];
-            if (p.errorClass) parts.push(`**Error class**: ${p.errorClass}`);
-            if (p.description) parts.push(`**Description**: ${p.description.slice(0, 300)}`);
-            if (p.rootCause) parts.push(`**Root cause**: ${p.rootCause.slice(0, 400)}`);
-            if (p.fix) parts.push(`**Fix**: ${p.fix.slice(0, 400)}`);
-            if (p.sourceRef) parts.push(`**Source**: ${p.sourceRef}`);
-            return parts.join("\n");
-          }),
-        ];
-        console.log(lines.join("\n\n"));
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
+      const queryKw = extractKeywords(errorText);
+      if (queryKw.length === 0) {
+        console.error("No meaningful keywords found in the error text.");
         process.exit(1);
       }
-    });
+
+      const all = await getAllFailurePatterns();
+      if (all.length === 0) {
+        console.log("No failure patterns stored yet. Patterns are ingested from docs/learnings/ on startup.");
+        process.exit(0);
+      }
+
+      const querySet = new Set(queryKw);
+      const overlapScore = (patternKw: string[], qs: Set<string>): { score: number; matched: string[] } => {
+        const matched = patternKw.filter(k => qs.has(k));
+        if (patternKw.length === 0 && qs.size === 0) return { score: 0, matched: [] };
+        const union = new Set([...patternKw, ...qs]);
+        return { score: union.size > 0 ? matched.length / union.size : 0, matched };
+      };
+
+      const scored = all.map(p => {
+        const patternKw = p.keywords ? p.keywords.split(" ").filter(Boolean) : [];
+        const { score, matched } = overlapScore(patternKw, querySet);
+        return { pattern: p, score, matchedKeywords: matched };
+      })
+        .filter(m => m.score > 0.05)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, effectiveLimit);
+
+      if (options.json) {
+        console.log(JSON.stringify({ query: errorText, keywords: queryKw, matches: scored.map(m => ({ ...m.pattern, score: m.score, matchedKeywords: m.matchedKeywords })) }, null, 2));
+        process.exit(0);
+      }
+
+      if (scored.length === 0) {
+        console.log("No similar failures found. This may be a new class of error.");
+        process.exit(0);
+      }
+
+      const lines = [
+        `Found ${scored.length} similar failure(s) (keywords: ${queryKw.slice(0, 6).join(", ")}):`,
+        "",
+        ...scored.map((m, i) => {
+          const p = m.pattern;
+          const parts = [
+            `## ${i + 1}. ${p.title} (${Math.round(m.score * 100)}% match)`,
+            `**Matched keywords**: ${m.matchedKeywords.slice(0, 8).join(", ")}`,
+          ];
+          if (p.errorClass) parts.push(`**Error class**: ${p.errorClass}`);
+          if (p.description) parts.push(`**Description**: ${p.description.slice(0, 300)}`);
+          if (p.rootCause) parts.push(`**Root cause**: ${p.rootCause.slice(0, 400)}`);
+          if (p.fix) parts.push(`**Fix**: ${p.fix.slice(0, 400)}`);
+          if (p.sourceRef) parts.push(`**Source**: ${p.sourceRef}`);
+          return parts.join("\n");
+        }),
+      ];
+      console.log(lines.join("\n\n"));
+      process.exit(0);
+    }));
 }

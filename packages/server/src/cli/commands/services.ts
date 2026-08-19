@@ -1,13 +1,12 @@
 import type { Command } from "commander";
 import { planStackSweep, serviceStackWsToken, type StackSweepScope } from "@agentic-kanban/shared";
 import { dockerAvailable } from "@agentic-kanban/shared/lib/docker-exec";
-import { runMigrations } from "../shared.js";
+import { cliAction } from "../shared.js";
 import { createDefaultComposeRunner } from "../../services/workspace-services.service.js";
 import {
   getOrCreateServiceStackInstanceId,
   getNonTerminalWorkspaceIds,
 } from "../../repositories/workspace-service-state.repository.js";
-import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * `services reap` — the deliberate, operator-driven wide sweep for orphaned Docker
@@ -52,104 +51,98 @@ Examples:
   $ pnpm cli -- services reap --instance ab12cd34 --yes   # reap a named stranded id
 `,
     )
-    .action(async (options: { yes?: boolean; instance?: string; allInstances?: boolean; json?: boolean }) => {
-      try {
-        await runMigrations();
+    .action(cliAction(async (options: { yes?: boolean; instance?: string; allInstances?: boolean; json?: boolean }) => {
 
-        if (!(await dockerAvailable())) {
-          console.error("Docker is not available on this host — nothing to sweep.");
-          process.exit(1);
-        }
-
-        if (options.instance && options.allInstances) {
-          console.error("Choose one of --instance <id> or --all-instances, not both.");
-          process.exit(1);
-        }
-
-        const runner = createDefaultComposeRunner();
-        const [containerProjectNames, residualProjectNames, currentInstanceId, liveIds] = await Promise.all([
-          runner.list(),
-          // Container-less residue (#163): a project whose containers are already gone
-          // (failed compensating down, external prune) is invisible to `compose ls` but
-          // still carries labeled volumes/networks/images the wide sweep must also see.
-          runner.listResidualProjects(),
-          getOrCreateServiceStackInstanceId(),
-          getNonTerminalWorkspaceIds(),
-        ]);
-        const composeProjectNames = [...new Set([...containerProjectNames, ...residualProjectNames])];
-        const containerNameSet = new Set(containerProjectNames);
-        const liveWsTokens = new Set(liveIds.map(serviceStackWsToken));
-
-        const scope: StackSweepScope = options.allInstances
-          ? { kind: "all" }
-          : options.instance
-            ? { kind: "instance", id: options.instance }
-            : { kind: "current" };
-
-        const plan = planStackSweep({ composeProjectNames, currentInstanceId, liveWsTokens, scope });
-
-        if (options.json) {
-          console.log(JSON.stringify({ currentInstanceId, scope, ...plan, applied: false }, null, 2));
-        } else {
-          console.log(`Service-stack sweep  (this instance: ${currentInstanceId}, scope: ${describeScope(scope)})`);
-          console.log(`  live workspaces in this DB: ${liveWsTokens.size}`);
-          if (plan.reap.length === 0) {
-            console.log("\n  No orphaned stacks to reap under this scope.");
-          } else {
-            console.log(`\n  Reapable orphans (${plan.reap.length}):`);
-            for (const c of plan.reap) {
-              const inst = c.instanceId ?? "legacy";
-              console.log(`    ${c.name}   [instance ${inst}${inst === currentInstanceId ? " = this" : ""}]`);
-            }
-          }
-        }
-
-        if (options.allInstances && plan.reap.length > 0 && !options.json) {
-          console.log(
-            "\n  ⚠  --all-instances reaps stacks belonging to OTHER instance ids too. If another\n" +
-              "     board shares this Docker daemon, its LIVE stacks live in a different DB whose\n" +
-              "     workspaces this command cannot see — they would be torn down. Prefer\n" +
-              "     --instance <id> to name a specific stranded id.",
-          );
-        }
-
-        if (!options.yes) {
-          if (plan.reap.length > 0 && !options.json) {
-            console.log("\n  Dry-run. Re-run with --yes to tear these down (`docker compose down -v`).");
-          }
-          process.exit(0);
-        }
-
-        // --yes: actually down each candidate. Best-effort per stack; report the tally.
-        // A candidate with no live container left (residue-only) can't be resolved by
-        // `compose down -p` (it discovers the project via container labels) — remove its
-        // labeled volumes/networks/images directly instead (#163).
-        const reaped: string[] = [];
-        const failed: { name: string; stderr: string }[] = [];
-        for (const c of plan.reap) {
-          const { ok, stderr } = containerNameSet.has(c.name)
-            ? await runner.down({ projectName: c.name, cwd: process.cwd() })
-            : await runner.removeResidualProjectResources(c.name);
-          if (ok) reaped.push(c.name);
-          else failed.push({ name: c.name, stderr });
-        }
-
-        if (options.json) {
-          console.log(JSON.stringify({ currentInstanceId, scope, reaped, failed, applied: true }, null, 2));
-        } else {
-          console.log(`\n  Reaped ${reaped.length} stack(s).`);
-          for (const name of reaped) console.log(`    ✓ ${name}`);
-          if (failed.length > 0) {
-            console.log(`  ${failed.length} failed:`);
-            for (const f of failed) console.log(`    ✗ ${f.name}: ${f.stderr.slice(0, 200)}`);
-          }
-        }
-        process.exit(failed.length > 0 ? 1 : 0);
-      } catch (err) {
-        console.error("Error:", errorMessage(err));
+      if (!(await dockerAvailable())) {
+        console.error("Docker is not available on this host — nothing to sweep.");
         process.exit(1);
       }
-    });
+
+      if (options.instance && options.allInstances) {
+        console.error("Choose one of --instance <id> or --all-instances, not both.");
+        process.exit(1);
+      }
+
+      const runner = createDefaultComposeRunner();
+      const [containerProjectNames, residualProjectNames, currentInstanceId, liveIds] = await Promise.all([
+        runner.list(),
+        // Container-less residue (#163): a project whose containers are already gone
+        // (failed compensating down, external prune) is invisible to `compose ls` but
+        // still carries labeled volumes/networks/images the wide sweep must also see.
+        runner.listResidualProjects(),
+        getOrCreateServiceStackInstanceId(),
+        getNonTerminalWorkspaceIds(),
+      ]);
+      const composeProjectNames = [...new Set([...containerProjectNames, ...residualProjectNames])];
+      const containerNameSet = new Set(containerProjectNames);
+      const liveWsTokens = new Set(liveIds.map(serviceStackWsToken));
+
+      const scope: StackSweepScope = options.allInstances
+        ? { kind: "all" }
+        : options.instance
+          ? { kind: "instance", id: options.instance }
+          : { kind: "current" };
+
+      const plan = planStackSweep({ composeProjectNames, currentInstanceId, liveWsTokens, scope });
+
+      if (options.json) {
+        console.log(JSON.stringify({ currentInstanceId, scope, ...plan, applied: false }, null, 2));
+      } else {
+        console.log(`Service-stack sweep  (this instance: ${currentInstanceId}, scope: ${describeScope(scope)})`);
+        console.log(`  live workspaces in this DB: ${liveWsTokens.size}`);
+        if (plan.reap.length === 0) {
+          console.log("\n  No orphaned stacks to reap under this scope.");
+        } else {
+          console.log(`\n  Reapable orphans (${plan.reap.length}):`);
+          for (const c of plan.reap) {
+            const inst = c.instanceId ?? "legacy";
+            console.log(`    ${c.name}   [instance ${inst}${inst === currentInstanceId ? " = this" : ""}]`);
+          }
+        }
+      }
+
+      if (options.allInstances && plan.reap.length > 0 && !options.json) {
+        console.log(
+          "\n  ⚠  --all-instances reaps stacks belonging to OTHER instance ids too. If another\n" +
+            "     board shares this Docker daemon, its LIVE stacks live in a different DB whose\n" +
+            "     workspaces this command cannot see — they would be torn down. Prefer\n" +
+            "     --instance <id> to name a specific stranded id.",
+        );
+      }
+
+      if (!options.yes) {
+        if (plan.reap.length > 0 && !options.json) {
+          console.log("\n  Dry-run. Re-run with --yes to tear these down (`docker compose down -v`).");
+        }
+        process.exit(0);
+      }
+
+      // --yes: actually down each candidate. Best-effort per stack; report the tally.
+      // A candidate with no live container left (residue-only) can't be resolved by
+      // `compose down -p` (it discovers the project via container labels) — remove its
+      // labeled volumes/networks/images directly instead (#163).
+      const reaped: string[] = [];
+      const failed: { name: string; stderr: string }[] = [];
+      for (const c of plan.reap) {
+        const { ok, stderr } = containerNameSet.has(c.name)
+          ? await runner.down({ projectName: c.name, cwd: process.cwd() })
+          : await runner.removeResidualProjectResources(c.name);
+        if (ok) reaped.push(c.name);
+        else failed.push({ name: c.name, stderr });
+      }
+
+      if (options.json) {
+        console.log(JSON.stringify({ currentInstanceId, scope, reaped, failed, applied: true }, null, 2));
+      } else {
+        console.log(`\n  Reaped ${reaped.length} stack(s).`);
+        for (const name of reaped) console.log(`    ✓ ${name}`);
+        if (failed.length > 0) {
+          console.log(`  ${failed.length} failed:`);
+          for (const f of failed) console.log(`    ✗ ${f.name}: ${f.stderr.slice(0, 200)}`);
+        }
+      }
+      process.exit(failed.length > 0 ? 1 : 0);
+    }));
 }
 
 function describeScope(scope: StackSweepScope): string {
