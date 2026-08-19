@@ -11,6 +11,7 @@ import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.reposit
 import { clearMergeBackoff, recordMergeFailure, type MergeBackoffDeps } from "../services/merge-backoff.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
+import { reconcileGroupMemberIssues } from "../services/merge-cleanup.service.js";
 import { isPreMergeGateFailure } from "../services/workspace-merge-gate.js";
 
 export type LogMonitorActionFn = (action: MonitorActionName, workspaceId: string, issueId: string, extra?: Pick<MonitorAction, "endpoint" | "httpStatus" | "responseSummary" | "verificationResult">) => void;
@@ -114,5 +115,7 @@ export async function closeDirectWorkspaceAsDone(ws: WorkspaceCandidate, logActi
   await clearWorkspaceWorkingDir(ws.wsId, now, db);
   const doneStatusId = await getProjectStatusIdByName(ws.projectId, "Done");
   if (doneStatusId) await transitionIssueStatus(db, ws.issueId, doneStatusId, { now }).catch((err) => console.warn(`[monitor] failed to move direct-workspace issue ${ws.issueId} to Done:`, errorMessage(err)));
+  // Ticket group (#661): a closing group workspace lands every member ticket too.
+  await reconcileGroupMemberIssues({ database: db, workspaceId: ws.wsId, now, projectId: ws.projectId });
   logAction("merge", ws.wsId, ws.issueId, { verificationResult: "ok" });
 }

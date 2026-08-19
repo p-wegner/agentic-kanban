@@ -68,6 +68,13 @@ export type TicketContext = {
    * project it is building). See {@link BoardFeedbackRouting}.
    */
   boardFeedback?: BoardFeedbackRouting | null;
+  /**
+   * Ticket group (#661): the ADDITIONAL tickets this workspace serves beyond the lead
+   * one above. When present, the file frames the work as one group — every ticket gets
+   * its own full description section, the agent implements them one at a time with a
+   * commit per ticket, and the board closes ALL of them when this one branch lands.
+   */
+  groupTickets?: Array<{ issueNumber: number | null; title: string; description?: string | null }> | null;
 };
 
 /**
@@ -353,19 +360,50 @@ export function buildBoardFeedbackSection(
  * the source of truth instead of re-foraging the codebase for the same details.
  */
 export function buildTicketContextMarkdown(ctx: TicketContext): string {
+  const group = ctx.groupTickets?.filter(Boolean) ?? [];
+  const groupRefs = group.map((t) => (t.issueNumber != null ? `#${t.issueNumber}` : `"${t.title}"`)).join(", ");
   const heading = ctx.issueNumber != null ? `Ticket #${ctx.issueNumber}: ${ctx.title}` : `Ticket: ${ctx.title}`;
   const lines = [
     "<!-- ak-ticket-context: auto-generated per workspace, gitignored, do not commit -->",
     `# ${heading}`,
     "",
-    "This is the task you are working on. Treat the details below as the authoritative",
-    "specification — do not re-read the codebase to rediscover what is already stated here.",
+    ...(group.length > 0
+      ? [
+          `This workspace serves a TICKET GROUP: this ticket plus ${group.length} more (${groupRefs}),`,
+          "listed in full below. All of them are yours, on this one branch. Treat the details as the",
+          "authoritative specification — do not re-read the codebase to rediscover what is stated here.",
+        ]
+      : [
+          "This is the task you are working on. Treat the details below as the authoritative",
+          "specification — do not re-read the codebase to rediscover what is already stated here.",
+        ]),
     "",
     "## Description",
     "",
     ctx.description?.trim() ? ctx.description.trim() : "_(No description provided.)_",
     "",
   ];
+  if (group.length > 0) {
+    lines.push(
+      "## Ticket group — the other tickets in this workspace",
+      "",
+      "Work through the group one ticket at a time, in any order that makes sense technically.",
+      "Make a separate commit per ticket and reference its number (`#N`) in the commit message —",
+      "commit granularity stays per ticket even though the branch, review, and merge gate are",
+      "shared. When the branch merges, the board closes EVERY ticket in the group, so do not",
+      "leave one silently unimplemented: if a ticket turns out to be infeasible or already done,",
+      "say so explicitly in your final summary and in a comment on that ticket.",
+      "",
+    );
+    for (const t of group) {
+      lines.push(
+        `### Ticket ${t.issueNumber != null ? `#${t.issueNumber}` : ""}: ${t.title}`.replace("Ticket :", "Ticket:"),
+        "",
+        t.description?.trim() ? t.description.trim() : "_(No description provided.)_",
+        "",
+      );
+    }
+  }
   const stackSection = buildStackProfileSection(ctx.stackProfile, ctx.verifyCommandOverride);
   if (stackSection) {
     lines.push(stackSection);

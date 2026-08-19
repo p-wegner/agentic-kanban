@@ -49,6 +49,32 @@ export function buildAgentPrompt(
   return prompt;
 }
 
+/**
+ * Ticket group (#661): render the group's MEMBER tickets into the agent prompt so the
+ * builder knows every ticket it owns on this branch, whatever provider launches it
+ * (the ticket-context file carries the same list, but only Claude auto-loads it as
+ * project memory — the prompt is the channel every provider sees). Pure.
+ */
+export function buildGroupPromptSection(
+  members: Array<{ issueNumber: number | null; title: string; description: string | null }>,
+): string {
+  const lines = [
+    "## Ticket group — this workspace serves multiple tickets",
+    "",
+    "The following tickets are ALSO yours, in this same branch. Implement each one, one at a",
+    "time, with a separate commit per ticket referencing its number (`#N`). The review and the",
+    "merge gate run ONCE for the whole group; when this branch lands, the board closes every",
+    "ticket in the group. If one turns out infeasible or already done, say so explicitly in",
+    "your summary instead of skipping it silently.",
+  ];
+  for (const m of members) {
+    const ref = m.issueNumber != null ? `#${m.issueNumber}: ` : "";
+    lines.push("", `### Ticket ${ref}${m.title}`);
+    if (m.description?.trim()) lines.push("", m.description.trim());
+  }
+  return lines.join("\n");
+}
+
 /** Strip build-time visual-verification instructions from a prompt. Pure. */
 export function neutralizeBuildTimeVisualVerification(prompt: string): string {
   const lines = prompt.split(/\r?\n/);

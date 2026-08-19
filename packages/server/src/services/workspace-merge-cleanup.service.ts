@@ -12,6 +12,7 @@ import { insertIssueComment } from "../repositories/issue-comments.repository.js
 import { autoStartFollowups } from "./followup-workspace.service.js";
 import { resolveStartPolicy } from "./start-policy.service.js";
 import { autoStartUnblockedDependencyIssue } from "./dependency-auto-chain.service.js";
+import { listMemberIssueIds } from "../repositories/workspace-issue-members.repository.js";
 import { rebuildSharedIfChanged, runLearningStep } from "./merge-helpers.service.js";
 import { cleanupMergedWorktreeAndBranch } from "./merge-executor.service.js";
 import { cleanupSiblingWorktrees } from "./workspace-repos.service.js";
@@ -362,15 +363,20 @@ async function maybeAutoStartUnblockedDependency(
   },
 ): Promise<void> {
   try {
-    await autoStartUnblockedDependencyIssue({
-      database: deps.database,
-      projectId: args.projectId,
-      completedIssueId: args.issueId,
-      prefMap: args.prefMap,
-      getSessionManager: deps.getSessionManager,
-      boardEvents: deps.boardEvents,
-      gitService: deps.gitService,
-    });
+    // Ticket group (#661): a merged group completes N issues, so dependents of ANY
+    // member may have just unblocked — run the cascade once per completed issue.
+    const completedIssueIds = [args.issueId, ...await listMemberIssueIds(args.workspaceId, deps.database)];
+    for (const completedIssueId of completedIssueIds) {
+      await autoStartUnblockedDependencyIssue({
+        database: deps.database,
+        projectId: args.projectId,
+        completedIssueId,
+        prefMap: args.prefMap,
+        getSessionManager: deps.getSessionManager,
+        boardEvents: deps.boardEvents,
+        gitService: deps.gitService,
+      });
+    }
   } catch (err) {
     console.warn("[workspace-merge] dependency auto-chain check failed:", err);
   }

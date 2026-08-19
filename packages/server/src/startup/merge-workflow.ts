@@ -1,6 +1,7 @@
 import { issueTags, preferences, projects, repos, sessions, tags, workspaces } from "@agentic-kanban/shared/schema";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { runDoneUnmergedScannerNow } from "./done-unmerged-invariant-scanner.js";
+import { reconcileGroupMemberIssues } from "../services/merge-cleanup.service.js";
 import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
@@ -506,6 +507,8 @@ Server: http://localhost:${serverPort}`;
         // matching Done status, so blocked_by/depends_on dependents can resolve
         // via the node type check (#537).
         await transitionIssueStatus(db, issueId, doneStatusId, { now });
+        // Ticket group (#661): the auto-merged group closes every member ticket too.
+        await reconcileGroupMemberIssues({ database: db, workspaceId: workspace.id, now, projectId });
       }
       boardEvents.broadcast(projectId, "workspace_merged");
       console.log(`[workflow] auto-merged workspace ${workspace.id}`);

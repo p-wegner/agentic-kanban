@@ -91,6 +91,22 @@ export async function insertWorkspaceRecordRow(
   await database.insert(workspaces).values(values);
 }
 
+/**
+ * Ticket groups (#661): open (non-closed) workspaces LEADING any of the given issues.
+ * Used to validate group members at create time — a member already served by its own
+ * live workspace must not join a group too (two agents on one ticket).
+ */
+export async function findOpenWorkspacesForIssues(
+  issueIds: string[],
+  database: Database = db,
+) {
+  if (issueIds.length === 0) return [];
+  return database
+    .select({ id: workspaces.id, issueId: workspaces.issueId, branch: workspaces.branch, status: workspaces.status })
+    .from(workspaces)
+    .where(and(inArray(workspaces.issueId, issueIds), ne(workspaces.status, "closed")));
+}
+
 export async function findOpenDirectWorkspacesForIssue(
   issueId: string,
   database: Database = db,

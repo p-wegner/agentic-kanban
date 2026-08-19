@@ -187,6 +187,13 @@ export interface CreateWorkspaceInput {
    * Omitted/empty = all repos (zero-regression default).
    */
   repoScope?: string[];
+  /**
+   * Ticket group (#661): ADDITIONAL issues this workspace serves beyond `issueId` (the
+   * lead). All must belong to the lead's project and have no live workspace of their
+   * own. They flip to In Progress in the same transaction as the lead, are rendered in
+   * full into the ticket context + prompt, and are all closed when this branch merges.
+   */
+  memberIssueIds?: string[];
 }
 
 export interface CreateWorkspaceResult {

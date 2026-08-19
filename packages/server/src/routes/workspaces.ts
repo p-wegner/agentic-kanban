@@ -236,11 +236,16 @@ export function createWorkspacesRoute(
       model?: string;
       skipContextPacker?: boolean;
       repoScope?: string[];
+      memberIssueIds?: string[];
     }>(c);
     const isDirect = body.isDirect === true;
     if (!body.issueId) {
       return c.json({ error: "issueId is required" }, 400);
     }
+    // Ticket group (#661): additional issues served by this one workspace.
+    const memberIssueIds = Array.isArray(body.memberIssueIds)
+      ? body.memberIssueIds.filter((v): v is string => typeof v === "string" && v.length > 0)
+      : undefined;
 
     const input = {
       issueId: body.issueId,
@@ -262,6 +267,7 @@ export function createWorkspacesRoute(
       model: body.model,
       skipContextPacker: body.skipContextPacker === true,
       repoScope: Array.isArray(body.repoScope) ? body.repoScope : undefined,
+      memberIssueIds,
     } satisfies CreateWorkspaceInput;
 
     const wantsAsync = ["1", "true", "yes"].includes((c.req.query("async") || "").toLowerCase());
@@ -287,13 +293,38 @@ export function createWorkspacesRoute(
           409,
         );
       }
+      // Ticket group (#661): an automatic starter claims every MEMBER too — a member is
+      // otherwise invisible to the table-based checks for the whole provisioning window,
+      // exactly the #366 blindness the lead's claim closes. A member whose claim fails
+      // (another starter is provisioning it) is DROPPED from the group rather than
+      // failing the whole create.
+      const memberJobs: Array<{ jobId: string }> = [];
+      if (isAutoStarter && input.memberIssueIds && input.memberIssueIds.length > 0) {
+        const claimed: string[] = [];
+        for (const memberId of input.memberIssueIds) {
+          const memberJob = claimIssueForAutoStart(memberId);
+          if (memberJob) {
+            memberJobs.push(memberJob);
+            claimed.push(memberId);
+          } else {
+            console.log(`[workspaces] ticket-group member ${memberId} dropped — a workspace creation is already in flight for it (#366)`);
+          }
+        }
+        input.memberIssueIds = claimed;
+      }
       // Nothing awaits this promise; the job record IS the report. createWorkspace
       // resolves with status:"error" for most failures (completeCreateJob maps that to
       // a failed job) and only throws WorkspaceErrors (failCreateJob path).
       void workspaceService
         .createWorkspace(input)
-        .then((result) => completeCreateJob(job.jobId, result))
-        .catch((err: unknown) => failCreateJob(job.jobId, err));
+        .then((result) => {
+          completeCreateJob(job.jobId, result);
+          for (const memberJob of memberJobs) completeCreateJob(memberJob.jobId, result);
+        })
+        .catch((err: unknown) => {
+          failCreateJob(job.jobId, err);
+          for (const memberJob of memberJobs) failCreateJob(memberJob.jobId, err);
+        });
       return c.json(
         { accepted: true, jobId: job.jobId, issueId: input.issueId, statusUrl: `/api/workspaces/create-jobs/${job.jobId}` },
         202,

@@ -5,6 +5,7 @@ import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/share
 import { runUnderBuildGate } from "../services/jvm-build-gate.js";
 import { runPreMergeGate, resolveMergeGateShas, gateAlreadyPassed, RUN_GATE, type MergeGateToken } from "../services/pre-merge-gate.service.js";
 import { getAutoLandLoopTicket } from "../services/plugin-loop-hooks.service.js";
+import { reconcileGroupMemberIssues } from "../services/merge-cleanup.service.js";
 import { movedDuringGate } from "../services/workspace-merge-gate.js";
 import { issues, preferences, projectStatuses, projects, scheduledRunHistory, scheduledRuns, sessions, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { desc, eq } from "drizzle-orm";
@@ -787,6 +788,8 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       await clearWorkspaceWorkingDir(workspaceId, now, db);
       if (doneStatus) {
         await transitionIssueStatus(db, issueId, doneStatus.id, { now });
+        // Ticket group (#661): members of a closing group workspace converge with the lead.
+        await reconcileGroupMemberIssues({ database: db, workspaceId, now, projectId });
       }
       boardEvents.broadcast(projectId, "workspace_merged");
       console.log(`[workflow] direct workspace ${workspaceId} closed on agent exit (no committed changes)  issue moved to Done`);
@@ -811,6 +814,8 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         await closeWorkspace({ database: db, workspaceId, now, markMerged: true, clearWorkingDir: true });
         if (doneStatus) {
           await transitionIssueStatus(db, issueId, doneStatus.id, { now });
+          // Ticket group (#661): the landed group closes every member ticket too.
+          await reconcileGroupMemberIssues({ database: db, workspaceId, now, projectId });
         }
         boardEvents.broadcast(projectId, "workspace_merged");
         console.log(`[workflow] non-direct workspace ${workspaceId} closed on agent exit (no committed changes, was In Review, work already landed  mergedAt stamped)  issue moved to Done`);
