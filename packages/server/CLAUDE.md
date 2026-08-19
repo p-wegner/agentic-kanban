@@ -65,6 +65,40 @@ Both purity guards check the FUNCTION, not the file: these live beside the db-re
 calls them, so a file-level import scan would have to fail them or be relaxed into uselessness.
 They slice the declaration with `sliceTopLevelFunction` from the shared guard machinery.
 
+## What a pass RETURNS — `PassReport` (#592)
+
+The `run*` / `sweep*` / `reap*` / `reconcile*` family — 43 of them across `services/` and
+`startup/` — is one kind (see **background sweep** above) that had ~20 different result
+interfaces: `{checked, closed, released, held}`, `{scanned, reaped, skippedAhead,
+skippedRunning}`, `{landed, held}`, `{checked, clearedNodes, convergedToDone}`. Several
+return a bare `number` or `void`, so "found nothing" and "reported nothing" are the same
+value.
+
+`lib/pass-report.ts` is the common core, and a pass **extends** it rather than being
+replaced by it — its own outcome lists stay, which is the only reason adoption is safe to
+do mechanically:
+
+```ts
+export interface BornBlockedSweepResult extends PassReport {
+  closed: string[]; released: string[]; retriedAndReleased: string[]; held: string[];
+}
+const result: BornBlockedSweepResult = { ...emptyPassReport(rows.length), closed: [], … };
+recordActed(result, row.workspaceId, "close");      // it changed something
+recordSkipped(result, row.workspaceId, "hold");     // it deliberately left it alone
+```
+
+**`acted + skipped` may be LESS than `scanned`, on purpose.** A candidate that threw is
+neither, so it stays in the remainder that `formatPassReport` prints as `N unaccounted` —
+a pass that swallowed failures must not read as a clean run. `passReasonCounts` groups the
+reasons for a digest or a monitor.
+
+Not in `packages/shared`: every pass is server-side, and `shared/lib` is for code more than
+one package needs (#590).
+
+Adopters: `born-blocked-reconciler`, `workflow-node-divergence-reconciler`,
+`worker-incoming-sweep`, `terminal-workspace-reaper`, `hook-wiring-audit.service`. Migrate
+the rest opportunistically, batched by directory — a new pass should start here.
+
 ## Guard suites — the kind, its marker, and its shared machinery (#583)
 
 A **guard suite** is a test whose subject is the REPO TREE rather than a module: no raw `git`

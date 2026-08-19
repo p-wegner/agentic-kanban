@@ -17,6 +17,7 @@
 // `workspaces.branch`); unmatched refs are HELD and reported, and left in the
 // staging namespace so a real one can still be recovered by hand.
 
+import { emptyPassReport, recordActed, recordSkipped, type PassReport } from "../lib/pass-report.js";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { projects } from "@agentic-kanban/shared/schema";
 import { db as realDb } from "../db/index.js";
@@ -25,7 +26,8 @@ import { KANBAN_INCOMING_REF_PREFIX } from "../services/git-http.service.js";
 import { listWorkerAssignedBranches } from "../repositories/worker.repository.js";
 import { syncIncomingBranch, clearIncomingRef } from "../services/worker-remote-sync.service.js";
 
-export interface IncomingSweepResult {
+/** #592 — the shared pass core, plus the outcome lists only this pass has. */
+export interface IncomingSweepResult extends PassReport {
   landed: string[];
   held: Array<{ branch: string; reason: string }>;
 }
@@ -43,7 +45,7 @@ async function listIncomingBranches(repoPath: string): Promise<string[]> {
 
 /** Land any worker pushes that arrived while this board was not listening. */
 export async function sweepIncomingWorkerRefs(database: Database = realDb): Promise<IncomingSweepResult> {
-  const result: IncomingSweepResult = { landed: [], held: [] };
+  const result: IncomingSweepResult = { ...emptyPassReport(), landed: [], held: [] };
   let rows: Array<{ id: string; repoPath: string | null }>;
   try {
     rows = await database.select({ id: projects.id, repoPath: projects.repoPath }).from(projects);
@@ -61,6 +63,7 @@ export async function sweepIncomingWorkerRefs(database: Database = realDb): Prom
       continue; // not a repo / unreadable — nothing to recover
     }
     if (branches.length === 0) continue;
+    result.scanned += branches.length;
     let assigned: Set<string>;
     try {
       assigned = await listWorkerAssignedBranches(project.id, database);
@@ -70,12 +73,14 @@ export async function sweepIncomingWorkerRefs(database: Database = realDb): Prom
       // from an injected ref, so nothing lands.
       for (const branch of branches) {
         result.held.push({ branch, reason: "assignment lookup failed" });
+        recordSkipped(result, branch, "assignment lookup failed");
       }
       continue;
     }
     for (const branch of branches) {
       if (!assigned.has(branch)) {
         result.held.push({ branch, reason: "no worker assignment for this branch" });
+        recordSkipped(result, branch, "no worker assignment for this branch");
         console.warn(
           `[worker-sweep] refusing to land ${branch} in project ${project.id}: ` +
           `no session was ever dispatched to a worker for that branch`,
@@ -85,10 +90,12 @@ export async function sweepIncomingWorkerRefs(database: Database = realDb): Prom
       const sync = await syncIncomingBranch(project.repoPath, branch);
       if (sync.ok) {
         result.landed.push(branch);
+        recordActed(result, branch, "landed");
         await clearIncomingRef(project.repoPath, branch).catch(() => {});
         console.log(`[worker-sweep] recovered worker push for ${branch} (${sync.status})`);
       } else {
         result.held.push({ branch, reason: sync.error });
+        recordSkipped(result, branch, "sync failed");
         console.warn(`[worker-sweep] could not land worker push for ${branch}: ${sync.error}`);
       }
     }
