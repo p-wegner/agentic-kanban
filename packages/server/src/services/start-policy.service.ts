@@ -35,6 +35,7 @@ export type { StartPolicy };
 
 // #496: built from the registry, so an unregistered prefix is a COMPILE error.
 const startModePrefDef = projectPref("start_mode");
+const autodrivePrefDef = projectPref("board_autodrive");
 
 export function startModePrefKey(projectId: string): string {
   return startModePrefDef.key(projectId);
@@ -108,4 +109,49 @@ function deriveMode(prefMap: Map<string, string>, projectId: string): StartMode 
   const globalMonitorAutoStart =
     getBool(prefMap, "auto_monitor") && getBool(prefMap, "nudge_auto_start");
   return autodrive || globalMonitorAutoStart ? "monitor" : "manual";
+}
+
+/**
+ * #595 — moved here from `startup/monitor-setup.ts`. Both are pure prefMap resolvers over
+ * `resolveStartPolicy`, so this file already owned the decision they wrap; they only lived
+ * in `startup/` because the monitor was their loudest caller. Keeping them there forced
+ * `routes/internal-monitor.ts` to import a startup module for one function, which is a
+ * `no-circular` violation the moment those routes leave `startup/`'s rule-free zone.
+ */
+/**
+ * Project ids whose *resolved* Start Mode is `monitor` — i.e. the in-process deterministic
+ * monitor is their driver. This routes through `resolveStartPolicy` (the single source of truth,
+ * decision 008) instead of reading `board_autodrive_*` raw, so it honours both an explicit
+ * `start_mode_<id>` AND the legacy-flag derivation, fixing two scheduling bugs:
+ *   (a) `start_mode=monitor` with autodrive unset & `auto_monitor` off (force-disabled every boot)
+ *       — previously never scheduled because the gate was purely `auto_monitor || board_autodrive`.
+ *   (b) `start_mode=manual` with a stale `board_autodrive=true` — no longer counts as driven, so
+ *       `manual` is a real kill-switch (the old regex would still schedule/act on it).
+ * `conductor` is intentionally NOT included: the external loop drives it and the in-process engine
+ * stands down. Candidate ids are gathered from both key families so any project that ever set a
+ * mode or a legacy flag is considered.
+ */
+export function monitorDrivenProjectIds(prefMap: Map<string, string>): Set<string> {
+  const candidates = new Set<string>();
+  for (const key of prefMap.keys()) {
+    const sm = startModePrefDef.projectIdOf(key);
+    if (sm) candidates.add(sm);
+    const ad = autodrivePrefDef.projectIdOf(key);
+    if (ad) candidates.add(ad);
+  }
+  const ids = new Set<string>();
+  for (const projectId of candidates) {
+    if (resolveStartPolicy(prefMap, projectId).mode === "monitor") ids.add(projectId);
+  }
+  return ids;
+}
+
+/**
+ * The monitor cycle should run/reschedule when the global toggle is on OR any project resolves to
+ * `monitor` Start Mode. Start Mode (via `resolveStartPolicy`) — NOT the raw `board_autodrive` flag —
+ * is now the authoritative scheduling input, so a `monitor` project schedules even with autodrive
+ * unset, and a `manual` project with a stale autodrive flag does not.
+ */
+export function monitorShouldRun(prefMap: Map<string, string>): boolean {
+  return getBool(prefMap, "auto_monitor") || monitorDrivenProjectIds(prefMap).size > 0;
 }

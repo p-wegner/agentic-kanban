@@ -220,6 +220,25 @@ module.exports = {
       from: { path: "^packages/server/src/services/" },
       to: { path: "drizzle-orm" },
     },
+    {
+      name: "startup-bypasses-repositories",
+      comment:
+        "The monitor engine and its sweeps must not run raw persistence either (#595). " +
+        "`startup/` was outside EVERY rule in this file while holding ~5.5k LOC of monitor " +
+        "engine that runs on every cycle: 30 of its 54 files value-import drizzle-orm and 28 " +
+        "import the `db` value, so the layering was enforced for services and evaded by the " +
+        "code next door. Two findings made that concrete rather than theoretical: a query " +
+        "extracted out of `startup/` into `services/` tripped services-bypass-repositories " +
+        "within minutes (#594), and three live `/api/internal/*` routes defined inside " +
+        "`startup/monitor-setup.ts` were exempt from routes-not-down-to-persistence and " +
+        "no-circular until they were moved into routes/ — where they immediately failed both. " +
+        "WARN, not error, per this file's own severity policy (line 9): the 30-file backlog is " +
+        "real work, and a rule that cannot go green today belongs at warn with its count " +
+        "written down. Tighten per slice; lower the number here each time. Backlog: 30.",
+      severity: "warn",
+      from: { path: "^packages/server/src/startup/" },
+      to: { path: "drizzle-orm" },
+    },
   ],
 
   options: {
