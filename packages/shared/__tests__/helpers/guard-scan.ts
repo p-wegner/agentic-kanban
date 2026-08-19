@@ -110,3 +110,37 @@ export function compareRatchet(
   }
   return { over, stale };
 }
+
+/**
+ * The source text of a top-level `export function <name>(…) { … }`, from the `export` keyword
+ * to its closing brace, or `null` if the file declares no such function.
+ *
+ * Guards about PURITY have to work at function granularity, not file granularity: a service
+ * module routinely holds one pure `resolveX(prefMap, …)` beside db-reading functions, so
+ * "this file imports `repositories/`" says nothing about whether the resolver is pure. The
+ * brace match relies on the repo's formatting (a top-level declaration's closing brace sits at
+ * column 0), which is what Prettier guarantees here — good enough for a guard, and it returns
+ * null rather than guessing when the shape is unfamiliar.
+ */
+export function sliceTopLevelFunction(source: string, name: string): string | null {
+  const start = source.search(new RegExp(`^export (?:async )?function ${name}\\b`, "m"));
+  if (start < 0) return null;
+  const end = source.indexOf("\n}", start);
+  return end < 0 ? null : source.slice(start, end + 2);
+}
+
+/** Every binding a file imports from a module specifier matching `modulePattern`. */
+export function importedBindingsFrom(source: string, modulePattern: RegExp): string[] {
+  const names: string[] = [];
+  for (const m of source.matchAll(/import\s+(type\s+)?\{([^}]*)\}\s+from\s+"([^"]+)"/g)) {
+    if (m[1] || !modulePattern.test(m[3])) continue;
+    for (const raw of m[2].split(",")) {
+      const binding = raw.trim().split(/\s+as\s+/).pop()?.trim();
+      if (binding) names.push(binding);
+    }
+  }
+  for (const m of source.matchAll(/import\s+(\w+)\s+from\s+"([^"]+)"/g)) {
+    if (modulePattern.test(m[2])) names.push(m[1]);
+  }
+  return names;
+}
