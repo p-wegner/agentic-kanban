@@ -8,7 +8,8 @@ import { deduplicateProjects, unregisterLeakedTempProjects, findProjectsWithMiss
 import { getAllProjects } from "../repositories/project.repository.js";
 import { sweepHookWiring, formatHookWiringReport } from "../services/hook-wiring-audit.service.js";
 import type * as agentServiceType from "../services/agent.service.js";
-import * as agentService from "../services/agent.service.js";import * as gitService from "../services/git.service.js";
+import * as agentService from "../services/agent.service.js";import * as realGitService from "../services/git.service.js";
+import type { GitService } from "../services/workspace-internals.js";
 import { cleanupSiblingWorktrees } from "../services/workspace-repos.service.js";
 import { listProjectRepos } from "../repositories/repo.repository.js";
 import type { SessionManager } from "../services/session.manager.js";
@@ -561,14 +562,14 @@ export async function pruneStaleWorktrees(): Promise<void> {
         const projRows = await db.select({ repoPath: projects.repoPath }).from(projects).where(eq(projects.id, issueRows[0].projectId)).limit(1);
         if (projRows.length > 0) {
           const { repoPath } = projRows[0];
-          try { await gitService.removeWorktree(repoPath, ws.workingDir!); } catch { /* locked — skip */ }
+          try { await realGitService.removeWorktree(repoPath, ws.workingDir!); } catch { /* locked — skip */ }
         }
       }
       // Multi-repo: sibling worktrees + branches too (no-op single-repo).
       // preserveUnmerged: this path prunes stale WORKTREES of closed workspaces — it
       // never deletes the leading branch, so an unmerged sibling branch (unshipped
       // work) must not be force-deleted either.
-      await cleanupSiblingWorktrees(gitService, ws.id, db, { preserveUnmerged: true });
+      await cleanupSiblingWorktrees(realGitService, ws.id, db, { preserveUnmerged: true });
       await clearWorkspaceWorkingDir(ws.id, new Date().toISOString());
     } catch (err) {
       console.warn(`[startup] Failed to prune worktree for workspace ${ws.id}:`, err);
@@ -606,7 +607,7 @@ export async function pruneOrphanedWorktrees(): Promise<void> {
         repoPath: project.repoPath,
         baseBranch: project.defaultBranch || "master",
         claims,
-        git: gitService,
+        git: realGitService,
       });
       if (report.removed.length > 0 || report.keptWithUnshippedWork.length > 0) {
         console.log(`[startup] orphaned worktrees for project '${project.name}': removed ${report.removed.length}, kept (unshipped work) ${report.keptWithUnshippedWork.length}`);
@@ -645,7 +646,7 @@ export async function pruneOrphanedSiblingWorktrees(
   } = {},
 ): Promise<void> {
   const database = deps.database ?? db;
-  const git = deps.git ?? gitService;
+  const git = deps.git ?? realGitService;
   const listRepos = deps.listRepos ?? listProjectRepos;
   const projectRepos = await listRepos(project.id, database).catch(() => [] as Awaited<ReturnType<typeof listProjectRepos>>);
   for (const repo of projectRepos) {
@@ -727,7 +728,7 @@ export async function reconcileAbandonedProvisioning(deps: {
 }
 
 /** Abort any in-progress merges in all registered project repos (self-healing after hot-reload kills a merge mid-operation). */
-export async function abortStaleMerges(): Promise<void> {
+export async function abortStaleMerges(gitService: GitService = realGitService): Promise<void> {
   try {
     const projectRows = await db.select({ repoPath: projects.repoPath }).from(projects);
     for (const { repoPath } of projectRows) {
@@ -753,7 +754,7 @@ export async function abortStaleMerges(): Promise<void> {
  * leaves `.git/rebase-merge` or `.git/rebase-apply` in the worktree, which
  * blocks subsequent operations.
  */
-export async function abortStaleRebases(): Promise<void> {
+export async function abortStaleRebases(gitService: GitService = realGitService): Promise<void> {
   try {
     // Closed workspaces' worktrees are gone (or about to be reaped) — probing them
     // is a wasted fs/git check per historical row on every startup.
@@ -782,7 +783,7 @@ export async function abortStaleRebases(): Promise<void> {
 }
 
 /** Check if main checkout HEAD is on defaultBranch for each project; log a warning if drifted. */
-export async function checkMainCheckoutHeads(): Promise<void> {
+export async function checkMainCheckoutHeads(gitService: GitService = realGitService): Promise<void> {
   try {
     const projectRows = await db.select({ repoPath: projects.repoPath, defaultBranch: projects.defaultBranch, name: projects.name }).from(projects);
     for (const { repoPath, defaultBranch, name } of projectRows) {
@@ -841,9 +842,10 @@ export async function runCriticalStartupTasks(sessionManager: SessionManager, _d
  * gate's full 120 s ceiling before proceeding anyway, which is worse than the problem being
  * solved. The audit tail below has no ordering relationship to a write and must not gate one.
  */
-export async function runGatedDeferredStartupTasks(): Promise<void> {
-  await abortStaleMerges();
-  await abortStaleRebases();
+export async function runGatedDeferredStartupTasks(deps: { gitService?: GitService } = {}): Promise<void> {
+  const gitService = deps.gitService ?? realGitService;
+  await abortStaleMerges(gitService);
+  await abortStaleRebases(gitService);
   // Worker fleet (epic #184): land any remote-worker pushes that arrived while the board was
   // down. Must run AFTER cleanupStaleSessions — that sweep finalizes the pid-less remote
   // session rows, and this recovers their work from the incoming ref so a restart mid-flight

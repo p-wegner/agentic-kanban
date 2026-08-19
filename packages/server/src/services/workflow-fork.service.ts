@@ -42,6 +42,8 @@ import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
 import * as realGitService from "./git.service.js";
+// #558: the ONE GitService type (this file carried a byte-identical private copy).
+import type { GitService } from "./workspace-internals.js";
 import { teardownWorktree } from "./workspace-teardown.service.js";
 import {
   getNode,
@@ -73,7 +75,6 @@ const SPEC_PHASE_SKILLS = new Set(["spec-requirements", "spec-design", "spec-tas
 const SPEC_PHASE_SESSION_START_TIMEOUT_MS = 2 * 60 * 1000;
 const SPEC_PHASE_SESSION_POLL_MS = 1000;
 
-type GitService = typeof realGitService;
 
 export function createWorkflowForkService(deps: {
   database: Database;
