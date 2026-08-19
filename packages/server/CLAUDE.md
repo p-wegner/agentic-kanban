@@ -84,6 +84,44 @@ line is not a style nit — it is a line nobody will find later.
   Most survivors are `console.warn(variable)` forwarding a pre-tagged string — legitimate,
   hence a ratchet rather than a ban.
 
+## `startup/` is THREE roles, not one — root vs monitor engine vs sweeps (#595)
+
+`startup/` is named after a placement, not a role, and 49 files sit in it. Three different
+things live there, and only the first is actually about starting up:
+
+| Role | What | Examples |
+|---|---|---|
+| **composition root** | genuinely boot-time wiring, runs once | `route-setup`, `background-services`, `startup-tasks`, `readiness`, `process-handlers`, `scheduled-tasks`, `session-restore`, `fk-alignment` |
+| **monitor engine** | the Autopilot, ~5.5k LOC, runs EVERY cycle | `monitor-setup`, `monitor-cycle`, `monitor-auto-start`, `monitor-backlog`, `monitor-contract`, `monitor-eligibility`, `monitor-file-contention`, `monitor-helpers`, `monitor-project-scheduler`, `monitor-workspace-actions`, `monitor-cycle-actions`, `merge-workflow`, `exit-workflow`, `auto-merge-orchestrator` |
+| **sweeps** | periodic passes, the **background sweep** kind above | the 13 `*-reconciler`, `*-reaper`, `*-scanner`, `worker-incoming-sweep` |
+
+**Why the split matters, concretely.** `.dependency-cruiser.cjs` enforces
+`routes → services → repositories → db`, and `startup/` was outside EVERY rule in it — so
+the layering was enforced for `services/` and evaded by the monitor engine next door. Not
+theoretical: 30 of the 49 files value-import `drizzle-orm` and 28 import the `db` value.
+
+Two findings in #594/#595 made it concrete. A query extracted OUT of `startup/` into
+`services/` tripped `services-bypass-repositories` within minutes, having sat unnoticed for
+months. And three live `/api/internal/*` routes defined inside `startup/monitor-setup.ts`
+were exempt from `routes-not-down-to-persistence` and `no-circular` — moving them to
+`routes/internal-monitor.ts` failed both immediately (a `db` value-import, and a cycle back
+into `startup/`), and fixing them is what moved `monitorDrivenProjectIds`/`monitorShouldRun`
+into `services/start-policy.service.ts`, which already owned that decision.
+
+**Rules now in force:**
+- `startup-bypasses-repositories` (depcruise, **warn**, backlog 30) — same shape as the
+  `services-bypass-repositories` rule that drained from 76 to 0. Warn rather than error per
+  this file's own severity policy: a rule that cannot go green today belongs at warn with its
+  count written down. Tighten per slice and lower the number.
+- **No route DEFINITIONS in `startup/`.** `route-setup.ts` is the sanctioned exception — it is
+  the composition root, and mounting is its job. (It still defines one handler inline,
+  `POST /api/workspaces/:id/review`; that is the remaining item, not a licence for more.)
+- A new sweep is a **background sweep** (registered in `BACKGROUND_SERVICES`) and should reach
+  the DB through a repository, not drizzle.
+
+The physical `startup/` → `monitor/` + `sweeps/` move stays open: it is a 36-file rename that
+would collide with every in-flight branch, and the rule above buys most of its value now.
+
 ## Named kinds in `startup/` and `services/` (#584, #585, #586)
 
 Three shapes that were consistent in code and nameless in docs. Each now has a guard suite, so

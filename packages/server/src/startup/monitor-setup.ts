@@ -16,18 +16,23 @@ import { createMonitorWorkspaceActions } from "./monitor-workspace-actions.js";
 import { buildMonitorNudgePrompt } from "../services/review.service.js";
 import { snapshotAndCleanStaleDevProcesses, type BoardMonitorResourceSnapshot } from "../services/stale-dev-processes.js";
 import { healWorkspaceSummaryProjection } from "../services/workspace-summary-projection.service.js";
-import { resolveStartPolicy } from "../services/start-policy.service.js";
+import {
+  resolveStartPolicy,
+  monitorDrivenProjectIds,
+  monitorShouldRun,
+} from "../services/start-policy.service.js";
 import { advanceDuePluginLoops } from "../services/plugin-loop-monitor.js";
 import { scanDirtyMainCheckouts } from "../services/dirty-main-checkout.js";
 import { scanAutodriveStallWarnings, buildAutoStartSkipWarnings } from "../services/autodrive-stall-warning.service.js";
 import { resolveMergePolicy } from "./merge-strategy.js";
-import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
+import { getAllPreferencesCached, invalidatePreferencesCache } from "../repositories/preferences.repository.js";
 import { conditionalJsonResponse } from "../services/board-etag-cache.service.js";
 import { createMonitorPhaseRecorder, type MonitorCycleTimings } from "../lib/monitor-phase-timings.js";
 import type { MonitorStatusResponse, MonitorWarning, MonitorResourceSummary } from "@agentic-kanban/shared/types";
 import { createSpawnControlProbe } from "../lib/monitor-spawn-control.js";
 import { createMonitorProjectScheduler } from "./monitor-project-scheduler.js";
 import { shouldStartHealthRefresh } from "./health-refresh-gate.js";
+import { registerInternalMonitorRoutes } from "../routes/internal-monitor.js";
 import { getLoopLagMonitor } from "../lib/loop-lag-registry.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -54,43 +59,6 @@ export function autoDriveProjectIds(prefMap: Map<string, string>): Set<string> {
   return ids;
 }
 
-/**
- * Project ids whose *resolved* Start Mode is `monitor` — i.e. the in-process deterministic
- * monitor is their driver. This routes through `resolveStartPolicy` (the single source of truth,
- * decision 008) instead of reading `board_autodrive_*` raw, so it honours both an explicit
- * `start_mode_<id>` AND the legacy-flag derivation, fixing two scheduling bugs:
- *   (a) `start_mode=monitor` with autodrive unset & `auto_monitor` off (force-disabled every boot)
- *       — previously never scheduled because the gate was purely `auto_monitor || board_autodrive`.
- *   (b) `start_mode=manual` with a stale `board_autodrive=true` — no longer counts as driven, so
- *       `manual` is a real kill-switch (the old regex would still schedule/act on it).
- * `conductor` is intentionally NOT included: the external loop drives it and the in-process engine
- * stands down. Candidate ids are gathered from both key families so any project that ever set a
- * mode or a legacy flag is considered.
- */
-export function monitorDrivenProjectIds(prefMap: Map<string, string>): Set<string> {
-  const candidates = new Set<string>();
-  for (const key of prefMap.keys()) {
-    const sm = startModePref.projectIdOf(key);
-    if (sm) candidates.add(sm);
-    const ad = autodrivePref.projectIdOf(key);
-    if (ad) candidates.add(ad);
-  }
-  const ids = new Set<string>();
-  for (const projectId of candidates) {
-    if (resolveStartPolicy(prefMap, projectId).mode === "monitor") ids.add(projectId);
-  }
-  return ids;
-}
-
-/**
- * The monitor cycle should run/reschedule when the global toggle is on OR any project resolves to
- * `monitor` Start Mode. Start Mode (via `resolveStartPolicy`) — NOT the raw `board_autodrive` flag —
- * is now the authoritative scheduling input, so a `monitor` project schedules even with autodrive
- * unset, and a `manual` project with a stale autodrive flag does not.
- */
-export function monitorShouldRun(prefMap: Map<string, string>): boolean {
-  return getBool(prefMap, "auto_monitor") || monitorDrivenProjectIds(prefMap).size > 0;
-}
 
 export interface MonitorState {
   timer: ReturnType<typeof setTimeout> | null;
@@ -161,105 +129,20 @@ interface MonitorSetupDeps {
   fixAndMergeSessionIds: Set<string>;
 }
 
-/** Default (non-verbose) monitor-status caps the resource snapshot's decision lists —
- *  the client renders at most 3 of each (`MonitorSections.tsx`). */
-const RESOURCE_SNAPSHOT_ITEM_CAP = 5;
-
-export function setupMonitorRoutes(app: Hono, monitorState: MonitorState, runMonitorCycle: (force?: boolean) => Promise<void>, _syncMonitorState: () => Promise<void>, runResourceSweep?: (force?: boolean) => Promise<BoardMonitorResourceSnapshot | null>) {
-  app.post("/api/internal/monitor-run", (c) => {
-    if (monitorState.timer) clearTimeout(monitorState.timer);
-    monitorState.timer = setTimeout(() => {}, 0);
-    monitorState.nextRunAt = null;
-    runMonitorCycle(true).catch(() => {});
-    return c.json({ triggered: true });
-  });
-  // Force a resource sweep now (reap orphaned worktree dev servers), regardless of
-  // whether auto_monitor is enabled. Lets an external orchestrator loop or a user
-  // reclaim resources on demand.
-  app.post("/api/internal/resource-sweep", async (c) => {
-    if (!runResourceSweep) return c.json({ error: "resource sweep unavailable" }, 503);
-    const snapshot = await runResourceSweep(true);
-    if (!snapshot) return c.json({ cleaned: 0, kept: 0, listeners: 0 });
-    return c.json({
-      cleaned: snapshot.cleaned.filter((d) => d.action === "cleaned").length,
-      cleanupFailed: snapshot.cleaned.filter((d) => d.action === "cleanup_failed").length,
-      kept: snapshot.kept.length,
-      listeners: snapshot.listeners.length,
-    });
-  });
-  app.get("/api/internal/monitor-status", async (c) => {
-    // #402's short-TTL cache instead of a raw full-table scan — this endpoint is
-    // polled every 30s by EVERY open tab, so the scans stacked up fast.
-    const prefRows = await getAllPreferencesCached(db);
-    const prefMap = toPrefMap(prefRows);
-    const maintenanceEnabled = getBool(prefMap, "monitor_maintenance_window_enabled");
-    const maintenanceEnd = prefMap.get("monitor_maintenance_window_end") || null;
-    const maintenanceActive = maintenanceEnabled && (!maintenanceEnd || new Date(maintenanceEnd).getTime() > Date.now());
-    // #357 — each field answers ONE honest question.
-    //
-    // This endpoint used to report `enabled: false` and `active: true` simultaneously, with a
-    // populated `currentCycle` and cycles demonstrably running every ~8 minutes — because
-    // `enabled` was the raw GLOBAL `auto_monitor` pref while scheduling actually depends on
-    // `monitorShouldRun` (global OR any project whose resolved Start Mode is `monitor`). A user
-    // read "monitor off" beside an idle-looking board and reasonably concluded they were stranded;
-    // the monitor described as "off" was the thing that had just started their ticket.
-    //
-    // `enabled` now answers the only question the UI is really asking — WILL work start on its own?
-    // The raw toggle is still available as `globalToggle` for the settings control that owns it, and
-    // the two are no longer conflated.
-    const cycleInFlight = monitorState.currentCycle !== null;
-    // 2026-08-11 perf audit: the default payload shipped 36-111KB every 30s to every
-    // tab while the client (`client/src/lib/monitor-popover.ts`) reads only `{at, kept,
-    // cleaned}` off the resource snapshot — and at most 3 items of each — and never reads
-    // `lastCyclePhaseTimings` at all (~92% of the bytes unread). The full snapshot
-    // (processes/listeners/activeWorkspaces + uncapped decisions) and the phase timings
-    // now sit behind `?verbose=1` for the humans/scripts that actually want them.
-    const verbose = c.req.query("verbose") === "1";
-    const snapshot = monitorState.lastResourceSnapshot;
-    const resourceSnapshot = snapshot === null
-      ? null
-      : verbose
-        ? snapshot
-        : {
-            at: snapshot.at,
-            kept: snapshot.kept.slice(0, RESOURCE_SNAPSHOT_ITEM_CAP),
-            cleaned: snapshot.cleaned.slice(0, RESOURCE_SNAPSHOT_ITEM_CAP),
-          };
-    // Computed ONCE (it walks the whole prefMap) — was evaluated twice below.
-    const drivenProjectIds = monitorDrivenProjectIds(prefMap);
-    const payload: MonitorStatusResponse = {
-      /** Will the monitor run on its own? (global toggle OR a monitor-mode project) */
-      enabled: getBool(prefMap, "auto_monitor") || drivenProjectIds.size > 0,
-      /** The raw `auto_monitor` pref — the state of the settings toggle, nothing more. */
-      globalToggle: getBool(prefMap, "auto_monitor"),
-      /** Projects whose resolved Start Mode makes them monitor-driven regardless of the toggle. */
-      monitorDrivenProjectCount: drivenProjectIds.size,
-      intervalMin: getNumber(prefMap, "auto_monitor_interval"),
-      /** Is a timer armed for a future cycle? (NOT "is a cycle running" — see cycleInFlight.) */
-      active: monitorState.timer !== null,
-      /** Is a cycle executing right now? */
-      cycleInFlight,
-      lastRun: monitorState.lastRun,
-      currentCycle: monitorState.currentCycle,
-      // While a cycle is in flight this was misleading: the armed timer's fire time was reported as
-      // "next run" even though the re-entrancy guard will drop that trigger, and the end-of-cycle
-      // rerun fires within seconds instead (measured 5-8s gaps between cycles, not the configured
-      // 4 minutes). A countdown of "4 min" beside a cycle that has been running for 7 is worse than
-      // no countdown, so the honest answer while a cycle runs is "as soon as this one finishes".
-      nextRunAt: cycleInFlight ? null : monitorState.nextRunAt,
-      recentActions: monitorState.recentActions,
-      resourceSnapshot,
-      warnings: monitorState.warnings,
-      lastHealthCheckAt: monitorState.lastHealthCheckAt,
-      // Unread by any client — verbose-only (see the payload-diet note above).
-      ...(verbose ? { lastCyclePhaseTimings: monitorState.lastCyclePhaseTimings } : {}),
-      maintenanceActive,
-      maintenanceEnd,
-    };
-    // Conditional GET (#400's helper): the monitor's state changes on the minutes
-    // scale, so most 30s polls collapse to a bodyless 304.
-    return conditionalJsonResponse(JSON.stringify(payload), c.req.header("If-None-Match"));
-  });
+/**
+ * #595 — the route DEFINITIONS moved to `routes/internal-monitor.ts`; this stays as the
+ * wiring, because it is what owns `monitorState` and the cycle runner. `startup/` is
+ * outside every depcruise rule, so a route defined here was exempt from the layering the
+ * other ~47 obey.
+ */
+export function setupMonitorRoutes(
+  app: Hono,
+  monitorState: MonitorState,
+  runMonitorCycle: (force?: boolean) => Promise<void>,
+  _syncMonitorState: () => Promise<void>,
+  runResourceSweep?: (force?: boolean) => Promise<BoardMonitorResourceSnapshot | null>,
+) {
+  registerInternalMonitorRoutes(app, monitorState, runMonitorCycle, _syncMonitorState, runResourceSweep);
 }
 
 export function createMonitorSetup({ sessionManager, boardEvents, serverPort, reviewSessionIds, fixAndMergeSessionIds }: MonitorSetupDeps) {
@@ -413,6 +296,16 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
     let warningCount = monitorState.warnings.length;
     try {
       setPhase("loading-preferences");
+      // A FORCED cycle means "run now", so it must read prefs NOW (#613 follow-up). The 2s
+      // preference cache is busted by every write that goes through the repository or the
+      // shared checked path, but NOT by a raw `db.insert(preferences)` or by another PROCESS
+      // writing the same SQLite file — the standalone MCP server is exactly that, and the
+      // repository's own header names the hazard. Before the cache landed here this path read
+      // the table directly, so a force triggered right after such a write acted on the new
+      // value; with the cache it could act on a snapshot up to 2s old and skip the project
+      // that was just enabled. Invalidating is a counter bump, and only on the forced path, so
+      // the ~10 timer-driven scans per minute the cache exists for (#402) still share one query.
+      if (force) invalidatePreferencesCache();
       const prefRows = await getAllPreferencesCached(db);
       const prefMap = toPrefMap(prefRows);
       if (!force && !monitorShouldRun(prefMap)) return;
@@ -784,3 +677,9 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
     },
   };
 }
+
+/**
+ * #595 — re-exported so `monitor-setup.test.ts` and any other existing importer keep their
+ * path while the implementations live in `services/start-policy.service.ts`.
+ */
+export { monitorDrivenProjectIds, monitorShouldRun };
