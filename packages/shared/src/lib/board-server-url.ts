@@ -1,16 +1,29 @@
 const LOOPBACK_HOST = "127.0.0.1";
 const DEFAULT_PORT = 3001;
 
-export function resolveBoardServerPort(override?: string | number): number {
+/**
+ * THE board-server port ladder (#615). `KANBAN_SERVER_PORT || PORT || "3001"` was copied
+ * ten times across routes, services and startup while this helper already existed — a
+ * helper landed, the ring not drained — so a new rung (`KANBAN_BOARD_SERVER_PORT`, which is
+ * how a worktree names the MAIN board) reached some callers and not others.
+ *
+ * `env` is injectable so a caller that already takes an env — a pure port resolver, a
+ * launch-env builder — can use the one ladder without reaching for `process.env` and
+ * losing its testability.
+ */
+export function resolveBoardServerPort(
+  override?: string | number,
+  env: Record<string, string | undefined> = process.env,
+): number {
   if (override !== undefined) {
     const parsed = Number(override);
     if (parsed) return parsed;
   }
   return (
-    Number(process.env.KANBAN_BOARD_SERVER_PORT) ||
-    Number(process.env.KANBAN_SERVER_PORT) ||
-    Number(process.env.SERVER_PORT) ||
-    Number(process.env.PORT) ||
+    Number(env.KANBAN_BOARD_SERVER_PORT) ||
+    Number(env.KANBAN_SERVER_PORT) ||
+    Number(env.SERVER_PORT) ||
+    Number(env.PORT) ||
     DEFAULT_PORT
   );
 }

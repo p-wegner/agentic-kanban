@@ -1,3 +1,4 @@
+import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, delimiter, dirname, join, resolve } from "node:path";
@@ -112,7 +113,7 @@ export function getMcpConfigPath(fs: FileSystem = nodeFileSystem): string {
  * the MCP server's tools can call back to this server.
  */
 export function getMcpServersConfig(): Record<string, { command: string; args: string[]; env?: Record<string, string> }> {
-  const serverPort = process.env.KANBAN_SERVER_PORT || process.env.SERVER_PORT || process.env.PORT || "3001";
+  const serverPort = String(resolveBoardServerPort()); // #615 — the one ladder
   // Pin the spawned MCP server to the SAME database this server uses. Without this it
   // re-runs data-dir resolution under a different cwd and can fall back to
   // ~/.agentic-kanban (a different DB), so the butler would answer about the wrong board.
