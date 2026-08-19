@@ -139,7 +139,12 @@ function mergeTaskRunner(test: string | null, build: string | null): string | nu
  *  function with a fixed arity, and leaving both invited them to drift. */
 function chainAll(...parts: (string | null | undefined)[]): string | null {
   const kept = parts.map((p) => p?.trim()).filter((p): p is string => Boolean(p));
-  return kept.length > 0 ? kept.join(" && ") : null;
+  // De-duplicate identical segments (#521). A profile may legitimately give the same
+  // command two jobs — go's typecheck IS `go build ./...`, its build IS `go build ./...`
+  // — and chaining it twice ran the same work twice and read as a mistake in the gate.
+  const seen = new Set<string>();
+  const unique = kept.filter((p) => (seen.has(p) ? false : (seen.add(p), true)));
+  return unique.length > 0 ? unique.join(" && ") : null;
 }
 
 /**

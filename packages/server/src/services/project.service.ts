@@ -20,6 +20,7 @@ import { listBranches } from "./git.service.js";
 import { buildWorkspaceSummaryMap, buildBlockedMap, buildTagMap, buildGraphEdges } from "./board-aggregation.service.js";
 import { getProjectById, getProjectByRepoPath, getAllProjects, insertProject, deleteProjectCascade, setProjectArchived, getProjectStats, getProjectStatuses, createProjectStatus, deleteProjectStatus, updateProjectStatusSortOrder } from "../repositories/project.repository.js";
 import { getProjectsBasePath, updateProjectFields, clearActiveProjectPreference, getProjectStatusIdsAndNames, getBoardIssueRows, getProjectStatusesOrdered, getBoardIssues, getGraphIssues, getCrossProjectIssues, getActiveWorkspaceCounts, getBoardSummaryRows } from "../repositories/project-service.repository.js";
+import { deriveSetupScriptFromProfile, deriveVerifyScriptFromProfile, getStackProfile } from "./stack-profile.service.js";
 import { generateSetupScript as generateSetupScriptAI, generateTeardownScript as generateTeardownScriptAI, generateVerifyScript as generateVerifyScriptAI } from "./project-setup.service.js";
 import { cloneRepo } from "./repo-clone.service.js";
 import type { WorkspaceSummaryCache } from "./workspace-summary-cache.service.js";
@@ -807,6 +808,16 @@ export function createProjectService(deps: { database: Database; workspaceSummar
 
   async function generateSetupScript(projectId: string) {
     try {
+      // #521: the persisted stack profile FIRST. The button used to go straight to the
+      // model, so it could hand back a different install command than registration wrote
+      // from the same repo — and it paid for an LLM call to do it.
+      const project = await getProjectById(projectId, database);
+      if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
+      const derived = deriveSetupScriptFromProfile(
+        await getStackProfile(projectId, database),
+        project.repoPath,
+      ).trim();
+      if (derived) return derived;
       return await generateSetupScriptAI(projectId, database);
     } catch (err: unknown) {
       if ((err as { statusCode?: unknown }).statusCode === 404) throw new ProjectError("Project not found", "NOT_FOUND");
@@ -825,6 +836,15 @@ export function createProjectService(deps: { database: Database; workspaceSummar
 
   async function generateVerifyScript(projectId: string) {
     try {
+      // #521: same as generateSetupScript — the profile is the source of truth, so the
+      // button and `populateVerifyScript` cannot disagree about the same repo.
+      const project = await getProjectById(projectId, database);
+      if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
+      const derived = deriveVerifyScriptFromProfile(
+        await getStackProfile(projectId, database),
+        project.repoPath,
+      ).trim();
+      if (derived) return derived;
       return await generateVerifyScriptAI(projectId, database);
     } catch (err: unknown) {
       if ((err as { statusCode?: unknown }).statusCode === 404) throw new ProjectError("Project not found", "NOT_FOUND");
