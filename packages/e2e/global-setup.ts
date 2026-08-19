@@ -97,8 +97,41 @@ export async function ensureE2EProject(
   throw new Error(`Failed to create E2E test project: ${registerRes.status()} ${await registerRes.text()}`);
 }
 
+/**
+ * Wait for the E2E server to answer /health before touching the API.
+ *
+ * Playwright starts `webServer` and runs `globalSetup` without guaranteeing the server is
+ * listening first, so every API call in here raced the boot. On a cold isolated stack that
+ * boot is not fast — it migrates and seeds a fresh database, and this repo's startup sweep
+ * walks ~20 orphaned worktrees before the port opens. Losing the race produced
+ * `ECONNREFUSED 127.0.0.1:<port>` out of global-setup, which fails EVERY spec in the run at
+ * 0ms — so the whole lane reported a connection error instead of whatever the specs would
+ * actually have found. That is why a single spec passed and the lane did not.
+ *
+ * Budget matches the config's `webServer.timeout` (120s): whatever Playwright is willing to
+ * wait for the server, so is this.
+ */
+async function waitForServer(apiContext: APIRequestContext, timeoutMs = 120_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = "never attempted";
+  while (Date.now() < deadline) {
+    try {
+      const res = await apiContext.get("/health", { timeout: 5_000 });
+      if (res.ok()) return;
+      lastError = `HTTP ${res.status()}`;
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new Error(
+    `[global-setup] server on port ${serverPort} did not answer /health within ${timeoutMs}ms — last error: ${lastError}`,
+  );
+}
+
 async function globalSetup() {
   const apiContext = await request.newContext({ baseURL: `http://127.0.0.1:${serverPort}` });
+  await waitForServer(apiContext);
 
   // Resolve the actual monorepo root. For worktrees nested inside packages/.worktrees/,
   // the git common-dir points back to the main repo's .git — use it to find the main root.
