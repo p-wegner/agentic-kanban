@@ -3,6 +3,40 @@
 ## Self-HTTP calls are an anti-pattern
 A service must never `fetch('http://127.0.0.1:PORT/api/...')` to call its own server. Instead, accept the target service function as a constructor/factory parameter (dependency injection). Self-HTTP calls: create a hard runtime dependency on port availability, bypass TypeScript types (JSON round-trip), are impossible to unit-test without a running server, and swallow errors through JSON re-parsing. The fix: pass `createWorkspace` (or similar) directly to the service that needs it.
 
+## `coded-domain-error` — one vocabulary, and why an unknown code is a 500 (#587)
+
+A domain error here is `class XError extends Error` carrying a `code`. `middleware/
+error-handler.ts` maps that code to an HTTP status STRUCTURALLY, so a new error class is
+handled automatically — that is the design, and it is a good one.
+
+**The failure mode is the other half of "structurally": a code the map does not know falls
+through to 500.** Fifteen service-local classes each re-spelled their own subset of the
+vocabulary — six distinct unions of the same six codes — so nothing tied a service's idea of
+`code` to the middleware's, and a code invented in a service (or mistyped) silently became an
+internal-server-error instead of the 404 or 409 it meant.
+
+- **`DOMAIN_ERROR_CODES` / `DomainErrorCode` in `errors/index.ts` is the vocabulary.** New
+  error classes declare `readonly code: DomainErrorCode`, not a hand-written union.
+- **`DOMAIN_CODE_STATUS` is keyed by it** (`Record<DomainErrorCode, StatusCode>`), so adding
+  a code without a status — or a status without a code — is a type error. The union and the
+  mapping are one thing.
+- **`domain-error-vocabulary.test.ts`** (`@gate:always-run`) fails on a code that is in
+  neither the vocabulary nor the non-HTTP list, and ratchets the six hand-written spellings
+  shrink-only.
+
+**Not every code is an HTTP code.** `WorkspaceError` carries a refusal vocabulary
+(`STALE_SAFETY_POLICY`, `PROFILE_ALLOWLIST_HOLD`, `NO_AVAILABLE_WORKER`, the `GROUP_MEMBER_*`
+family) that the middleware handles in its own `instanceof` branch, picking the status from
+the reason. The guard lists those separately — judging them against the HTTP table would be
+wrong.
+
+**`AppError` is NOT deprecated**, despite #587's framing. Its subclasses (`NotFoundError`,
+`ValidationError`, `ConflictError`, `ForbiddenError`) already carry exactly these codes and
+are handled by the same middleware; they are the SHARED spelling of the pattern, not a rival
+to it. Migrating their ~40 throws into more bespoke per-service classes would multiply the
+re-declaration this ticket exists to remove. Use whichever fits: `AppError` subclasses for
+the generic cases, a service-local class when the error carries extra data.
+
 ## Vocabulary collisions — what these ten nouns mean HERE (#611)
 
 Ten nouns carry more than one sense in this codebase. Most are fine once written down; four
