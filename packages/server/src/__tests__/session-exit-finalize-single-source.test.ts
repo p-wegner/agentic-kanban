@@ -30,8 +30,9 @@ const FINALIZE_MOVES = [
   "applyAuthFailureRecovery",
   "recordAgentProfileLaunchSuccess",
   // The per-route stats builders and the butler text that named a duration one copy dropped.
-  "buildCodexUsageLimitStats",
-  "buildClaudeUsageLimitStats",
+  // The two per-provider usage-limit builders became one keyed on the provider (#542), so the
+  // move to watch for is that single name.
+  "buildUsageLimitStats",
   "buildZeroOutputLaunchFailureStats",
   "buildModelErrorLaunchFailureStats",
   "buildStaleResumeLaunchFailureStats",

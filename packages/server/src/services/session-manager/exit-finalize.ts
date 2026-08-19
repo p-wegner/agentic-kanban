@@ -1,3 +1,4 @@
+import { buildUsageLimitStats } from "@agentic-kanban/shared/lib/session-stats-blob";
 import type { Database } from "../../db/index.js";
 import * as lifecycleRepo from "../../repositories/session-lifecycle.repository.js";
 import { recordAgentProfileLaunchFailure } from "../agent-profile-health.service.js";
@@ -10,8 +11,6 @@ import {
   buildZeroOutputLaunchFailureStats,
   buildModelErrorLaunchFailureStats,
   buildStaleResumeLaunchFailureStats,
-  buildCodexUsageLimitStats,
-  buildClaudeUsageLimitStats,
   launchFailureButlerText,
 } from "./session-exit-stats.js";
 import { mergeExistingSessionStats } from "./session-launch-helpers.js";
@@ -88,9 +87,15 @@ async function persistStoppedWithStats(
  */
 export async function finalizeUsageLimitRoute(route: UsageLimitRoute, ctx: ExitFinalizeContext): Promise<number> {
   const { usageLimit, effectiveExitCode } = route;
-  const stats = usageLimit.kind === "codex"
-    ? buildCodexUsageLimitStats(ctx.executor, ctx.durationMs, ctx.exitCode, usageLimit.message, usageLimit.retryAfter)
-    : buildClaudeUsageLimitStats(ctx.executor, ctx.durationMs, ctx.exitCode, usageLimit.message, usageLimit.retryAfter);
+  // The provider is already a discriminant on both sides (#542) — build the blob from it
+  // rather than branching to two builders that differed only in the literal they wrote.
+  const stats = buildUsageLimitStats(usageLimit.kind, {
+    executor: ctx.executor,
+    durationMs: ctx.durationMs,
+    exitCode: ctx.exitCode,
+    message: usageLimit.message,
+    retryAfter: usageLimit.retryAfter,
+  });
   await recordFailure(ctx, stats.failureReason, effectiveExitCode);
   await persistStoppedWithStats(ctx, stats, String(effectiveExitCode));
   if (ctx.workspaceId) await lifecycleRepo.updateWorkspaceStatus(ctx.workspaceId, "blocked", ctx.now, ctx.db);

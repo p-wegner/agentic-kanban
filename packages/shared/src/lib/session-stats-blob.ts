@@ -80,3 +80,78 @@ export function mergeSessionStats(
   const existing = parseSessionStatsBlob(existingRaw);
   return existing ? { ...existing, ...patch } : patch;
 }
+
+/**
+ * The providers whose quota exhaustion the board parks a workspace on (#542).
+ *
+ * The blob has carried a discriminant (`rateLimitKind`) all along, but every reader was a
+ * per-provider predicate — `isCodexUsageLimitStats` / `isClaudeUsageLimitStats`, identical
+ * except for the literal — and every consumer then OR'd the pair, or picked one ad hoc.
+ * Reading the discriminant once gives callers the provider for free, which is what the
+ * per-provider predicates were throwing away.
+ */
+export const USAGE_LIMIT_KINDS = ["codex", "claude"] as const;
+export type UsageLimitKind = (typeof USAGE_LIMIT_KINDS)[number];
+
+const RATE_LIMIT_KIND_BY_PROVIDER: Record<UsageLimitKind, "codex-usage-limit" | "claude-usage-limit"> = {
+  codex: "codex-usage-limit",
+  claude: "claude-usage-limit",
+};
+
+/** What a usage-limit death recorded: which provider, and its own reset time if it gave one. */
+export interface UsageLimitStats {
+  kind: UsageLimitKind;
+  /** The provider's reset time (ISO), or null when it named none. */
+  retryAfter: string | null;
+}
+
+/**
+ * Read a session's persisted stats as a usage-limit death, or null when it is not one.
+ *
+ * Returns the provider so a caller no longer has to ask each predicate in turn, and the
+ * reset time so it is parsed once rather than re-read from the blob afterwards.
+ */
+export function readUsageLimitStats(raw: string | null | undefined): UsageLimitStats | null {
+  const stats = parseSessionStatsBlob(raw);
+  if (!stats || stats.rateLimited !== true) return null;
+  const kind = USAGE_LIMIT_KINDS.find((k) => stats.rateLimitKind === RATE_LIMIT_KIND_BY_PROVIDER[k]);
+  if (!kind) return null;
+  return { kind, retryAfter: typeof stats.retryAfter === "string" ? stats.retryAfter : null };
+}
+
+/** True when the stats record a usage-limit death by THIS provider. */
+export function isUsageLimitStatsOf(raw: string | null | undefined, kind: UsageLimitKind): boolean {
+  return readUsageLimitStats(raw)?.kind === kind;
+}
+
+export interface UsageLimitStatsInput {
+  executor: string;
+  durationMs: number;
+  exitCode: number | null;
+  message: string;
+  /** The provider's reset time, persisted so the exit rotation can stamp the cooldown window. */
+  retryAfter: string | null;
+}
+
+/**
+ * The stats blob written when a session dies on a provider quota. One builder keyed on the
+ * provider; the two it replaces were identical but for the `rateLimitKind` literal.
+ */
+export function buildUsageLimitStats(kind: UsageLimitKind, input: UsageLimitStatsInput): SessionStatsBlob & { failureReason: string } {
+  return {
+    durationMs: input.durationMs,
+    totalCostUsd: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    numTurns: 0,
+    model: input.executor,
+    success: false,
+    launchFailure: true,
+    rateLimited: true,
+    rateLimitKind: RATE_LIMIT_KIND_BY_PROVIDER[kind],
+    retryAfter: input.retryAfter,
+    failureReason: input.message,
+    providerExitCode: input.exitCode,
+    agentSummary: input.message,
+  };
+}

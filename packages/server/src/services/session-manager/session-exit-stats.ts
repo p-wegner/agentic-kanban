@@ -81,44 +81,9 @@ export function buildStaleResumeLaunchFailureStats(executor: string, durationMs:
   };
 }
 
-export function buildCodexUsageLimitStats(executor: string, durationMs: number, exitCode: number | null, message: string, retryAfter: string | null) {
-  return {
-    durationMs,
-    totalCostUsd: 0,
-    inputTokens: 0,
-    outputTokens: 0,
-    numTurns: 0,
-    model: executor,
-    success: false,
-    launchFailure: true,
-    rateLimited: true,
-    rateLimitKind: "codex-usage-limit",
-    retryAfter,
-    failureReason: message,
-    providerExitCode: exitCode,
-    agentSummary: message,
-  };
-}
-
-export function buildClaudeUsageLimitStats(executor: string, durationMs: number, exitCode: number | null, message: string, resetsAt: string | null) {
-  return {
-    durationMs,
-    totalCostUsd: 0,
-    inputTokens: 0,
-    outputTokens: 0,
-    numTurns: 0,
-    model: executor,
-    success: false,
-    launchFailure: true,
-    rateLimited: true,
-    rateLimitKind: "claude-usage-limit",
-    // Persisted so the exit-workflow rotation can stamp the right cooldown window.
-    retryAfter: resetsAt,
-    failureReason: message,
-    providerExitCode: exitCode,
-    agentSummary: message,
-  };
-}
+// The two per-provider usage-limit builders lived here and were identical but for the
+// `rateLimitKind` literal; they are one `buildUsageLimitStats(kind, …)` in shared now (#542),
+// which `exit-finalize.ts` calls directly with the kind it has already discriminated on.
 
 /**
  * Stats for an INDETERMINATE exit — the real exit code was never observed (external/reattach PID

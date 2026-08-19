@@ -10,7 +10,7 @@ import type { MonitorAction } from "./monitor-helpers.js";
 import { NOISE_TRIGGER_TYPES } from "../services/session-filter.js";
 import { commitLeftoverChanges, countBehindCommits, getCommitCountAhead, getWorkingTreeDiff } from "../services/git.service.js";
 import { startManualReview } from "../services/review.service.js";
-import { isCodexUsageLimitStats } from "../services/codex-rate-limit.js";
+import { readUsageLimitStats } from "@agentic-kanban/shared/lib/session-stats-blob";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { getStackProfile, verifyScriptPrefKey } from "../services/stack-profile.service.js";
 import { runPreMergeGate, resolveMergeGateShas, gateAlreadyPassed, RUN_GATE, type MergeGateToken, type MergeGateEvidence } from "../services/pre-merge-gate.service.js";
@@ -355,9 +355,13 @@ async function mergeBlockedByBackoff(ws: WorkspaceCandidate, deps: ProcessWorksp
 
 async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession | undefined, sessionCount: number, ctx: CycleContext): Promise<void> {
   const { deps, logAction, canStartRelaunch, canStartMerge } = ctx;
-  if (isCodexUsageLimitStats(sess?.stats)) {
+  // Provider-neutral since #542. This site (and the stopped-workspace one below) used to
+  // check the CODEX predicate only, so a CLAUDE-quota death was relaunched here instead of
+  // parked — an asymmetry nothing documented and nothing wanted; exit-workflow blocks both.
+  const idleUsageLimit = readUsageLimitStats(sess?.stats);
+  if (idleUsageLimit) {
     await setWorkspaceStatus(db, ws.wsId, "blocked");
-    console.log(`[monitor] Needs attention: workspace ${ws.wsId} for issue #${ws.issueNumber ?? "?"} hit a Codex usage limit; skipping relaunch`);
+    console.log(`[monitor] Needs attention: workspace ${ws.wsId} for issue #${ws.issueNumber ?? "?"} hit a ${idleUsageLimit.kind} usage limit; skipping relaunch`);
     deps.boardEvents.broadcast(ws.projectId, "board_changed");
     return;
   }
@@ -637,9 +641,10 @@ async function handleBlockedWorkspace(ws: WorkspaceCandidate, sess: LatestSessio
 
 async function handleActiveStoppedWorkspace(ws: WorkspaceCandidate, sess: LatestSession, ctx: CycleContext): Promise<void> {
   const { deps, logAction } = ctx;
-  if (isCodexUsageLimitStats(sess.stats)) {
+  const stoppedUsageLimit = readUsageLimitStats(sess.stats);
+  if (stoppedUsageLimit) {
     await setWorkspaceStatus(db, ws.wsId, "blocked");
-    console.log(`[monitor] Needs attention: active workspace ${ws.wsId} stopped after Codex usage limit; marking blocked`);
+    console.log(`[monitor] Needs attention: active workspace ${ws.wsId} stopped after ${stoppedUsageLimit.kind} usage limit; marking blocked`);
     deps.boardEvents.broadcast(ws.projectId, "board_changed");
     return;
   }
