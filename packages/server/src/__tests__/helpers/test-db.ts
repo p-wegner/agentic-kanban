@@ -6,7 +6,7 @@ import { resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID, createHash } from "node:crypto";
 import * as schema from "@agentic-kanban/shared/schema";
-import { MIGRATION_FILES, MIGRATIONS_DIR } from "./migrations.js";
+import { MIGRATION_FILES, MIGRATIONS_DIR, readMigrationStatements } from "./migrations.js";
 
 export type TestDb = ReturnType<typeof drizzle<typeof schema>>;
 

@@ -117,7 +117,7 @@ export function surfaceIsolationDowngrade(params: {
 
   if (isolationDowngradeReason) {
     updateWorkspaceIsolationDowngrade(workspaceId, true, isolationDowngradeReason, db)
-      .catch((err) => console.error(`Failed to persist isolation downgrade: workspaceId=${workspaceId}`, err));
+      .catch((err) => console.error(`[devcontainer] failed to persist isolation downgrade: workspaceId=${workspaceId}`, err));
     void (async () => {
       try {
         const { createDiffComment } = await import("../../repositories/session.repository.js");
@@ -139,6 +139,6 @@ export function surfaceIsolationDowngrade(params: {
     })();
   } else if (wasAlreadyDowngraded) {
     updateWorkspaceIsolationDowngrade(workspaceId, false, null, db)
-      .catch((err) => console.error(`Failed to clear isolation downgrade: workspaceId=${workspaceId}`, err));
+      .catch((err) => console.error(`[devcontainer] failed to clear isolation downgrade: workspaceId=${workspaceId}`, err));
   }
 }

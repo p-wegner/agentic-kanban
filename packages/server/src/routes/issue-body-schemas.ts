@@ -67,6 +67,11 @@ export const projectIdBody = z.object({
   projectId: requiredRaw("projectId is required"),
 });
 
+export const groupScanBody = z.object({
+  projectId: requiredRaw("projectId is required"),
+  apply: z.boolean().optional(),
+});
+
 export const decomposeConfirmBody = z.object({
   projectId: requiredRaw("projectId is required"),
   children: arrayOnly<unknown>("children must be an array"),
