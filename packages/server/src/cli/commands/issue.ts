@@ -131,8 +131,9 @@ Examples:
 
   issueCmd
     .command("create <title>")
-    .description("Create a new issue in the active project.\n\nIssue numbers are auto-incrementing per project. The issue is placed in the first project status (typically Todo) unless overridden with -s.")
+    .description("Create a new issue in the active project.\n\nIssue numbers are auto-incrementing per project. The issue is placed in the first project status (typically Todo) unless overridden with -s. Use --description-file for a multi-line / markdown body — this avoids the shell quoting and newline mangling that can truncate an inline -d value.")
     .option("-d, --description <description>", "Issue description (markdown supported)")
+    .option("--description-file <path>", "Read the description from a UTF-8 file (overrides -d)")
     .option("-p, --priority <priority>", "Priority: low, medium, high, critical (default: medium)")
     .option("-t, --type <type>", "Issue type: task, bug, feature, chore (default: task)")
     .option("-s, --status <status>", "Initial status name (default: first project status, typically Todo)")
@@ -141,9 +142,10 @@ Examples:
   $ agentic-kanban issue create "Fix login bug" -t bug
   $ agentic-kanban issue create "Add dark mode" -d "Support theme switching" -t feature
   $ agentic-kanban issue create "Hotfix" -t bug -s "In Progress"
+  $ agentic-kanban issue create "Long writeup" --description-file ./body.md
 `)
     .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
-    .action(cliAction(async (title: string, options: { project?: string; description?: string; priority?: string; type?: string; status?: string }) => {
+    .action(cliAction(async (title: string, options: { project?: string; description?: string; descriptionFile?: string; priority?: string; type?: string; status?: string }) => {
       const projectId = await resolveProjectIdArg(options.project);
 
       const statuses = await getProjectStatuses(projectId);
@@ -160,11 +162,25 @@ Examples:
         statusId = found.id;
       }
 
+      // #667 — `issue update` has had --description-file (and a help note about truncation)
+      // while `create` did not, so a multi-line body passed inline died at the first
+      // newline. #659 and #660 were both created that way and lost everything after their
+      // first line; nothing failed, so nobody noticed until the bodies were needed.
+      let description = options.description;
+      if (options.descriptionFile !== undefined) {
+        try {
+          description = readFileSync(options.descriptionFile, "utf8");
+        } catch (err) {
+          console.error(`Could not read description file '${options.descriptionFile}': ${errorMessage(err)}`);
+          process.exit(1);
+        }
+      }
+
       const { id, issueNumber } = await createIssueWithNextNumber({
         projectId,
         statusId,
         title,
-        description: options.description,
+        description,
         priority: options.priority,
         issueType: options.type,
       });
