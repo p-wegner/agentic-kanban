@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
 import { getE2EProjectId } from "../helpers/e2e-project.js";
+import { issueCard, narrowBoardTo } from "../helpers/board-ui.js";
 
 interface StatusOption {
   id: string;
@@ -44,10 +45,14 @@ test.describe("Board card bulk selection", () => {
     await page.addInitScript(() => localStorage.setItem("kanban-board-view", "kanban"));
     await page.goto("/");
     await page.waitForSelector("[data-testid='board-stats-bar']", { timeout: 10000 });
+    // Narrow the board to this run's issues: BoardColumn virtualizes a column past 15
+    // issues, so a card outside the rendered window is not in the DOM and the spec fails
+    // with "element(s) not found" for a reason unrelated to what it is testing (#659).
+    await narrowBoardTo(page, suffix);
 
-    const cards = titles.map((title) =>
-      page.locator("div[draggable]", { has: page.locator("p", { hasText: title }) }).first()
-    );
+    // `div[draggable]` wrapping a `p` is incidental markup twice over. The card declares
+    // its own accessible name, which is what the other board specs use.
+    const cards = titles.map((title) => issueCard(page, title));
     await expect(cards[0]).toBeVisible({ timeout: 10000 });
     await expect(cards[1]).toBeVisible({ timeout: 10000 });
     await expect(cards[2]).toBeVisible({ timeout: 10000 });
