@@ -3,6 +3,7 @@ import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { ShowdownContestant } from "@agentic-kanban/shared";
 import { analyzeDependencies, enhanceIssue, aiEstimateIssue, decomposeEpic, confirmEpicDecomposition, contractCoupledComponent, confirmContractComponent, analyzeTouchedFiles } from "../services/issue-ai.service.js";
+import { scanForTicketGroups } from "../services/ticket-group-scan.service.js";
 import type { DecomposeChildProposal, DecomposeDependencyProposal } from "../services/issue-ai.service.js";
 import { createIssueService } from "../services/issue.service.js";
 import type { CreateIssueInput, BatchDependencyInput } from "../services/issue.service.js";
@@ -164,6 +165,19 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
       database,
     );
     options?.boardEvents?.broadcast(body.projectId, "board_changed");
+    return c.json(result);
+  });
+
+  // POST /api/issues/group-scan — AI-propose ticket GROUPS over the open backlog (#661).
+  // The non-destructive sibling of /contract: applying writes `coupled_with` edges only
+  // (every ticket keeps its identity); the monitor's auto-group start then executes each
+  // group as ONE workspace. Preview by default; `apply: true` creates the edges.
+  router.post("/group-scan", async (c) => {
+    const body = await parseJsonBody<{ projectId?: string; apply?: boolean }>(c);
+    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
+    const projectId = body.projectId;
+    const result = await wrapAiOperation("group-scan", () => scanForTicketGroups(projectId, database, { apply: body.apply === true }));
+    if (body.apply === true) options?.boardEvents?.broadcast(projectId, "dependency_added");
     return c.json(result);
   });
 
