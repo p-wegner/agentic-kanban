@@ -1,3 +1,5 @@
+import { triggerPhase } from "@agentic-kanban/shared";
+
 // Pure phase-derivation for the Workspace Lifecycle Timeline (#96).
 //
 // Turns the timestamps a workspace ALREADY carries (createdAt, latest setup run,
@@ -70,11 +72,7 @@ function ms(iso: string | null | undefined): number | null {
 }
 
 /** Classify a session by its trigger into which lifecycle phase it opens. */
-function classifySession(triggerType: string | null | undefined): "build" | "landing" {
-  if (triggerType === "review") return "landing";
-  if (triggerType === "merge" || triggerType === "fix-and-merge" || triggerType === "fix-conflicts") return "landing";
-  return "build";
-}
+const classifySession: (triggerType: string | null | undefined) => "build" | "landing" = triggerPhase;
 
 /**
  * Derive the ordered lifecycle phases for a workspace.

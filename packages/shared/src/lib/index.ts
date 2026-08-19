@@ -56,3 +56,5 @@ export * from "./project-statuses.js";
 export * from "./board-health-events.js";
 export * from "./board-events-contract.js";
 export * from "./issue-comment-kind.js";
+// Session trigger-type vocabulary + traits table (#495) — pure, no Node builtins.
+export * from "./session-trigger.js";

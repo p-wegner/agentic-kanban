@@ -1,4 +1,6 @@
 import type { IssueWithStatus } from "@agentic-kanban/shared";
+import { triggerBadgeLabel } from "@agentic-kanban/shared";
+import { TRIGGER_TYPE_CLASSES, SKILL_TRIGGER_CLASSNAME } from "./workspace-helpers.js";
 
 export function getLastSessionBadge(triggerType: string | null | undefined): { label: string; className: string } | null {
   if (!triggerType) return null;

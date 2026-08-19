@@ -1,4 +1,5 @@
 import { parseSessionStatsBlob } from "@agentic-kanban/shared";
+import { isBuilderCycleTrigger } from "@agentic-kanban/shared/lib/session-trigger";
 import { isClaudeUsageLimitStats } from "./claude-rate-limit.js";
 import { isCodexUsageLimitStats } from "./codex-rate-limit.js";
 import type { WorkspaceCandidate } from "../startup/monitor-cycle.js";
@@ -52,8 +53,15 @@ export function hasRepeatedFailedCommand(stats: string | null): boolean {
     );
 }
 
+/**
+ * Is this the ticket's implementer, as the monitor cycle counts it? Delegates to the
+ * shared traits table's `builderCycle` flag (#495), which is deliberately NOT the same
+ * predicate the launcher uses: `auto-start` and `skill:*` runs continue the worktree but
+ * are started by the monitor itself, so counting them here would make the cycle wait on
+ * its own work.
+ */
 export function isBuilderSession(sess: LatestSession): boolean {
-  return !sess.triggerType || sess.triggerType === "agent" || sess.triggerType === "chat" || sess.triggerType === "plan-implement";
+  return isBuilderCycleTrigger(sess.triggerType);
 }
 
 /** A `blocked` workspace parked there by a provider usage limit, and whether its wait is over. */

@@ -12,20 +12,21 @@
  * feature); do not conflate.
  */
 
-export type ReviewKind = "review" | "build" | "rework" | "noise" | "other";
+import { triggerRole, type SessionTriggerRole } from "@agentic-kanban/shared/lib/session-trigger";
 
 /**
- * Classify a session's `triggerType` into a lifecycle role. Legacy initial
- * sessions have a null triggerType and are treated as build runs.
+ * A session's lifecycle role. The vocabulary and the classification now live in
+ * `shared/lib/session-trigger` (#495) — this alias is kept because the aggregation's
+ * public shape names the type, and the two words mean the same thing here.
  */
-export function classifyTrigger(t: string | null): ReviewKind {
-  if (!t) return "build"; // legacy initial sessions have null triggerType
-  if (t === "review" || t.startsWith("skill:code-review")) return "review";
-  if (t.startsWith("skill:board-monitor") || t.startsWith("skill:board-navigator")) return "noise";
-  if (t === "chat" || t === "fix-and-merge" || t === "fix-conflicts" || t === "plan-reject") return "rework";
-  if (t === "verify" || t === "learning" || t === "bisect" || t === "reconcile") return "other";
-  return "build"; // agent, auto-start, manual, plan-implement, skill:<other>
-}
+export type ReviewKind = SessionTriggerRole;
+
+/**
+ * Classify a session's `triggerType` into a lifecycle role. Thin alias over the shared
+ * traits table; four byte-identical copies of this body used to exist (two server libs,
+ * two MCP tools).
+ */
+export const classifyTrigger: (t: string | null) => ReviewKind = triggerRole;
 
 /** Parse a session's persisted `stats` JSON into the cost/duration/turns we aggregate. */
 export function parseSessionStats(raw: string | null): { cost: number; durationMs: number; turns: number } {

@@ -5,6 +5,9 @@ import { parseSessionSummary } from "@agentic-kanban/shared";
 import { getCommitsForBranch } from "../git-service.js";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { mcpJson, mcpText, resolveActiveProjectId } from "../db-utils.js";
+// Session-role classification is the shared traits table (#495) — this file used to
+// carry a byte-identical private copy of it.
+import { triggerRole as classifyTrigger } from "@agentic-kanban/shared/lib/session-trigger";
 
 /**
  * Mirrors `pnpm cli -- session reviewer-fixes`.
@@ -17,15 +20,6 @@ import { mcpJson, mcpText, resolveActiveProjectId } from "../db-utils.js";
  */
 export function registerReviewerFixes(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema } = deps;
-
-  function classifyTrigger(t: string | null): "review" | "build" | "rework" | "noise" | "other" {
-    if (!t) return "build";
-    if (t === "review" || t.startsWith("skill:code-review")) return "review";
-    if (t.startsWith("skill:board-monitor") || t.startsWith("skill:board-navigator")) return "noise";
-    if (t === "chat" || t === "fix-and-merge" || t === "fix-conflicts" || t === "plan-reject") return "rework";
-    if (t === "verify" || t === "learning" || t === "bisect" || t === "reconcile") return "other";
-    return "build";
-  }
 
   server.tool(
     "reviewer_fixes",

@@ -1,4 +1,5 @@
 import { formatTokenCount } from "../lib/workspace-helpers.js";
+import { triggerBadgeLabel } from "@agentic-kanban/shared";
 import {
   occupancyFromStatsJson,
   occupancyFromLive,
@@ -105,11 +106,12 @@ export function ContextWindowView({
           </summary>
           <div className="mt-1 space-y-1 max-h-40 overflow-y-auto pr-1">
             {historical.map(({ session, occ }) => {
+              // The everyday agent/chat runs stay unlabelled ("Agent"); anything else gets
+              // its human label from the shared traits table (#495) rather than the raw slug.
+              const routine = !session.triggerType || session.triggerType === "agent" || session.triggerType === "chat";
               const label =
                 session.skillName ??
-                (session.triggerType && session.triggerType !== "agent" && session.triggerType !== "chat"
-                  ? session.triggerType
-                  : "Agent");
+                (routine ? "Agent" : (triggerBadgeLabel(session.triggerType) ?? session.triggerType ?? "Agent"));
               const { text } = occupancyColor(occ.fraction);
               return (
                 <div key={session.id} className="flex items-center gap-2 text-[10px]">
