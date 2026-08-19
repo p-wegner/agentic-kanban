@@ -1,9 +1,19 @@
 import { randomUUID } from "node:crypto";
 import * as schema from "@agentic-kanban/shared/schema";
 import type { TestDb } from "./test-db.js";
+import { buildProjectStatusRows, statusIdsByName } from "@agentic-kanban/shared/lib/project-statuses";
 
 const NOW = "2026-05-30T09:00:00.000Z";
 
+/**
+ * Seed a project with the PRODUCTION status topology (#563) — the same rows
+ * `initializeProjectStatuses` creates, built by the same shared function.
+ *
+ * `statusId` still points at "In Progress" so the existing callers are unchanged;
+ * what changed is that the project now also has Backlog/Todo/In Review/AI
+ * Reviewed/Done/Cancelled, and "Todo" (not "In Progress") is the default column,
+ * which is what production does.
+ */
 export async function seedProject(db: TestDb, name: string) {
   const projectId = randomUUID();
   await db.insert(schema.projects).values({
@@ -16,17 +26,11 @@ export async function seedProject(db: TestDb, name: string) {
     updatedAt: NOW,
   });
 
-  const statusId = randomUUID();
-  await db.insert(schema.projectStatuses).values({
-    id: statusId,
-    projectId,
-    name: "In Progress",
-    sortOrder: 0,
-    isDefault: true,
-    createdAt: NOW,
-  });
+  const rows = buildProjectStatusRows(projectId, NOW);
+  for (const row of rows) await db.insert(schema.projectStatuses).values(row);
+  const statusIds = statusIdsByName(rows);
 
-  return { projectId, statusId };
+  return { projectId, statusId: statusIds["In Progress"], statusIds };
 }
 
 export async function seedIssue(

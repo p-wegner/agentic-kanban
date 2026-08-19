@@ -345,12 +345,10 @@ describe("workflow.service — transitions", () => {
   it("advances workspace node and syncs issue status", async () => {
     const { db } = createTestDb();
     const service = createService(db);
-    const { projectId, statusId } = await seedProject(db, "transition-advance");
-    const inReviewStatusId = randomUUID();
-    const now = "2026-05-30T09:00:00.000Z";
-    await db.insert(schema.projectStatuses).values({
-      id: inReviewStatusId, projectId, name: "In Review", sortOrder: 1, isDefault: false, createdAt: now,
-    });
+    // "In Review" now comes from seedProject's production topology (#563); this test
+    // used to insert a second one, and the service resolved by NAME to whichever it found.
+    const { projectId, statusId, statusIds } = await seedProject(db, "transition-advance");
+    const inReviewStatusId = statusIds["In Review"];
     const { templateId, nodeIds } = await seedLinearWorkflow(db, ["Implement", "Review"], ["In Progress", "In Review"]);
     const [implId, reviewId] = nodeIds;
 
