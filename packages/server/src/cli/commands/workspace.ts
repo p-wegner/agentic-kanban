@@ -1,5 +1,6 @@
 import type { Command } from "commander";
 import type { ScorecardResult } from "../../services/workspace-scorecard.service.js";
+import type { DiffResponse } from "@agentic-kanban/shared/types";
 import { getIssueIdByNumberInProject } from "../../repositories/issue.repository.js";
 import { getIssueById } from "../../repositories/followup-workspace.repository.js";
 import { getProjectById } from "../../repositories/project.repository.js";
@@ -32,12 +33,17 @@ interface StartResponse extends ErrorResponse {
   workingDir?: string;
 }
 
-/** GET .../diff — workspace git diff. */
-interface DiffResponse extends ErrorResponse {
-  stats?: string;
-  changedFiles?: string[];
-  diff?: string;
-}
+/**
+ * GET .../diff — workspace git diff.
+ *
+ * #571: this was a hand-written all-optional interface, and it had drifted from the route
+ * in two ways that BOTH failed silently. `stats` was typed `string` but the service returns
+ * `{filesChanged, insertions, deletions}`, so `Stats: ${data.stats}` printed
+ * `Stats: [object Object]`; and `changedFiles` does not exist in the response at all, so the
+ * "Changed files" block never ran. Deriving from the shared DTO makes either drift a compile
+ * error instead of a wrong line of output. Partial because the response is error-or-result.
+ */
+type DiffResponseBody = ErrorResponse & Partial<DiffResponse>;
 
 /**
  * GET .../scorecard — PR quality scorecard.
@@ -404,7 +410,7 @@ Examples:
       try {
         const port = options.port ?? "";
         const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "diff"));
-        const data = await res.json() as DiffResponse;
+        const data = await res.json() as DiffResponseBody;
 
         if (!res.ok) {
           console.error(`Diff failed: ${data.error ?? res.statusText}`);
@@ -414,10 +420,9 @@ Examples:
         if (options.json) {
           console.log(JSON.stringify(data, null, 2));
         } else {
-          if (data.stats) console.log(`Stats: ${data.stats}`);
-          if (Array.isArray(data.changedFiles) && data.changedFiles.length > 0) {
-            console.log(`Changed files (${data.changedFiles.length}):`);
-            for (const f of data.changedFiles) console.log(`  ${f}`);
+          if (data.stats) {
+            const { filesChanged, insertions, deletions } = data.stats;
+            console.log(`Stats: ${filesChanged} file(s) changed, +${insertions} -${deletions}`);
           }
           if (data.diff) console.log("\n" + String(data.diff));
         }

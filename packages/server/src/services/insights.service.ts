@@ -1,4 +1,5 @@
 import type { SessionFrictionStats } from "@agentic-kanban/shared";
+import { parseSessionStatsBlob } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
 import { getInsightsSessionRows } from "../repositories/session.repository.js";
 import { getActiveWorkspacesForProject } from "../repositories/workspace.repository.js";
@@ -11,7 +12,7 @@ const RANGE_DAYS = {
 
 export type InsightsRange = keyof typeof RANGE_DAYS | "all";
 
-interface ParsedSessionStats {
+interface NormalizedSessionStats {
   durationMs: number;
   totalCostUsd: number;
   inputTokens: number;
@@ -207,11 +208,17 @@ export function parseRange(value: string | undefined): InsightsRange {
   return "30d";
 }
 
-function parseStats(raw: string | null): ParsedSessionStats | null {
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as Partial<ParsedSessionStats>;
-    if (typeof parsed !== "object" || parsed === null) return null;
+/**
+ * #571: this is NOT a fifth copy of the stats blob — it is the NORMALIZED projection, with
+ * every numeric defaulted and every field required, which is what lets the aggregation
+ * below add them without a `?? 0` at each use. Only the raw PARSE is shared
+ * (`parseSessionStatsBlob`); the shape stays local because making it optional like the
+ * blob would push those defaults out into ~10 call sites.
+ */
+function parseStats(raw: string | null): NormalizedSessionStats | null {
+  const parsed = parseSessionStatsBlob(raw);
+  if (!parsed) return null;
+  {
     return {
       durationMs: Number(parsed.durationMs ?? 0),
       totalCostUsd: Number(parsed.totalCostUsd ?? 0),
@@ -223,14 +230,12 @@ function parseStats(raw: string | null): ParsedSessionStats | null {
       agentSummary: typeof parsed.agentSummary === "string" ? parsed.agentSummary : undefined,
       cacheReadTokens: Number(parsed.cacheReadTokens ?? 0),
       contextTokens: Number(parsed.contextTokens ?? 0),
-      friction: parsed.friction && typeof parsed.friction === "object" ? parsed.friction : undefined,
+      friction: parsed.friction && typeof parsed.friction === "object" ? parsed.friction as SessionFrictionStats : undefined,
     };
-  } catch {
-    return null;
   }
 }
 
-function isSuccessful(stats: ParsedSessionStats | null, exitCode: string | null) {
+function isSuccessful(stats: NormalizedSessionStats | null, exitCode: string | null) {
   return !!stats && (stats.success === true || exitCode === "0");
 }
 
@@ -239,7 +244,7 @@ function isSuccessful(stats: ParsedSessionStats | null, exitCode: string | null)
  * window. Mirrors the `contextTokens || inputTokens + cacheReadTokens`
  * convention used in workspace-summary / session-stats / workspace.repository.
  */
-function contextTokensFor(stats: ParsedSessionStats | null): number {
+function contextTokensFor(stats: NormalizedSessionStats | null): number {
   if (!stats) return 0;
   const explicit = stats.contextTokens ?? 0;
   return explicit || (stats.inputTokens + (stats.cacheReadTokens ?? 0));
@@ -261,7 +266,7 @@ function createAggregateBucket(): AggregateBucket {
   };
 }
 
-function applyAggregate(bucket: AggregateBucket, stats: ParsedSessionStats | null, success: boolean) {
+function applyAggregate(bucket: AggregateBucket, stats: NormalizedSessionStats | null, success: boolean) {
   bucket.sessionCount += 1;
   if (success) bucket.successCount += 1;
   if (!stats) return;
@@ -423,7 +428,7 @@ export interface AccumulateContext {
 // the row-level accumulateInsightsRow below reads as a flat list of dimensions
 // instead of one 150-line branch-dense function.
 
-function accumulateFriction(acc: InsightsAccumulator, stats: ParsedSessionStats | null): void {
+function accumulateFriction(acc: InsightsAccumulator, stats: NormalizedSessionStats | null): void {
   if (!stats?.friction) return;
   acc.sessionsWithFriction += 1;
   acc.frictionTotalToolCalls += stats.friction.totalToolCalls;
@@ -448,7 +453,7 @@ function accumulateSkillBucket(
   key: string,
   skillId: string | null,
   skillName: string,
-  stats: ParsedSessionStats | null,
+  stats: NormalizedSessionStats | null,
   success: boolean,
 ): void {
   const bucket = bySkill.get(key) ?? { skillId, skillName, ...createAggregateBucket() };
@@ -459,7 +464,7 @@ function accumulateSkillBucket(
 function accumulateModelBucket(
   byModel: Map<string, ModelBucket>,
   model: string,
-  stats: ParsedSessionStats | null,
+  stats: NormalizedSessionStats | null,
   success: boolean,
 ): void {
   const bucket = byModel.get(model) ?? { model, ...createAggregateBucket() };
@@ -482,7 +487,7 @@ function accumulateCategoryBucket<
   map: Map<string, T>,
   key: string,
   create: () => T,
-  stats: ParsedSessionStats | null,
+  stats: NormalizedSessionStats | null,
   success: boolean,
 ): void {
   const bucket = map.get(key) ?? create();
@@ -500,7 +505,7 @@ function accumulateProviderProfileBucket(
   byProviderProfile: Map<string, ProviderProfileBucket>,
   provider: string,
   profile: string,
-  stats: ParsedSessionStats | null,
+  stats: NormalizedSessionStats | null,
   success: boolean,
 ): void {
   const key = `${provider}::${profile}`;
@@ -517,7 +522,7 @@ function accumulateProviderProfileBucket(
 function accumulateTimeSeriesBucket(
   timeSeries: Map<string, TimeSeriesBucket>,
   dateKey: string,
-  stats: ParsedSessionStats | null,
+  stats: NormalizedSessionStats | null,
   success: boolean,
 ): void {
   const bucket = timeSeries.get(dateKey) ?? {
@@ -535,7 +540,7 @@ function accumulateTimeSeriesBucket(
 function accumulateExpensive(
   acc: InsightsAccumulator,
   row: InsightsSessionRow,
-  stats: ParsedSessionStats,
+  stats: NormalizedSessionStats,
   resolvedModel: string,
   tokens: number,
   success: boolean,
@@ -563,7 +568,7 @@ function accumulateExpensive(
 function accumulateContextLeaderboard(
   acc: InsightsAccumulator,
   row: InsightsSessionRow,
-  stats: ParsedSessionStats | null,
+  stats: NormalizedSessionStats | null,
   startedAtIso: string,
   contextWindowFromIso: string,
 ): void {
@@ -590,7 +595,7 @@ function accumulateContextLeaderboard(
 
 /** Per-row facts derived from a session row, independent of the accumulator. */
 interface SessionRowFacts {
-  stats: ParsedSessionStats | null;
+  stats: NormalizedSessionStats | null;
   success: boolean;
   resolvedModel: string;
   resolvedSkillId: string | null;

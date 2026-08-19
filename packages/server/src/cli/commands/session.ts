@@ -1,6 +1,6 @@
 import type { Command } from "commander";
 import { parseSessionSummary, computeFrictionStats, extractKeywords } from "@agentic-kanban/shared";
-import type { SessionFrictionStats } from "@agentic-kanban/shared";
+import type { SessionFrictionStats, SessionStatsBlob } from "@agentic-kanban/shared";
 import { getCommitsForBranch } from "@agentic-kanban/shared/lib/git-service";
 import { runMigrations, getActiveProjectId, resolveIssueNumberArg, cliAction } from "../shared.js";
 import {
@@ -33,16 +33,6 @@ const BASE_URL = `http://127.0.0.1:${resolveCliPort()}`;
  * access falls back to a default — narrowing here keeps the parse boundary typed
  * without asserting fields that may be absent.
  */
-interface ParsedSessionStats {
-  durationMs?: number;
-  totalCostUsd?: number;
-  inputTokens?: number;
-  outputTokens?: number;
-  numTurns?: number;
-  model?: string;
-  success?: boolean;
-  agentSummary?: string;
-}
 
 /**
  * The `deepMethod` block of the review-effectiveness report (untyped `Record` on
@@ -82,9 +72,9 @@ export function registerSessionCommand(program: Command) {
 
       const summary = parseSessionSummary(msgRows);
 
-      let stats: ParsedSessionStats | null = null;
+      let stats: SessionStatsBlob | null = null;
       if (session.stats) {
-        try { stats = JSON.parse(session.stats) as ParsedSessionStats; } catch { /* ignore */ }
+        try { stats = JSON.parse(session.stats) as SessionStatsBlob; } catch { /* ignore */ }
       }
 
       console.log(JSON.stringify({
