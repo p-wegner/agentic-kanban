@@ -1,3 +1,4 @@
+import { mergedTreeHash, rememberTreeGatedGreen, wasTreeGatedGreen } from "./merge-gate-tree-memo.js";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -353,6 +354,25 @@ export async function runPreMergeGate(
     return { passed: false, skipped: false, stage: "none", message: installBlock };
   }
 
+  // ---- #492 tree-hash memo -----------------------------------------------------------------
+  // A queue of ready branches re-ran the same suite against the same code: five branches, five
+  // ~42-min gates. `git merge-tree --write-tree` gives the tree the merge WOULD produce, which
+  // is an exact content fingerprint — if that tree already passed, the suite has nothing new to
+  // tell us. Cheap (one git call, no checkout) and exact (a tree id is content, not a commit).
+  //
+  // Runs AFTER the install block so a workspace with outstanding installs is still refused: that
+  // check is about THIS workspace's dependencies, not about the code, so a green tree elsewhere
+  // says nothing about it.
+  const treeHash = await mergedTreeHash(workspace.workingDir, workspace.baseBranch);
+  if (wasTreeGatedGreen(projectId, treeHash)) {
+    return {
+      passed: true,
+      skipped: false,
+      stage: "verify",
+      message: `pre-merge gate reused an earlier PASS for this exact merged tree (${treeHash!.slice(0, 12)}) — identical content, already verified (#492)`,
+    };
+  }
+
   // ---- #531 verify_script gate -------------------------------------------------------------
   // A read error here means we can't tell whether a gate is configured — treat as "no verify gate"
   // (never block a merge on a gate-DETECTION error; fail-closed applies only to a CONFIGURED gate
@@ -649,6 +669,10 @@ export async function runPreMergeGate(
   // docs-only diff", and conflating them is how eight unverified merges went unremarked. A project
   // with no gate at all is `unverified`; a project with a gate that deliberately skipped is not.
   const unverified = !ranSomething && !verifyConfigured;
+  // #492 — remember only a run that actually CHECKED something. A skipped or unverified gate
+  // proves nothing about the tree, and memoizing it would let "nothing ran" propagate to every
+  // later branch that happens to produce the same content.
+  if (ranSomething && !smokeInconclusive) rememberTreeGatedGreen(projectId, treeHash);
   return {
     passed: true,
     skipped: !ranSomething,
