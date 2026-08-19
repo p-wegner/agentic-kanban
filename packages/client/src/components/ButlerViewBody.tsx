@@ -32,7 +32,7 @@ interface ButlerViewBodyProps {
   commandMenuOpen: boolean;
   fetchButlers: () => Promise<ButlerListItem[]>;
   filteredCommands: ButlerCommand[];
-  formatRelativeTs: (ts: number, now?: number) => string;
+  formatRelativeTs: (ts: number, nowMs?: number) => string;
   formatWindow: (n: number) => string;
   handleClearContext: () => Promise<void>;
   handleKeyDown: (e: ReactKeyboardEvent<HTMLTextAreaElement>) => void;

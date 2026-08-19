@@ -11,9 +11,9 @@ export function formatWindow(n: number): string {
   return n >= 1_000_000 ? `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M` : `${Math.round(n / 1000)}k`;
 }
 
-/** Relative timestamp label. `now` is injectable for deterministic tests. */
-export function formatRelativeTs(ts: number, now: number = Date.now()): string {
-  const diff = now - ts;
+/** Relative timestamp label. `nowMs` is injectable for deterministic tests. */
+export function formatRelativeTs(ts: number, nowMs: number = Date.now()): string {
+  const diff = nowMs - ts;
   if (diff < 60_000) return "just now";
   const mins = Math.floor(diff / 60_000);
   if (mins < 60) return `${mins}m ago`;
