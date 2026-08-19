@@ -90,6 +90,8 @@ import {
   runCriticalStartupTasks,
   runGatedDeferredStartupTasks,
   runStartupAuditTasks,
+  runNonFatal,
+  STARTUP_AUDIT_TASKS,
 } from "../startup/startup-tasks.js";
 import { reconcileStrandedSiblingMerges } from "../startup/merge-workflow.js";
 import { reapTerminalWorkspaces } from "../startup/terminal-workspace-reaper.js";
@@ -153,6 +155,22 @@ describe("startup phase split (#282)", () => {
     expect(vi.mocked(scanDoneUnmergedWorkspaces)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(reapTerminalWorkspaces)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(applyMigrations)).not.toHaveBeenCalled();
+  });
+
+  it("declares the audit tail as a table, in the order the tail runs (#564)", () => {
+    // Order is load-bearing twice: the parentless-child reap must follow the DB-tracked one
+    // (#281), and the abandoned-provisioning report must follow the disk sweeps (#630).
+    const names = STARTUP_AUDIT_TASKS.map((t) => t.name);
+    expect(names.indexOf("reapParentlessChildServers")).toBeGreaterThan(names.indexOf("reapOrphanedPluginViewProcesses"));
+    expect(names.indexOf("reconcileAbandonedProvisioning")).toBeGreaterThan(names.indexOf("pruneOrphanedWorktrees"));
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it("runNonFatal swallows a failure and names the task", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await expect(runNonFatal("theTask", async () => { throw new Error("boom"); })).resolves.toBeUndefined();
+    expect(warn.mock.calls.some(([msg]) => String(msg).includes("theTask"))).toBe(true);
+    warn.mockRestore();
   });
 
   it("keeps the WRITE-gating phase to the git-state repairs only", async () => {
