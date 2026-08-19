@@ -7,6 +7,7 @@
 // instead of being duplicated per file. Pure mechanical extraction — no behavior change.
 import { createRoutes } from "../../routes/index.js";
 import * as schema from "@agentic-kanban/shared/schema";
+import { and, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -119,7 +120,24 @@ export async function createProjectDirectly(database: TestDb, overrides: {
   return id;
 }
 
+/**
+ * Seed one status, IDEMPOTENTLY (#668).
+ *
+ * A project may not hold two statuses with the same name — that is a unique index since
+ * migration 0125, and before it a duplicate silently produced two columns with the same
+ * label. Several fixtures called a per-item seeder in a loop against ONE project, so they
+ * were creating exactly that: `seedSession(...)` three times meant three "In Progress"
+ * statuses. Returning the existing id keeps those loops working and keeps the fixture
+ * honest about what a project actually looks like.
+ */
 export async function createStatusDirectly(database: TestDb, projectId: string, name: string, sortOrder: number) {
+  const existing = await database
+    .select({ id: schema.projectStatuses.id })
+    .from(schema.projectStatuses)
+    .where(and(eq(schema.projectStatuses.projectId, projectId), eq(schema.projectStatuses.name, name)))
+    .limit(1);
+  if (existing.length > 0) return existing[0].id;
+
   const now = new Date().toISOString();
   const id = randomUUID();
   await database.insert(schema.projectStatuses).values({

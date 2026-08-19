@@ -58,8 +58,14 @@ export function buildProjectStatusRows(
   }));
 }
 
-/** `{ Todo: "<id>", "In Progress": "<id>", … }` — what callers actually want back. */
-export function statusIdsByName(rows: readonly ProjectStatusRow[]): Record<string, string> {
+/**
+ * `{ Todo: "<id>", "In Progress": "<id>", … }` — what callers actually want back.
+ *
+ * Takes the two fields it reads rather than a full `ProjectStatusRow`, so it also works on a
+ * narrow `select({ id, name })` of EXISTING rows — which is what a seeder that skips names the
+ * project already has needs in order to return the project's whole map (#668).
+ */
+export function statusIdsByName(rows: readonly { id: string; name: string }[]): Record<string, string> {
   return Object.fromEntries(rows.map((row) => [row.name, row.id]));
 }
 

@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { relations } from "drizzle-orm";
 import { projects } from "./projects.js";
 
@@ -12,6 +12,11 @@ export const projectStatuses = sqliteTable("project_statuses", {
 }, (table) => ({
   // Inner-joined on every board load and the 30s auto-merge tick (0113).
   projectIdIdx: index("idx_project_statuses_project_id").on(table.projectId),
+  // #668 — two statuses with the same name meant two columns called "Todo" (one holding the
+  // issues, one permanently empty), and every by-name lookup — the merge path, the monitor,
+  // the E2E specs — silently picked whichever came first. A name is how a status is
+  // addressed everywhere outside the database, so it has to be unique per project.
+  projectNameUnique: uniqueIndex("project_statuses_project_name_unique").on(table.projectId, table.name),
 }));
 
 export const projectStatusesRelations = relations(projectStatuses, ({ one, many }) => ({

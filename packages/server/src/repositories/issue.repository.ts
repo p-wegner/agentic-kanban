@@ -2,7 +2,7 @@ import { issues, workspaces, projectStatuses, workflowNodes, tags, issueTags, is
 import { loadIssueSummary, type IssueSummaryResult } from "@agentic-kanban/shared/lib/issue-summary";
 import { parseIssueRef } from "@agentic-kanban/shared/lib/issue-ref";
 import { DEFAULT_PROJECT_STATUSES, buildProjectStatusRows, statusIdsByName } from "@agentic-kanban/shared/lib/project-statuses";
-import { eq, inArray, and, gte, count } from "drizzle-orm";
+import { eq, inArray, and, gte, count, asc, desc } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -46,11 +46,27 @@ export async function initializeProjectStatuses(
   now: string,
   database: Database = db,
 ): Promise<Record<string, string>> {
-  const rows = buildProjectStatusRows(projectId, now);
+  // #668 — this used to insert the canonical set unconditionally, so calling it twice for one
+  // project produced a SECOND set: two columns named "Todo", one holding every issue and one
+  // permanently empty, with every by-name lookup silently picking whichever came first. It is
+  // the only unguarded seeding path (`project-registration.ts:528` already checks, and
+  // `deduplicateProjects` matches by name), and since 0125 a duplicate is a constraint
+  // violation rather than a quiet second column — so the guard is what keeps a legitimate
+  // double call working instead of throwing.
+  //
+  // Insert only the names the project does not already have, and return ids for ALL of them:
+  // the caller wants the project's status map, not a record of what this call happened to write.
+  const existing = await database
+    .select({ id: projectStatuses.id, name: projectStatuses.name })
+    .from(projectStatuses)
+    .where(eq(projectStatuses.projectId, projectId));
+  const existingNames = new Set(existing.map((row) => row.name));
+
+  const rows = buildProjectStatusRows(projectId, now).filter((row) => !existingNames.has(row.name));
   for (const row of rows) {
     await database.insert(projectStatuses).values(row);
   }
-  return statusIdsByName(rows);
+  return { ...statusIdsByName(existing), ...statusIdsByName(rows) };
 }
 
 /**
@@ -70,6 +86,14 @@ export async function resolveNewIssueDefaults(
           .select({ id: projectStatuses.id })
           .from(projectStatuses)
           .where(eq(projectStatuses.projectId, projectId))
+          // ORDER BY, because `limit(1)` without one returns whatever the query plan
+          // happens to yield first — and the plan is not stable. This read had no order at
+          // all, so "the status a new issue lands in" was decided by which index SQLite
+          // chose; adding the #668 unique index on (project_id, name) silently moved it
+          // from insertion order to NAME order, i.e. a new issue started landing in "AI
+          // Reviewed" instead of "Todo". The column is not arbitrary — `is_default` exists
+          // to name it, and `sort_order` breaks the tie leftmost-first.
+          .orderBy(desc(projectStatuses.isDefault), asc(projectStatuses.sortOrder))
           .limit(1),
   ]);
 
