@@ -92,3 +92,61 @@ describe("ProgressStepper", () => {
     expect(bare).toContain("Test &amp; QA (plan + execution)");
   });
 });
+
+/**
+ * #481 — the Start affordance on a planned step.
+ *
+ * The complaint: the panel rendered "generating" for a step nothing was working, while a
+ * notice on the same screen said the ticket would not start on its own — and the step card,
+ * where the user is looking, offered nothing to click.
+ */
+describe("ProgressStepper — Start on a planned step (#481)", () => {
+  const planned: PluginProgressStep = {
+    id: "step-2",
+    label: "Draft the PRD",
+    state: "planned",
+    ticket: { issueId: "iss-4", issueNumber: 4 },
+  };
+
+  it("offers Start on a planned step that has a ticket", () => {
+    const html = renderToStaticMarkup(
+      <ProgressStepper steps={[planned]} onOpenStep={() => {}} onStartStep={() => {}} />,
+    );
+    expect(html).toContain('data-testid="plugin-loop-step-start-step-2"');
+    expect(html).toContain("Start #4");
+  });
+
+  it("offers nothing when the step has no ticket to start", () => {
+    // A planner can report `planned` for a step the board never ticketed; there is nothing
+    // to start, and a dead button would be worse than none.
+    const html = renderToStaticMarkup(
+      <ProgressStepper steps={[{ ...planned, ticket: undefined }]} onOpenStep={() => {}} onStartStep={() => {}} />,
+    );
+    expect(html).not.toContain("plugin-loop-step-start-");
+  });
+
+  it("does NOT offer Start on a stalled step", () => {
+    // `stalled` already HAS a workspace (#479) — starting a second one is not the remedy,
+    // and offering it here would duplicate the loop-stall card's job.
+    const html = renderToStaticMarkup(
+      <ProgressStepper steps={[{ ...planned, state: "stalled" }]} onOpenStep={() => {}} onStartStep={() => {}} />,
+    );
+    expect(html).not.toContain("plugin-loop-step-start-");
+  });
+
+  it("does NOT offer Start when the caller passes no handler", () => {
+    // Without `onStartStep` the step still SAYS planned — it just cannot be acted on here,
+    // which is the pre-#481 behaviour and must stay available to other callers.
+    const html = renderToStaticMarkup(<ProgressStepper steps={[planned]} onOpenStep={() => {}} />);
+    expect(html).not.toContain("plugin-loop-step-start-");
+    expect(html).toContain("planned — not started yet");
+  });
+
+  it("disables the button while that step's start is in flight", () => {
+    const html = renderToStaticMarkup(
+      <ProgressStepper steps={[planned]} onOpenStep={() => {}} onStartStep={() => {}} startingStepId="step-2" />,
+    );
+    expect(html).toContain("Starting…");
+    expect(html).toContain("disabled");
+  });
+});

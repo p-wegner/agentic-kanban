@@ -26,7 +26,7 @@ import type { LoopIssueRow } from "../repositories/plugins.repository.js";
  */
 export function reconcileProgressStepStates(
   steps: PluginLoopProgressStep[],
-  openTickets: Pick<LoopIssueRow, "externalKey" | "hasAnyWorkspace" | "hasLiveWorkspace">[],
+  openTickets: Pick<LoopIssueRow, "id" | "issueNumber" | "externalKey" | "hasAnyWorkspace" | "hasLiveWorkspace">[],
 ): PluginLoopProgressStep[] {
   return steps.map((step) => {
     if (step.state !== "generating") return step;
@@ -39,7 +39,11 @@ export function reconcileProgressStepStates(
     });
     if (!ticket) return step;
     if (ticket.hasLiveWorkspace) return step; // a live workspace really is generating — leave it
-    if (ticket.hasAnyWorkspace) return { ...step, state: "stalled" }; // #479 — exited, nothing landed
-    return { ...step, state: "planned" }; // #481 — ticketed, no workspace ever provisioned
+    // #481 — carry the ticket on the DOWNGRADED states only. Those are the two the user has to
+    // act on, and they are the two where the old UI said "generating" while offering nothing to
+    // click. A `generating` step needs no Start button, so attaching it there would be noise.
+    const ref = { issueId: ticket.id, issueNumber: ticket.issueNumber };
+    if (ticket.hasAnyWorkspace) return { ...step, state: "stalled", ticket: ref }; // #479 — exited, nothing landed
+    return { ...step, state: "planned", ticket: ref }; // #481 — ticketed, no workspace ever provisioned
   });
 }

@@ -305,6 +305,14 @@ export interface PluginLoopProgressStep {
   version?: string;
   /** Repo-relative artifacts this step produced, openable from the stepper. */
   artifacts?: string[];
+  /**
+   * The board ticket this step resolved to, attached by `reconcileProgressStepStates` (#481).
+   *
+   * A planner cannot supply this — it knows unit ids, not board issues. The board joins them
+   * anyway to decide `planned`/`stalled`, so carrying the result costs nothing and is what
+   * lets the stepper offer a Start button instead of telling the user to go find the ticket.
+   */
+  ticket?: { issueId: string; issueNumber: number | null };
 }
 
 export const PLUGIN_CHECK_VERDICTS = ["pass", "warn", "fail"] as const;

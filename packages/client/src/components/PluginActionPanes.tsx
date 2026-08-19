@@ -251,6 +251,8 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
   // Line-anchored review notes collected on the artifact diff (#304).
   const [lineNotes, setLineNotes] = useState<string[]>([]);
   const [switchingMode, setSwitchingMode] = useState(false);
+  /** #481 — the step whose start is in flight, so its button can disable itself. */
+  const [startingStepId, setStartingStepId] = useState<string | null>(null);
   /**
    * Per-unit agent cost for the stepper (#457/#453). The events endpoint computes the cost
    * rollup independently of the event window, so `limit=1` buys the whole `byUnit` join for
@@ -292,6 +294,33 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
   const initialFind = useMemo(() => gateInitialFind(loop.checks), [loop.checks]);
   /** Set when the open artifact came from the gate card, i.e. it is the thing under review. */
   const [artifactFromGate, setArtifactFromGate] = useState(false);
+
+  /**
+   * Start ONE planned step's ticket (#481).
+   *
+   * The complaint this closes: the panel rendered "generating" for a step nothing was working,
+   * while a notice on the same screen said the ticket would not start on its own — and the only
+   * offered remedies were to find the ticket on the board or change Start Mode in another view.
+   * `switchToMonitorMode` below is the blunt instrument (it changes policy for the whole
+   * project); this is the per-step one, for the common case of just wanting THIS step to run.
+   *
+   * Deliberately no branch/skill: `POST /api/workspaces` derives the branch from the issue the
+   * same way every other start path does, so a step started here is indistinguishable from one
+   * the monitor started.
+   */
+  async function startStepTicket(step: PluginProgressStep) {
+    if (!step.ticket || startingStepId) return;
+    setStartingStepId(step.id);
+    try {
+      await apiPost("/api/workspaces", { issueId: step.ticket.issueId });
+      showToast(`Started #${step.ticket.issueNumber ?? "?"} — ${step.label}`, "success");
+      onChanged();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to start the step", "error");
+    } finally {
+      setStartingStepId(null);
+    }
+  }
 
   /**
    * One-click fix for the manual-Start-Mode warning (#428): the loop planned tickets that
@@ -459,6 +488,8 @@ export function PluginLoopPane({ loop, projectId, onChanged, startPolicy = null,
         activePath={openArtifact}
         /* #457 — per-step cost, joined `step-<n>:v<m>` → step id by `stepCost`. */
         costByUnit={costByUnit}
+        onStartStep={startStepTicket}
+        startingStepId={startingStepId}
         onOpenStep={(step, index, total) => {
           setOpenArtifact(step.artifacts![0]);
           setOpenArtifactStep({ label: step.label, version: step.version, artifacts: step.artifacts, index, total });
