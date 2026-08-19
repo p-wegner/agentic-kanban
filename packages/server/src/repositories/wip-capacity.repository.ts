@@ -12,8 +12,13 @@ import type { db } from "../db/index.js";
  * fixed by relocating a pure utility, because the code is a real query.
  *
  * Direction matters, not tidiness: `startup/` composes and drives `services/`, so a service
- * reaching back up means the two can only ever be loaded together. Auto-start's WIP question
- * is a service-level policy question that the monitor happens to be the loudest caller of.
+ * reaching back up means the two can only ever be loaded together.
+ *
+ * A REPOSITORY, not a service, and the layering said so out loud: parked in `services/` this
+ * tripped depcruise's `services-bypass-repositories` within minutes, because it builds a
+ * drizzle query and services may not. It sat in `startup/` for months without complaint —
+ * which is #595's whole thesis in one file. `startup/` is outside every depcruise rule, so
+ * moving code OUT of it is what first subjects it to the layering the rest of the server has.
  */
 
 /** Issues carrying this tag are an explicit opt-out of monitor auto-start. */

@@ -22,7 +22,7 @@ import {
   countActiveWip,
   countWipCapacity,
   type WipCapacitySnapshot,
-} from "../services/wip-capacity.service.js";
+} from "../repositories/wip-capacity.repository.js";
 
 async function hasSkipAutoStartTag(issueId: string): Promise<boolean> {
   const rows = await db.select({ id: tags.id }).from(issueTags)
