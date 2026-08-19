@@ -268,6 +268,7 @@ function VirtualizedCompletedGrid({
       className="shrink-0 max-h-[50vh] sm:max-h-[40vh] overflow-hidden flex flex-col"
     >
       <button
+        data-testid="completed-toggle"
         onClick={onToggle}
         className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 mb-2 transition-colors shrink-0"
       >

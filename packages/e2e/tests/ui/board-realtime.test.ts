@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
 import { getE2EProjectId } from "../helpers/e2e-project.js";
+import { issueCard, narrowBoardTo } from "../helpers/board-ui.js";
 
 test.describe("Board Real-time Updates", () => {
   let projectId: string;
@@ -25,24 +26,29 @@ test.describe("Board Real-time Updates", () => {
   });
 
   test("board updates when issue created via API", async ({ page, request }) => {
+    const suffix = Date.now().toString(36);
+    const uniqueTitle = `RT create test ${suffix}`;
+
     await page.goto("/");
     await page.waitForSelector("h2");
+    // Narrow BEFORE creating: the Todo column is virtualized past 15 issues, so on a board
+    // with real content the new card would never enter the DOM and this spec would report
+    // "board did not update" for a reason that has nothing to do with realtime updates.
+    await narrowBoardTo(page, suffix);
 
-    const uniqueTitle = `RT create test ${Date.now()}`;
     const createRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: { title: uniqueTitle, statusId, projectId },
     });
     createdIssueIds.push((await createRes.json()).id);
 
     // Board should auto-refresh and show the new issue
-    await expect(
-      page.locator("p", { hasText: uniqueTitle }).first(),
-    ).toBeVisible({ timeout: 5000 });
+    await expect(issueCard(page, uniqueTitle)).toBeVisible({ timeout: 5000 });
   });
 
   test("board updates when issue status changes via API", async ({ page, request }) => {
     // Create an issue
-    const uniqueTitle = `RT status test ${Date.now()}`;
+    const suffix = Date.now().toString(36);
+    const uniqueTitle = `RT status test ${suffix}`;
     const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: { title: uniqueTitle, statusId, projectId },
     });
@@ -63,11 +69,10 @@ test.describe("Board Real-time Updates", () => {
 
     await page.goto("/");
     await page.waitForSelector("h2");
+    await narrowBoardTo(page, suffix);
 
     // Wait for the issue to appear
-    await expect(
-      page.locator("p", { hasText: uniqueTitle }).first(),
-    ).toBeVisible({ timeout: 5000 });
+    await expect(issueCard(page, uniqueTitle)).toBeVisible({ timeout: 5000 });
 
     // Move issue to "Done" via API
     await request.patch(`${SERVER_URL}/api/issues/${issueId}`, {
