@@ -11,7 +11,7 @@
  */
 
 import { mkdirSync, writeFileSync, chmodSync } from "node:fs";
-import { join, basename } from "node:path";
+import { join } from "node:path";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { buildAgentPrompt } from "./workspace-create/policy.js";
 import type { Database } from "../db/index.js";
@@ -265,8 +265,10 @@ export function createWorkspaceProvisionService(deps: {
       // once per INSTALLED plugin, i.e. a DB query per plugin on the workspace-create path.
       for (const { manifest } of await listEnabledPlugins(projectId, database)) {
         for (const skill of manifest.skills ?? []) {
-          const name = basename(skill.dir.replace(/\\/g, "/"));
-          await copySkillToWorktree(repoPath, name, worktreePath);
+          // #553: pluginSkillName is the ONE derivation of a plugin skill's directory name
+          // (its comment says three hand-rolled ones disagreed) — the loop and onboarding
+          // resolvers in this same file already use it.
+          await copySkillToWorktree(repoPath, pluginSkillName(skill.dir), worktreePath);
         }
       }
     } catch (err) {

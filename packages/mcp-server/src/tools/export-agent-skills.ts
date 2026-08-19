@@ -3,7 +3,7 @@ import { z } from "zod";
 import { sql } from "drizzle-orm";
 import { access } from "node:fs/promises";
 import { join } from "node:path";
-import { ensureCodexSkillsLink, writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
+import { ensureCodexSkillsLink, skillsDirOf, writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { mcpError, mcpText } from "../db-utils.js";
@@ -47,7 +47,7 @@ export function registerExportAgentSkills(server: McpServer, deps: ToolDeps = pr
           return mcpText("No skills found to export.");
         }
 
-        const skillsDir = join(targetPath, ".claude", "skills");
+        const skillsDir = skillsDirOf(targetPath);
         await ensureCodexSkillsLink(targetPath);
 
         // Track existing skill directories we manage (to clean up stale ones)

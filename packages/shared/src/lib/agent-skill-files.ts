@@ -1,7 +1,24 @@
 import { access, cp, lstat, mkdir, readFile, readdir, symlink, unlink, writeFile } from "node:fs/promises";
-import type { Dirent } from "node:fs";
+import { readdirSync as readdirSyncNode, type Dirent } from "node:fs";
 import { join, relative } from "node:path";
 import { errorMessage } from "./error-message.js";
+
+/**
+ * `<root>/.claude/skills` — the ONE derivation of the skills directory (#553).
+ *
+ * The join was re-derived in fourteen places across four packages, which is what let
+ * three writers/scanners bypass this module's guards entirely (a private scan that
+ * missed junctioned plugin skills, a `writeFileSync` with no name guard and no
+ * frontmatter). Anything that reads or writes a materialized skill goes through these.
+ */
+export function skillsDirOf(root: string): string {
+  return join(root, ".claude", "skills");
+}
+
+/** `<root>/.claude/skills/<name>` — the directory one materialized skill occupies. */
+export function skillDirOf(root: string, skillName: string): string {
+  return join(skillsDirOf(root), skillName);
+}
 
 /**
  * True for a directory entry that may hold a skill.
@@ -85,8 +102,8 @@ export async function writeAgentSkillFile(targetPath: string, skill: AgentSkillF
     // Read it off the unnarrowed value.
     throw new Error(`Invalid skill name for filesystem use: "${String((skill as { name: unknown }).name)}"`);
   }
-  const skillsDir = join(targetPath, ".claude", "skills");
-  const skillDir = join(skillsDir, skill.name);
+  const skillsDir = skillsDirOf(targetPath);
+  const skillDir = skillDirOf(targetPath, skill.name);
 
   await mkdir(skillDir, { recursive: true });
   await writeFile(join(skillDir, "SKILL.md"), buildSkillMarkdown(skill), "utf-8");
@@ -96,7 +113,7 @@ export async function writeAgentSkillFile(targetPath: string, skill: AgentSkillF
 }
 
 export async function ensureCodexSkillsLink(targetPath: string) {
-  const claudeSkillsDir = join(targetPath, ".claude", "skills");
+  const claudeSkillsDir = skillsDirOf(targetPath);
   const codexDir = join(targetPath, ".codex");
   const codexSkillsDir = join(codexDir, "skills");
 
@@ -136,7 +153,7 @@ export async function ensureCodexSkillsLink(targetPath: string) {
 
 /** Path to the installed SKILL.md for a skill inside a project repo. */
 export function localSkillFilePath(repoPath: string, skillName: string): string {
-  return join(repoPath, ".claude", "skills", skillName, "SKILL.md");
+  return join(skillDirOf(repoPath, skillName), "SKILL.md");
 }
 
 /**
@@ -198,7 +215,7 @@ function parseDiskSkillMarkdown(content: string, fallbackName: string): DiskSkil
  * Skills with invalid names (path traversal) are silently skipped.
  */
 export async function scanLocalSkills(repoPath: string): Promise<DiskSkillEntry[]> {
-  const skillsDir = join(repoPath, ".claude", "skills");
+  const skillsDir = skillsDirOf(repoPath);
   const entries = await readdir(skillsDir, { withFileTypes: true }).catch(() => null);
   if (!entries) return [];
   const skills: DiskSkillEntry[] = [];
@@ -222,9 +239,28 @@ export async function scanLocalSkills(repoPath: string): Promise<DiskSkillEntry[
  * would read and parse every file for nothing.
  */
 export async function listLocalSkillNames(repoPath: string): Promise<string[]> {
-  const skillsDir = join(repoPath, ".claude", "skills");
+  const skillsDir = skillsDirOf(repoPath);
   const entries = await readdir(skillsDir, { withFileTypes: true }).catch(() => null);
   if (!entries) return [];
+  return entries
+    .filter((entry) => couldHoldSkill(entry) && isSafeSkillName(entry.name))
+    .map((entry) => entry.name);
+}
+
+/**
+ * The synchronous twin of {@link listLocalSkillNames}, for the launch path, which
+ * assembles its argv synchronously (#553). Same two rules — `couldHoldSkill` (a plugin
+ * skill is a JUNCTION, which readdir reports as a symlink, never a directory) and
+ * `isSafeSkillName` — because a second copy of them is exactly what made plugin skills
+ * invisible to the Pi launcher while they sat plainly on disk.
+ */
+export function listLocalSkillNamesSync(repoPath: string): string[] {
+  let entries: Dirent[];
+  try {
+    entries = readdirSyncNode(skillsDirOf(repoPath), { withFileTypes: true });
+  } catch {
+    return [];
+  }
   return entries
     .filter((entry) => couldHoldSkill(entry) && isSafeSkillName(entry.name))
     .map((entry) => entry.name);
@@ -252,8 +288,8 @@ export async function copySkillToWorktree(repoPath: string, skillName: string, w
   if (!isSafeSkillName(skillName)) {
     return false;
   }
-  const srcDir = join(repoPath, ".claude", "skills", skillName);
-  const destDir = join(worktreePath, ".claude", "skills", skillName);
+  const srcDir = skillDirOf(repoPath, skillName);
+  const destDir = skillDirOf(worktreePath, skillName);
   try {
     const content = await readFile(localSkillFilePath(repoPath, skillName), "utf-8");
     await mkdir(destDir, { recursive: true });
@@ -286,7 +322,7 @@ export async function copySkillToWorktree(repoPath: string, skillName: string, w
  * this case — any existing custom skill means we leave the directory alone.
  */
 export async function isSkillsDirAbsentOrEmpty(repoPath: string): Promise<boolean> {
-  const skillsDir = join(repoPath, ".claude", "skills");
+  const skillsDir = skillsDirOf(repoPath);
   const entries = await readdir(skillsDir, { withFileTypes: true }).catch(() => null);
   if (!entries) return true;
   for (const entry of entries) {
@@ -309,7 +345,7 @@ export async function isSkillsDirAbsentOrEmpty(repoPath: string): Promise<boolea
  * when that strip regressed, this function faithfully generated the corruption. The
  * generated block is authoritative — it comes from the DB row.
  */
-function buildSkillMarkdown(skill: AgentSkillFile) {
+export function buildSkillMarkdown(skill: AgentSkillFile) {
   return [
     "---",
     `name: ${skill.name}`,

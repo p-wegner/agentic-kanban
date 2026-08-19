@@ -1,6 +1,7 @@
 import type { AgentLaunchRequest } from "./agent-dispatch.service.js";
 import { resolveEffectivePrompt } from "./agent-provider/context-files-prompt.js";
 import { spawn, type ChildProcess } from "node:child_process";
+import { listLocalSkillNamesSync, localSkillFilePath } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { openSync, closeSync, readSync, statSync, unlinkSync, existsSync, writeFileSync, readFileSync, appendFileSync, readdirSync, type Dirent } from "node:fs";
 import { join } from "node:path";
 import { buildAgentLaunchConfig, narrowProviderName } from "./agent-provider.js";
@@ -80,18 +81,18 @@ export class AgentState {
 /** Module-level singleton used by all exported functions. */
 export const agentState = new AgentState();
 
+/**
+ * The SKILL.md files materialized into a worktree, for Pi's repeated `--skill` flags.
+ *
+ * Routed through `agent-skill-files` (#553): this used to be a private scan filtering on
+ * `entry.isDirectory()` with its own name regex, and readdir reports a junction as a
+ * SYMLINK, not a directory — so every PLUGIN skill (fanned out as a junction) was invisible
+ * here and never reached the Pi launch, while sitting plainly on disk. `couldHoldSkill` +
+ * `isSafeSkillName` already decide both questions, in one place, for every other reader.
+ */
 function materializedSkillFiles(worktreePath: string): string[] {
-  const skillsDir = join(worktreePath, ".claude", "skills");
-  let entries: Dirent[];
-  try {
-    entries = readdirSync(skillsDir, { withFileTypes: true });
-  } catch {
-    return [];
-  }
-
-  return entries
-    .filter((entry) => entry.isDirectory() && !/[\\/]/.test(entry.name) && entry.name !== "." && entry.name !== "..")
-    .map((entry) => join(skillsDir, entry.name, "SKILL.md"))
+  return listLocalSkillNamesSync(worktreePath)
+    .map((name) => localSkillFilePath(worktreePath, name))
     .filter((skillPath) => existsSync(skillPath));
 }
 

@@ -112,7 +112,7 @@ Examples:
     .action(cliAction(async (targetPath: string, options: { project?: string; names?: string }) => {
       const { access } = await import("node:fs/promises");
       const { join } = await import("node:path");
-      const { ensureCodexSkillsLink, writeAgentSkillFile } = await import("@agentic-kanban/shared/lib/agent-skill-files");
+      const { ensureCodexSkillsLink, skillsDirOf, writeAgentSkillFile } = await import("@agentic-kanban/shared/lib/agent-skill-files");
 
       try {
         await access(targetPath);
@@ -133,7 +133,7 @@ Examples:
         process.exit(0);
       }
 
-      const skillsDir = join(targetPath, ".claude", "skills");
+      const skillsDir = skillsDirOf(targetPath);
       await ensureCodexSkillsLink(targetPath);
 
       for (const skill of rows) {

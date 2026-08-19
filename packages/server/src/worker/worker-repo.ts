@@ -12,6 +12,7 @@
 // adapter (single-spawn architecture gate).
 
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
@@ -105,10 +106,15 @@ export async function provisionWorkerCheckout(
     : `refs/remotes/origin/${repo.baseBranch}`;
   await gitExecOrThrow(["worktree", "add", "-b", localBranch, checkoutDir, startPoint], { cwd: cacheDir });
 
+  // #553: through the shared writer, not a raw writeFileSync. The hand-rolled version
+  // had no `isSafeSkillName` guard and emitted no frontmatter, so a remote worker's
+  // skills were not discoverable as slash-commands the way every local one is.
   for (const skill of repo.skills ?? []) {
-    const dir = join(checkoutDir, ".claude", "skills", skill.name);
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "SKILL.md"), skill.content);
+    await writeAgentSkillFile(checkoutDir, {
+      name: skill.name,
+      description: skill.description ?? "",
+      prompt: skill.content,
+    });
   }
 
   if (repo.setupScript?.trim()) {

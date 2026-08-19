@@ -289,7 +289,7 @@ export function createRemoteAgentService(
               setupScript: repo.setupScript,
               skills: skillRows
                 .filter((s) => typeof s.prompt === "string" && s.prompt.trim().length > 0)
-                .map((s) => ({ name: s.name, content: s.prompt })),
+                .map((s) => ({ name: s.name, description: s.description ?? "", content: s.prompt })),
             },
           });
           if (!delivered) throw new Error(`fleet worker ${workerId} is not connected`);
