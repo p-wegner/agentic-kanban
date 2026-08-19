@@ -1,3 +1,4 @@
+// @gate:always-run — scans the mcp-server tools tree for unsanctioned board-reach; imports nothing it checks (#538/#605).
 /**
  * #605 — the MCP tools have exactly TWO sanctioned ways to reach the board, and this
  * pins both.

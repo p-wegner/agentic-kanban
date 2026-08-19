@@ -1,3 +1,4 @@
+// @gate:always-run — scans the mcp-server tools tree for hand-built error envelopes; imports nothing it checks (#538/#617).
 /**
  * #617 (ring R17) — one spelling for an MCP error return.
  *
