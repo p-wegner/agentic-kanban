@@ -136,3 +136,85 @@ describe("runMergeTrain", () => {
     expect(result.gateFailure).toMatch(/no members/);
   }, 240000);
 });
+
+/**
+ * #492 — one bad branch must not block the rest of the queue.
+ *
+ * Before this, a red train landed NOTHING: five ready branches, one of them broken, cost a
+ * full gate run and left all five unmerged, and the only recovery was to fall back to five
+ * per-ticket gates. Bisecting the batch keeps the good branches moving and — the part that
+ * matters for the author — says WHICH branch was red instead of blaming the batch.
+ */
+describe("runMergeTrain — bisect a red batch (#492)", () => {
+  /** A gate that fails only when the train contains the named branch's file. */
+  function gateFailingFor(badFile: string) {
+    return vi.fn(async ({ trainRef }: { trainRef: string }) => {
+      // gitExecOrThrow resolves with stdout as a STRING, not `{ stdout }`.
+      const tree = await gitExecOrThrow(["ls-tree", "-r", "--name-only", trainRef], { cwd: repo });
+      return tree.split(/\r?\n/).includes(badFile)
+        ? { passed: false, message: `verify failed: ${badFile} is red` }
+        : { passed: true, message: "ok" };
+    });
+  }
+
+  it("lands the good branch and attributes the failure to the bad one", async () => {
+    // f1 -> a.txt (good), f2 -> b.txt (bad).
+    const runGate = gateFailingFor("b.txt");
+    const closeMember = vi.fn().mockResolvedValue(undefined);
+
+    const result = await runMergeTrain({ repoPath: repo, baseBranch: "main", members, label: "bs1", runGate, closeMember });
+
+    expect(result.landed.map((m) => m.branch)).toEqual(["f1"]);
+    expect(result.gateRejected.map((r) => r.member.branch)).toEqual(["f2"]);
+    expect(result.gateRejected[0].reason).toContain("b.txt is red");
+    // The good branch really is on the base; the bad one really is not.
+    expect(await isAncestor(repo, await revParse(repo, "f1"), "main")).toBe(true);
+    expect(await isAncestor(repo, await revParse(repo, "f2"), "main")).toBe(false);
+    // A gate-rejected member is not a DROPPED member — dropped means "could not assemble".
+    expect(result.dropped).toEqual([]);
+  }, 240000);
+
+  it("costs ONE gate run when the batch is green — bisect never fires on the happy path", async () => {
+    const runGate = vi.fn().mockResolvedValue({ passed: true, message: "ok" });
+    const result = await runMergeTrain({
+      repoPath: repo, baseBranch: "main", members, label: "bs2", runGate, closeMember: vi.fn().mockResolvedValue(undefined),
+    });
+    expect(runGate).toHaveBeenCalledTimes(1);
+    expect(result.gateRuns).toBe(1);
+    expect(result.landed).toHaveLength(2);
+  }, 240000);
+
+  it("reports the gate runs it actually spent, so the batching claim is falsifiable", async () => {
+    const runGate = gateFailingFor("b.txt");
+    const result = await runMergeTrain({
+      repoPath: repo, baseBranch: "main", members, label: "bs3", runGate, closeMember: vi.fn().mockResolvedValue(undefined),
+    });
+    // Full batch (red) + each half individually = 3, and the count says so rather than the
+    // caller assuming the advertised 1.
+    expect(result.gateRuns).toBe(runGate.mock.calls.length);
+    expect(result.gateRuns).toBeGreaterThan(1);
+  }, 240000);
+
+  it("still lands NOTHING, and blames nobody individually, when bisect is off", async () => {
+    // The old all-or-nothing behaviour, kept reachable so the change is a choice, not a fait
+    // accompli.
+    const runGate = gateFailingFor("b.txt");
+    const result = await runMergeTrain({
+      repoPath: repo, baseBranch: "main", members, label: "bs4", runGate,
+      closeMember: vi.fn().mockResolvedValue(undefined), bisectOnFailure: false,
+    });
+    expect(result.landed).toEqual([]);
+    expect(runGate).toHaveBeenCalledTimes(1);
+    expect(result.gateFailure).toContain("b.txt is red");
+  }, 240000);
+
+  it("attributes EVERY branch when they are all red, rather than one arbitrary scapegoat", async () => {
+    const runGate = vi.fn().mockResolvedValue({ passed: false, message: "everything is red" });
+    const result = await runMergeTrain({
+      repoPath: repo, baseBranch: "main", members, label: "bs5", runGate, closeMember: vi.fn(),
+    });
+    expect(result.landed).toEqual([]);
+    expect(result.gateRejected.map((r) => r.member.branch).sort()).toEqual(["f1", "f2"]);
+    expect(result.gateFailure).toBeTruthy();
+  }, 240000);
+});

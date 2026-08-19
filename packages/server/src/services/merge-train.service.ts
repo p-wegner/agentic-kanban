@@ -219,12 +219,91 @@ export interface TrainRunResult {
   dropped: Array<{ member: TrainMember; reason: string }>;
   /** Set when the batch did not land; the members remain unmerged. */
   gateFailure?: string;
+  /**
+   * How many gate runs this train cost, INCLUDING bisect re-gates (#492). The happy path is
+   * 1 for any batch size — the whole point — and a reader needs to see when it was not, or
+   * the "N merges, 1 gate" claim is unfalsifiable.
+   */
+  gateRuns: number;
+  /**
+   * Members a bisect individually proved red (#492). They are NOT in `landed` and NOT in
+   * `dropped` — `dropped` means "could not be assembled" (a conflict), this means "assembled
+   * fine and failed the gate on its own". Keeping them apart matters: a conflict is the
+   * author's to rebase, a gate failure is the author's to FIX, and reporting one as the other
+   * sends them to the wrong place.
+   */
+  gateRejected: Array<{ member: TrainMember; reason: string }>;
   mergeSha?: string;
   /** Members that landed but could not be closed out — they ARE merged; only bookkeeping lags. */
   closeFailures: Array<{ member: TrainMember; reason: string }>;
 }
 
 export async function runMergeTrain(args: {
+  repoPath: string;
+  baseBranch: string;
+  members: TrainMember[];
+  label: string;
+  runGate: (ctx: { trainRef: string; trainSha: string }) => Promise<{ passed: boolean; message: string }>;
+  closeMember: (workspaceId: string) => Promise<void>;
+  /**
+   * Bisect a red batch instead of rejecting it whole (#492). Default ON: without it, one bad
+   * branch blocks every other branch in the queue indefinitely, which is the failure mode
+   * that made batching not worth having. Set false to restore the all-or-nothing behaviour.
+   */
+  bisectOnFailure?: boolean;
+}): Promise<TrainRunResult> {
+  const { repoPath, baseBranch, members, label, runGate, closeMember } = args;
+  const bisect = args.bisectOnFailure !== false;
+
+  /**
+   * Land as much of `subset` as is green, splitting on failure.
+   *
+   * A red train of one member is ATTRIBUTION — that member is the culprit, and it goes to
+   * `gateRejected` so the caller can tell its author. A red train of several is a question,
+   * and halving answers it: each half is assembled against the base as it stands THEN, so a
+   * green first half lands before the second half is even built. That is what keeps the good
+   * branches moving past a bad one.
+   *
+   * Cost: 1 gate run when the batch is green (the case this feature exists for). With k bad
+   * branches out of n it is bounded by O(k log n) runs — worse than n only when nearly
+   * everything is red, and in that case the queue was never going to land in one run anyway.
+   */
+  async function landGreenest(subset: TrainMember[], subLabel: string): Promise<TrainRunResult> {
+    const attempt = await runTrainAttempt({ ...args, members: subset, label: subLabel });
+    if (attempt.landed.length > 0 || !attempt.gateFailure) return attempt;
+    // Nothing landed and the gate is why. (An assembly-empty batch has no gate to blame and
+    // must not be split — halving it would just re-discover the same conflicts.)
+    if (!bisect || subset.length <= 1 || attempt.dropped.length === subset.length) {
+      return {
+        ...attempt,
+        gateRejected: subset.length === 1
+          ? [{ member: subset[0], reason: attempt.gateFailure }]
+          : attempt.gateRejected,
+      };
+    }
+    const mid = Math.floor(subset.length / 2);
+    const first = await landGreenest(subset.slice(0, mid), `${subLabel}a`);
+    const second = await landGreenest(subset.slice(mid), `${subLabel}b`);
+    return {
+      trainRef: attempt.trainRef,
+      landed: [...first.landed, ...second.landed],
+      dropped: [...attempt.dropped, ...first.dropped, ...second.dropped],
+      gateRejected: [...first.gateRejected, ...second.gateRejected],
+      closeFailures: [...first.closeFailures, ...second.closeFailures],
+      gateRuns: attempt.gateRuns + first.gateRuns + second.gateRuns,
+      mergeSha: second.mergeSha ?? first.mergeSha,
+      // Only still a whole-batch failure if neither half landed anything.
+      ...(first.landed.length + second.landed.length === 0
+        ? { gateFailure: attempt.gateFailure }
+        : {}),
+    };
+  }
+
+  return await landGreenest(members, label);
+}
+
+/** ONE assemble → gate → land → close cycle. The bisect driver above composes these. */
+async function runTrainAttempt(args: {
   repoPath: string;
   baseBranch: string;
   members: TrainMember[];
@@ -245,7 +324,7 @@ export async function runMergeTrain(args: {
   // `deleteTrainRef` is itself best-effort and never throws, so it cannot mask a real error.
   try {
     if (asm.included.length === 0 || !asm.trainSha) {
-      return { trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateFailure: "no members could be assembled onto the train" };
+      return { trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], gateRuns: 0, gateFailure: "no members could be assembled onto the train" };
     }
 
     // Cheap insurance before spending a gate on it: if assembly somehow produced a train that
@@ -254,7 +333,7 @@ export async function runMergeTrain(args: {
 
     const gate = await runGate({ trainRef: asm.trainRef, trainSha: asm.trainSha });
     if (!gate.passed) {
-      return { trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateFailure: gate.message };
+      return { trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], gateRuns: 1, gateFailure: gate.message };
     }
 
     const { mergeSha } = await landMergeTrain({
@@ -279,7 +358,7 @@ export async function runMergeTrain(args: {
       }
     }
 
-    return { trainRef: asm.trainRef, landed: asm.included, dropped: asm.dropped, mergeSha, closeFailures };
+    return { trainRef: asm.trainRef, landed: asm.included, dropped: asm.dropped, mergeSha, closeFailures, gateRejected: [], gateRuns: 1 };
   } finally {
     await deleteTrainRef(repoPath, asm.trainRef);
   }
