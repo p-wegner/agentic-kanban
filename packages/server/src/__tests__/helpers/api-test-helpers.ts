@@ -84,7 +84,16 @@ export function ensureFixtureRepo(): string {
   return repoPath;
 }
 
-// Helper: create a project directly in DB (bypassing git-info detection)
+/**
+ * Create a project directly in the DB (bypassing git-info detection), with NO status
+ * columns — its callers compose bespoke, minimal status sets via `createStatusDirectly`.
+ *
+ * Deliberately NOT routed through `buildProjectStatusRows` (#563): seeding the full
+ * production topology here would add columns the board-endpoint assertions in its 13
+ * callers do not expect, for no gain — those tests are not about the status topology.
+ * The helpers that DO mean to seed a whole project (`workflow-test-helpers.seedProject`,
+ * the mcp-server `seed.ts`, `cli.test.ts`) go through the shared builder instead.
+ */
 export async function createProjectDirectly(database: TestDb, overrides: {
   name?: string;
   repoPath?: string;

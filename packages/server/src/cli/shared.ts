@@ -7,14 +7,6 @@ export { runMigrations } from "../db/manual-migrate.js";
 import { runMigrations as runMigrationsForAction } from "../db/manual-migrate.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
-export const DEFAULT_STATUSES = [
-  { name: "Todo", sortOrder: 0, isDefault: true },
-  { name: "In Progress", sortOrder: 1, isDefault: false },
-  { name: "In Review", sortOrder: 2, isDefault: false },
-  { name: "AI Reviewed", sortOrder: 3, isDefault: false },
-  { name: "Done", sortOrder: 4, isDefault: false },
-  { name: "Cancelled", sortOrder: 5, isDefault: false },
-];
 
 export function logDefaultBranch(defaultBranch: string | null | undefined, indent = "  ") {
   if (defaultBranch) {

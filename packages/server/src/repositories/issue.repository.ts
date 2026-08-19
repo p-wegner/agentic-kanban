@@ -1,6 +1,7 @@
 import { issues, workspaces, projectStatuses, workflowNodes, tags, issueTags, issueDependencies, issueArtifacts, agentSkills } from "@agentic-kanban/shared/schema";
 import { loadIssueSummary, type IssueSummaryResult } from "@agentic-kanban/shared/lib/issue-summary";
 import { parseIssueRef } from "@agentic-kanban/shared/lib/issue-ref";
+import { DEFAULT_PROJECT_STATUSES, buildProjectStatusRows, statusIdsByName } from "@agentic-kanban/shared/lib/project-statuses";
 import { eq, inArray, and, gte, count } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
@@ -27,31 +28,29 @@ export {
 // here so the existing importers (issue.service, routes, tests) are unchanged.
 export type { IssueSummaryResult };
 
-export const DEFAULT_STATUSES = [
-  { name: "Backlog", sortOrder: -1, isDefault: false },
-  { name: "Todo", sortOrder: 0, isDefault: true },
-  { name: "In Progress", sortOrder: 1, isDefault: false },
-  { name: "In Review", sortOrder: 2, isDefault: false },
-  { name: "AI Reviewed", sortOrder: 3, isDefault: false },
-  { name: "Done", sortOrder: 4, isDefault: false },
-  { name: "Cancelled", sortOrder: 5, isDefault: false },
-];
+/**
+ * The default status topology now lives in `@agentic-kanban/shared/lib/project-statuses`
+ * so the test helpers can seed exactly what production creates (#563). Re-exported here
+ * because the CLI's `register`/`create` commands print it from this module.
+ */
+export const DEFAULT_STATUSES = DEFAULT_PROJECT_STATUSES;
 
+/**
+ * Seed a new project's status columns and RETURN their ids by name (#563).
+ *
+ * It used to return `void`, which is why no caller could hand ids on and 137 test files
+ * grew their own hand-rolled (and drifted) seeders instead.
+ */
 export async function initializeProjectStatuses(
   projectId: string,
   now: string,
   database: Database = db,
-): Promise<void> {
-  for (const status of DEFAULT_STATUSES) {
-    await database.insert(projectStatuses).values({
-      id: randomUUID(),
-      projectId,
-      name: status.name,
-      sortOrder: status.sortOrder,
-      isDefault: status.isDefault,
-      createdAt: now,
-    });
+): Promise<Record<string, string>> {
+  const rows = buildProjectStatusRows(projectId, now);
+  for (const row of rows) {
+    await database.insert(projectStatuses).values(row);
   }
+  return statusIdsByName(rows);
 }
 
 /**

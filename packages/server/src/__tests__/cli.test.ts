@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import { drizzle } from "drizzle-orm/libsql";
 import { createClient } from "@libsql/client";
+import { buildProjectStatusRows } from "@agentic-kanban/shared/lib/project-statuses";
 import * as schema from "@agentic-kanban/shared/schema";
 import { eq, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
@@ -22,14 +23,6 @@ const TSX_LOADER = pathToFileURL(
   resolve(PKG_DIR, "node_modules/tsx/dist/loader.mjs")
 ).href;
 
-const DEFAULT_STATUSES = [
-  { name: "Todo", sortOrder: 0, isDefault: true },
-  { name: "In Progress", sortOrder: 1, isDefault: false },
-  { name: "In Review", sortOrder: 2, isDefault: false },
-  { name: "AI Reviewed", sortOrder: 3, isDefault: false },
-  { name: "Done", sortOrder: 4, isDefault: false },
-  { name: "Cancelled", sortOrder: 5, isDefault: false },
-];
 
 function applyMigrations(dbPath: string) {
   const client = createClient({ url: `file:${dbPath}` });
@@ -110,10 +103,10 @@ async function seedProject(dbPath: string, overrides: { name?: string; repoPath?
     id, name, repoPath, repoName: "test-repo", defaultBranch: "main", createdAt: now, updatedAt: now,
   });
 
-  for (const s of DEFAULT_STATUSES) {
-    await database.insert(schema.projectStatuses).values({
-      id: randomUUID(), projectId: id, name: s.name, sortOrder: s.sortOrder, isDefault: s.isDefault, createdAt: now,
-    });
+  // The production topology, from the one place that defines it (#563). This used to be
+  // a fourth hand-maintained copy here, and it had already lost the "Backlog" column.
+  for (const row of buildProjectStatusRows(id, now)) {
+    await database.insert(schema.projectStatuses).values(row);
   }
 
   await database.insert(schema.preferences).values({ key: "activeProjectId", value: id, updatedAt: now })

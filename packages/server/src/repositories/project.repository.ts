@@ -136,8 +136,10 @@ export async function insertProject(
     updatedAt: now,
   });
 
-  await initializeProjectStatuses(id, now, database);
-  return { id, name: values.name, repoPath: values.repoPath, defaultBranch: values.defaultBranch };
+  // Hand the freshly-minted status ids back (#563) — the caller otherwise has to
+  // re-query the table it just populated to learn where to put the first issue.
+  const statusIds = await initializeProjectStatuses(id, now, database);
+  return { id, name: values.name, repoPath: values.repoPath, defaultBranch: values.defaultBranch, statusIds };
 }
 
 /**
