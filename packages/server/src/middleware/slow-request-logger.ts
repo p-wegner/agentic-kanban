@@ -1,3 +1,4 @@
+import { readBoardEnv } from "../lib/env-registry.js";
 import type { MiddlewareHandler } from "hono";
 
 const DEFAULT_THRESHOLD_MS = 200;
@@ -119,7 +120,7 @@ export function clearSlowRequests(): void {
 }
 
 function getThreshold(): number {
-  const raw = process.env.SLOW_REQUEST_THRESHOLD_MS;
+  const raw = readBoardEnv("KANBAN_SLOW_REQUEST_THRESHOLD_MS");
   if (raw != null && raw !== "") {
     const parsed = Number(raw);
     if (Number.isFinite(parsed) && parsed > 0) return parsed;

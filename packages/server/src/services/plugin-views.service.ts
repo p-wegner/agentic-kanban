@@ -14,6 +14,7 @@
  * `plugin.service.ts` never touches the map directly; it goes through `stopAllPluginViews()` /
  * `stopPluginViews()` and the runtime returned by `createPluginViewsRuntime()`.
  */
+import { readBoardEnv } from "../lib/env-registry.js";
 import net from "node:net";
 import type { ChildProcess } from "node:child_process";
 import {
@@ -42,7 +43,7 @@ const READINESS_POLL_MS = 150;
 
 /** Read per call, not at import, so a test (or an operator) can retune it without a restart. */
 function readinessTimeoutMs(): number {
-  const raw = Number(process.env.PLUGIN_VIEW_READY_TIMEOUT_MS);
+  const raw = Number(readBoardEnv("KANBAN_PLUGIN_VIEW_READY_TIMEOUT_MS"));
   return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_READINESS_TIMEOUT_MS;
 }
 

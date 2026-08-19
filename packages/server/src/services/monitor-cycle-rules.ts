@@ -1,3 +1,4 @@
+import { readBoardEnv } from "../lib/env-registry.js";
 import { parseSessionStatsBlob, readUsageLimitStats } from "@agentic-kanban/shared";
 import { isBuilderCycleTrigger } from "@agentic-kanban/shared/lib/session-trigger";
 import type { WorkspaceCandidate } from "../startup/monitor-cycle.js";
@@ -26,7 +27,7 @@ export type LatestSession = {
 };
 
 export function parseStuckBuilderTimeoutMs(): number {
-  const fromEnv = Number(process.env.STUCK_BUILDER_TIMEOUT_MS);
+  const fromEnv = Number(readBoardEnv("KANBAN_STUCK_BUILDER_TIMEOUT_MS"));
   return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : DEFAULT_STUCK_BUILDER_TIMEOUT_MS;
 }
 

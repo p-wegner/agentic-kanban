@@ -16,7 +16,7 @@ import { DatabaseSync } from "node:sqlite";
  * reads/writes, the recurring "board looks empty" worktree incident). See #962.
  *
  * Precedence — an EXPLICIT env override ALWAYS wins over the on-disk probe:
- *   1. `DB_URL`               — explicit connection URL, used verbatim.
+ *   1. `KANBAN_DB_URL` (or the legacy `DB_URL`) — explicit connection URL, used verbatim.
  *   2. `AGENTIC_KANBAN_DIR`   — explicit data dir; `<dir>/kanban.db`.
  *   3. in-checkout dev DB     — the first `localDbCandidates` path that exists AND
  *                              looks like a real, non-empty board (size floor + content probe).
@@ -170,7 +170,10 @@ export function resolveDbLocation(opts: ResolveDbLocationOptions = {}): DbLocati
 
   // 1. DB_URL — explicit connection URL, verbatim. A non-`file:` URL (e.g. a
   //    remote libsql endpoint) has no on-disk path/dir.
-  const dbUrl = env.DB_URL;
+  // #615 — canonical name first, the pre-rename `DB_URL` still honoured. This resolver is
+  // pure and lives in `shared`, so it cannot use the server's `readBoardEnv`; the precedence
+  // is the same and `env-registry-doc-parity.test.ts` pins the pair.
+  const dbUrl = env.KANBAN_DB_URL || env.DB_URL;
   if (dbUrl) {
     const path = dbUrl.startsWith("file:") ? filePathFromFileUrl(dbUrl) : null;
     return { url: dbUrl, path, dir: path ? dirname(path) : null, source: "DB_URL", rejectedLocalCandidates: [] };

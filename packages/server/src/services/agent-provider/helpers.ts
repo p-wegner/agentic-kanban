@@ -1,3 +1,4 @@
+import { readBoardEnv } from "../../lib/env-registry.js";
 import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -472,8 +473,9 @@ export function resolveMockLaunch(
   defaultBinary: string,
 ): MockLaunchResolution {
   const { agentCommand, providerSessionId, keepAlive } = options;
-  const isMockAgent = !!process.env.AGENT_COMMAND || isMockAgentCommand(agentCommand);
-  const command = process.env.AGENT_COMMAND || agentCommand || defaultBinary;
+  const agentCommandOverride = readBoardEnv("KANBAN_AGENT_COMMAND");
+  const isMockAgent = !!agentCommandOverride || isMockAgentCommand(agentCommand);
+  const command = agentCommandOverride || agentCommand || defaultBinary;
 
   const mockArgs: string[] = [];
   if (isMockAgent) {
