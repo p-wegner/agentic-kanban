@@ -221,6 +221,8 @@ export async function buildDriveDashboard(
 
   // --- cold-build-clean status ---
   const coldCloneRaw = await getPreference(coldCloneCheckPrefKey(projectId), database);
+  // #551: deliberately the RAW pref, not `resolveEffectiveVerify` — this asks whether a gate is
+  // CONFIGURED (what preflight/onboarding repair), not what the gate would run.
   const verifyRaw = await getPreference(verifyScriptPrefKey(projectId), database);
   // Surface the most recent build/verify-related event from the error/server/launch
   // streams (a failed cold-clone build emits a session_failed/error event).

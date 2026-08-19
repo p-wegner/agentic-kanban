@@ -7,6 +7,7 @@ import { createTestDb } from "./helpers/test-db.js";
 import {
   deriveVerifyScriptFromProfile,
   populateVerifyScript,
+  resolveEffectiveVerify,
   verifyScriptPrefKey,
 } from "../services/stack-profile.service.js";
 import { getPreference, setPreference } from "../repositories/preferences.repository.js";
@@ -109,5 +110,60 @@ describe("populateVerifyScript", () => {
     const written = await populateVerifyScript("proj-4", dir, db);
     expect(written).toBe("go test ./...");
     expect(await getPreference(verifyScriptPrefKey("proj-4"), db)).toBe("go test ./...");
+  });
+});
+
+describe("resolveEffectiveVerify (#551)", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await tmp();
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("prefers the override, and still carries the stack's rules", async () => {
+    const { db } = createTestDb();
+    await setPreference(verifyScriptPrefKey("p"), "make custom-check", db);
+    const eff = await resolveEffectiveVerify("p", db, { profile: profile({ testCommand: "pnpm test" }), repoPath: dir });
+    expect(eff?.command).toBe("make custom-check");
+    expect(eff?.source).toBe("override");
+    // The per-stack traps are true of the STACK, not of the particular invocation.
+    expect(eff?.rules.length).toBeGreaterThan(0);
+  });
+
+  it("derives from the profile when no override is set", async () => {
+    const { db } = createTestDb();
+    const eff = await resolveEffectiveVerify("p", db, {
+      profile: profile({ testCommand: "pnpm test", buildCommand: "pnpm run build" }),
+      repoPath: dir,
+    });
+    expect(eff?.command).toBe("pnpm test && pnpm run build");
+    expect(eff?.source).toBe("derived");
+  });
+
+  it("does not persist a derived command unless asked to", async () => {
+    const { db } = createTestDb();
+    const opts = { profile: profile({ testCommand: "pnpm test" }), repoPath: dir };
+    await resolveEffectiveVerify("p", db, opts);
+    expect(await getPreference(verifyScriptPrefKey("p"), db)).toBeNull();
+    await resolveEffectiveVerify("p", db, { ...opts, persistDerived: true });
+    expect(await getPreference(verifyScriptPrefKey("p"), db)).toBe("pnpm test");
+  });
+
+  it("returns null when nothing can be resolved", async () => {
+    const { db } = createTestDb();
+    const eff = await resolveEffectiveVerify("p", db, { profile: null, repoPath: dir });
+    expect(eff).toBeNull();
+  });
+
+  it("gives the ticket context and the gate the SAME command on an overridden project", async () => {
+    const { db } = createTestDb();
+    await setPreference(verifyScriptPrefKey("p"), "gradlew.bat test", db);
+    const forGate = await resolveEffectiveVerify("p", db, { profile: profile({ testCommand: "pnpm test" }), repoPath: dir, persistDerived: true });
+    const forTicket = await resolveEffectiveVerify("p", db, { profile: profile({ testCommand: "pnpm test" }), repoPath: dir });
+    expect(forTicket?.command).toBe(forGate?.command);
   });
 });

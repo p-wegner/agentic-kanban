@@ -37,7 +37,7 @@ import {
   getMergeBackoffState,
   setMergeBackoffState,
 } from "../repositories/merge-backoff.repository.js";
-import { verifyScriptPrefKey } from "./stack-profile.service.js";
+import { resolveEffectiveVerify } from "./stack-profile.service.js";
 import { recordDriveObstacle, type ObstacleBroadcaster } from "./drive-obstacles.service.js";
 import { emitButlerSystemEvent } from "./butler-event-feed.js";
 
@@ -193,9 +193,12 @@ function makeDefaultIsMainCheckoutClean(database: Database) {
 function makeDefaultVerifyScriptHash(database: Database) {
   return async (projectId: string): Promise<string | null> => {
     try {
-      const script = await getPreference(verifyScriptPrefKey(projectId), database);
-      if (!script || !script.trim()) return null;
-      return createHash("sha1").update(script).digest("hex").slice(0, 16);
+      // #551: hash what the gate WILL run (override, else derived) — a project whose gate
+      // is derived rather than overridden used to hash to null, so its backoff never
+      // invalidated when the stack profile changed the command.
+      const effective = await resolveEffectiveVerify(projectId, database);
+      if (!effective) return null;
+      return createHash("sha1").update(effective.command).digest("hex").slice(0, 16);
     } catch {
       return null;
     }
