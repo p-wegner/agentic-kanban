@@ -1,5 +1,6 @@
 import { issues, workspaces, projectStatuses, workflowNodes, tags, issueTags, issueDependencies, issueArtifacts, agentSkills } from "@agentic-kanban/shared/schema";
 import { loadIssueSummary, type IssueSummaryResult } from "@agentic-kanban/shared/lib/issue-summary";
+import { parseIssueRef } from "@agentic-kanban/shared/lib/issue-ref";
 import { eq, inArray, and, gte, count } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
@@ -101,10 +102,11 @@ export async function getIssueSummary(
    */
   projectId?: string,
 ): Promise<IssueSummaryResult | null> {
-  const ref = /^\d+$/.test(idParam)
-    ? { issueNumber: Number(idParam), projectId }
-    : { issueId: idParam };
-  return loadIssueSummary(database, ref);
+  const parsed = parseIssueRef(idParam);
+  return loadIssueSummary(
+    database,
+    parsed.kind === "number" ? { issueNumber: parsed.issueNumber, projectId } : { issueId: parsed.issueId },
+  );
 }
 
 export async function getIssuesByProject(

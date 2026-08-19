@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
-import { isResolvedDependencyStatusView } from "@agentic-kanban/shared";
+import { isResolvedDependencyStatusView, parseIssueRef } from "@agentic-kanban/shared";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { mcpJson, requireEntity, resolveActiveProjectId } from "../db-utils.js";
 
@@ -15,7 +15,7 @@ export function registerGetIssue(server: McpServer, deps: ToolDeps = prodDeps) {
       projectId: z.string().optional().describe("Project ID — required when resolving by issue number to avoid cross-project ambiguity"),
     },
     async ({ issueId, projectId }) => {
-      const isNumeric = /^\d+$/.test(issueId);
+      const ref = parseIssueRef(issueId);
       // #506: a numeric ref with no explicit projectId used to fall back to an UNSCOPED
       // lookup, despite this parameter's own description calling it "required ... to avoid
       // cross-project ambiguity". Issue numbers are per-project, so that returned an
@@ -25,15 +25,15 @@ export function registerGetIssue(server: McpServer, deps: ToolDeps = prodDeps) {
       // — a board with no active project is a degenerate state, and turning a previously
       // working call into an error would be a contract change this fix does not need.
       let scopeProjectId = projectId;
-      if (isNumeric && !scopeProjectId) {
+      if (ref.kind === "number" && !scopeProjectId) {
         const resolved = await resolveActiveProjectId(db, schema);
         if (resolved.ok) scopeProjectId = resolved.projectId;
       }
-      const whereClause = isNumeric
+      const whereClause = ref.kind === "number"
         ? (scopeProjectId
-            ? and(eq(schema.issues.issueNumber, Number(issueId)), eq(schema.issues.projectId, scopeProjectId))
-            : eq(schema.issues.issueNumber, Number(issueId)))
-        : eq(schema.issues.id, issueId);
+            ? and(eq(schema.issues.issueNumber, ref.issueNumber), eq(schema.issues.projectId, scopeProjectId))
+            : eq(schema.issues.issueNumber, ref.issueNumber))
+        : eq(schema.issues.id, ref.issueId);
 
       const issues = await db.select({
         id: schema.issues.id,
