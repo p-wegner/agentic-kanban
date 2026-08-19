@@ -1,3 +1,4 @@
+import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { issueTags, preferences, projects, repos, sessions, tags, workspaces } from "@agentic-kanban/shared/schema";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { runDoneUnmergedScannerNow } from "./done-unmerged-invariant-scanner.js";
@@ -63,7 +64,7 @@ export function hasVisuallyVerifiableChanges(changedFiles: string[], isWebProjec
 /** Tag the issue with "needs-visual-verification" when in after_merge mode and client files changed. */
 export async function tagIfNeedsVisualVerification(repoPath: string, branch: string, baseBranch: string | null, issueId: string, now: string, projectId?: string): Promise<void> {
   try {
-    const prefRows = await db.select({ key: preferences.key, value: preferences.value }).from(preferences);
+    const prefRows = await getAllPreferencesCached(db);
     const prefMap = toPrefMap(prefRows);
     if (prefMap.get("visual_verification_mode") !== "after_merge") return;
 
@@ -248,7 +249,7 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
     // TypeScript's control-flow analysis would otherwise narrow the outer variable to `null`.
     const merge: { landed: { mergedAt: string; mergedHeadSha: string | null } | null } = { landed: null };
     try {
-      const prefRowsLearning = await db.select().from(preferences);
+      const prefRowsLearning = await getAllPreferencesCached(db);
       const prefMapLearning = toPrefMap(prefRowsLearning);
       if (getBool(prefMapLearning, "learning_step_before_merge") && workspace.workingDir) {
         try {

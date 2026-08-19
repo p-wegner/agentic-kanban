@@ -315,7 +315,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
     (triggerTimer).unref?.();
   }
   async function refreshMonitorWarnings(prefMap?: Map<string, string>) {
-    const prefs = prefMap ?? new Map((await db.select().from(preferences)).map((r) => [r.key, r.value]));
+    const prefs = prefMap ?? toPrefMap(await getAllPreferencesCached(db));
     const warnings: MonitorWarning[] = [
       ...await scanDirtyMainCheckouts(db),
       ...await scanAutodriveStallWarnings(db, prefs),
@@ -413,7 +413,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
     let warningCount = monitorState.warnings.length;
     try {
       setPhase("loading-preferences");
-      const prefRows = await db.select().from(preferences);
+      const prefRows = await getAllPreferencesCached(db);
       const prefMap = toPrefMap(prefRows);
       if (!force && !monitorShouldRun(prefMap)) return;
       cycleDidWork = true;
@@ -667,7 +667,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
         ...(skippedProjectIds.length > 0 ? { skippedProjectIds } : {}),
         ...(notStartedProjectIds.length > 0 ? { notStartedProjectIds } : {}),
       };
-      const prefRows = await db.select().from(preferences).catch(() => []);
+      const prefRows = await getAllPreferencesCached(db).catch(() => []);
       const prefMap = new Map(prefRows.map((r: { key: string; value: string }) => [r.key, r.value]));
       if (monitorShouldRun(prefMap)) {
         const intervalMin = getNumber(prefMap, "auto_monitor_interval");
@@ -687,7 +687,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
   }
 
   async function syncMonitorState() {
-    const prefRows = await db.select().from(preferences).catch(() => []);
+    const prefRows = await getAllPreferencesCached(db).catch(() => []);
     const prefMap = new Map(prefRows.map((r: { key: string; value: string }) => [r.key, r.value]));
     // #349: this ran every 30s (the `syncMonitorInterval` period) and was AWAITED, with no
     // re-entrancy guard — so a scan measured at 203-265s had ~8 copies of itself in flight at
@@ -725,7 +725,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
   async function runStandaloneResourceSweep(force = false): Promise<BoardMonitorResourceSnapshot | null> {
     try {
       if (!force) {
-        const prefRows = await db.select().from(preferences).catch(() => []);
+        const prefRows = await getAllPreferencesCached(db).catch(() => []);
         const prefMap = new Map(prefRows.map((r: { key: string; value: string }) => [r.key, r.value]));
         if (monitorShouldRun(prefMap)) return null;
       }

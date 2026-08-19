@@ -1,3 +1,4 @@
+import { boardStrategyPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { ACCENT, BRAND } from "./chartColors";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import {
@@ -73,8 +74,13 @@ export const KIND_LABELS: Record<SegmentKind, string> = {
   custom: "Custom",
 };
 
+/**
+ * #613 — delegates to the ONE family in shared. This was the second deriver of the Strategy
+ * Bullseye key: the client could not reach the server's helper, so it re-spelled the key,
+ * and a drift here would have written a preference the server never reads.
+ */
 export function settingsKey(projectId: string) {
-  return `board_strategy_${projectId}`;
+  return boardStrategyPref.key(projectId);
 }
 
 export function presetsKey(projectId: string) {

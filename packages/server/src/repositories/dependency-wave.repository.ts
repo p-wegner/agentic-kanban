@@ -1,3 +1,4 @@
+import { boardStrategyPref, projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { issueDependencies, issues, preferences, projectStatuses, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
@@ -14,11 +15,13 @@ import type { Database } from "../db/index.js";
  * Returns the whole map rather than one value so the caller can apply the same precedence the
  * monitor uses (`resolveMonitorTunables`) instead of re-deriving a second answer here.
  */
+const wipLimitPref = projectPref("wip_limit");
+
 export async function getWipLimitPrefMap(
   projectId: string,
   database: Database = db,
 ): Promise<Map<string, string>> {
-  const keys = [`wip_limit_${projectId}`, `board_strategy_${projectId}`, "nudge_wip_limit"];
+  const keys = [wipLimitPref.key(projectId), boardStrategyPref.key(projectId), "nudge_wip_limit"];
   const prefRows = await database
     .select({ key: preferences.key, value: preferences.value })
     .from(preferences)

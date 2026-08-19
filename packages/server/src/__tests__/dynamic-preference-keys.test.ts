@@ -3,6 +3,7 @@ import {
   isProjectScopedDynamicKey,
   PROJECT_SCOPED_KEY_PREFIXES,
   FREEFORM_SUFFIX_KEY_PREFIXES,
+  isBoardStrategyPreferenceKey,
 } from "../lib/dynamic-preference-keys.js";
 
 const PROJECT_ID = "0b3f1a2c-4d5e-6789-abcd-ef0123456789";
@@ -53,8 +54,20 @@ describe("isProjectScopedDynamicKey", () => {
     expect(isProjectScopedDynamicKey("butler_event_feed")).toBe(false);
   });
 
-  it("does not match the board-strategy key (handled separately by the service)", () => {
-    expect(isProjectScopedDynamicKey(`board_strategy_${PROJECT_ID}`)).toBe(false);
+  it("matches the board-strategy key, now that its family is registered (#613)", () => {
+    // It used to be false: `board_strategy` was missing from the prefix table and was
+    // OR-ed in by a dedicated predicate instead. Nothing was newly ACCEPTED or REJECTED by
+    // registering it — the dedicated predicate is still OR-ed in and is deliberately looser
+    // than the table's strict UUID suffix — but the family is now buildable with
+    // `projectPref`, which is what the eleven hand-written `board_strategy_${id}` literals
+    // (including a second deriver in the client) were working around.
+    expect(isProjectScopedDynamicKey(`board_strategy_${PROJECT_ID}`)).toBe(true);
+  });
+
+  it("still accepts a board-strategy key with a non-UUID suffix, via the dedicated predicate", () => {
+    // The direction that would be a REGRESSION: the table's suffix is stricter, so anything
+    // relying on the looser recognizer must keep working.
+    expect(isBoardStrategyPreferenceKey("board_strategy_abc-123")).toBe(true);
   });
 
   it("requires the full suffix to be hex (no trailing garbage)", () => {
