@@ -9,6 +9,7 @@ import { logBoardHealthEvent } from "../repositories/board-health-events.reposit
 import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
 import { listWorkspaceRepos, type RepoRow } from "../repositories/repo.repository.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
+import { emptyPassReport, recordActed, recordSkipped, type PassReport } from "../lib/pass-report.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 
@@ -30,8 +31,12 @@ export interface TerminalWorkspaceReaperDeps {
   pathExists?: (path: string) => boolean;
 }
 
-export interface TerminalWorkspaceReapResult {
-  scanned: number;
+/**
+ * #592 — the shared pass core, plus this pass's own counters. `scanned` now comes from
+ * `PassReport`; `reaped`/`skippedAhead`/`skippedRunning` stay because callers and tests
+ * read them by name.
+ */
+export interface TerminalWorkspaceReapResult extends PassReport {
   reaped: number;
   skippedAhead: number;
   skippedRunning: number;
@@ -201,7 +206,7 @@ export async function reapTerminalWorkspaces(
       ),
     );
 
-  const result: TerminalWorkspaceReapResult = { scanned: candidates.length, reaped: 0, skippedAhead: 0, skippedRunning: 0 };
+  const result: TerminalWorkspaceReapResult = { ...emptyPassReport(candidates.length), reaped: 0, skippedAhead: 0, skippedRunning: 0 };
   const now = new Date().toISOString();
 
   for (const c of candidates) {
@@ -209,6 +214,7 @@ export async function reapTerminalWorkspaces(
 
     if (await hasRunningSession(database, c.wsId)) {
       result.skippedRunning++;
+      recordSkipped(result, c.wsId, "session running");
       continue;
     }
 
@@ -216,11 +222,13 @@ export async function reapTerminalWorkspaces(
     if (!verification.safe) {
       if (verification.reason === "ahead") {
         result.skippedAhead++;
+        recordSkipped(result, c.wsId, "ahead of base");
         console.warn(
           `[terminal-workspace-reaper] refusing to close workspace ${c.wsId} for issue #${c.issueNumber ?? "?"}: ` +
             `${verification.aheadCommits ?? "unknown"} commit(s) are ahead of ${c.baseBranch ?? c.defaultBranch ?? "base"}`,
         );
       } else {
+        recordSkipped(result, c.wsId, verification.reason);
         console.warn(
           `[terminal-workspace-reaper] skipping workspace ${c.wsId} for issue #${c.issueNumber ?? "?"}: ${verification.message ?? verification.reason}`,
         );
@@ -267,6 +275,7 @@ export async function reapTerminalWorkspaces(
         clearWorkingDir: false,
       });
       result.reaped++;
+      recordActed(result, c.wsId, "reaped");
       console.log(
         `[terminal-workspace-reaper] closed stale ${c.wsStatus} workspace ${c.wsId} for terminal issue ` +
           `#${c.issueNumber ?? "?"} (${c.statusName}); reason=${verification.reason} branch=${c.branch}`,

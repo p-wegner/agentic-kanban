@@ -53,6 +53,7 @@ import { issues, projectStatuses, workflowNodes, workspaces } from "@agentic-kan
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { reconcileMergedIssue } from "../services/merge-cleanup.service.js";
+import { emptyPassReport, recordActed, recordSkipped, type PassReport } from "../lib/pass-report.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 
@@ -132,8 +133,8 @@ export async function listNodeDivergences(database: Database = db): Promise<Node
   }));
 }
 
-export interface NodeDivergenceSweepResult {
-  checked: number;
+/** #592 — the shared pass core, plus the outcome lists only this pass has. */
+export interface NodeDivergenceSweepResult extends PassReport {
   clearedNodes: string[];
   convergedToDone: string[];
 }
@@ -145,11 +146,14 @@ export async function reconcileWorkflowNodeDivergence(
   const now = opts.now ?? new Date().toISOString();
   const log = opts.log ?? ((message: string) => console.log(`[node-divergence] ${message}`));
   const rows = await listNodeDivergences(database).catch(() => [] as NodeDivergenceRow[]);
-  const result: NodeDivergenceSweepResult = { checked: rows.length, clearedNodes: [], convergedToDone: [] };
+  const result: NodeDivergenceSweepResult = { ...emptyPassReport(rows.length), clearedNodes: [], convergedToDone: [] };
 
   for (const row of rows) {
     const { action, reason } = decideNodeDivergence(row);
-    if (action === "none") continue;
+    if (action === "none") {
+      recordSkipped(result, row.issueId, "none");
+      continue;
+    }
     const ref = `issue #${row.issueNumber ?? "?"} (${row.issueId})`;
     try {
       if (action === "clear-node") {
@@ -159,13 +163,17 @@ export async function reconcileWorkflowNodeDivergence(
         await database.update(workspaces).set({ currentNodeId: null })
           .where(and(eq(workspaces.issueId, row.issueId), sql`${workspaces.status} != 'closed'`));
         result.clearedNodes.push(row.issueId);
+        recordActed(result, row.issueId, "clear-node");
         log(`cleared the workflow node of ${ref} — ${reason}`);
         continue;
       }
       await reconcileMergedIssue({ database, issueId: row.issueId, now, projectId: row.projectId });
       result.convergedToDone.push(row.issueId);
+      recordActed(result, row.issueId, "converge-to-done");
       log(`converged ${ref} to Done — ${reason}`);
     } catch (err) {
+      // Deliberately neither acted nor skipped: it stays in the report's `unaccounted`
+      // remainder (#592), so a run that swallowed failures cannot read as a clean one.
       log(`failed to reconcile ${ref}: ${errorMessage(err)}`);
     }
   }

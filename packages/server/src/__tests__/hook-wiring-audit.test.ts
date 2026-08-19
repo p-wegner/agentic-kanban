@@ -98,7 +98,7 @@ describe("sweepHookWiring", () => {
       { id: "2", name: "fine", repoPath: fine },
       { id: "3", name: "none", repoPath: none },
     ]);
-    expect(result.checked).toBe(3);
+    expect(result.scanned).toBe(3);
     expect(result.broken.map((b) => b.projectName)).toEqual(["broken"]);
     expect(result.unguarded).toEqual(["none"]);
   });
@@ -106,7 +106,7 @@ describe("sweepHookWiring", () => {
   it("skips a project whose repo path is gone instead of reporting it", () => {
     // A moved/unmounted project is a different problem; reporting it here would bury the finding.
     const result = sweepHookWiring([{ id: "1", name: "gone", repoPath: join(tmpdir(), "ak-does-not-exist-xyz") }]);
-    expect(result.checked).toBe(0);
+    expect(result.scanned).toBe(0);
     expect(result.broken).toEqual([]);
   });
 

@@ -16,6 +16,7 @@
  * The audit is read-only; repair is `ensureHookScaffold`, which is idempotent and additive (it
  * appends missing hook entries and never overwrites a script or an existing array).
  */
+import { emptyPassReport, recordActed, recordSkipped, type PassReport } from "../lib/pass-report.js";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ensureHookScaffold } from "./project-scaffold.js";
@@ -91,8 +92,8 @@ export function auditHookWiring(
   };
 }
 
-export interface HookWiringSweepResult {
-  checked: number;
+/** #592 — the shared pass core, plus this sweep's own outcome lists. */
+export interface HookWiringSweepResult extends PassReport {
   /** Projects whose guard was present but not registered on both matchers, before repair. */
   broken: HookWiringStatus[];
   /** Projects whose wiring this sweep actually repaired. */
@@ -127,39 +128,51 @@ export function sweepHookWiring(
   const broken: HookWiringStatus[] = [];
   const repaired: string[] = [];
   const unguarded: string[] = [];
-  let checked = 0;
+  const report = emptyPassReport();
   for (const project of projects) {
     if (!project.repoPath || !existsSync(project.repoPath)) continue;
-    checked++;
+    report.scanned++;
     const status = auditHookWiring({ id: project.id, name: project.name, repoPath: project.repoPath });
     if (!status.scriptPresent) {
       unguarded.push(project.name);
+      recordSkipped(report, project.id, "no guard script");
       continue;
     }
-    if (!status.looksInstalledButIsNot) continue;
+    if (!status.looksInstalledButIsNot) {
+      recordSkipped(report, project.id, "correctly wired");
+      continue;
+    }
     broken.push(status);
-    if (!opts.repair) continue;
+    if (!opts.repair) {
+      recordSkipped(report, project.id, "broken, repair not requested");
+      continue;
+    }
     try {
       ensureHookScaffold(project.repoPath);
       const after = auditHookWiring({ id: project.id, name: project.name, repoPath: project.repoPath });
-      if (!after.looksInstalledButIsNot) repaired.push(project.name);
+      if (!after.looksInstalledButIsNot) {
+        repaired.push(project.name);
+        recordActed(report, project.id, "repaired");
+      } else {
+        recordSkipped(report, project.id, "repair did not take");
+      }
     } catch {
       /* repair is best-effort; the finding is already recorded in `broken` */
     }
   }
-  return { checked, broken, repaired, unguarded };
+  return { ...report, broken, repaired, unguarded };
 }
 
 /** One-line-per-project report for the server log. Empty array when everything is wired. */
 export function formatHookWiringReport(result: HookWiringSweepResult): string[] {
   if (result.broken.length === 0) {
     return result.unguarded.length > 0
-      ? [`[hook-audit] ${result.unguarded.length} of ${result.checked} project(s) have NO cross-worktree guard installed ` +
+      ? [`[hook-audit] ${result.unguarded.length} of ${result.scanned} project(s) have NO cross-worktree guard installed ` +
          `(unprotected, but not misleading — re-register or re-scaffold to install): ${result.unguarded.join(", ")}`]
       : [];
   }
   const lines = [
-    `[hook-audit] ${result.broken.length} of ${result.checked} registered project(s) ship the cross-worktree guard ` +
+    `[hook-audit] ${result.broken.length} of ${result.scanned} registered project(s) ship the cross-worktree guard ` +
     `WITHOUT registering it on every vector — it looks installed and does not run:`,
   ];
   for (const status of result.broken) {

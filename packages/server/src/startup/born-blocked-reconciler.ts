@@ -55,6 +55,7 @@ import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
+import { emptyPassReport, recordActed, recordSkipped, type PassReport } from "../lib/pass-report.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
@@ -133,8 +134,8 @@ export async function listBornBlockedWorkspaces(database: Database = db): Promis
     ));
 }
 
-export interface BornBlockedSweepResult {
-  checked: number;
+/** #592 — the shared pass core, plus the outcome lists only this pass has. */
+export interface BornBlockedSweepResult extends PassReport {
   closed: string[];
   released: string[];
   retriedAndReleased: string[];
@@ -161,7 +162,7 @@ export async function reconcileBornBlockedWorkspaces(
     });
 
   const rows = await listBornBlockedWorkspaces(database).catch(() => [] as BornBlockedRow[]);
-  const result: BornBlockedSweepResult = { checked: rows.length, closed: [], released: [], retriedAndReleased: [], held: [] };
+  const result: BornBlockedSweepResult = { ...emptyPassReport(rows.length), closed: [], released: [], retriedAndReleased: [], held: [] };
   const now = new Date(nowMs).toISOString();
 
   for (const row of rows) {
@@ -169,6 +170,7 @@ export async function reconcileBornBlockedWorkspaces(
     const ref = `workspace ${row.workspaceId} (issue #${row.issueNumber ?? "?"})`;
     if (action === "hold") {
       result.held.push(row.workspaceId);
+      recordSkipped(result, row.workspaceId, "hold");
       continue;
     }
     if (action === "close") {
@@ -177,12 +179,14 @@ export async function reconcileBornBlockedWorkspaces(
       // `markMerged: false` — this workspace never produced anything to merge.
       await closeWorkspace({ database, workspaceId: row.workspaceId, now, markMerged: false });
       result.closed.push(row.workspaceId);
+      recordActed(result, row.workspaceId, "close");
       log(`closed ${ref} — ${reason}`);
       continue;
     }
     if (action === "release") {
       await setWorkspaceStatus(database, row.workspaceId, "idle", { now });
       result.released.push(row.workspaceId);
+      recordActed(result, row.workspaceId, "release");
       log(`released ${ref} to idle — ${reason}`);
       continue;
     }
@@ -209,9 +213,11 @@ export async function reconcileBornBlockedWorkspaces(
     if (exitCode === 0) {
       await setWorkspaceStatus(database, row.workspaceId, "idle", { now });
       result.retriedAndReleased.push(row.workspaceId);
+      recordActed(result, row.workspaceId, "retry-setup-succeeded");
       log(`setup succeeded on retry for ${ref} — released to idle`);
     } else {
       result.held.push(row.workspaceId);
+      recordSkipped(result, row.workspaceId, "retry-setup-failed");
       log(`setup failed again for ${ref} (exit ${exitCode}) — still blocked, verdict restamped`);
     }
   }
