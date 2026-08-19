@@ -44,6 +44,31 @@ per-provider parsers live in `src/lib/agent-stream/{claude,codex,copilot,pi}.ts`
 in `agent-stream/shared.ts`, all re-exported through the unchanged facade so consumers' imports of
 `@agentic-kanban/shared/lib/agent-stream-parser` don't change.
 
+## Exec adapters — `lib/<system>-exec.ts`, one result shape (#591)
+
+An exec adapter wraps exactly ONE external CLI: `<system>Exec(args, opts)` + `<system>Available()`,
+centralising `windowsHide`, buffer limits, timeouts and error normalisation so the CLI is a single
+replaceable port. Three exist: `git-exec.ts` (the sanctioned git spawn point, see the root
+CLAUDE.md), `docker-exec.ts`, `devcontainer-exec.ts`.
+
+All three return the shared **`ExecResult`** (`lib/exec-result.ts`) — do not declare a new
+`XExecResult` interface:
+
+```ts
+{ stdout: string; stderr: string; code: number | null; error: Error | null }
+```
+
+`code: null` means the process produced NO exit code — killed by a signal, or never spawned
+(ENOENT/timeout). It is deliberately not `-1`: `-1` is a value a real exit can carry, so the two
+adapters that used it made "did this run at all?" a different question per adapter. Read the
+convention through `execSucceeded` / `execFailedToRun` / `execErrorMessage` rather than
+re-deriving it at each call site; `execErrorMessage` prefers stderr over the wrapper's own
+message, which is the order `gitExecOrThrow` already used, and never returns an empty string.
+
+`exec-result.ts` is pure (no `node:` import) and so is a VALUE export from the lib barrel; the
+adapters themselves are node-only and stay `export type *` + deep-path imports (#791). Guarded by
+`exec-adapter-shape.test.ts`.
+
 ## Client-bundle safety (#791)
 `shared/src/index.ts → lib/index.ts` is reachable by the **client** bundle. Any module re-exported
 there as a VALUE that imports a Node builtin (`node:child_process`, `fs`, …) white-screens the whole

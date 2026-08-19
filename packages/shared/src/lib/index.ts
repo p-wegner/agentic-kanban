@@ -19,6 +19,9 @@ export * from "./sanitize-utf8.js";
 export * from "./service-ports.js";
 // Canonical per-stack verify command (#124) — pure string logic, no Node builtins.
 export * from "./verify-command.js";
+// #591 — the one result shape every `<system>-exec.ts` adapter returns. Pure (no node:
+// import), so unlike the adapters themselves it is safe as a VALUE export here.
+export * from "./exec-result.js";
 // Claude transcript project-dir encoding (#159) — pure string logic, no Node builtins.
 export * from "./transcript-cwd-encoding.js";
 // Pure text linter for sibling compose relative-path resolution (dev #109) — no Node

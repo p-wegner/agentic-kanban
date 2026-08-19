@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { execFile, execFileSync, spawn, type ChildProcess, type ExecFileException, type StdioOptions } from "node:child_process";
 import { existsSync } from "node:fs";
+import type { ExecResult } from "./exec-result.js";
 import { recordOperation } from "./operation-metrics.js";
 
 /**
@@ -148,17 +149,12 @@ export interface GitExecOptions {
   probeLabel?: string;
 }
 
-export interface GitExecResult {
-  stdout: string;
-  stderr: string;
-  /**
-   * Process exit code. `0` on success, the numeric exit code on a non-zero exit,
-   * and `null` when the process was killed by a signal or failed to spawn (e.g.
-   * `ENOENT`/timeout — see `error` for the cause).
-   */
-  code: number | null;
-  /** The raw child_process error when git failed to run or exited non-zero, else `null`. */
-  error: Error | null;
+/**
+ * #591 — git's result IS the shared `ExecResult`, plus the instrumentation field only this
+ * adapter produces. The `code: null` / `Error` conventions documented on `ExecResult` were
+ * git's first; docker and devcontainer were brought onto them rather than the reverse.
+ */
+export interface GitExecResult extends ExecResult {
   /**
    * INSTRUMENTATION ONLY — the two durations this call contributed to `operation-metrics`, handed
    * back so a caller that needs the INDIVIDUAL sample (rather than a window aggregate) reads the
