@@ -5,7 +5,6 @@ import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
 import type { GitService } from "./workspace-internals.js";
 import { teardownWorktree } from "./workspace-teardown.service.js";
-import { workspaceServicesService, parseStoredComposeProjectName } from "./workspace-services.service.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import { generateAndPersistGithubHandoffDraft } from "./github-handoff-draft.service.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
@@ -16,11 +15,11 @@ import { listMemberIssueIds } from "../repositories/workspace-issue-members.repo
 import { rebuildSharedIfChanged, runLearningStep } from "./merge-helpers.service.js";
 import { cleanupMergedWorktreeAndBranch } from "./merge-executor.service.js";
 import { cleanupSiblingWorktrees } from "./workspace-repos.service.js";
-import { reapWorkspaceContainer } from "./devcontainer-workspace.service.js";
 import type { MergeWarning } from "./workspace-merge-prevalidation.service.js";
 import { applyDeferredWorkingTreeSync } from "@agentic-kanban/shared/lib/git-service";
 import { advanceLoopAfterMergedIssue } from "./plugin-loop-hooks.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { releaseWorkspaceResources } from "./workspace-resource-release.js";
 
 export type WorkspacePostMergeCleanupArgs = {
   workspaceId: string;
@@ -160,14 +159,10 @@ async function teardownMergedWorktree(
   // Per-workspace Docker service stack down (only when one was provisioned) BEFORE the
   // worktree is removed. Uses the STORED compose project name (#F1). Best-effort — the
   // engine never throws.
-  const mergeComposeName = parseStoredComposeProjectName(args.serviceState);
-  if (mergeComposeName) {
-    await workspaceServicesService.teardownWorkspaceServices({
-      composeProjectName: mergeComposeName,
-      composeWorktreePath: args.workingDir,
-      releasedByWorkspaceId: args.workspaceId,
-    });
-  }
+  await releaseWorkspaceResources(
+    { id: args.workspaceId, workingDir: args.workingDir, isDirect: args.isDirect, serviceState: args.serviceState },
+    { phase: "post-merge" },
+  );
   try {
     await teardownWorktree(
       {
@@ -225,12 +220,11 @@ async function removeWorktreeAndBranch(
   deps: { database: Database; gitService: GitService },
   warnings: MergeWarning[],
 ): Promise<void> {
-  // Devcontainer builder + dependency volumes (#138), before the worktree goes:
-  // the container bind-mounts it and holds the volumes open. No-op when the
-  // workspace was never containerized.
-  if (args.workingDir) {
-    await reapWorkspaceContainer({ worktreePath: args.workingDir, workspaceId: args.workspaceId });
-  }
+  // The devcontainer reap that used to sit here moved into
+  // `releaseWorkspaceResources` (#549), which runs a few lines earlier in
+  // `teardownMergedWorktree` — the container holds this directory's bind mount and
+  // dependency volumes, so it goes before ANYTHING touches the worktree, which is
+  // what the other seven terminal paths already did.
 
   await cleanupMergedWorktreeAndBranch({
     repoPath: args.repoPath,

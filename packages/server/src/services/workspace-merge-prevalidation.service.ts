@@ -17,9 +17,8 @@ import {
 } from "./workspace-internals.js";
 import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
 import { cleanupSiblingWorktrees, executeSiblingMerges, type SiblingMergeResult } from "./workspace-repos.service.js";
-import { workspaceServicesService, parseStoredComposeProjectName } from "./workspace-services.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import { reapWorkspaceContainer } from "./devcontainer-workspace.service.js";
+import { releaseWorkspaceResources } from "./workspace-resource-release.js";
 
 export type MergeWarning = { step: string; message: string; recoverable: true };
 
@@ -185,25 +184,7 @@ async function reconcileAlreadyMergedRetry(args: {
     // ends the workspace without ever reaching post-merge cleanup, so the compose stack
     // (containers, volumes, host ports) would otherwise leak until the next restart's
     // reaper. Uses the STORED compose project name; gated on a persisted serviceState.
-    const composeName = parseStoredComposeProjectName(workspace.serviceState);
-    if (composeName) {
-      await workspaceServicesService.teardownWorkspaceServices({
-        composeProjectName: composeName,
-        composeWorktreePath: workspace.workingDir,
-        releasedByWorkspaceId: workspace.id,
-      });
-    }
-    // #576: the compose stack is not the only per-workspace resource. With
-    // `devcontainer_builders` on, the devcontainer and its dependency volumes leak
-    // until `findStaleProfileContainers` or a manual `docker` sweep. Only three of
-    // the eight terminal paths reaped; this was one of the five that did not.
-    try {
-      await reapWorkspaceContainer({ worktreePath: workspace.workingDir, workspaceId: workspace.id });
-    } catch (err) {
-      // Best-effort, like the stack teardown above: a docker hiccup must not fail the
-      // merge path. The startup reaper is the backstop.
-      console.warn(`[workspaces] container reap failed (non-fatal) for ${workspace.id}: ${errorMessage(err)}`);
-    }
+    await releaseWorkspaceResources(workspace, { phase: "merge prevalidation" });
     await teardownWorktree(
       {
         workingDir: workspace.workingDir,
@@ -320,22 +301,7 @@ async function reconcileAncestorWorkspace(
   // workingDir without ever reaching post-merge cleanup, so no later lifecycle path
   // could still find the stack. Uses the STORED compose project name.
   if (workspace.workingDir && !workspace.isDirect) {
-    const composeName = parseStoredComposeProjectName(workspace.serviceState);
-    if (composeName) {
-      await workspaceServicesService.teardownWorkspaceServices({
-        composeProjectName: composeName,
-        composeWorktreePath: workspace.workingDir,
-        releasedByWorkspaceId: workspace.id,
-      });
-    }
-    // #576: same reasoning as the already-merged path above — workingDir is nulled by
-    // finalizeMergeCleanup below, so this is the LAST point at which the devcontainer
-    // and its dependency volumes can be found by path.
-    try {
-      await reapWorkspaceContainer({ worktreePath: workspace.workingDir, workspaceId: workspace.id });
-    } catch (err) {
-      console.warn(`[workspaces] container reap failed (non-fatal) for ${workspace.id}: ${errorMessage(err)}`);
-    }
+    await releaseWorkspaceResources(workspace, { phase: "merge prevalidation" });
   }
   // Multi-repo: drop the sibling worktrees + branches (no-op single-repo). The merge
   // pre-flight only resolves to 'reconcile' when no sibling has pending work, and

@@ -7,7 +7,6 @@ import {
 } from "../repositories/workspace.repository.js";
 import { getIssueNumberById } from "../repositories/workspace-merge.repository.js";
 import { listWorkspaceRepos } from "../repositories/repo.repository.js";
-import { workspaceServicesService, parseStoredComposeProjectName } from "./workspace-services.service.js";
 import { cleanupSiblingWorktrees, stampReconciledMerges } from "./workspace-repos.service.js";
 import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
 import {
@@ -18,7 +17,7 @@ import {
   type GitService,
 } from "./workspace-internals.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import { reapWorkspaceContainer } from "./devcontainer-workspace.service.js";
+import { releaseWorkspaceResources } from "./workspace-resource-release.js";
 
 export type AlreadyMergedCheck = {
   isAlreadyMerged: boolean;
@@ -299,26 +298,9 @@ export async function reconcileAlreadyMerged(
 
   // Best-effort worktree cleanup
   if (workspace.workingDir && !workspace.isDirect) {
-    // Tear the per-workspace service stack down BEFORE the worktree is removed, like
-    // every other end path — reconcile-already-merged previously leaked it (#F4). Uses
-    // the STORED compose project name; gated on a persisted serviceState.
-    const reconcileComposeName = parseStoredComposeProjectName(workspace.serviceState);
-    if (reconcileComposeName) {
-      await workspaceServicesService.teardownWorkspaceServices({
-        composeProjectName: reconcileComposeName,
-        composeWorktreePath: workspace.workingDir,
-        releasedByWorkspaceId: id,
-      });
-    }
-    // #576: the compose stack is not the only per-workspace resource. With
-    // `devcontainer_builders` on, the devcontainer and its dependency volumes leak
-    // until `findStaleProfileContainers` or a manual `docker` sweep. Only three of
-    // the eight terminal paths reaped; this was one of the five that did not.
-    try {
-      await reapWorkspaceContainer({ worktreePath: workspace.workingDir, workspaceId: id });
-    } catch (err) {
-      console.warn(`[workspaces] container reap failed (non-fatal) for ${id}: ${errorMessage(err)}`);
-    }
+    // Stack + container BEFORE the worktree is removed, like every other end path —
+    // reconcile-already-merged previously leaked both (#F4, #576).
+    await releaseWorkspaceResources({ ...workspace, id }, { phase: "reconcile-already-merged" });
     try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch { /* non-fatal */ }
   }
 

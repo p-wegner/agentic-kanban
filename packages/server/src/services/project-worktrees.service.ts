@@ -15,13 +15,11 @@ import { listProjectRepos, getWorkspaceRepoClaims } from "../repositories/repo.r
 import { getProjectWorkspacesWithIssue, getWorkspaceWorkingDirById } from "../repositories/project-service.repository.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
 import { listWorktrees, removeWorktree, getDiffShortstat } from "./git.service.js";
-import { workspaceServicesService, parseStoredComposeProjectName } from "./workspace-services.service.js";
-import { reapWorkspaceContainer } from "./devcontainer-workspace.service.js";
 import { selectCachedDiffStats } from "../lib/workspace-diff-cache.js";
 import { cachedWorktreeDiffStats, scheduleWorktreeDiffStatsRefresh, type DiffStats } from "../lib/worktree-diff-stats.js";
-import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { ProjectError } from "./project-error.js";
 import type { Database } from "../db/index.js";
+import { releaseWorkspaceResources } from "./workspace-resource-release.js";
 
 export function createProjectWorktreesService(database: Database) {
 
@@ -180,22 +178,7 @@ export function createProjectWorktreesService(database: Database) {
       // startup reaper. Uses the STORED compose project name; the engine's
       // last-reference guard still skips the down while another live workspace
       // shares the same compose project. Best-effort — never throws.
-      if (ws.workingDir && !ws.isDirect) {
-        const composeName = parseStoredComposeProjectName(ws.serviceState);
-        if (composeName) {
-          await workspaceServicesService.teardownWorkspaceServices({
-            composeProjectName: composeName,
-            composeWorktreePath: ws.workingDir,
-            releasedByWorkspaceId: ws.id,
-          });
-        }
-        // #576: the devcontainer + dep volumes leak too, not just the compose stack.
-        try {
-          await reapWorkspaceContainer({ worktreePath: ws.workingDir, workspaceId: ws.id });
-        } catch (err) {
-          console.warn(`[projects] container reap failed (non-fatal) for ${ws.id}: ${errorMessage(err)}`);
-        }
-      }
+      await releaseWorkspaceResources(ws, { phase: "project delete" });
 
       await deleteWorkspaceCascade(ws.id, database);
     }
