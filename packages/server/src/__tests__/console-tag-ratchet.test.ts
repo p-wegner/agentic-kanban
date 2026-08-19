@@ -52,7 +52,7 @@ function untaggedCount(): { total: number; sample: string[] } {
 }
 
 /** Untagged `console.*` calls in services/ + startup/ as of #616. Only ever LOWER this. */
-const BASELINE_UNTAGGED = 22;
+const BASELINE_UNTAGGED = 21;
 
 describe("server console logs carry a [tag] prefix (#616)", () => {
   const { total, sample } = untaggedCount();

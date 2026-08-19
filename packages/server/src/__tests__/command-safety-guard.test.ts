@@ -24,10 +24,22 @@ interface RunResult {
   reason: string;
 }
 
+/**
+ * The guard resolves a RELATIVE db path against the process CWD — correctly, since that is
+ * what a relative path means. Vitest runs with CWD = `packages/server`, so a fixture written
+ * as `packages/server/kanban.db` would resolve to `packages/server/packages/server/kanban.db`
+ * and mean whatever happens to sit there. A stray 4KB stub at that drifted path (left behind
+ * by a CWD-drift accident) once made four of these cases go GREEN-to-RED overnight with no
+ * code change, because the #406 stub allowance then fired. Pin the CWD to the repo root so a
+ * fixture path means what it reads as.
+ */
+const REPO_ROOT = join(__dirname, "../../../..");
+
 function runGuard(command: string, env: Record<string, string> = {}): RunResult {
   const result = spawnSync(process.execPath, [HOOK], {
     input: JSON.stringify({ tool_input: { command } }),
     encoding: "utf8",
+    cwd: REPO_ROOT,
     env: { ...process.env, ALLOW_DB_DESTROY: "", DB_URL: "", AGENTIC_KANBAN_DIR: "", ...env },
     windowsHide: true,
     timeout: 30_000,

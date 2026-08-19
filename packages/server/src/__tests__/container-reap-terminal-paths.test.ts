@@ -36,8 +36,25 @@ describe("container reap covers every stack-teardown site (#576)", () => {
     expect(offenders, `these tear down a stack but leak the devcontainer:\n${offenders.join("\n")}`).toEqual([]);
   });
 
-  it("finds the known call sites, so the scan itself cannot silently match nothing", () => {
-    const callers = tsFiles(SRC).filter((file) => readFileSync(file, "utf8").includes("teardownWorkspaceServices({"));
-    expect(callers.length).toBeGreaterThanOrEqual(4);
+  // #549 folded the eight hand-copied teardown blocks into `releaseWorkspaceResources`, so
+  // the invariant above is now true by CONSTRUCTION rather than by eight coincidences. That
+  // makes the old ">= 4 callers" floor both stale (there are 2) and the wrong guard: what
+  // has to be defended now is that a NINTH terminal path does not start a new copy.
+  const SANCTIONED_CALLERS = [
+    // The one end-of-life release, called from every terminal path (#549).
+    "services/workspace-resource-release.ts",
+    // Not a terminal path: a mid-provisioning rollback that downs a stack it just brought
+    // up when its state could not be persisted (#F5b/#F5c), before the workspace exists to
+    // be released.
+    "services/workspace-create.service.ts",
+  ];
+
+  it("only the sanctioned modules tear a stack down directly", () => {
+    const callers = tsFiles(SRC)
+      .filter((file) => readFileSync(file, "utf8").includes("teardownWorkspaceServices({"))
+      .map((file) => path.relative(SRC, file).replaceAll("\\", "/"));
+
+    // Not vacuous: the scan must still find the sanctioned ones.
+    expect(callers.sort()).toEqual([...SANCTIONED_CALLERS].sort());
   });
 });

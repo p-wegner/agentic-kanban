@@ -35,7 +35,7 @@ import { createShowdownService } from "../services/showdown.service.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import {
   enhanceIssueBody, analyzeDependenciesBody, aiEstimateBody, projectIdBody,
-  decomposeConfirmBody, contractConfirmBody, batchIssuesBody, dependenciesBatchBody,
+  decomposeConfirmBody, contractConfirmBody, groupScanBody, batchIssuesBody, dependenciesBatchBody,
   contractCoupledBody, bulkUpdateBody,
 } from "./issue-body-schemas.js";
 import { createRouter } from "../middleware/create-router.js";
@@ -173,8 +173,7 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   // (every ticket keeps its identity); the monitor's auto-group start then executes each
   // group as ONE workspace. Preview by default; `apply: true` creates the edges.
   router.post("/group-scan", async (c) => {
-    const body = await parseJsonBody<{ projectId?: string; apply?: boolean }>(c);
-    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
+    const body = await parseJsonBody(c, groupScanBody);
     const projectId = body.projectId;
     const result = await wrapAiOperation("group-scan", () => scanForTicketGroups(projectId, database, { apply: body.apply === true }));
     if (body.apply === true) options?.boardEvents?.broadcast(projectId, "dependency_added");
