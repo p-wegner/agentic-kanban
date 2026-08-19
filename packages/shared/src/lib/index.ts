@@ -22,6 +22,9 @@ export * from "./verify-command.js";
 // #591 — the one result shape every `<system>-exec.ts` adapter returns. Pure (no node:
 // import), so unlike the adapters themselves it is safe as a VALUE export here.
 export * from "./exec-result.js";
+// #559 — pure (no node builtins), so it is safe as a VALUE export in the client-reachable
+// barrel; the client has three of the hand-rolled memos this replaces.
+export * from "./ttl-memo.js";
 // Claude transcript project-dir encoding (#159) — pure string logic, no Node builtins.
 export * from "./transcript-cwd-encoding.js";
 // Pure text linter for sibling compose relative-path resolution (dev #109) — no Node
