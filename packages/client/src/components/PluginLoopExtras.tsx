@@ -78,6 +78,12 @@ export type PluginProgressStep = {
     | "planned" | "stalled";
   version?: string;
   artifacts?: string[];
+  /**
+   * The board ticket this step resolved to (#481), attached server-side by
+   * `reconcileProgressStepStates` and present only on the DOWNGRADED states — the two where
+   * the user has to act. Mirrors `PluginLoopProgressStep` in shared.
+   */
+  ticket?: { issueId: string; issueNumber: number | null };
 };
 export type PluginCheck = { name: string; verdict: "pass" | "warn" | "fail"; detail?: string };
 export type StartPolicy = { mode: string; autoStartUnblocked: boolean } | null;

@@ -80,7 +80,7 @@ export function stepCost(stepId: string, byUnit?: LoopUnitCost[] | null): {
  * artifact as its own chip (#453). See PluginLoopExtras.tsx history for the wrapping-pill-row
  * layout this replaced.
  */
-export function ProgressStepper({ steps, activePath, costByUnit, onOpenStep, onOpenStepArtifact }: {
+export function ProgressStepper({ steps, activePath, costByUnit, onOpenStep, onOpenStepArtifact, onStartStep, startingStepId }: {
   steps: PluginProgressStep[] | undefined;
   /** Path currently open in the viewer — keeps its row visibly selected (#423). */
   activePath?: string | null;
@@ -98,6 +98,18 @@ export function ProgressStepper({ steps, activePath, costByUnit, onOpenStep, onO
    * picker (#422).
    */
   onOpenStepArtifact?: (step: PluginProgressStep, path: string, index: number, total: number) => void;
+  /**
+   * Start the step's ticket (#481). Optional — without it the step still SAYS "planned", it
+   * just cannot be acted on from here, which is the pre-#481 behaviour.
+   *
+   * The complaint this closes: the panel said "generating" while a notice on the same screen
+   * said the ticket would not start on its own, and the only offered remedies were to go find
+   * the ticket on the board or change Start Mode in another view. The step card — where the
+   * user is actually looking — offered nothing.
+   */
+  onStartStep?: (step: PluginProgressStep) => void;
+  /** The step whose start is in flight, so its button can disable itself. */
+  startingStepId?: string | null;
 }) {
   if (!steps || steps.length === 0) return null;
   return (
@@ -143,6 +155,21 @@ export function ProgressStepper({ steps, activePath, costByUnit, onOpenStep, onO
               </span>
             )}
             <span className="shrink-0 text-[10px] opacity-60">{STEP_STATE_TEXT[step.state]}</span>
+            {/* #481 — the missing affordance. Only for `planned`: a `stalled` step already has
+                a workspace, so starting a second one is not the remedy (that is the loop-stall
+                card's job). */}
+            {onStartStep && step.state === "planned" && step.ticket && (
+              <button
+                type="button"
+                data-testid={`plugin-loop-step-start-${step.id}`}
+                disabled={startingStepId === step.id}
+                onClick={() => onStartStep(step)}
+                title={`Start #${step.ticket.issueNumber ?? "?"} — creates a workspace and launches the agent for this step`}
+                className="shrink-0 rounded border border-brand-300 px-1.5 py-0.5 text-[10px] text-brand-700 hover:bg-brand-50 disabled:opacity-50 dark:border-brand-700 dark:text-brand-300 dark:hover:bg-brand-900/30"
+              >
+                {startingStepId === step.id ? "Starting…" : `Start #${step.ticket.issueNumber ?? "?"}`}
+              </button>
+            )}
             {/* Every artifact reachable without opening one first (#422/#453): a step with
                 three outputs used to advertise `📄3` and open only the first. */}
             {artifacts.map((artifactPath) => (
