@@ -1,3 +1,4 @@
+import { execErrorMessage } from "@agentic-kanban/shared/lib/exec-result";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
@@ -537,7 +538,7 @@ async function recreateStaleProfileContainers(
     if (removed.code !== 0) {
       console.warn(
         `[devcontainer] could not remove stale-profile container ${containerId.slice(0, 12)}: ` +
-          `${removed.stderr.trim() || removed.error} — the next 'up' may reuse it with the wrong profile.`,
+          `${execErrorMessage(removed)} — the next 'up' may reuse it with the wrong profile.`,
       );
     }
   }
@@ -568,7 +569,7 @@ export async function chownDependencyVolumes(
   if (result.code !== 0) {
     console.warn(
       `[devcontainer] could not chown dependency volumes to ${handle.remoteUser}: ` +
-        `${result.stderr.trim() || result.error} — the install may fail with EACCES.`,
+        `${execErrorMessage(result)} — the install may fail with EACCES.`,
     );
   }
 }
@@ -639,7 +640,7 @@ export async function reapWorkspaceContainer(opts: {
       if (removed.code === 0) containersRemoved++;
       else
         console.warn(
-          `[devcontainer] could not remove container ${containerId.slice(0, 12)}: ${removed.stderr.trim() || removed.error}`,
+          `[devcontainer] could not remove container ${containerId.slice(0, 12)}: ${execErrorMessage(removed)}`,
         );
     }
 
@@ -649,7 +650,7 @@ export async function reapWorkspaceContainer(opts: {
         if (removed.code === 0) volumesRemoved++;
         else
           console.warn(
-            `[devcontainer] could not remove volume ${volume}: ${removed.stderr.trim() || removed.error}`,
+            `[devcontainer] could not remove volume ${volume}: ${execErrorMessage(removed)}`,
           );
       }
     }

@@ -1,6 +1,7 @@
 import { execFile, type ExecFileException } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import type { ExecResult } from "./exec-result.js";
 
 /**
  * The single sanctioned adapter for spawning the `devcontainer` CLI.
@@ -33,14 +34,8 @@ const DEFAULT_MAX_BUFFER = 10 * 1024 * 1024;
 /** Provisioning pulls/builds an image on a cold cache — this needs to be generous. */
 const DEFAULT_UP_TIMEOUT_MS = 600000;
 
-export interface DevcontainerExecResult {
-  stdout: string;
-  stderr: string;
-  /** `0` on success, the numeric exit code on non-zero exit, `-1` when the CLI failed to spawn (see `error`). */
-  code: number;
-  /** The spawn/exec error message when the CLI failed to run, else undefined. */
-  error?: string;
-}
+/** #591 — the shared shape (spawn failure is `code: null`, as it is for git and docker). */
+export type DevcontainerExecResult = ExecResult;
 
 export interface DevcontainerExecOptions {
   cwd?: string;
@@ -65,7 +60,7 @@ export interface DevcontainerHandle {
 /**
  * Run the devcontainer CLI and resolve with {stdout, stderr, code, error} —
  * NEVER rejects. On a non-zero exit `code` is the numeric exit code; on a spawn
- * failure (ENOENT/timeout) `code` is -1 and `error` holds the message.
+ * failure (ENOENT/timeout) `code` is null and `error` holds the cause.
  *
  * `shell: true` because the npm-global `devcontainer` is a `.cmd` shim on
  * Windows. This is the cold provisioning path only — see the module comment for
@@ -93,11 +88,11 @@ export function devcontainerExec(
         const errOut = stderr == null ? "" : stderr.toString();
         if (err) {
           const rawCode = (err as ExecFileException).code;
-          const code = typeof rawCode === "number" ? rawCode : -1;
-          resolve({ stdout: out, stderr: errOut, code, error: err.message });
+          const code = typeof rawCode === "number" ? rawCode : null;
+          resolve({ stdout: out, stderr: errOut, code, error: err });
           return;
         }
-        resolve({ stdout: out, stderr: errOut, code: 0 });
+        resolve({ stdout: out, stderr: errOut, code: 0, error: null });
       },
     );
   });

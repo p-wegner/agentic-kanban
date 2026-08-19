@@ -1,3 +1,4 @@
+import { execErrorMessage } from "@agentic-kanban/shared/lib/exec-result";
 import type { AgentLaunchRequest } from "./agent-dispatch.service.js";
 import { resolveEffectivePrompt } from "./agent-provider/context-files-prompt.js";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -156,7 +157,7 @@ function killContainerAgent(sessionId: string, containerId: string): void {
   void dockerExec(["kill", containerId]).then((result) => {
     if (result.code !== 0) {
       console.warn(
-        `[agent] docker kill failed: sessionId=${sessionId} containerId=${containerId.slice(0, 12)}: ${result.stderr.trim() || result.error}`,
+        `[agent] docker kill failed: sessionId=${sessionId} containerId=${containerId.slice(0, 12)}: ${execErrorMessage(result)}`,
       );
     }
   });

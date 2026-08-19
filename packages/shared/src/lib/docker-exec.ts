@@ -1,4 +1,5 @@
 import { execFile, type ExecFileException } from "node:child_process";
+import type { ExecResult } from "./exec-result.js";
 
 /**
  * The single sanctioned adapter for spawning the `docker` CLI.
@@ -21,14 +22,12 @@ const DEFAULT_MAX_BUFFER = 10 * 1024 * 1024;
 /** Default kill timeout for a docker invocation (ms). */
 const DEFAULT_TIMEOUT_MS = 120000;
 
-export interface DockerExecResult {
-  stdout: string;
-  stderr: string;
-  /** Process exit code. `0` on success, the numeric exit code on non-zero exit, `-1` when the process failed to spawn (see `error`). */
-  code: number;
-  /** The spawn/exec error message when docker failed to run, else undefined. */
-  error?: string;
-}
+/**
+ * #591 — the shared shape, not a docker-specific one. The alias is kept so existing imports and
+ * the doc comments that name it still resolve; what changed is that a spawn failure now reports
+ * `code: null` like git does, instead of the `-1` docker used to invent.
+ */
+export type DockerExecResult = ExecResult;
 
 export interface DockerExecOptions {
   cwd?: string;
@@ -39,7 +38,7 @@ export interface DockerExecOptions {
 /**
  * Run docker and resolve with {stdout, stderr, code, error} — NEVER rejects. On a
  * non-zero exit `code` is the numeric exit code; on a spawn failure (ENOENT/timeout)
- * `code` is -1 and `error` holds the message.
+ * `code` is null and `error` holds the cause.
  */
 export function dockerExec(args: string[], opts: DockerExecOptions = {}): Promise<DockerExecResult> {
   const { cwd, env, timeoutMs = DEFAULT_TIMEOUT_MS } = opts;
@@ -53,11 +52,11 @@ export function dockerExec(args: string[], opts: DockerExecOptions = {}): Promis
         const errOut = stderr == null ? "" : stderr.toString();
         if (err) {
           const rawCode = (err as ExecFileException).code;
-          const code = typeof rawCode === "number" ? rawCode : -1;
-          resolve({ stdout: out, stderr: errOut, code, error: err.message });
+          const code = typeof rawCode === "number" ? rawCode : null;
+          resolve({ stdout: out, stderr: errOut, code, error: err });
           return;
         }
-        resolve({ stdout: out, stderr: errOut, code: 0 });
+        resolve({ stdout: out, stderr: errOut, code: 0, error: null });
       },
     );
   });

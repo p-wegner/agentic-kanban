@@ -30,6 +30,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ServiceStackConfig, ServiceStackState } from "@agentic-kanban/shared";
 import { composeProjectName, isInstanceManagedComposeProject } from "@agentic-kanban/shared";
+import { execErrorMessage } from "@agentic-kanban/shared/lib/exec-result";
 import { dockerExec, dockerAvailable } from "@agentic-kanban/shared/lib/docker-exec";
 import { createStackPortAllocator, releaseStackPorts, type StackPortAllocator } from "./port-allocator.js";
 import {
@@ -227,7 +228,7 @@ export function createDefaultComposeRunner(): ComposeRunner {
         ["compose", "-p", projectName, ...fileArgs, "--env-file", envFile, ...upFlags],
         { cwd, env, timeoutMs },
       );
-      return { ok: res.code === 0, stderr: res.stderr || res.error || "" };
+      return { ok: res.code === 0, stderr: execErrorMessage(res) };
     },
     async down({ projectName, cwd, env, removeVolumes }) {
       if (!(await dockerAvailable(env))) {
@@ -246,7 +247,7 @@ export function createDefaultComposeRunner(): ComposeRunner {
           ? ["down", "--remove-orphans"]
           : ["down", "-v", "--rmi", "local", "--remove-orphans"];
       const res = await dockerExec(["compose", "-p", projectName, ...downFlags], { cwd, env });
-      return { ok: res.code === 0, stderr: res.stderr || res.error || "" };
+      return { ok: res.code === 0, stderr: execErrorMessage(res) };
     },
     async restart({ composeFile, extraComposeFiles, projectName, cwd, envFile, env, timeoutMs }) {
       if (!(await dockerAvailable(env))) {
@@ -257,7 +258,7 @@ export function createDefaultComposeRunner(): ComposeRunner {
         ["compose", "-p", projectName, ...fileArgs, "--env-file", envFile, "restart"],
         { cwd, env, timeoutMs: timeoutMs ?? 120000 },
       );
-      return { ok: res.code === 0, stderr: res.stderr || res.error || "" };
+      return { ok: res.code === 0, stderr: execErrorMessage(res) };
     },
     async logs({ composeFile, extraComposeFiles, projectName, cwd, envFile, tail, env, timeoutMs }) {
       if (!(await dockerAvailable(env))) {
@@ -271,7 +272,7 @@ export function createDefaultComposeRunner(): ComposeRunner {
         ["compose", "-p", projectName, ...fileArgs, "--env-file", envFile, "logs", "--no-color", "--tail", String(safeTail)],
         { cwd, env, timeoutMs: timeoutMs ?? 20000 },
       );
-      return { ok: res.code === 0, stdout: res.stdout, stderr: res.stderr || res.error || "" };
+      return { ok: res.code === 0, stdout: res.stdout, stderr: execErrorMessage(res) };
     },
     async list(env) {
       if (!(await dockerAvailable(env))) return [];
@@ -316,7 +317,7 @@ export function createDefaultComposeRunner(): ComposeRunner {
         const listRes = await dockerExec(listArgs, { env });
         if (listRes.code !== 0) {
           ok = false;
-          stderrParts.push(listRes.stderr || listRes.error || "");
+          stderrParts.push(execErrorMessage(listRes));
           return;
         }
         const ids = listRes.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -324,7 +325,7 @@ export function createDefaultComposeRunner(): ComposeRunner {
         const removeRes = await dockerExec(removeCmd(ids), { env });
         if (removeRes.code !== 0) {
           ok = false;
-          stderrParts.push(removeRes.stderr || removeRes.error || "");
+          stderrParts.push(execErrorMessage(removeRes));
         }
       };
       await removeByKind(["volume", "ls", "-q", "--filter", filter], (ids) => ["volume", "rm", "-f", ...ids]);
