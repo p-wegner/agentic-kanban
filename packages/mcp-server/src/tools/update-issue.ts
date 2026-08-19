@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { requireEntity, resolveStatusByName, checkOpenUnmergedWorkspace } from "../db-utils.js";
+import { mcpStructuredError, requireEntity, resolveStatusByName, checkOpenUnmergedWorkspace } from "../db-utils.js";
 import { fireIssueStatusWebhook } from "@agentic-kanban/shared/lib/issue-status-orchestration";
 import { isTerminalStatusName } from "@agentic-kanban/shared/lib";
 import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
@@ -44,17 +44,11 @@ export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps
         if (isTerminalStatusName(statusName)) {
           const check = await checkOpenUnmergedWorkspace(db, schema, issueId);
           if (check.blocked) {
-            return {
-              content: [{
-                type: "text" as const,
-                text: JSON.stringify({
-                  error: `Cannot set issue status to "${statusName}": it has an open workspace (branch: ${check.branch ?? check.workspaceId}) that has not been merged. Call merge_workspace first — it merges the branch and auto-transitions the issue to Done. To discard without merging, call close_workspace or delete_workspace first.`,
-                  code: "OPEN_WORKSPACE_NOT_MERGED",
-                  workspaceId: check.workspaceId,
-                  branch: check.branch,
-                }),
-              }],
-            };
+            return mcpStructuredError(
+              "OPEN_WORKSPACE_NOT_MERGED",
+              `Cannot set issue status to "${statusName}": it has an open workspace (branch: ${check.branch ?? check.workspaceId}) that has not been merged. Call merge_workspace first — it merges the branch and auto-transitions the issue to Done. To discard without merging, call close_workspace or delete_workspace first.`,
+              { workspaceId: check.workspaceId, branch: check.branch },
+            );
           }
         }
         const r = await resolveStatusByName(db, schema, existing.projectId, statusName);

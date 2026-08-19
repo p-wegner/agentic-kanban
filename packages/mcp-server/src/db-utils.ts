@@ -116,19 +116,34 @@ export async function resolveActiveProjectId(
   schema: typeof schemaModule,
   providedId?: string,
 ): Promise<{ ok: true; projectId: string } | { ok: false; error: McpResponse }> {
-  if (providedId) return { ok: true, projectId: providedId };
-  const pref = await db
-    .select({ value: schema.preferences.value })
-    .from(schema.preferences)
-    .where(eq(schema.preferences.key, "activeProjectId"))
-    .limit(1);
-  if (pref.length === 0 || !pref[0].value) {
+  const projectId = await resolveActiveProjectIdOrNull(db, schema, providedId);
+  if (!projectId) {
     return {
       ok: false,
       error: mcpError("No active project. Run `pnpm cli -- register <path>` first."),
     };
   }
-  return { ok: true, projectId: pref[0].value };
+  return { ok: true, projectId };
+}
+
+/**
+ * The same resolution WITHOUT the standard MCP error — for the two tools that answer a
+ * missing project in their own shape (`workflow-templates` with a per-tool message,
+ * `wait_workspace` with its `{result:"error"}` contract). They each re-implemented the
+ * preference query, which is how a change to the preference key would have missed them (#508).
+ */
+export async function resolveActiveProjectIdOrNull(
+  db: ToolDb,
+  schema: typeof schemaModule,
+  providedId?: string,
+): Promise<string | null> {
+  if (providedId) return providedId;
+  const pref = await db
+    .select({ value: schema.preferences.value })
+    .from(schema.preferences)
+    .where(eq(schema.preferences.key, "activeProjectId"))
+    .limit(1);
+  return pref[0]?.value || null;
 }
 
 /**

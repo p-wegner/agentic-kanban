@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { boardApi } from "@agentic-kanban/shared/lib/board-server-url";
+import { boardApi } from "../board-call.js";
 import { mcpContent } from "../db-utils.js";
 
 /**
@@ -17,10 +17,6 @@ import { mcpContent } from "../db-utils.js";
  * leaves it stranded in the wrong place. `enable_plugin` therefore takes an optional `location`
  * and applies it first, and the descriptions say so where the model will actually read them.
  */
-
-function api(path: string, init?: RequestInit) {
-  return boardApi(`/api${path}`, init);
-}
 
 function failure(what: string, res: { status: number; data: unknown }): string {
   const detail = (res.data as { error?: string } | null)?.error;
@@ -41,7 +37,7 @@ export function registerEnablePlugin(server: McpServer) {
         .describe("Where the plugin writes its output. Applied BEFORE scaffolding. Default: leading (the product repo)."),
     },
     async ({ pluginId, projectId, location }) => {
-      const res = await api(`/plugins/${pluginId}/enable`, {
+      const res = await boardApi(`/api/plugins/${pluginId}/enable`, {
         method: "POST",
         body: JSON.stringify({ projectId, ...(location ? { location } : {}) }),
       });
@@ -63,7 +59,7 @@ export function registerSetPluginOutputLocation(server: McpServer) {
       location: z.enum(["leading", "sidecar"]).describe("leading = product repo, sidecar = separate output repo"),
     },
     async ({ pluginId, projectId, location }) => {
-      const res = await api(`/plugins/${pluginId}/output-location`, {
+      const res = await boardApi(`/api/plugins/${pluginId}/output-location`, {
         method: "POST",
         body: JSON.stringify({ projectId, location }),
       });
@@ -84,7 +80,7 @@ export function registerGetPluginScaffold(server: McpServer) {
       projectId: z.string().describe("The project"),
     },
     async ({ pluginId, projectId }) => {
-      const res = await api(`/plugins/${pluginId}/scaffold?projectId=${encodeURIComponent(projectId)}`);
+      const res = await boardApi(`/api/plugins/${pluginId}/scaffold?projectId=${encodeURIComponent(projectId)}`);
       if (!res.ok) return mcpContent(failure("get_plugin_scaffold", res));
       return mcpContent(res.data);
     },
@@ -106,7 +102,7 @@ export function registerFillPluginScaffold(server: McpServer) {
       })).describe("One entry per marker you are answering; unanswered markers stay open"),
     },
     async ({ pluginId, projectId, values }) => {
-      const res = await api(`/plugins/${pluginId}/scaffold`, {
+      const res = await boardApi(`/api/plugins/${pluginId}/scaffold`, {
         method: "POST",
         body: JSON.stringify({ projectId, values }),
       });

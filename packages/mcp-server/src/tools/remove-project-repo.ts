@@ -1,7 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { boardApiUrl } from "../server-url.js";
-import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { boardApi, boardErrorText, mcpJson, mcpText, mcpUnreachable } from "../board-call.js";
 
 export function registerRemoveProjectRepo(server: McpServer) {
   server.tool(
@@ -13,23 +12,13 @@ export function registerRemoveProjectRepo(server: McpServer) {
     },
     async ({ projectId, repoId }) => {
       try {
-        const res = await fetch(boardApiUrl(`/api/projects/${projectId}/repos/${repoId}`), {
+        const { ok, statusText, data } = await boardApi(`/api/projects/${projectId}/repos/${repoId}`, {
           method: "DELETE",
-          headers: { "Content-Type": "application/json" },
         });
-        const data = await res.json() as Record<string, unknown>;
-        if (!res.ok) {
-          const errMsg = (data.error as string) ?? res.statusText;
-          return { content: [{ type: "text" as const, text: `Error removing repo from project: ${errMsg}` }] };
-        }
-        return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+        if (!ok) return mcpText(`Error removing repo from project: ${boardErrorText(data, statusText)}`);
+        return mcpJson(data);
       } catch (err) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: `Failed to reach the board server (is it running?): ${errorMessage(err)}`,
-          }],
-        };
+        return mcpUnreachable(err);
       }
     },
   );

@@ -73,9 +73,9 @@ describe("move_issue — workflow edge legality", () => {
     const parsed = JSON.parse(result.content[0].text);
 
     // Error code + actionable next-stage guidance (workflow + error dimensions).
-    expect(parsed.code).toBe("WORKFLOW_TRANSITION_INVALID");
+    expect(parsed.error.code).toBe("WORKFLOW_TRANSITION_INVALID");
     expect(parsed.movedTo).toBeUndefined();
-    expect(parsed.error).toMatch(/Review/); // the valid next stage is surfaced to the agent
+    expect(parsed.error.message).toMatch(/Review/); // the valid next stage is surfaced to the agent
 
     // No mutation: status and node unchanged, no board notification fired
     // (state-transition dimension — proves the refusal blocks the write, not just the response).

@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { resolveProjectName, mcpText, mcpJson } from "../db-utils.js";
+import { resolveActiveProjectIdOrNull, resolveProjectName, mcpText, mcpJson } from "../db-utils.js";
 import {
   listWorkflowTemplates,
   getTemplateGraph,
@@ -11,14 +11,8 @@ import {
   deleteWorkflowTemplate,
 } from "@agentic-kanban/shared/lib/workflow-engine";
 
-async function resolveProjectId(deps: ToolDeps, projectId?: string): Promise<string | null> {
-  if (projectId) return projectId;
-  const pref = await deps.db
-    .select({ value: deps.schema.preferences.value })
-    .from(deps.schema.preferences)
-    .where(eq(deps.schema.preferences.key, "activeProjectId"))
-    .limit(1);
-  return pref[0]?.value ?? null;
+function resolveProjectId(deps: ToolDeps, projectId?: string): Promise<string | null> {
+  return resolveActiveProjectIdOrNull(deps.db, deps.schema, projectId);
 }
 
 const nodeSchema = z.object({

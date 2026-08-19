@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { boardApiUrl } from "../server-url.js";
+import { boardApi, mcpText } from "../board-call.js";
 
 const POLL_INTERVAL_MS = 500;
 const TIMEOUT_MS = 120_000;
@@ -20,17 +20,15 @@ export function registerApproveToolUse(server: McpServer) {
       // Create a pending approval on the kanban server
       let approvalId: string;
       try {
-        const res = await fetch(boardApiUrl("/api/approvals"), {
+        const { ok, status, data } = await boardApi("/api/approvals", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sessionId, toolName: tool_name, toolInput: tool_input }),
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json() as { id: string };
-        approvalId = data.id;
-      } catch (err) {
+        if (!ok) throw new Error(`HTTP ${status}`);
+        approvalId = (data as { id: string }).id;
+      } catch {
         // If server is unreachable, deny by default
-        return { content: [{ type: "text" as const, text: "deny" }] };
+        return mcpText("deny");
       }
 
       // Poll until resolved or timeout
@@ -38,13 +36,13 @@ export function registerApproveToolUse(server: McpServer) {
       while (Date.now() < deadline) {
         await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
         try {
-          const res = await fetch(boardApiUrl(`/api/approvals/${approvalId}`));
-          if (res.ok) {
-            const data = await res.json() as { decision: string | null };
-            if (data.decision) {
+          const { ok, data } = await boardApi(`/api/approvals/${approvalId}`);
+          if (ok) {
+            const decision = (data as { decision?: string | null } | null)?.decision;
+            if (decision) {
               // Clean up and return
-              fetch(boardApiUrl(`/api/approvals/${approvalId}`), { method: "DELETE" }).catch(() => {});
-              return { content: [{ type: "text" as const, text: data.decision }] };
+              void boardApi(`/api/approvals/${approvalId}`, { method: "DELETE" }).catch(() => {});
+              return mcpText(decision);
             }
           }
         } catch {
@@ -53,8 +51,8 @@ export function registerApproveToolUse(server: McpServer) {
       }
 
       // Timed out — deny and clean up
-      fetch(boardApiUrl(`/api/approvals/${approvalId}`), { method: "DELETE" }).catch(() => {});
-      return { content: [{ type: "text" as const, text: "deny" }] };
+      void boardApi(`/api/approvals/${approvalId}`, { method: "DELETE" }).catch(() => {});
+      return mcpText("deny");
     },
   );
 }

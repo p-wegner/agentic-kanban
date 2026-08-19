@@ -1,7 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { boardApiUrl } from "../server-url.js";
-import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { boardApi, boardErrorText, mcpJson, mcpText, mcpUnreachable } from "../board-call.js";
 
 export function registerAddProjectRepo(server: McpServer) {
   server.tool(
@@ -18,7 +17,7 @@ export function registerAddProjectRepo(server: McpServer) {
     },
     async ({ projectId, path, cloneUrl, createName, name, setupScript, composeFile }) => {
       if ([path, cloneUrl, createName].filter((v) => typeof v === "string" && v.trim()).length !== 1) {
-        return { content: [{ type: "text" as const, text: "Error: provide exactly one of `path`, `cloneUrl`, or `createName`." }] };
+        return mcpText("Error: provide exactly one of `path`, `cloneUrl`, or `createName`.");
       }
       try {
         const body: Record<string, unknown> = {};
@@ -29,24 +28,14 @@ export function registerAddProjectRepo(server: McpServer) {
         if (setupScript !== undefined) body.setupScript = setupScript;
         if (composeFile !== undefined) body.composeFile = composeFile;
 
-        const res = await fetch(boardApiUrl(`/api/projects/${projectId}/repos`), {
+        const { ok, statusText, data } = await boardApi(`/api/projects/${projectId}/repos`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
-        const data = await res.json() as Record<string, unknown>;
-        if (!res.ok) {
-          const errMsg = (data.error as string) ?? res.statusText;
-          return { content: [{ type: "text" as const, text: `Error adding repo to project: ${errMsg}` }] };
-        }
-        return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+        if (!ok) return mcpText(`Error adding repo to project: ${boardErrorText(data, statusText)}`);
+        return mcpJson(data);
       } catch (err) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: `Failed to reach the board server (is it running?): ${errorMessage(err)}`,
-          }],
-        };
+        return mcpUnreachable(err);
       }
     },
   );

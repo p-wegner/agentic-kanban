@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { boardApi } from "@agentic-kanban/shared/lib/board-server-url";
+import { boardApi } from "../board-call.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { mcpContent } from "../db-utils.js";
 
@@ -10,10 +10,6 @@ import { mcpContent } from "../db-utils.js";
  * rides in the tool descriptions: resolving a gate is a HUMAN decision — the model may
  * only call resolve_plugin_gate after the user explicitly stated that decision.
  */
-
-function api(path: string, init?: RequestInit) {
-  return boardApi(`/api${path}`, init);
-}
 
 interface SurfaceLoop {
   pluginId: string;
@@ -43,7 +39,7 @@ interface SurfaceLoop {
 }
 
 async function surfaceLoops(projectId: string): Promise<SurfaceLoop[]> {
-  const res = await api(`/projects/${projectId}/plugin-surface`);
+  const res = await boardApi(`/api/projects/${projectId}/plugin-surface`);
   if (!res.ok) throw new Error(`plugin-surface failed (${res.status})`);
   return ((res.data as { loops?: SurfaceLoop[] }).loops ?? []);
 }
@@ -118,7 +114,7 @@ export function registerListInbox(server: McpServer) {
     "Everything blocked on a HUMAN across ALL projects at once: plugin-loop gates, finished-but-unlanded loop merges, unanswered agent questions and pending tool approvals — each carrying its own project. USE THIS for any cross-project \"what needs my attention / what is waiting on me\" question instead of calling the per-project tools once per project; fanning out by hand mis-attributes items to the wrong project.",
     {},
     async () => {
-      const res = await api("/inbox");
+      const res = await boardApi("/api/inbox");
       if (!res.ok) return mcpContent(`Inbox failed (${res.status}): ${JSON.stringify(res.data)}`);
       const items = (res.data as { items?: unknown[] }).items ?? [];
       return mcpContent(items.length ? items : "Nothing is waiting on you on any project.");
@@ -139,7 +135,7 @@ export function registerResolvePluginGate(server: McpServer) {
       input: z.string().optional().describe("The user's feedback text — required by revision-style actions"),
     },
     async ({ projectId, pluginId, loopName, gateId, actionId, input }) => {
-      const res = await api(`/plugins/${pluginId}/loops/${loopName}/gate/resolve`, {
+      const res = await boardApi(`/api/plugins/${pluginId}/loops/${loopName}/gate/resolve`, {
         method: "POST",
         body: JSON.stringify({ projectId, gateId, actionId, input }),
       });
@@ -159,7 +155,7 @@ export function registerAdvancePluginLoop(server: McpServer) {
       loopName: z.string().describe("Loop name"),
     },
     async ({ projectId, pluginId, loopName }) => {
-      const res = await api(`/plugins/${pluginId}/loops/${loopName}/advance`, {
+      const res = await boardApi(`/api/plugins/${pluginId}/loops/${loopName}/advance`, {
         method: "POST",
         body: JSON.stringify({ projectId }),
       });

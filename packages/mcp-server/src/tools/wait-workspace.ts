@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { eq, and, desc } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
+import { mcpJson, resolveActiveProjectIdOrNull } from "../db-utils.js";
 
 /**
  * Workspace statuses that mean the agent has finished its turn successfully.
@@ -65,28 +66,12 @@ export function registerWaitWorkspace(server: McpServer, deps: ToolDeps = prodDe
       const pollIntervalMs = 2000;
 
       // 1. Resolve projectId
-      let pid = projectId;
+      const pid = await resolveActiveProjectIdOrNull(db, schema, projectId);
       if (!pid) {
-        const pref = await db
-          .select({ value: schema.preferences.value })
-          .from(schema.preferences)
-          .where(eq(schema.preferences.key, "activeProjectId"))
-          .limit(1);
-        if (pref.length === 0) {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: JSON.stringify(
-                  { result: "error", reason: "No active project. Pass projectId or register a project first." },
-                  null,
-                  2,
-                ),
-              },
-            ],
-          };
-        }
-        pid = pref[0].value;
+        return mcpJson({
+          result: "error",
+          reason: "No active project. Pass projectId or register a project first.",
+        });
       }
 
       // 2. Resolve issue by number
