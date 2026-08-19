@@ -5,6 +5,7 @@ import { and, eq, isNotNull, isNull, ne, or } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database, TransactionClient } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
+import type { RepoInstallState } from "@agentic-kanban/shared/lib/repo-install-state";
 
 export type RepoDb = Database | TransactionClient;
 
@@ -151,6 +152,11 @@ export async function insertWorkspaceRepo(
     // into the workspace stack (#71). Without persisting it here the per-repo stack feature
     // is inert — the workspace row would always read composeFile=null.
     composeFile?: string | null;
+    /**
+     * #628 — only the `background` install mode sets this (to `pending`). Left NULL by the
+     * inline modes, where the install has already run before this row exists.
+     */
+    installState?: RepoInstallState | null;
   },
   database: RepoDb = db,
 ): Promise<void> {
@@ -165,6 +171,8 @@ export async function insertWorkspaceRepo(
     baseBranch: input.baseBranch,
     baseCommitSha: input.baseCommitSha ?? null,
     composeFile: input.composeFile ?? null,
+    installState: input.installState ?? null,
+    installUpdatedAt: input.installState ? new Date().toISOString() : null,
   });
 }
 
@@ -210,6 +218,46 @@ export async function setWorkspaceRepoMergedSha(
   // #415 — the merge stamp changes the row's merge-status verdict; dirty the projection
   // atomically (the stamped sha itself short-circuits reads, but ahead/historic move too).
   await database.update(repos).set({ mergedHeadSha, summaryDirty: true }).where(eq(repos.id, repoId));
+}
+
+/**
+ * #628 — advance one workspace repo's dependency-install state. Keyed by (workspaceId, path)
+ * rather than by row id because the background runner is handed the SIBLING descriptors that
+ * `provisionSiblingWorktrees` returned, which predate the rows: the rows are inserted in the
+ * create transaction, after provisioning has already handed back its result.
+ */
+export async function setWorkspaceRepoInstallState(
+  params: { workspaceId: string; path: string; state: RepoInstallState; detail?: string | null },
+  database: RepoDb = db,
+): Promise<void> {
+  await database
+    .update(repos)
+    .set({
+      installState: params.state,
+      installDetail: params.detail ?? null,
+      installUpdatedAt: new Date().toISOString(),
+    })
+    .where(and(eq(repos.workspaceId, params.workspaceId), eq(repos.path, params.path)));
+}
+
+/**
+ * #628 — the install states of every repo row of a workspace, LEADING INCLUDED. The merge
+ * gate is the caller, and it means "did every dependency install for this workspace finish",
+ * which is not a question about siblings specifically.
+ */
+export async function listWorkspaceRepoInstallStates(
+  workspaceId: string,
+  database: RepoDb = db,
+): Promise<Array<{ name: string | null; path: string; installState: string | null; installDetail: string | null }>> {
+  return database
+    .select({
+      name: repos.name,
+      path: repos.path,
+      installState: repos.installState,
+      installDetail: repos.installDetail,
+    })
+    .from(repos)
+    .where(eq(repos.workspaceId, workspaceId));
 }
 
 export async function deleteProjectRepo(repoId: string, projectId: string, database: RepoDb = db): Promise<boolean> {

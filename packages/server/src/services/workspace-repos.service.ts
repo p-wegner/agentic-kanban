@@ -10,7 +10,7 @@ import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import type { Database, TransactionClient } from "../db/index.js";
-import { listProjectRepos, listWorkspaceRepos, insertWorkspaceRepo, setWorkspaceRepoMergedSha, findLiveSiblingSharers, findCrossProjectBranchHolders, type RepoRow } from "../repositories/repo.repository.js";
+import { listProjectRepos, listWorkspaceRepos, insertWorkspaceRepo, setWorkspaceRepoMergedSha, setWorkspaceRepoInstallState, findLiveSiblingSharers, findCrossProjectBranchHolders, type RepoRow } from "../repositories/repo.repository.js";
 import { getAllWorkspaceRepos, siblingRefFromRow, stampRepoMergedHeadSha, type WorkspaceRepoRef } from "./workspace-all-repos.js";
 import { WorkspaceError, acquireRepoMergeLock, type GitService } from "./workspace-internals.js";
 import { runMergeCore } from "./merge-executor.service.js";
@@ -108,6 +108,11 @@ export interface SiblingWorktree {
   baseCommitSha: string | null;
   /** Per-repo compose file (relative to the repo), if this repo ships its own stack (#71). */
   composeFile: string | null;
+  /**
+   * #628 — this repo's dependency install was DEFERRED (install mode `background`) and still
+   * has to run. Absent/false on every inline-install path, where the install already ran.
+   */
+  installDeferred?: boolean;
 }
 
 /** Bounded-concurrency `map`. Preserves input order; every task is awaited before returning. */
@@ -139,7 +144,15 @@ const SIBLING_WORKTREE_CONCURRENCY = 6;
  *  CPU+network heavy and contends on a shared package cache, which a checkout does not. */
 const SIBLING_INSTALL_CONCURRENCY = 4;
 
-export type SiblingInstallMode = "sequential" | "parallel";
+/**
+ * #627 `sequential` | `parallel` run the installs INLINE, before the workspace row exists.
+ * #628 adds `background`: provisioning returns as soon as the worktrees are on disk and the
+ * installs run after the agent has already launched. That is the difference between an agent
+ * reading its first file in seconds and waiting 30-60 minutes on a 17-repo project — at the
+ * cost that the agent may briefly see a worktree without its dependencies, which is why the
+ * merge gate refuses to land a workspace whose installs are still outstanding or failed.
+ */
+export type SiblingInstallMode = "sequential" | "parallel" | "background";
 
 const siblingInstallModePref = projectPref("sibling_install_mode");
 const siblingInstallTimeoutPref = projectPref("sibling_install_timeout_ms");
@@ -164,7 +177,7 @@ export async function resolveSiblingInstallOptions(
   const rawTimeout = await getPreference(siblingInstallTimeoutPref.key(projectId), database).catch(() => null);
   const parsed = rawTimeout ? Number.parseInt(rawTimeout, 10) : NaN;
   return {
-    installMode: rawMode === "parallel" ? "parallel" : "sequential",
+    installMode: rawMode === "parallel" || rawMode === "background" ? rawMode : "sequential",
     installTimeoutMs:
       Number.isFinite(parsed) && parsed >= MIN_INSTALL_TIMEOUT_MS && parsed <= MAX_INSTALL_TIMEOUT_MS
         ? parsed
@@ -185,6 +198,79 @@ async function runSiblingSetup(repo: RepoRow, worktreePath: string, timeoutMs: n
     }
   } catch (err) {
     console.warn(`[workspace-repos] setup script for ${repo.name ?? repo.path} failed (non-fatal): ${errorMessage(err)}`);
+  }
+}
+
+/** Does this repo have a setup script worth running at all? */
+export function repoNeedsInstall(repo: Pick<RepoRow, "setupScript">): boolean {
+  return Boolean(repo.setupScript && repo.setupScript.trim());
+}
+
+/**
+ * #628 — run the deferred sibling installs AFTER the agent has launched, recording per-repo
+ * state on the workspace's repo rows as it goes so the UI can render "installing 3/16" and
+ * the merge gate can refuse a branch whose deps never came up.
+ *
+ * Never throws: it is called fire-and-forget from the deferred launch path, where a rejection
+ * would surface as a launch failure for a workspace whose agent is already running fine.
+ */
+export async function runBackgroundSiblingInstalls(params: {
+  workspaceId: string;
+  projectId: string;
+  siblings: SiblingWorktree[];
+  database: Database;
+  installMode: SiblingInstallMode;
+  installTimeoutMs?: number;
+  onProgress?: () => void;
+}): Promise<void> {
+  const { workspaceId, projectId, database } = params;
+  const pending = params.siblings.filter((s) => s.installDeferred);
+  if (pending.length === 0) return;
+
+  const allRepos = await listProjectRepos(projectId, database).catch(() => [] as RepoRow[]);
+  const byPath = new Map(allRepos.map((r) => [r.path, r]));
+  // `background` describes WHEN, not HOW: the installs themselves still contend on one
+  // package cache, so they run one at a time exactly like the `sequential` default.
+  const concurrency = 1;
+
+  console.log(`[workspace-repos] background installs starting for workspace ${workspaceId} (${pending.length} repo(s))`);
+  await mapBounded(pending, concurrency, async (sibling) => {
+    const repo = byPath.get(sibling.path);
+    if (!repo || !repoNeedsInstall(repo)) {
+      await setWorkspaceRepoInstallState({ workspaceId, path: sibling.path, state: "skipped", detail: "no setup script" }, database).catch(() => {});
+      params.onProgress?.();
+      return;
+    }
+    await setWorkspaceRepoInstallState({ workspaceId, path: sibling.path, state: "running" }, database).catch(() => {});
+    params.onProgress?.();
+    const outcome = await runSiblingSetupReporting(repo, sibling.worktreePath, params.installTimeoutMs);
+    await setWorkspaceRepoInstallState(
+      { workspaceId, path: sibling.path, state: outcome.ok ? "done" : "failed", detail: outcome.detail },
+      database,
+    ).catch(() => {});
+    params.onProgress?.();
+  });
+  console.log(`[workspace-repos] background installs finished for workspace ${workspaceId}`);
+}
+
+/** `runSiblingSetup` with the verdict returned instead of only logged (#628). */
+async function runSiblingSetupReporting(
+  repo: RepoRow,
+  worktreePath: string,
+  timeoutMs: number | undefined,
+): Promise<{ ok: boolean; detail: string | null }> {
+  try {
+    const res = await runSetupScript(worktreePath, repo.setupScript!, timeoutMs ? { timeoutMs } : {});
+    if (res.exitCode !== 0) {
+      const detail = `exit ${res.exitCode}: ${res.stderr.slice(0, 300)}`;
+      console.warn(`[workspace-repos] setup script for ${repo.name ?? repo.path} ${detail}`);
+      return { ok: false, detail };
+    }
+    return { ok: true, detail: null };
+  } catch (err) {
+    const detail = errorMessage(err);
+    console.warn(`[workspace-repos] setup script for ${repo.name ?? repo.path} failed: ${detail}`);
+    return { ok: false, detail };
   }
 }
 
@@ -304,6 +390,15 @@ export async function provisionSiblingWorktrees(params: {
   if (params.skipSetup) {
     console.log("[workspace-repos] skipSetup — sibling dependency installs skipped by request");
   }
+  // #628 — `background` defers phase 2 entirely. The caller runs it via
+  // `runBackgroundSiblingInstalls` once the workspace row exists to record state on, so the
+  // agent launches against bare worktrees instead of waiting out the installs.
+  if (params.installMode === "background" && withSetup.length > 0) {
+    console.log(
+      `[workspace-repos] deferring ${withSetup.length} sibling setup script(s) to the background (install mode: background)`,
+    );
+    return succeeded.map((o) => ({ ...o.sibling, installDeferred: repoNeedsInstall(o.repo) }));
+  }
   if (withSetup.length > 0) {
     const parallel = params.installMode === "parallel";
     const concurrency = parallel ? SIBLING_INSTALL_CONCURRENCY : 1;
@@ -327,6 +422,9 @@ export async function insertSiblingWorktreeRecords(
     await insertWorkspaceRepo({
       workspaceId,
       projectId,
+      // #628: a deferred install is `pending` from the moment the row exists, so the merge
+      // gate refuses this branch even if the server dies before the runner starts.
+      installState: s.installDeferred ? "pending" : null,
       path: s.path,
       name: s.name,
       worktreePath: s.worktreePath,

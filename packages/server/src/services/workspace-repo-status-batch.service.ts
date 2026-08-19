@@ -152,6 +152,8 @@ export async function buildWorkspaceRepoStatusBatch(
       summaryHistoric: leadingRow?.summaryHistoric ?? null,
       summaryGitRefreshedAt: leadingRow?.summaryGitRefreshedAt ?? null,
       summaryDirty: leadingRow?.summaryDirty ?? null,
+      installState: leadingRow?.installState ?? null,
+      installDetail: leadingRow?.installDetail ?? null,
     };
     const refs: WorkspaceRepoRef[] = [leadingRef, ...siblingRows.map(siblingRefFromRow)];
     const baseBranch = leadingRef.baseBranch ?? "";

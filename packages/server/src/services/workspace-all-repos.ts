@@ -71,6 +71,9 @@ export interface WorkspaceRepoRef {
   summaryGitRefreshedAt: string | null;
   /** Null when no backing row exists (never fresh). */
   summaryDirty: boolean | null;
+  /** #628 — deferred dependency-install state; null on every inline-install project. */
+  installState: string | null;
+  installDetail: string | null;
 }
 
 /**
@@ -139,6 +142,8 @@ async function leadingRef(workspaceId: string, database: Database): Promise<Work
     summaryHistoric: row?.summaryHistoric ?? null,
     summaryGitRefreshedAt: row?.summaryGitRefreshedAt ?? null,
     summaryDirty: row?.summaryDirty ?? null,
+    installState: row?.installState ?? null,
+    installDetail: row?.installDetail ?? null,
   };
 }
 
@@ -214,6 +219,8 @@ export function siblingRefFromRow(row: RepoRow): WorkspaceRepoRef {
     summaryHistoric: row.summaryHistoric,
     summaryGitRefreshedAt: row.summaryGitRefreshedAt,
     summaryDirty: row.summaryDirty,
+    installState: row.installState,
+    installDetail: row.installDetail,
   };
 }
 

@@ -4,6 +4,7 @@ import { getWorkspaceById } from "../repositories/workspace.repository.js";
 import { WorkspaceError, requireBaseBranch, type GitService } from "./workspace-internals.js";
 import { getAllWorkspaceRepos, type WorkspaceRepoRef } from "./workspace-all-repos.js";
 import { computeRepoAheadHistoric, isRepoProjectionFresh } from "./workspace-summary-projection.service.js";
+import { summarizeRepoInstalls } from "@agentic-kanban/shared/lib/repo-install-state";
 
 // The wire contract lives in @agentic-kanban/shared (types/api/workspace.ts) so the
 // client consumes the same shape (#79); these aliases keep existing importers working.
@@ -39,7 +40,9 @@ export async function getRepoMergeStatus(
   }
 
   const allMerged = repos.every((r) => !r.hasWork || r.merged);
-  return { branch: workspace.branch, baseBranch, allMerged, repos };
+  // #628 — one rollup so a caller renders "installing 3/16" without re-deriving it.
+  const installSummary = summarizeRepoInstalls(repos.map((r) => r.installState));
+  return { branch: workspace.branch, baseBranch, allMerged, repos, installSummary };
 }
 
 /**
@@ -72,7 +75,13 @@ export async function computeRepoMergeEntry(
   gitService: GitService,
   opts: RepoMergeComputeOpts = {},
 ): Promise<RepoMergeStatusEntry> {
-  const base = { name: ref.kind === "leading" ? null : ref.name, path: ref.path, isLeading: ref.kind === "leading" };
+  const base = {
+    name: ref.kind === "leading" ? null : ref.name,
+    path: ref.path,
+    isLeading: ref.kind === "leading",
+    installState: ref.installState,
+    installDetail: ref.installDetail,
+  };
   if (ref.mergedHeadSha) {
     return { ...base, hasWork: true, ahead: 0, merged: true, stranded: false };
   }

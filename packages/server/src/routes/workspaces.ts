@@ -117,6 +117,7 @@ export function createWorkspacesRoute(
       tddMode?: boolean;
       includeVisualProof?: boolean;
       skipSetup?: boolean;
+      installMode?: "sequential" | "parallel" | "background";
       customPrompt?: string;
       clarifications?: string;
       skillId?: string;
@@ -142,6 +143,7 @@ export function createWorkspacesRoute(
       tddMode: body.tddMode === true,
       includeVisualProof: body.includeVisualProof === true,
       skipSetup: body.skipSetup === true,
+      installMode: body.installMode,
       customPrompt: body.customPrompt,
       clarifications: body.clarifications,
       skillId: body.skillId,
@@ -227,6 +229,7 @@ export function createWorkspacesRoute(
       tddMode?: boolean;
       includeVisualProof?: boolean;
       skipSetup?: boolean;
+      installMode?: "sequential" | "parallel" | "background";
       customPrompt?: string;
       clarifications?: string;
       skillId?: string;
@@ -258,6 +261,7 @@ export function createWorkspacesRoute(
       tddMode: body.tddMode === true,
       includeVisualProof: body.includeVisualProof === true,
       skipSetup: body.skipSetup === true,
+      installMode: body.installMode,
       customPrompt: body.customPrompt,
       clarifications: body.clarifications,
       skillId: body.skillId,
