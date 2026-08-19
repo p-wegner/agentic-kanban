@@ -2,6 +2,7 @@ import { homedir, tmpdir } from "node:os";
 import { existsSync as fsExistsSync, statSync as fsStatSync } from "node:fs";
 import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DatabaseSync } from "node:sqlite";
 
 /**
  * Single source of truth for resolving the kanban.db location.
@@ -17,7 +18,8 @@ import { fileURLToPath } from "node:url";
  * Precedence — an EXPLICIT env override ALWAYS wins over the on-disk probe:
  *   1. `DB_URL`               — explicit connection URL, used verbatim.
  *   2. `AGENTIC_KANBAN_DIR`   — explicit data dir; `<dir>/kanban.db`.
- *   3. in-checkout dev DB     — the first `localDbCandidates` path that exists.
+ *   3. in-checkout dev DB     — the first `localDbCandidates` path that exists AND
+ *                              looks like a real, non-empty board (size floor + content probe).
  *   4. home-dir fallback      — `~/.agentic-kanban/kanban.db`.
  *
  * Pure and dependency-injectable (env / existsSync / homeDir) so it is unit
@@ -42,8 +44,8 @@ export interface DbLocation {
   /** which precedence rule decided the location — surfaced in startup logs. */
   source: DbPathSource;
   /**
-   * In-checkout candidates that EXIST on disk but were rejected as stubs by the size
-   * floor. Almost always the fingerprint of a real problem — a schema-only DB that some
+   * In-checkout candidates that EXIST on disk but were rejected — either as stubs by the
+   * size floor, or (#663) as real-but-EMPTY databases with no board content. Almost always the fingerprint of a real problem — a schema-only DB that some
    * tool (historically `drizzle-kit` with its old hardcoded `file:kanban.db`) minted in
    * the checkout. Returned rather than logged so this function stays pure; every caller
    * that logs its resolution logs these too, because the failure mode being guarded
@@ -67,6 +69,11 @@ export interface ResolveDbLocationOptions {
   statSync?: (p: string) => { size: number };
   /** Injected for tests; defaults to `node:os` `homedir()`. */
   homeDir?: string;
+  /**
+   * Injected for tests; defaults to `sqliteHasBoardContent`. Decides whether an
+   * in-checkout candidate that cleared the size floor holds actual board content.
+   */
+  hasBoardContent?: (p: string) => boolean;
 }
 
 /**
@@ -92,6 +99,41 @@ function isValidLocalDb(candidate: string, stat: (p: string) => { size: number }
     return stat(candidate).size >= MIN_VALID_LOCAL_DB_BYTES;
   } catch {
     return false;
+  }
+}
+
+/**
+ * The size floor above cannot see the failure mode that actually bites (#663): a
+ * leftover in-checkout DB that has been fully MIGRATED but holds zero rows is ~850 KB,
+ * so it clears the floor comfortably and is adopted — silently shadowing the real board.
+ * Every view then reads empty, which looks exactly like catastrophic data loss, and the
+ * obvious remedy (re-seed / re-register / `db:setup`) writes into the shadow and makes it
+ * real.
+ *
+ * A schema-only DB is not small, so only CONTENT distinguishes the two. `node:sqlite`'s
+ * `DatabaseSync` gives us that synchronously and with no dependency — `resolveDbLocation`
+ * stays sync, which it must, because its callers assign it to a module-level const.
+ *
+ * Opened READ-ONLY, so probing can never create or migrate the file it is judging.
+ *
+ * Fails OPEN: any error (no `node:sqlite`, a locked or corrupt file, a DB predating the
+ * `projects` table) returns `true`, i.e. the pre-#663 behaviour of trusting the size floor
+ * alone. Rejecting on a failed probe would be the dangerous direction — it would route a
+ * healthy-but-briefly-locked dev DB to the home fallback and split the board in two.
+ */
+export function sqliteHasBoardContent(candidate: string): boolean {
+  let db: InstanceType<typeof DatabaseSync> | undefined;
+  try {
+    db = new DatabaseSync(candidate, { readOnly: true });
+    return db.prepare("select 1 from projects limit 1").get() !== undefined;
+  } catch {
+    return true;
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      /* nothing useful to do — the handle is going out of scope either way */
+    }
   }
 }
 
@@ -124,6 +166,7 @@ export function resolveDbLocation(opts: ResolveDbLocationOptions = {}): DbLocati
   const stat = opts.statSync ?? fsStatSync;
   const home = opts.homeDir ?? homedir();
   const candidates = opts.localDbCandidates ?? [];
+  const hasContent = opts.hasBoardContent ?? sqliteHasBoardContent;
 
   // 1. DB_URL — explicit connection URL, verbatim. A non-`file:` URL (e.g. a
   //    remote libsql endpoint) has no on-disk path/dir.
@@ -162,11 +205,13 @@ export function resolveDbLocation(opts: ResolveDbLocationOptions = {}): DbLocati
   const rejectedLocalCandidates: string[] = [];
   for (const candidate of candidates) {
     if (!exists(candidate)) continue;
-    if (isValidLocalDb(candidate, stat)) {
+    // Two independent ways a present file is NOT the board: too small to be a database
+    // at all (a stub), or a real database that holds no board content (a migrated-but-
+    // empty leftover, #663). Both are reported rather than silently skipped — a silent
+    // skip is how a stray stayed invisible while it shadowed the real DB.
+    if (isValidLocalDb(candidate, stat) && hasContent(candidate)) {
       return { ...fileUrl(candidate), source: "local-checkout", rejectedLocalCandidates };
     }
-    // Present but too small to be a real DB. Report it: silently skipping it is how a
-    // stray stub stayed invisible while it shadowed (or nearly shadowed) the real DB.
     rejectedLocalCandidates.push(candidate);
   }
 
