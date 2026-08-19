@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { apiPost } from "../lib/api.js";
 import { useBacklogMarkdownLookups, type StatusRow, type TagRow } from "../hooks/useBacklogMarkdownLookups.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**

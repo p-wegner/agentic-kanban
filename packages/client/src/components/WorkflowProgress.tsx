@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import { apiFetch, apiPost } from "../lib/api.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 
 interface WfNode {
   id: string;

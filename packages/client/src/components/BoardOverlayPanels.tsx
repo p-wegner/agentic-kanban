@@ -1,7 +1,7 @@
 import type { Dispatch, ReactNode, RefObject, SetStateAction } from "react";
 import { apiFetch } from "../lib/api.js";
 import { getSettings } from "../lib/settingsStore.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { SettingsPanel } from "./SettingsPanel.js";
 import { QuickTasksPanel } from "./QuickTasksPanel.js";
 import { CodemodPanel } from "./CodemodPanel.js";

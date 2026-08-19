@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from "react";
 import { apiFetch, apiPost } from "../lib/api.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { setProjectPref } from "../lib/settingsStore.js";
 import { requestIssueFocus, requestViewNavigation } from "../lib/navigateView.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { workspaceStatusToneClass } from "../lib/badgeTones.js";
 
 interface WorktreeInfo {

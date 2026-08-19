@@ -3,7 +3,7 @@ import type { PluginManifest, PluginOutputLocation } from "@agentic-kanban/share
 import { PLUGIN_OUTPUT_LOCATIONS } from "@agentic-kanban/shared";
 import { apiFetch, apiPost, apiDelete } from "../../lib/api.js";
 import { getViewRoutePath } from "../../lib/appRoutes.js";
-import { showToast } from "../Toast.js";
+import { showToast } from "../../lib/toast.js";
 
 /** One row from GET /api/plugins?projectId= — DB row + parsed manifest + enabled flag. */
 type PluginListItem = {

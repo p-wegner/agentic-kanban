@@ -6,7 +6,7 @@ import { IssueCard } from "./IssueCard.js";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { getSettings, setSettings } from "../lib/settingsStore.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 import { useBoardBulkSelectionStore } from "../stores/boardBulkSelectionStore.js";
 import { normalizeIssuePriority, priorityLabel, priorityOrder } from "../lib/priorityTraits.js";

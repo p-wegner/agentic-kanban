@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiPatch } from "../lib/api.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import {
   addChecklistItem,
   toggleChecklistItem,

@@ -1,7 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import { apiPost, apiPut, apiDelete } from "../../lib/api.js";
 import { EditSkillForm, type SkillSetting } from "../SettingsPanel.shared.js";
-import { showToast } from "../Toast.js";
+import { showToast } from "../../lib/toast.js";
 
 type NewSkill = { name: string; description: string; prompt: string; model: string; isInit?: boolean };
 

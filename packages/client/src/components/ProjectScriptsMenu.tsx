@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ProjectScriptLastRunStatus, ProjectScriptShortcutResponse } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { useDismissable } from "../hooks/useDismissable.js";
 
 interface ProjectScriptsMenuProps {

@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { ImportIssuesModal } from "./ImportIssuesModal.js";
 import { BacklogMarkdownModal } from "./BacklogMarkdownModal.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { apiPost } from "../lib/api.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { useDismissable } from "../hooks/useDismissable.js";

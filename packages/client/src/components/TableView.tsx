@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues, UpdateIssueRequest } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { formatDateKeyLong } from "../lib/dateKey.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { CollapsibleSection } from "./CollapsibleSection.js";
 import { filterIssues } from "../lib/tableView-filters.js";
 import { applySortDirection, compareSortKey } from "../lib/tableView-sorting.js";

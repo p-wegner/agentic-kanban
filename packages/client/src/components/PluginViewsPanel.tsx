@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { subscribeSettingsInvalidated } from "../lib/settingsStore.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { usePluginViewStore } from "../stores/pluginViewStore.js";
 import {
   PluginLoopPane,

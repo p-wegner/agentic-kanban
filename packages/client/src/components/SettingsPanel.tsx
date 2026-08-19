@@ -5,7 +5,7 @@ import { buildServicesConfig } from "../lib/services-config.js";
 import { apiFetch, apiPost, apiPut, apiPatch } from "../lib/api.js";
 import { setSettings as savePreferences } from "../lib/settingsStore.js";
 import { invalidateClientSurfaceLocal } from "../lib/clientInvalidation.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
 import { useConfigImportExport } from "../hooks/useConfigImportExport.js";
 import { applyPreflightResult, CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, DEFAULT_SETTINGS, PI_DEFAULT_PROFILE, TABS, uniqueProfiles, type AgentProfileHealth, type McpHealth, type ProjectSettingsState, type Settings, type SettingsPanelProps, type Tab } from "./SettingsPanel.shared.js";

@@ -5,7 +5,7 @@ import {
   loadVoiceLanguage,
   resolveVoiceLanguage,
 } from "../lib/voice-language.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 interface VoiceInboxButtonProps {

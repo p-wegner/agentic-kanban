@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import { apiPost } from "../lib/api.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { priorityLabel, priorityTraits, type IssuePriority } from "../lib/priorityTraits.js";
 
 interface ChildProposal {

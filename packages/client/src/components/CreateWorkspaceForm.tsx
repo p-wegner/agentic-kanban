@@ -23,7 +23,7 @@ import {
   type LaunchTemplate,
   type LaunchTemplateOptions,
 } from "../lib/launchTemplates.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { LaunchPreviewPanel } from "./LaunchPreviewPanel.js";
 import {
   agentPresetsKey,

@@ -4,7 +4,7 @@ import { ProjectScriptsSettingsSection } from "../ProjectScriptsSettingsSection.
 import { StackProfileSettingsSection } from "../StackProfileSettingsSection.js";
 import { ProjectReposSection } from "../ProjectReposSection.js";
 import { DriveSettingsSection } from "../DriveSettingsSection.js";
-import { showToast } from "../Toast.js";
+import { showToast } from "../../lib/toast.js";
 import { ArchiveDoneSection, CollapsibleSection, Field, Toggle, type ProjectSettingsState, type Settings, type SkillSetting } from "../SettingsPanel.shared.js";
 
 type ConfigImportPreview = {

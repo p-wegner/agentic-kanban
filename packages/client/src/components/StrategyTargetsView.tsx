@@ -3,7 +3,7 @@ import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { BRAND, PRIORITY_META, TYPE_COLORS } from "../lib/chartColors";
 import { apiFetch } from "../lib/api.js";
 import { setSettings } from "../lib/settingsStore.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 
 import { DEFAULT_CONFIG, POLICY_MODE_LABELS, POLICY_MODE_DESCRIPTIONS, KIND_LABELS, settingsKey, clampWeight, clampPolicy, normalizeConfig, issueSearchText, matchesSegment, deriveRefillFocus, makeAgentBrief } from "../lib/strategy-targets.js";
 import type { SegmentKind, Provider, ProviderPolicyMode, StrategySegment, ProviderProfilePolicy, StrategyConfig, MonitorPolicyPreset } from "../lib/strategy-targets.js";

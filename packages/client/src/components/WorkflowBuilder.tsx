@@ -16,7 +16,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { apiFetch, apiPost, apiPut } from "../lib/api.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { layoutGraph } from "../lib/workflowLayout.js";
 import { ISSUE_TYPES } from "@agentic-kanban/shared";
 import {

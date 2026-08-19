@@ -5,7 +5,7 @@ import { apiPost } from "../lib/api.js";
 import { getBoardDragData } from "../lib/dragData.js";
 import { prefetchBundle } from "../lib/issueDetailBundleCache.js";
 import { IssueWorkLogBadge } from "./IssueWorkLogBadge.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { formatRelativeTime, formatAbsoluteTime } from "../lib/formatRelativeTime.js";
 import type { CardDensity } from "../hooks/useBoardPreferences.js";
 import { useIssueDisplayData } from "../hooks/useIssueDisplayData.js";

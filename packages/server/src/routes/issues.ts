@@ -39,7 +39,7 @@ import {
   contractCoupledBody, bulkUpdateBody,
 } from "./issue-body-schemas.js";
 import { createRouter } from "../middleware/create-router.js";
-import { wrapAiOperation } from "../middleware/ai-operation.js";
+import { wrapAiOperation } from "../lib/ai-operation.js";
 import { runTicketPreflight, formatClarificationsBlock, type PreflightClarification, type PreflightVerdict } from "../services/ticket-preflight.service.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";

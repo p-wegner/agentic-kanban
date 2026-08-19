@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import { getSettings, setSettings } from "../../lib/settingsStore.js";
-import { showToast } from "../Toast.js";
+import { showToast } from "../../lib/toast.js";
 import {
   CODEX_DEFAULT_PROFILE,
   COPILOT_DEFAULT_PROFILE,
