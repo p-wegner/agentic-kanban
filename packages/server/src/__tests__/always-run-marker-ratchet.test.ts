@@ -124,6 +124,10 @@ const KNOWN_SAFE_UNMARKED = new Set<string>([
   "merge-cleanup.service.test.ts",
   "project-scripts.test.ts",
   "reconcile-merged-issue.test.ts",
+  // #661: same shape as merge-cleanup.service.test.ts above — imports the services under
+  // test (merge-cleanup + workspace-issue-members repository) directly; MIGRATIONS_DIR
+  // only seeds the temp DB.
+  "ticket-groups.test.ts",
   // #647: same MIGRATIONS_DIR-shaped exemption, reached by the rewritten signature. Each
   // resolves the monorepo root only to find `packages/shared/drizzle` and seed a TEMP DB
   // with the real schema; the subject under test is the MCP tool, reachable by import.
