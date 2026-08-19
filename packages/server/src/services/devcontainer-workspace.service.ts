@@ -1,5 +1,6 @@
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
 import { dockerExec } from "@agentic-kanban/shared/lib/docker-exec";
 import {
   devcontainerAvailable,
@@ -96,6 +97,60 @@ export interface ProvisionOptions {
   hostTmp?: string;
   /** The `devcontainer_strict` setting: refuse the launch instead of falling back to host (#160). */
   strict?: boolean;
+}
+
+/**
+ * The one place that turns "this project/launch, right now" into `ProvisionOptions` (#555).
+ *
+ * Both callers of `provisionContainerForWorkspace` — setup time
+ * (`workspace-provision.service.ts`) and launch time
+ * (`session-manager/devcontainer-launch.ts`) — must produce the SAME options for
+ * the same workspace: `devcontainer up` reuses an existing container and its
+ * CREATION-TIME mounts win, so a setup call that resolved `symlinkDirs`/`strict`
+ * differently freezes the container on the wrong shape and the launch-time call
+ * meeting it can only recreate or accept it (#155, #577). They used to build the
+ * object by hand, one field at a time, which is exactly how that drift happened.
+ *
+ * Returns `null` when containerization is off, so the caller can skip the work it
+ * would otherwise pay for; `resolveSymlink` is only invoked when it is on.
+ */
+export interface DevcontainerProvisionRequest {
+  worktreePath: string;
+  workspaceId?: string;
+  /** Read a global preference (repo/service, whichever the caller already has). */
+  readPreference: (key: string) => Promise<string | null | undefined>;
+  /**
+   * The project's symlink config, resolved lazily — dependency volumes are mounted
+   * only when the feature is ON for the project (#577), never from `dirs` alone.
+   */
+  resolveSymlink?: () => Promise<{ enabled: boolean; dirs: string | string[] | null } | null>;
+  /** The profile this workspace's agent will actually authenticate as (#133/#155). */
+  profile?: { claudeProfile?: string; claudeConfigDir?: string; settingsProfile?: string };
+  hostHome?: string;
+  hostTmp?: string;
+}
+
+export async function resolveDevcontainerProvisionOptions(
+  request: DevcontainerProvisionRequest,
+): Promise<ProvisionOptions | null> {
+  const enabled = parseBoolSetting("devcontainer_builders", (await request.readPreference("devcontainer_builders")) ?? null);
+  if (!enabled) return null;
+
+  const strict = parseBoolSetting("devcontainer_strict", (await request.readPreference("devcontainer_strict")) ?? null);
+  const symlink = request.resolveSymlink ? await request.resolveSymlink() : null;
+
+  return {
+    enabled: true,
+    strict,
+    worktreePath: request.worktreePath,
+    workspaceId: request.workspaceId,
+    symlinkDirs: symlink?.enabled ? symlink.dirs : null,
+    claudeProfile: request.profile?.claudeProfile,
+    claudeConfigDir: request.profile?.claudeConfigDir,
+    settingsProfile: request.profile?.settingsProfile,
+    hostHome: request.hostHome,
+    hostTmp: request.hostTmp,
+  };
 }
 
 /** The container-side home directory for a given remote user. */
