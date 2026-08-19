@@ -15,7 +15,8 @@ import { getPreference } from "../repositories/preferences.repository.js";
 import { getStackProfile, verifyScriptPrefKey } from "../services/stack-profile.service.js";
 import { resolveMergeGateConfig } from "../services/pre-merge-gate.service.js";
 import { devCommandPrefKey, healthUrlPrefKey } from "../services/dev-server.service.js";
-import { runPreMergeGate, resolveMergeGateShas, gateAlreadyPassed, RUN_GATE, type MergeGateToken, type MergeGateEvidence } from "../services/pre-merge-gate.service.js";
+import { gateAlreadyPassed, RUN_GATE, type MergeGateToken, type MergeGateEvidence } from "../services/pre-merge-gate.service.js";
+import { runGateWithEvidence } from "../services/merge-gate-evidence.js";
 import {
   MAX_SESSIONS,
   NON_TRIVIAL_WORKTREE_DIFF_CHARS,
@@ -464,16 +465,18 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
       // right here for un-ready work, or the review-exit gate that set readyForMerge.
       let gateToken: MergeGateToken = gateTokenFromWorkspaceEvidence(ws, "review-exit gate (readyForMerge, auto_merge_in_review)");
       if (!ws.readyForMerge) {
-        // #573: pin the state the gate is ABOUT to test, BEFORE it runs. The gate is a
-        // 20-40 minute build+test run and nothing stops a still-active builder committing
-        // into the worktree while it runs. Evidence minted WITHOUT shas falls back to
-        // `evidenceIsValid`'s 15-minute age check, and `ranAt` is stamped at gate END — so
-        // a commit landing mid-gate produced evidence that looked FRESH, and the moved tip
-        // was merged having never been tested. The merge-gate and review-exit paths
-        // already pin; these two monitor paths were the only ones that did not.
+        // #540/#573: the #243 protocol via its ONE owner — pin the state the gate is ABOUT to
+        // test, run, re-pin, and mint proof only for a tip that did not move. Evidence minted
+        // WITHOUT tips falls back to `evidenceIsValid`'s 15-minute age check with a `ranAt`
+        // stamped at gate END, so a commit landing mid-gate produced evidence that looked FRESH
+        // and the moved tip merged having never been tested.
         const gateWorkspace = { id: ws.wsId, workingDir: ws.workingDir, baseBranch: ws.baseBranch };
-        const gateShas = await resolveMergeGateShas(gateWorkspace);
-        const gate = await runPreMergeGate(gateWorkspace, ws.projectId, db);
+        const gate = await runGateWithEvidence({
+          workspace: gateWorkspace,
+          projectId: ws.projectId,
+          source: "monitor-cycle gate (auto_merge_in_review)",
+          database: db,
+        });
         if (!gate.passed) {
           console.log(`[monitor] Withholding auto_merge_in_review for idle In-Review workspace ${ws.wsId}  pre-merge gate failed (${gate.stage}): ${gate.message}`);
           emitButlerSystemEvent({
@@ -486,14 +489,10 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
           deps.boardEvents.broadcast(ws.projectId, "workflow_error");
           return;
         }
-        if (!gate.skipped) console.log(`[monitor] Pre-merge gate passed for idle In-Review workspace ${ws.wsId} (${gate.stage}); proceeding with auto_merge_in_review`);
-        gateToken = gateAlreadyPassed({
-          ranAt: new Date().toISOString(),
-          stage: gate.stage,
-          source: "monitor-cycle gate (auto_merge_in_review)",
-          branchSha: gateShas.branchSha,
-          baseSha: gateShas.baseSha,
-        });
+        if (gate.ran) console.log(`[monitor] Pre-merge gate passed for idle In-Review workspace ${ws.wsId} (${gate.stage}); proceeding with auto_merge_in_review`);
+        // Null when a tip moved during the run (or nothing was gated) — then the merge executor
+        // gates for itself rather than being handed proof for a state that no longer exists.
+        gateToken = gate.token ?? RUN_GATE;
       }
       if (!canStartMerge(ws)) return;
       await mergeWorkspaceWithFixFallback(ws, deps.workspaceActions, logAction, {
@@ -572,13 +571,17 @@ async function handleReviewingWorkspace(ws: WorkspaceCandidate, sess: LatestSess
     // here for un-ready work, or the review-exit gate that set readyForMerge.
     let gateToken: MergeGateToken = gateTokenFromWorkspaceEvidence(ws, "review-exit gate (readyForMerge, reviewing+stopped)");
     if (!ws.readyForMerge) {
-      // #573: pin before running (see the note on the auto_merge_in_review path above).
-      // `baseBranch` was also omitted here, which degrades every diff-derived gate decision
-      // to its most expensive branch (pre-merge-gate.service.ts:222-233) — the docs-only
-      // skip and the test-package scoping can never fire without it.
+      // #540/#573: pin → gate → re-pin → mint, via the shared owner (see the note on the
+      // auto_merge_in_review path above). `baseBranch` was also omitted here, which degrades
+      // every diff-derived gate decision to its most expensive branch — the docs-only skip and
+      // the test-package scoping can never fire without it.
       const gateWorkspace = { id: ws.wsId, workingDir: ws.workingDir, baseBranch: ws.baseBranch };
-      const gateShas = await resolveMergeGateShas(gateWorkspace);
-      const gate = await runPreMergeGate(gateWorkspace, ws.projectId, db);
+      const gate = await runGateWithEvidence({
+        workspace: gateWorkspace,
+        projectId: ws.projectId,
+        source: "monitor-cycle gate (reviewing+stopped)",
+        database: db,
+      });
       if (!gate.passed) {
         console.log(`[monitor] Withholding merge for reviewing+stopped workspace ${ws.wsId}  pre-merge gate failed (${gate.stage}): ${gate.message}`);
         emitButlerSystemEvent({
@@ -591,13 +594,7 @@ async function handleReviewingWorkspace(ws: WorkspaceCandidate, sess: LatestSess
         deps.boardEvents.broadcast(ws.projectId, "workflow_error");
         return;
       }
-      gateToken = gateAlreadyPassed({
-        ranAt: new Date().toISOString(),
-        stage: gate.stage,
-        source: "monitor-cycle gate (reviewing+stopped)",
-        branchSha: gateShas.branchSha,
-        baseSha: gateShas.baseSha,
-      });
+      gateToken = gate.token ?? RUN_GATE;
     }
     if (!canStartMerge(ws)) return;
     // Deliberately NO fix-and-merge fallback on this path: a reviewing

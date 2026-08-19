@@ -24,14 +24,12 @@ import type { workspaces } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import { getLatestIssueCommentByKind } from "../repositories/issue-comments.repository.js";
 import { WorkspaceError } from "./workspace-internals.js";
-import {
-  resolveMergeGate,
-  resolveMergeGateShas,
-  RUN_GATE,
-  gateAlreadyPassed,
-  type MergeGateShas,
-  type MergeGateToken,
-} from "./pre-merge-gate.service.js";
+import type { MergeGateToken } from "./pre-merge-gate.service.js";
+import { runGateWithEvidence } from "./merge-gate-evidence.js";
+
+// The #243 sha comparison moved next to the protocol that uses it (#540). Re-exported here
+// because this is the path callers and suites already import it from.
+export { movedDuringGate } from "./merge-gate-evidence.js";
 import { getBaseBranchHealthAtMergeBase, describeRedBaseAttribution } from "./base-branch-health.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -187,19 +185,15 @@ export async function runPreLockGate(args: {
   }
 
   console.log(`[workspace-merge] pre-lock gate phase=start workspaceId=${workspaceId}`);
-  // Pin the state the gate is ABOUT to test, BEFORE it runs (#243). The gate is a 20-40 minute
-  // build+test run and nothing stops a still-active builder (or a human) committing into the
-  // worktree while it runs, so SHAs resolved after the run describe a tip the gate never saw.
+  // #540: the #243 pin-run-repin-mint protocol lives in ONE place now.
+  // `baseBranch` matters: without it the gate cannot read the diff, so every diff-derived
+  // cost decision silently degrades to its most expensive branch — the docs-only skip
+  // (#198) could never fire on the merge path, and the test-package scoping cannot either.
   const gateWorkspace = { id: workspaceId, workingDir: workspace.workingDir, baseBranch };
-  const shasBefore = await resolveMergeGateShas(gateWorkspace);
-  const preGate = await resolveMergeGate({
-    token: RUN_GATE,
-    // `baseBranch` matters: without it the gate cannot read the diff, so every diff-derived
-    // cost decision silently degrades to its most expensive branch — the docs-only skip
-    // (#198) could never fire on the merge path, and the test-package scoping cannot either.
-    // The value is already in hand from the caller; omitting it was pure loss.
+  const preGate = await runGateWithEvidence({
     workspace: gateWorkspace,
     projectId,
+    source: "pre-lock-merge",
     database,
   });
 
@@ -260,43 +254,17 @@ export async function runPreLockGate(args: {
   console.log(
     `[workspace-merge] pre-lock gate passed workspaceId=${workspaceId} stage=${preGate.stage}; acquiring lock`,
   );
-  // Pin the evidence to the exact state that was verified. This is what lets the in-lock
+  // The minted evidence pins the exact state that was verified. That is what lets the in-lock
   // re-resolve accept the pass after an arbitrarily long lock wait (no pointless re-gate)
   // while still catching the case that genuinely invalidates it: another merge landed and
   // moved the base, so the merge RESULT is no longer what was tested.
-  //
-  // #243: re-resolve AFTER the run and compare. If either tip moved WHILE the gate ran, the
-  // pass describes a state that no longer exists — minting evidence for it would hand the
-  // executor a proof token asserting code was verified that the gate never saw. Mint nothing
-  // and let the executor re-gate under the lock instead.
-  const shasAfter = await resolveMergeGateShas(gateWorkspace);
-  const moved = movedDuringGate(shasBefore, shasAfter);
-  if (moved) {
+  if (!preGate.token) {
     console.warn(
-      `[workspace-merge] pre-lock gate passed for workspace ${workspaceId} but the ${moved} moved DURING the run ` +
+      `[workspace-merge] pre-lock gate passed for workspace ${workspaceId} but the ${preGate.moved} moved DURING the run ` +
         `— minting no evidence (#243); the merge executor will re-gate under the lock.`,
     );
     return token;
   }
-  return gateAlreadyPassed({
-    ranAt: new Date().toISOString(),
-    stage: preGate.stage,
-    source: "pre-lock-merge",
-    // Deliberately the BEFORE tips: they are what the verify run actually tested. They equal
-    // the after tips here (nothing moved), so this is a statement of intent, not a behaviour
-    // difference — the evidence must never name a tip the gate did not see.
-    branchSha: shasBefore.branchSha,
-    baseSha: shasBefore.baseSha,
-  });
+  return preGate.token;
 }
 
-/**
- * Which tip (if any) moved between the two reads around a gate run. `undefined` on either side
- * means "unresolvable" — a diagnostic read failure must not be reported as movement, which is
- * why only a known-to-known change counts.
- */
-export function movedDuringGate(before: MergeGateShas, after: MergeGateShas): "branch" | "base" | null {
-  if (before.branchSha && after.branchSha && before.branchSha !== after.branchSha) return "branch";
-  if (before.baseSha && after.baseSha && before.baseSha !== after.baseSha) return "base";
-  return null;
-}

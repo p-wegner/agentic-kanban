@@ -71,6 +71,8 @@ vi.mock("../services/stack-profile.service.js", () => ({
   verifyScriptPrefKey: (projectId: string) => `verify_script_${projectId}`,
   // #377: runPreMergeGate re-derives a verify_script once at gate time when none is configured.
   populateVerifyScript: vi.fn(async () => null),
+  // #551: the gate asks ONE resolver what it will run; null = this project has no gate.
+  resolveEffectiveVerify: vi.fn(async () => null),
 }));
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
