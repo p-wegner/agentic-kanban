@@ -12,6 +12,7 @@ import { revParse } from "@agentic-kanban/shared/lib/git-service";
 import { getChangedFileNames } from "./git.service.js";
 import type { Database } from "../db/index.js";
 import { getPreference } from "../repositories/preferences.repository.js";
+import { describeOutstandingRepoInstalls } from "./pre-merge-gate-installs.js";
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
 import { buildSmokeCheck, getStackProfile, resolveEffectiveVerify } from "./stack-profile.service.js";
 import { resolveDevServerPlan } from "./dev-server.service.js";
@@ -334,11 +335,24 @@ export interface PreMergeGateResult {
  * Both heavy invocations run under the build-concurrency gate (#823) so parallel pre-merge checks
  * on a JVM stack don't spawn a daemon storm that starves the backend.
  */
+
 export async function runPreMergeGate(
   workspace: PreMergeGateWorkspace,
   projectId: string,
   database: Database,
 ): Promise<PreMergeGateResult> {
+  // ---- #628 deferred dependency installs ---------------------------------------------------
+  // With install mode `background` the agent launches before its repos' dependencies exist, so
+  // the protection `setupFailedBlocking` (#169) gave by refusing the LAUNCH has to be here
+  // instead: a branch whose installs are still outstanding was never built against its real
+  // dependencies, and one whose install FAILED never can be. Runs first and cheaply — a single
+  // indexed read of this workspace's repo rows — and is a complete no-op for every project on
+  // the inline install modes, where the column is NULL.
+  const installBlock = await describeOutstandingRepoInstalls(workspace.id, database);
+  if (installBlock) {
+    return { passed: false, skipped: false, stage: "none", message: installBlock };
+  }
+
   // ---- #531 verify_script gate -------------------------------------------------------------
   // A read error here means we can't tell whether a gate is configured — treat as "no verify gate"
   // (never block a merge on a gate-DETECTION error; fail-closed applies only to a CONFIGURED gate

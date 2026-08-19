@@ -63,6 +63,7 @@ import { getIssueReposTouched } from "./repo-tags.service.js";
 import {
   provisionSiblingWorktrees,
   resolveSiblingInstallOptions,
+  runBackgroundSiblingInstalls,
   resolveEffectiveRepoScope,
   insertSiblingWorktreeRecords,
   rollbackSiblingWorktrees,
@@ -399,6 +400,8 @@ export function createWorkspaceCreateService(deps: {
       branch: string;
       createdAt: string;
       siblings: SiblingWorktree[];
+      /** #628 — the per-repo install timeout, for the deferred background install run. */
+      installTimeoutMs?: number;
       issue: { issueNumber: number | null; title: string; description: string | null; projectId: string };
       contextPrimer: string | null;
       /** Ticket group (#661): member tickets, preserved across the service-stack rewrite. */
@@ -536,6 +539,25 @@ export function createWorkspaceCreateService(deps: {
           console.warn(`[workspaces] workspace ${workspaceId} is ${lifecycle ? lifecycle.status : "deleted"} — skipping the deferred agent launch`);
           return;
         }
+        // #628 — the deferred dependency installs. Started BEFORE the launch and deliberately
+        // NOT awaited: the whole point is that the agent reads its first file in seconds
+        // instead of 30-60 minutes into a 17-repo install run. Each repo's row moves
+        // pending -> running -> done|failed as it goes, and the merge gate refuses to land
+        // the branch while any of them is outstanding or failed.
+        if (ctx.siblings.some((sib) => sib.installDeferred)) {
+          void runBackgroundSiblingInstalls({
+            workspaceId,
+            projectId,
+            siblings: ctx.siblings,
+            database,
+            installMode: "background",
+            installTimeoutMs: ctx.installTimeoutMs,
+            onProgress: () => boardEvents?.broadcast(projectId, "workspace_setup"),
+          }).catch((err: unknown) => {
+            console.warn(`[workspaces] background sibling installs failed for ${workspaceId}: ${errorMessage(err)}`);
+          });
+        }
+
         const t2 = Date.now();
         await launchAgent(agentLaunchArgs);
         timing("agent-launch", t2);
@@ -591,6 +613,9 @@ export function createWorkspaceCreateService(deps: {
     // Sibling worktrees provisioned for the project's additional repos (multi-repo);
     // hoisted so the catch block can roll them back alongside the leading worktree.
     let siblingWorktrees: SiblingWorktree[] = [];
+    // #628 — resolved inside the multi-repo branch below, read again by the deferred
+    // background install run, which happens after this scope has returned.
+    let siblingInstallTimeoutMs: number | undefined;
     // #630: whether the in-flight marker exists, so both exits can clear it exactly once.
     let provisioningMarked = false;
 
@@ -679,7 +704,11 @@ export function createWorkspaceCreateService(deps: {
         // #627: how the per-repo dependency installs run is a per-project choice — sequential
         // (default) or bounded-parallel — plus an optional timeout, since the setup script's
         // 5-minute default is a hard ceiling a cold Maven repo can exceed.
-        const installOpts = await resolveSiblingInstallOptions(issue.projectId, database);
+        const projectInstallOpts = await resolveSiblingInstallOptions(issue.projectId, database);
+        // #628 — an explicit per-launch mode beats the project preference, so a single
+        // expensive multi-repo ticket can be started hands-off without changing the project.
+        const installOpts = { ...projectInstallOpts, installMode: input.installMode ?? projectInstallOpts.installMode };
+        siblingInstallTimeoutMs = installOpts.installTimeoutMs;
         // #629: with no explicit scope, fall back to what the TICKET says it touches
         // (`repo:<name>` tags) instead of provisioning every repo. The monitor's auto-starter
         // calls createWorkspace({ issueId }) with nothing else, so this is the path that
@@ -858,6 +887,7 @@ export function createWorkspaceCreateService(deps: {
           branch,
           createdAt: now,
           siblings: siblingWorktrees,
+          installTimeoutMs: siblingInstallTimeoutMs,
           issue: { issueNumber: issue.issueNumber, title: issue.title, description: issue.description, projectId: issue.projectId },
           contextPrimer,
           groupTickets: groupMembers,

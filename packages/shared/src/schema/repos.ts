@@ -53,6 +53,20 @@ export const repos = sqliteTable("repos", {
   summaryHistoric: integer("summary_historic"),
   summaryGitRefreshedAt: text("summary_git_refreshed_at"),
   summaryDirty: integer("summary_dirty", { mode: "boolean" }).notNull().default(true),
+  /**
+   * #628 — per-repo dependency-install state, on the WORKSPACE-scoped rows only.
+   *
+   * NULL means "not tracked", which is every row created under the inline install modes
+   * (`sequential`/`parallel`): there, the install has already finished by the time the row
+   * exists, so there is no state to report. Only the `background` mode writes it, moving a
+   * row `pending` -> `running` -> `done` | `failed` | `skipped` while the agent is already
+   * working. The merge gate reads it, because deferring the install is only safe if
+   * something still refuses to LAND a branch whose deps never came up.
+   */
+  installState: text("install_state"),
+  /** Human-readable why for a `failed`/`skipped` row (exit code + stderr tail). */
+  installDetail: text("install_detail"),
+  installUpdatedAt: text("install_updated_at"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 }, (table) => [
   index("repos_project_id_idx").on(table.projectId),

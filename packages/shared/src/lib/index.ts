@@ -7,6 +7,8 @@ export * from "./session-summary.js";
 export * from "./failure-keywords.js";
 export * from "./status-view.js";
 export * from "./workspace-activity-state.js";
+// Per-repo dependency-install vocabulary (#628) — pure predicates, client-rendered.
+export * from "./repo-install-state.js";
 export * from "./branch.js";
 export * from "./slugify.js";
 export * from "./butler-ticket-prompt.js";

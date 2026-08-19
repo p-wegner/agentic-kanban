@@ -168,6 +168,13 @@ export interface CreateWorkspaceInput {
   tddMode?: boolean;
   includeVisualProof?: boolean;
   skipSetup?: boolean;
+  /**
+   * #628 — per-launch override of the project's `sibling_install_mode`. `background` starts
+   * the agent as soon as the worktrees exist and installs dependencies behind it; the merge
+   * gate then refuses to land the branch until every install has finished. Unset = the
+   * project preference.
+   */
+  installMode?: "sequential" | "parallel" | "background";
   customPrompt?: string;
   /** Markdown block of answered preflight clarifications, prepended to the agent's
    *  initial context so it starts with the resolved Q&A. */

@@ -179,6 +179,14 @@ export interface RepoMergeStatusRepoEntry {
   merged: boolean;
   /** Has work, but it is NOT on base — the #69 failure mode, made visible. */
   stranded: boolean;
+  /**
+   * #628 — this repo's dependency-install state when installs were DEFERRED to the
+   * background (`pending` | `running` | `done` | `failed` | `skipped`). Null on every
+   * inline-install project, which is what keeps the chip out of the UI there.
+   */
+  installState?: string | null;
+  /** Why a `failed`/`skipped` install ended that way (exit code + stderr tail). */
+  installDetail?: string | null;
 }
 
 /** Response of GET /api/workspaces/:id/repo-merge-status (multi-repo, non-direct workspaces). */
@@ -187,6 +195,12 @@ export interface RepoMergeStatusResponse {
   baseBranch: string;
   allMerged: boolean;
   repos: RepoMergeStatusRepoEntry[];
+  /**
+   * #628 — rollup of the per-repo deferred installs, so a caller can render "installing
+   * 3/16" without re-deriving it. `tracked: 0` (the inline-install default) means there is
+   * nothing to show.
+   */
+  installSummary?: { tracked: number; done: number; failed: number; outstanding: number; installing: boolean };
 }
 
 /**
