@@ -613,14 +613,23 @@ export function createMergeQueueService(deps: {
     for (const d of result.dropped) {
       yield { type: "skipped", workspaceId: d.member.workspaceId, issueNumber: d.member.issueNumber ?? null, issueTitle: "", reason: `dropped from train: ${d.reason.slice(0, 200)}` };
     }
+    // #492 — a member the bisect individually proved red is attributed to ITSELF, not blamed
+    // on the batch. This is the difference between "your branch broke the gate" and "someone
+    // in a batch you were in broke the gate", and only the first is actionable by its author.
+    for (const r of result.gateRejected) {
+      yield { type: "error", workspaceId: r.member.workspaceId, issueNumber: r.member.issueNumber ?? null, issueTitle: "", error: `gate failed for this branch alone (bisected out of the train): ${r.reason.slice(0, 300)}` };
+    }
     if (result.landed.length === 0) {
       for (const m of members) {
         if (result.dropped.some((d) => d.member.workspaceId === m.workspaceId)) continue;
+        if (result.gateRejected.some((r) => r.member.workspaceId === m.workspaceId)) continue;
         yield { type: "error", workspaceId: m.workspaceId, issueNumber: m.issueNumber ?? null, issueTitle: "", error: `train gate failed — nothing landed: ${(result.gateFailure ?? "").slice(0, 300)}` };
       }
       yield { type: "done", merged: [], failed: members.map((m) => m.workspaceId), skipped: [] };
       return;
     }
+    console.log(`[merge-train] ${label}: ${result.landed.length}/${members.length} landed in ${result.gateRuns} gate run(s)` +
+      `${result.gateRejected.length > 0 ? `, ${result.gateRejected.length} bisected out` : ""}`);
     for (const m of result.landed) {
       const closeFailure = result.closeFailures.find((c) => c.member.workspaceId === m.workspaceId);
       // A close-out failure is NOT a merge failure — the work IS on the base branch, only the
@@ -634,7 +643,9 @@ export function createMergeQueueService(deps: {
     yield {
       type: "done",
       merged: result.landed.map((m) => m.workspaceId),
-      failed: [],
+      // A bisected-out member did NOT land, so reporting it as anything but failed would tell
+      // the queue its work is on the base when it is not.
+      failed: result.gateRejected.map((r) => r.member.workspaceId),
       skipped: result.dropped.map((d) => d.member.workspaceId),
     };
   }
