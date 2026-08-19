@@ -24,6 +24,7 @@ import {
   getSessionStatsByIds,
   getSessionMessagesForSessions,
 } from "../repositories/workspace-summary.repository.js";
+import { listLiveGroupWorkspacesForIssues } from "../repositories/workspace-issue-members.repository.js";
 import { notifySummaryWriteThrough } from "./summary-write-through-notifier.js";
 import { resolveDiffRef } from "@agentic-kanban/shared/lib/git-service";
 
@@ -169,6 +170,21 @@ export async function buildWorkspaceSummaryMap(
 
   // Phase 7+8: fetch latest sessions and attach last tool / assistant message
   await attachSessionData(mainWorkspaceMap, workspaceSummaryMap, database, archivedIssueIds);
+
+  // Ticket group (#661): a MEMBER issue has no workspace row of its own (the group
+  // workspace is keyed by the lead), so its card would read as idle and invite a
+  // duplicate manual start. Alias the lead's summary onto each live member — the card
+  // then shows the shared branch/agent exactly as the lead's does.
+  try {
+    const memberLinks = await listLiveGroupWorkspacesForIssues(issueIds, database);
+    for (const link of memberLinks) {
+      if (workspaceSummaryMap.has(link.issueId)) continue;
+      const leadSummary = workspaceSummaryMap.get(link.leadIssueId);
+      if (leadSummary) workspaceSummaryMap.set(link.issueId, leadSummary);
+    }
+  } catch {
+    // Projection enrichment only — a failure here must never break the board build.
+  }
 
   return workspaceSummaryMap;
 }

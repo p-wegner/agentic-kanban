@@ -39,6 +39,7 @@ import { registerCreateIssuesBatch } from "./tools/create-issues-batch.js";
 import { registerExportBacklogMarkdown, registerImportBacklogMarkdown } from "./tools/backlog-markdown.js";
 import { registerUpdateDependenciesBatch } from "./tools/update-dependencies-batch.js";
 import { registerContractCoupledIssues } from "./tools/contract-coupled-issues.js";
+import { registerProposeTicketGroups } from "./tools/propose-ticket-groups.js";
 import { registerGetBoardStatus } from "./tools/get-board-status.js";
 import { registerGetIssueSummary } from "./tools/get-issue-summary.js";
 import { registerListAgentSkills } from "./tools/list-agent-skills.js";
@@ -142,6 +143,7 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   create_issues_batch: registerCreateIssuesBatch,
   update_dependencies_batch: registerUpdateDependenciesBatch,
   contract_coupled_issues: registerContractCoupledIssues,
+  propose_ticket_groups: registerProposeTicketGroups,
   get_board_status: registerGetBoardStatus,
   get_issue_summary: registerGetIssueSummary,
   list_agent_skills: registerListAgentSkills,
