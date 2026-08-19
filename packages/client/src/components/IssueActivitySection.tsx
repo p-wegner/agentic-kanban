@@ -1,31 +1,9 @@
+import type { ActivityEventType, ActivityEvent } from "../lib/issueDetailTypes.js";
 import React from "react";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { slugify } from "@agentic-kanban/shared/lib/slugify";
 import { showToast } from "./Toast.js";
 
-export type ActivityEventType =
-  | "issue_created"
-  | "status_changed"
-  | "workspace_created"
-  | "workspace_launched"
-  | "workspace_merged"
-  | "workspace_closed"
-  | "session_started"
-  | "session_completed"
-  | "session_failed"
-  | "session_stopped"
-  | "comment";
-
-export interface ActivityEvent {
-  id: string;
-  type: ActivityEventType;
-  summary: string;
-  actor: string | null;
-  timestamp: string;
-  workspaceId?: string | null;
-  sessionId?: string | null;
-  commentKind?: string | null;
-}
 
 interface Props {
   events: ActivityEvent[];
@@ -222,3 +200,6 @@ export function IssueActivitySection({ events, loading, issueTitle, issueNumber,
     </div>
   );
 }
+
+/** #610 — re-exported so this component's existing importers are unchanged. */
+export type { ActivityEventType, ActivityEvent } from "../lib/issueDetailTypes.js";

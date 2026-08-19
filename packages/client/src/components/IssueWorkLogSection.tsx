@@ -1,15 +1,9 @@
+import type { TimeEntry, TimeEntriesData } from "../lib/issueDetailTypes.js";
 import { useEffect, useState } from "react";
 import { apiPost, apiDelete } from "../lib/api.js";
 import { formatRelativeTime, formatAbsoluteTime } from "../lib/formatRelativeTime.js";
 import { showToast } from "./Toast.js";
 
-export interface TimeEntry {
-  id: string;
-  issueId: string;
-  minutes: number;
-  note: string | null;
-  createdAt: string;
-}
 
 export function formatMinutes(totalMinutes: number): string {
   if (totalMinutes <= 0) return "0m";
@@ -20,10 +14,6 @@ export function formatMinutes(totalMinutes: number): string {
   return `${m}m`;
 }
 
-export interface TimeEntriesData {
-  entries: TimeEntry[];
-  totalMinutes: number;
-}
 
 interface IssueWorkLogSectionProps {
   issueId: string;
@@ -180,3 +170,6 @@ export function IssueWorkLogSection({ issueId, initial, loading }: IssueWorkLogS
     </div>
   );
 }
+
+/** #610 — re-exported so this component's existing importers are unchanged. */
+export type { TimeEntry, TimeEntriesData } from "../lib/issueDetailTypes.js";

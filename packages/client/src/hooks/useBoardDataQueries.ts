@@ -5,7 +5,7 @@ import { boardQueryKeys } from "../lib/boardQueryKeys.js";
 import { boardColumnsQueryOptions } from "../lib/boardColumnsQuery.js";
 import { projectReposQueryOptions } from "../lib/projectReposQuery.js";
 import type { Project } from "../lib/projectTypes.js";
-import type { Tag } from "../routes/BoardPage.js";
+import type { Tag } from "../lib/boardTypes.js";
 
 // Re-exported so existing importers that pull the key factory from this module
 // keep working; the canonical definition now lives in lib/boardQueryKeys.ts.

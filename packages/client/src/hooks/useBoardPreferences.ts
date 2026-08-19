@@ -6,7 +6,7 @@ import { getSettings, setSettings } from "../lib/settingsStore.js";
 import { getWipLimit, wipLimitKey } from "../lib/wipLimits.js";
 import { startStaggeredPoll, type PollHandle } from "../lib/pollScheduler.js";
 import { showToast } from "../lib/toast.js";
-import type { MonitorStatus } from "../components/MonitorPopover.js";
+import type { MonitorStatus } from "../lib/monitor-popover.js";
 
 export type CardDensity = "comfortable" | "compact";
 

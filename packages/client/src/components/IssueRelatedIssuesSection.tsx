@@ -1,11 +1,6 @@
+import type { RelatedIssue } from "../lib/issueDetailTypes.js";
 import { useState } from "react";
 
-export interface RelatedIssue {
-  id: string;
-  issueNumber: number | null;
-  title: string;
-  sharedFileCount: number;
-}
 
 interface IssueRelatedIssuesSectionProps {
   /** Related issues from the detail-bundle (#418) — no self-fetch anymore. */
@@ -70,3 +65,6 @@ export function IssueRelatedIssuesSection({ related, loading, onNavigateToIssue 
     </div>
   );
 }
+
+/** #610 — re-exported so this component's existing importers are unchanged. */
+export type { RelatedIssue } from "../lib/issueDetailTypes.js";

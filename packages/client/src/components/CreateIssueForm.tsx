@@ -1,3 +1,4 @@
+import type { CreateIssueFormState } from "../lib/boardTypes.js";
 import { useRef, useEffect, useState } from "react";
 import type { CreateIssueRequest, IssueEstimate } from "@agentic-kanban/shared";
 import { apiFetch, apiPost } from "../lib/api.js";
@@ -21,17 +22,6 @@ interface WorkflowTemplate {
   isDefault: boolean;
 }
 
-export interface CreateIssueFormState {
-  title: string;
-  description: string;
-  pastedImages: string[];
-  issueType: CreateIssueRequest["issueType"];
-  estimate?: IssueEstimate | "";
-  startWorkspace: boolean;
-  planMode: boolean;
-  skipAutoReview: boolean;
-  skillId?: string;
-}
 
 interface CreateIssueFormProps {
   projectId: string;
@@ -435,3 +425,6 @@ export function CreateIssueForm({
     </form>
   );
 }
+
+/** #610 — re-exported so this component's existing importers are unchanged. */
+export type { CreateIssueFormState } from "../lib/boardTypes.js";

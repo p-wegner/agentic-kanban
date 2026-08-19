@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import type { SkillSetting } from "../components/SettingsPanel.shared.js";
+import type { SkillSetting } from "../lib/settingsTypes.js";
 
 type NewSkill = { name: string; description: string; prompt: string; model: string };
 

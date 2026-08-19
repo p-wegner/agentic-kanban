@@ -1,3 +1,5 @@
+/** #610 — was a narrower local copy (the lib type adds only OPTIONAL fields). */
+import type { Project } from "../lib/projectTypes.js";
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { apiFetch, apiPost } from "../lib/api.js";
@@ -33,15 +35,6 @@ import { buildCreateWorkspaceBody } from "../lib/createWorkspaceBody.js";
 import { defaultModelForProvider } from "../lib/settings-shared.js";
 import { isPlanModePriority } from "../lib/priorityTraits.js";
 
-interface Project {
-  id: string;
-  name: string;
-  repoPath: string;
-  repoName: string;
-  defaultBranch: string | null;
-  remoteUrl: string | null;
-  setupScript?: string | null;
-}
 interface CreateWorkspaceFormProps {
   issue: IssueWithStatus;
   project: Project | null;

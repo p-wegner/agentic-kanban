@@ -1,12 +1,8 @@
+import type { TouchedFile } from "../lib/issueDetailTypes.js";
 import { useEffect, useState } from "react";
 import { apiPost } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 
-export interface TouchedFile {
-  path: string;
-  reason: string;
-  confidence: "high" | "medium" | "low";
-}
 
 interface IssueTouchedFilesSectionProps {
   issueId: string;
@@ -118,3 +114,6 @@ export function IssueTouchedFilesSection({ issueId, initialFiles, onAppendToDesc
     </div>
   );
 }
+
+/** #610 — re-exported so this component's existing importers are unchanged. */
+export type { TouchedFile } from "../lib/issueDetailTypes.js";

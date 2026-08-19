@@ -1,15 +1,4 @@
-interface StatusDuration {
-  statusName: string;
-  durationMs: number;
-}
-
-export interface CycleTimeData {
-  totalAgeMs: number;
-  createdAt: string;
-  closedAt: string | null;
-  isOpen: boolean;
-  statusBreakdowns: StatusDuration[];
-}
+import type { StatusDuration, CycleTimeData } from "../lib/issueDetailTypes.js";
 
 function formatDurationMs(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000);
@@ -79,3 +68,6 @@ export function IssueCycleTimeBadge({ data, loading }: IssueCycleTimeBadgeProps)
     </div>
   );
 }
+
+/** #610 — re-exported so this component's existing importers are unchanged. */
+export type { StatusDuration, CycleTimeData } from "../lib/issueDetailTypes.js";

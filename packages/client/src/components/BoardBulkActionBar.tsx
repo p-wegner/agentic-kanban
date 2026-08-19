@@ -1,12 +1,9 @@
+/** #610 — was a byte-identical local copy; the board DTO module owns it. */
+import type { Tag } from "../lib/boardTypes.js";
 import type { IssueWithStatus, UpdateIssueRequest, StatusWithIssues } from "@agentic-kanban/shared";
 
 import { ISSUE_PRIORITIES, priorityLabel, type IssuePriority } from "../lib/priorityTraits.js";
 
-interface Tag {
-  id: string;
-  name: string;
-  color: string | null;
-}
 
 interface Props {
   selectedIssues: IssueWithStatus[];

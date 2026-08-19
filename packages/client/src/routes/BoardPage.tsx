@@ -1,3 +1,4 @@
+import type { Tag, ExpandedCreatePanel } from "../lib/boardTypes.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Layout } from "../components/Layout.js";
@@ -64,11 +65,6 @@ import { useHiddenViews } from "../hooks/useHiddenViews.js";
 import type { Project } from "../lib/projectTypes.js";
 export type { Project };
 
-export interface Tag {
-  id: string;
-  name: string;
-  color: string | null;
-}
 
 /** Pending "move to Done" confirmation (issue + the deferred mutation). */
 export type MoveToDonePending = { issue: IssueWithStatus; confirm: () => Promise<void> } | null;
@@ -83,10 +79,15 @@ export type DependencyImpactPending = {
 } | null;
 
 /** Inline create-issue panel expanded under a column. */
-export type ExpandedCreatePanel = { statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null;
 
 /** Workspace panel deep-link target (open a specific workspace/session). */
-export type WorkspaceInitial = { workspaceId: string; sessionId: string } | null;
+/**
+ * #610 — this declared `sessionId: string` while `stores/boardSelectionStore.ts` declared it
+ * OPTIONAL, and the store is right: `BoardOverlayPanels.tsx:302` calls
+ * `setWorkspaceInitial({ workspaceId })` with no session at all. Two copies of one type that
+ * disagreed on a field’s optionality is the drift this ticket exists for — the store owns it now.
+ */
+export type { WorkspaceInitial } from "../stores/boardSelectionStore.js";
 
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 const BACKLOG_STATUS_NAME = "Backlog";
@@ -841,3 +842,6 @@ export function BoardPage() {
     />
   );
 }
+
+/** #610 — re-exported so this route's existing importers are unchanged. */
+export type { Tag, ExpandedCreatePanel } from "../lib/boardTypes.js";

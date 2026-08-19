@@ -1,3 +1,4 @@
+import type { SkillSetting, TagSetting } from "../lib/settingsTypes.js";
 import { useState, type ReactNode } from "react";
 import { apiPost } from "../lib/api.js";
 import { showToast } from "./Toast.js";
@@ -271,6 +272,7 @@ export function formatNextFire(value: string | null | undefined): string {
 
 export type SettingsTextSetter = (key: keyof Settings) => (value: string) => void;
 export type SettingsBoolSetter = (key: keyof Settings) => (checked: boolean) => void;
-export type SkillSetting = { id: string; name: string; description: string; prompt: string; model: string | null; projectId: string | null; isBuiltin: boolean; isInit?: boolean };
-export type TagSetting = { id: string; name: string; color: string | null; isBuiltin: boolean };
 export type ProjectSettingsState = { defaultBranch: string; setupScript: string; setupBlocking: boolean; setupEnabled: boolean; teardownScript: string; verifyScript: string; color: string | null; symlinkEnabled: boolean; symlinkDirs: string; defaultSkillId: string | null } & ServicesConfigFormFields;
+
+/** #610 — re-exported so this panel's existing importers are unchanged. */
+export type { SkillSetting, TagSetting } from "../lib/settingsTypes.js";
