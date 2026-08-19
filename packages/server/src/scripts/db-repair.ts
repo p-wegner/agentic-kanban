@@ -17,6 +17,7 @@
  *   pnpm db:repair --force    # additionally recreate an unusable db (backup taken first)
  */
 
+import { readBoardEnv } from "../lib/env-registry.js";
 import type { createClient } from "@libsql/client";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -33,7 +34,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const DB_PATH = resolve(__dirname, "../../kanban.db");
 const SIDECARS = ["", "-wal", "-shm"] as const;
 
-const force = process.argv.includes("--force") || process.env.ALLOW_DB_DESTROY === "1";
+const force = process.argv.includes("--force") || readBoardEnv("KANBAN_ALLOW_DB_DESTROY") === "1";
 
 const LOCK_CODES = new Set(["EBUSY", "EPERM", "EACCES"]);
 

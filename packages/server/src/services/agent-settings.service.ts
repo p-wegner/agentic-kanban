@@ -1,3 +1,4 @@
+import { readBoardEnv } from "../lib/env-registry.js";
 import { resolve, dirname } from "node:path";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -47,7 +48,7 @@ export async function loadAgentSettings(
 }
 
 export function isMockProfile(profile: string | undefined): boolean {
-  return profile === "mock" || process.env.MOCK_AGENT === "1";
+  return profile === "mock" || readBoardEnv("KANBAN_MOCK_AGENT") === "1";
 }
 
 export function toExecutorProvider(provider: ProviderName): ProviderId {

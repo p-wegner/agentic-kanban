@@ -1,3 +1,4 @@
+import { __resetEnvDeprecationWarningsForTests } from "../lib/env-registry.js";
 import { Hono } from "hono";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import {
@@ -23,7 +24,7 @@ function createTestApp(handlerDelayMs = 0) {
 describe("slowRequestLogger middleware", () => {
   afterEach(() => {
     vi.restoreAllMocks();
-    delete process.env.SLOW_REQUEST_THRESHOLD_MS;
+    delete process.env.KANBAN_SLOW_REQUEST_THRESHOLD_MS;
     clearSlowRequests();
   });
 
@@ -39,7 +40,7 @@ describe("slowRequestLogger middleware", () => {
   });
 
   it("does not warn when request is below the threshold", async () => {
-    process.env.SLOW_REQUEST_THRESHOLD_MS = "500";
+    process.env.KANBAN_SLOW_REQUEST_THRESHOLD_MS = "500";
     vi.spyOn(console, "debug").mockImplementation(() => {});
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
@@ -50,7 +51,7 @@ describe("slowRequestLogger middleware", () => {
   });
 
   it("warns when request exceeds threshold", async () => {
-    process.env.SLOW_REQUEST_THRESHOLD_MS = "10";
+    process.env.KANBAN_SLOW_REQUEST_THRESHOLD_MS = "10";
     vi.spyOn(console, "debug").mockImplementation(() => {});
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
@@ -74,7 +75,7 @@ describe("slowRequestLogger middleware", () => {
   });
 
   it("records a slow request in the ring buffer", async () => {
-    process.env.SLOW_REQUEST_THRESHOLD_MS = "10";
+    process.env.KANBAN_SLOW_REQUEST_THRESHOLD_MS = "10";
     vi.spyOn(console, "debug").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
 
@@ -90,7 +91,7 @@ describe("slowRequestLogger middleware", () => {
   });
 
   it("does not record a fast request in the ring buffer", async () => {
-    process.env.SLOW_REQUEST_THRESHOLD_MS = "500";
+    process.env.KANBAN_SLOW_REQUEST_THRESHOLD_MS = "500";
     vi.spyOn(console, "debug").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
 
@@ -101,7 +102,7 @@ describe("slowRequestLogger middleware", () => {
   });
 
   it("returns entries most-recent first", async () => {
-    process.env.SLOW_REQUEST_THRESHOLD_MS = "10";
+    process.env.KANBAN_SLOW_REQUEST_THRESHOLD_MS = "10";
     vi.spyOn(console, "debug").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
 
@@ -132,12 +133,12 @@ describe("slowRequestLogger middleware", () => {
 describe("slowRequestLogger loop-lag attribution (#405)", () => {
   afterEach(() => {
     vi.restoreAllMocks();
-    delete process.env.SLOW_REQUEST_THRESHOLD_MS;
+    delete process.env.KANBAN_SLOW_REQUEST_THRESHOLD_MS;
     clearSlowRequests();
   });
 
   it("attributes the majority of the duration to lag when the loop is blocked synchronously", async () => {
-    process.env.SLOW_REQUEST_THRESHOLD_MS = "10";
+    process.env.KANBAN_SLOW_REQUEST_THRESHOLD_MS = "10";
     vi.spyOn(console, "debug").mockImplementation(() => {});
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
@@ -168,7 +169,7 @@ describe("slowRequestLogger loop-lag attribution (#405)", () => {
   });
 
   it("does not blame lag for a genuinely slow async handler (injected sampler)", async () => {
-    process.env.SLOW_REQUEST_THRESHOLD_MS = "10";
+    process.env.KANBAN_SLOW_REQUEST_THRESHOLD_MS = "10";
     vi.spyOn(console, "debug").mockImplementation(() => {});
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
@@ -196,7 +197,7 @@ describe("slowRequestLogger loop-lag attribution (#405)", () => {
   });
 
   it("marks starvation deterministically when the sampler reports dominant lag (injected sampler)", async () => {
-    process.env.SLOW_REQUEST_THRESHOLD_MS = "10";
+    process.env.KANBAN_SLOW_REQUEST_THRESHOLD_MS = "10";
     vi.spyOn(console, "debug").mockImplementation(() => {});
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
@@ -213,5 +214,49 @@ describe("slowRequestLogger loop-lag attribution (#405)", () => {
     expect(warnSpy).toHaveBeenCalledOnce();
     expect(warnSpy.mock.calls[0][0]).toContain("(loop lag max 9800ms p50 9800ms — starved, not handler)");
     expect(getSlowRequests()[0].starved).toBe(true);
+  });
+});
+
+/**
+ * #615 renamed this to `KANBAN_SLOW_REQUEST_THRESHOLD_MS`. The rename is only safe because
+ * the old name keeps working, so the compatibility path needs a test of its own — every
+ * other case above uses the canonical name and would pass either way.
+ */
+describe("slow-request threshold — legacy env name (#615)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete process.env.SLOW_REQUEST_THRESHOLD_MS;
+    delete process.env.KANBAN_SLOW_REQUEST_THRESHOLD_MS;
+    clearSlowRequests();
+    __resetEnvDeprecationWarningsForTests();
+  });
+
+  it("still honours the pre-rename SLOW_REQUEST_THRESHOLD_MS", async () => {
+    __resetEnvDeprecationWarningsForTests();
+    process.env.SLOW_REQUEST_THRESHOLD_MS = "10";
+    vi.spyOn(console, "debug").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const app = createTestApp(50);
+    await app.request("/api/test");
+
+    const messages = warnSpy.mock.calls.map((c) => String(c[0]));
+    // The threshold was actually applied — a 50ms handler over a 10ms threshold warns.
+    expect(messages.some((m) => m.includes("[slow-request]"))).toBe(true);
+    // …and the operator is told what to rename it to.
+    expect(messages.some((m) => m.includes("KANBAN_SLOW_REQUEST_THRESHOLD_MS"))).toBe(true);
+  });
+
+  it("the canonical name wins when both are set", async () => {
+    __resetEnvDeprecationWarningsForTests();
+    process.env.SLOW_REQUEST_THRESHOLD_MS = "10";
+    process.env.KANBAN_SLOW_REQUEST_THRESHOLD_MS = "5000";
+    vi.spyOn(console, "debug").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const app = createTestApp(50);
+    await app.request("/api/test");
+
+    expect(warnSpy.mock.calls.map((c) => String(c[0])).some((m) => m.includes("[slow-request]"))).toBe(false);
   });
 });
