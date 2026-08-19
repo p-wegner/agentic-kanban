@@ -1,3 +1,4 @@
+// @gate:always-run — reads app.css from disk; imports nothing it checks (#601).
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -14,7 +15,9 @@ import { describe, expect, it } from "vitest";
  * utilities are a separate, much larger migration.
  */
 
-const CLIENT_SRC = join(__dirname);
+// #601 — moved into `src/__tests__` so its `@gate:always-run` marker is actually SEEN:
+// all three always-run lists scan `packages/client/src/__tests__` and nothing else.
+const CLIENT_SRC = join(__dirname, "..");
 const GLOBAL_STYLESHEETS = ["app.css", join("components", "BoardColumn.css")];
 
 const readCss = (rel: string) => readFileSync(join(CLIENT_SRC, rel), "utf8");

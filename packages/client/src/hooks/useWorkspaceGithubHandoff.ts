@@ -55,6 +55,8 @@ export function useWorkspaceGithubHandoff({ setActionLoading, setError, onWorksp
     setError(null);
     try {
       const url = `/api/workspaces/${wsId}/handoff-bundle?format=markdown`;
+      // eslint-disable-next-line no-restricted-syntax -- text/markdown download: the body is
+      // read as text and turned into a Blob, not a JSON read for the query layer.
       const res = await fetch(url);
       if (!res.ok) {
         const data = await res.json() as { error?: string };
