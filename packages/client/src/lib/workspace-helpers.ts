@@ -1,3 +1,4 @@
+import { triggerBadgeLabel, humanizeSkillName } from "@agentic-kanban/shared";
 import type { ProfileSelection } from "@agentic-kanban/shared";
 import { AGENT_PROVIDER_NAMES, PROVIDER_TRAITS, providerLabel } from "@agentic-kanban/shared/lib/provider-traits";
 import { WORKSPACE_STATUS_TONE, workspaceStatusToneClass } from "./badgeTones.js";
@@ -34,17 +35,25 @@ export const SESSION_STATUS_COLORS: Record<string, string> = {
   stopped: "bg-yellow-100 text-yellow-700",
 };
 
-export const TRIGGER_TYPE_LABELS: Record<string, { label: string; className: string }> = {
-  agent: { label: "Agent", className: "bg-blue-50 text-blue-600" },
-  chat: { label: "Chat", className: "bg-indigo-50 text-indigo-600" },
-  review: { label: "AI Review", className: "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300" },
-  merge: { label: "AI Merge", className: "bg-emerald-100 text-emerald-700" },
-  "fix-conflicts": { label: "Fix Conflicts", className: "bg-orange-100 text-orange-700" },
-  "fix-and-merge": { label: "Fix & Merge", className: "bg-orange-100 text-orange-700" },
-  bisect: { label: "Auto-bisect", className: "bg-rose-100 text-rose-700" },
-  learning: { label: "Learning", className: "bg-teal-100 text-teal-700" },
-  "auto-start": { label: "Auto-start", className: "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400" },
+/**
+ * Badge colours per trigger type. The LABELS come from the shared traits table (#495) —
+ * only the styling is a client concern, so this map holds classes alone and a trigger
+ * absent from it simply renders unstyled rather than losing its badge.
+ */
+export const TRIGGER_TYPE_CLASSES: Record<string, string> = {
+  agent: "bg-blue-50 text-blue-600",
+  chat: "bg-indigo-50 text-indigo-600",
+  review: "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300",
+  merge: "bg-emerald-100 text-emerald-700",
+  "fix-conflicts": "bg-orange-100 text-orange-700",
+  "fix-and-merge": "bg-orange-100 text-orange-700",
+  bisect: "bg-rose-100 text-rose-700",
+  learning: "bg-teal-100 text-teal-700",
+  "auto-start": "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400",
 };
+
+/** The skill-run badge styling, shared by every `skill:*` trigger. */
+export const SKILL_TRIGGER_CLASSNAME = "bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300";
 
 export function profileOptionValue(option: ProfileOption): string {
   return `${option.provider}:${option.name}`;
@@ -111,24 +120,21 @@ export function resolveQuickLaunchDefault(prefs: Record<string, string>): { prov
   return undefined;
 }
 
-const SKILL_NAME_ACRONYMS = new Set(["ui", "ai", "api", "llm", "url", "http", "id"]);
-export function humanizeSkillName(name: string): string {
-  return name.replace(/[-_]/g, " ").replace(/\b\w+/g, w =>
-    SKILL_NAME_ACRONYMS.has(w.toLowerCase()) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)
-  );
-}
+// The acronym-aware humanizer moved to the shared traits module with the vocabulary
+// (#495), so a `skill:*` badge reads the same on the board and in any server-side label.
+export { humanizeSkillName };
 
 export function getTriggerTypeLabel(triggerType: string | null, skillName?: string | null): { label: string; className: string } | null {
   if (!triggerType) {
-    if (skillName) return { label: `✨ ${humanizeSkillName(skillName)}`, className: "bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300" };
+    if (skillName) return { label: `✨ ${humanizeSkillName(skillName)}`, className: SKILL_TRIGGER_CLASSNAME };
     return null;
   }
-  if (TRIGGER_TYPE_LABELS[triggerType]) return TRIGGER_TYPE_LABELS[triggerType];
-  if (triggerType.startsWith("skill:")) {
-    const name = triggerType.slice(6);
-    return { label: `✨ ${humanizeSkillName(name)}`, className: "bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300" };
-  }
-  return null;
+  const label = triggerBadgeLabel(triggerType);
+  if (!label) return null;
+  const className = triggerType.startsWith("skill:")
+    ? SKILL_TRIGGER_CLASSNAME
+    : (TRIGGER_TYPE_CLASSES[triggerType] ?? "");
+  return { label, className };
 }
 
 export function formatDuration(start: string, end: string | null): string {

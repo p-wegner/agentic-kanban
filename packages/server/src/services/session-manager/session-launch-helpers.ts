@@ -6,16 +6,21 @@ import { narrowProviderName } from "../agent-provider.js";
 import type { RotationRings } from "../agent-provider/provider-exit-behavior.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { mergeSessionStats } from "@agentic-kanban/shared/lib/session-stats-blob";
+import { isBuilderLaunchTrigger } from "@agentic-kanban/shared/lib/session-trigger";
 
 /** Pure helpers for session launch that don't need the createSessionLifecycle closure. */
 
 export const CODEX_SPARK_MODEL = "gpt-5.3-codex-spark";
 export const CODEX_SAFE_DEFAULT_MODEL = "gpt-5.5";
 
+/**
+ * Does this session continue the worktree, i.e. should a rate-limit rotation relaunch it
+ * on a fresh profile? The trigger half is the shared traits table's `builderLaunch` flag
+ * (#495); plan mode is a launch-time fact with no trigger of its own, so it stays here.
+ */
 export function isBuilderSession(triggerType: string | undefined, planMode: boolean | undefined): boolean {
   if (planMode) return false;
-  if (!triggerType) return true;
-  return triggerType === "agent" || triggerType === "auto-start" || triggerType === "plan-implement" || triggerType.startsWith("skill:");
+  return isBuilderLaunchTrigger(triggerType);
 }
 
 /** Handoff note prefixed onto the prompt when relaunching fresh after a missing-transcript resume failure (#26). */

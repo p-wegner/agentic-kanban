@@ -1,4 +1,5 @@
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
+import { isBuilderCycleTrigger } from "@agentic-kanban/shared/lib/session-trigger";
 import type { Database } from "../db/index.js";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { db } from "../db/index.js";
@@ -143,7 +144,7 @@ function classifyCause(rows: ActiveWorkspaceWithSessions[], prefMap: Map<string,
     const sess = row.latestSession;
     if (!sess || sess.status !== "running") return false;
     const tokenTotal = sessionTokenTotal(sess.stats);
-    const builderLike = !sess.triggerType || sess.triggerType === "agent" || sess.triggerType === "chat" || sess.triggerType === "plan-implement";
+    const builderLike = isBuilderCycleTrigger(sess.triggerType);
     return builderLike && (tokenTotal === null || tokenTotal === 0);
   })) return "hung_zero_token_builder";
 
