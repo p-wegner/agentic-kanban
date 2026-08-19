@@ -3,6 +3,39 @@
 ## Self-HTTP calls are an anti-pattern
 A service must never `fetch('http://127.0.0.1:PORT/api/...')` to call its own server. Instead, accept the target service function as a constructor/factory parameter (dependency injection). Self-HTTP calls: create a hard runtime dependency on port availability, bypass TypeScript types (JSON round-trip), are impossible to unit-test without a running server, and swallow errors through JSON re-parsing. The fix: pass `createWorkspace` (or similar) directly to the service that needs it.
 
+## `provider-pair` — one module per agent provider, same shape (#593)
+
+Four providers are registered (`claude`, `codex`, `copilot`, `pi`) and several capabilities
+ship as a per-provider module with a mirrored export shape:
+
+| Capability | Module | Providers |
+|---|---|---|
+| provider adapter | `agent-provider/<name>-provider.ts` | all four |
+| usage-limit detection | `services/<name>-rate-limit.ts` | claude, codex |
+| interactive login | `services/<name>-login.service.ts` | claude, codex |
+| auth rotation | `claude-subscription-ring.ts` / `codex-license-ring.ts`, both over the generic `auth-rotation-ring.ts` | claude, codex |
+
+**The rule: a capability is either PRESENT for a provider or DECLARED absent — never just
+missing.** A four-provider registry with two-provider adapters is fine; what is not fine is
+that nothing said whether copilot and pi were a decision or an oversight, because that is
+how a provider silently gets second-class behaviour.
+
+`provider-exit-behavior.ts` is the precedent to copy: a `Record<ProviderName, …>` the
+compiler forces to be exhaustive, with copilot and pi given an explicit
+`makeNoopBehavior(…)` rather than being absent. `auth-rotation-ring.ts` is the other — its
+header exists to state that the two rings are "identical logic once".
+
+`provider-pair-parity.test.ts` (`@gate:always-run`) enforces it: every provider either has
+the module or appears in that capability's `unsupported` map WITH a reason, and an
+`unsupported` entry whose module has since appeared fails too — a stale exemption
+permanently excuses a provider that no longer needs excusing. Adding a fifth provider turns
+every capability red until it is classified.
+
+Still ad-hoc, and deliberately left so: the two login ROUTES
+(`POST /api/preferences/{claude,codex}-login`) take different body params (`configDir` vs
+`codexHome`) and are public API the UI calls. Table-driving them means changing that
+contract, which is a bigger change than this ticket's "document the rule, add the test".
+
 ## How a service is WIRED — factory vs fn-module, and the ONE injection seam (#604)
 
 Both shapes are legitimate. Say which you are writing and why:
