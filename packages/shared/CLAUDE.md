@@ -44,6 +44,39 @@ per-provider parsers live in `src/lib/agent-stream/{claude,codex,copilot,pi}.ts`
 in `agent-stream/shared.ts`, all re-exported through the unchanged facade so consumers' imports of
 `@agentic-kanban/shared/lib/agent-stream-parser` don't change.
 
+## `lib/` is SEVEN kinds, and only one may touch the DB (#590)
+
+`packages/shared/src/lib` holds 143 files that are not one thing. Placement and the
+persistence rule follow from which kind a file is:
+
+| Sub-kind | What it is | May reach `shared/schema` |
+|---|---|---|
+| **shared-db-op** | a drizzle operation that is the SINGLE write/cascade authority for a domain fact, needed by server AND mcp (`mcp-no-server-internals` forbids mcp importing server code) — `cascade-delete.ts`, `checked-preference-write.ts`, `workflow-engine/status-transition.ts`, `workspace-status.ts`, `issue-number.ts`, `fk-actions.ts`, … | **yes — only this kind** |
+| **node-adapter** | one external system behind `xExec`/`xAvailable` or an fs port; deep-path import only, never a value export in the client barrel | no |
+| **key-derivation** | pure functions that mint an id/key from parts (`plugin-keys.ts`, `path-key.ts`) | no |
+| **contract-codec** | parse/serialize a wire or file contract (`plugin-manifest.ts`, `service-stack-codec.ts`) | no |
+| **stream-parser** | incremental agent-output parsing (`agent-stream/*`) | no |
+| **pure-policy / projection** | a decision or a derived view over data passed in (`merge-policy.ts`, `profile-allowlist.ts`, `status-view.ts`) | no |
+| **telemetry-singleton** | process-wide counters/metrics | no |
+
+The docs called each db-op an "SSOT" or "single write authority" seven times without ever
+naming the KIND, so nothing said that the other six are pure with respect to persistence —
+and nothing checked it.
+
+**Where it is enforced.** `docs/pattern-language/pattern-language.json` carries `shared-db-op`
+as its own element placed BEFORE `shared-lib` (first match wins), with `shared-lib` no longer
+allowed to reach `shared-schema`. Because that engine matches PATHS and not imports, the
+element's member list is a hand-written enumeration — so
+`packages/shared/__tests__/shared-lib-sub-kinds.test.ts` (`@gate:always-run`) re-derives
+membership from the imports (`drizzle-orm` is what makes a module a db-op; the tables alone
+do not) and fails when the list and the code disagree. Adding a db-op therefore means adding
+it to the spec, which is the point.
+
+**The one standing exception**, frozen in that suite and shrink-only: a pure module may read a
+column VOCABULARY (`as const`) from `shared/schema` — `dependency-type-traits.ts` does, and the
+`shared-schema` element intent explicitly blesses vocabularies living beside their tables. A
+pure module importing a TABLE is always a violation.
+
 ## Exec adapters — `lib/<system>-exec.ts`, one result shape (#591)
 
 An exec adapter wraps exactly ONE external CLI: `<system>Exec(args, opts)` + `<system>Available()`,

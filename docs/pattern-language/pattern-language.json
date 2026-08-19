@@ -120,12 +120,35 @@
       "intent": "Type-only contracts shared between packages; no runtime code."
     },
     {
+      "name": "shared-db-op",
+      "match": [
+        "packages/shared/src/lib/cascade-delete\\.ts$",
+        "packages/shared/src/lib/checked-preference-write\\.ts$",
+        "packages/shared/src/lib/drive-retro\\.ts$",
+        "packages/shared/src/lib/fk-actions\\.ts$",
+        "packages/shared/src/lib/issue-number\\.ts$",
+        "packages/shared/src/lib/issue-status-orchestration\\.ts$",
+        "packages/shared/src/lib/issue-summary\\.ts$",
+        "packages/shared/src/lib/session-messages\\.ts$",
+        "packages/shared/src/lib/workspace-git-state\\.ts$",
+        "packages/shared/src/lib/workspace-status\\.ts$",
+        "packages/shared/src/lib/workflow-engine/node-queries\\.ts$",
+        "packages/shared/src/lib/workflow-engine/status-resolution\\.ts$",
+        "packages/shared/src/lib/workflow-engine/status-sync\\.ts$",
+        "packages/shared/src/lib/workflow-engine/status-transition\\.ts$",
+        "packages/shared/src/lib/workflow-engine/templates\\.ts$",
+        "packages/shared/src/lib/workflow-engine/transitions\\.ts$",
+        "packages/shared/src/lib/workflow-engine/workspace-init\\.ts$"
+      ],
+      "intent": "A drizzle operation in packages/shared/src/lib that is the SINGLE write/cascade authority for a domain fact, shared by server AND mcp (mcp-no-server-internals forbids mcp importing server code). The only sub-kind of shared/lib permitted to value-import drizzle-orm and reach shared/schema; every other sub-kind (node-adapter, key-derivation, contract-codec, stream-parser, pure-policy/projection, telemetry-singleton) is pure with respect to persistence. Enumerated by path because the spec engine matches paths, not imports - shared-lib-sub-kinds.test.ts re-derives the set from the imports and fails on drift."
+    },
+    {
       "name": "shared-lib",
       "match": [
         "packages/shared/src/lib/",
         "packages/shared/src/index\\.ts$"
       ],
-      "intent": "Code used by more than one package: node adapters (git/docker/fs, deep-path only), shared drizzle ops, key derivation, contract codecs, stream parsers, pure helpers."
+      "intent": "Code used by more than one package, in seven sub-kinds: node-adapter (git/docker/fs, deep-path only), key-derivation, contract-codec, stream-parser, pure-policy/projection, telemetry-singleton - and shared-db-op, which is split out as its own element because it is the ONLY one allowed to touch persistence. Everything matching THIS element is pure with respect to the DB: no drizzle-orm, no shared/schema tables."
     },
     {
       "name": "mcp-tool",
@@ -183,11 +206,13 @@
       "server-db",
       "shared-schema",
       "shared-types",
+      "shared-db-op",
       "shared-lib"
     ],
     "server-middleware": [
       "server-lib",
       "server-service",
+      "shared-db-op",
       "shared-lib",
       "shared-types"
     ],
@@ -199,6 +224,7 @@
       "server-worker",
       "shared-schema",
       "shared-types",
+      "shared-db-op",
       "shared-lib"
     ],
     "server-monitor": [
@@ -210,6 +236,7 @@
       "server-worker",
       "shared-schema",
       "shared-types",
+      "shared-db-op",
       "shared-lib"
     ],
     "server-repository": [
@@ -217,6 +244,7 @@
       "server-lib",
       "shared-schema",
       "shared-types",
+      "shared-db-op",
       "shared-lib"
     ],
     "server-lib": [
@@ -224,17 +252,25 @@
       "server-db",
       "shared-schema",
       "shared-types",
+      "shared-db-op",
       "shared-lib"
     ],
     "server-db": [
       "shared-schema",
+      "shared-db-op",
       "shared-lib",
       "server-lib",
       "server-scaffold"
     ],
-    "shared-lib": [
+    "shared-db-op": [
+      "shared-db-op",
       "shared-lib",
       "shared-schema",
+      "shared-types"
+    ],
+    "shared-lib": [
+      "shared-db-op",
+      "shared-lib",
       "shared-types"
     ],
     "shared-types": [
@@ -243,6 +279,7 @@
     "shared-schema": [],
     "mcp-tool": [
       "mcp-tool",
+      "shared-db-op",
       "shared-lib",
       "shared-schema",
       "shared-types"
@@ -253,6 +290,7 @@
       "client-store",
       "client-lib",
       "shared-types",
+      "shared-db-op",
       "shared-lib"
     ],
     "client-hook": [
@@ -260,17 +298,20 @@
       "client-store",
       "client-lib",
       "shared-types",
+      "shared-db-op",
       "shared-lib"
     ],
     "client-store": [
       "client-store",
       "client-lib",
       "shared-types",
+      "shared-db-op",
       "shared-lib"
     ],
     "client-lib": [
       "client-lib",
       "shared-types",
+      "shared-db-op",
       "shared-lib"
     ]
   }
