@@ -38,13 +38,13 @@ doc mention!), reaper, `start/stopX` background pair (25 exports), resolver shap
 |---|---|
 | provider | agent provider (`AgentProvider`, 4 impls) · quota provider · strategy `Provider` union · React context providers (4) |
 | port | TCP port (20/21 `*Port*` symbols, `runtime-port.ts`) · hexagonal port (`OrphanedWorktreeGitPort`, CLAUDE.md "adapter/port") |
-| gate | pre-merge verify gate · plugin human gate (`PluginLoopGate`, `GateCard`) · file-contention gate · readiness gate · JVM build **semaphore** (`jvm-build-gate.ts:37`) · `@gate:always-run` test marker |
+| gate | pre-merge verify gate · plugin human gate (`PluginLoopGate`, `GateCard`) · file-contention gate · readiness gate · JVM build **semaphore** — RENAMED to `jvm-build-semaphore.ts` (#611), since it refuses nothing · `@gate:always-run` test marker |
 | hook | `.claude/hooks/*.js` scripts (17) · React hooks (58) · git hooks |
 | monitor | Autopilot / Steward / Conductor (CLAUDE.md's own three) · `LoopLagMonitor` · `orchestrator-monitor.service` |
 | service | server service module (290) · Docker service stack (14 files, decision 011) · "the shared git service" |
 | view | board view (27 in `VIEW_REGISTRY`) · presentational half of a container pair (`XView`, 6, since 2026-07-18) · `status-view` (shared) |
 | contract | interface contract · the coupling-*contract* op (decision 010, 14 symbols) |
-| scanner | guard-suite scanner (tests) · `done-unmerged-invariant-scanner.ts` (a runtime reconciler) |
+| scanner | guard-suite scanner (tests) — the ONLY sense now. `done-unmerged-invariant-scanner.ts` was renamed `-sweep.ts` (#611): it is a runtime background sweep, not a guard test |
 | engine / workflow | workflow engine · plugin-loop engine · services engine · "in-process engine"; workflow graph · `exit-workflow`/`merge-workflow` · `kanban-workflow` skill |
 
 ## Element catalogue (role level)
@@ -63,7 +63,7 @@ unenforced · **implicit** = consistent shape, unnamed · **emerging** = 2–4 m
 | **adapter / port** | wrap ONE external system: explicit ports `AgentProvider` (4 impls), `ComposeRunner`, `QuotaUsageProvider`, `VersionRunner`, `WebhookSender`; implicit `process-exec.ts` (15 fns), git via shared adapter | `implements \w+(Provider\|Runner)` / `^export interface \w+(Runner\|Provider\|Sender)` | 5 explicit; ≈74 technology-kind files | explicit for git (`git-exec-single-spawn`), implicit for process/docker/fs (19 files spawn beside `process-exec.ts`) |
 | **coded-domain-error** | `class XError extends Error { code: "NOT_FOUND"\|… }` mapped once in `middleware/error-handler.ts:10-30` | `^export class \w+Error extends Error` | 15 classes, ≈330 throws | documented+structural — but ring R3 |
 | **projection / snapshot / summary** | read-only aggregate for a view, never writes: `buildX(rows) → Summary`, `computeX(db, id, window)` | name regex `projection\|snapshot\|summary\|dashboard\|analytics\|scorecard\|timeline\|insights\|digest` | 19 (+2 in `lib/`) | implicit (decision 014 names one) |
-| **cache / lock / claim** | in-process memo or mutual exclusion (`board-etag-cache`, `workspace-summary-cache`, `agent-questions/cache.ts:25`, `workspace-internals.ts:627 activeMerges`, `auto-start-claim`, `port-allocator`, `jvm-build-gate`) | `*-cache*\|*-claim\|*-lock` | ≈10 | implicit; 2 wiring styles |
+| **cache / lock / claim** | in-process memo or mutual exclusion (`board-etag-cache`, `workspace-summary-cache`, `agent-questions/cache.ts:25`, `workspace-internals.ts:627 activeMerges`, `auto-start-claim`, `port-allocator`, `jvm-build-semaphore`) | `*-cache*\|*-claim\|*-lock` | ≈10 | implicit; 2 wiring styles |
 | **registry** | name→instance: `agent-provider/registry.ts` (module Map + accessor) · `butler-sdk/registry.ts:13` (exported bare Map) · `createWorkerRegistry(db)` (factory) | `registry` in path | 3 (3 shapes) | emerging, inconsistent |
 | **re-export shim / types-only** | 7 compat shims still named `*.service.ts` (`git.service.ts`, `session.manager.ts`, `setup-script.ts`, `agent-provider.ts`…) + 8 type modules | only `export … from` / `export type` | 15 | decomposition residue |
 

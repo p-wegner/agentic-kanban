@@ -1,5 +1,21 @@
 # Client Package — Architecture Patterns
 
+## `View` means a BOARD VIEW — a container's pure half is `*Body` (#611)
+
+`view` is the client's most overloaded noun: 27 board views in `VIEW_REGISTRY` (guarded by
+the `viewTabs` collision test) against the presentational halves of container/presentation
+pairs, which also ended in `View`. Reading `FleetServiceStackMapView` you could not tell
+whether it was a registered board view or half a component.
+
+**Board view = `VIEW_REGISTRY` entry. A container's pure half = `*Body`.** Renamed:
+`RepoMergeStatusStripView` → `…Body`, `FleetServiceStackMapView` → `…Body`,
+`MultirepoHealthPillView` → `…Body`.
+
+Only those three — the container pairs #611 names. The other `*View` components in
+`components/` were left alone deliberately: renaming 32 symbols is churn with a real chance
+of collateral damage, and the rule above is what stops the ambiguity growing. Rename the
+rest opportunistically when you are already in the file.
+
 ## Two client patterns that were consistent but unnamed (#589)
 
 ### `lib/<feature>.ts` — the pure core beside a component or hook

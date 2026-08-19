@@ -18,7 +18,7 @@ import { setWorkspaceStatus } from "../repositories/workspace-status.repository.
 import { isPidAlive } from "../lib/pid.js";
 import { reconcileAncestorBranchWorkspaces } from "./ancestor-branch-reconciler.js";
 import { reconcileHandMergedBranches } from "./hand-merged-branch-reconciler.js";
-import { scanDoneUnmergedWorkspaces } from "./done-unmerged-invariant-scanner.js";
+import { scanDoneUnmergedWorkspaces } from "./done-unmerged-invariant-sweep.js";
 import { reapTerminalWorkspaces } from "./terminal-workspace-reaper.js";
 import { reconcileOrphanedWorktrees } from "./orphaned-worktree-reconciler.js";
 import { assertForeignKeysEnabled, alignForeignKeyActionsOnStartup } from "./fk-alignment.js";

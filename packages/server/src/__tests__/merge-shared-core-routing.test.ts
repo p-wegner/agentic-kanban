@@ -32,8 +32,8 @@ vi.mock("../db/index.js", async () => {
 });
 
 // The invariant scanner kicked off after an auto-merge polls the real board — stub it.
-vi.mock("../startup/done-unmerged-invariant-scanner.js", () => ({
-  runDoneUnmergedScannerNow: vi.fn(),
+vi.mock("../startup/done-unmerged-invariant-sweep.js", () => ({
+  runDoneUnmergedSweepNow: vi.fn(),
 }));
 
 // Spy on the shared merge executor core. getDirtyMainFiles keeps its benign shape

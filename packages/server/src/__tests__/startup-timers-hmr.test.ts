@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setupScheduledTasks } from "../startup/scheduled-tasks.js";
 import { startAutoMergeOrchestrator } from "../startup/auto-merge-orchestrator.js";
 import { startAncestorBranchReconciler, stopAncestorBranchReconciler } from "../startup/ancestor-branch-reconciler.js";
-import { startDoneUnmergedScanner, stopDoneUnmergedScanner } from "../startup/done-unmerged-invariant-scanner.js";
+import { startDoneUnmergedSweep, stopDoneUnmergedSweep } from "../startup/done-unmerged-invariant-sweep.js";
 import { startStrandedReviewReconciler } from "../startup/stranded-review-reconciler.js";
 import { startZombieFixSessionReconciler } from "../startup/zombie-fix-session-reconciler.js";
 import { startBackupScheduler } from "../startup/backup-scheduler.js";
@@ -103,8 +103,8 @@ describe("startup timers are restart-safe for HMR-style reloads", () => {
   });
 
   it("recreates done-unmerged scanner timers instead of accumulating handles", () => {
-    const first = startDoneUnmergedScanner({}, 10_000);
-    const second = startDoneUnmergedScanner({}, 10_000);
+    const first = startDoneUnmergedSweep({}, 10_000);
+    const second = startDoneUnmergedSweep({}, 10_000);
 
     // #529: these now return a PeriodicSweepHandle. The assertion is unchanged in
     // INTENT — a restart clears the previous pair and installs a new one — but the
@@ -129,9 +129,9 @@ describe("startup timers are restart-safe for HMR-style reloads", () => {
   });
 
   it("clears done-unmerged scanner interval handles on stop", () => {
-    const { interval } = startDoneUnmergedScanner({}, 10_000);
+    const { interval } = startDoneUnmergedSweep({}, 10_000);
 
-    stopDoneUnmergedScanner();
+    stopDoneUnmergedSweep();
 
     // The boot timeout is cleared too; its handle is private to the sweep now, so this
     // asserts it happened rather than which object it was called with. NOT a count
@@ -175,8 +175,8 @@ describe("startup timers are restart-safe for HMR-style reloads", () => {
 
   it("done-unmerged scanner stops firing ticks after cleanup", () => {
     const tick = vi.fn();
-    startDoneUnmergedScanner({ onTick: tick }, 5_000);
-    stopDoneUnmergedScanner();
+    startDoneUnmergedSweep({ onTick: tick }, 5_000);
+    stopDoneUnmergedSweep();
 
     vi.advanceTimersByTime(60_000);
 

@@ -28,8 +28,8 @@ vi.mock("../db/index.js", async () => {
   };
 });
 
-vi.mock("../startup/done-unmerged-invariant-scanner.js", () => ({
-  runDoneUnmergedScannerNow: vi.fn(),
+vi.mock("../startup/done-unmerged-invariant-sweep.js", () => ({
+  runDoneUnmergedSweepNow: vi.fn(),
 }));
 
 // The two shared-git primitives the #350 assertion is built from. Mocked so the test can put the

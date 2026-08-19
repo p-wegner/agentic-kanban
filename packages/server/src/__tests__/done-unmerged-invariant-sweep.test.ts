@@ -18,7 +18,7 @@ import { tmpdir } from "node:os";
 import { eq } from "drizzle-orm";
 import { issues, preferences, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
-import { scanDoneUnmergedWorkspaces, startDoneUnmergedScanner } from "../startup/done-unmerged-invariant-scanner.js";
+import { scanDoneUnmergedWorkspaces, startDoneUnmergedSweep } from "../startup/done-unmerged-invariant-sweep.js";
 import { activeMerges } from "../services/workspace-internals.js";
 import type { BranchTipAncestryResult } from "@agentic-kanban/shared/lib/git-service";
 
@@ -491,7 +491,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const checkAncestor = makeCheckAncestor(false);
     const countCommits = makeCountCommits(2);
 
-    const { timer, interval } = startDoneUnmergedScanner(
+    const { timer, interval } = startDoneUnmergedSweep(
       {
         database: db, checkAncestor, countCommits,
         detectConflicts: makeDetectConflicts(false),

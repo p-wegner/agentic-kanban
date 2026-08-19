@@ -1,7 +1,7 @@
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { issueTags, preferences, projects, repos, sessions, tags, workspaces } from "@agentic-kanban/shared/schema";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
-import { runDoneUnmergedScannerNow } from "./done-unmerged-invariant-scanner.js";
+import { runDoneUnmergedSweepNow } from "./done-unmerged-invariant-sweep.js";
 import { reconcileGroupMemberIssues } from "../services/merge-cleanup.service.js";
 import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
@@ -501,7 +501,7 @@ Server: http://localhost:${serverPort}`;
       console.log(`[workflow] auto-merged workspace ${workspace.id}`);
       // Run the done-unmerged invariant scan immediately after merge so silent-merge-loss
       // is caught without waiting for the next periodic tick (#589).
-      runDoneUnmergedScannerNow();
+      runDoneUnmergedSweepNow();
     } catch (err) {
       console.error("[workflow] auto-merge failed:", err);
       boardEvents.broadcast(projectId, "workflow_error");

@@ -65,7 +65,7 @@ const BASELINE: Record<string, number> = {
   // sanctioned home for a key's polarity. This entry must stay at 1 — a second raw read of
   // plugin_enabled_* anywhere is the violation this ratchet exists to catch.
   "server/src/repositories/plugins.repository.ts::<row-value>": 1,
-  "server/src/startup/done-unmerged-invariant-scanner.ts::<row-value>": 1,
+  "server/src/startup/done-unmerged-invariant-sweep.ts::<row-value>": 1,
   "server/src/startup/exit-workflow.ts::<row-value>": 1,
   "server/src/startup/monitor-setup.ts::<row-value>": 2,
   // Both reconcilers now read their toggle through a NAMED constant rather than an inline

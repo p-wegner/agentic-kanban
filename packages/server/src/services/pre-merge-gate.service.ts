@@ -21,7 +21,7 @@ import { resolveProjectDevServerPlan } from "./dev-server.service.js";
 import { quiesceBuildersEnabled } from "./gate-quiesce.js";
 import { isSelfProjectRepo } from "./self-project.js";
 import { getProjectRepoPath } from "../repositories/project.repository.js";
-import { runUnderBuildGate } from "./jvm-build-gate.js";
+import { runUnderBuildSemaphore } from "./jvm-build-semaphore.js";
 import {
   resolveVerifyGateStrategy,
   countAlwaysRunGuardSuites,
@@ -510,7 +510,7 @@ export async function runPreMergeGate(
       buildersQuiesced: await quiesceBuildersEnabled(projectId, database).catch(() => undefined),
     };
     const runVerify = () =>
-      runUnderBuildGate(() =>
+      runUnderBuildSemaphore(() =>
         runSetupScript(workingDir, verifyScript!, { timeoutMs: verifyTimeoutMs, env: verifyEnv }).catch((e) => ({
           exitCode: 1,
           stdout: "",
@@ -543,7 +543,7 @@ export async function runPreMergeGate(
         const installCommand = await getProjectSetupScript(projectId, database).catch(() => null);
         if (installCommand && installCommand.trim()) {
           console.warn(`[pre-merge-gate] verify_script failed with a missing-deps signature for workspace ${workspace.id} — retrying once after running the project's install command`);
-          await runUnderBuildGate(() =>
+          await runUnderBuildSemaphore(() =>
             runSetupScript(workingDir, installCommand, { timeoutMs: DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, env: gradleEnv }).catch((e) => ({
               exitCode: 1,
               stdout: "",
@@ -627,7 +627,7 @@ export async function runPreMergeGate(
         console.log(`[pre-merge-gate] skipping smoke check for workspace ${workspace.id} — diff touches only docs (#198)`);
       } else {
         smokeApplies = true;
-        const smoke = await runUnderBuildGate(() => runSmokeCheck(workspace.workingDir!, smokeCheck));
+        const smoke = await runUnderBuildSemaphore(() => runSmokeCheck(workspace.workingDir!, smokeCheck));
         if (!smoke.passed) {
           return { passed: false, skipped: false, stage: "smoke", message: `smoke check failed: ${smoke.message}` };
         }

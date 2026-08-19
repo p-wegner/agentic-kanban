@@ -46,7 +46,7 @@
 //     - cli.test.ts        spawn-based CLI integration; stale migration list / worktree DB resolution
 //     - cli-butler.test.ts spawn-based CLI integration; same root causes
 //     - git.service.test.ts real git on temp dirs; Windows file-locking / timing
-//     - done-unmerged-invariant-scanner.test.ts, workspace-merge-service.test.ts,
+//     - done-unmerged-invariant-sweep.test.ts, workspace-merge-service.test.ts,
 //       workspace-already-merged.test.ts, api-workspace.test.ts, workspace-lifecycle-transitions.test.ts,
 //       merge-endpoint-reconcile-noop.test.ts, merge-service-edge-cases.test.ts, preferences.test.ts
 //       (#173) — every one of these is green in isolation; under full
@@ -114,7 +114,7 @@ export const PACKAGES = [
       "**/cli.test.ts",
       "**/cli-butler.test.ts",
       "**/git.service.test.ts",
-      "**/done-unmerged-invariant-scanner.test.ts",
+      "**/done-unmerged-invariant-sweep.test.ts",
       "**/workspace-merge-service.test.ts",
       "**/workspace-already-merged.test.ts",
       "**/api-workspace.test.ts",

@@ -4,7 +4,7 @@ import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys"
 import { isSpecPlanningStageName, transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
-import { runUnderBuildGate } from "../services/jvm-build-gate.js";
+import { runUnderBuildSemaphore } from "../services/jvm-build-semaphore.js";
 import { RUN_GATE, type MergeGateToken } from "../services/pre-merge-gate.service.js";
 import { runGateWithEvidence } from "../services/merge-gate-evidence.js";
 import { getAutoLandLoopTicket } from "../services/plugin-loop-hooks.service.js";
@@ -637,7 +637,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       const repoRows = await db.select({ repoPath: projects.repoPath }).from(projects).where(eq(projects.id, projectId)).limit(1);
       const repoPath = repoRows[0]?.repoPath;
       if (repoPath && workspace.branch) {
-        const coldResult: ColdCloneCheckResult = await runUnderBuildGate(() =>
+        const coldResult: ColdCloneCheckResult = await runUnderBuildSemaphore(() =>
           runColdCloneBuildCheckForProject(
             projectId,
             { repoPath, branch: workspace.branch },
