@@ -11,7 +11,6 @@ export const FETCH_IN_EFFECT_BASELINE: Record<string, number> = {
   // #513: THE sanctioned ladder. Every entry below is a hand-rolled copy waiting to be
   // migrated onto this hook; this one line is the destination, not another offender.
   "hooks/useApiResource.ts": 1,
-  "components/ActivityFeedView.tsx": 1,
   "components/AllWorkspacesPanel.tsx": 1,
   "components/ArtifactViewer.tsx": 1,
   "components/BacklogView.tsx": 1,
@@ -36,7 +35,6 @@ export const FETCH_IN_EFFECT_BASELINE: Record<string, number> = {
   "components/LaunchPreviewPanel.tsx": 1,
   "components/LoopTimeline.tsx": 1,
   "components/MetricsView.tsx": 1,
-  "components/MilestonesOverview.tsx": 1,
   "components/MonitorActionReplayDrawer.tsx": 1,
   "components/MonitorCycleHistoryPanel.tsx": 1,
   "components/MonitorCycleTimeline.tsx": 2,
