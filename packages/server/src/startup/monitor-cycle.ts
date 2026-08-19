@@ -13,6 +13,8 @@ import { startManualReview } from "../services/review.service.js";
 import { readUsageLimitStats } from "@agentic-kanban/shared/lib/session-stats-blob";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { getStackProfile, verifyScriptPrefKey } from "../services/stack-profile.service.js";
+import { resolveMergeGateConfig } from "../services/pre-merge-gate.service.js";
+import { devCommandPrefKey, healthUrlPrefKey } from "../services/dev-server.service.js";
 import { runPreMergeGate, resolveMergeGateShas, gateAlreadyPassed, RUN_GATE, type MergeGateToken, type MergeGateEvidence } from "../services/pre-merge-gate.service.js";
 import {
   MAX_SESSIONS,
@@ -215,20 +217,27 @@ type CycleContext = {
 };
 
 /**
- * Whether a project has an automatic pre-merge quality gate — a `verify_script` (build/test) and/or
- * a web smoke check (isWeb stack profile → boot + render check). The verify+smoke gate runs when a
- * review session EXITS (exit-workflow) and sets `readyForMerge` only on pass. So for a gated
- * project the monitor must NOT bypass `readyForMerge` via auto_merge_in_review — doing so races the
- * in-flight review and merges the work before (or instead of) the gate, which then sees the work
- * "already merged" and is skipped entirely. The fix: for gated projects, only auto-merge work the
- * gate has approved (readyForMerge=true); un-ready In-Review work waits for the review's gate.
+ * Whether a project has an automatic pre-merge quality gate — a `verify_script` (build/test)
+ * and/or a web smoke check. The verify+smoke gate runs when a review session EXITS
+ * (exit-workflow) and sets `readyForMerge` only on pass. So for a gated project the monitor
+ * must NOT bypass `readyForMerge` via auto_merge_in_review — doing so races the in-flight
+ * review and merges the work before (or instead of) the gate, which then sees the work
+ * "already merged" and is skipped entirely.
+ *
+ * #546: the answer comes from `resolveMergeGateConfig`, the same derivation the gate itself
+ * uses. This used to say `profile.isWeb === true`, which is a strictly WIDER condition than
+ * `buildSmokeCheck` — an isWeb project with no dev command was treated as gated and had
+ * auto_merge_in_review suppressed for a smoke check that never ran.
  */
 export async function projectHasMergeGate(projectId: string, database = db): Promise<boolean> {
   try {
-    const verify = await getPreference(verifyScriptPrefKey(projectId), database);
-    if (verify && verify.trim()) return true;
-    const profile = await getStackProfile(projectId, database);
-    return profile?.isWeb === true;
+    const [verify, profile, devCommandOverride, healthUrlOverride] = await Promise.all([
+      getPreference(verifyScriptPrefKey(projectId), database),
+      getStackProfile(projectId, database),
+      getPreference(devCommandPrefKey(projectId), database),
+      getPreference(healthUrlPrefKey(projectId), database),
+    ]);
+    return resolveMergeGateConfig({ verifyScript: verify, profile, devCommandOverride, healthUrlOverride }).hasGate;
   } catch {
     return false; // best-effort: never block the monitor on a gate-detection error
   }

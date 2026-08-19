@@ -1,5 +1,5 @@
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
-import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
+import { isAutomaticMergeEnabled } from "@agentic-kanban/shared/lib/merge-policy";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import type { Database } from "../db/index.js";
@@ -135,7 +135,11 @@ export function resolveProjectRuntimeConfig(input: ProjectRuntimeConfigInput): P
     nowMs: input.nowMs,
   });
   const startPolicy = resolveStartPolicy(input.prefMap, input.projectId);
-  const autoMerge = isAutoMergeEnabled(input.prefMap);
+  // #546: this read `auto_merge` ALONE while every other owner predicate also required a
+  // strategy, so with `merge_strategy: "direct"` the runtime config reported auto-merge ON
+  // for work no automation would ever merge — and drive-preflight, its only consumer,
+  // passed the "prefs coherent" check on that.
+  const autoMerge = isAutomaticMergeEnabled(input.prefMap);
   const autoMergeDisabled = input.prefMap.get(autoMergeDisabledPrefKey(input.projectId)) === "true";
 
   return {

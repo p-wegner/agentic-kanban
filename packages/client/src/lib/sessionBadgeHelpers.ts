@@ -2,22 +2,21 @@ import type { IssueWithStatus } from "@agentic-kanban/shared";
 import { triggerBadgeLabel } from "@agentic-kanban/shared";
 import { TRIGGER_TYPE_CLASSES, SKILL_TRIGGER_CLASSNAME } from "./workspace-helpers.js";
 
+/**
+ * The badge for a card's LAST session. Deliberately narrower than `getTriggerTypeLabel`:
+ * the everyday `agent`/`chat`/`bisect` runs are suppressed here, because a badge on every
+ * card carries no information. Labels and skill humanization come from the shared traits
+ * table (#495); this file decides only the subset and the colour.
+ */
+const LAST_SESSION_BADGE_TRIGGERS = new Set(["review", "merge", "fix-conflicts", "fix-and-merge", "learning", "auto-start"]);
+
 export function getLastSessionBadge(triggerType: string | null | undefined): { label: string; className: string } | null {
   if (!triggerType) return null;
-  const map: Record<string, { label: string; className: string }> = {
-    review: { label: "AI Review", className: "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300" },
-    merge: { label: "AI Merge", className: "bg-emerald-100 text-emerald-700" },
-    "fix-conflicts": { label: "Fix Conflicts", className: "bg-orange-100 text-orange-700" },
-    "fix-and-merge": { label: "Fix & Merge", className: "bg-orange-100 text-orange-700" },
-    learning: { label: "Learning", className: "bg-teal-100 text-teal-700" },
-    "auto-start": { label: "Auto-start", className: "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400" },
-  };
-  if (map[triggerType]) return map[triggerType];
-  if (triggerType.startsWith("skill:")) {
-    const name = triggerType.slice(6).replace(/[-_]/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-    return { label: `✨ ${name}`, className: "bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300" };
-  }
-  return null;
+  const label = triggerBadgeLabel(triggerType);
+  if (!label) return null;
+  if (triggerType.startsWith("skill:")) return { label, className: SKILL_TRIGGER_CLASSNAME };
+  if (!LAST_SESSION_BADGE_TRIGGERS.has(triggerType)) return null;
+  return { label, className: TRIGGER_TYPE_CLASSES[triggerType] ?? "" };
 }
 
 export type ActiveAgentState = {

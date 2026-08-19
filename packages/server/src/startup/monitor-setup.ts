@@ -20,10 +20,9 @@ import { resolveStartPolicy } from "../services/start-policy.service.js";
 import { advanceDuePluginLoops } from "../services/plugin-loop-monitor.js";
 import { scanDirtyMainCheckouts } from "../services/dirty-main-checkout.js";
 import { scanAutodriveStallWarnings, buildAutoStartSkipWarnings } from "../services/autodrive-stall-warning.service.js";
-import { resolveMergeStrategy } from "./merge-strategy.js";
+import { resolveMergePolicy } from "./merge-strategy.js";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { conditionalJsonResponse } from "../services/board-etag-cache.service.js";
-import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
 import { createMonitorPhaseRecorder, type MonitorCycleTimings } from "../lib/monitor-phase-timings.js";
 import type { MonitorStatusResponse, MonitorWarning, MonitorResourceSummary } from "@agentic-kanban/shared/types";
 import { createSpawnControlProbe } from "../lib/monitor-spawn-control.js";
@@ -448,7 +447,6 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
         console.log(`[monitor] Maintenance window active — skipping disruptive actions${endTime ? ` until ${endTime}` : ""}`);
         return;
       }
-      const mergeStrategy = resolveMergeStrategy(prefMap);
       // NOTE: the warnings refresh used to run HERE, third of eleven phases, ahead of every
       // productive phase. It is pure diagnostics — nothing in the cycle reads its output — but
       // it scans every project's active workspaces, so on a busy board it became a multi-minute
@@ -546,7 +544,8 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
         sessionManager,
         boardEvents,
         workspaceActions,
-        autoMergeEnabled: isAutoMergeEnabled(prefMap) && mergeStrategy === "monitor",
+        // The monitor only owns merging when it is the configured owner (#546).
+        autoMergeEnabled: resolveMergePolicy(prefMap).owner === "monitor",
         autoMergeInReview: getBool(prefMap, "auto_merge_in_review"),
         autoMergeDisabledProjectIds,
         reviewSessionIds,

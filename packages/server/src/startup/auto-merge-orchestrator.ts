@@ -1,4 +1,3 @@
-import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { isTerminalStatusView } from "@agentic-kanban/shared";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { issues, projectStatuses, workspaces, workflowNodes, sessions, sessionMessages } from "@agentic-kanban/shared/schema";
@@ -10,8 +9,10 @@ import { createMergeQueueService } from "../services/merge-queue.service.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
 import { buildStrandedBatch, pickIntegrationWorkspace } from "../services/reconciler.service.js";
 import type { SessionManager } from "../services/session.manager.js";
-import { resolveMergeStrategy } from "./merge-strategy.js";
-import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
+import { resolveMergePolicy } from "./merge-strategy.js";
+import { resolveMergeGateConfig } from "../services/pre-merge-gate.service.js";
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
+import type { StackProfile } from "@agentic-kanban/shared";
 import { reconcileCompletionStates } from "./completion-state-reconciler.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { reconcileDriveCompletion } from "./drive-completion-reconciler.js";
@@ -39,6 +40,8 @@ const ZOMBIE_TIMEOUT_MS = 5 * 60_000;
 const autoMergeDisabledPref = projectPref("auto_merge_disabled");
 const verifyScriptPref = projectPref("verify_script");
 const stackProfilePref = projectPref("project_stack_profile");
+const devCommandPref = projectPref("dev_command");
+const healthUrlPref = projectPref("health_url");
 
 export interface AutoMergeOrchestratorState {
   running: boolean;
@@ -54,6 +57,41 @@ export interface AutoMergeOrchestratorState {
 }
 
 let activeAutoMergeSweep: PeriodicSweepHandle | null = null;
+
+/**
+ * The per-project gate inputs, read out of the one prefMap scan this orchestrator already
+ * does, and answered by the gate's own `resolveMergeGateConfig` (#546).
+ */
+function collectGatedProjectIds(prefMap: Map<string, string>): Set<string> {
+  const inputs = new Map<string, { verifyScript: string | null; profile: StackProfile | null; devCommandOverride: string | null; healthUrlOverride: string | null }>();
+  const at = (projectId: string) => {
+    let entry = inputs.get(projectId);
+    if (!entry) {
+      entry = { verifyScript: null, profile: null, devCommandOverride: null, healthUrlOverride: null };
+      inputs.set(projectId, entry);
+    }
+    return entry;
+  };
+  for (const [key, value] of prefMap) {
+    if (!value) continue;
+    const verifyProjectId = verifyScriptPref.projectIdOf(key);
+    if (verifyProjectId) { at(verifyProjectId).verifyScript = value; continue; }
+    const profileProjectId = stackProfilePref.projectIdOf(key);
+    if (profileProjectId) {
+      try { at(profileProjectId).profile = JSON.parse(value) as StackProfile; } catch { /* not JSON */ }
+      continue;
+    }
+    const devCommandProjectId = devCommandPref.projectIdOf(key);
+    if (devCommandProjectId) { at(devCommandProjectId).devCommandOverride = value; continue; }
+    const healthUrlProjectId = healthUrlPref.projectIdOf(key);
+    if (healthUrlProjectId) { at(healthUrlProjectId).healthUrlOverride = value; }
+  }
+  const gated = new Set<string>();
+  for (const [projectId, input] of inputs) {
+    if (resolveMergeGateConfig(input).hasGate) gated.add(projectId);
+  }
+  return gated;
+}
 
 export function createAutoMergeOrchestrator(deps: {
   database: Database;
@@ -89,7 +127,7 @@ export function createAutoMergeOrchestrator(deps: {
     // the same tick, so one underlying query serves both.
     const prefRows = await getAllPreferencesCached(database);
     const prefMap = toPrefMap(prefRows);
-    return isAutoMergeEnabled(prefMap) && resolveMergeStrategy(prefMap) === "merge_queue";
+    return resolveMergePolicy(prefMap).owner === "merge_queue";
   }
 
   async function findCompletedWorkspaceIds(): Promise<string[]> {
@@ -110,19 +148,17 @@ export function createAutoMergeOrchestrator(deps: {
         .filter((id): id is string => id !== null),
     );
 
-    // Projects with an automatic pre-merge gate — a verify_script (build/test) and/or a web smoke
-    // check (isWeb stack profile). For these, `auto_merge_in_review` must NOT bypass `readyForMerge`:
-    // the gate runs on review exit and sets readyForMerge on pass, so merging un-ready In-Review work
-    // here would race/skip the gate (#821). Both signals already live in prefMap.
-    const gatedProjectIds = new Set<string>();
-    for (const [key, value] of prefMap) {
-      const verifyProjectId = verifyScriptPref.projectIdOf(key);
-      if (verifyProjectId && value && value.trim()) { gatedProjectIds.add(verifyProjectId); continue; }
-      const profileProjectId = stackProfilePref.projectIdOf(key);
-      if (profileProjectId && value) {
-        try { if ((JSON.parse(value) as { isWeb?: boolean } | null)?.isWeb === true) gatedProjectIds.add(profileProjectId); } catch { /* not JSON */ }
-      }
-    }
+    // Projects with an automatic pre-merge gate. For these, `auto_merge_in_review` must NOT
+    // bypass `readyForMerge`: the gate runs on review exit and sets readyForMerge on pass, so
+    // merging un-ready In-Review work here would race/skip the gate (#821).
+    //
+    // #546: this used to answer the question itself — `verify_script` OR `profile.isWeb` —
+    // which is WIDER than the gate. An isWeb project with no dev command was treated as gated
+    // and had auto_merge_in_review suppressed for a smoke check `buildSmokeCheck` returns null
+    // for. It now asks `resolveMergeGateConfig`, the gate's own derivation; every input it
+    // needs (verify script, stack profile, dev-command/health-url overrides) is already in
+    // prefMap, so this stays a single scan with no extra query.
+    const gatedProjectIds = collectGatedProjectIds(prefMap);
 
     const statusNames = autoMergeInReview
       ? MERGEABLE_STATUS_NAMES
