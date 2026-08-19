@@ -33,6 +33,9 @@ import { reapOrphanServiceStacksOnce } from "./startup/service-stack-reaper.js";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { attachButlerEventFeed } from "./services/butler-event-feed.js";
+import { getButlerSession, sendButlerTurn } from "./services/butler-sdk.service.js";
+import { getPreference } from "./repositories/preferences.repository.js";
 
 const serverStartRepoRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../../");
 
@@ -107,6 +110,14 @@ export async function startServer(port?: number, hostname?: string) {
   // project (session exit, workspace status change, MCP comment notify, ...)
   // drops that project's cached pending-questions listing.
   boardEvents.addInvalidationListener((projectId) => invalidateAgentQuestionsCache(projectId));
+  // The butler system-event feed (#561): the only place it learns about the DB and
+  // the butler-session registry. Unattached it is inert, which is what keeps it out
+  // of every test that merely runs code emitting an event.
+  attachButlerEventFeed({
+    readPreference: (key) => getPreference(key, db),
+    isButlerActive: (projectId) => getButlerSession(projectId).active,
+    sendTurn: (projectId, text) => sendButlerTurn(projectId, text),
+  });
   let runWorkflowOnExit: ReturnType<typeof createWorkflowEngine>["runWorkflowOnExit"] = async () => {};
   let autoMerge: ReturnType<typeof createAutoMerge> = async () => {};
   const sessionManager = createSessionManager(upgradeWebSocket, {

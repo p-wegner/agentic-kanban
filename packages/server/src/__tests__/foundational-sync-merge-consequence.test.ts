@@ -41,7 +41,6 @@ vi.mock("../services/git.service.js", () => ({
   // #377: runPreMergeGate reads the diff to decide docs-only/package-scoped skips.
   getChangedFileNames: vi.fn(async () => [] as string[]),
 }));
-vi.mock("../services/butler-event-feed.js", () => ({ emitButlerSystemEvent: vi.fn() }));
 vi.mock("../services/agent-settings.service.js", () => ({
   // #541: exit-workflow / merge-workflow now resolve their launch settings here instead
   // of hand-rolling the ladder, so these two must exist on the mock.

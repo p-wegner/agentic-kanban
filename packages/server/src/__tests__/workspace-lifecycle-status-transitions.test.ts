@@ -18,7 +18,6 @@ vi.mock("../services/git.service.js", () => ({
   // on its assertion — the merge had never previously got this far.
   getChangedFileNames: vi.fn(async () => [] as string[]),
 }));
-vi.mock("../services/butler-event-feed.js", () => ({ emitButlerSystemEvent: vi.fn() }));
 vi.mock("../services/agent-settings.service.js", () => {
   const stubAgentSettings = () => ({
     agentCommand: undefined,
