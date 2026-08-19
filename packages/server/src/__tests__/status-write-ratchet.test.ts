@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
+import { walkPackageSources } from "../../../shared/__tests__/helpers/guard-scan.js";
 
 /**
  * #953 — ratchet gate against raw status writes outside the transition authorities.
@@ -84,19 +85,8 @@ const BASELINE: Record<string, number> = {
   "server/src/repositories/workspace-summary.repository.ts::workspaces-opaque-set": 2,
 };
 
-function listTsFiles(dir: string): string[] {
-  const out: string[] = [];
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name === "__tests__" || entry.name === "node_modules") continue;
-      out.push(...listTsFiles(full));
-    } else if (/\.tsx?$/.test(entry.name) && !entry.name.endsWith(".d.ts")) {
-      out.push(full);
-    }
-  }
-  return out;
-}
+/** #583 — the tree walk every guard suite needs, from the one shared helper. */
+const listTsFiles = (dir: string): string[] => walkPackageSources(dir);
 
 const UPDATE_SET_RE =
   /update\(\s*(?:schema\.)?(issues|workspaces)\s*\)\s*\.\s*set\(\s*(\{[\s\S]*?\}|[A-Za-z_$][\w$.]*)\s*[),]/g;

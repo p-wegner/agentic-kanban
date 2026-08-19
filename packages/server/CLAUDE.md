@@ -50,6 +50,28 @@ line is not a style nit — it is a line nobody will find later.
   Most survivors are `console.warn(variable)` forwarding a pre-tagged string — legitimate,
   hence a ratchet rather than a ban.
 
+## Guard suites — the kind, its marker, and its shared machinery (#583)
+
+A **guard suite** is a test whose subject is the REPO TREE rather than a module: no raw `git`
+spawn outside the adapter, no untagged `console.*`, one declaration per wire DTO, a spelling
+ratchet, a god-module scan. The kind exists because such a suite is invisible to
+`vitest related` — it reaches state outside its own import graph, so nothing it asserts about
+is in its imports, and a scoped test run silently drops it.
+
+- **Declare it**, don't hand-list it: a top-of-file `// @gate:always-run` marker. `scripts/test-mine.mjs`
+  builds its always-run set by SCANNING for that marker (recursively, every test extension), and
+  `always-run-marker-ratchet.test.ts` statically re-derives the "reaches outside its own import
+  graph" signature and fails on a matching file that carries none.
+- **Use the shared machinery**: `packages/shared/__tests__/helpers/guard-scan.ts` —
+  `walkPackageSources` (the tree walk, skipping `__tests__`/`node_modules`/`dist`/`.d.ts`/tests),
+  `walkTestFiles`, `packagesRootFrom`, and `compareRatchet` (which reports BOTH over-baseline
+  regressions and BELOW-baseline staleness, so a baseline shrinks instead of becoming a budget).
+  Do not paste a private walker into a new guard: every copy is a place the SCAN can diverge from
+  what the guard claims to cover — which is exactly how the pre-merge gate's own
+  `countAlwaysRunGuardSuites` under-reported for months while the marker scan was correct.
+- **A guard reports honestly.** The gate message names the guard set it ran (`+66 guard suites`);
+  a number that quietly means something narrower than it says is worse than no number.
+
 ## Board API data enrichment
 Workspace summaries computed server-side in board endpoint via single grouped query, attached to each issue as `workspaceSummary`. Prefer server-side aggregation over client-side joins.
 

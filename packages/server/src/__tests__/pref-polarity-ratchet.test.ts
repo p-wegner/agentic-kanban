@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
+import { walkPackageSources } from "../../../shared/__tests__/helpers/guard-scan.js";
 
 /**
  * #947 — ratchet gate against raw preference polarity reads.
@@ -82,19 +83,8 @@ const IGNORED_KEYS = new Set(["output_parser"]);
 const LINE_SKIP = /c\.req\.query\(|localStorage|searchParams/;
 const POLARITY = /(?:===|!==)\s*["'](?:true|false)["']/;
 
-function listTsFiles(dir: string): string[] {
-  const out: string[] = [];
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name === "__tests__" || entry.name === "node_modules") continue;
-      out.push(...listTsFiles(full));
-    } else if (/\.tsx?$/.test(entry.name) && !entry.name.endsWith(".d.ts")) {
-      out.push(full);
-    }
-  }
-  return out;
-}
+/** #583 — the tree walk every guard suite needs, from the one shared helper. */
+const listTsFiles = (dir: string): string[] => walkPackageSources(dir);
 
 function normalizeKey(raw: string): string {
   return raw.trim().replace(/^["'`]|["'`]$/g, "");

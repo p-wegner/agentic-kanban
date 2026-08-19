@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
+import { walkPackageSources } from "../../../shared/__tests__/helpers/guard-scan.js";
 
 /**
  * #599 — the READ-side counterpart to `status-write-ratchet.test.ts`.
@@ -62,23 +63,8 @@ const BASELINE: Record<string, number> = {
   "shared/src/lib/drive-retro.ts": 1,
 };
 
-function sourceFiles(rel: string): string[] {
-  const abs = path.join(packagesRoot, rel);
-  if (!fs.existsSync(abs)) return [];
-  const out: string[] = [];
-  const walk = (dir: string): void => {
-    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, e.name);
-      if (e.isDirectory()) {
-        if (e.name !== "__tests__" && e.name !== "node_modules" && e.name !== "dist") walk(full);
-        continue;
-      }
-      if (/\.tsx?$/.test(e.name) && !e.name.includes(".test.")) out.push(full);
-    }
-  };
-  walk(abs);
-  return out;
-}
+/** #583 — the tree walk every guard suite needs, from the one shared helper. */
+const sourceFiles = (rel: string): string[] => walkPackageSources(path.join(packagesRoot, rel));
 
 function currentCounts(): Record<string, number> {
   const counts: Record<string, number> = {};

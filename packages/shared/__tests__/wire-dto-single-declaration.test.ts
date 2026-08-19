@@ -21,6 +21,7 @@
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
+import { walkPackageSources } from "./helpers/guard-scan.js";
 import { fileURLToPath } from "node:url";
 
 const packagesRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -107,19 +108,10 @@ function declaredTypeNames(pkg: string, exportedOnly: boolean): Set<string> {
   const pattern = exportedOnly
     ? /^export (?:interface|type) (\w+)/gm
     : /^(?:export )?(?:interface|type) (\w+)/gm;
-  const walk = (dir: string): void => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (entry.name !== "__tests__" && entry.name !== "node_modules" && entry.name !== "dist") walk(full);
-        continue;
-      }
-      if (!entry.name.endsWith(".ts") && !entry.name.endsWith(".tsx")) continue;
-      const src = fs.readFileSync(full, "utf-8");
-      for (const m of src.matchAll(pattern)) found.add(m[1]);
-    }
-  };
-  walk(base);
+  // #583 — the tree walk every guard suite needs, from the one shared helper.
+  for (const full of walkPackageSources(base)) {
+    for (const m of fs.readFileSync(full, "utf-8").matchAll(pattern)) found.add(m[1]);
+  }
   return found;
 }
 

@@ -86,15 +86,28 @@ export const ALWAYS_RUN_TESTS_DIRS = [
  *  message's "+N guard suites" figure — never throws, never affects gate behavior. */
 export function countAlwaysRunGuardSuites(repoRoot: string): number {
   let count = 0;
+  // #583 — RECURSIVE, and every test extension. The old flat `readdirSync` over `.test.ts`
+  // only saw a `__tests__` dir's top level, so `mcp-server/src/__tests__/tools/` (33 suites)
+  // and every `.test.tsx`/`.test.mjs` were invisible: the gate under-reported the guard set
+  // it claims to run while the marker ratchet, which had been fixed to recurse, stayed green.
+  // A number in a gate message that quietly means something narrower than it says is worse
+  // than no number, because it is the thing an operator checks instead of the suite list.
+  const scan = (abs: string): void => {
+    for (const entry of readdirSync(abs, { withFileTypes: true })) {
+      const full = join(abs, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name !== "node_modules" && !entry.name.startsWith(".")) scan(full);
+        continue;
+      }
+      if (!/\.test\.[cm]?[jt]sx?$/.test(entry.name)) continue;
+      if (readFileSync(full, "utf8").includes("@gate:always-run")) count += 1;
+    }
+  };
   for (const dir of ALWAYS_RUN_TESTS_DIRS) {
     const abs = resolve(repoRoot, dir);
     if (!existsSync(abs)) continue;
     try {
-      for (const name of readdirSync(abs)) {
-        if (!name.endsWith(".test.ts")) continue;
-        const text = readFileSync(join(abs, name), "utf8");
-        if (text.includes("@gate:always-run")) count += 1;
-      }
+      scan(abs);
     } catch {
       // Best-effort decoration only — never let a scan error affect the gate.
     }
