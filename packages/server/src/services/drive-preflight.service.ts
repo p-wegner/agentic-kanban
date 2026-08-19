@@ -222,6 +222,8 @@ export async function runDrivePreflight(
     }
 
     // --- Verify (merge) gate: the keystone auto-merge gate. Auto-repairable (derived from profile). ---
+    // #551: the RAW pref on purpose — this check is about whether the gate is CONFIGURED
+    // (and offers to derive one), not about what `resolveEffectiveVerify` would run.
     const verify = prefMap.get(verifyScriptPrefKey(projectId));
     if (verify && verify.trim()) {
       checks.push(ok("verifyGate", "Verify gate set", `verify_script = ${verify}.`));

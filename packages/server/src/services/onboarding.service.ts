@@ -113,6 +113,8 @@ export function createOnboardingService(deps: OnboardingServiceDeps) {
       case "stack-profile":
         return (await getStackProfile(projectId, database)) !== null;
       case "setup-verify-scripts": {
+        // #551: RAW pref — the step asks whether the operator CONFIGURED a gate; a value
+        // `resolveEffectiveVerify` could derive on the fly must not mark this step done.
         const verify = await getPreference(verifyScriptPrefKey(projectId), database);
         return Boolean(project.setupScript?.trim()) && Boolean(verify?.trim());
       }

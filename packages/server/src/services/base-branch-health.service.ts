@@ -17,7 +17,7 @@ import { cloneBranchTo, getMergeBase, revParse } from "@agentic-kanban/shared/li
 import type { Database } from "../db/index.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { getProjectById } from "../repositories/project.repository.js";
-import { verifyScriptPrefKey } from "./stack-profile.service.js";
+import { resolveEffectiveVerify } from "./stack-profile.service.js";
 import {
   recordBaseBranchHealth,
   getLatestBaseBranchHealth,
@@ -48,8 +48,11 @@ export async function verifyBaseBranchHealth(
   const project = await getProjectById(projectId, database);
   if (!project?.repoPath || !project.defaultBranch) return null;
 
-  const verifyScript = await getPreference(verifyScriptPrefKey(projectId), database).catch(() => null);
-  if (!verifyScript || !verifyScript.trim()) return null;
+  // #551: the same resolver the gate asks, so base health measures the command the gate
+  // will actually run — including the derived one on a project that never set an override.
+  const effective = await resolveEffectiveVerify(projectId, database, { repoPath: project.repoPath }).catch(() => null);
+  const verifyScript = effective?.command ?? null;
+  if (!verifyScript) return null;
 
   const branch = project.defaultBranch;
   const sha = await revParse(project.repoPath, branch).catch(() => null);

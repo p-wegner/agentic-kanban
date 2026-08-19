@@ -40,7 +40,9 @@ export {
   verifyScriptPrefKey,
   deriveVerifyScriptFromProfile,
   populateVerifyScript,
+  resolveEffectiveVerify,
 } from "./stack-profile/verify-script.js";
+export type { EffectiveVerify } from "./stack-profile/verify-script.js";
 
 // --- Run/smoke verification harness (#791) ---
 export { buildSmokeCheck } from "./stack-profile/smoke-check.js";

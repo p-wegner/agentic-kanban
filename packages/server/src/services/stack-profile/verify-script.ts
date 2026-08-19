@@ -6,9 +6,10 @@
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 
 import type { StackProfile } from "@agentic-kanban/shared";
-import { deriveVerifyCommand } from "@agentic-kanban/shared/lib/verify-command";
+import { deriveVerifyCommand, deriveVerifyCommandPlan } from "@agentic-kanban/shared/lib/verify-command";
 import type { Database } from "../../db/index.js";
 import { getPreference, setPreference } from "../../repositories/preferences.repository.js";
+import { getProjectById } from "../../repositories/project.repository.js";
 import { detectProjectMarkers, deriveVerifyScript } from "../project-setup.service.js";
 import { getStackProfile } from "./persistence.js";
 
@@ -63,4 +64,66 @@ export async function populateVerifyScript(
 
   await setPreference(verifyScriptPrefKey(projectId), verify, database);
   return verify;
+}
+
+/**
+ * The one answer to "what command will the merge gate run for this project" (#551).
+ *
+ * `verify-command.ts` has always DECLARED that one plan feeds both the merge gate and the
+ * builder's ticket-context prompt — while the two actually read different sources: the gate
+ * reads the `verify_script_<id>` override, the ticket context derived from the stack profile
+ * alone. On any project with a hand-set or AI-generated override the builder was told to run
+ * a different command than it would be merged against. This resolver is that single answer,
+ * in the GATE's precedence: override first, derived second.
+ *
+ * `rules`/`onFailure` always come from the derived plan even when the command is an override —
+ * the per-stack traps (PowerShell native-stderr, raw XML reports) are true of the stack, not
+ * of the particular invocation.
+ *
+ * Returns null when nothing can be resolved; callers must treat that as "no gate".
+ */
+export interface EffectiveVerify {
+  command: string;
+  rules: string[];
+  onFailure: string | null;
+  /** Where the command came from — an operator/AI override, or derived from the stack. */
+  source: "override" | "derived";
+}
+
+export async function resolveEffectiveVerify(
+  projectId: string,
+  database: Database,
+  opts: {
+    /** Reuse an already-loaded profile instead of re-reading it. */
+    profile?: StackProfile | null;
+    /** Reuse an already-loaded repo path; read from the project row when absent. */
+    repoPath?: string | null;
+    /**
+     * Persist a DERIVED command to `verify_script_<projectId>` (#377 gate-time derivation).
+     * Only the gate itself passes this — a read-only consumer must not mutate the project.
+     */
+    persistDerived?: boolean;
+  } = {},
+): Promise<EffectiveVerify | null> {
+  const override = await getPreference(verifyScriptPrefKey(projectId), database).catch(() => null);
+  const profile = opts.profile !== undefined ? opts.profile : await getStackProfile(projectId, database);
+  const plan = deriveVerifyCommandPlan(profile);
+
+  if (override && override.trim()) {
+    return { command: override.trim(), rules: plan?.rules ?? [], onFailure: plan?.onFailure ?? null, source: "override" };
+  }
+
+  let repoPath = opts.repoPath ?? null;
+  if (!repoPath) {
+    const project = await getProjectById(projectId, database).catch(() => null);
+    repoPath = project?.repoPath ?? null;
+  }
+  if (!repoPath) return null;
+
+  const derived = deriveVerifyScriptFromProfile(profile, repoPath).trim();
+  if (!derived) return null;
+  if (opts.persistDerived) {
+    await setPreference(verifyScriptPrefKey(projectId), derived, database).catch(() => undefined);
+  }
+  return { command: derived, rules: plan?.rules ?? [], onFailure: plan?.onFailure ?? null, source: "derived" };
 }

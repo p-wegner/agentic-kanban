@@ -13,8 +13,7 @@ import { getChangedFileNames } from "./git.service.js";
 import type { Database } from "../db/index.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { getProjectSetupScript } from "../repositories/stack-profile.repository.js";
-import { getProjectById } from "../repositories/project.repository.js";
-import { buildSmokeCheck, getStackProfile, populateVerifyScript, verifyScriptPrefKey } from "./stack-profile.service.js";
+import { buildSmokeCheck, getStackProfile, resolveEffectiveVerify } from "./stack-profile.service.js";
 import { resolveDevServerPlan } from "./dev-server.service.js";
 import type { SmokeCheck, StackProfile } from "@agentic-kanban/shared";
 import { resolveProjectDevServerPlan } from "./dev-server.service.js";
@@ -344,24 +343,28 @@ export async function runPreMergeGate(
   // A read error here means we can't tell whether a gate is configured — treat as "no verify gate"
   // (never block a merge on a gate-DETECTION error; fail-closed applies only to a CONFIGURED gate
   // that can't RUN). Mirrors projectHasMergeGate's defensive catch.
-  let verifyScript = await getPreference(verifyScriptPrefKey(projectId), database).catch(() => null);
-  if (!verifyScript || !verifyScript.trim()) {
-    // #377 — re-derive ONCE at gate time when nothing is configured. `verify_script` is otherwise
-    // only ever derived at REGISTRATION, and a project registered from an empty repo (every
-    // pipeline-scaffolded project: the code arrives in later step commits) therefore has no gate
-    // forever, however many test suites it later grows. `populateVerifyScript` is idempotent and
-    // never clobbers an existing value or writes an empty one, so this can only ever ADD a gate.
-    //
-    // Honest limit, MEASURED on the project from the ticket: detection reads the repo ROOT only, and
-    // that project's `package.json` lives in `src/`, so this recovers nothing there. It closes the
-    // common root-layout case; the `unverified` flag below is what covers the rest.
-    const project = await getProjectById(projectId, database).catch(() => null);
-    if (project?.repoPath) {
-      verifyScript = await populateVerifyScript(projectId, project.repoPath, database).catch(() => null);
-      if (verifyScript) {
-        console.log(`[pre-merge-gate] derived a verify_script for project ${projectId} at gate time — the repo has grown one since registration (#377): ${verifyScript}`);
-      }
-    }
+  // #551: ONE resolver answers "what will the gate run" — override first, derived second —
+  // and it is the same call `workspace-provision` makes to tell the builder what to run, so
+  // the two can no longer name different commands.
+  //
+  // #377 — `persistDerived` re-derives ONCE at gate time when nothing is configured.
+  // `verify_script` is otherwise only ever derived at REGISTRATION, and a project registered
+  // from an empty repo (every pipeline-scaffolded project: the code arrives in later step
+  // commits) therefore has no gate forever, however many test suites it later grows. The
+  // resolver never clobbers an existing value or writes an empty one, so this can only ADD a
+  // gate.
+  //
+  // Honest limit, MEASURED on the project from #377: detection reads the repo ROOT only, and
+  // that project's `package.json` lives in `src/`, so this recovers nothing there. It closes
+  // the common root-layout case; the `unverified` flag below is what covers the rest.
+  //
+  // A read error means we can't tell whether a gate is configured — treat as "no verify gate"
+  // (never block a merge on a gate-DETECTION error; fail-closed applies only to a CONFIGURED
+  // gate that can't RUN). Mirrors projectHasMergeGate's defensive catch.
+  const effectiveVerify = await resolveEffectiveVerify(projectId, database, { persistDerived: true }).catch(() => null);
+  const verifyScript = effectiveVerify?.command ?? null;
+  if (effectiveVerify?.source === "derived") {
+    console.log(`[pre-merge-gate] derived a verify_script for project ${projectId} at gate time — the repo has grown one since registration (#377): ${verifyScript}`);
   }
   const verifyConfigured = Boolean(verifyScript && verifyScript.trim());
   if (verifyConfigured && !workspace.workingDir) {
