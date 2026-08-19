@@ -25,7 +25,7 @@ import {
   redoWorkflowHistory,
   undoWorkflowHistory,
   type WorkflowHistoryState,
-} from "./workflowHistory.js";
+} from "../lib/workflowHistory.js";
 
 const NODE_TYPES = ["start", "normal", "parallel-fork", "parallel-join", "end"] as const;
 const EDGE_CONDITIONS = ["manual", "auto_on_exit_0", "tests_pass", "tests_fail", "diff_clean", "diff_touches"] as const;

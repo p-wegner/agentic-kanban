@@ -12,7 +12,7 @@ import {
   gateRecommendationConflict,
   partitionGateChecks,
   viewGateRecommendation,
-} from "./gateCardPolicy.js";
+} from "../lib/gateCardPolicy.js";
 import type { PluginCheck, PluginGate, PluginGateAction } from "./PluginLoopExtras.js";
 
 // ── Approval gate card (#286) ─────────────────────────────────────────

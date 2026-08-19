@@ -4,7 +4,7 @@ import { showToast } from "./Toast.js";
 import { setProjectPref } from "../lib/settingsStore.js";
 import { requestIssueFocus, requestViewNavigation } from "../lib/navigateView.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
-import { checkLocationTokens } from "./gateCardPolicy.js";
+import { checkLocationTokens } from "../lib/gateCardPolicy.js";
 import { deriveProductIdentity, type ProductIdentity, type ScaffoldForm } from "./PluginScaffoldPane.js";
 import {
   ArtifactViewer,
