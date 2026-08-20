@@ -98,6 +98,30 @@ export async function getSessionById(sessionId: string, database: Database = db)
   return rows[0] ?? null;
 }
 
+/**
+ * Is this session still live, from the DB's point of view?
+ *
+ * Asked when a fleet worker reconnects and announces a session the board process has no
+ * memory of. The answer decides between two very different things: a zombie whose board row
+ * was already finalized (stop it), and a session that is genuinely still running and doing
+ * sanctioned work (leave it alone). Returns null when there is no such session row at all.
+ *
+ * Lives here rather than in worker.repository (#957): `sessions` is this aggregate's table,
+ * and the worker repository delegates to this accessor instead of re-querying it.
+ */
+export async function getSessionLiveness(
+  sessionId: string,
+  database: Database = db,
+): Promise<{ status: string; workerId: string | null } | null> {
+  const rows = await database
+    .select({ status: sessions.status, workerId: sessions.workerId })
+    .from(sessions)
+    .where(eq(sessions.id, sessionId))
+    .limit(1);
+  const row = rows[0];
+  return row ? { status: row.status, workerId: row.workerId ?? null } : null;
+}
+
 /** Full session metadata for the transcript view: session + workspace + issue + project. */
 export async function getSessionTranscriptContext(sessionId: string, database: Database = db) {
   const rows = await database

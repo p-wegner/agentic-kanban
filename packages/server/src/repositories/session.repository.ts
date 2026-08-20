@@ -25,6 +25,7 @@ export {
   getWorkspaceSessions,
   getWorkspaceSkillName,
   getSessionById,
+  getSessionLiveness,
   getSessionTranscriptContext,
   getLatestSessionIdForWorkspace,
 } from "./session/lifecycle.js";
