@@ -19,12 +19,20 @@ If you are blocked, say so in the description and leave the card `In Progress` �
 
 ## Start work on a ticket from scratch
 
+The one call that actually starts work is **`POST /api/workspaces`** — it creates the worktree,
+moves the issue to In Progress and launches the agent, in one step. CLI: `workspace start <issue-id>`
+(the UUID, which `issue get <N>` prints — this verb takes the id, not `#N`).
+
 ```
-start_workspace { issueNumber: N }        # worktree + agent, one call
+POST /api/workspaces { issueId }          # worktree + In Progress + agent, one call
 get_board_status                          # watch it: session state, tokens, cost, last output
 read_terminal { workspaceId }             # the agent's actual output
 send_workspace_message { workspaceId, content }   # follow-up turn (409 while busy)
 ```
+
+**`start_workspace` is NOT this call.** It creates a bare worktree record: no agent, no status
+change. Reach for it only when you explicitly want an empty worktree. `launch_workspace` then
+starts an agent in one that already exists.
 
 ## Review and merge
 
@@ -70,14 +78,75 @@ dozen at once reliably makes things worse.
 
 ## Backlog as one markdown file
 
+This is how you hand an existing backlog — a repo's `BACKLOG.md`, a TODO list, a plan a human
+wrote — to the board in one call. The board server must be running; import and export are HTTP
+endpoints, not local DB writes.
+
 ```
-agentic-kanban backlog export --out BACKLOG.md [--status Todo]
-agentic-kanban backlog import BACKLOG.md          # preview
-agentic-kanban backlog import BACKLOG.md --apply
+import_backlog_markdown   { projectId, markdown, apply: false }   # preview: counts + warnings
+import_backlog_markdown   { projectId, markdown, apply: true }    # write
+export_backlog_markdown   { projectId, status?: "open" }          # the other direction
 ```
 
-Import is liberal and never deletes; it matches by `#number` (same project only) and is idempotent.
-Always preview before `--apply`.
+CLI equivalent: `agentic-kanban backlog import BACKLOG.md` (preview) / `--apply`, and
+`backlog export --out BACKLOG.md [--status Todo]`.
+
+**Import never deletes.** The default `update` mode matches each parsed issue to an existing one
+— by `#N` (only when the file's `project` matches the target project), then by external `key`,
+then by title — writes only the fields the file actually contains, ADDS tags and dependencies
+rather than replacing them, and creates whatever did not match. Re-importing an unchanged export
+is a no-op. **Always preview first**: the preview reports a `confidence` score and warnings, and
+below ~0.6 you should fix the file rather than import it.
+
+### The format (`kanban-md 1`) — enough to write one
+
+```markdown
+---
+kanban-md: 1
+project: pantry
+statuses: Backlog, In Progress, In Review, Done
+---
+
+# pantry — backlog
+
+## Backlog
+
+### #12 Collapse the client's provider ladders
+`priority: high` · `type: chore` · `tags: arch, client` · `depends: #10, #11` · `key: gh-77`
+
+Why: nine hand-rolled copies drift.
+
+- [ ] write the table
+- [ ] delete the copies
+
+## In Progress
+
+### Ship it
+`priority: medium` · `type: feature`
+```
+
+- Front matter is optional; `project` is what makes `#N` match existing issues on re-import.
+- `## Section` is a **status column**, matched case-insensitively and through aliases
+  (`Todo`/`To Do`/`Open` → Backlog, `Doing`/`WIP` → In Progress, `Closed`/`Completed` → Done).
+  An unknown section becomes a new column.
+- `### [#N] Title` is one issue. **Keep `#N` for issues that already exist; omit it for new ones**
+  — numbers are assigned, and a colliding number is renumbered rather than overwriting.
+- The backtick line right under the heading is metadata: `` `key: value` `` tokens joined by ` · `.
+  Keys: `priority` (critical/high/medium/low), `type` (feature/bug/task/chore/epic), `tags`,
+  `milestone`, `estimate`, `due`, `depends`, `blocks`, `key` (external id), `url`. All optional.
+- Everything until the next `###`/`##` is the description. **Headings inside a description must be
+  `####` or deeper** — a `##` or `###` there would be read as a new section or issue.
+- `- [ ]` / `- [x]` lines in the body are the issue's checklist.
+
+The importer also reads the styles people already write, so a plain `BACKLOG.md` usually imports
+as-is: `## Todo` plus `- [ ]` items (each top-level item is an issue, sub-bullets are its
+description), `- **Title** — description`, `#12` anywhere in a title, inline `[bug]` / `[P1]`
+hints. Code fences are opaque. When you are converting a messy file, write the standard form
+above rather than hoping — you can see exactly what was understood in the preview.
+
+**Coupled tickets:** declare `depends:` / `blocks:` in the file rather than writing "do this with
+#12" in prose. A `coupled_with` edge is what lets the board run several tickets as ONE workspace
+with one review and one merge gate; prose is invisible to it.
 
 ## Find out what is going on right now
 
