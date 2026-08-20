@@ -206,6 +206,13 @@ describe("getBaseBranchHealthAtMergeBase (#491)", () => {
 // generated artifacts like shared/dist are absent and every suite importing them fails)
 // must NOT be attributed to the base. The old code recorded that as `red`, which made the
 // gate blame the base and withhold EVERY merge on the project while master was in fact green.
+describe("base-branch-health — unverified is not a red base (#674)", () => {
+  let db: ReturnType<typeof createTestDb>["db"];
+
+  beforeEach(() => {
+    ({ db } = createTestDb());
+  });
+
   it("attributes an unverified base as UNKNOWN, never as ALREADY RED", async () => {
     const repoPath = makeRepoPath();
     const projectId = await seedProject(db, repoPath);
@@ -352,48 +359,5 @@ describe("verifyBaseBranchHealth — installs before verifying (#674)", () => {
     expect(result?.outcome).toBe("red");
     expect(result?.message).toContain(realFailure);
     expect(result?.message).not.toContain("head noise line 0 ");
-  });
-});
-
-  it("attributes an unverified base as UNKNOWN, never as ALREADY RED", async () => {
-    const repoPath = makeRepoPath();
-    const projectId = await seedProject(db, repoPath);
-    const sha = "abc1234567890abcdef1234567890abcdef123456";
-    await recordBaseBranchHealth(
-      {
-        projectId,
-        sha,
-        branch: "master",
-        outcome: "unverified",
-        durationMs: 1234,
-        message: "could not prepare the base clone — `pnpm install -r` failed (exit 1).",
-      },
-      db,
-    );
-
-    const health = await getBaseBranchHealthForSha(projectId, sha, db);
-    const attribution = describeRedBaseAttribution({ mergeBaseSha: sha, health });
-
-    expect(attribution).not.toBeNull();
-    expect(attribution).toContain("BASE BRANCH HEALTH UNKNOWN");
-    // The whole point: it must not read as an accusation against the base.
-    expect(attribution).not.toContain("ALREADY RED");
-    expect(attribution).not.toContain("ALREADY UNVERIFIED");
-    expect(attribution).toContain("NOT attributed to it");
-  });
-
-  it("still attributes a genuinely red base as ALREADY RED", async () => {
-    const repoPath = makeRepoPath();
-    const projectId = await seedProject(db, repoPath);
-    const sha = "def1234567890abcdef1234567890abcdef123456";
-    await recordBaseBranchHealth(
-      { projectId, sha, branch: "master", outcome: "red", durationMs: 10, message: "1 test failed" },
-      db,
-    );
-
-    const health = await getBaseBranchHealthForSha(projectId, sha, db);
-    const attribution = describeRedBaseAttribution({ mergeBaseSha: sha, health });
-
-    expect(attribution).toContain("BASE BRANCH ALREADY RED");
   });
 });
