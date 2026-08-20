@@ -209,13 +209,14 @@ export async function startServer(port?: number, hostname?: string) {
   // 1 s is short enough to clear idle connections quickly while still amortising
   // the TCP handshake cost across rapid back-to-back requests.
   (server as { keepAliveTimeout?: number }).keepAliveTimeout = 1000;
-  // Node's DEFAULT `requestTimeout` is 5 minutes, and it closed the socket mid-merge (#680).
+  // Node's DEFAULT `requestTimeout` is 5 minutes; the board budgets a verify run 45 (#680).
   //
-  // Measured twice while trying to land the In-Review queue: `POST /api/workspaces/:id/merge`
-  // returned `HTTP 000` (connection dropped) after ~5 minutes with `curl -m 3300`, while the
-  // gate kept running server-side — so the CALLER could never learn the outcome of an operation
-  // the board itself budgets up to 45 minutes for (see verify-budget.ts). Any long endpoint has
-  // the same shape: merge, review, fix-and-merge, a cold-clone base probe.
+  // Defensive, and deliberately NOT dressed up as a measurement: the `HTTP 000` merge drops that
+  // prompted this were traced to `tsx watch` restarting the dev server mid-request (an edit to a
+  // server file during the run), not to this ceiling — they died at ~13-16 minutes, not at 5. So
+  // whether Node's default ever actually cut a merge here is UNVERIFIED. What is not in doubt is
+  // that a 5-minute transport ceiling under a 45-minute operation is a mismatch waiting to
+  // happen, on merge, review, fix-and-merge, or a cold-clone base probe.
   //
   // Not 0 (disabled): a genuinely stuck request should still be reaped eventually. The budget is
   // the verify budget plus slack for the install/clone/smoke phases that surround it, so the

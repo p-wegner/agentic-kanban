@@ -7,7 +7,6 @@ import {
   selectAllPreferences,
   selectAgentSkillById,
   selectWorkspaceIdById,
-  selectWorkspaceBranchById,
   updateChildWorkspaceFailed,
   insertFailedChildWorkspace,
   selectTemplateBuiltinKey,
@@ -240,8 +239,8 @@ export function createWorkflowForkService(deps: {
     // that changes the derivation (as #565's slug consolidation did) gives the worktree one branch
     // while the DB row keeps the other, and nothing reconciles them. The derivation stays as the
     // fallback for a child that has no row yet.
-    const persistedBranch = await selectWorkspaceBranchById(childWorkspaceId, database);
-    const childBranch = persistedBranch ?? childBranchName(parent.branch, entry.name, sharedWorktree);
+    const persisted = await selectWorkspaceIdById(childWorkspaceId, database);
+    const childBranch = persisted[0]?.branch ?? childBranchName(parent.branch, entry.name, sharedWorktree);
     const worktreePath = sharedWorktree
       ? (parent.workingDir ?? project.repoPath)
       : await gitService.createWorktree(project.repoPath, childBranch, parent.branch);
