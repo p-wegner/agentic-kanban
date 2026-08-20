@@ -243,7 +243,7 @@ export async function runMergeTrain(args: {
   baseBranch: string;
   members: TrainMember[];
   label: string;
-  runGate: (ctx: { trainRef: string; trainSha: string }) => Promise<{ passed: boolean; message: string }>;
+  runGate: (ctx: { trainRef: string; trainSha: string; included: TrainMember[] }) => Promise<{ passed: boolean; message: string }>;
   closeMember: (workspaceId: string) => Promise<void>;
   /**
    * Bisect a red batch instead of rejecting it whole (#492). Default ON: without it, one bad
@@ -308,7 +308,7 @@ async function runTrainAttempt(args: {
   baseBranch: string;
   members: TrainMember[];
   label: string;
-  runGate: (ctx: { trainRef: string; trainSha: string }) => Promise<{ passed: boolean; message: string }>;
+  runGate: (ctx: { trainRef: string; trainSha: string; included: TrainMember[] }) => Promise<{ passed: boolean; message: string }>;
   closeMember: (workspaceId: string) => Promise<void>;
 }): Promise<TrainRunResult> {
   const { repoPath, baseBranch, members, label, runGate, closeMember } = args;
@@ -331,7 +331,11 @@ async function runTrainAttempt(args: {
     // does not contain a member's tip, everything downstream would be wrong.
     await assertTrainPreservesAncestry(repoPath, asm.trainRef, asm.included);
 
-    const gate = await runGate({ trainRef: asm.trainRef, trainSha: asm.trainSha });
+    // #676: hand the gate the members actually INCLUDED in the assembled tree, not the ones
+    // requested. A member dropped during assembly (conflict) is not landing, so keying the
+    // deferred-install check on the requested set would block the train on a workspace whose
+    // code is not in it.
+    const gate = await runGate({ trainRef: asm.trainRef, trainSha: asm.trainSha, included: asm.included });
     if (!gate.passed) {
       return { trainRef: asm.trainRef, landed: [], dropped: asm.dropped, closeFailures, gateRejected: [], gateRuns: 1, gateFailure: gate.message };
     }

@@ -584,7 +584,7 @@ export function createMergeQueueService(deps: {
         baseBranch,
         members,
         label,
-        runGate: async ({ trainRef }) => {
+        runGate: async ({ trainRef, included }) => {
           // Gate the TREE THAT LANDS. A per-member gate never tests the merge commit, which is
           // how two individually-green branches can produce a red base with no conflict.
           let gateWorktree: string | null = null;
@@ -597,7 +597,9 @@ export function createMergeQueueService(deps: {
                 id: `train:${label}`,
                 workingDir: gateWorktree,
                 baseBranch,
-                memberWorkspaceIds: members.map((m) => m.workspaceId),
+                // The INCLUDED members (#676) — a member dropped during assembly is not in this
+                // tree, so its outstanding install must not withhold the train.
+                memberWorkspaceIds: included.map((m) => m.workspaceId),
               },
               projectId,
               database,
