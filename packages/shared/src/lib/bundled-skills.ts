@@ -229,3 +229,33 @@ async function filesMatch(a: string, b: string): Promise<boolean> {
 export function projectSkillsDir(projectRoot: string): string {
   return skillsDirOf(projectRoot);
 }
+
+/**
+ * Decide which skills an install actually writes, for a request that may name skills and may
+ * target the user's agent homes rather than a project.
+ *
+ * Two rules, both of which were easy to get wrong inline in the CLI action:
+ *
+ * 1. **A bundled directory wins over a same-named prompt-only skill.** It is the richer form of
+ *    the same skill, and installing both would leave the loser's SKILL.md sitting there.
+ * 2. **`--user` defaults to bundled only.** The prompt-only built-ins are per-project working
+ *    prompts the board also materializes into worktrees itself; installing them machine-wide
+ *    would offer every agent in every repo a review prompt written for one particular board.
+ *    Naming one explicitly still installs it — the default is a scope choice, not a restriction.
+ */
+export function selectSkillsToInstall<B extends { name: string }, P extends { name: string }>(
+  input: { bundled: readonly B[]; promptOnly: readonly P[]; names?: readonly string[]; user?: boolean },
+): { bundled: B[]; promptOnly: P[] } {
+  const bundledNames = new Set(input.bundled.map(s => s.name));
+  const promptOnly = input.promptOnly.filter(s => !bundledNames.has(s.name));
+
+  const names = input.names?.map(n => n.trim()).filter(Boolean) ?? [];
+  if (names.length > 0) {
+    const wanted = new Set(names);
+    return {
+      bundled: input.bundled.filter(s => wanted.has(s.name)),
+      promptOnly: promptOnly.filter(s => wanted.has(s.name)),
+    };
+  }
+  return { bundled: [...input.bundled], promptOnly: input.user ? [] : promptOnly };
+}

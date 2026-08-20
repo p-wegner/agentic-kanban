@@ -8,6 +8,7 @@ import {
   installBundledSkill,
   inspectInstalledSkill,
   discoverUserSkillRoots,
+  selectSkillsToInstall,
   type BundledSkill,
 } from "../src/lib/bundled-skills.js";
 
@@ -143,5 +144,52 @@ describe("findBundledSkillsDir", () => {
     const dir = findBundledSkillsDir();
     expect(dir).toBeTruthy();
     expect(dir!.replace(/\\/g, "/")).toMatch(/packages\/server\/skills$/);
+  });
+});
+
+describe("selectSkillsToInstall", () => {
+  const bundled = [{ name: "agentic-kanban" }];
+  const promptOnly = [{ name: "agentic-kanban" }, { name: "code-review" }, { name: "orchestrator" }];
+  const names = (r: { bundled: { name: string }[]; promptOnly: { name: string }[] }) => ({
+    bundled: r.bundled.map(s => s.name),
+    promptOnly: r.promptOnly.map(s => s.name),
+  });
+
+  it("drops a prompt-only skill that a bundled directory supersedes", () => {
+    expect(names(selectSkillsToInstall({ bundled, promptOnly }))).toEqual({
+      bundled: ["agentic-kanban"],
+      promptOnly: ["code-review", "orchestrator"],
+    });
+  });
+
+  it("installs bundled skills ONLY for a --user install", () => {
+    expect(names(selectSkillsToInstall({ bundled, promptOnly, user: true }))).toEqual({
+      bundled: ["agentic-kanban"],
+      promptOnly: [],
+    });
+  });
+
+  it("still installs a prompt-only skill under --user when it is named explicitly", () => {
+    expect(names(selectSkillsToInstall({ bundled, promptOnly, user: true, names: ["code-review"] }))).toEqual({
+      bundled: [],
+      promptOnly: ["code-review"],
+    });
+  });
+
+  it("gives a project target both kinds", () => {
+    const result = selectSkillsToInstall({ bundled, promptOnly });
+    expect(result.bundled.length + result.promptOnly.length).toBe(3);
+  });
+
+  it("ignores blank entries from a trailing comma in -n", () => {
+    expect(names(selectSkillsToInstall({ bundled, promptOnly, names: ["agentic-kanban", " ", ""] }))).toEqual({
+      bundled: ["agentic-kanban"],
+      promptOnly: [],
+    });
+  });
+
+  it("returns nothing selected for a name that matches neither kind", () => {
+    const result = selectSkillsToInstall({ bundled, promptOnly, names: ["nope"] });
+    expect(result).toEqual({ bundled: [], promptOnly: [] });
   });
 });
