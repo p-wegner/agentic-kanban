@@ -1,5 +1,6 @@
 import type { AgentLaunchRequest } from "./agent-dispatch.service.js";
 import { resolveEffectivePrompt } from "./agent-provider/context-files-prompt.js";
+import { stripMcpConfigArgs } from "./agent-provider/container-wrap.js";
 // Remote agent execution over a fleet worker's WebSocket (epic #1, phase 1c #5).
 //
 // Implements the AgentExecutionService seam (phase 0): `launch` builds the SAME
@@ -242,9 +243,19 @@ export function createRemoteAgentService(
     });
     const stdinPrompt = config.promptPrefix ? `${config.promptPrefix}\n\n${prompt}` : prompt;
 
+    // #244's sibling: the ENV is projected for a cross-machine spec, but the ARGS
+    // were shipped verbatim — and they carry board-host paths too. `--mcp-config`
+    // names a file in this machine's tmpdir, so a true remote worker died on
+    // "Invalid MCP configuration: MCP config file not found" before running a single
+    // turn. Shipping the file would not help: the MCP server it configures talks to
+    // the board API, which is loopback-only by design and unreachable from there.
+    // A same-filesystem worker keeps the arg, exactly as it keeps host paths in env.
+    const isTrueRemote = Boolean(placement.repo);
+    const specArgs = isTrueRemote ? stripMcpConfigArgs(config.args) : config.args;
+
     const spec = {
       command: config.command,
-      args: config.args,
+      args: specArgs,
       env,
       cwd: worktreePath,
       stdinPrompt,
