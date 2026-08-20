@@ -21,6 +21,52 @@ You reach it three ways, in this order of preference:
 Never hand-roll what the board already does (create a worktree, run a review, resolve a merge). If a
 verb below exists, call it.
 
+## Using the board from a project that is NOT the board's checkout
+
+This skill is installed machine-wide, so you will usually meet the board from some *other*
+repo — one that has no board source, no board database, and no idea the board exists. That is
+the supported case. You never need to read the board's code to use it; everything you need is
+in this skill and its `references/`.
+
+**Preconditions, both on THIS machine:**
+
+1. **The board server is running.** MCP tools and the CLI reach it on loopback
+   `127.0.0.1:3001` (override with `KANBAN_SERVER_PORT`). Start it with `npx agentic-kanban dev`,
+   or from a Docker install. Issue CRUD and project registration work without it, but backlog
+   import/export, workspaces, review and merge do not.
+2. **One database.** Every board process on the machine opens the same SQLite file — the board's
+   own checkout uses `packages/server/kanban.db`, everything else `~/.agentic-kanban/kanban.db`;
+   `AGENTIC_KANBAN_DIR` or `DB_URL` overrides both. If the board UI shows different data than
+   your tools return, that is the split — check the `[db] opening …` line the CLI prints.
+
+**Do you have the tools?** If your tool list contains `mcp__agentic-kanban__*`, you are wired —
+use those. If it does not, either use the CLI (`npx -y agentic-kanban <command>`, same verbs, no
+MCP needed) or ask the user to wire MCP once, machine-wide:
+
+```bash
+claude mcp add agentic-kanban --scope user -- npx -y -p agentic-kanban agentic-kanban-mcp
+```
+
+**The repo you are in must be a registered project** before it can hold tickets. Check with
+`list_projects` (CLI: `npx -y agentic-kanban list`); register with `register_project` (CLI:
+`npx -y agentic-kanban register .`). Registration detects the stack, derives the setup and verify
+commands, **and scaffolds the repo**: `.claude/` safety hooks, a starter `CLAUDE.md`/`AGENTS.md`,
+and `.gitignore` entries for agent artifacts — committed as `chore: scaffold agent guards and
+onboarding`. That is a write and a commit in someone else's repository, so say what it will do
+before you run it, and run it on a clean tree.
+
+**Then pick the flow:**
+
+| You were asked to | Do this |
+|---|---|
+| Put an existing backlog (a `BACKLOG.md`, a TODO list, a plan) on the board | Shape it into Backlog Markdown and `import_backlog_markdown` with `apply: false` first to preview, then `apply: true`. See `references/workflows.md`. |
+| File one or a few tickets | `create_issue` — or `create_issues_batch` when they are related, declaring `coupled_with` for tickets that must land together. |
+| Actually implement a ticket | `POST /api/workspaces` (CLI: `workspace start <issue-id>`) — the board makes the worktree, launches an agent in it and drives review/gate/merge. Do NOT clone, branch or edit the repo yourself to "help". |
+| Say what is going on | `get_board_status` for the project, not an unbounded workspace dump. |
+
+**Always pass `projectId` explicitly.** `create_issue` defaults to the board's *active* project,
+which is whatever the user last looked at in the UI — almost never the repo you are sitting in.
+
 ## The core loop
 
 ```
@@ -42,7 +88,8 @@ register a repo  →  create issue  →  workspace (worktree + agent)  →  diff
 | Issues, sub-issues, tags, priorities, dependencies | `list_issues`, `get_issue`, `create_issue`, `move_issue`, `add_dependency` |
 | Batch backlog creation, coupled ticket groups | `create_issues_batch`, `propose_ticket_groups` |
 | Backlog as a single markdown file, both directions | `export_backlog_markdown` / `import_backlog_markdown` |
-| Workspaces: worktree + agent, follow-up turns, resume | `start_workspace`, `send_workspace_message`, `stop_workspace` |
+| Start work: worktree + In Progress + agent, in one call | `POST /api/workspaces` (CLI `workspace start`) — *not* `start_workspace`, which makes a bare worktree |
+| Follow-up turns, resume, stop a running agent | `send_workspace_message`, `relaunch_workspace`, `stop_workspace` |
 | Watch agents live (output, tokens, cost, stalls) | `get_board_status`, `read_terminal`, `get_session_stats` |
 | AI code review with inline diff comments | `review_workspace`, `get_diff_comments`, `create_diff_comment` |
 | Pre-merge gate (tests + boot/render smoke) then merge | `merge_workspace` |
