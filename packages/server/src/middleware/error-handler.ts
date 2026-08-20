@@ -1,6 +1,12 @@
 import type { Context } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { AppError, AiOperationError, type DomainErrorCode } from "../errors/index.js";
+import {
+  AppError,
+  AiOperationError,
+  STANDALONE_REFUSAL_STATUS,
+  WORKSPACE_REFUSAL_CODES,
+  type DomainErrorCode,
+} from "../errors/index.js";
 import { WorkspaceError } from "../services/workspace-internals.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -73,6 +79,28 @@ export function domainErrorHandler(err: Error, c: Context): Response {
         409,
       );
     }
+    // #692 — every OTHER refusal reason was dropped here. The status was already right (it
+    // comes from the error's own NOT_FOUND/BAD_REQUEST/CONFLICT code), but the body carried
+    // only a prose message, so a client could not tell a profile-allowlist hold from an
+    // isolation refusal from a group-member conflict without string-matching the sentence.
+    // The guard suite exempted these codes from the HTTP vocabulary on the claim that this
+    // branch handled them; it did not. Now it does, and the guard checks it.
+    const refusal = err.data?.code;
+    if (typeof refusal === "string" && (WORKSPACE_REFUSAL_CODES as readonly string[]).includes(refusal)) {
+      const status = DOMAIN_CODE_STATUS[err.code];
+      return c.json({ error: err.message, code: refusal }, status);
+    }
+  }
+
+  // A refusal that is its own error class with a top-level `code`, so it never reaches the
+  // WorkspaceError branch above and is absent from DOMAIN_CODE_STATUS (#692). Without this,
+  // `WorkerDispatchUnavailableError` — strict worker dispatch with no live worker — fell all
+  // the way through to the generic 500 below, which is exactly the "unknown code is a silent
+  // 500" defect the #587 vocabulary exists to prevent.
+  const standalone = (err as { code?: unknown }).code;
+  if (typeof standalone === "string" && standalone in STANDALONE_REFUSAL_STATUS) {
+    const status = STANDALONE_REFUSAL_STATUS[standalone as keyof typeof STANDALONE_REFUSAL_STATUS];
+    return c.json({ error: err.message, code: standalone }, status as StatusCode);
   }
 
   if (err instanceof AppError) {
