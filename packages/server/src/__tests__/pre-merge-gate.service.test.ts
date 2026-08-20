@@ -327,3 +327,72 @@ describe("runPreMergeGate: an unverified merge must be SAYABLE (#377)", () => {
     expect(res.unverified).toBe(true);
   });
 });
+
+/**
+ * The docs-only GUARDS-ONLY run is this repo's own mechanism, and must not be exported to
+ * every other project on the board.
+ *
+ * `KANBAN_TEST_GUARDS_ONLY` is honoured only by `scripts/test-mine.mjs`. Any other registered
+ * project's verify_script (gradlew.bat, pytest, mvn, …) ignores the variable entirely, so
+ * "narrow the docs-only run to the guard suites" reads as narrowing while actually running
+ * that project's FULL suite — the ~40-minute build #198's skip exists to avoid, reintroduced
+ * everywhere except the one repo it was written for.
+ *
+ * This behaviour shipped with no test at all, which is why the only suite that touched it was
+ * left red on master instead of failing loudly at the change.
+ */
+describe("docs-only guards-only run is restricted to this repo's checkout", () => {
+  let db: ReturnType<typeof createTestDb>["db"];
+  beforeEach(() => {
+    ({ db } = createTestDb());
+    runSetupScript.mockReset();
+    runSmokeCheck.mockReset();
+    getChangedFileNames.mockReset();
+  });
+
+  it("runs verify with KANBAN_TEST_GUARDS_ONLY for a docs-only diff on THIS repo", async () => {
+    // repoPath = process.cwd() is what makes the fixture resolve as the self project.
+    const selfProjectId = await createProjectDirectly(db, { repoPath: process.cwd() });
+    await setPreference(verifyScriptPrefKey(selfProjectId), "pnpm test:mine", db);
+    getChangedFileNames.mockResolvedValue(["CLAUDE.md"]);
+    runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "" });
+
+    const res = await runPreMergeGate({ id: "ws", workingDir: "/tmp/wt", baseBranch: "master" }, selfProjectId, db);
+
+    expect(res.passed).toBe(true);
+    expect(res.skipped).toBe(false);
+    expect(res.stage).toBe("verify");
+    const env = (runSetupScript.mock.calls[0]?.[2] as { env: Record<string, string> }).env;
+    expect(env.KANBAN_TEST_GUARDS_ONLY).toBe("1");
+    // The narrower claim has to be sayable, not just made (#538).
+    expect(res.message).toContain("guard");
+  });
+
+  it("skips verify_script wholesale for a docs-only diff on ANOTHER project", async () => {
+    const otherProjectId = await createProjectDirectly(db, { repoPath: join(tmpdir(), "some-other-repo") });
+    await setPreference(verifyScriptPrefKey(otherProjectId), "gradlew.bat test", db);
+    getChangedFileNames.mockResolvedValue(["README.md"]);
+
+    const res = await runPreMergeGate({ id: "ws", workingDir: "/tmp/wt", baseBranch: "master" }, otherProjectId, db);
+
+    expect(res.passed).toBe(true);
+    expect(res.skipped).toBe(true);
+    // Not "verify" — claiming a stage for a run that never happened is the #182 dishonesty.
+    expect(res.stage).not.toBe("verify");
+    expect(runSetupScript).not.toHaveBeenCalled();
+  });
+
+  it("still runs the full verify for a foreign project when the diff touches source too", async () => {
+    const otherProjectId = await createProjectDirectly(db, { repoPath: join(tmpdir(), "some-other-repo-2") });
+    await setPreference(verifyScriptPrefKey(otherProjectId), "gradlew.bat test", db);
+    getChangedFileNames.mockResolvedValue(["README.md", "src/Main.kt"]);
+    runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "" });
+
+    const res = await runPreMergeGate({ id: "ws", workingDir: "/tmp/wt", baseBranch: "master" }, otherProjectId, db);
+
+    expect(res.skipped).toBe(false);
+    expect(runSetupScript).toHaveBeenCalledTimes(1);
+    const env = (runSetupScript.mock.calls[0]?.[2] as { env: Record<string, string> }).env;
+    expect(env.KANBAN_TEST_GUARDS_ONLY).toBeUndefined();
+  });
+});

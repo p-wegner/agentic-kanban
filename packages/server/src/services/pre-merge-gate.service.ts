@@ -428,7 +428,20 @@ export async function runPreMergeGate(
   // actually used must be sayable regardless of outcome.
   let gateTierInfo: GateTierInfo | null = null;
 
-  if (verifyConfigured && workspace.workingDir) {
+  // #675 follow-up: the guards-only docs-only run is THIS repo's mechanism, so ask first
+  // whether this project IS this repo. `KANBAN_TEST_GUARDS_ONLY` is honoured only by
+  // `scripts/test-mine.mjs`; every other registered project's verify_script (gradlew.bat,
+  // pytest, mvn, …) ignores the variable entirely and would run its FULL suite instead — so
+  // for them a markdown-only change would cost the ~40-minute build that #198's skip exists
+  // to avoid. Measured shape of the bug: the env var made the narrowing look universal while
+  // being inert everywhere but here. A foreign project keeps the wholesale #198 skip.
+  const docsOnlyGuardsRunApplies =
+    docsOnly && isSelfProjectRepo(await getProjectRepoPath(projectId, database));
+  const skipVerifyForForeignDocsOnly = docsOnly && !docsOnlyGuardsRunApplies;
+  if (skipVerifyForForeignDocsOnly && verifyConfigured && workspace.workingDir) {
+    console.log(`[pre-merge-gate] skipping verify_script for workspace ${workspace.id} — diff touches only docs (${changedFiles.length} file(s)), and this project's verify_script has no guards-only mode (#198)`);
+  }
+  if (verifyConfigured && workspace.workingDir && !skipVerifyForForeignDocsOnly) {
     const workingDir = workspace.workingDir;
     const verifyTimeoutMs = await resolveVerifyTimeoutMs(projectId, database);
     // #194: pin this worktree's backend-spawned gradle to the SAME per-worktree
@@ -518,7 +531,7 @@ export async function runPreMergeGate(
     // exists to catch exactly that drift. The premise "a `.md` change cannot break the build"
     // is false BY CONSTRUCTION in this repo, so the cheap-check motive is honoured by narrowing
     // to the guards rather than by checking nothing.
-    const verifyEnv = docsOnly
+    const verifyEnv = docsOnlyGuardsRunApplies
       ? { ...isolationEnv, KANBAN_TEST_GUARDS_ONLY: "1" }
       : effectiveTestScope
         ? {
@@ -527,7 +540,7 @@ export async function runPreMergeGate(
             ...(fileScope ? { KANBAN_TEST_FILES: changedFiles.join(",") } : {}),
           }
         : isolationEnv;
-    if (docsOnly) {
+    if (docsOnlyGuardsRunApplies) {
       console.log(`[pre-merge-gate] docs-only diff for workspace ${workspace.id} (${changedFiles.length} file(s)) — running @gate:always-run guard suites only`);
     }
     if (fileScope) {
@@ -535,9 +548,9 @@ export async function runPreMergeGate(
     }
     gateTierInfo = {
       strategy: gateStrategy,
-      packageScoped: Boolean(effectiveTestScope) && !docsOnly,
-      fileScoped: fileScope && !docsOnly,
-      ...(docsOnly ? { guardsOnly: true } : {}),
+      packageScoped: Boolean(effectiveTestScope) && !docsOnlyGuardsRunApplies,
+      fileScoped: fileScope && !docsOnlyGuardsRunApplies,
+      ...(docsOnlyGuardsRunApplies ? { guardsOnly: true } : {}),
       changedFileCount: changedFiles.length,
       guardSuiteCount: countAlwaysRunGuardSuites(workingDir),
       maxWorkers: gateMaxWorkers,
@@ -695,10 +708,12 @@ export async function runPreMergeGate(
   // `verifyRan` — not `verifyConfigured` — because the verify script only runs when there is a
   // worktree to run it in. Reporting stage "verify" for a run that never happened would write
   // false evidence into `mergeGateStage`, which is exactly the dishonesty #182 set out to
-  // remove. A docs-only diff now DOES run it (narrowed to the `@gate:always-run` guard suites,
-  // see the tier note above), so it no longer subtracts here — and `buildGateTierMessage` names
-  // the guards-only tier, so the narrower claim stays visible rather than passing as a full run.
-  const verifyRan = verifyConfigured && Boolean(workspace.workingDir);
+  // remove. On THIS repo a docs-only diff does run it (narrowed to the `@gate:always-run` guard
+  // suites, see the tier note above), and `buildGateTierMessage` names the guards-only tier so
+  // the narrower claim stays visible instead of passing as a full run; on any OTHER project a
+  // docs-only diff still skips verify_script wholesale, and saying "verify ran" there would be
+  // the same false evidence in a new place.
+  const verifyRan = verifyConfigured && Boolean(workspace.workingDir) && !skipVerifyForForeignDocsOnly;
   const ranSomething = verifyRan || smokeApplies || e2eSmokeRan;
   // #377 — "nothing is configured" is NOT the same state as "the configured gate was skipped for a
   // docs-only diff", and conflating them is how eight unverified merges went unremarked. A project
