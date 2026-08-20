@@ -1,4 +1,4 @@
-import type { PluginCheck, PluginGate, PluginGateAction } from "../components/PluginLoopExtras.js";
+import type { PluginCheck, PluginGate, PluginGateAction } from "./pluginLoopTypes.js";
 
 /**
  * Pure decision logic for the approval-gate card (#378).
