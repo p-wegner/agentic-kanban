@@ -240,3 +240,40 @@ describe("buildSpawnEnv — OAuth config-dir profiles", () => {
     expect(env.CLAUDE_CONFIG_DIR).toBe("/home/x/.claude-ambient");
   });
 });
+
+// The operator's own interactive agent session can also pollute the server env. A Claude session
+// on the ACP bus exports ACP_AUTOCONNECT=1 plus its identity, and `pnpm dev` launched from such a
+// session passes all of it to every agent it spawns. ACP_AUTOCONNECT=1 force-overrides ACP's own
+// opt-outs (including the one that keeps it out of headless sessions), and ACP's detached
+// heartbeat child then wedges the launch: claude 2.1.237 headless does not return while any
+// process in its tree lives, so the agent emitted nothing until the 900s hang watchdog killed it.
+// Observed live: every builder launch AND the butler dead on this machine.
+describe("buildSpawnEnv — operator agent-session (ACP) strip", () => {
+  const ACP_VARS = ["ACP_AUTOCONNECT", "ACP_AGENT_NAME", "ACP_AGENT_FILE"] as const;
+  const saved: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    for (const key of ACP_VARS) saved[key] = process.env[key];
+  });
+
+  afterEach(() => {
+    for (const key of ACP_VARS) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+  });
+
+  it("strips ACP_* so a spawned agent neither hangs headless nor borrows the operator's bus identity", () => {
+    process.env.ACP_AUTOCONNECT = "1";
+    process.env.ACP_AGENT_NAME = "C--projects-andrena-agentic-kanban--51899e91";
+    process.env.ACP_AGENT_FILE = "C:/Users/op/.acp-agent-C--projects-andrena-agentic-kanban--51899e91.json";
+
+    const env = buildSpawnEnv(undefined, noProfileFs);
+
+    for (const key of ACP_VARS) {
+      expect(env[key], `${key} must be stripped`).toBeUndefined();
+    }
+    // Unrelated vars still pass through — the strip is prefix-scoped, not a blanket wipe.
+    expect(env.PATH).toBe(process.env.PATH);
+  });
+});

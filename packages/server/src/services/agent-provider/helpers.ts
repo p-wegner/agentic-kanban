@@ -161,6 +161,30 @@ function isProfileOwnedEnvVar(key: string): boolean {
 }
 
 /**
+ * Vars belonging to the OPERATOR's own interactive agent session, which a board-spawned agent
+ * must never inherit. Today that is the ACP agent bus (`C:\projectsndrenacp`): a session on
+ * the bus exports `ACP_AUTOCONNECT=1` plus its own identity (`ACP_AGENT_NAME`/`ACP_AGENT_FILE`),
+ * and `pnpm dev` started from such a session hands all three to every agent it spawns.
+ *
+ * Two things go wrong then. The identity vars make the child act AS the operator's agent on the
+ * bus instead of itself, and `ACP_AUTOCONNECT=1` force-overrides ACP's own opt-outs — including
+ * the one that keeps it out of headless sessions. That second one is fatal: verified against
+ * claude 2.1.237 on Windows, a headless run (`-p` / the Agent SDK) does not return until every
+ * process in its tree has exited, so ACP's detached heartbeat child wedges the launch forever —
+ * zero output, past the hook's own timeout, until the 900s hang watchdog kills the session. It
+ * took out every builder launch AND the butler on this machine.
+ *
+ * So the board strips the whole prefix: an agent's bus membership is the agent's own business,
+ * never something inherited from whoever happened to run `pnpm dev`.
+ */
+const OPERATOR_SESSION_ENV_PREFIXES = ["ACP_"];
+
+/** True if `key` belongs to the operator's own agent session and must not be inherited by a spawn. */
+function isOperatorSessionEnvVar(key: string): boolean {
+  return OPERATOR_SESSION_ENV_PREFIXES.some((prefix) => key.startsWith(prefix));
+}
+
+/**
  * True if the Claude profile's settings.json defines a custom `ANTHROPIC_BASE_URL` (e.g. z.ai/glm).
  * Such profiles route to a non-Anthropic endpoint that doesn't understand Claude model aliases, so
  * the `--model` flag must be omitted — the profile's own `ANTHROPIC_MODEL` env decides the model.
@@ -199,7 +223,7 @@ export function buildSpawnEnv(claudeProfile?: string, fs: FileSystem = nodeFileS
   const spawnEnv: Record<string, string> = { ...process.env as Record<string, string> };
 
   for (const key of Object.keys(spawnEnv)) {
-    if (isProfileOwnedEnvVar(key)) delete spawnEnv[key];
+    if (isProfileOwnedEnvVar(key) || isOperatorSessionEnvVar(key)) delete spawnEnv[key];
   }
 
   if (!claudeProfile) return spawnEnv;
