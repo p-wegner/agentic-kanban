@@ -354,21 +354,27 @@ Example:
   // ─── New commands ───────────────────────────────────────────────────────────
 
   wsCmd
-    .command("start <issue-id>")
-    .description("One-step create + launch a workspace for an issue.\n\nPosts to POST /api/workspaces which creates the worktree, moves the issue to In Progress, and launches the agent in a single call. Requires the kanban server to be running (pnpm dev).")
+    .command("start <issue>")
+    .description("One-step create + launch a workspace for an issue.\n\nTakes an issue NUMBER (`701`, `#701`) or a full issue id. A number is resolved against --project, or the board active project — numbers are per-project.\n\nPosts to POST /api/workspaces which creates the worktree, moves the issue to In Progress, and launches the agent in a single call. Requires the kanban server to be running (pnpm dev).")
+    .option("--project <projectId>", "Project the issue NUMBER belongs to (default: the active project)")
     .option("--base <baseBranch>", "Base branch to create from (default: project default branch)")
     .option("--profile <claudeProfile>", "Claude profile to use for the agent session")
     .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
     .addHelpText("after", `
 Examples:
+  $ agentic-kanban workspace start 701
+  $ agentic-kanban workspace start '#701'
   $ agentic-kanban workspace start <issue-id>
   $ agentic-kanban workspace start <issue-id> --base develop
   $ agentic-kanban workspace start <issue-id> --profile anth
 `)
-    .action(async (issueId: string, options: { project?: string; base?: string; profile?: string; port?: string }) => {
+    .action(async (issueRef: string, options: { project?: string; base?: string; profile?: string; port?: string }) => {
       try {
         const port = options.port ?? "";
-        const body: Record<string, unknown> = { issueId };
+        // The number-or-id decision is the API's (#701), so the ref goes through as typed
+        // rather than being resolved twice with two chances to disagree.
+        const body: Record<string, unknown> = { issueId: issueRef };
+        if (options.project) body.projectId = options.project;
         if (options.base) body.baseBranch = options.base;
         if (options.profile) body.claudeProfile = options.profile;
 
@@ -384,7 +390,7 @@ Examples:
           process.exit(1);
         }
 
-        console.log(`Started workspace for issue '${issueId}'`);
+        console.log(`Started workspace for issue '${issueRef}'`);
         console.log(`  id: ${String(data.id)}`);
         if (data.branch) console.log(`  branch: ${data.branch}`);
         if (data.workingDir) console.log(`  dir: ${data.workingDir}`);

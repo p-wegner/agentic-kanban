@@ -20,6 +20,55 @@ import { clampDays, cutoffDayFor, subDays, buildDateAxis } from "../lib/analytic
 import { startCreateJob, completeCreateJob, failCreateJob, getCreateJob } from "../services/create-job.service.js";
 import { conditionalJsonResponse } from "../services/board-etag-cache.service.js";
 import { claimIssueForAutoStart } from "../services/auto-start-claim.js";
+import { parseIssueRef } from "@agentic-kanban/shared/lib/issue-ref";
+import { getIssueByNumberOrId } from "../repositories/issue/cli-commands.repository.js";
+import { getPreference } from "../repositories/preferences.repository.js";
+
+
+/**
+ * Resolve the issue a create/preview call names, accepting `#N` / `42` as well as a UUID (#701).
+ *
+ * The one call that actually starts work took ONLY a UUID, while every human-facing surface —
+ * CLAUDE.md, ticket titles, commit subjects, the CLI's own `issue get <N>` — names a ticket by
+ * its number. So the documented spelling was the one spelling this endpoint rejected, and an
+ * agent had to make a second round trip just to translate.
+ *
+ * Numbers are per-project (`MAX(issue_number) + 1`), so a numeric ref is only meaningful with a
+ * project: the body's `projectId` wins, else the board's active project. That fallback is the
+ * same one `create_issue` uses, and it is stated in the error when it produces the wrong answer
+ * rather than being silent — resolving `#42` in an arbitrary project is exactly the #506 bug.
+ */
+async function resolveIssueIdFromBody(
+  body: { issueId?: string; issueNumber?: string | number; projectId?: string },
+  database: Database,
+): Promise<{ ok: true; issueId: string } | { ok: false; status: 400 | 404; error: string }> {
+  const raw = body.issueId ?? (body.issueNumber !== undefined ? String(body.issueNumber) : undefined);
+  if (raw === undefined || raw === "") {
+    return { ok: false, status: 400, error: "issueId (or issueNumber) is required" };
+  }
+  const ref = parseIssueRef(raw);
+  // An id ref is passed through untouched: callers hand ids straight from the DB, and the
+  // service already reports a missing issue. Only a NUMBER needs resolving here.
+  if (ref.kind === "id") return { ok: true, issueId: ref.issueId };
+
+  const projectId = body.projectId ?? (await getPreference("activeProjectId")) ?? undefined;
+  if (!projectId) {
+    return {
+      ok: false,
+      status: 400,
+      error: `issueNumber ${ref.issueNumber} needs a project: issue numbers are per-project, and no projectId was given and no active project is set. Pass projectId, or pass the issue's id.`,
+    };
+  }
+  const issue = await getIssueByNumberOrId(String(ref.issueNumber), projectId, database);
+  if (!issue) {
+    return {
+      ok: false,
+      status: 404,
+      error: `No issue #${ref.issueNumber} in project ${projectId}. Issue numbers are per-project — it may exist in another project.`,
+    };
+  }
+  return { ok: true, issueId: issue.id };
+}
 
 export function createWorkspacesRoute(
   database: Database,
@@ -108,6 +157,10 @@ export function createWorkspacesRoute(
   router.post("/preview", async (c) => {
     const body = await parseJsonBody<{
       issueId?: string;
+      /** #701: `#N` / `42` alternative to `issueId`; resolved against `projectId` or the active project. */
+      issueNumber?: string | number;
+      /** Scopes a numeric `issueId`/`issueNumber` — issue numbers are per-project. */
+      projectId?: string;
       branch?: string;
       isDirect?: boolean;
       baseBranch?: string;
@@ -128,12 +181,13 @@ export function createWorkspacesRoute(
       skipContextPacker?: boolean;
       repoScope?: string[];
     }>(c);
-    if (!body.issueId) {
-      return c.json({ error: "issueId is required" }, 400);
+    const previewRef = await resolveIssueIdFromBody(body, database);
+    if (!previewRef.ok) {
+      return c.json({ error: previewRef.error }, previewRef.status);
     }
 
     const result = await workspaceService.computeLaunchPreview({
-      issueId: body.issueId,
+      issueId: previewRef.issueId,
       branch: body.branch,
       isDirect: body.isDirect === true,
       baseBranch: body.baseBranch,
@@ -220,6 +274,10 @@ export function createWorkspacesRoute(
   router.post("/", async (c) => {
     const body = await parseJsonBody<{
       issueId?: string;
+      /** #701: `#N` / `42` alternative to `issueId`; resolved against `projectId` or the active project. */
+      issueNumber?: string | number;
+      /** Scopes a numeric `issueId`/`issueNumber` — issue numbers are per-project. */
+      projectId?: string;
       branch?: string;
       isDirect?: boolean;
       baseBranch?: string;
@@ -242,8 +300,9 @@ export function createWorkspacesRoute(
       memberIssueIds?: string[];
     }>(c);
     const isDirect = body.isDirect === true;
-    if (!body.issueId) {
-      return c.json({ error: "issueId is required" }, 400);
+    const createRef = await resolveIssueIdFromBody(body, database);
+    if (!createRef.ok) {
+      return c.json({ error: createRef.error }, createRef.status);
     }
     // Ticket group (#661): additional issues served by this one workspace.
     const memberIssueIds = Array.isArray(body.memberIssueIds)
@@ -251,7 +310,7 @@ export function createWorkspacesRoute(
       : undefined;
 
     const input = {
-      issueId: body.issueId,
+      issueId: createRef.issueId,
       branch: body.branch,
       isDirect,
       baseBranch: body.baseBranch,
