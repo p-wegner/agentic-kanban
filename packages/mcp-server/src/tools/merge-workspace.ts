@@ -61,7 +61,10 @@ export function registerMergeWorkspace(server: McpServer, deps: ToolDeps = prodD
         // The safe path surfaces distinct signals here — e.g. 409 (a merge is
         // already in progress for this repo), 503 (the merge build/verify failed,
         // not a conflict), or a conflict that should be routed to fix-and-merge.
-        return mcpText(`Merge not completed (HTTP ${result.status}): ${result.text}`);
+        // `|| statusText`: an error body can legitimately be empty, and #684's unreadable-body
+        // case deliberately reports itself through `statusText` — rendering only `text` there
+        // would print a bare "Merge not completed (HTTP 200): " with no reason at all.
+        return mcpText(`Merge not completed (HTTP ${result.status}): ${result.text || result.statusText}`);
       }
       return mcpText(result.text);
     },

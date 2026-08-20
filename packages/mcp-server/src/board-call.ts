@@ -30,8 +30,16 @@ export type { McpResponse } from "./db-utils.js";
  */
 export function boardErrorText(data: unknown, statusText: string): string {
   if (data && typeof data === "object" && !Array.isArray(data)) {
-    const err = (data as { error?: unknown }).error;
-    if (typeof err === "string" && err) return err;
+    const rec = data as { error?: unknown; detail?: unknown };
+    const err = typeof rec.error === "string" && rec.error ? rec.error : null;
+    // #684 — `detail` is the other half of the server's error contract: the
+    // `AiOperationError` branch of `middleware/error-handler.ts` puts the raw AI response
+    // there, i.e. the one field that says WHY a prediction failed. Reading only `error`
+    // dropped it, so what reached the agent was the generic sentence and nothing actionable.
+    const detail = typeof rec.detail === "string" && rec.detail ? rec.detail : null;
+    if (err && detail) return `${err} — ${detail}`;
+    if (err) return err;
+    if (detail) return detail;
   }
   return statusText;
 }
@@ -49,9 +57,31 @@ export function mcpUnreachable(err: unknown, what = "the board server"): McpResp
 export async function boardApiText(
   path: string,
   init?: RequestInit,
-): Promise<{ ok: boolean; status: number; statusText: string; text: string }> {
+): Promise<{ ok: boolean; status: number; statusText: string; text: string; bodyError?: string }> {
   const res = await fetch(boardApiUrl(path), init);
-  const text = await res.text().catch(() => "");
+  let text: string;
+  try {
+    text = await res.text();
+  } catch (err) {
+    // #684 — this read used to be `.catch(() => "")`, which turned a truncated or aborted
+    // body into an EMPTY STRING while leaving `ok` true. For `merge_workspace` that is the
+    // worst possible shape: the tool returns `mcpText("")`, so an empty SUCCESSFUL merge is
+    // reported, and every agent that treats a non-error response as "merged" — Conductor,
+    // monitor, butler — is misled about whether the branch landed. Before the #508
+    // consolidation the read sat outside the try/catch and surfaced as an MCP error.
+    //
+    // A response whose body could not be read is not a success, whatever the status line
+    // said, so `ok` is false here and the reason rides on `statusText` (which every caller
+    // already renders) as well as on `bodyError` for callers that want to branch on it.
+    const reason = errorMessage(err);
+    return {
+      ok: false,
+      status: res.status,
+      statusText: `${res.statusText || `HTTP ${res.status}`} (response body could not be read: ${reason})`,
+      text: "",
+      bodyError: reason,
+    };
+  }
   return { ok: res.ok, status: res.status, statusText: res.statusText, text };
 }
 
