@@ -29,6 +29,7 @@ import {
   updateProvisioning,
 } from "../repositories/workspace-provisioning.repository.js";
 import { warnIfBranchHeldByLiveWorkspace } from "./workspace-branch-holders.js";
+import { warnIfWorktreePathNotRegistered } from "./workspace-worktree-reconcile.js";
 import type { ProviderName } from "./agent-provider.js";
 import {
   skippedSetupRun,
@@ -695,6 +696,10 @@ export function createWorkspaceCreateService(deps: {
       // The branch is only settled here (it can be derived), and the worktree path is what a
       // reclaim needs — record both before the sibling loop, which is the long part.
       await updateProvisioning(id, { phase: "siblings", branch, worktreePath }, database).catch(() => {});
+
+      if (!isDirect && worktreePath) {
+        await warnIfWorktreePathNotRegistered(gitService, project.repoPath, worktreePath, id, issue.projectId);
+      }
 
       // Multi-repo (full-peers): a worktree on the same branch in every additional
       // repo. No-op for single-repo projects and direct workspaces. A failure here
