@@ -64,6 +64,29 @@ export async function listWorkerAssignedBranches(
 }
 
 /**
+ * Is this session still live on this worker, from the DB's point of view?
+ *
+ * Asked when a worker reconnects and announces a session the board process has no
+ * memory of. The answer decides between two very different things: a zombie whose
+ * board row was already finalized (stop it), and a session that is genuinely still
+ * running and doing sanctioned work (leave it alone).
+ *
+ * Returns null when there is no such session row at all.
+ */
+export async function getSessionLiveness(
+  sessionId: string,
+  database: Database = db,
+): Promise<{ status: string; workerId: string | null } | null> {
+  const rows = await database
+    .select({ status: sessions.status, workerId: sessions.workerId })
+    .from(sessions)
+    .where(eq(sessions.id, sessionId))
+    .limit(1);
+  const row = rows[0];
+  return row ? { status: row.status, workerId: row.workerId ?? null } : null;
+}
+
+/**
  * Stamp which fleet worker a session runs on (mirrors sessions.containerId).
  *
  * Delegates to the `sessions`-owning repository (#957) instead of writing the table
