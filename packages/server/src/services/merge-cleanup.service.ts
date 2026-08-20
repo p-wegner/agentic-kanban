@@ -9,6 +9,7 @@ import {
 } from "../repositories/merge-cleanup.repository.js";
 import { listMemberIssueIds } from "../repositories/workspace-issue-members.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { isTerminalStatusName } from "@agentic-kanban/shared/lib/status-view";
 
 export interface FinalizeMergeCleanupInput {
   database: Database;
@@ -70,6 +71,13 @@ export interface ReconcileMergedIssueResult {
    * treating the no-op as "already Done".
    */
   reopenedAfterMerge?: boolean;
+  /**
+   * Set when the issue was left alone because it already sits on a DIFFERENT terminal
+   * status (#686) — practically always a deliberate Cancel. Callers surface this rather
+   * than reporting the no-op as "already Done", because the two mean opposite things:
+   * one is convergence, the other is a decision the merge must not overturn.
+   */
+  terminalStatusPreserved?: string;
 }
 
 /**
@@ -124,6 +132,27 @@ export async function reconcileMergedIssue(
   // path) sees the issue already on the target status and does nothing.
   if (issue.statusId === targetStatus.id) {
     return { projectId, issueTransitioned: false, targetStatusId: targetStatus.id };
+  }
+
+  // Terminal-status guard (#686). The two guards above are both blind to a member that was
+  // deliberately CANCELLED before the merge: it is not on the target status, and its
+  // transition predates the merge, so `reconcileGroupMemberIssues` — which reconciles every
+  // member of a merged group unconditionally — set it to Done. An unrelated sibling landing
+  // then silently overwrote the operator's Cancel, with no audit trail.
+  //
+  // Deliberately independent of `mergedAt`: unlike the recency guard below, this one must
+  // hold on the MERGE path too, since that is where the group fan-out happens. A terminal
+  // status is a decision, not a status that failed to catch up, so no merge may overturn it.
+  // (Reopening a Cancelled ticket to Backlog/Todo is a legal transition and restores
+  // convergence — this only refuses to move it while it is still closed.)
+  const currentStatusName = statuses.find((status) => status.id === issue.statusId)?.name ?? null;
+  if (isTerminalStatusName(currentStatusName)) {
+    return {
+      projectId,
+      issueTransitioned: false,
+      targetStatusId: targetStatus.id,
+      terminalStatusPreserved: currentStatusName ?? undefined,
+    };
   }
 
   // Recency guard (only for catch-up callers that pass `mergedAt`): the merge is old news
