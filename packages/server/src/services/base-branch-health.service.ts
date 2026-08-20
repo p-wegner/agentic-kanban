@@ -17,6 +17,7 @@ import { cloneBranchTo, getMergeBase, revParse } from "@agentic-kanban/shared/li
 import type { Database } from "../db/index.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { getProjectById } from "../repositories/project.repository.js";
+import { VERIFY_SCRIPT_TIMEOUT_MS } from "./verify-budget.js";
 import { resolveEffectiveVerify, deriveSetupScriptFromProfile, getStackProfile } from "./stack-profile.service.js";
 import {
   recordBaseBranchHealth,
@@ -30,7 +31,10 @@ const CLONE_TIMEOUT_MS = 5 * 60 * 1000;
 // probe additionally installs the clone first. At 20 minutes the probe timed out instead of
 // answering, which is the same failure mode as the false red it replaced — a probe that never
 // returns a verdict still leaves the gate attributing branch failures to an unknown base.
-const VERIFY_TIMEOUT_MS = 45 * 60 * 1000;
+// The budget is now SHARED with the pre-merge gate (verify-budget.ts) — this file's own
+// premise is that the two run the same script and are "directly comparable", which two
+// different ceilings quietly made false.
+const VERIFY_TIMEOUT_MS = VERIFY_SCRIPT_TIMEOUT_MS;
 const INSTALL_TIMEOUT_MS = 15 * 60 * 1000;
 
 export interface BaseBranchVerifyResult {

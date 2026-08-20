@@ -33,6 +33,7 @@ import {
   type GateTierInfo,
 } from "./pre-merge-gate-tier.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { VERIFY_SCRIPT_TIMEOUT_MS } from "./verify-budget.js";
 
 /**
  * Default verify-gate timeout (#192). The verify gate runs a full build+test suite in a
@@ -40,8 +41,12 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
  * script `DEFAULT_SETUP_SCRIPT_TIMEOUT_MS` budgets — so it gets its own, larger default
  * budget rather than sharing the 5-minute setup-script constant. Still overridable per
  * project via `verify_timeout_ms_<projectId>`.
+ *
+ * The number itself now comes from `verify-budget.ts`, shared with base-branch-health: both
+ * run the SAME `verify_script`, and while they held separate budgets (20 vs 45 minutes) the
+ * base probe could answer green where every branch gate timed out.
  */
-export const DEFAULT_VERIFY_TIMEOUT_MS = 20 * 60 * 1000;
+export const DEFAULT_VERIFY_TIMEOUT_MS = VERIFY_SCRIPT_TIMEOUT_MS;
 
 /** Preference key for a per-project override of the verify-gate timeout (ms). */
 // #496: built from the registry, so an unregistered prefix is a COMPILE error.
