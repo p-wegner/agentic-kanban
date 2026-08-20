@@ -14,8 +14,44 @@
 // board services silently re-introduces exactly what this file exists to avoid.
 // `worker-cli-isolation.test.ts` fails the build if that happens.
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { Command } from "commander";
 import { registerWorkerSubcommands } from "../cli/commands/worker.js";
+
+// `--version` MUST describe the artifact that is actually installed. It was
+// hardcoded to "0.0.1", which is worse than useless on a worker machine: builds
+// are handed over as sha-stamped tarballs (scripts/pack-worker.mjs), so the one
+// question `--version` exists to answer is "which build is this?" — and a fixed
+// string answers it with a plausible number that carries no information. Read it
+// from our own package.json instead, walking up because the bundled entry
+// (dist/worker.js) and the tsc output (dist/worker/worker-cli.js) sit at
+// different depths. Fall back to "unknown" rather than to any number: a wrong
+// version is the failure mode being fixed here.
+function resolveVersion(): string {
+  try {
+    let dir = dirname(fileURLToPath(import.meta.url));
+    for (let up = 0; up < 5; up++) {
+      try {
+        const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as {
+          name?: string;
+          version?: string;
+        };
+        if (pkg.name === "agentic-kanban" && pkg.version) return pkg.version;
+      } catch {
+        // no package.json at this level — keep walking
+      }
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  } catch {
+    // fall through
+  }
+  return "unknown";
+}
 
 const program = new Command();
 
@@ -28,7 +64,7 @@ program
       "No board checkout and no board database are required.\n\n" +
       "Start here:  agentic-kanban-worker instructions --board <board-url>",
   )
-  .version("0.0.1");
+  .version(resolveVersion());
 
 registerWorkerSubcommands(program);
 
